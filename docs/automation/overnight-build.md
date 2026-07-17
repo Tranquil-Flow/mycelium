@@ -1,109 +1,154 @@
-# Mycelium overnight autonomous build queue
+# Mycelium overnight continuation queue
 
-Status: ACTIVE on isolated branch `automation/mycelium-overnight` only.
+Status: ARMED for 02:00 CEST on isolated branch `automation/mycelium-overnight`.
 Base at queue creation: `dc9ca4c5e8f5bc73c2e3e9ae762afad45db25350`.
-Authoritative architecture plan: canonical worktree `.hermes/plans/2026-07-17_142630-mycelium-ddai-mvp-synthesis-plan.md` (live SHA-256 observed 2026-07-18: `4fba42b7fb9c61dccdfd53b4a7f7fb56750a0ef01760e2560c7c44c79712eb20`).
+Authoritative architecture plan: canonical worktree `.hermes/plans/2026-07-17_142630-mycelium-ddai-mvp-synthesis-plan.md`.
 
-## Safety boundary
+## Latest honest status
 
-- Work only in `/Users/evinova-self/Projects/mycelium-wt-overnight`.
-- Never edit `/Users/evinova-self/Projects/mycelium` or any other worktree/repository.
-- No network, fetch, pull, push, PR, issue/comment, package install, remote host, or external source import.
-- Do not modify existing immutable evidence runs.
-- Do not emit or set `route_ready: true`; only physical qualification may do that.
+Observed handover at 2026-07-18 01:22 CEST:
+
+- Component completion: 94%.
+- Verified working MVP: 35%.
+- Phase 6: in progress, not yet verified.
+- Phase 7 wire codec: merged and verified.
+- Phase 7 native transport: pending.
+- Phase 8 two-Mac proof: pending.
+- Phase 9 read-only gateway: merged and verified.
+- Phase 9 semantic live UI/request lane: pending.
+- Phases 10 recovery/mobile and 11 demo/release: pending.
+
+These percentages are planning estimates, not readiness claims. Every scheduled run must re-probe live Git state and tests before changing them.
+
+## Concurrent-session pickup map
+
+The 02:00 run inherits work from four interactive lanes. All source lanes are read-only to automation:
+
+| Lane | Path | Branch | Expected role |
+|---|---|---|---|
+| Main | `/Users/evinova-self/Projects/mycelium` | `main` | serial integration and canonical plan updates |
+| A1 | `/Users/evinova-self/Projects/mycelium-wt-p6-exec` | `phase6/two-process-router-exec` | Phase 6 qualification continuation |
+| A2 | `/Users/evinova-self/Projects/mycelium-wt-p6-local-exec` | `phase6/local-exec` | competing/parallel Phase 6 qualification lane |
+| B | `/Users/evinova-self/Projects/mycelium-wt-p7-sidecar` | `phase7/iroh-sidecar` | authenticated native sidecar |
+| C | `/Users/evinova-self/Projects/mycelium-wt-p9-semantic-ui` | `phase9/semantic-observatory` | semantic Observatory gateway/UI |
+
+Automation writes only to `/Users/evinova-self/Projects/mycelium-wt-overnight`. It may inspect source lanes and integrate committed or safely quiescent work into the overnight branch, but must never modify, reset, clean, commit, or switch a source lane.
+
+## Hard safety boundary
+
+- Write only in `/Users/evinova-self/Projects/mycelium-wt-overnight` and temporary files under `/tmp`.
+- Never edit canonical `main`, A1, A2, B, C, any other worktree, or another repository.
+- No network, fetch, pull, push, PR, issue/comment, package install, remote host, phone, credential use, or external source import.
+- No recursive cron creation or schedule modification.
+- Do not modify immutable evidence runs.
+- Never set or imply `route_ready: true`; only an authorized physical qualification may do that.
 - Keep Mycelium independent: no code or protected edits from other distributed-inference repositories.
-- Use TDD: observe focused RED before production change, then focused GREEN and full-suite GREEN.
-- One smallest coherent tranche per scheduled run. Prefer a verified commit over broad unfinished edits.
-- Preserve truthful claim boundaries: local work is not physical distributed-inference evidence.
+- Use TDD for new behavior: focused RED, minimal implementation, focused GREEN, then relevant broad gates.
+- Preserve truthful claim boundaries: local process evidence is not two-host distributed-inference evidence.
+- Stage explicit files only. Never use `git add -A` or `git add .`.
 
-## First-run synchronization
+## Active-lane collision gate
 
-`BASE_SYNC_PENDING`
+Before harvesting any source lane, inspect its branch, status, recent commits, diff, untracked files, newest relevant file mtime, and running commands.
 
-Exactly once, before the first production tranche:
+Treat a source lane as active and skip it for this tick if any of these hold:
 
-1. require a clean worktree;
-2. rebase this branch onto the current local `main` ref, without network access;
-3. on conflict, abort the rebase and report a blocker without production edits;
-4. replace `BASE_SYNC_PENDING` with `BASE_SYNC_COMPLETE` in the same green commit as the first tranche.
+1. a process/test command references that worktree;
+2. a source or test file changed in the previous 12 minutes;
+3. Git/index lock state exists;
+4. output is changing during a two-probe check;
+5. state is ambiguous.
 
-After completion, never merge/rebase/cherry-pick automatically. This prevents later autonomous runs from colliding with live manual work.
+Do not wait on or kill an active process. A later 30-minute tick will retry.
 
-## Weighted plan status
+## Reconciliation rules
 
-Method: complete phase = 1.0, partial phase = 0.5, pending phase = 0.0. This is a planning estimate, not an MVP-readiness claim.
+1. Merge only committed local `main` history into the overnight branch. Never consume canonical uncommitted changes.
+2. For a clean, inactive lane with commits not yet integrated, review its complete diff and evidence before merging or cherry-picking into the overnight branch.
+3. For an inactive lane with uncommitted work quiescent for at least 12 minutes, snapshot its diff and explicitly reviewed untracked files through `/tmp`, apply only to the overnight branch, then independently test. Never commit in the source lane.
+4. A1 and A2 are competing Phase 6 implementations. Compare architecture, tests, and evidence; select or reconcile deliberately. Do not blindly concatenate both.
+5. Never treat an agent summary or a commit message as verification. Re-run the focused gates and all affected broad gates in the overnight worktree.
+6. Resolve ordinary conflicts only in the overnight branch. If a conflict changes canonical protocol authority or evidence semantics, abort that integration and report the architecture conflict.
 
-`[##########----------] 50%` — 4 complete, 6 partial, 4 pending; 7.0/14 weighted phase-equivalents.
+## Priority queue
 
-| Phase | State | Live evidence / missing gate |
-|---|---|---|
-| 0 provenance/baseline | partial | private baseline and manifest exist; original locked-environment gate remains incomplete |
-| 1 green baseline/contracts | complete | current Python baseline green; compatibility contracts frozen |
-| 2 Gossip → Planner → assignments | complete | atomic adapter and assignment compiler integrated |
-| 3 assignment provisioning/evidence | complete | assignment-scoped provisioning and coherent bundle integrated |
-| 4 MLX loader/backend | partial | assignment-bound load and stage execution pass; no stage-local KV interface |
-| 5 deterministic Layer Builder | complete | graph construction/negative validation integrated |
-| 6 real local Router execution | partial | live local state/capacity and direct MLX RuntimePort exist; no runtime-service RPC, KV decode continuity, or real two-process inference |
-| 7 native iroh | partial | clean-room codec/provenance work only; no authenticated production TransportPort |
-| 8 physical qualification | pending | no two-Mac compute/parity qualification |
-| 9 request gateway | pending | no qualified distributed token request stream |
-| 10 read-only Observatory | partial | typed data lane and read-only gateway tranches exist; live accepted-run projection remains incomplete |
-| 11 recovery | pending | intentionally deferred until stable physical prefill/decode |
-| 12 Pixel | partial | external qualification evidence only; no exact-stage runtime |
-| 13 demo/release | pending | no reproducible accepted orchestration |
+### P0 — Recover and integrate interactive-session output
 
-Strongest honest execution claim: two independent local spawned processes load/probe disjoint assignment-bound MLX stages. No cross-process prefill/decode or physical distributed inference is yet proven.
+- Inspect Main, A1, A2, B, and C.
+- Integrate only complete, reviewable work without touching source worktrees.
+- Record exact source branch/commit or dirty-snapshot identity in the run journal.
 
-## Overnight critical path
+### P1 — Finish Phase 6 genuine two-process Router qualification
 
-Work in order. Check an item only when its acceptance tests and the full Python suite pass. If an item is too large, add indented unchecked sub-tranches beneath it and finish only the smallest one.
+MVP decision is locked for this tranche:
 
-- [ ] O1 — Stage-local KV execution primitive
-  - Extend the GPT-2 stage backend with explicit per-layer key/value state and position offset.
-  - Keep the existing stateless execution API compatible.
-  - Prove cached prefill + one-token incremental decode matches full-sequence recomputation for entry and non-entry stages within declared exact/tolerance rules.
-  - Reject wrong layer count, shape, dtype, position, overflow, and cross-assignment state.
-  - Do not add global mutable caches here.
+- Set `RouterConfig(prefill_chunk_size_tokens=0)`.
+- Send the complete prompt through ordinary PREFILL.
+- Decode by replaying complete context.
+- Do not add or claim progressive prefill or persistent KV-backed decode yet.
 
-- [ ] O2 — Assignment/path-bound KV lifecycle in `MLXRuntimePort`
-  - Bind cache ownership to deployment epoch, assignment, placement, request/path, path attempt, and stage.
-  - PREFILL creates state; DECODE consumes only the next token/activation and strictly advances position/token index.
-  - Reject decode-before-prefill, replay, gap, wrong path attempt, wrong placement, overflow, and stale identity.
-  - `cancel(path_id)` must free all local state idempotently; snapshots/evidence must not expose prompt/token content.
-  - Preserve item-level failure isolation.
+Acceptance requires:
 
-- [ ] O3 — Runtime-owned service protocol and client `RuntimePort`
-  - Build a bounded, versioned, canonical local RPC seam around an assignment-loaded runtime.
-  - Never use pickle or unbounded frames.
-  - Runtime process owns loaded tensors, KV state, cancellation, and queue accounting.
-  - Client validates request/response identity, timeout, frame size, and process death fail-closed.
-  - Keep transport local-only; do not imply authenticated physical networking.
+- two persistent spawned MLX workers with one exact disjoint assignment each;
+- parent-controlled bounded non-pickle IPC and clean shutdown;
+- two production `Router` instances using `LoopbackSocketMesh` TCP and `mycelium.router_wire.v1` framing;
+- real stage-0 activation bytes crossing the captured TCP frame into stage 1;
+- prefill plus at least two decode outputs;
+- parity with an independent concatenated MLX reference;
+- distinct child PIDs, assignment/path-lock/token evidence, activation digest, and no hidden full-model fallback;
+- timeout, crash, malformed-RPC, cancellation, and cleanup tests;
+- `route_ready: false` unless a later separately authorized physical gate proves otherwise.
 
-- [ ] O4 — Runtime-owned capacity/lease integration
-  - Connect reservations to the serving runtime rather than a fixture or unrelated coordinator.
-  - Prove reserve/commit/release/expiry, overcommit rejection, deployment/placement binding, cancellation cleanup, and queue-depth reporting.
-  - Preserve existing process-local capacity implementation unless replacement behavior is fully covered.
+### P2 — Integrate and harden Phase 7 native sidecar
 
-- [ ] O5 — Real two-process prefill and multi-token decode harness
-  - Spawn two persistent runtime processes with disjoint assignments and actual client RuntimePorts.
-  - Execute entry → final stage prefill, greedy token loopback, and at least two incremental decode steps with stage-local KV reuse.
-  - Compare activation/logit tolerances and exact token IDs against monolithic full-sequence reference.
-  - Record both PIDs, disjoint loaded tensor sets, per-stage cache positions, and content-free event evidence.
-  - No fixture RuntimePort/CapacityPort may participate.
+Only after reviewing Lane B output. Keep the 16 MiB operational cap. Require authenticated UDS, inherited-pipe bootstrap secret, peer credentials, challenge-response, directional keys, replay/sequence protection, endpoint-key pinning, bounded queues, cancellation, reconnect, acknowledgements, strict canonical Router ingress, and redacted observability.
 
-- [ ] O6 — Local qualification negative gates and evidence
-  - Kill either runtime and fail closed.
-  - Cover stale proof/revision/epoch, duplicate/replayed envelope, sequence gap, expired lease, dropped process, cancellation, and no hidden full-model fallback.
-  - Emit a new local qualification artifact with a SHA-256 manifest and explicit `route_ready: false`.
-  - Never mutate old evidence.
+No network dependency fetch is allowed overnight. If the pinned Rust dependency is unavailable locally, preserve source and report the exact dependency gate rather than substituting a mock transport.
 
-## Stop boundary
+### P3 — Integrate and harden Phase 9 semantic Observatory lane
 
-After O1–O6, or if progress requires native iroh source, physical peers, credentials, architecture approval, package installation, or network access: stop implementation, preserve a clean green branch, and report the exact blocker. Do not invent substitute mocks or weaken acceptance gates.
+Only after reviewing Lane C output. Preserve strict privacy projection, supported-version checks, exact deployment/model/provenance binding, explicit claim scopes, freshness/conflicts, same-origin defaults, one publication/SSE owner, and a live-label gate requiring both a current route challenge and a real request lifecycle.
+
+Never expose prompts, token IDs/content, activations, logits, KV state, tensors, weights, credentials, raw endpoints/IPs/paths, or raw Router frames. Fixtures remain labeled static/demo.
+
+### P4 — Serial integration and next local tranche
+
+After P1–P3 are green, choose exactly one smallest locally verifiable tranche from the authoritative plan. Prefer recovery/cancellation/state-machine hardening or release reproducibility that does not require remote hosts. Do not begin physical Phase 8 without explicit current authorization containing both hosts and exact staging/cleanup scope.
+
+## Per-tick execution budget
+
+- Aim for 22 minutes of implementation/reconciliation and reserve the rest for verification and a compact report.
+- Complete at most one coherent TDD tranche per tick.
+- If another scheduled slot is missed because the prior run is still active, never overlap or spawn a duplicate worker.
+- Prefer one clean verified commit over broad unfinished edits.
+- If no source lane is safe to harvest, work only on a disjoint existing overnight-branch task or make no changes.
+
+## Verification gates
+
+Always run the smallest focused tests first. Then run gates based on touched scope:
+
+- Python: focused tests, relevant Router/gateway suites, full `python3 -m pytest -q`, `python3 -m compileall -q`, and `git diff --check`.
+- Rust touched: `cargo fmt --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test` with local caches only.
+- UI touched: existing package checks/tests with the existing lockfile; no package install.
+- Contract touched: contract manifest verification, audit, pins, and golden-frame checks.
+
+Some worktrees omit local ignored planning authorities expected by the full suite. If needed, copy only these exact files from canonical into the overnight worktree for the test run, then remove them before staging:
+
+- `ROUTER_HANDOVER.md`
+- `docs/plans/2026-07-16-request-streaming-session-lifecycle-mvp.md`
+
+Do not commit those temporary copies. Report pre-existing or environment-specific failures separately; never describe a failing full suite as green.
+
+## Commit and report rules
+
+- Commit only after focused gates pass and the affected broad gate result is understood.
+- Use explicit `git add <paths...>` and inspect `git diff --cached --name-only`.
+- Keep source provenance in the commit message or journal.
+- Append one compact journal row per run.
+- Discord report must stay below 1,800 characters and state: source lanes inspected, files/commit integrated, RED→GREEN evidence, broad gate result, commit, honest claim boundary, and next target.
+- If no safe progress is possible, make no speculative edit; report the exact blocker.
 
 ## Run journal
 
-Append one compact row per scheduled run.
-
-| UTC time | Commit | Queue item | Focused RED | Focused/full GREEN | Result / next |
-|---|---|---|---|---|---|
+| UTC time | Source identity | Commit | Priority item | RED | Focused/full gates | Result / next |
+|---|---|---|---|---|---|---|
