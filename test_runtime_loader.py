@@ -13,7 +13,12 @@ import mlx.core as mx
 import pytest
 
 from layer_assignment import assignment_id_for
-from runtime_loader import RuntimeLoadError, canonical_json, load_assignment_stage
+from runtime_loader import (
+    RuntimeLoadError,
+    _gpt2_block,
+    canonical_json,
+    load_assignment_stage,
+)
 from weight_provisioning import sha256_file
 
 
@@ -294,7 +299,7 @@ def test_loads_exact_assignment_owned_gpt2_stage_and_emits_canonical_proof(
     )
     assert proof["loaded_tensor_digest"].startswith("sha256:")
     assert proof["runtime"] == assignment["runtime"]
-    assert tuple(proof["probe_shape"]) == (1, 2, 7)
+    assert tuple(proof["probe_shape"]) == (1, 3, 7)
     assert proof["probe_digest"].startswith("sha256:")
     assert proof["load_generation"] == 11
     assert proof["control_plane_binding"] == assignment["control_plane_binding"]
@@ -409,21 +414,21 @@ def test_canonical_json_rejects_nonfinite_numbers() -> None:
             0,
             1,
             ["input_embedding", "decoder"],
-            [1, 2, 4],
+            [1, 3, 4],
             ["transformer.h.1.ln_1.weight", "transformer.ln_f.weight"],
         ),
         (
             0,
             1,
             ["decoder"],
-            [1, 2, 4],
+            [1, 3, 4],
             ["transformer.wte.weight", "transformer.h.1.ln_1.weight"],
         ),
         (
             1,
             2,
             ["decoder", "final_norm", "lm_head"],
-            [1, 2, 7],
+            [1, 3, 7],
             ["transformer.wpe.weight", "transformer.h.0.ln_1.weight"],
         ),
     ],
@@ -510,6 +515,92 @@ def test_decoder_only_probe_changes_when_decoder_weight_changes(tmp_path: Path) 
     second = load_assignment_stage(assignment_b, report_b, load_generation=1)
 
     assert first.proof["probe_digest"] != second.proof["probe_digest"]
+
+
+def test_causal_attention_never_reads_future_token() -> None:
+    hidden_a = mx.array([[[2.0, -1.0], [-1.0, 2.0]]], dtype=mx.float32)
+    hidden_b = mx.array([[[2.0, -1.0], [2.0, -1.0]]], dtype=mx.float32)
+    tensors = {
+        "ln_1.weight": mx.ones((2,), dtype=mx.float32),
+        "ln_1.bias": mx.zeros((2,), dtype=mx.float32),
+        "attn.c_attn.weight": mx.array(
+            [[0.0, 0.0, 0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]],
+            dtype=mx.float32,
+        ),
+        "attn.c_attn.bias": mx.array(
+            [2000.0, 2000.0, -2000.0, -2000.0, 0.0, 0.0],
+            dtype=mx.float32,
+        ),
+        "attn.c_proj.weight": mx.eye(2, dtype=mx.float32),
+        "attn.c_proj.bias": mx.zeros((2,), dtype=mx.float32),
+        "ln_2.weight": mx.ones((2,), dtype=mx.float32),
+        "ln_2.bias": mx.zeros((2,), dtype=mx.float32),
+        "mlp.c_fc.weight": mx.zeros((2, 4), dtype=mx.float32),
+        "mlp.c_fc.bias": mx.zeros((4,), dtype=mx.float32),
+        "mlp.c_proj.weight": mx.zeros((4, 2), dtype=mx.float32),
+        "mlp.c_proj.bias": mx.zeros((2,), dtype=mx.float32),
+    }
+
+    output_a = _gpt2_block(hidden_a, tensors, "", n_head=1, epsilon=1e-5)
+    output_b = _gpt2_block(hidden_b, tensors, "", n_head=1, epsilon=1e-5)
+    mx.eval(output_a, output_b)
+
+    assert bool(mx.allclose(output_a[:, 0, :], output_b[:, 0, :]).item())
+
+
+def test_decoder_probe_changes_when_query_and_key_weights_change(tmp_path: Path) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    assignment_a, report_a, _ = _case(first_root)
+    assignment_b, report_b, artifact_b = _case(second_root)
+    _restrict_assignment(assignment_a, report_a, start=0, end=1, components=["decoder"])
+    _restrict_assignment(assignment_b, report_b, start=0, end=1, components=["decoder"])
+    tensors = _source_tensors()
+    key = "transformer.h.0.attn.c_attn.weight"
+    tensors[key] = mx.concatenate(
+        [tensors[key][:, :8] * -17.0 + 3.0, tensors[key][:, 8:]], axis=1
+    )
+    mx.save_safetensors(artifact_b, tensors)
+    _refresh_file_evidence(assignment_b, report_b, artifact_b)
+
+    first = load_assignment_stage(assignment_a, report_a, load_generation=1)
+    second = load_assignment_stage(assignment_b, report_b, load_generation=1)
+
+    assert first.proof["probe_digest"] != second.proof["probe_digest"]
+
+
+def test_entry_probe_changes_when_third_position_embedding_changes(tmp_path: Path) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    assignment_a, report_a, _ = _case(first_root)
+    assignment_b, report_b, artifact_b = _case(second_root)
+    tensors = _source_tensors()
+    position_embeddings = tensors["transformer.wpe.weight"]
+    tensors["transformer.wpe.weight"] = mx.concatenate(
+        [position_embeddings[:2], position_embeddings[2:3] + 100.0, position_embeddings[3:]],
+        axis=0,
+    )
+    mx.save_safetensors(artifact_b, tensors)
+    _refresh_file_evidence(assignment_b, report_b, artifact_b)
+
+    first = load_assignment_stage(assignment_a, report_a, load_generation=1)
+    second = load_assignment_stage(assignment_b, report_b, load_generation=1)
+
+    assert first.proof["probe_digest"] != second.proof["probe_digest"]
+
+
+def test_rejects_gpt2_config_too_small_for_three_token_probe(tmp_path: Path) -> None:
+    assignment, report, _ = _case(tmp_path)
+    assignment["runtime"]["model_config"]["vocab_size"] = 2
+    assignment["runtime"]["model_config"]["n_positions"] = 2
+    _rebind(assignment, report)
+
+    with pytest.raises(RuntimeLoadError, match="at least 3"):
+        load_assignment_stage(assignment, report, load_generation=1)
 
 
 def test_rejects_static_component_at_wrong_stage_boundary(tmp_path: Path) -> None:
@@ -613,6 +704,14 @@ def test_rejects_verified_local_path_outside_cache_root(tmp_path: Path) -> None:
     report["verified_files"][0]["local_path"] = str(escaped.resolve())
 
     with pytest.raises(RuntimeLoadError, match="escapes artifact cache root"):
+        load_assignment_stage(assignment, report, load_generation=1)
+
+
+def test_rejects_multiply_linked_artifact(tmp_path: Path) -> None:
+    assignment, report, artifact = _case(tmp_path)
+    (tmp_path / "artifact-alias.safetensors").hardlink_to(artifact)
+
+    with pytest.raises(RuntimeLoadError, match="exactly one hard link"):
         load_assignment_stage(assignment, report, load_generation=1)
 
 

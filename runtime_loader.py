@@ -213,6 +213,11 @@ def _validate_runtime(runtime: Any) -> tuple[dict[str, Any], Any]:
         value = config.get(field)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise _fail(f"gpt2 model_config {field} must be a positive integer")
+    if config["vocab_size"] < 3 or config["n_positions"] < 3:
+        raise _fail(
+            "gpt2 model_config vocab_size and n_positions must be at least 3 "
+            "for the deterministic probe"
+        )
     n_embd = config["n_embd"]
     n_head = config["n_head"]
     if n_embd % n_head != 0:
@@ -552,6 +557,8 @@ def _open_verified_artifact(
         metadata = os.fstat(handle.fileno())
         if not stat.S_ISREG(metadata.st_mode):
             raise _fail(f"verified artifact is not a regular file: {relative}")
+        if metadata.st_nlink != 1:
+            raise _fail(f"verified artifact must have exactly one hard link: {relative}")
         if metadata.st_size != assigned_record.get("size_bytes"):
             raise _fail(f"verified artifact size mismatch: {relative}")
         digest = hashlib.sha256()
@@ -857,7 +864,9 @@ def _gpt2_block(
     positions = mx.arange(sequence)
     causal = positions[:, None] >= positions[None, :]
     scores = mx.where(
-        causal[None, None, :, :], scores, mx.array(-1e4, dtype=scores.dtype)
+        causal[None, None, :, :],
+        scores,
+        mx.array(-math.inf, dtype=scores.dtype),
     )
     probabilities = mx.softmax(scores, axis=-1)
     attended = mx.matmul(probabilities, value)
@@ -900,14 +909,18 @@ def _run_gpt2_probe(
     if "input_embedding" in components:
         token_embedding = tensors[f"{namespace}wte.weight"]
         position_embedding = tensors[f"{namespace}wpe.weight"]
-        token_ids = mx.array([[0, 1]], dtype=mx.int32)
-        position_ids = mx.array([[0, 1]], dtype=mx.int32)
+        token_ids = mx.array([[0, 1, 2]], dtype=mx.int32)
+        position_ids = mx.array([[0, 1, 2]], dtype=mx.int32)
         hidden = token_embedding[token_ids] + position_embedding[position_ids]
     else:
-        hidden = mx.arange(2 * hidden_size, dtype=mx.float32).reshape(1, 2, hidden_size)
-        hidden = ((hidden + 1.0) / max(2 * hidden_size, 1)).astype(
-            _RUNTIME_DTYPES[runtime["dtype"]]
+        positions = mx.arange(1, 4, dtype=mx.float32).reshape(1, 3, 1)
+        channels = mx.arange(1, hidden_size + 1, dtype=mx.float32).reshape(
+            1, 1, hidden_size
         )
+        hidden = (
+            mx.sin(positions * channels)
+            + positions * mx.square(channels) / max(hidden_size * hidden_size, 1)
+        ).astype(_RUNTIME_DTYPES[runtime["dtype"]])
 
     config = runtime["model_config"]
     for layer in range(start, end):
