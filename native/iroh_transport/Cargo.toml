@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "mycelium-iroh-transport"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "AGPL-3.0-or-later"
+description = "Clean-room native codec for Mycelium Router wire framing"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+sha2 = "0.10"

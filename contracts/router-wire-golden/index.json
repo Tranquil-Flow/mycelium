@@ -1,0 +1,86 @@
+{
+  "frames": [
+    {
+      "byte_length": 518,
+      "file": "01-hop-header.bin",
+      "frame_sha256": "70d053d3619fb082f6ef0247f4fcb450563fa37d86a305d3a62f129022fe0000",
+      "message_type": "HopHeader",
+      "payload_length": 12,
+      "payload_sha256": "739b224b4eab9d95d8896ff685d6f49346303851da535977d671522ee9a073e0"
+    },
+    {
+      "byte_length": 433,
+      "file": "02-manifest-delta.bin",
+      "frame_sha256": "0a7bf4f6ffde665216e06284b26e68c33fc9cb4a081ecf57bc685bad26641acf",
+      "message_type": "ManifestDelta",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 3348,
+      "file": "03-manifest-locked.bin",
+      "frame_sha256": "062a709f0629f48fd9706c11639409251592669e1faaa2f3b1782f73bfe5d00a",
+      "message_type": "ManifestLocked",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 3137,
+      "file": "04-progressive-prefill-message.bin",
+      "frame_sha256": "db21d60d9c088da48b3d34af599683da8605467ddfb2169591f3855c88ba4834",
+      "message_type": "ProgressivePrefillMessage",
+      "payload_length": 256,
+      "payload_sha256": "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880"
+    },
+    {
+      "byte_length": 314,
+      "file": "05-prefill-chunk-completed.bin",
+      "frame_sha256": "26b3ff536feaeecbaddd2a0c5cc854fc225dc0f58dc29a05642b9d4adb82a5e1",
+      "message_type": "PrefillChunkCompleted",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 373,
+      "file": "06-reservation-request.bin",
+      "frame_sha256": "678cb44d94304c5d8b55a23abcf6c51ceb92e02b48d6ed80d200fd9fa02e6abf",
+      "message_type": "ReservationRequest",
+      "payload_length": 4,
+      "payload_sha256": "9374c94b3821e8ed7779fb5ab9670f2af0b183f7e19374851bd2abdf9fcc7be2"
+    },
+    {
+      "byte_length": 290,
+      "file": "07-reservation-result.bin",
+      "frame_sha256": "a03d01762424c9afaba54bbf46afa8e62fb4465435502b487ed20b9d6d95bad8",
+      "message_type": "ReservationResult",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 223,
+      "file": "08-reservation-commit-result.bin",
+      "frame_sha256": "93dc488346441f57a34baed8b57623701e1c099d7e7e51532a41c891b2824e70",
+      "message_type": "ReservationCommitResult",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 350,
+      "file": "09-token-event.bin",
+      "frame_sha256": "2ac457091548521169eb257bdd5150cba1b0ef23f2ba00ba545b117f97a6a5c0",
+      "message_type": "TokenEvent",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "byte_length": 375,
+      "file": "10-failure-report.bin",
+      "frame_sha256": "0a214200cbe621521fb5c4ba3b84793a1c4b601bdb0a5813e913a58309f493de",
+      "message_type": "FailureReport",
+      "payload_length": 0,
+      "payload_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "protocol": "mycelium.router_wire.v1",
+  "schema": "mycelium.router_wire.golden.v1"
+}
