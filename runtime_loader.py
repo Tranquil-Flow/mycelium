@@ -15,7 +15,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, BinaryIO, Mapping
+from typing import Any, BinaryIO, Mapping, NoReturn
 
 import mlx.core as mx
 
@@ -65,6 +65,10 @@ _RUNTIME_DTYPES = {
 
 class RuntimeLoadError(ValueError):
     """Permanent, fail-closed assignment loading failure."""
+
+
+class RuntimeExecutionError(ValueError):
+    """Fail-closed execution error for an already loaded local stage."""
 
 
 @dataclass(frozen=True)
@@ -855,6 +859,170 @@ def _run_gpt2_probe(
     mx.eval(hidden)
     if not bool(mx.all(mx.isfinite(hidden)).item()):
         raise _fail("deterministic functional probe produced non-finite output")
+    return hidden
+
+
+def execute_loaded_stage(
+    loaded_stage: LoadedStage,
+    *,
+    token_ids: mx.array | None = None,
+    hidden_states: mx.array | None = None,
+) -> mx.array:
+    """Execute exactly the GPT-2 components bound by one ``LoadedStage``.
+
+    Runtime identity, layer range, roles, and aliases come from the immutable
+    load proof rather than an unbound caller argument. Entry stages accept
+    rank-two integer token IDs; all other stages accept rank-three hidden
+    states. There is intentionally no KV-cache interface, so callers must pass
+    the complete sequence on every invocation.
+    """
+
+    def reject(code: str) -> NoReturn:
+        raise RuntimeExecutionError(code)
+
+    if not isinstance(loaded_stage, LoadedStage):
+        reject("invalid_loaded_stage")
+    proof = loaded_stage.proof
+    if not isinstance(proof, Mapping):
+        reject("invalid_loaded_stage_proof")
+    try:
+        runtime = validate_normalized_mlx_runtime(
+            json.loads(canonical_json(proof.get("runtime")))
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeExecutionError("invalid_loaded_stage_runtime") from exc
+    config = runtime["model_config"]
+    layer_range = proof.get("loaded_range")
+    if not isinstance(layer_range, Mapping):
+        reject("invalid_loaded_stage_range")
+    start = layer_range.get("start_layer")
+    end = layer_range.get("end_layer_exclusive")
+    count = layer_range.get("layer_count")
+    if (
+        not isinstance(start, int)
+        or isinstance(start, bool)
+        or start < 0
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or end <= start
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count != end - start
+        or end > config["n_layer"]
+    ):
+        reject("invalid_loaded_stage_range")
+    raw_components = proof.get("loaded_components")
+    if not isinstance(raw_components, (list, tuple)):
+        reject("invalid_loaded_stage_components")
+    components = list(raw_components)
+    if (
+        not components
+        or len(components) != len(set(components))
+        or "decoder" not in components
+        or set(components)
+        - {"input_embedding", "decoder", "final_norm", "lm_head"}
+    ):
+        reject("invalid_loaded_stage_components")
+
+    tensors = loaded_stage.tensors
+    if not isinstance(tensors, Mapping):
+        reject("invalid_loaded_stage_tensors")
+    transformer_key = f"transformer.h.{start}.ln_1.weight"
+    plain_key = f"h.{start}.ln_1.weight"
+    if transformer_key in tensors and plain_key not in tensors:
+        namespace = "transformer."
+    elif plain_key in tensors and transformer_key not in tensors:
+        namespace = ""
+    else:
+        reject("invalid_loaded_stage_namespace")
+
+    expected_dtype = _RUNTIME_DTYPES[runtime["dtype"]]
+    expected_dtype_name = str(expected_dtype)
+    has_embedding = "input_embedding" in components
+    if has_embedding:
+        if token_ids is None or hidden_states is not None:
+            reject("entry_stage_requires_token_ids")
+        if len(token_ids.shape) != 2 or int(token_ids.shape[1]) <= 0:
+            reject("invalid_token_id_shape")
+        if str(token_ids.dtype) not in {
+            "mlx.core.int8",
+            "mlx.core.int16",
+            "mlx.core.int32",
+            "mlx.core.int64",
+            "mlx.core.uint8",
+            "mlx.core.uint16",
+            "mlx.core.uint32",
+            "mlx.core.uint64",
+        }:
+            reject("invalid_token_id_dtype")
+        sequence = int(token_ids.shape[1])
+        if sequence > config["n_positions"]:
+            reject("position_bounds_exceeded")
+        if (
+            not bool(mx.all(token_ids >= 0).item())
+            or not bool(mx.all(token_ids < config["vocab_size"]).item())
+        ):
+            reject("token_bounds_exceeded")
+        positions = mx.arange(sequence, dtype=mx.int32)
+        hidden = (
+            tensors[f"{namespace}wte.weight"][token_ids]
+            + tensors[f"{namespace}wpe.weight"][positions]
+        )
+    else:
+        if hidden_states is None or token_ids is not None:
+            reject("non_entry_stage_requires_hidden_states")
+        if len(hidden_states.shape) != 3:
+            reject("invalid_hidden_state_rank")
+        if (
+            int(hidden_states.shape[0]) <= 0
+            or int(hidden_states.shape[1]) <= 0
+            or int(hidden_states.shape[2]) != config["n_embd"]
+        ):
+            reject("invalid_hidden_state_shape")
+        if int(hidden_states.shape[1]) > config["n_positions"]:
+            reject("position_bounds_exceeded")
+        if str(hidden_states.dtype) != expected_dtype_name:
+            reject("hidden_state_dtype_mismatch")
+        hidden = hidden_states
+
+    if str(hidden.dtype) != expected_dtype_name:
+        reject("hidden_state_dtype_mismatch")
+    if not bool(mx.all(mx.isfinite(hidden)).item()):
+        reject("nonfinite_hidden_states")
+    epsilon = float(config["layer_norm_epsilon"])
+    for layer in range(start, end):
+        hidden = _gpt2_block(
+            hidden,
+            tensors,
+            f"{namespace}h.{layer}.",
+            config["n_head"],
+            epsilon,
+        )
+    if "final_norm" in components:
+        hidden = _layer_norm(
+            hidden,
+            tensors[f"{namespace}ln_f.weight"],
+            tensors[f"{namespace}ln_f.bias"],
+            epsilon,
+        )
+    if "lm_head" in components:
+        aliases = loaded_stage.resolved_aliases
+        if not isinstance(aliases, Mapping):
+            reject("invalid_loaded_stage_aliases")
+        alias = aliases.get("lm_head", {})
+        if not isinstance(alias, Mapping):
+            reject("invalid_loaded_stage_aliases")
+        head_keys = alias.get("tensor_keys", ["lm_head.weight"])
+        if (
+            not isinstance(head_keys, (list, tuple))
+            or len(head_keys) != 1
+            or not isinstance(head_keys[0], str)
+        ):
+            reject("invalid_loaded_stage_aliases")
+        hidden = mx.matmul(hidden, tensors[head_keys[0]].transpose(1, 0))
+    mx.eval(hidden)
+    if not bool(mx.all(mx.isfinite(hidden)).item()):
+        reject("nonfinite_stage_output")
     return hidden
 
 
