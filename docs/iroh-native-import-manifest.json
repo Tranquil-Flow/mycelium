@@ -1,0 +1,643 @@
+{
+  "schema": "mycelium.iroh_native_import_manifest.v1",
+  "generated_at_utc": "2026-07-17T19:40:25Z",
+  "review_only": true,
+  "implementation_imported": false,
+  "tests_modified": false,
+  "review_outcome": "do_not_import_yet",
+  "review_baseline": {
+    "repository": "/Users/evinova-self/Projects/mycelium",
+    "worktree": "/Users/evinova-self/Projects/mycelium-wt-p7-iroh-review",
+    "branch": "phase7/native-iroh-review",
+    "commit": "88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92"
+  },
+  "provenance": {
+    "remote_native_source": {
+      "host": "evis-macbook-pro-1",
+      "user": "evinova",
+      "path": "/Users/evinova/Projects/mycelium-iroh-native-spike",
+      "access": "read_only_over_ssh",
+      "git_repository": false,
+      "source_commit": null,
+      "license_file_present": false,
+      "provenance_binding": "absolute_path_plus_byte_size_plus_sha256",
+      "limitations": [
+        "No Git metadata was present, so no source commit or author history can be attested.",
+        "No license file was present; ownership and reuse permission require explicit attestation before import.",
+        "Remote target artifacts and evidence outputs were not treated as source."
+      ]
+    },
+    "local_activation_spike": {
+      "path": "/Users/evinova-self/Projects/mycelium-iroh-activation-spike",
+      "access": "read_only",
+      "git_repository": false,
+      "native_candidate_count": 0,
+      "disposition": "evidence_only_exclude_entire_tree",
+      "reason": "Python benchmark/evidence harness, runtime identity keys, memberships, and generated result files are not native Rust transport source."
+    }
+  },
+  "candidate_files": [
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/Cargo.toml",
+      "relative_source_path": "Cargo.toml",
+      "byte_size": 573,
+      "sha256": "397b5eb408c8d0b7041c2a146edfd52dfaed83ac0da03c28de5dfe1e2fb9586c",
+      "language": "TOML",
+      "role": "Rust package and direct dependency manifest for benchmark library and CLI",
+      "dependencies": [
+        "anyhow=1",
+        "clap=4.5 derive",
+        "futures=0.3",
+        "hex=0.4",
+        "iroh=1.0.0 exact",
+        "rand=0.9",
+        "serde=1 derive",
+        "serde_json=1",
+        "sha2=0.10",
+        "tokio=1 full",
+        "uuid=1 v5",
+        "dev:tempfile=3",
+        "Rust 1.91",
+        "edition 2024"
+      ],
+      "transport_contract": "Build-time contract only; declares package mycelium-iroh-activation-native and benchmark binary.",
+      "disposition": "adapt_then_import",
+      "proposed_destination_path": "native/iroh_transport/Cargo.toml",
+      "verbatim": false,
+      "required_changes": [
+        "Rename package/library for production transport.",
+        "Remove benchmark CLI target and audit unused hex, rand, clap, serde_json, and tempfile dependencies.",
+        "Keep iroh version explicit until compatibility tests justify an upgrade."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/Cargo.lock",
+      "relative_source_path": "Cargo.lock",
+      "byte_size": 106203,
+      "sha256": "a4e41a432926da35b236615bd471ca202f22721adc16ca2d793778de912da00f",
+      "language": "Cargo lockfile",
+      "role": "Exact transitive dependency resolution for the reviewed spike",
+      "dependencies": [
+        "Resolved transitive graph for Cargo.toml"
+      ],
+      "transport_contract": "No runtime contract; reproducibility support only.",
+      "disposition": "regenerate_after_manifest_adaptation",
+      "proposed_destination_path": "native/iroh_transport/Cargo.lock",
+      "verbatim": false,
+      "required_changes": [
+        "Do not claim the reviewed lock hash after Cargo.toml changes.",
+        "Review dependency diff and licenses before committing regenerated lockfile."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/lib.rs",
+      "relative_source_path": "src/lib.rs",
+      "byte_size": 71,
+      "sha256": "fbb5747f0242830065cce32f306bc00dd8afe5cb75a7c2645429dfb41616bc5b",
+      "language": "Rust",
+      "role": "Library module root",
+      "dependencies": [
+        "crate::clock",
+        "crate::protocol",
+        "crate::scheduler",
+        "crate::transport"
+      ],
+      "transport_contract": "Exports all benchmark modules without a production adapter boundary.",
+      "disposition": "rewrite_then_import",
+      "proposed_destination_path": "native/iroh_transport/src/lib.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Export production transport and wire modules only.",
+        "Keep benchmark/evidence helpers out of public production API."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/main.rs",
+      "relative_source_path": "src/main.rs",
+      "byte_size": 4891,
+      "sha256": "dfbcb16d96ea266de52e6dac5b64d0ef976e04927a4a86f365e725843351ee1d",
+      "language": "Rust",
+      "role": "Benchmark CLI with serve/client/loopback/three-crossing modes and evidence-file writes",
+      "dependencies": [
+        "std::net::SocketAddr",
+        "std::path::PathBuf",
+        "activation_spike_native::transport",
+        "anyhow",
+        "clap",
+        "serde_json",
+        "tokio"
+      ],
+      "transport_contract": "Operator benchmark orchestration; not Mycelium Router transport API.",
+      "disposition": "must_not_import",
+      "proposed_destination_path": null,
+      "verbatim": false,
+      "reason": "Production import must not add benchmark CLI, arbitrary evidence-path writes, or spike command surface. Recreate a separate example later only if still needed."
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/clock.rs",
+      "relative_source_path": "src/clock.rs",
+      "byte_size": 1805,
+      "sha256": "dcdf736ae8065843db6e2e296f06a18e55a05c07ec049e9ced0003861aeca045",
+      "language": "Rust",
+      "role": "Four-timestamp clock calibration and one-way arrival estimator",
+      "dependencies": [
+        "std::time::SystemTime",
+        "std::time::UNIX_EPOCH"
+      ],
+      "transport_contract": "Selects lowest-network-RTT calibration sample, estimates server-minus-client offset and uncertainty, and derives arrival-ready latency.",
+      "disposition": "adapt_then_import",
+      "proposed_destination_path": "native/iroh_transport/src/clock.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Treat wall-clock calibration as telemetry only, never ordering, authorization, expiry, or correctness authority.",
+        "Inject/test clock behavior and handle system-time regression without panic."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/protocol.rs",
+      "relative_source_path": "src/protocol.rs",
+      "byte_size": 8030,
+      "sha256": "ff4c2ffe878327573ce775b4170f94b6f0724fc91759ec87d6d44d219d061e39",
+      "language": "Rust",
+      "role": "Activation and receipt binary codec",
+      "dependencies": [
+        "std::error::Error",
+        "std::fmt",
+        "sha2"
+      ],
+      "transport_contract": "MYA2 activation header v2 (112 bytes) plus payload, and MYR2 receipt (72 bytes); SHA-256 length/digest validation; 64 MiB payload ceiling.",
+      "disposition": "adapt_then_import",
+      "proposed_destination_path": "native/iroh_transport/src/protocol.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Replace or envelope this benchmark codec with exact mycelium.router_wire.v1 message semantics.",
+        "Define request/control message discriminator and action mapping.",
+        "Resolve 64 MiB Rust versus 256 MiB Router payload limit deliberately.",
+        "Do not treat ReceiptStatus::Unauthorized as implemented authorization; no code emits it."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/scheduler.rs",
+      "relative_source_path": "src/scheduler.rs",
+      "byte_size": 3455,
+      "sha256": "e315c14ec3a9fe38b72347b353eee6aee8025f57dcdcd940e6dc5a9ea53a849b",
+      "language": "Rust",
+      "role": "Benchmark send-window and asynchronous receipt collector",
+      "dependencies": [
+        "std::time",
+        "futures",
+        "tokio runtime via tokio::select!"
+      ],
+      "transport_contract": "Allows windows 1, 2, or 4; starts a replacement send when prior send setup completes; receives receipts concurrently and restores result order.",
+      "disposition": "adapt_then_import",
+      "proposed_destination_path": "native/iroh_transport/src/scheduler.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Rename or redesign to avoid confusion with Mycelium Router HopScheduler.",
+        "Add byte and work limits, retry-after signaling, cancellation, deadlines, and bounded receipt lifetime.",
+        "Do not represent benchmark window as Router backpressure."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/transport.rs",
+      "relative_source_path": "src/transport.rs",
+      "byte_size": 57336,
+      "sha256": "64454f11a4ad597411b7271d6fc2e5ba521e897ce809c81c4fc3e9513c17709d",
+      "language": "Rust",
+      "role": "Native Iroh benchmark endpoint, stream protocol, calibration, activation sender/receiver, chain benchmark, and JSON evidence writer",
+      "dependencies": [
+        "std::sync::Arc",
+        "std::time::Instant",
+        "anyhow",
+        "clap::ValueEnum",
+        "iroh::Endpoint",
+        "iroh::EndpointAddr",
+        "iroh::RelayMode",
+        "iroh::endpoint::Connection",
+        "iroh::endpoint::presets",
+        "serde",
+        "sha2",
+        "tokio::sync::Semaphore",
+        "tokio::sync::mpsc",
+        "tokio::task::JoinSet",
+        "uuid",
+        "crate::clock",
+        "crate::protocol",
+        "crate::scheduler"
+      ],
+      "transport_contract": "ALPN mycelium/activation-native/2; direct or N0 relay endpoint; calibration streams followed by per-message or persistent activation stream, fixed receipts, and done handshake; one Iroh connection reused only within one benchmark run.",
+      "disposition": "reference_only_rewrite",
+      "proposed_destination_path": "native/iroh_transport/src/transport.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Implement all six Python TransportPort operations and inbound Router dispatch.",
+        "Replace benchmark-generated payloads, IDs, evidence writing, chain loop, simulated delay, and fixed-count lifecycle.",
+        "Add trusted peer identity binding and server authorization.",
+        "Add operation deadlines, cancellation, bounded queues, retry classification, and long-lived connection management.",
+        "Assign production ALPN only after wire contract is frozen; do not reuse benchmark ALPN as production compatibility signal."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/tests/contract.rs",
+      "relative_source_path": "tests/contract.rs",
+      "byte_size": 5732,
+      "sha256": "c05b1d18004f9f7a91d281482b54faad551c4687d61b3bca19d83547016eebb8",
+      "language": "Rust",
+      "role": "Codec, calibration, window, and asynchronous receipt unit tests",
+      "dependencies": [
+        "activation_spike_native::clock",
+        "activation_spike_native::protocol",
+        "activation_spike_native::scheduler",
+        "sha2",
+        "tokio"
+      ],
+      "transport_contract": "Checks benchmark frame integrity, receipt codec, lowest-RTT calibration, window validation, and receipt non-gating behavior.",
+      "disposition": "adapt_after_implementation",
+      "proposed_destination_path": "native/iroh_transport/tests/contract.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Retain useful codec invariants but add exact Router wire fixtures and malformed-frame coverage."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/tests/loopback.rs",
+      "relative_source_path": "tests/loopback.rs",
+      "byte_size": 1656,
+      "sha256": "756209b113efff1f312303c5d4f8185fa0972bd95da505d3473676401e964d25",
+      "language": "Rust",
+      "role": "Native direct loopback benchmark test",
+      "dependencies": [
+        "activation_spike_native::transport",
+        "tokio"
+      ],
+      "transport_contract": "Exercises direct Iroh loopback with per-message streams, delayed receipts, digest checks, and calibration metrics.",
+      "disposition": "adapt_after_implementation",
+      "proposed_destination_path": "native/iroh_transport/tests/loopback.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Drive Router messages and receiver dispatch rather than deterministic benchmark payloads.",
+        "Assert peer authorization, timeout, cancellation, backpressure, and connection reuse."
+      ]
+    },
+    {
+      "source_path": "/Users/evinova/Projects/mycelium-iroh-native-spike/tests/persistent_chain.rs",
+      "relative_source_path": "tests/persistent_chain.rs",
+      "byte_size": 1918,
+      "sha256": "df4aa0a1909b6f125ade26d046058a748dc186d2226a450b3698ed7fe1be0c7d",
+      "language": "Rust",
+      "role": "Persistent-stream and synthetic three-crossing benchmark tests",
+      "dependencies": [
+        "activation_spike_native::transport",
+        "tokio"
+      ],
+      "transport_contract": "Checks one framed stream carries fixed-count activations and synthetic three-crossing measurements.",
+      "disposition": "adapt_after_implementation",
+      "proposed_destination_path": "native/iroh_transport/tests/persistent_chain.rs",
+      "verbatim": false,
+      "required_changes": [
+        "Replace synthetic alternating chain with actual multi-node Router integration.",
+        "Test independent message completion and stream failure isolation."
+      ]
+    }
+  ],
+  "router_contract_mapping": {
+    "python_port": "mycelium_router.ports.TransportPort",
+    "methods": [
+      {
+        "method": "send_hop(HopHeader, payload)",
+        "coverage": "partial_transport_primitive_only",
+        "native_analog": "ActivationHeader plus opaque payload over Iroh bidirectional stream",
+        "gaps": [
+          "No Python HopHeader encoding or decoding",
+          "No path_id, path_attempt, phase, token_index, hop_index, source/destination placement, topology_version, idempotency_key, or prefill_chunk_token_count",
+          "No destination resolution from ExecutionGraph",
+          "No inbound Router.receive_hop or receive_progressive_prefill dispatch",
+          "request_id is forced to UUID v5 while Router contract permits arbitrary string IDs",
+          "hop_id is not a Router contract field"
+        ]
+      },
+      {
+        "method": "send_manifest_delta(ManifestDelta)",
+        "coverage": "none",
+        "native_analog": null,
+        "gaps": [
+          "No message type, codec, routing-to-entry, or receiver dispatch"
+        ]
+      },
+      {
+        "method": "send_manifest_locked(ManifestLocked)",
+        "coverage": "none",
+        "native_analog": null,
+        "gaps": [
+          "No participant fanout, registration, entry confirmation, codec, or receiver dispatch"
+        ]
+      },
+      {
+        "method": "send_failure_report(FailureReport)",
+        "coverage": "none",
+        "native_analog": "Receipt status is benchmark delivery validation only",
+        "gaps": [
+          "Receipt lacks Router failure scope, reason, placement_id, edge_id, node_id, path ID, and path attempt",
+          "No routing to request entry"
+        ]
+      },
+      {
+        "method": "send_token_event(TokenEvent)",
+        "coverage": "none",
+        "native_analog": null,
+        "gaps": [
+          "No token event fields, codec, routing, or receiver dispatch"
+        ]
+      },
+      {
+        "method": "send_prefill_chunk_completed(PrefillChunkCompleted)",
+        "coverage": "none",
+        "native_analog": null,
+        "gaps": [
+          "No chunk index/count fields, codec, routing, or receiver dispatch"
+        ]
+      }
+    ],
+    "wire_compatibility": {
+      "router_wire": "mycelium.router_wire.v1: 4-byte header length, canonical JSON envelope, message_type/body/payload_length/payload_sha256, then raw payload; 1 MiB header and 256 MiB payload ceilings",
+      "native_wire": "MYA2 v2: fixed 112-byte activation header plus raw payload; MYR2 fixed 72-byte receipt; 64 MiB payload ceiling",
+      "compatible": false,
+      "decision": "Production adapter must carry or reproduce the exact Router wire contract and add a message/action discriminator. Byte-level compatibility cannot be inferred from shared SHA-256 use."
+    },
+    "sync_async_impedance": "Python TransportPort methods are synchronous; native implementation is Tokio async. A bounded bridge with explicit completion/error semantics is required. No FFI, subprocess protocol, or Rust-native Router integration exists in reviewed source."
+  },
+  "plane_boundary": {
+    "gossip_control_plane": {
+      "allowed": [
+        "membership",
+        "topology summaries",
+        "availability",
+        "capacity/load summaries",
+        "non-sensitive routing telemetry"
+      ],
+      "forbidden": [
+        "activation tensors",
+        "prefill payloads",
+        "prompt token IDs",
+        "generated token payloads",
+        "model weights",
+        "protected edits or deltas",
+        "request-scoped manifests",
+        "secrets or private keys"
+      ]
+    },
+    "router_request_control_plane": {
+      "messages": [
+        "ManifestDelta",
+        "ManifestLocked",
+        "FailureReport",
+        "TokenEvent",
+        "PrefillChunkCompleted"
+      ],
+      "required_path": "Authenticated point-to-point Router transport, not Gossip"
+    },
+    "data_plane": {
+      "messages": [
+        "HopHeader plus activation/prefill payload",
+        "ProgressivePrefillMessage plus raw payload"
+      ],
+      "required_path": "Authenticated point-to-point Iroh transport"
+    },
+    "static_confirmation": {
+      "result": "no_reviewed_path_into_gossip",
+      "evidence": [
+        "Remote Rust src files contain no gossip reference.",
+        "mycelium_router Python package contains no mycelium_gossip import/reference.",
+        "mycelium_gossip Python package contains no mycelium_router import/reference.",
+        "Reviewed mycelium_gossip source contains no tensor, prompt, checkpoint, protected-edit, or activation field/reference."
+      ],
+      "scope_limit": "Static source reachability only. Native tests were not executed and no production adapter exists, so this is not an end-to-end runtime claim.",
+      "required_gate": "Future adapter tests must fail if any data-plane or protected-edit payload is submitted to Gossip."
+    }
+  },
+  "transport_behavior": {
+    "authentication": {
+      "connection_security": "Iroh supplies cryptographic endpoint identity and exposes connection.remote_id().",
+      "server_authorization": "absent; server accepts any peer that reaches endpoint and negotiates ALPN",
+      "client_trust_binding": "insufficient; client trusts mutable ready JSON EndpointAddr and checks only ready schema, mode, and ALPN",
+      "persistent_identity": "absent in native source; Endpoint builder is not given a persisted SecretKey",
+      "unauthorized_status": "declared but never emitted",
+      "production_requirement": "Bind stable Iroh endpoint IDs to trusted Mycelium node IDs and authorize both inbound peer and requested destination."
+    },
+    "peer_identity": "Connection evidence records remote endpoint ID, but no comparison against trusted membership/topology occurs.",
+    "alpn": {
+      "value": "mycelium/activation-native/2",
+      "meaning": "benchmark wire version only",
+      "production_usable": false
+    },
+    "stream_framing": {
+      "calibration": "Each sample uses one bidirectional stream: 16-byte MYC2 request, EOF, 32-byte MYS2 response, EOF.",
+      "per_message": "One bidirectional stream per activation: 112-byte MYA2 header, exact payload_length bytes, EOF; 72-byte MYR2 receipt, EOF.",
+      "persistent": "One bidirectional data stream per run: repeated MYA2 header plus payload frames; repeated 72-byte receipts; fixed external count determines termination; EOF after count.",
+      "done": "Separate bidirectional stream with 8-byte MYD2 request and 8-byte MYE2 response.",
+      "dispatch": "Stream purpose is positional/stateful; no generic stream/message type discriminator."
+    },
+    "retry": "No connect, stream, message, or receipt retry policy. Errors abort run.",
+    "cancellation": "No cancellation token, Router path cancellation message, stream reset policy, or cancellation acknowledgement.",
+    "timeouts": {
+      "present": [
+        "45 seconds waiting for relay endpoint online",
+        "60 seconds for external client connect",
+        "5 seconds best-effort wait for connection close"
+      ],
+      "absent": [
+        "server accept",
+        "incoming handshake",
+        "calibration reads/writes",
+        "activation reads/writes",
+        "receipt reads/writes",
+        "done handshake",
+        "whole operation deadline"
+      ]
+    },
+    "backpressure": {
+      "per_message": "Client starts at most window 1/2/4 send futures; server semaphore limits concurrent activation processing. Permit is released after validation, before delayed receipt write.",
+      "persistent": "Sequential writer plus mpsc channels sized to count; no Router work/byte limit or retry-after result.",
+      "transport_layer": "Iroh/QUIC flow control applies implicitly, but no application-level policy is surfaced.",
+      "router_compatible": false
+    },
+    "connection_reuse": {
+      "within_run": "One Iroh connection is reused for calibration, all activation streams, and done handshake.",
+      "per_message_mode": "New bidirectional stream per activation on same connection.",
+      "persistent_mode": "One bidirectional activation stream on same connection.",
+      "across_requests_or_runs": "None; no pool, cache, reconnect, health check, idle expiry, or concurrent peer manager."
+    }
+  },
+  "must_not_import": [
+    {
+      "source_pattern": "/Users/evinova-self/Projects/mycelium-iroh-activation-spike/**",
+      "reason": "Evidence-only Python spike; includes private identity key material, membership files, generated results, and a non-native transport implementation."
+    },
+    {
+      "source_pattern": "/Users/evinova/Projects/mycelium-iroh-native-spike/src/main.rs",
+      "reason": "Benchmark CLI and evidence writer, not production transport."
+    },
+    {
+      "source_pattern": "/Users/evinova/Projects/mycelium-iroh-native-spike/evidence/**",
+      "reason": "Generated benchmark outputs, including tensor-named evidence; not source and not proof of current hashed source execution."
+    },
+    {
+      "source_pattern": "/Users/evinova/Projects/mycelium-iroh-native-spike/target/**",
+      "reason": "Build artifacts and dependency cache."
+    },
+    {
+      "source_pattern": "Any .key, private-key, ready, stdout, result, membership, or machine-specific identity file from either source tree",
+      "reason": "Secret, ephemeral, generated, or machine-bound material."
+    }
+  ],
+  "collision_analysis": {
+    "proposed_namespace": "native/iroh_transport/",
+    "baseline_commit": "88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92",
+    "baseline_tracked_file_count": 211,
+    "exact_path_collisions": [],
+    "namespace_collisions": [],
+    "live_canonical_observation": {
+      "commit": "4da5430e2fe7aa41766fa023ed8dc2260091fb35",
+      "exact_path_collisions": [],
+      "namespace_collisions": [],
+      "note": "Read-only observation only; live canonical state was not modified and is not the review baseline."
+    },
+    "semantic_collisions": [
+      "Rust protocol.rs conflicts on wire semantics with mycelium_router/wire.py despite no path collision.",
+      "Rust scheduler.rs is a send-window collector, not mycelium_router/scheduler.py HopScheduler.",
+      "Rust transport.rs benchmark receipt semantics differ from LoopbackSocketTransport synchronous dispatch completion.",
+      "Rust 64 MiB payload ceiling conflicts with Router 256 MiB payload ceiling.",
+      "Benchmark ALPN must not advertise production Router compatibility."
+    ],
+    "build_integration_risks": [
+      "Repository currently has no Cargo workspace or native namespace.",
+      "Rust 1.91 and edition 2024 become new toolchain constraints.",
+      "native/iroh_transport/target must be ignored before any build.",
+      "Python-to-Rust bridge and packaging strategy are unresolved."
+    ]
+  },
+  "proposed_destination_paths": [
+    "native/iroh_transport/Cargo.toml",
+    "native/iroh_transport/Cargo.lock",
+    "native/iroh_transport/src/lib.rs",
+    "native/iroh_transport/src/clock.rs",
+    "native/iroh_transport/src/protocol.rs",
+    "native/iroh_transport/src/scheduler.rs",
+    "native/iroh_transport/src/transport.rs",
+    "native/iroh_transport/tests/contract.rs",
+    "native/iroh_transport/tests/loopback.rs",
+    "native/iroh_transport/tests/persistent_chain.rs"
+  ],
+  "staged_import_order": [
+    {
+      "stage": 0,
+      "name": "provenance_and_contract_gate",
+      "actions": [
+        "Obtain source ownership/reuse attestation and choose license.",
+        "Re-read remote bytes and require every listed size and SHA-256 to match.",
+        "Freeze production ALPN, peer identity mapping, Router message framing, timeout/cancellation/retry semantics, and bridge architecture.",
+        "Keep import blocked if any hash or source provenance differs."
+      ]
+    },
+    {
+      "stage": 1,
+      "name": "crate_scaffold",
+      "paths": [
+        "native/iroh_transport/Cargo.toml",
+        "native/iroh_transport/Cargo.lock",
+        "native/iroh_transport/src/lib.rs"
+      ],
+      "actions": [
+        "Adapt manifest and module root; regenerate and review lockfile.",
+        "Add target ignore rule in same implementation change.",
+        "Do not add benchmark CLI."
+      ]
+    },
+    {
+      "stage": 2,
+      "name": "wire_and_clock_primitives",
+      "paths": [
+        "native/iroh_transport/src/protocol.rs",
+        "native/iroh_transport/src/clock.rs",
+        "native/iroh_transport/tests/contract.rs"
+      ],
+      "actions": [
+        "Adapt codec to exact Router message semantics and enforce fail-closed bounds.",
+        "Keep clock estimation telemetry-only.",
+        "Add cross-language golden fixtures before transport integration."
+      ]
+    },
+    {
+      "stage": 3,
+      "name": "bounded_async_engine",
+      "paths": [
+        "native/iroh_transport/src/scheduler.rs",
+        "native/iroh_transport/src/transport.rs"
+      ],
+      "actions": [
+        "Rewrite transport around stable authenticated peers, operation deadlines, cancellation, bounded work/bytes, retry classification, and connection pooling.",
+        "Implement all outbound TransportPort operations and inbound Router dispatch.",
+        "Remove benchmark payload generation, evidence-file writes, simulated delays, fixed-count protocol, and three-crossing orchestration."
+      ]
+    },
+    {
+      "stage": 4,
+      "name": "native_and_router_integration_tests",
+      "paths": [
+        "native/iroh_transport/tests/loopback.rs",
+        "native/iroh_transport/tests/persistent_chain.rs"
+      ],
+      "actions": [
+        "Adapt tests to real Router messages and multi-node dispatch.",
+        "Add direct and relay tests, unauthorized peer rejection, malformed wire rejection, timeout, cancellation, retry, backpressure, connection reuse, and Gossip-boundary tests.",
+        "Only after these real native tests execute successfully may transport functionality be claimed."
+      ]
+    }
+  ],
+  "verification_commands": {
+    "review_artifacts_now": [
+      "git add --intent-to-add -- docs/iroh-native-import-manifest.md docs/iroh-native-import-manifest.json",
+      "python3 -m json.tool docs/iroh-native-import-manifest.json >/dev/null",
+      "git diff --check -- docs/iroh-native-import-manifest.md docs/iroh-native-import-manifest.json",
+      "git status --short",
+      "git diff --name-only 88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92 -- docs/iroh-native-import-manifest.md docs/iroh-native-import-manifest.json"
+    ],
+    "source_provenance_before_import": [
+      "ssh -i ~/.ssh/id_ed25519_m4pro_to_laptop -o BatchMode=yes evinova@evis-macbook-pro-1 'cd ~/Projects/mycelium-iroh-native-spike && shasum -a 256 Cargo.toml Cargo.lock src/lib.rs src/main.rs src/clock.rs src/protocol.rs src/scheduler.rs src/transport.rs tests/contract.rs tests/loopback.rs tests/persistent_chain.rs'",
+      "git ls-tree -r --name-only 88af7fc0b4e2bf3ec480cd8e2916bcbc480c1e92 -- native/iroh_transport"
+    ],
+    "after_future_import": [
+      "cargo fmt --manifest-path native/iroh_transport/Cargo.toml -- --check",
+      "cargo clippy --manifest-path native/iroh_transport/Cargo.toml --all-targets --all-features -- -D warnings",
+      "cargo test --manifest-path native/iroh_transport/Cargo.toml --all-targets",
+      "python3 -m pytest -q test_router_wire.py test_router_socket_transport.py test_router_end_to_end.py test_router_backpressure.py",
+      "git diff --check",
+      "git status --short"
+    ],
+    "required_future_test_assertions": [
+      "All six TransportPort methods round-trip across native transport.",
+      "Python and Rust accept the same golden Router frames and reject the same malformed frames.",
+      "Untrusted endpoint ID cannot deliver or receive Router messages.",
+      "Operation deadline and cancellation terminate blocked connect/read/write/receipt paths.",
+      "Work and byte limits return explicit retry-after backpressure without unbounded buffering.",
+      "One peer connection is reused across independent Router requests and recovers after closure.",
+      "No tensor, prompt payload, protected edit, private key, or request-scoped manifest enters Gossip."
+    ]
+  },
+  "test_execution": {
+    "native_tests_executed_during_review": false,
+    "reason": "Native source existed only on read-only remote evidence machine. Running Cargo would write target artifacts; copying source or installing packages was forbidden.",
+    "reviewed_test_source": true,
+    "historical_evidence_files_accepted_as_current_test_proof": false,
+    "transport_working_claim": false
+  },
+  "blockers": [
+    "Missing source Git provenance and license/ownership attestation",
+    "No implementation of five TransportPort methods and only partial send_hop primitive",
+    "Incompatible Router/native wire contracts and payload ceilings",
+    "No trusted Mycelium-node to Iroh-endpoint authorization",
+    "No production cancellation, deadlines, retries, bounded Router backpressure, or cross-request connection manager",
+    "No resolved Python/Rust bridge or Rust-native Router architecture",
+    "No real native tests executed against the reviewed hashes"
+  ]
+}
