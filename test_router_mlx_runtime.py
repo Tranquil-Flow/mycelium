@@ -310,6 +310,18 @@ def test_two_stage_prefill_and_decode_match_concatenated_reference_and_wire_byte
    assert decode_token == reference_decode_token
 
 
+def test_constructor_rejects_non_little_endian_host(runtime_case, monkeypatch):
+   placement_id = runtime_case.graph.stages[0].placements[0].placement_id
+   monkeypatch.setattr("mycelium_router.mlx_runtime.sys.byteorder", "big")
+
+   with pytest.raises(MLXRuntimeError, match="^unsupported_host_byte_order"):
+      MLXRuntimePort(
+         runtime_case.assignments[0]["node_id"],
+         runtime_case.graph,
+         {placement_id: runtime_case.loaded[0]},
+      )
+
+
 def test_constructor_rejects_graph_and_placement_proof_bindings(runtime_case):
    placement_id = runtime_case.graph.stages[0].placements[0].placement_id
    cases = (

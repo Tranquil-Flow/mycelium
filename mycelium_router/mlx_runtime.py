@@ -141,6 +141,8 @@ class MLXRuntimePort:
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
+      if sys.byteorder != "little":
+         _reject("unsupported_host_byte_order")
       if not isinstance(graph, ExecutionGraph):
          _reject("invalid_execution_graph")
       try:
