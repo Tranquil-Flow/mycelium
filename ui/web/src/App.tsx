@@ -1,63 +1,30 @@
 import { useEffect, useState } from 'react';
-import scenarioFixture from '../../tests/fixtures/source/hypothetical-six-node.json';
-import simulationFixture from '../../tests/fixtures/source/planner-simulation.json';
-import geographyFixture from '../../tests/fixtures/source/synthetic-geo.json';
-import fixtureManifest from '../../tests/fixtures/source/ui-fixture-manifest.json';
-import failoverFixture from '../../tests/fixtures/failover/failover-scenarios.json';
-import manualProvisioningRouteFixture from '../../tests/fixtures/source/manual-provisioning-route-v1.json';
-import provisioningAudit from '../../tests/fixtures/source/provisioning-audit.json';
 import { AppShell, type ObservatoryView } from './components/AppShell';
-import { adaptSimulator } from './model/adapter';
-import { adaptFailoverScenarios } from './model/failover';
-import { adaptProvisioningEvidence } from './model/provisioning';
-import type { EvidenceSnapshot, FailoverIncident, ProvisioningEvidence } from './model/types';
+import {
+  createObservatorySource,
+  type ObservatoryDataSource,
+  type ObservatorySourceState,
+} from './data/observatorySource';
 import { EvidenceView } from './views/EvidenceView';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
 import './styles.css';
 
-interface LoadedBundle {
-  readonly snapshot: EvidenceSnapshot;
-  readonly incidents: readonly FailoverIncident[];
-  readonly provisioning: ProvisioningEvidence;
+type SourceResult =
+  | { readonly source: ObservatoryDataSource; readonly state: 'loading' }
+  | {
+      readonly source: ObservatoryDataSource;
+      readonly state: 'ready';
+      readonly sourceState: ObservatorySourceState;
+    }
+  | { readonly source: ObservatoryDataSource; readonly state: 'error'; readonly message: string };
+
+export interface AppProps {
+  readonly source?: ObservatoryDataSource;
 }
 
-type BundleResult =
-  | { readonly state: 'ready'; readonly bundle: LoadedBundle }
-  | { readonly state: 'error'; readonly message: string };
-
-function loadOfflineBundle(): BundleResult {
-  try {
-    const snapshot = adaptSimulator(
-      scenarioFixture,
-      simulationFixture,
-      geographyFixture,
-      fixtureManifest,
-    );
-    const incidents = adaptFailoverScenarios(failoverFixture, {
-      knownNodeIds: snapshot.nodes.map((node) => node.id),
-      numLayers: snapshot.model.numLayers,
-    });
-    const provisioning = adaptProvisioningEvidence(manualProvisioningRouteFixture, provisioningAudit);
-
-    return {
-      state: 'ready',
-      bundle: {
-        snapshot,
-        incidents,
-        provisioning,
-      },
-    };
-  } catch (reason: unknown) {
-    return {
-      state: 'error',
-      message: reason instanceof Error ? reason.message : 'Unknown fixture parsing error',
-    };
-  }
-}
-
-const offlineBundle = loadOfflineBundle();
+const defaultSource = createObservatorySource();
 
 const OBSERVATORY_VIEWS: readonly ObservatoryView[] = [
   'network',
@@ -73,12 +40,39 @@ function viewFromHash(hash: string): ObservatoryView | null {
     : null;
 }
 
-function BundleError({ message }: { readonly message: string }) {
+function sourceErrorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : 'Unknown Observatory source error';
+}
+
+function initialSourceResult(source: ObservatoryDataSource): SourceResult {
+  const current = source.getState();
+  if (current !== null) return { source, state: 'ready', sourceState: current };
+  if (source.kind !== 'static') return { source, state: 'loading' };
+
+  try {
+    const initial = source.loadInitial();
+    return initial instanceof Promise
+      ? { source, state: 'loading' }
+      : { source, state: 'ready', sourceState: initial };
+  } catch (reason: unknown) {
+    return { source, state: 'error', message: sourceErrorMessage(reason) };
+  }
+}
+
+function BundleError({
+  message,
+  sourceKind,
+}: {
+  readonly message: string;
+  readonly sourceKind: ObservatoryDataSource['kind'];
+}) {
   return (
     <section className="bundle-error panel" role="alert">
       <span aria-hidden="true">!</span>
       <div>
-        <p className="eyebrow caution">Offline fixture error</p>
+        <p className="eyebrow caution">
+          {sourceKind === 'static' ? 'Offline fixture error' : 'Live source error'}
+        </p>
         <h2>Evidence bundle unavailable</h2>
         <p>{message}</p>
         <small>No fallback values were inferred or presented.</small>
@@ -87,9 +81,25 @@ function BundleError({ message }: { readonly message: string }) {
   );
 }
 
-export default function App() {
+function BundleLoading() {
+  return (
+    <section className="bundle-error panel" role="status" aria-live="polite">
+      <span className="layout-loader" aria-hidden="true" />
+      <div>
+        <p className="eyebrow">Read-only source</p>
+        <h2>Loading coherent evidence snapshot</h2>
+        <small>No partial generation is rendered.</small>
+      </div>
+    </section>
+  );
+}
+
+export default function App({ source = defaultSource }: AppProps) {
   const [activeView, setActiveView] = useState<ObservatoryView>(
     () => viewFromHash(window.location.hash) ?? 'network',
+  );
+  const [sourceResult, setSourceResult] = useState<SourceResult>(() =>
+    initialSourceResult(source),
   );
 
   useEffect(() => {
@@ -108,6 +118,50 @@ export default function App() {
     return () => window.removeEventListener('hashchange', synchronizeHash);
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+
+    const acceptState = (nextState: ObservatorySourceState) => {
+      if (active) setSourceResult({ source, state: 'ready', sourceState: nextState });
+    };
+    const acceptError = (reason: unknown) => {
+      if (!active) return;
+      const current = source.getState();
+      if (current !== null) {
+        acceptState(current);
+      } else {
+        setSourceResult({ source, state: 'error', message: sourceErrorMessage(reason) });
+      }
+    };
+
+    const current = source.getState();
+    setSourceResult(
+      current === null
+        ? { source, state: 'loading' }
+        : { source, state: 'ready', sourceState: current },
+    );
+
+    try {
+      unsubscribe = source.subscribe?.(acceptState);
+      const initial = source.loadInitial();
+      if (initial instanceof Promise) {
+        void initial
+          .then((loadedState) => acceptState(source.getState() ?? loadedState))
+          .catch(acceptError);
+      } else {
+        acceptState(source.getState() ?? initial);
+      }
+    } catch (reason: unknown) {
+      acceptError(reason);
+    }
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [source]);
+
   const navigate = (view: ObservatoryView) => {
     setActiveView(view);
     const nextHash = `#${view}`;
@@ -116,11 +170,16 @@ export default function App() {
     }
   };
 
+  const renderedSourceResult: SourceResult =
+    sourceResult.source === source ? sourceResult : { source, state: 'loading' };
+
   let content;
-  if (offlineBundle.state === 'error') {
-    content = <BundleError message={offlineBundle.message} />;
+  if (renderedSourceResult.state === 'loading') {
+    content = <BundleLoading />;
+  } else if (renderedSourceResult.state === 'error') {
+    content = <BundleError message={renderedSourceResult.message} sourceKind={source.kind} />;
   } else {
-    const { snapshot, incidents, provisioning } = offlineBundle.bundle;
+    const { snapshot, incidents, provisioning } = renderedSourceResult.sourceState.bundle;
     switch (activeView) {
       case 'network':
         content = <NetworkView snapshot={snapshot} />;
@@ -143,13 +202,23 @@ export default function App() {
     }
   }
 
+  const sourceState =
+    renderedSourceResult.state === 'ready' ? renderedSourceResult.sourceState : null;
   const scopeLabel =
-    offlineBundle.state === 'ready'
-      ? offlineBundle.bundle.snapshot.source.scenarioName
-      : 'offline fixture';
+    sourceState === null
+      ? source.kind === 'static'
+        ? 'offline fixture'
+        : 'live gateway'
+      : sourceState.bundle.snapshot.source.scenarioName;
 
   return (
-    <AppShell activeView={activeView} onViewChange={navigate} scopeLabel={scopeLabel}>
+    <AppShell
+      activeView={activeView}
+      onViewChange={navigate}
+      scopeLabel={scopeLabel}
+      sourceKind={source.kind}
+      sourceState={sourceState}
+    >
       {content}
     </AppShell>
   );

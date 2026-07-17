@@ -1,6 +1,53 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import App from './App';
+import {
+  StaticObservatorySource,
+  type ObservatoryDataSource,
+  type ObservatorySourceListener,
+  type ObservatorySourceState,
+} from './data/observatorySource';
+
+class InjectedLiveSource implements ObservatoryDataSource {
+  readonly kind = 'live' as const;
+  readonly calls: string[] = [];
+  private readonly listeners = new Set<ObservatorySourceListener>();
+  private state: ObservatorySourceState;
+
+  constructor() {
+    const staticState = new StaticObservatorySource().loadInitial();
+    this.state = {
+      status: 'disconnected',
+      generation: 7,
+      bundle: staticState.bundle,
+      reason: 'test disconnect',
+    };
+  }
+
+  readonly subscribe = (listener: ObservatorySourceListener): (() => void) => {
+    this.calls.push('subscribe');
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  loadInitial(): ObservatorySourceState {
+    this.calls.push('loadInitial');
+    return this.state;
+  }
+
+  getState(): ObservatorySourceState {
+    return this.state;
+  }
+
+  reconnect(): void {
+    this.state = {
+      status: 'connected',
+      generation: 8,
+      bundle: this.state.bundle,
+    };
+    for (const listener of this.listeners) listener(this.state);
+  }
+}
 
 describe('Network Observatory', () => {
   beforeEach(() => {
@@ -74,11 +121,81 @@ describe('Network Observatory', () => {
     expect(screen.getByRole('heading', { name: /strategy comparison/i })).toBeInTheDocument();
   });
 
+  it('follows browser hash navigation after initial load', () => {
+    render(<App />);
+
+    window.history.pushState(null, '', '#evidence');
+    act(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+
+    expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
   it('falls back safely from an unknown view hash', () => {
     window.history.replaceState(null, '', '#future-contract');
     render(<App />);
 
     expect(window.location.hash).toBe('#network');
     expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
+  });
+
+  it('renders the existing fail-closed fixture error instead of crashing source construction', () => {
+    const source = new StaticObservatorySource(() => {
+      throw new TypeError('fixture contract mismatch');
+    });
+
+    render(<App source={source} />);
+
+    expect(screen.getByText(/offline fixture error/i)).toBeInTheDocument();
+    expect(screen.getByText(/fixture contract mismatch/i)).toBeInTheDocument();
+    expect(screen.getByText(/no fallback values/i)).toBeInTheDocument();
+  });
+
+  it('accepts an injected read-only live source and reflects disconnect then reconnect state', () => {
+    const source = new InjectedLiveSource();
+    render(<App source={source} />);
+
+    expect(screen.getByText(/live · read only/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /disconnected · g7/i })).toBeDisabled();
+    expect(source.calls).toEqual(['subscribe', 'loadInitial']);
+
+    act(() => source.reconnect());
+
+    expect(screen.getByRole('button', { name: /current · g8/i })).toBeDisabled();
+  });
+
+  it('never renders a previous source bundle under a replacement source identity', async () => {
+    const staticSource = new StaticObservatorySource();
+    const bundle = staticSource.loadInitial().bundle;
+    let resolveInitial: ((state: ObservatorySourceState) => void) | undefined;
+    const loading = new Promise<ObservatorySourceState>((resolve) => {
+      resolveInitial = resolve;
+    });
+    const replacement: ObservatoryDataSource = {
+      kind: 'live',
+      getState: () => null,
+      loadInitial: () => loading,
+    };
+    const { rerender } = render(<App source={staticSource} />);
+    expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
+
+    rerender(<App source={replacement} />);
+
+    expect(
+      screen.getByRole('heading', { name: /loading coherent evidence snapshot/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/live · read only/i)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveInitial?.({ status: 'connected', generation: 12, bundle });
+      await loading;
+    });
+
+    expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /current · g12/i })).toBeDisabled();
   });
 });

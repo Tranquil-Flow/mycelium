@@ -22,6 +22,21 @@ npm run dev
 ```
 
 The default application runs entirely from bundled evidence. “Current” transport is visibly disabled.
+The bundle is loaded through `StaticObservatorySource`; its adapted snapshot, incidents, and provisioning evidence remain the existing UI contract.
+
+## Read-only data-source boundary
+
+`App` accepts an `ObservatoryDataSource`, while `createObservatorySource()` selects static mode by default and rejects unknown source kinds. `LiveObservatorySource` is an injectable transport shell only:
+
+- snapshot and optional event-stream URLs are required constructor/config inputs; no gateway path is assumed
+- initial acquisition uses one explicit `GET` with `cache: no-store`
+- optional updates use inbound-only server-sent events
+- gateway payload decoders are injected, so this UI does not predeclare a future backend schema; each decoder owns complete semantic validation against its published contract
+- each decoder must return one atomic Observatory bundle plus a non-negative generation
+- event subscription starts before snapshot acquisition, then generation ordering reconciles the two read-only streams without rollback
+- stale or duplicate generations are ignored, including malformed envelopes whose valid generation is already stale
+- disconnect preserves the last coherent bundle; reconnect becomes current only after a strictly newer generation arrives
+- the transport exposes no request-submission or control-message surface
 
 Primary views are directly addressable:
 

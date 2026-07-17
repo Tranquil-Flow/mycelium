@@ -1,4 +1,8 @@
 import type { ReactNode } from 'react';
+import type {
+  ObservatorySourceKind,
+  ObservatorySourceState,
+} from '../data/observatorySource';
 
 export type ObservatoryView = 'network' | 'plans' | 'incidents' | 'evidence';
 
@@ -6,6 +10,8 @@ interface AppShellProps {
   readonly activeView: ObservatoryView;
   readonly onViewChange: (view: ObservatoryView) => void;
   readonly scopeLabel: string;
+  readonly sourceKind: ObservatorySourceKind;
+  readonly sourceState: ObservatorySourceState | null;
   readonly children: ReactNode;
 }
 
@@ -53,7 +59,23 @@ function NavIcon({ name }: { readonly name: 'network' | 'plans' | 'incidents' | 
   );
 }
 
-export function AppShell({ activeView, onViewChange, scopeLabel, children }: AppShellProps) {
+export function AppShell({
+  activeView,
+  onViewChange,
+  scopeLabel,
+  sourceKind,
+  sourceState,
+  children,
+}: AppShellProps) {
+  const isStatic = sourceKind === 'static';
+  const currentLabel = isStatic
+    ? 'Current unavailable'
+    : sourceState === null
+      ? 'Connecting'
+      : sourceState.status === 'disconnected'
+        ? `Disconnected · g${sourceState.generation}`
+        : `Current · g${sourceState.generation}`;
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -72,9 +94,12 @@ export function AppShell({ activeView, onViewChange, scopeLabel, children }: App
           </div>
         </div>
 
-        <div className="fixture-badge" aria-label="Offline evidence mode">
+        <div
+          className="fixture-badge"
+          aria-label={isStatic ? 'Offline evidence mode' : 'Live read-only evidence mode'}
+        >
           <span className="fixture-dot" aria-hidden="true" />
-          SIMULATION · FIXTURE
+          {isStatic ? 'SIMULATION · FIXTURE' : 'LIVE · READ ONLY'}
         </div>
 
         <nav className="primary-nav" aria-label="Observatory sections">
@@ -101,8 +126,8 @@ export function AppShell({ activeView, onViewChange, scopeLabel, children }: App
           <div className="source-state">
             <span className="source-glyph" aria-hidden="true">◇</span>
             <div>
-              <strong>Local evidence bundle</strong>
-              <span>No network dependency</span>
+              <strong>{isStatic ? 'Local evidence bundle' : 'Gateway evidence source'}</strong>
+              <span>{isStatic ? 'No network dependency' : 'GET + inbound event stream only'}</span>
             </div>
           </div>
           <p>Read-only qualification surface</p>
@@ -115,11 +140,11 @@ export function AppShell({ activeView, onViewChange, scopeLabel, children }: App
             <span className="topbar-label">Scope</span>
             <strong>{scopeLabel}</strong>
             <span className="separator" aria-hidden="true">/</span>
-            <span>offline replay</span>
+            <span>{isStatic ? 'offline replay' : 'gateway projection'}</span>
           </div>
           <button type="button" className="current-control" disabled>
             <span className="status-ring" aria-hidden="true" />
-            Current unavailable
+            {currentLabel}
           </button>
         </header>
         <main className="main-content" id="main-content" tabIndex={-1}>
