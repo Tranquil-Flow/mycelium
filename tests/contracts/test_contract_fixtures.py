@@ -10,13 +10,20 @@ from pathlib import Path
 import pytest
 
 from layer_assignment import validate_assignment_identity
+from mycelium_gossip.evidence_bundle import evidence_bundle_from_dict
+from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_binding
 from mycelium_layer_planner.serialization import route_plan_from_dict
+from planner_assignment import validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
 import scripts.contract_audit as contract_audit
 import scripts.contract_io as contract_io
 from scripts.contract_audit import audit
 from scripts.contract_io import atomic_write_under_root, read_under_root
-from scripts.generate_contract_fixtures import assignments_and_reports, manual_route as generated_manual_route
+from scripts.generate_contract_fixtures import (
+    assignments_and_reports,
+    manual_route as generated_manual_route,
+    model_manifest as generated_model_manifest,
+)
 from scripts.generate_contract_manifest import encoded as encoded_manifest
 from weight_provisioning import artifact_report_errors, provisioning_audit_errors
 
@@ -31,6 +38,9 @@ EXPECTED_PROTOCOLS = {
     "provisioning-audit-v1.json": "mycelium.provisioning_audit.v1",
     "gossip-router-view-v1.json": "mycelium.gossip.router_view.v1",
     "gossip-allocator-view-v1.json": "mycelium.gossip.allocator_view.v1",
+    "gossip-evidence-bundle-v1.json": "mycelium.gossip.evidence_bundle.v1",
+    "layer-planner-snapshot-v1.json": "mycelium.layer_planner_snapshot.v1",
+    "control-plane-tranche-v1.json": "mycelium.control_plane_tranche.v1",
 }
 
 
@@ -78,7 +88,7 @@ def test_contract_audit_checks_manifest_hashes_and_protocol_ownership() -> None:
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
     payload = json.loads(completed.stdout)
-    assert payload == {"checked": 7, "drift": [], "ok": True}
+    assert payload == {"checked": len(EXPECTED_PROTOCOLS), "drift": [], "ok": True}
 
 
 def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(tmp_path: Path) -> None:
@@ -433,3 +443,13 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
             assert edge["dst_endpoint_id"] in {
                 endpoint["endpoint_id"] for endpoint in destination["endpoints"]
             }
+
+    evidence_bundle = load_fixture("gossip-evidence-bundle-v1.json")
+    evidence_bundle_from_dict(evidence_bundle)
+    planner_snapshot = load_fixture("layer-planner-snapshot-v1.json")
+    validate_planner_snapshot_binding(planner_snapshot, evidence_bundle)
+    tranche = load_fixture("control-plane-tranche-v1.json")
+    validate_control_plane_tranche(tranche, manifest=generated_model_manifest())
+    assert tranche["evidence_bundle"] == evidence_bundle
+    assert tranche["planner_snapshot"] == planner_snapshot
+    assert len(tranche["assignments"]) == 2

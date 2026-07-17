@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 import model_manifest as mm
 from layer_assignment import compile_layer_assignments
+from mycelium_gossip.evidence_bundle import build_evidence_bundle, evidence_bundle_to_dict
 from mycelium_gossip.registry import VersionedRecordStore
 from mycelium_gossip.schema import RecordKind, build_record
 from mycelium_gossip.service import PeerHealthState, PeerState
@@ -23,8 +24,13 @@ from mycelium_gossip.views import (
     build_router_view,
     router_view_to_dict,
 )
+from mycelium_layer_planner.gossip_adapter import (
+    plan_evidence_bundle,
+    planner_snapshot_from_evidence_bundle,
+)
 from mycelium_layer_planner.planner import plan_snapshot
 from mycelium_layer_planner.serialization import route_plan_to_dict
+from planner_assignment import compile_bound_layer_assignments, validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
 from weight_provisioning import artifact_report_errors, audit_provisioning
 
@@ -187,7 +193,7 @@ def provisioning_audit() -> dict[str, Any]:
     return audit
 
 
-def gossip_views() -> tuple[dict[str, Any], dict[str, Any]]:
+def gossip_documents() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     store = VersionedRecordStore("swarm-a", monotonic=lambda: 100.0)
 
     def add(kind: RecordKind, node_id: str, payload: dict[str, Any]) -> None:
@@ -254,6 +260,13 @@ def gossip_views() -> tuple[dict[str, Any], dict[str, Any]]:
                 "queue_depth": 0,
                 "in_flight": 0,
                 "concurrency_limit": 2,
+                "performance": {
+                    "prefill_ms_per_layer_token": 0.001,
+                    "decode_ms_per_layer_token": 0.001,
+                    "memory_bandwidth_Bps": 1_000_000_000,
+                    "spill_bandwidth_Bps": 1_000_000_000,
+                    "calibration_confidence": 1.0,
+                },
             },
         )
         add(
@@ -277,25 +290,29 @@ def gossip_views() -> tuple[dict[str, Any], dict[str, Any]]:
             },
         )
 
-    add(
-        RecordKind.LINK,
-        "node-a",
-        {
-            "protocol": "mycelium.link_state.v1",
-            "src_node_id": "node-a",
-            "dst_node_id": "node-b",
-            "src_endpoint_id": "http-overlay",
-            "dst_endpoint_id": "http-overlay",
-            "reachable": True,
-            "connect_rtt_ema_ms": 1.2,
-            "rtt_p95_ms": 1.8,
-            "jitter_ms": 0.1,
-            "loss_ratio": 0.0,
-            "goodput_mbps": 900.0,
-            "sample_count": 16,
-            "measurement_method": "active_probe",
-        },
-    )
+    for src_node_id, dst_node_id in (
+        ("node-a", "node-b"),
+        ("node-b", "node-a"),
+    ):
+        add(
+            RecordKind.LINK,
+            src_node_id,
+            {
+                "protocol": "mycelium.link_state.v1",
+                "src_node_id": src_node_id,
+                "dst_node_id": dst_node_id,
+                "src_endpoint_id": "http-overlay",
+                "dst_endpoint_id": "http-overlay",
+                "reachable": True,
+                "connect_rtt_ema_ms": 1.2,
+                "rtt_p95_ms": 1.8,
+                "jitter_ms": 0.1,
+                "loss_ratio": 0.0,
+                "goodput_mbps": 900.0,
+                "sample_count": 16,
+                "measurement_method": "active_probe",
+            },
+        )
 
     peer_states = tuple(
         PeerState(
@@ -311,12 +328,99 @@ def gossip_views() -> tuple[dict[str, Any], dict[str, Any]]:
     snapshot = store.snapshot()
     router = build_router_view(snapshot, peer_states, ())
     allocator = build_allocator_view(snapshot, peer_states, ())
-    return router_view_to_dict(router), allocator_view_to_dict(allocator)
+    manifest = model_manifest()
+    bundle = build_evidence_bundle(
+        snapshot=snapshot,
+        peer_states=peer_states,
+        quarantines=(),
+        deployment_id="12345678-1234-5678-1234-567812345678",
+        deployment_epoch=1,
+        model_id=manifest["model_id"],
+        num_layers=manifest["num_layers"],
+        manifest_digest=mm.manifest_digest_ref(manifest),
+        resolved_commit=manifest["resolved_commit"],
+    )
+    return (
+        router_view_to_dict(router),
+        allocator_view_to_dict(allocator),
+        evidence_bundle_to_dict(bundle),
+    )
+
+
+def control_plane_documents(
+    evidence_bundle: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    manifest = model_manifest()
+    model = {
+        "model_id": manifest["model_id"],
+        "revision": manifest["resolved_commit"],
+        "weight_digest": mm.manifest_digest_ref(manifest),
+        "architecture": "Decoder",
+        "num_layers": manifest["num_layers"],
+        "hidden_size": 128,
+        "dtype_bytes": 2,
+        "kv_heads": 2,
+        "head_dim": 32,
+        "weight_bytes": 50 * 1024**3,
+    }
+    workload = {
+        "preset": "interactive_chat_v1",
+        "concurrency_points": [1, 4],
+        "user_scale": 2,
+    }
+    policy = {
+        "memory_reserve_fraction": 0,
+        "replica_budget": 0,
+        "ttft_slo_ms": 1_000_000,
+        "tpot_slo_ms": 1_000_000,
+    }
+    snapshot = planner_snapshot_from_evidence_bundle(
+        evidence_bundle,
+        model=model,
+        workload=workload,
+        policy=policy,
+    )
+    product_route = route_plan_to_dict(
+        plan_evidence_bundle(
+            evidence_bundle,
+            model=model,
+            workload=workload,
+            policy=policy,
+        )
+    )
+    route_wire = json.loads(json.dumps(product_route))
+    nodes = [placement["node_id"] for placement in route_wire["placements"]]
+    assignments = compile_bound_layer_assignments(
+        route_plan=route_wire,
+        planner_snapshot=snapshot,
+        evidence_bundle=evidence_bundle,
+        manifest=manifest,
+        deployment_id=evidence_bundle["deployment"]["deployment_id"],
+        deployment_epoch=evidence_bundle["deployment"]["deployment_epoch"],
+        cache_roots={node: f"/var/lib/mycelium/{node}" for node in nodes},
+        runtime_by_node={
+            node: {"backend": "mlx", "dtype": "float16", "quantization": "none"}
+            for node in nodes
+        },
+    )
+    tranche = {
+        "protocol": "mycelium.control_plane_tranche.v1",
+        "evidence_bundle": evidence_bundle,
+        "planner_snapshot": snapshot,
+        "route_plan": route_wire,
+        "assignments": assignments,
+        "claim_boundary": (
+            "atomic control-plane compatibility evidence only; assigned runtime layers remain unloaded"
+        ),
+    }
+    validate_control_plane_tranche(tranche, manifest=manifest)
+    return snapshot, route_wire, tranche
 
 
 def documents() -> dict[str, dict[str, Any]]:
     assignments, reports = assignments_and_reports()
-    router, allocator = gossip_views()
+    router, allocator, evidence_bundle = gossip_documents()
+    planner_evidence_snapshot, _, control_plane_tranche = control_plane_documents(evidence_bundle)
     generated = {
         "route-plan-v2.json": route_plan_to_dict(plan_snapshot(planner_snapshot())),
         "manual-provisioning-route-v1.json": manual_route(),
@@ -325,6 +429,9 @@ def documents() -> dict[str, dict[str, Any]]:
         "provisioning-audit-v1.json": provisioning_audit(),
         "gossip-router-view-v1.json": router,
         "gossip-allocator-view-v1.json": allocator,
+        "gossip-evidence-bundle-v1.json": evidence_bundle,
+        "layer-planner-snapshot-v1.json": planner_evidence_snapshot,
+        "control-plane-tranche-v1.json": control_plane_tranche,
     }
     if set(generated) != EXPECTED_FIXTURE_NAMES:
         raise ValueError("generated fixture set differs from authoritative contract registry")

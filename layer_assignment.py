@@ -35,7 +35,6 @@ _ASSIGNMENT_ID_FIELDS = (
    "files",
    "artifact_cache_root",
    "runtime",
-   "control_plane_binding",
 )
 
 
@@ -45,6 +44,9 @@ def assignment_id_for(assignment: dict[str, Any]) -> str:
       identity = {field: assignment[field] for field in _ASSIGNMENT_ID_FIELDS}
    except KeyError as exc:
       raise ValueError(f"assignment identity missing field: {exc.args[0]}") from exc
+   control_plane_binding = assignment.get("control_plane_binding")
+   if control_plane_binding is not None:
+      identity["control_plane_binding"] = control_plane_binding
    try:
       namespace = uuid.UUID(str(identity["deployment_id"]))
    except (TypeError, ValueError) as exc:
@@ -202,8 +204,9 @@ def compile_layer_assignments(
          "files": files,
          "artifact_cache_root": cache_root,
          "runtime": dict(runtime),
-         "control_plane_binding": copy.deepcopy(control_plane_binding),
       }
+      if control_plane_binding is not None:
+         semantic_identity["control_plane_binding"] = copy.deepcopy(control_plane_binding)
       assignment_id = assignment_id_for(semantic_identity)
       assignment = {
          "assignment_id": assignment_id,

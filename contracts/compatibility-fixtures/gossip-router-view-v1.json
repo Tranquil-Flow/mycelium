@@ -20,9 +20,30 @@
         "payload_hash": "sha256:81d7549041bc2d5aa9d9380f7c614d0b7a3759871ba4794482c3c97baa1c32ae",
         "sequence": 1
       }
+    },
+    {
+      "connect_rtt_ema_ms": 1.2,
+      "dst_endpoint_id": "http-overlay",
+      "dst_node_id": "node-a",
+      "eligible": true,
+      "exclusion_reasons": [],
+      "goodput_mbps": 900.0,
+      "jitter_ms": 0.1,
+      "loss_ratio": 0.0,
+      "measurement_method": "active_probe",
+      "reachable": true,
+      "rtt_p95_ms": 1.8,
+      "sample_count": 16,
+      "src_endpoint_id": "http-overlay",
+      "src_node_id": "node-b",
+      "version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:a8bd4171ee574542b3b967adaa965a35f3b3d3d402b34adb30aacf1a861d1a99",
+        "sequence": 1
+      }
     }
   ],
-  "eligibility_generation": "df5c0a7230d72176f2903cc961a7276772a34890e878bf9f3c179ded9cb76f53",
+  "eligibility_generation": "0e1e26785a180056b7b31f013bfe6ce27af4e1c9109ad76de5ff9c98f9e428b8",
   "nodes": [
     {
       "boot_id": "boot-node-a-1",
@@ -72,7 +93,7 @@
       "queue_depth": 0,
       "status_version": {
         "incarnation": 1,
-        "payload_hash": "sha256:2aa8c668d3de0bad5932539a371437c338ec7fe84055aac8ea845146a2005272",
+        "payload_hash": "sha256:0e3869dc687a4cf82df7ae89609e304f75807fc1ff1ecd143d1955585b3f9b78",
         "sequence": 1
       }
     },
@@ -124,11 +145,11 @@
       "queue_depth": 0,
       "status_version": {
         "incarnation": 1,
-        "payload_hash": "sha256:baafe1a5e0e5d08257a144862df6f873d37f18ccf9b97e3da3eea7e0ee183188",
+        "payload_hash": "sha256:6e74198056d3cdd1376f863d001a89b34ec9d70831acf5b4a1601fadf28a5bda",
         "sequence": 1
       }
     }
   ],
   "protocol": "mycelium.gossip.router_view.v1",
-  "snapshot_generation": 7
+  "snapshot_generation": 8
 }

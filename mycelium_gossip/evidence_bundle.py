@@ -55,7 +55,7 @@ class EvidenceBundle:
     evidence_bundle_digest: str
 
 
-def _canonical_bytes(document: Mapping[str, Any]) -> bytes:
+def _canonical_bytes(document: Any) -> bytes:
     try:
         return json.dumps(
             document,
@@ -66,6 +66,11 @@ def _canonical_bytes(document: Mapping[str, Any]) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise EvidenceBundleError("evidence bundle must be canonical JSON") from exc
+
+
+def _json_value(value: Any) -> Any:
+    """Normalize tuples and string enums to their actual JSON wire representation."""
+    return json.loads(_canonical_bytes(value))
 
 
 def evidence_bundle_digest(document: Mapping[str, Any]) -> str:
@@ -231,7 +236,7 @@ def _snapshot_from_wire(swarm_id: str, generation: int, values: Any) -> tuple[Re
 
 
 def evidence_bundle_to_dict(bundle: EvidenceBundle) -> dict[str, Any]:
-    return copy.deepcopy({
+    return _json_value({
         "protocol": bundle.protocol,
         "swarm_id": bundle.swarm_id,
         "deployment": dict(bundle.deployment),
@@ -277,8 +282,8 @@ def evidence_bundle_from_dict(document: Mapping[str, Any]) -> EvidenceBundle:
     if list(quarantine_wire) != quarantines_raw or len({entry.key for entry in quarantines}) != len(quarantines):
         raise EvidenceBundleError("quarantines must be unique and sorted")
 
-    expected_router = router_view_to_dict(build_router_view(snapshot, peers, quarantines))
-    expected_allocator = allocator_view_to_dict(build_allocator_view(snapshot, peers, quarantines))
+    expected_router = _json_value(router_view_to_dict(build_router_view(snapshot, peers, quarantines)))
+    expected_allocator = _json_value(allocator_view_to_dict(build_allocator_view(snapshot, peers, quarantines)))
     if document.get("router_view") != expected_router:
         raise EvidenceBundleError("router_view is not derived from bound evidence")
     if document.get("allocator_view") != expected_allocator:
@@ -335,8 +340,12 @@ def build_evidence_bundle(
         "records": [entry.record.to_dict() for entry in snapshot.records],
         "peer_states": [_peer_to_dict(peer) for peer in peers],
         "quarantines": [_quarantine_to_dict(entry) for entry in quarantine_items],
-        "router_view": router_view_to_dict(build_router_view(snapshot, peers, quarantine_items)),
-        "allocator_view": allocator_view_to_dict(build_allocator_view(snapshot, peers, quarantine_items)),
+        "router_view": _json_value(
+            router_view_to_dict(build_router_view(snapshot, peers, quarantine_items))
+        ),
+        "allocator_view": _json_value(
+            allocator_view_to_dict(build_allocator_view(snapshot, peers, quarantine_items))
+        ),
     }
     document["evidence_bundle_digest"] = evidence_bundle_digest(document)
     return evidence_bundle_from_dict(document)

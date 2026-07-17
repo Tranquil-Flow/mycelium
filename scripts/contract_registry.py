@@ -51,6 +51,37 @@ CONTRACT_SPECS = (
         "mycelium.gossip.allocator_view.v1",
         ("mycelium_gossip/views.py",),
     ),
+    ContractSpec(
+        "gossip-evidence-bundle-v1.json",
+        "mycelium.gossip.evidence_bundle.v1",
+        (
+            "mycelium_gossip/evidence_bundle.py",
+            "mycelium_gossip/service.py",
+            "mycelium_gossip/views.py",
+            "mycelium_gossip/registry.py",
+            "mycelium_gossip/schema.py",
+            "mycelium_gossip/state.py",
+        ),
+    ),
+    ContractSpec(
+        "layer-planner-snapshot-v1.json",
+        "mycelium.layer_planner_snapshot.v1",
+        (
+            "mycelium_layer_planner/gossip_adapter.py",
+            "mycelium_layer_planner/planner.py",
+            "mycelium_layer_planner/contracts.py",
+        ),
+    ),
+    ContractSpec(
+        "control-plane-tranche-v1.json",
+        "mycelium.control_plane_tranche.v1",
+        (
+            "planner_assignment.py",
+            "layer_assignment.py",
+            "mycelium_gossip/evidence_bundle.py",
+            "mycelium_layer_planner/gossip_adapter.py",
+        ),
+    ),
 )
 
 SPECS_BY_FIXTURE = {spec.fixture_name: spec for spec in CONTRACT_SPECS}

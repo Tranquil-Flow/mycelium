@@ -2,7 +2,7 @@
 """Bind product Planner placement intent to executable provisioning assignments."""
 from __future__ import annotations
 
-import copy
+import json
 from typing import Any, Mapping
 
 import model_manifest as mm
@@ -18,9 +18,9 @@ CONTROL_PLANE_BINDING_PROTOCOL = "mycelium.control_plane_binding.v1"
 
 def _route_wire(value: Mapping[str, Any] | RoutePlanV2) -> dict[str, Any]:
     if isinstance(value, RoutePlanV2):
-        return route_plan_to_dict(value)
+        return json.loads(json.dumps(route_plan_to_dict(value)))
     if isinstance(value, Mapping):
-        return copy.deepcopy(dict(value))
+        return json.loads(json.dumps(dict(value)))
     raise ValueError("route_plan must be a RoutePlanV2 or mapping")
 
 
@@ -226,3 +226,58 @@ def compile_bound_layer_assignments(
             raise ValueError("assignment lost control-plane lineage")
         validate_assignment_identity(assignment)
     return assignments
+
+
+def validate_control_plane_tranche(
+    document: Mapping[str, Any], *, manifest: dict[str, Any]
+) -> None:
+    """Validate one immutable evidence → plan → assignment compatibility tranche."""
+    if document.get("protocol") != "mycelium.control_plane_tranche.v1":
+        raise ValueError("control-plane tranche protocol mismatch")
+    evidence_bundle = document.get("evidence_bundle")
+    planner_snapshot = document.get("planner_snapshot")
+    route_plan = document.get("route_plan")
+    assignments = document.get("assignments")
+    if not isinstance(evidence_bundle, Mapping):
+        raise ValueError("control-plane tranche evidence_bundle is required")
+    if not isinstance(planner_snapshot, Mapping):
+        raise ValueError("control-plane tranche planner_snapshot is required")
+    if not isinstance(route_plan, Mapping):
+        raise ValueError("control-plane tranche route_plan is required")
+    if not isinstance(assignments, list) or not assignments:
+        raise ValueError("control-plane tranche assignments must be non-empty")
+    if any(not isinstance(item, Mapping) for item in assignments):
+        raise ValueError("control-plane tranche assignments must be objects")
+
+    first = assignments[0]
+    deployment_id = first.get("deployment_id")
+    deployment_epoch = first.get("deployment_epoch")
+    cache_roots: dict[str, str] = {}
+    runtime_by_node: dict[str, dict[str, Any]] = {}
+    for assignment in assignments:
+        if assignment.get("deployment_id") != deployment_id:
+            raise ValueError("control-plane tranche mixes assignment deployment IDs")
+        if assignment.get("deployment_epoch") != deployment_epoch:
+            raise ValueError("control-plane tranche mixes assignment deployment epochs")
+        node_id = assignment.get("node_id")
+        if not isinstance(node_id, str) or not node_id or node_id in cache_roots:
+            raise ValueError("control-plane tranche assignment node IDs must be unique")
+        cache_root = assignment.get("artifact_cache_root")
+        runtime = assignment.get("runtime")
+        if not isinstance(cache_root, str) or not isinstance(runtime, Mapping):
+            raise ValueError("control-plane tranche assignment target identity is invalid")
+        cache_roots[node_id] = cache_root
+        runtime_by_node[node_id] = dict(runtime)
+
+    expected = compile_bound_layer_assignments(
+        route_plan=route_plan,
+        planner_snapshot=planner_snapshot,
+        evidence_bundle=evidence_bundle,
+        manifest=manifest,
+        deployment_id=deployment_id,
+        deployment_epoch=deployment_epoch,
+        cache_roots=cache_roots,
+        runtime_by_node=runtime_by_node,
+    )
+    if json.loads(json.dumps(assignments)) != expected:
+        raise ValueError("control-plane tranche assignments do not match bound compiler output")

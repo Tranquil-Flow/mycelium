@@ -1,0 +1,80 @@
+{
+  "deployment": {
+    "deployment_epoch": 1,
+    "deployment_id": "12345678-1234-5678-1234-567812345678"
+  },
+  "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+  "links": [
+    {
+      "bandwidth_Bps": 112500000.0,
+      "dst": "node-b",
+      "inferred": false,
+      "jitter_ms": 0.1,
+      "loss_ratio": 0.0,
+      "rtt_ms": 1.8,
+      "src": "node-a",
+      "stale": false
+    },
+    {
+      "bandwidth_Bps": 112500000.0,
+      "dst": "node-a",
+      "inferred": false,
+      "jitter_ms": 0.1,
+      "loss_ratio": 0.0,
+      "rtt_ms": 1.8,
+      "src": "node-b",
+      "stale": false
+    }
+  ],
+  "model": {
+    "architecture": "Decoder",
+    "dtype_bytes": 2,
+    "head_dim": 32,
+    "hidden_size": 128,
+    "kv_heads": 2,
+    "model_id": "org/model",
+    "num_layers": 4,
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "weight_bytes": 53687091200,
+    "weight_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356"
+  },
+  "nodes": [
+    {
+      "calibration_confidence": 1.0,
+      "decode_ms_per_layer_token": 0.001,
+      "fast_memory_bytes": 34359738368,
+      "memory_bandwidth_Bps": 1000000000.0,
+      "node_id": "node-a",
+      "prefill_ms_per_layer_token": 0.001,
+      "spill_bandwidth_Bps": 1000000000.0,
+      "total_memory_bytes": 34359738368
+    },
+    {
+      "calibration_confidence": 1.0,
+      "decode_ms_per_layer_token": 0.001,
+      "fast_memory_bytes": 34359738368,
+      "memory_bandwidth_Bps": 1000000000.0,
+      "node_id": "node-b",
+      "prefill_ms_per_layer_token": 0.001,
+      "spill_bandwidth_Bps": 1000000000.0,
+      "total_memory_bytes": 34359738368
+    }
+  ],
+  "policy": {
+    "memory_reserve_fraction": 0,
+    "replica_budget": 0,
+    "tpot_slo_ms": 1000000,
+    "ttft_slo_ms": 1000000
+  },
+  "protocol": "mycelium.layer_planner_snapshot.v1",
+  "snapshot_generation": 8,
+  "swarm_id": "swarm-a",
+  "workload": {
+    "concurrency_points": [
+      1,
+      4
+    ],
+    "preset": "interactive_chat_v1",
+    "user_scale": 2
+  }
+}

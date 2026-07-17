@@ -1,0 +1,894 @@
+{
+  "assignments": [
+    {
+      "artifact_cache_root": "/var/lib/mycelium/node-a",
+      "assignment_id": "a4fb1b6c-35ea-5af3-ba91-e0270e14f2c8",
+      "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+      "component_aliases": {},
+      "component_tensor_keys": {
+        "decoder": [
+          "transformer.h.0.attn.weight",
+          "transformer.h.1.attn.weight"
+        ],
+        "input_embedding": [
+          "transformer.wpe.weight",
+          "transformer.wte.weight"
+        ]
+      },
+      "components": [
+        "input_embedding",
+        "decoder"
+      ],
+      "control_plane_binding": {
+        "deployment_epoch": 1,
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+        "planner_snapshot_digest": "sha256:5e36a60895aee5257585f9950e92454faa483fcceacf06cb44f3e49e9a93e8a6",
+        "protocol": "mycelium.control_plane_binding.v1",
+        "snapshot_generation": 8,
+        "swarm_id": "swarm-a"
+      },
+      "deployment_epoch": 1,
+      "deployment_id": "12345678-1234-5678-1234-567812345678",
+      "expected_tensor_keys": [
+        "transformer.h.0.attn.weight",
+        "transformer.h.1.attn.weight",
+        "transformer.wpe.weight",
+        "transformer.wte.weight"
+      ],
+      "expected_tensor_prefixes": [
+        "transformer.h.0.",
+        "transformer.h.1."
+      ],
+      "files": [
+        {
+          "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "path": "shard-1.safetensors",
+          "size_bytes": 10
+        },
+        {
+          "content_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "path": "shard-2.safetensors",
+          "size_bytes": 20
+        }
+      ],
+      "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+      "model_id": "org/model",
+      "node_id": "node-a",
+      "protocol": "mycelium.layer_assignment.v2",
+      "range": {
+        "end_layer_exclusive": 2,
+        "layer_count": 2,
+        "start_layer": 0
+      },
+      "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "route_ready": false,
+      "runtime": {
+        "backend": "mlx",
+        "dtype": "float16",
+        "quantization": "none"
+      }
+    },
+    {
+      "artifact_cache_root": "/var/lib/mycelium/node-b",
+      "assignment_id": "30d9f10c-fb4d-5571-9f46-611adba2ab1d",
+      "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+      "component_aliases": {},
+      "component_tensor_keys": {
+        "decoder": [
+          "transformer.h.2.attn.weight",
+          "transformer.h.3.attn.weight"
+        ],
+        "final_norm": [
+          "transformer.ln_f.weight"
+        ],
+        "lm_head": [
+          "lm_head.weight"
+        ]
+      },
+      "components": [
+        "decoder",
+        "final_norm",
+        "lm_head"
+      ],
+      "control_plane_binding": {
+        "deployment_epoch": 1,
+        "deployment_id": "12345678-1234-5678-1234-567812345678",
+        "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+        "planner_snapshot_digest": "sha256:5e36a60895aee5257585f9950e92454faa483fcceacf06cb44f3e49e9a93e8a6",
+        "protocol": "mycelium.control_plane_binding.v1",
+        "snapshot_generation": 8,
+        "swarm_id": "swarm-a"
+      },
+      "deployment_epoch": 1,
+      "deployment_id": "12345678-1234-5678-1234-567812345678",
+      "expected_tensor_keys": [
+        "lm_head.weight",
+        "transformer.h.2.attn.weight",
+        "transformer.h.3.attn.weight",
+        "transformer.ln_f.weight"
+      ],
+      "expected_tensor_prefixes": [
+        "transformer.h.2.",
+        "transformer.h.3."
+      ],
+      "files": [
+        {
+          "content_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+          "path": "shard-3.safetensors",
+          "size_bytes": 30
+        }
+      ],
+      "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+      "model_id": "org/model",
+      "node_id": "node-b",
+      "protocol": "mycelium.layer_assignment.v2",
+      "range": {
+        "end_layer_exclusive": 4,
+        "layer_count": 2,
+        "start_layer": 2
+      },
+      "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "route_ready": false,
+      "runtime": {
+        "backend": "mlx",
+        "dtype": "float16",
+        "quantization": "none"
+      }
+    }
+  ],
+  "claim_boundary": "atomic control-plane compatibility evidence only; assigned runtime layers remain unloaded",
+  "evidence_bundle": {
+    "allocator_view": {
+      "eligibility_generation": "085c9987e9fa1999d57073ffcac2aceb0c1e3f8ae229704f62a0c06c7e246627",
+      "nodes": [
+        {
+          "boot_id": "boot-node-a-1",
+          "concurrency_limit": 2,
+          "eligible": true,
+          "exclusion_reasons": [],
+          "in_flight": 0,
+          "incarnation": 1,
+          "memory_domains": [
+            {
+              "allocatable_after_reservations_bytes": 34359738368,
+              "committed_bytes": 8589934592,
+              "kind": "unified",
+              "memory_domain_id": "unified-0",
+              "reclaimable_bytes": 2147483648,
+              "reservation_generation": 1,
+              "total_bytes": 51539607552
+            }
+          ],
+          "node_id": "node-a",
+          "peer_state": "alive",
+          "profile_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:b97d42fd68eb9d207f2e2e8a7df70b4feeadd11be19391c7ab4ca8731aac8245",
+            "sequence": 1
+          },
+          "queue_depth": 0,
+          "status_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:0e3869dc687a4cf82df7ae89609e304f75807fc1ff1ecd143d1955585b3f9b78",
+            "sequence": 1
+          },
+          "total_allocatable_bytes": 34359738368
+        },
+        {
+          "boot_id": "boot-node-b-1",
+          "concurrency_limit": 2,
+          "eligible": true,
+          "exclusion_reasons": [],
+          "in_flight": 0,
+          "incarnation": 1,
+          "memory_domains": [
+            {
+              "allocatable_after_reservations_bytes": 34359738368,
+              "committed_bytes": 8589934592,
+              "kind": "unified",
+              "memory_domain_id": "unified-0",
+              "reclaimable_bytes": 2147483648,
+              "reservation_generation": 1,
+              "total_bytes": 51539607552
+            }
+          ],
+          "node_id": "node-b",
+          "peer_state": "alive",
+          "profile_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:1012c0ac1ff072b28eb7fbe06406e7f81f9b4e740ab9a423ce70c26b0e9b7ae5",
+            "sequence": 1
+          },
+          "queue_depth": 0,
+          "status_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:6e74198056d3cdd1376f863d001a89b34ec9d70831acf5b4a1601fadf28a5bda",
+            "sequence": 1
+          },
+          "total_allocatable_bytes": 34359738368
+        }
+      ],
+      "protocol": "mycelium.gossip.allocator_view.v1",
+      "snapshot_generation": 8
+    },
+    "deployment": {
+      "deployment_epoch": 1,
+      "deployment_id": "12345678-1234-5678-1234-567812345678"
+    },
+    "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+    "model": {
+      "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+      "model_id": "org/model",
+      "num_layers": 4,
+      "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "peer_states": [
+      {
+        "boot_id": "boot-node-a-1",
+        "incarnation": 1,
+        "liveness_present": true,
+        "node_id": "node-a",
+        "state": "alive"
+      },
+      {
+        "boot_id": "boot-node-b-1",
+        "incarnation": 1,
+        "liveness_present": true,
+        "node_id": "node-b",
+        "state": "alive"
+      }
+    ],
+    "protocol": "mycelium.gossip.evidence_bundle.v1",
+    "quarantines": [],
+    "records": [
+      {
+        "boot_id": "boot-node-a-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "link",
+        "origin_node_id": "node-a",
+        "payload": {
+          "connect_rtt_ema_ms": 1.2,
+          "dst_endpoint_id": "http-overlay",
+          "dst_node_id": "node-b",
+          "goodput_mbps": 900.0,
+          "jitter_ms": 0.1,
+          "loss_ratio": 0.0,
+          "measurement_method": "active_probe",
+          "protocol": "mycelium.link_state.v1",
+          "reachable": true,
+          "rtt_p95_ms": 1.8,
+          "sample_count": 16,
+          "src_endpoint_id": "http-overlay",
+          "src_node_id": "node-a"
+        },
+        "payload_hash": "sha256:81d7549041bc2d5aa9d9380f7c614d0b7a3759871ba4794482c3c97baa1c32ae",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-a-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "offering",
+        "origin_node_id": "node-a",
+        "payload": {
+          "assignment_id": "assignment-node-a",
+          "deployment_epoch": 1,
+          "deployment_id": "deploy-1",
+          "end_layer_exclusive": 2,
+          "inference_endpoint_id": "http-overlay",
+          "load_generation": 1,
+          "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "model_id": "model-a",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "protocol": "mycelium.runtime_offering.v1",
+          "readiness_state": "loaded_and_probed",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "runtime_instance_id": "runtime-node-a-1",
+          "start_layer": 0
+        },
+        "payload_hash": "sha256:e7d71cc9b14567117ddb62b7fa9e709aadc48bf387aef1ef609c7a78cc30db49",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-a-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "profile",
+        "origin_node_id": "node-a",
+        "payload": {
+          "architecture": "arm64",
+          "endpoints": [
+            {
+              "endpoint_id": "http-overlay",
+              "host": "100.64.0.1",
+              "inbound": true,
+              "port": 9000,
+              "scope": "overlay",
+              "transport": "http"
+            }
+          ],
+          "memory_domains": [
+            {
+              "kind": "unified",
+              "memory_domain_id": "unified-0",
+              "total_bytes": 51539607552
+            }
+          ],
+          "node_id": "node-a",
+          "platform": "darwin",
+          "policy": {
+            "available_for_swarm": true
+          },
+          "protocol": "mycelium.device_profile.v2",
+          "protocol_versions": [
+            "mycelium.gossip.record.v1"
+          ],
+          "software_version": "0.1.0"
+        },
+        "payload_hash": "sha256:b97d42fd68eb9d207f2e2e8a7df70b4feeadd11be19391c7ab4ca8731aac8245",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-a-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "status",
+        "origin_node_id": "node-a",
+        "payload": {
+          "concurrency_limit": 2,
+          "in_flight": 0,
+          "lifecycle": "ready",
+          "memory_domains": [
+            {
+              "allocatable_after_reservations_bytes": 34359738368,
+              "committed_bytes": 8589934592,
+              "kind": "unified",
+              "memory_domain_id": "unified-0",
+              "reclaimable_bytes": 2147483648,
+              "reservation_generation": 1,
+              "total_bytes": 51539607552
+            }
+          ],
+          "node_id": "node-a",
+          "performance": {
+            "calibration_confidence": 1.0,
+            "decode_ms_per_layer_token": 0.001,
+            "memory_bandwidth_Bps": 1000000000,
+            "prefill_ms_per_layer_token": 0.001,
+            "spill_bandwidth_Bps": 1000000000
+          },
+          "protocol": "mycelium.device_status.v1",
+          "queue_depth": 0
+        },
+        "payload_hash": "sha256:0e3869dc687a4cf82df7ae89609e304f75807fc1ff1ecd143d1955585b3f9b78",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-b-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "link",
+        "origin_node_id": "node-b",
+        "payload": {
+          "connect_rtt_ema_ms": 1.2,
+          "dst_endpoint_id": "http-overlay",
+          "dst_node_id": "node-a",
+          "goodput_mbps": 900.0,
+          "jitter_ms": 0.1,
+          "loss_ratio": 0.0,
+          "measurement_method": "active_probe",
+          "protocol": "mycelium.link_state.v1",
+          "reachable": true,
+          "rtt_p95_ms": 1.8,
+          "sample_count": 16,
+          "src_endpoint_id": "http-overlay",
+          "src_node_id": "node-b"
+        },
+        "payload_hash": "sha256:a8bd4171ee574542b3b967adaa965a35f3b3d3d402b34adb30aacf1a861d1a99",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-b-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "offering",
+        "origin_node_id": "node-b",
+        "payload": {
+          "assignment_id": "assignment-node-b",
+          "deployment_epoch": 1,
+          "deployment_id": "deploy-1",
+          "end_layer_exclusive": 4,
+          "inference_endpoint_id": "http-overlay",
+          "load_generation": 1,
+          "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "model_id": "model-a",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "protocol": "mycelium.runtime_offering.v1",
+          "readiness_state": "loaded_and_probed",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "runtime_instance_id": "runtime-node-b-1",
+          "start_layer": 2
+        },
+        "payload_hash": "sha256:2a7096b2ab72c6e95dfe77d4883917abb33923701e907fa2eb1676e39f9cd2dc",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-b-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "profile",
+        "origin_node_id": "node-b",
+        "payload": {
+          "architecture": "arm64",
+          "endpoints": [
+            {
+              "endpoint_id": "http-overlay",
+              "host": "100.64.0.2",
+              "inbound": true,
+              "port": 9000,
+              "scope": "overlay",
+              "transport": "http"
+            }
+          ],
+          "memory_domains": [
+            {
+              "kind": "unified",
+              "memory_domain_id": "unified-0",
+              "total_bytes": 51539607552
+            }
+          ],
+          "node_id": "node-b",
+          "platform": "darwin",
+          "policy": {
+            "available_for_swarm": true
+          },
+          "protocol": "mycelium.device_profile.v2",
+          "protocol_versions": [
+            "mycelium.gossip.record.v1"
+          ],
+          "software_version": "0.1.0"
+        },
+        "payload_hash": "sha256:1012c0ac1ff072b28eb7fbe06406e7f81f9b4e740ab9a423ce70c26b0e9b7ae5",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      },
+      {
+        "boot_id": "boot-node-b-1",
+        "generated_at_unix_ms": 100,
+        "incarnation": 1,
+        "kind": "status",
+        "origin_node_id": "node-b",
+        "payload": {
+          "concurrency_limit": 2,
+          "in_flight": 0,
+          "lifecycle": "ready",
+          "memory_domains": [
+            {
+              "allocatable_after_reservations_bytes": 34359738368,
+              "committed_bytes": 8589934592,
+              "kind": "unified",
+              "memory_domain_id": "unified-0",
+              "reclaimable_bytes": 2147483648,
+              "reservation_generation": 1,
+              "total_bytes": 51539607552
+            }
+          ],
+          "node_id": "node-b",
+          "performance": {
+            "calibration_confidence": 1.0,
+            "decode_ms_per_layer_token": 0.001,
+            "memory_bandwidth_Bps": 1000000000,
+            "prefill_ms_per_layer_token": 0.001,
+            "spill_bandwidth_Bps": 1000000000
+          },
+          "protocol": "mycelium.device_status.v1",
+          "queue_depth": 0
+        },
+        "payload_hash": "sha256:6e74198056d3cdd1376f863d001a89b34ec9d70831acf5b4a1601fadf28a5bda",
+        "protocol": "mycelium.gossip.record.v1",
+        "sequence": 1,
+        "swarm_id": "swarm-a",
+        "ttl_ms": 10000
+      }
+    ],
+    "router_view": {
+      "edges": [
+        {
+          "connect_rtt_ema_ms": 1.2,
+          "dst_endpoint_id": "http-overlay",
+          "dst_node_id": "node-b",
+          "eligible": true,
+          "exclusion_reasons": [],
+          "goodput_mbps": 900.0,
+          "jitter_ms": 0.1,
+          "loss_ratio": 0.0,
+          "measurement_method": "active_probe",
+          "reachable": true,
+          "rtt_p95_ms": 1.8,
+          "sample_count": 16,
+          "src_endpoint_id": "http-overlay",
+          "src_node_id": "node-a",
+          "version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:81d7549041bc2d5aa9d9380f7c614d0b7a3759871ba4794482c3c97baa1c32ae",
+            "sequence": 1
+          }
+        },
+        {
+          "connect_rtt_ema_ms": 1.2,
+          "dst_endpoint_id": "http-overlay",
+          "dst_node_id": "node-a",
+          "eligible": true,
+          "exclusion_reasons": [],
+          "goodput_mbps": 900.0,
+          "jitter_ms": 0.1,
+          "loss_ratio": 0.0,
+          "measurement_method": "active_probe",
+          "reachable": true,
+          "rtt_p95_ms": 1.8,
+          "sample_count": 16,
+          "src_endpoint_id": "http-overlay",
+          "src_node_id": "node-b",
+          "version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:a8bd4171ee574542b3b967adaa965a35f3b3d3d402b34adb30aacf1a861d1a99",
+            "sequence": 1
+          }
+        }
+      ],
+      "eligibility_generation": "0e1e26785a180056b7b31f013bfe6ce27af4e1c9109ad76de5ff9c98f9e428b8",
+      "nodes": [
+        {
+          "boot_id": "boot-node-a-1",
+          "concurrency_limit": 2,
+          "eligible": true,
+          "endpoints": [
+            {
+              "endpoint_id": "http-overlay",
+              "host": "100.64.0.1",
+              "inbound": true,
+              "port": 9000,
+              "scope": "overlay",
+              "transport": "http"
+            }
+          ],
+          "exclusion_reasons": [],
+          "in_flight": 0,
+          "incarnation": 1,
+          "node_id": "node-a",
+          "offerings": [
+            {
+              "assignment_id": "assignment-node-a",
+              "deployment_epoch": 1,
+              "deployment_id": "deploy-1",
+              "end_layer_exclusive": 2,
+              "inference_endpoint_id": "http-overlay",
+              "load_generation": 1,
+              "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "model_id": "model-a",
+              "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "runtime_instance_id": "runtime-node-a-1",
+              "start_layer": 0,
+              "version": {
+                "incarnation": 1,
+                "payload_hash": "sha256:e7d71cc9b14567117ddb62b7fa9e709aadc48bf387aef1ef609c7a78cc30db49",
+                "sequence": 1
+              }
+            }
+          ],
+          "peer_state": "alive",
+          "profile_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:b97d42fd68eb9d207f2e2e8a7df70b4feeadd11be19391c7ab4ca8731aac8245",
+            "sequence": 1
+          },
+          "queue_depth": 0,
+          "status_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:0e3869dc687a4cf82df7ae89609e304f75807fc1ff1ecd143d1955585b3f9b78",
+            "sequence": 1
+          }
+        },
+        {
+          "boot_id": "boot-node-b-1",
+          "concurrency_limit": 2,
+          "eligible": true,
+          "endpoints": [
+            {
+              "endpoint_id": "http-overlay",
+              "host": "100.64.0.2",
+              "inbound": true,
+              "port": 9000,
+              "scope": "overlay",
+              "transport": "http"
+            }
+          ],
+          "exclusion_reasons": [],
+          "in_flight": 0,
+          "incarnation": 1,
+          "node_id": "node-b",
+          "offerings": [
+            {
+              "assignment_id": "assignment-node-b",
+              "deployment_epoch": 1,
+              "deployment_id": "deploy-1",
+              "end_layer_exclusive": 4,
+              "inference_endpoint_id": "http-overlay",
+              "load_generation": 1,
+              "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "model_id": "model-a",
+              "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "runtime_instance_id": "runtime-node-b-1",
+              "start_layer": 2,
+              "version": {
+                "incarnation": 1,
+                "payload_hash": "sha256:2a7096b2ab72c6e95dfe77d4883917abb33923701e907fa2eb1676e39f9cd2dc",
+                "sequence": 1
+              }
+            }
+          ],
+          "peer_state": "alive",
+          "profile_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:1012c0ac1ff072b28eb7fbe06406e7f81f9b4e740ab9a423ce70c26b0e9b7ae5",
+            "sequence": 1
+          },
+          "queue_depth": 0,
+          "status_version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:6e74198056d3cdd1376f863d001a89b34ec9d70831acf5b4a1601fadf28a5bda",
+            "sequence": 1
+          }
+        }
+      ],
+      "protocol": "mycelium.gossip.router_view.v1",
+      "snapshot_generation": 8
+    },
+    "snapshot_generation": 8,
+    "swarm_id": "swarm-a"
+  },
+  "planner_snapshot": {
+    "deployment": {
+      "deployment_epoch": 1,
+      "deployment_id": "12345678-1234-5678-1234-567812345678"
+    },
+    "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+    "links": [
+      {
+        "bandwidth_Bps": 112500000.0,
+        "dst": "node-b",
+        "inferred": false,
+        "jitter_ms": 0.1,
+        "loss_ratio": 0.0,
+        "rtt_ms": 1.8,
+        "src": "node-a",
+        "stale": false
+      },
+      {
+        "bandwidth_Bps": 112500000.0,
+        "dst": "node-a",
+        "inferred": false,
+        "jitter_ms": 0.1,
+        "loss_ratio": 0.0,
+        "rtt_ms": 1.8,
+        "src": "node-b",
+        "stale": false
+      }
+    ],
+    "model": {
+      "architecture": "Decoder",
+      "dtype_bytes": 2,
+      "head_dim": 32,
+      "hidden_size": 128,
+      "kv_heads": 2,
+      "model_id": "org/model",
+      "num_layers": 4,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "weight_bytes": 53687091200,
+      "weight_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356"
+    },
+    "nodes": [
+      {
+        "calibration_confidence": 1.0,
+        "decode_ms_per_layer_token": 0.001,
+        "fast_memory_bytes": 34359738368,
+        "memory_bandwidth_Bps": 1000000000.0,
+        "node_id": "node-a",
+        "prefill_ms_per_layer_token": 0.001,
+        "spill_bandwidth_Bps": 1000000000.0,
+        "total_memory_bytes": 34359738368
+      },
+      {
+        "calibration_confidence": 1.0,
+        "decode_ms_per_layer_token": 0.001,
+        "fast_memory_bytes": 34359738368,
+        "memory_bandwidth_Bps": 1000000000.0,
+        "node_id": "node-b",
+        "prefill_ms_per_layer_token": 0.001,
+        "spill_bandwidth_Bps": 1000000000.0,
+        "total_memory_bytes": 34359738368
+      }
+    ],
+    "policy": {
+      "memory_reserve_fraction": 0,
+      "replica_budget": 0,
+      "tpot_slo_ms": 1000000,
+      "ttft_slo_ms": 1000000
+    },
+    "protocol": "mycelium.layer_planner_snapshot.v1",
+    "snapshot_generation": 8,
+    "swarm_id": "swarm-a",
+    "workload": {
+      "concurrency_points": [
+        1,
+        4
+      ],
+      "preset": "interactive_chat_v1",
+      "user_scale": 2
+    }
+  },
+  "protocol": "mycelium.control_plane_tranche.v1",
+  "route_plan": {
+    "diagnostics": {
+      "accepted_replica_nodes": [],
+      "candidate_node_ids": [
+        "node-a",
+        "node-b"
+      ],
+      "excluded_nodes": {},
+      "frozen_primary_order": [
+        "node-a",
+        "node-b"
+      ],
+      "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+      "primary_order": [
+        "node-a",
+        "node-b"
+      ],
+      "primary_search": [
+        "allocation: no feasible contiguous allocation: 2 candidate order(s) rejected"
+      ],
+      "speculative": {
+        "enabled": false,
+        "target_fallback": true
+      },
+      "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
+      "unplaced_node_ids": [],
+      "workload": {
+        "arrival_process": "poisson_capacity_sweep",
+        "mode": "sensitivity_grid",
+        "name": "interactive_chat_v1",
+        "network_size_changes_capacity_not_demand": true,
+        "source": "LMSYS-Chat-1M",
+        "user_scale": 2.0
+      }
+    },
+    "forward_edges": [
+      {
+        "capacity_rps": 4.197297611905551,
+        "cost_ms": 238.24853333333334,
+        "dst_placement_id": "stage-001-primary",
+        "kind": "forward",
+        "src_placement_id": "stage-000-primary"
+      }
+    ],
+    "handoff_state": "placement_intent_only",
+    "legal_tracks": [
+      {
+        "cost_ms": 474.77911111111115,
+        "placement_ids": [
+          "stage-000-primary",
+          "stage-001-primary"
+        ],
+        "track_id": "track-000",
+        "traffic_fraction": 1.0
+      }
+    ],
+    "loopbacks": [
+      {
+        "cost_ms": 236.5305777777778,
+        "dst_placement_id": "stage-000-primary",
+        "payload_bytes": 16,
+        "src_placement_id": "stage-001-primary"
+      }
+    ],
+    "metrics": {
+      "replicated_output_capacity_tps": 902.4189865596935,
+      "replicated_request_capacity_rps": 4.197297611905551,
+      "scenarios": [
+        {
+          "confidence": 1.0,
+          "decode_payload_bytes": 256,
+          "name": "interactive-c1",
+          "output_goodput_tps": 453.2233242822956,
+          "prefill_payload_bytes": 17920,
+          "single_request_tps": 453.2233242822956,
+          "tpot_ms": 2.2064177777777783,
+          "ttft_ms": 1.539288888888889
+        },
+        {
+          "confidence": 1.0,
+          "decode_payload_bytes": 256,
+          "name": "interactive-c4",
+          "output_goodput_tps": 907.2141670564326,
+          "prefill_payload_bytes": 17920,
+          "single_request_tps": 453.2233242822956,
+          "tpot_ms": 2.2064177777777783,
+          "ttft_ms": 1.539288888888889
+        }
+      ],
+      "unmet_capacity_sweep_demand_rps": 1750.188667300375
+    },
+    "model": {
+      "architecture": "Decoder",
+      "dtype_bytes": 2,
+      "head_dim": 32,
+      "hidden_size": 128,
+      "kv_heads": 2,
+      "model_id": "org/model",
+      "num_layers": 4,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "weight_bytes": 53687091200,
+      "weight_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356"
+    },
+    "placements": [
+      {
+        "layer_range": {
+          "end": 2,
+          "start": 0
+        },
+        "node_id": "node-a",
+        "placement_id": "stage-000-primary",
+        "primary": true,
+        "replica_group_id": "stage-000",
+        "service_capacity_rps": 1754.3859649122805
+      },
+      {
+        "layer_range": {
+          "end": 4,
+          "start": 2
+        },
+        "node_id": "node-b",
+        "placement_id": "stage-001-primary",
+        "primary": true,
+        "replica_group_id": "stage-001",
+        "service_capacity_rps": 1754.3859649122805
+      }
+    ],
+    "protocol": "mycelium.route_plan.v2",
+    "provenance": {
+      "budget_exhausted": false,
+      "candidate_budget": 100000,
+      "candidate_node_count": 2,
+      "explored_candidates": 4,
+      "globally_exact": true,
+      "mode": "exact_joint_enumeration"
+    },
+    "snapshot_digest": "sha256:5e36a60895aee5257585f9950e92454faa483fcceacf06cb44f3e49e9a93e8a6",
+    "workload_name": "interactive_chat_v1"
+  }
+}

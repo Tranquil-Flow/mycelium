@@ -209,14 +209,14 @@ def planner_snapshot_from_evidence_bundle(
 
 
 def plan_evidence_bundle(
-    evidence_bundle: Mapping[str, Any] | EvidenceBundle,
+    bundle_value: EvidenceBundle | Mapping[str, Any],
     *,
     model: Mapping[str, Any],
     workload: Mapping[str, Any],
     policy: Mapping[str, Any],
 ) -> RoutePlanV2:
     snapshot = planner_snapshot_from_evidence_bundle(
-        evidence_bundle,
+        bundle_value,
         model=model,
         workload=workload,
         policy=policy,
@@ -226,3 +226,20 @@ def plan_evidence_bundle(
     if plan.snapshot_digest != expected_digest:
         raise ValueError("Planner returned a route not bound to the supplied evidence snapshot")
     return plan
+
+
+def validate_planner_snapshot_binding(
+    snapshot: Mapping[str, Any], bundle_value: EvidenceBundle | Mapping[str, Any]
+) -> None:
+    """Rebuild and compare a Planner snapshot against its sealed Gossip source."""
+    for field in ("model", "workload", "policy"):
+        if not isinstance(snapshot.get(field), Mapping):
+            raise ValueError(f"planner snapshot {field} is required")
+    expected = planner_snapshot_from_evidence_bundle(
+        bundle_value,
+        model=snapshot["model"],
+        workload=snapshot["workload"],
+        policy=snapshot["policy"],
+    )
+    if json.loads(json.dumps(snapshot)) != expected:
+        raise ValueError("planner snapshot does not equal deterministic evidence-bundle projection")

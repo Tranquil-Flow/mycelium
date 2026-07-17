@@ -261,7 +261,8 @@ def test_wire_round_trip_is_immutable_and_deterministic() -> None:
     populate(service, clock)
     bundle = capture(service)
 
-    decoded = evidence_bundle_from_dict(evidence_bundle_to_dict(bundle))
+    wire = json.loads(json.dumps(evidence_bundle_to_dict(bundle)))
+    decoded = evidence_bundle_from_dict(wire)
 
     assert decoded == bundle
     assert evidence_bundle_to_dict(decoded) == evidence_bundle_to_dict(bundle)
