@@ -84,6 +84,15 @@ class PublishedTopologyProviderTests(unittest.TestCase):
          provider.publish(replace(graph, topology_version=4))
       with self.assertRaisesRegex(ValueError, "topology_version_not_increasing"):
          provider.publish(replace(graph, topology_version=2))
+      with self.assertRaisesRegex(ValueError, "topology_version_not_increasing"):
+         provider.publish(
+            replace(
+               graph,
+               deployment_epoch=graph.deployment_epoch + 1,
+               topology_version=published.topology_version,
+            )
+         )
+      self.assertEqual(provider.snapshot(), published)
 
    def test_identity_change_requires_newer_deployment_epoch(self):
       graph = graph_fixture()
@@ -129,6 +138,42 @@ class PublishedTopologyProviderTests(unittest.TestCase):
                hidden_size=graph.hidden_size * 2,
             )
          )
+
+   def test_all_deployment_identity_changes_fail_closed_within_epoch(self):
+      graph = graph_fixture()
+      identity_changes = {
+         "deployment_id": "other-deployment",
+         "model_id": "other/model",
+         "resolved_commit": "fedcba9876543210fedcba9876543210fedcba98",
+         "manifest_digest": "sha256:other-manifest",
+         "hidden_size": graph.hidden_size + 1,
+         "activation_bytes": graph.activation_bytes + 1,
+         "token_envelope_bytes": graph.token_envelope_bytes + 1,
+      }
+
+      for field, value in identity_changes.items():
+         with self.subTest(field=field):
+            provider = PublishedTopologyProvider(graph)
+            with self.assertRaisesRegex(
+               ValueError,
+               "deployment_epoch_not_increasing_for_identity_change",
+            ):
+               provider.publish(
+                  replace(
+                     graph,
+                     topology_version=graph.topology_version + 100,
+                     **{field: value},
+                  )
+               )
+
+            self.assertEqual(provider.snapshot(), graph)
+            accepted = provider.publish(
+               replace(graph, topology_version=graph.topology_version + 1)
+            )
+            self.assertEqual(
+               accepted.topology_version,
+               graph.topology_version + 1,
+            )
 
    def test_placement_identity_cannot_change_within_deployment_epoch(self):
       graph = graph_fixture()
@@ -255,7 +300,10 @@ class PublishedDeviceStateProviderTests(unittest.TestCase):
       self.assertNotIn("injected-node", stored)
       self.assertIsInstance(stored["node-a"].neighbor_rtt_ms, dict)
 
-      replacement_states = state_table(slow_b_bandwidth=False)
+      replacement_states = {
+         node_id: replace(item, state_seq=item.state_seq + 1)
+         for node_id, item in state_table(slow_b_bandwidth=False).items()
+      }
       provider.publish(replacement_states)
       replacement_states["node-a"].neighbor_bandwidth_bytes_per_second[
          "node-b"
@@ -357,25 +405,121 @@ class PublishedDeviceStateProviderTests(unittest.TestCase):
       )
 
       self.assertEqual(changing.calls, 1)
-      self.assertEqual(provider.snapshot()["node-a"].neighbor_rtt_ms, {"node-b": 2.0})
+      self.assertEqual(
+         provider.snapshot()["node-a"].neighbor_rtt_ms,
+         {"node-b": 2.0},
+      )
+
+   def test_state_sequence_replay_conflict_and_regression_fail_closed(self):
+      initial = replace(
+         state("node-a"),
+         state_seq=7,
+         last_updated=10.0,
+      )
+      provider = PublishedDeviceStateProvider(
+         self.topology,
+         {"node-a": initial},
+      )
+
+      replay = provider.publish({"node-a": initial})
+      self.assertEqual(replay["node-a"], initial)
+
+      with self.assertRaisesRegex(
+         ValueError,
+         "device_state_seq_conflict:node-a",
+      ):
+         provider.publish(
+            {
+               "node-a": replace(
+                  initial,
+                  available_kv_bytes=initial.available_kv_bytes - 1,
+               )
+            }
+         )
+      with self.assertRaisesRegex(
+         ValueError,
+         "device_state_seq_regression:node-a",
+      ):
+         provider.publish(
+            {
+               "node-a": replace(
+                  initial,
+                  state_seq=initial.state_seq - 1,
+                  last_updated=initial.last_updated + 1.0,
+               )
+            }
+         )
+
+      self.assertEqual(provider.snapshot(), {"node-a": initial})
+
+   def test_state_sequence_high_watermark_survives_omission(self):
+      initial = replace(state("node-a"), state_seq=7)
+      provider = PublishedDeviceStateProvider(
+         self.topology,
+         {"node-a": initial},
+      )
+      provider.publish({})
+
+      with self.assertRaisesRegex(
+         ValueError,
+         "device_state_seq_regression:node-a",
+      ):
+         provider.publish({"node-a": replace(initial, state_seq=6)})
+      with self.assertRaisesRegex(
+         ValueError,
+         "device_state_seq_replay_after_omission:node-a",
+      ):
+         provider.publish({"node-a": initial})
+
+      self.assertEqual(provider.snapshot(), {})
+      fresh = replace(initial, state_seq=8, available_kv_bytes=123)
+      self.assertEqual(provider.publish({"node-a": fresh}), {"node-a": fresh})
+
+   def test_mixed_fresh_and_stale_whole_map_is_rejected_atomically(self):
+      initial = {
+         node_id: replace(item, state_seq=5)
+         for node_id, item in state_table().items()
+      }
+      provider = PublishedDeviceStateProvider(self.topology, initial)
+      candidate = {
+         "node-a": replace(initial["node-a"], state_seq=6),
+         "node-b": replace(initial["node-b"], state_seq=4),
+         "node-c": replace(initial["node-c"], state_seq=6),
+      }
+
+      with self.assertRaisesRegex(
+         ValueError,
+         "device_state_seq_regression:node-b",
+      ):
+         provider.publish(candidate)
+
+      self.assertEqual(provider.snapshot(), initial)
+      provider.publish(
+         {
+            node_id: replace(item, state_seq=6)
+            for node_id, item in initial.items()
+         }
+      )
 
    def test_whole_state_maps_publish_atomically_under_concurrent_access(self):
-      old = {
-         node_id: replace(item, state_seq=1)
-         for node_id, item in state_table().items()
-      }
-      new = {
-         node_id: replace(item, state_seq=2)
-         for node_id, item in state_table().items()
-      }
-      provider = PublishedDeviceStateProvider(self.topology, old)
+      initial = state_table()
+      provider = PublishedDeviceStateProvider(self.topology, initial)
       start = threading.Barrier(2)
       observed = []
 
       def writer():
          start.wait()
-         for index in range(1_000):
-            provider.publish(new if index % 2 else old)
+         for sequence in range(2, 1_002):
+            provider.publish(
+               {
+                  node_id: replace(
+                     item,
+                     state_seq=sequence,
+                     last_updated=float(sequence),
+                  )
+                  for node_id, item in initial.items()
+               }
+            )
 
       def reader():
          start.wait()
@@ -396,7 +540,7 @@ class PublishedDeviceStateProviderTests(unittest.TestCase):
 
       self.assertTrue(observed)
       self.assertTrue(
-         all(item in {(1, 1, 1), (2, 2, 2)} for item in observed)
+         all(len(item) == 3 and len(set(item)) == 1 for item in observed)
       )
 
 

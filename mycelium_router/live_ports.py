@@ -196,6 +196,8 @@ def _graph_identity(graph: ExecutionGraph) -> GraphIdentity:
       graph.model_id,
       graph.resolved_commit,
       graph.manifest_digest,
+      graph.entry_stage_id,
+      graph.final_stage_id,
       graph.hidden_size,
       graph.activation_bytes,
       graph.token_envelope_bytes,
@@ -352,7 +354,14 @@ def _copy_device_state(state: DeviceState) -> DeviceState:
 
 
 class PublishedDeviceStateProvider(DeviceStateProvider):
-   """Atomically publishes defensive whole-map DeviceState snapshots."""
+   """Atomically publishes defensive, sequence-ordered state snapshots.
+
+   ``state_seq`` is a per-node freshness boundary. Exact delivery replays of
+   currently published states are idempotent, but an older sequence, different
+   content at an already seen sequence, or replay after omission is rejected.
+   High-water marks survive omission from a whole-map snapshot so
+   remove/reinsert cannot roll a node back.
+   """
 
    def __init__(
       self,
@@ -377,6 +386,7 @@ class PublishedDeviceStateProvider(DeviceStateProvider):
       self._allowed_unknown_node_ids = allowed_ids
       self._lock = RLock()
       self._states: dict[str, DeviceState] = {}
+      self._state_high_watermarks: dict[str, DeviceState] = {}
       self.publish({} if states is None else states)
 
    def snapshot(self) -> dict[str, DeviceState]:
@@ -412,7 +422,21 @@ class PublishedDeviceStateProvider(DeviceStateProvider):
          candidate[node_id] = frozen
 
       with self._lock:
+         for node_id, frozen in candidate.items():
+            previous = self._state_high_watermarks.get(node_id)
+            if previous is None:
+               continue
+            if frozen.state_seq < previous.state_seq:
+               raise ValueError(f"device_state_seq_regression:{node_id}")
+            if frozen.state_seq == previous.state_seq and frozen != previous:
+               raise ValueError(f"device_state_seq_conflict:{node_id}")
+            if frozen.state_seq == previous.state_seq and node_id not in self._states:
+               raise ValueError(
+                  f"device_state_seq_replay_after_omission:{node_id}"
+               )
+
          self._states = candidate
+         self._state_high_watermarks.update(candidate)
          return {
             node_id: _copy_device_state(state)
             for node_id, state in candidate.items()
