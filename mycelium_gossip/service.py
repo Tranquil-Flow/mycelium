@@ -757,6 +757,41 @@ class GossipService:
         with self._lock:
             return tuple(self._peers[node_id] for node_id in sorted(self._peers))
 
+    def capture_evidence_bundle(
+        self,
+        *,
+        deployment_id: str,
+        deployment_epoch: int,
+        model_id: str,
+        num_layers: int,
+        manifest_digest: str,
+        resolved_commit: str,
+    ):
+        """Seal records, liveness, and quarantines into one immutable generation.
+
+        Service state remains locked while the registry takes its own frozen
+        snapshot. Registry notifications never hold the registry lock while
+        acquiring this service lock, so this service→registry order cannot form
+        a lock cycle.
+        """
+        from .evidence_bundle import build_evidence_bundle
+
+        with self._lock:
+            snapshot = self.registry.snapshot()
+            peer_states = tuple(self._peers[node_id] for node_id in sorted(self._peers))
+            quarantines = tuple(self._quarantines[key] for key in sorted(self._quarantines))
+        return build_evidence_bundle(
+            snapshot=snapshot,
+            peer_states=peer_states,
+            quarantines=quarantines,
+            deployment_id=deployment_id,
+            deployment_epoch=deployment_epoch,
+            model_id=model_id,
+            num_layers=num_layers,
+            manifest_digest=manifest_digest,
+            resolved_commit=resolved_commit,
+        )
+
     def issue_recovery_challenge(self, node_id: str) -> str:
         now = self._clock()
         with self._lock:
