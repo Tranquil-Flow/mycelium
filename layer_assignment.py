@@ -2,6 +2,7 @@
 """Compile route stages into immutable per-node layer assignments."""
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from pathlib import PurePosixPath
@@ -34,6 +35,7 @@ _ASSIGNMENT_ID_FIELDS = (
    "files",
    "artifact_cache_root",
    "runtime",
+   "control_plane_binding",
 )
 
 
@@ -93,6 +95,7 @@ def compile_layer_assignments(
    deployment_epoch: int,
    cache_roots: dict[str, str],
    runtime_by_node: dict[str, dict[str, Any]],
+   control_plane_binding: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
    if route_plan.get("protocol") == "mycelium.route_plan.v1":
       route_plan = upgrade_legacy_route_plan_v1(route_plan)
@@ -115,6 +118,8 @@ def compile_layer_assignments(
       raise ValueError("deployment_id must be a UUID") from exc
    if not isinstance(deployment_epoch, int) or isinstance(deployment_epoch, bool) or deployment_epoch < 0:
       raise ValueError("deployment_epoch must be a non-negative integer")
+   if control_plane_binding is not None and not isinstance(control_plane_binding, dict):
+      raise ValueError("control_plane_binding must be an object or null")
 
    file_records = {item["path"]: item for item in manifest["files"]}
    assignments = []
@@ -197,6 +202,7 @@ def compile_layer_assignments(
          "files": files,
          "artifact_cache_root": cache_root,
          "runtime": dict(runtime),
+         "control_plane_binding": copy.deepcopy(control_plane_binding),
       }
       assignment_id = assignment_id_for(semantic_identity)
       assignment = {
