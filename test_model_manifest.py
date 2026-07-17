@@ -10,6 +10,17 @@ class ModelManifestTests(unittest.TestCase):
          "architectures": ["GPT2Model"],
          "model_type": model_type,
          "n_layer": 3,
+         "n_embd": 4,
+         "n_head": 2,
+         "n_inner": None,
+         "vocab_size": 7,
+         "n_positions": 8,
+         "layer_norm_epsilon": 1e-5,
+         "activation_function": "gelu_new",
+         "scale_attn_weights": True,
+         "scale_attn_by_inverse_layer_idx": False,
+         "reorder_and_upcast_attn": False,
+         "add_cross_attention": False,
       }
 
    def index(self):
@@ -59,6 +70,26 @@ class ModelManifestTests(unittest.TestCase):
       self.assertEqual(manifest["component_tensor_keys"]["final_norm"], ["ln_f.weight"])
       self.assertEqual(manifest["component_tensor_keys"]["lm_head"], [])
       self.assertEqual(manifest["component_aliases"], {})
+      self.assertEqual(
+         manifest["runtime_model"],
+         {
+            "architecture": "gpt2",
+            "model_config": {
+               "n_layer": 3,
+               "n_embd": 4,
+               "n_head": 2,
+               "n_inner": 16,
+               "vocab_size": 7,
+               "n_positions": 8,
+               "layer_norm_epsilon": 1e-5,
+               "activation_function": "gelu_new",
+               "scale_attn_weights": True,
+               "scale_attn_by_inverse_layer_idx": False,
+               "reorder_and_upcast_attn": False,
+               "add_cross_attention": False,
+            },
+         },
+      )
       self.assertEqual(manifest["manifest_digest"]["algorithm"], "sha256")
       self.assertEqual(len(manifest["manifest_digest"]["value"]), 64)
 
@@ -68,7 +99,7 @@ class ModelManifestTests(unittest.TestCase):
          requested_revision="main",
          resolved_commit="a" * 40,
          config={
-            "model_type": "gpt2",
+            **self.config(),
             "architectures": ["GPT2LMHeadModel"],
             "n_layer": 1,
             "tie_word_embeddings": False,
@@ -177,6 +208,19 @@ class ModelManifestTests(unittest.TestCase):
             resolved_commit="a" * 40,
             config=self.config(),
             checkpoint_index=index,
+            file_metadata=self.files(),
+         )
+
+   def test_gpt2_runtime_model_config_missing_dimension_fails_closed(self):
+      config = self.config()
+      del config["n_head"]
+      with self.assertRaisesRegex(ValueError, "runtime model_config n_head"):
+         mm.compile_model_manifest(
+            model_id="org/model",
+            requested_revision="main",
+            resolved_commit="a" * 40,
+            config=config,
+            checkpoint_index=self.index(),
             file_metadata=self.files(),
          )
 

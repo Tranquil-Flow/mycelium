@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from model_adapters import adapter_for_config
+from runtime_contracts import normalize_gpt2_model_config
 
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -192,6 +193,17 @@ def compile_model_manifest(
       elif not component_tensor_keys.get("lm_head"):
          raise ValueError("causal LM missing lm_head tensors without explicit tied embeddings")
    component_files = _component_files(weight_map, component_tensor_keys)
+   runtime_model = None
+   if adapter.architecture == "gpt2" and (
+      _is_causal_lm(config)
+      or any(field in config for field in ("n_embd", "n_head", "vocab_size", "n_positions"))
+   ):
+      runtime_model = {
+         "architecture": "gpt2",
+         "model_config": normalize_gpt2_model_config(
+            config, expected_layers=num_layers
+         ),
+      }
    manifest = {
       "protocol": "mycelium.model_manifest.v1",
       "model_id": model_id,
@@ -211,6 +223,8 @@ def compile_model_manifest(
       "layer_files": layer_files,
       "tensor_keys_by_layer": tensor_keys_by_layer,
    }
+   if runtime_model is not None:
+      manifest["runtime_model"] = runtime_model
    manifest["manifest_digest"] = _digest_document(manifest)
    return manifest
 

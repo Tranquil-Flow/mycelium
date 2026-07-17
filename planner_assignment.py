@@ -12,6 +12,7 @@ from mycelium_layer_planner.contracts import RoutePlanV2
 from mycelium_layer_planner.gossip_adapter import planner_snapshot_digest
 from mycelium_layer_planner.serialization import route_plan_to_dict
 from route_contract import validate_manual_provisioning_route_v1
+from runtime_contracts import MLX_RUNTIME_BASE_FIELDS
 
 CONTROL_PLANE_BINDING_PROTOCOL = "mycelium.control_plane_binding.v1"
 
@@ -267,7 +268,11 @@ def validate_control_plane_tranche(
         if not isinstance(cache_root, str) or not isinstance(runtime, Mapping):
             raise ValueError("control-plane tranche assignment target identity is invalid")
         cache_roots[node_id] = cache_root
-        runtime_by_node[node_id] = dict(runtime)
+        if not MLX_RUNTIME_BASE_FIELDS.issubset(runtime):
+            raise ValueError("control-plane tranche assignment runtime identity is invalid")
+        runtime_by_node[node_id] = {
+            field: runtime[field] for field in MLX_RUNTIME_BASE_FIELDS
+        }
 
     expected = compile_bound_layer_assignments(
         route_plan=route_plan,

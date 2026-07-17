@@ -15,6 +15,7 @@ from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_bind
 from mycelium_layer_planner.serialization import route_plan_from_dict
 from planner_assignment import validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
+from runtime_contracts import GPT2_DECODER_TENSOR_SUFFIXES
 import scripts.contract_audit as contract_audit
 import scripts.contract_io as contract_io
 from scripts.contract_audit import audit
@@ -41,6 +42,7 @@ EXPECTED_PROTOCOLS = {
     "gossip-evidence-bundle-v1.json": "mycelium.gossip.evidence_bundle.v1",
     "layer-planner-snapshot-v1.json": "mycelium.layer_planner_snapshot.v1",
     "control-plane-tranche-v1.json": "mycelium.control_plane_tranche.v1",
+    "layer-load-proof-v1.json": "mycelium.layer_load_proof.v1",
 }
 
 
@@ -453,3 +455,16 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     assert tranche["evidence_bundle"] == evidence_bundle
     assert tranche["planner_snapshot"] == planner_snapshot
     assert len(tranche["assignments"]) == 2
+    for tranche_assignment in tranche["assignments"]:
+        expected_decoder_keys = sorted(
+            prefix + suffix
+            for prefix in tranche_assignment["expected_tensor_prefixes"]
+            for suffix in GPT2_DECODER_TENSOR_SUFFIXES
+        )
+        assert tranche_assignment["component_tensor_keys"]["decoder"] == expected_decoder_keys
+
+    load_proof = load_fixture("layer-load-proof-v1.json")
+    assert load_proof["assignment_id"] == tranche["assignments"][0]["assignment_id"]
+    assert load_proof["loaded_tensor_keys"] == sorted(
+        tranche["assignments"][0]["expected_tensor_keys"]
+    )

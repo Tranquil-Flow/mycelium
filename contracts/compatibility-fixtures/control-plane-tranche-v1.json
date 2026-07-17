@@ -2,13 +2,35 @@
   "assignments": [
     {
       "artifact_cache_root": "/var/lib/mycelium/node-a",
-      "assignment_id": "a4fb1b6c-35ea-5af3-ba91-e0270e14f2c8",
+      "assignment_id": "06dcdeb6-ffc8-5e8c-b210-44f4fc80e407",
       "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
       "component_aliases": {},
       "component_tensor_keys": {
         "decoder": [
-          "transformer.h.0.attn.weight",
-          "transformer.h.1.attn.weight"
+          "transformer.h.0.attn.c_attn.bias",
+          "transformer.h.0.attn.c_attn.weight",
+          "transformer.h.0.attn.c_proj.bias",
+          "transformer.h.0.attn.c_proj.weight",
+          "transformer.h.0.ln_1.bias",
+          "transformer.h.0.ln_1.weight",
+          "transformer.h.0.ln_2.bias",
+          "transformer.h.0.ln_2.weight",
+          "transformer.h.0.mlp.c_fc.bias",
+          "transformer.h.0.mlp.c_fc.weight",
+          "transformer.h.0.mlp.c_proj.bias",
+          "transformer.h.0.mlp.c_proj.weight",
+          "transformer.h.1.attn.c_attn.bias",
+          "transformer.h.1.attn.c_attn.weight",
+          "transformer.h.1.attn.c_proj.bias",
+          "transformer.h.1.attn.c_proj.weight",
+          "transformer.h.1.ln_1.bias",
+          "transformer.h.1.ln_1.weight",
+          "transformer.h.1.ln_2.bias",
+          "transformer.h.1.ln_2.weight",
+          "transformer.h.1.mlp.c_fc.bias",
+          "transformer.h.1.mlp.c_fc.weight",
+          "transformer.h.1.mlp.c_proj.bias",
+          "transformer.h.1.mlp.c_proj.weight"
         ],
         "input_embedding": [
           "transformer.wpe.weight",
@@ -22,8 +44,8 @@
       "control_plane_binding": {
         "deployment_epoch": 1,
         "deployment_id": "12345678-1234-5678-1234-567812345678",
-        "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
-        "planner_snapshot_digest": "sha256:5e36a60895aee5257585f9950e92454faa483fcceacf06cb44f3e49e9a93e8a6",
+        "evidence_bundle_digest": "sha256:07c57801ddc10d4955cda04cdc547d768791dddd51e60cbb1f1ebc2de1e1b805",
+        "planner_snapshot_digest": "sha256:6fb892bf7d4e0bbf4560a98c7d29ad9743590b2f4e721ddaa4c529c6f8711394",
         "protocol": "mycelium.control_plane_binding.v1",
         "snapshot_generation": 8,
         "swarm_id": "swarm-a"
@@ -31,8 +53,30 @@
       "deployment_epoch": 1,
       "deployment_id": "12345678-1234-5678-1234-567812345678",
       "expected_tensor_keys": [
-        "transformer.h.0.attn.weight",
-        "transformer.h.1.attn.weight",
+        "transformer.h.0.attn.c_attn.bias",
+        "transformer.h.0.attn.c_attn.weight",
+        "transformer.h.0.attn.c_proj.bias",
+        "transformer.h.0.attn.c_proj.weight",
+        "transformer.h.0.ln_1.bias",
+        "transformer.h.0.ln_1.weight",
+        "transformer.h.0.ln_2.bias",
+        "transformer.h.0.ln_2.weight",
+        "transformer.h.0.mlp.c_fc.bias",
+        "transformer.h.0.mlp.c_fc.weight",
+        "transformer.h.0.mlp.c_proj.bias",
+        "transformer.h.0.mlp.c_proj.weight",
+        "transformer.h.1.attn.c_attn.bias",
+        "transformer.h.1.attn.c_attn.weight",
+        "transformer.h.1.attn.c_proj.bias",
+        "transformer.h.1.attn.c_proj.weight",
+        "transformer.h.1.ln_1.bias",
+        "transformer.h.1.ln_1.weight",
+        "transformer.h.1.ln_2.bias",
+        "transformer.h.1.ln_2.weight",
+        "transformer.h.1.mlp.c_fc.bias",
+        "transformer.h.1.mlp.c_fc.weight",
+        "transformer.h.1.mlp.c_proj.bias",
+        "transformer.h.1.mlp.c_proj.weight",
         "transformer.wpe.weight",
         "transformer.wte.weight"
       ],
@@ -52,7 +96,7 @@
           "size_bytes": 20
         }
       ],
-      "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+      "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
       "model_id": "org/model",
       "node_id": "node-a",
       "protocol": "mycelium.layer_assignment.v2",
@@ -64,22 +108,60 @@
       "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "route_ready": false,
       "runtime": {
+        "architecture": "gpt2",
         "backend": "mlx",
         "dtype": "float16",
+        "model_config": {
+          "activation_function": "gelu_new",
+          "add_cross_attention": false,
+          "layer_norm_epsilon": 1e-05,
+          "n_embd": 128,
+          "n_head": 4,
+          "n_inner": 512,
+          "n_layer": 4,
+          "n_positions": 128,
+          "reorder_and_upcast_attn": false,
+          "scale_attn_by_inverse_layer_idx": false,
+          "scale_attn_weights": true,
+          "vocab_size": 1024
+        },
         "quantization": "none"
       }
     },
     {
       "artifact_cache_root": "/var/lib/mycelium/node-b",
-      "assignment_id": "30d9f10c-fb4d-5571-9f46-611adba2ab1d",
+      "assignment_id": "d35d714a-7fd5-584f-8fc9-501a9923e848",
       "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
       "component_aliases": {},
       "component_tensor_keys": {
         "decoder": [
-          "transformer.h.2.attn.weight",
-          "transformer.h.3.attn.weight"
+          "transformer.h.2.attn.c_attn.bias",
+          "transformer.h.2.attn.c_attn.weight",
+          "transformer.h.2.attn.c_proj.bias",
+          "transformer.h.2.attn.c_proj.weight",
+          "transformer.h.2.ln_1.bias",
+          "transformer.h.2.ln_1.weight",
+          "transformer.h.2.ln_2.bias",
+          "transformer.h.2.ln_2.weight",
+          "transformer.h.2.mlp.c_fc.bias",
+          "transformer.h.2.mlp.c_fc.weight",
+          "transformer.h.2.mlp.c_proj.bias",
+          "transformer.h.2.mlp.c_proj.weight",
+          "transformer.h.3.attn.c_attn.bias",
+          "transformer.h.3.attn.c_attn.weight",
+          "transformer.h.3.attn.c_proj.bias",
+          "transformer.h.3.attn.c_proj.weight",
+          "transformer.h.3.ln_1.bias",
+          "transformer.h.3.ln_1.weight",
+          "transformer.h.3.ln_2.bias",
+          "transformer.h.3.ln_2.weight",
+          "transformer.h.3.mlp.c_fc.bias",
+          "transformer.h.3.mlp.c_fc.weight",
+          "transformer.h.3.mlp.c_proj.bias",
+          "transformer.h.3.mlp.c_proj.weight"
         ],
         "final_norm": [
+          "transformer.ln_f.bias",
           "transformer.ln_f.weight"
         ],
         "lm_head": [
@@ -94,8 +176,8 @@
       "control_plane_binding": {
         "deployment_epoch": 1,
         "deployment_id": "12345678-1234-5678-1234-567812345678",
-        "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
-        "planner_snapshot_digest": "sha256:5e36a60895aee5257585f9950e92454faa483fcceacf06cb44f3e49e9a93e8a6",
+        "evidence_bundle_digest": "sha256:07c57801ddc10d4955cda04cdc547d768791dddd51e60cbb1f1ebc2de1e1b805",
+        "planner_snapshot_digest": "sha256:6fb892bf7d4e0bbf4560a98c7d29ad9743590b2f4e721ddaa4c529c6f8711394",
         "protocol": "mycelium.control_plane_binding.v1",
         "snapshot_generation": 8,
         "swarm_id": "swarm-a"
@@ -104,8 +186,31 @@
       "deployment_id": "12345678-1234-5678-1234-567812345678",
       "expected_tensor_keys": [
         "lm_head.weight",
-        "transformer.h.2.attn.weight",
-        "transformer.h.3.attn.weight",
+        "transformer.h.2.attn.c_attn.bias",
+        "transformer.h.2.attn.c_attn.weight",
+        "transformer.h.2.attn.c_proj.bias",
+        "transformer.h.2.attn.c_proj.weight",
+        "transformer.h.2.ln_1.bias",
+        "transformer.h.2.ln_1.weight",
+        "transformer.h.2.ln_2.bias",
+        "transformer.h.2.ln_2.weight",
+        "transformer.h.2.mlp.c_fc.bias",
+        "transformer.h.2.mlp.c_fc.weight",
+        "transformer.h.2.mlp.c_proj.bias",
+        "transformer.h.2.mlp.c_proj.weight",
+        "transformer.h.3.attn.c_attn.bias",
+        "transformer.h.3.attn.c_attn.weight",
+        "transformer.h.3.attn.c_proj.bias",
+        "transformer.h.3.attn.c_proj.weight",
+        "transformer.h.3.ln_1.bias",
+        "transformer.h.3.ln_1.weight",
+        "transformer.h.3.ln_2.bias",
+        "transformer.h.3.ln_2.weight",
+        "transformer.h.3.mlp.c_fc.bias",
+        "transformer.h.3.mlp.c_fc.weight",
+        "transformer.h.3.mlp.c_proj.bias",
+        "transformer.h.3.mlp.c_proj.weight",
+        "transformer.ln_f.bias",
         "transformer.ln_f.weight"
       ],
       "expected_tensor_prefixes": [
@@ -119,7 +224,7 @@
           "size_bytes": 30
         }
       ],
-      "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+      "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
       "model_id": "org/model",
       "node_id": "node-b",
       "protocol": "mycelium.layer_assignment.v2",
@@ -131,8 +236,23 @@
       "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "route_ready": false,
       "runtime": {
+        "architecture": "gpt2",
         "backend": "mlx",
         "dtype": "float16",
+        "model_config": {
+          "activation_function": "gelu_new",
+          "add_cross_attention": false,
+          "layer_norm_epsilon": 1e-05,
+          "n_embd": 128,
+          "n_head": 4,
+          "n_inner": 512,
+          "n_layer": 4,
+          "n_positions": 128,
+          "reorder_and_upcast_attn": false,
+          "scale_attn_by_inverse_layer_idx": false,
+          "scale_attn_weights": true,
+          "vocab_size": 1024
+        },
         "quantization": "none"
       }
     }
@@ -216,9 +336,9 @@
       "deployment_epoch": 1,
       "deployment_id": "12345678-1234-5678-1234-567812345678"
     },
-    "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+    "evidence_bundle_digest": "sha256:07c57801ddc10d4955cda04cdc547d768791dddd51e60cbb1f1ebc2de1e1b805",
     "model": {
-      "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+      "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
       "model_id": "org/model",
       "num_layers": 4,
       "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -676,7 +796,7 @@
       "deployment_epoch": 1,
       "deployment_id": "12345678-1234-5678-1234-567812345678"
     },
-    "evidence_bundle_digest": "sha256:d3521e7e1fe0cc9a4a0ab1854bae4be3d80eb79f875f3eec2865234d0c43f01e",
+    "evidence_bundle_digest": "sha256:07c57801ddc10d4955cda04cdc547d768791dddd51e60cbb1f1ebc2de1e1b805",
     "links": [
       {
         "bandwidth_Bps": 112500000.0,
@@ -709,7 +829,7 @@
       "num_layers": 4,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "weight_bytes": 53687091200,
-      "weight_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356"
+      "weight_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e"
     },
     "nodes": [
       {
@@ -853,7 +973,7 @@
       "num_layers": 4,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "weight_bytes": 53687091200,
-      "weight_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356"
+      "weight_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e"
     },
     "placements": [
       {
@@ -888,7 +1008,7 @@
       "globally_exact": true,
       "mode": "exact_joint_enumeration"
     },
-    "snapshot_digest": "sha256:5e36a60895aee5257585f9950e92454faa483fcceacf06cb44f3e49e9a93e8a6",
+    "snapshot_digest": "sha256:6fb892bf7d4e0bbf4560a98c7d29ad9743590b2f4e721ddaa4c529c6f8711394",
     "workload_name": "interactive_chat_v1"
   }
 }

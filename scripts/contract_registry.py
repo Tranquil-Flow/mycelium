@@ -29,7 +29,13 @@ CONTRACT_SPECS = (
     ContractSpec(
         "layer-assignment-v2.json",
         "mycelium.layer_assignment.v2",
-        ("layer_assignment.py", "model_manifest.py", "model_adapters.py", "route_contract.py"),
+        (
+            "layer_assignment.py",
+            "model_manifest.py",
+            "model_adapters.py",
+            "route_contract.py",
+            "runtime_contracts.py",
+        ),
     ),
     ContractSpec(
         "artifact-verification-report-v1.json",
@@ -78,8 +84,18 @@ CONTRACT_SPECS = (
         (
             "planner_assignment.py",
             "layer_assignment.py",
+            "runtime_contracts.py",
             "mycelium_gossip/evidence_bundle.py",
             "mycelium_layer_planner/gossip_adapter.py",
+        ),
+    ),
+    ContractSpec(
+        "layer-load-proof-v1.json",
+        "mycelium.layer_load_proof.v1",
+        (
+            "runtime_loader.py",
+            "runtime_contracts.py",
+            "mycelium_router/layer_builder.py",
         ),
     ),
 )

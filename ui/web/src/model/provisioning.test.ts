@@ -15,7 +15,7 @@ describe('provisioning evidence', () => {
     expect(evidence.model).toEqual({
       id: 'org/model',
       numLayers: 4,
-      manifestDigest: 'sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356',
+      manifestDigest: 'sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e',
       resolvedCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
     expect(evidence.nodeIds).toEqual(['node-a', 'node-b']);

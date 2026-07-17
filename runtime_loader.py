@@ -21,6 +21,10 @@ import mlx.core as mx
 
 from layer_assignment import validate_assignment_identity
 from model_adapters import ADAPTERS
+from runtime_contracts import (
+    GPT2_DECODER_TENSOR_SUFFIXES,
+    validate_normalized_mlx_runtime,
+)
 from weight_provisioning import artifact_report_errors
 
 
@@ -47,20 +51,6 @@ _SAFE_DTYPE_BYTES = {
     "U64": 8,
     "F64": 8,
 }
-_GPT2_LAYER_SUFFIXES = (
-    "ln_1.weight",
-    "ln_1.bias",
-    "attn.c_attn.weight",
-    "attn.c_attn.bias",
-    "attn.c_proj.weight",
-    "attn.c_proj.bias",
-    "ln_2.weight",
-    "ln_2.bias",
-    "mlp.c_fc.weight",
-    "mlp.c_fc.bias",
-    "mlp.c_proj.weight",
-    "mlp.c_proj.bias",
-)
 _SUPPORTED_SOURCE_DTYPES = {
     "mlx.core.bfloat16",
     "mlx.core.float16",
@@ -160,92 +150,11 @@ def _validate_control_plane_binding(assignment: dict[str, Any]) -> dict[str, Any
 
 
 def _validate_runtime(runtime: Any) -> tuple[dict[str, Any], Any]:
-    if not isinstance(runtime, dict):
-        raise _fail("runtime identity must be an object")
-    expected_runtime_fields = {
-        "backend",
-        "dtype",
-        "quantization",
-        "architecture",
-        "model_config",
-    }
-    if set(runtime) != expected_runtime_fields:
-        raise _fail("runtime identity fields do not match the normalized MLX contract")
-    if runtime.get("backend") != "mlx":
-        raise _fail("unsupported runtime backend; expected mlx")
-    if runtime.get("quantization") != "none":
-        raise _fail("unsupported runtime quantization; only none is supported")
-    dtype_name = runtime.get("dtype")
-    if dtype_name not in _RUNTIME_DTYPES:
-        raise _fail("unsupported runtime dtype; expected float16, bfloat16, or float32")
-    if runtime.get("architecture") != "gpt2":
-        raise _fail("unsupported runtime architecture; only gpt2 is supported")
-    config = runtime.get("model_config")
-    if not isinstance(config, dict):
-        raise _fail("gpt2 runtime requires model_config")
-    expected_config_fields = {
-        "n_layer",
-        "n_embd",
-        "n_head",
-        "n_inner",
-        "vocab_size",
-        "n_positions",
-        "layer_norm_epsilon",
-        "activation_function",
-        "scale_attn_weights",
-        "scale_attn_by_inverse_layer_idx",
-        "reorder_and_upcast_attn",
-        "add_cross_attention",
-    }
-    if set(config) != expected_config_fields:
-        raise _fail(
-            "gpt2 model_config fields do not match the normalized runtime contract"
-        )
-    positive_integer_fields = (
-        "n_layer",
-        "n_embd",
-        "n_head",
-        "n_inner",
-        "vocab_size",
-        "n_positions",
-    )
-    for field in positive_integer_fields:
-        value = config.get(field)
-        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            raise _fail(f"gpt2 model_config {field} must be a positive integer")
-    if config["vocab_size"] < 3 or config["n_positions"] < 3:
-        raise _fail(
-            "gpt2 model_config vocab_size and n_positions must be at least 3 "
-            "for the deterministic probe"
-        )
-    n_embd = config["n_embd"]
-    n_head = config["n_head"]
-    if n_embd % n_head != 0:
-        raise _fail("gpt2 model_config requires n_embd divisible by n_head")
-    epsilon = config.get("layer_norm_epsilon")
-    if (
-        not isinstance(epsilon, (int, float))
-        or isinstance(epsilon, bool)
-        or not math.isfinite(float(epsilon))
-        or epsilon <= 0
-    ):
-        raise _fail("gpt2 model_config layer_norm_epsilon must be positive and finite")
-    if config.get("activation_function") != "gelu_new":
-        raise _fail("unsupported gpt2 activation_function; expected gelu_new")
-    supported_flags = {
-        "scale_attn_weights": True,
-        "scale_attn_by_inverse_layer_idx": False,
-        "reorder_and_upcast_attn": False,
-        "add_cross_attention": False,
-    }
-    for field, expected in supported_flags.items():
-        if config.get(field) is not expected:
-            raise _fail(f"unsupported gpt2 model_config {field}={config.get(field)!r}")
     try:
-        canonical_json(runtime)
+        normalized = validate_normalized_mlx_runtime(runtime)
     except (TypeError, ValueError) as exc:
-        raise _fail("runtime identity must be canonical-JSON serializable") from exc
-    return copy.deepcopy(runtime), _RUNTIME_DTYPES[dtype_name]
+        raise _fail(str(exc)) from exc
+    return normalized, _RUNTIME_DTYPES[normalized["dtype"]]
 
 
 def _validate_range_and_prefixes(
@@ -388,7 +297,9 @@ def _validate_component_ownership(
 
     decoder_keys = component_keys["decoder"]
     expected_decoder_keys = sorted(
-        prefix + suffix for prefix in prefixes for suffix in _GPT2_LAYER_SUFFIXES
+        prefix + suffix
+        for prefix in prefixes
+        for suffix in GPT2_DECODER_TENSOR_SUFFIXES
     )
     if decoder_keys != expected_decoder_keys:
         raise _fail("gpt2 decoder tensor ownership is missing, extra, or mismatched")

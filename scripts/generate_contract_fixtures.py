@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -30,8 +31,10 @@ from mycelium_layer_planner.gossip_adapter import (
 )
 from mycelium_layer_planner.planner import plan_snapshot
 from mycelium_layer_planner.serialization import route_plan_to_dict
+from mycelium_router.layer_builder import build_execution_graph
 from planner_assignment import compile_bound_layer_assignments, validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
+from runtime_contracts import GPT2_DECODER_TENSOR_SUFFIXES
 from weight_provisioning import artifact_report_errors, audit_provisioning
 
 if __package__:
@@ -109,6 +112,25 @@ def manual_route() -> dict[str, Any]:
     return route
 
 
+def _gpt2_weight_map() -> dict[str, str]:
+    weight_map = {
+        "transformer.wte.weight": "shard-1.safetensors",
+        "transformer.wpe.weight": "shard-1.safetensors",
+    }
+    for layer in range(4):
+        shard = "shard-2.safetensors" if layer < 2 else "shard-3.safetensors"
+        for suffix in GPT2_DECODER_TENSOR_SUFFIXES:
+            weight_map[f"transformer.h.{layer}.{suffix}"] = shard
+    weight_map.update(
+        {
+            "transformer.ln_f.weight": "shard-3.safetensors",
+            "transformer.ln_f.bias": "shard-3.safetensors",
+            "lm_head.weight": "shard-3.safetensors",
+        }
+    )
+    return weight_map
+
+
 def model_manifest() -> dict[str, Any]:
     return mm.compile_model_manifest(
         model_id="org/model",
@@ -118,20 +140,22 @@ def model_manifest() -> dict[str, Any]:
             "model_type": "gpt2",
             "architectures": ["GPT2LMHeadModel"],
             "n_layer": 4,
+            "n_embd": 128,
+            "n_head": 4,
+            "n_inner": 512,
+            "vocab_size": 1024,
+            "n_positions": 128,
+            "layer_norm_epsilon": 1e-5,
+            "activation_function": "gelu_new",
+            "scale_attn_weights": True,
+            "scale_attn_by_inverse_layer_idx": False,
+            "reorder_and_upcast_attn": False,
+            "add_cross_attention": False,
             "tie_word_embeddings": False,
         },
         checkpoint_index={
             "metadata": {"total_size": 60},
-            "weight_map": {
-                "transformer.wte.weight": "shard-1.safetensors",
-                "transformer.wpe.weight": "shard-1.safetensors",
-                "transformer.h.0.attn.weight": "shard-2.safetensors",
-                "transformer.h.1.attn.weight": "shard-2.safetensors",
-                "transformer.h.2.attn.weight": "shard-3.safetensors",
-                "transformer.h.3.attn.weight": "shard-3.safetensors",
-                "transformer.ln_f.weight": "shard-3.safetensors",
-                "lm_head.weight": "shard-3.safetensors",
-            },
+            "weight_map": _gpt2_weight_map(),
         },
         file_metadata={
             "shard-1.safetensors": {"size_bytes": 10, "sha256": "1" * 64},
@@ -417,10 +441,92 @@ def control_plane_documents(
     return snapshot, route_wire, tranche
 
 
+def layer_load_proofs(tranche: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build synthetic compatibility proofs with runtime-loadable tensor ownership."""
+    proofs = []
+    for assignment in tranche["assignments"]:
+        probe_width = (
+            assignment["runtime"]["model_config"]["vocab_size"]
+            if "lm_head" in assignment["components"]
+            else assignment["runtime"]["model_config"]["n_embd"]
+        )
+        loaded_identity = {
+            "assignment_id": assignment["assignment_id"],
+            "runtime": assignment["runtime"],
+            "tensor_keys": sorted(assignment["expected_tensor_keys"]),
+        }
+        loaded_digest = hashlib.sha256(
+            json.dumps(
+                loaded_identity,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        probe_digest = hashlib.sha256(
+            f"contract-probe:{assignment['assignment_id']}".encode("utf-8")
+        ).hexdigest()
+        resolved_aliases = {
+            component: {
+                "target_component": target,
+                "tensor_keys": assignment["component_tensor_keys"][component],
+            }
+            for component, target in assignment.get("component_aliases", {}).items()
+        }
+        proofs.append(
+            {
+                "protocol": "mycelium.layer_load_proof.v1",
+                "deployment_id": assignment["deployment_id"],
+                "deployment_epoch": assignment["deployment_epoch"],
+                "assignment_id": assignment["assignment_id"],
+                "node_id": assignment["node_id"],
+                "model_id": assignment["model_id"],
+                "manifest_digest": assignment["manifest_digest"],
+                "resolved_commit": assignment["resolved_commit"],
+                "loaded_range": assignment["range"],
+                "loaded_components": assignment["components"],
+                "loaded_tensor_keys": sorted(assignment["expected_tensor_keys"]),
+                "loaded_tensor_digest": f"sha256:{loaded_digest}",
+                "resolved_component_aliases": resolved_aliases,
+                "runtime": assignment["runtime"],
+                "runtime_identity": {
+                    "backend": "mlx",
+                    "backend_version": "compatibility-fixture",
+                    "device": "gpu",
+                    "dtype": assignment["runtime"]["dtype"],
+                    "quantization": assignment["runtime"]["quantization"],
+                    "architecture": assignment["runtime"]["architecture"],
+                },
+                "probe_shape": [1, 3, probe_width],
+                "probe_digest": f"sha256:{probe_digest}",
+                "load_generation": 1,
+                "control_plane_binding": assignment["control_plane_binding"],
+                "route_ready": False,
+                "claim_boundary": (
+                    "assignment-bound local MLX stage loaded and deterministically probed; "
+                    "no route challenge or distributed inference claim"
+                ),
+            }
+        )
+    build_execution_graph(
+        tranche,
+        proofs,
+        manifest=model_manifest(),
+        runtime_endpoints={
+            proof["assignment_id"]: f"tcp://127.0.0.1:{9100 + index}"
+            for index, proof in enumerate(proofs)
+        },
+        topology_version=1,
+        token_envelope_bytes=1024,
+    )
+    return proofs
+
+
 def documents() -> dict[str, dict[str, Any]]:
     assignments, reports = assignments_and_reports()
     router, allocator, evidence_bundle = gossip_documents()
     planner_evidence_snapshot, _, control_plane_tranche = control_plane_documents(evidence_bundle)
+    load_proofs = layer_load_proofs(control_plane_tranche)
     generated = {
         "route-plan-v2.json": route_plan_to_dict(plan_snapshot(planner_snapshot())),
         "manual-provisioning-route-v1.json": manual_route(),
@@ -432,6 +538,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "gossip-evidence-bundle-v1.json": evidence_bundle,
         "layer-planner-snapshot-v1.json": planner_evidence_snapshot,
         "control-plane-tranche-v1.json": control_plane_tranche,
+        "layer-load-proof-v1.json": load_proofs[0],
     }
     if set(generated) != EXPECTED_FIXTURE_NAMES:
         raise ValueError("generated fixture set differs from authoritative contract registry")

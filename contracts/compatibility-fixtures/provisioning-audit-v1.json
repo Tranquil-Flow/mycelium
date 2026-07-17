@@ -2,7 +2,7 @@
   "all_assignments_verified": true,
   "assignment_bindings": [
     {
-      "assignment_id": "578d8ccb-09c8-5fec-a358-b3e8996ff5cc",
+      "assignment_id": "1d6f4e06-2904-5c52-8d18-315864429791",
       "node_id": "node-a",
       "range": {
         "end_layer_exclusive": 2,
@@ -11,7 +11,7 @@
       }
     },
     {
-      "assignment_id": "25d7c81d-47c1-50f7-8979-184a14e6aa9d",
+      "assignment_id": "663f7f62-ca01-5e07-8f1d-ca9914eb9ae0",
       "node_id": "node-b",
       "range": {
         "end_layer_exclusive": 4,
@@ -25,7 +25,7 @@
   "deployment_id": "12345678-1234-5678-1234-567812345678",
   "errors": [],
   "model": {
-    "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+    "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
     "model_id": "org/model",
     "num_layers": 4,
     "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

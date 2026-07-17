@@ -15,6 +15,17 @@ class LayerAssignmentTests(unittest.TestCase):
             "model_type": "gpt2",
             "architectures": ["GPT2LMHeadModel"],
             "n_layer": 3,
+            "n_embd": 4,
+            "n_head": 2,
+            "n_inner": 8,
+            "vocab_size": 7,
+            "n_positions": 8,
+            "layer_norm_epsilon": 1e-5,
+            "activation_function": "gelu_new",
+            "scale_attn_weights": True,
+            "scale_attn_by_inverse_layer_idx": False,
+            "reorder_and_upcast_attn": False,
+            "add_cross_attention": False,
             "tie_word_embeddings": False,
          },
          checkpoint_index={
@@ -46,6 +57,17 @@ class LayerAssignmentTests(unittest.TestCase):
             "model_type": "gpt2",
             "architectures": ["GPT2LMHeadModel"],
             "n_layer": 3,
+            "n_embd": 4,
+            "n_head": 2,
+            "n_inner": 8,
+            "vocab_size": 7,
+            "n_positions": 8,
+            "layer_norm_epsilon": 1e-5,
+            "activation_function": "gelu_new",
+            "scale_attn_weights": True,
+            "scale_attn_by_inverse_layer_idx": False,
+            "reorder_and_upcast_attn": False,
+            "add_cross_attention": False,
             "tie_word_embeddings": True,
          },
          checkpoint_index={
@@ -139,6 +161,49 @@ class LayerAssignmentTests(unittest.TestCase):
       self.assertEqual(node_a["resolved_commit"], "a" * 40)
       self.assertEqual(node_a["manifest_digest"], mm.manifest_digest_ref(self.manifest()))
       self.assertFalse(node_a["route_ready"])
+
+   def test_mlx_assignment_binds_normalized_model_runtime_from_manifest(self):
+      manifest = self.manifest()
+      assignments = la.compile_layer_assignments(
+         route_plan=self.route(),
+         manifest=manifest,
+         deployment_id="12345678-1234-5678-1234-567812345678",
+         deployment_epoch=1,
+         cache_roots={"node-a": "/tmp/a", "node-b": "/tmp/b"},
+         runtime_by_node={
+            node: {"backend": "mlx", "dtype": "float16", "quantization": "none"}
+            for node in ("node-a", "node-b")
+         },
+      )
+
+      for assignment in assignments:
+         self.assertEqual(
+            assignment["runtime"],
+            {
+               "backend": "mlx",
+               "dtype": "float16",
+               "quantization": "none",
+               **manifest["runtime_model"],
+            },
+         )
+         la.validate_assignment_identity(assignment)
+
+   def test_node_runtime_cannot_override_manifest_model_identity(self):
+      runtime = {
+         "backend": "mlx",
+         "dtype": "float16",
+         "quantization": "none",
+         "architecture": "attacker-model",
+      }
+      with self.assertRaisesRegex(ValueError, "runtime fields"):
+         la.compile_layer_assignments(
+            route_plan=self.route(),
+            manifest=self.manifest(),
+            deployment_id="12345678-1234-5678-1234-567812345678",
+            deployment_epoch=1,
+            cache_roots={"node-a": "/tmp/a", "node-b": "/tmp/b"},
+            runtime_by_node={"node-a": runtime, "node-b": runtime},
+         )
 
    def test_tied_lm_head_assignment_receives_embedding_source(self):
       manifest = self.tied_manifest()

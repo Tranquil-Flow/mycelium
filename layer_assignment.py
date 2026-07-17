@@ -10,6 +10,7 @@ from typing import Any
 
 import model_manifest as mm
 from route_contract import upgrade_legacy_route_plan_v1, validate_layer_range, validate_manual_provisioning_route_v1
+from runtime_contracts import MLX_RUNTIME_BASE_FIELDS, validate_normalized_mlx_runtime
 
 
 def _canonical(document: Any) -> str:
@@ -69,12 +70,28 @@ def validate_assignment_identity(assignment: dict[str, Any]) -> None:
       raise ValueError("assignment route_ready must be false until runtime activation")
 
 
-def _validate_runtime(runtime: dict[str, Any], node_id: str) -> None:
+def _normalize_runtime(
+   runtime: Any, node_id: str, manifest: dict[str, Any]
+) -> dict[str, Any]:
    if not isinstance(runtime, dict):
       raise ValueError(f"runtime identity missing for {node_id}")
+   if set(runtime) != MLX_RUNTIME_BASE_FIELDS:
+      raise ValueError(
+         f"runtime fields for {node_id} must be backend, dtype, and quantization"
+      )
    for field in ("backend", "dtype", "quantization"):
       if not isinstance(runtime.get(field), str) or not runtime[field]:
          raise ValueError(f"runtime {field} missing for {node_id}")
+   normalized = copy.deepcopy(runtime)
+   if runtime["backend"] == "mlx":
+      runtime_model = manifest.get("runtime_model")
+      if not isinstance(runtime_model, dict):
+         raise ValueError(
+            f"manifest lacks normalized MLX runtime model for {node_id}"
+         )
+      normalized.update(copy.deepcopy(runtime_model))
+      normalized = validate_normalized_mlx_runtime(normalized)
+   return normalized
 
 
 def validate_target_cache_root(value: str, node_id: str = "peer") -> str:
@@ -131,8 +148,7 @@ def compile_layer_assignments(
       validate_layer_range(layer_range, num_layers=manifest["num_layers"])
       cache_root_raw = cache_roots.get(node_id)
       cache_root = validate_target_cache_root(cache_root_raw, node_id)
-      runtime = runtime_by_node.get(node_id)
-      _validate_runtime(runtime, node_id)
+      runtime = _normalize_runtime(runtime_by_node.get(node_id), node_id, manifest)
 
       layers = range(layer_range["start_layer"], layer_range["end_layer_exclusive"])
       static_tensor_keys = manifest.get("component_tensor_keys", {})
