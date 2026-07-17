@@ -31,6 +31,15 @@ def digest(path):
    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def route_model(num_layers):
+   return {
+      "model_id": "org/model",
+      "num_layers": num_layers,
+      "manifest_digest": "sha256:" + "a" * 64,
+      "resolved_commit": "b" * 40,
+   }
+
+
 class WeightProvisioningTests(unittest.TestCase):
    def make_assignment(self, source, cache):
       shard_a = source / "shard-a.safetensors"
@@ -38,7 +47,7 @@ class WeightProvisioningTests(unittest.TestCase):
       write_safetensors(shard_a, ["h.0.attn.weight", "h.1.attn.weight"])
       write_safetensors(shard_b, ["h.1.mlp.weight"])
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
+         "protocol": "mycelium.layer_assignment.v2",
          "deployment_id": "12345678-1234-5678-1234-567812345678",
          "deployment_epoch": 1,
          "assignment_id": "87654321-4321-8765-4321-876543218765",
@@ -48,6 +57,10 @@ class WeightProvisioningTests(unittest.TestCase):
          "resolved_commit": "b" * 40,
          "range": {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
          "components": ["decoder"],
+         "component_tensor_keys": {
+            "decoder": ["h.0.attn.weight", "h.1.attn.weight", "h.1.mlp.weight"],
+         },
+         "component_aliases": {},
          "expected_tensor_prefixes": ["h.0.", "h.1."],
          "expected_tensor_keys": ["h.0.attn.weight", "h.1.attn.weight", "h.1.mlp.weight"],
          "files": [
@@ -232,15 +245,16 @@ class WeightProvisioningTests(unittest.TestCase):
    def test_coordinator_audit_rejects_wrong_report_protocol(self):
       route = {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
-         "model": {"model_id": "org/model", "num_layers": 1},
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": route_model(1),
          "route": [{
             "node_id": "node-a",
             "range": {"start_layer": 0, "end_layer_exclusive": 1, "layer_count": 1},
          }],
       }
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
+         "protocol": "mycelium.layer_assignment.v2",
          "deployment_id": "12345678-1234-5678-1234-567812345678",
          "deployment_epoch": 1,
          "assignment_id": "87654321-4321-8765-4321-876543218765",
@@ -264,15 +278,16 @@ class WeightProvisioningTests(unittest.TestCase):
    def test_coordinator_audit_rejects_duplicate_node_evidence(self):
       route = {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
-         "model": {"model_id": "org/model", "num_layers": 1},
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": route_model(1),
          "route": [{
             "node_id": "node-a",
             "range": {"start_layer": 0, "end_layer_exclusive": 1, "layer_count": 1},
          }],
       }
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
+         "protocol": "mycelium.layer_assignment.v2",
          "deployment_id": "12345678-1234-5678-1234-567812345678",
          "deployment_epoch": 1,
          "assignment_id": "87654321-4321-8765-4321-876543218765",
@@ -296,15 +311,16 @@ class WeightProvisioningTests(unittest.TestCase):
    def test_coordinator_audit_accepts_verified_reports_without_activating_route(self):
       route = {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
-         "model": {"model_id": "org/model", "num_layers": 2},
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": route_model(2),
          "route": [{
             "node_id": "node-a",
             "range": {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
          }],
       }
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
+         "protocol": "mycelium.layer_assignment.v2",
          "deployment_id": "12345678-1234-5678-1234-567812345678",
          "deployment_epoch": 1,
          "assignment_id": "87654321-4321-8765-4321-876543218765",
@@ -314,7 +330,8 @@ class WeightProvisioningTests(unittest.TestCase):
          "resolved_commit": "b" * 40,
          "range": route["route"][0]["range"],
          "components": ["decoder"],
-         "artifact_cache_root": "/tmp/node-a",
+         "component_tensor_keys": {"decoder": ["h.0.weight", "h.1.weight"]},
+         "component_aliases": {},
          "expected_tensor_prefixes": ["h.0.", "h.1."],
          "expected_tensor_keys": ["h.0.weight", "h.1.weight"],
          "files": [{
@@ -322,6 +339,7 @@ class WeightProvisioningTests(unittest.TestCase):
             "size_bytes": 123,
             "content_digest": "sha256:" + "c" * 64,
          }],
+         "artifact_cache_root": "/tmp/node-a",
          "runtime": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
          "route_ready": False,
       }
@@ -346,12 +364,47 @@ class WeightProvisioningTests(unittest.TestCase):
       self.assertTrue(audit["all_assignments_verified"])
       self.assertTrue(audit["ready_for_runtime_load"])
       self.assertFalse(audit["route_ready"])
+      self.assertEqual(audit["model"], route["model"])
+      self.assertEqual(audit["deployment_id"], assignment["deployment_id"])
+      self.assertEqual(audit["deployment_epoch"], assignment["deployment_epoch"])
+      self.assertEqual(
+         audit["assignment_bindings"],
+         [{
+            "node_id": "node-a",
+            "assignment_id": assignment["assignment_id"],
+            "range": route["route"][0]["range"],
+         }],
+      )
+
+   def test_coordinator_audit_rejects_route_model_identity_drift(self):
+      route = {
+         "ok": True,
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": route_model(2),
+         "route": [{
+            "node_id": "node-a",
+            "range": {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
+         }],
+      }
+      with tempfile.TemporaryDirectory() as td:
+         root = Path(td)
+         source = root / "source"
+         source.mkdir()
+         assignment = self.make_assignment(source, root / "cache")
+      route["model"]["manifest_digest"] = "sha256:" + "f" * 64
+
+      audit = wp.audit_provisioning(route, [assignment], [])
+
+      self.assertFalse(audit["all_assignments_verified"])
+      self.assertIn("manifest_digest does not match route", " ".join(audit["errors"]))
 
    def test_coordinator_audit_rejects_invalid_assignment_identity(self):
       route = {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
-         "model": {"model_id": "org/model", "num_layers": 2},
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": route_model(2),
          "route": [{"node_id": "node-a", "range": {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2}}],
       }
       with tempfile.TemporaryDirectory() as td:
@@ -379,15 +432,16 @@ class WeightProvisioningTests(unittest.TestCase):
    def test_coordinator_audit_rejects_forged_file_digest_and_byte_evidence(self):
       route = {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
-         "model": {"model_id": "org/model", "num_layers": 1},
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": route_model(1),
          "route": [{
             "node_id": "node-a",
             "range": {"start_layer": 0, "end_layer_exclusive": 1, "layer_count": 1},
          }],
       }
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
+         "protocol": "mycelium.layer_assignment.v2",
          "deployment_id": "12345678-1234-5678-1234-567812345678",
          "deployment_epoch": 1,
          "assignment_id": "87654321-4321-8765-4321-876543218765",
@@ -397,7 +451,8 @@ class WeightProvisioningTests(unittest.TestCase):
          "resolved_commit": "b" * 40,
          "range": route["route"][0]["range"],
          "components": ["decoder"],
-         "artifact_cache_root": "/tmp/node-a",
+         "component_tensor_keys": {"decoder": ["h.0.weight"]},
+         "component_aliases": {},
          "expected_tensor_prefixes": ["h.0."],
          "expected_tensor_keys": ["h.0.weight"],
          "files": [{
@@ -405,7 +460,11 @@ class WeightProvisioningTests(unittest.TestCase):
             "size_bytes": 123,
             "content_digest": "sha256:" + "c" * 64,
          }],
+         "artifact_cache_root": "/tmp/node-a",
+         "runtime": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+         "route_ready": False,
       }
+      assignment["assignment_id"] = la.assignment_id_for(assignment)
       forged = {
          **assignment,
          "protocol": "mycelium.artifact_verification_report.v1",

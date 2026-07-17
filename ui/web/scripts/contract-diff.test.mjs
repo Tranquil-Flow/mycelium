@@ -11,12 +11,12 @@ const scriptPath = fileURLToPath(new URL('./contract-diff.mjs', import.meta.url)
 
 test('ignores scalar values and array cardinality when JSON contract shape is stable', () => {
   const baseline = {
-    protocol: 'mycelium.route_plan.v2',
+    protocol: 'mycelium.manual_provisioning_route.v1',
     ok: true,
     route: [{ node_id: 'node-a', range: { start_layer: 0, end_layer_exclusive: 3 } }],
   };
   const candidate = {
-    protocol: 'mycelium.route_plan.v2',
+    protocol: 'mycelium.manual_provisioning_route.v1',
     ok: false,
     route: [
       { node_id: 'peer-x', range: { start_layer: 0, end_layer_exclusive: 2 } },

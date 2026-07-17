@@ -11,7 +11,7 @@
     "http-peer-b"
   ],
   "ok": true,
-  "protocol": "mycelium.route_plan.v2",
+  "protocol": "mycelium.manual_provisioning_route.v1",
   "route": [
     {
       "node_id": "http-peer-a",

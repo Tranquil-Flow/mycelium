@@ -38,7 +38,7 @@ def verify_manifest_digest(manifest: dict[str, Any]) -> bool:
    return supplied == _digest_document(unsigned)
 
 
-def _static_component_files(
+def _static_component_tensor_keys(
    weight_map: dict[str, str],
    components: dict[str, tuple[str, ...]],
 ) -> dict[str, list[str]]:
@@ -46,13 +46,33 @@ def _static_component_files(
    for name, prefixes in components.items():
       if name == "decoder":
          continue
-      matching = {
-         filename
-         for tensor, filename in weight_map.items()
+      result[name] = sorted(
+         tensor
+         for tensor in weight_map
          if any("{layer}" not in prefix and tensor.startswith(prefix) for prefix in prefixes)
-      }
-      result[name] = sorted(matching)
+      )
    return result
+
+
+def _component_files(
+   weight_map: dict[str, str],
+   component_tensor_keys: dict[str, list[str]],
+) -> dict[str, list[str]]:
+   return {
+      name: sorted({weight_map[key] for key in keys})
+      for name, keys in component_tensor_keys.items()
+   }
+
+
+def _is_causal_lm(config: dict[str, Any]) -> bool:
+   architectures = config.get("architectures")
+   return isinstance(architectures, list) and any(
+      isinstance(name, str) and (
+         name.endswith("ForCausalLM")
+         or name in {"GPT2LMHeadModel"}
+      )
+      for name in architectures
+   )
 
 
 def compile_model_manifest(
@@ -80,14 +100,37 @@ def compile_model_manifest(
       raise ValueError("checkpoint weight_map must map tensor names to files")
 
    adapter = adapter_for_config(config)
+   adapter.validate_architectures(config)
    num_layers = adapter.layer_count(config)
+   block_prefix_template = None
+   for candidate in (
+      adapter.block_prefix_template,
+      *adapter.alternate_block_prefix_templates,
+   ):
+      if all(
+         any(key.startswith(candidate.format(layer=layer)) for key in weight_map)
+         for layer in range(num_layers)
+      ):
+         block_prefix_template = candidate
+         break
+   if block_prefix_template is None:
+      for layer in range(num_layers):
+         if not any(
+            key.startswith(candidate.format(layer=layer))
+            for candidate in (
+               adapter.block_prefix_template,
+               *adapter.alternate_block_prefix_templates,
+            )
+            for key in weight_map
+         ):
+            raise ValueError(f"missing tensor coverage for layer {layer}")
+      raise ValueError("layer tensors mix incompatible checkpoint namespaces")
+
    tensor_keys_by_layer: dict[str, list[str]] = {}
    layer_files: dict[str, list[str]] = {}
    for layer in range(num_layers):
-      prefix = adapter.block_prefix_template.format(layer=layer)
+      prefix = block_prefix_template.format(layer=layer)
       keys = sorted(key for key in weight_map if key.startswith(prefix))
-      if not keys:
-         raise ValueError(f"missing tensor coverage for layer {layer}")
       tensor_keys_by_layer[str(layer)] = keys
       layer_files[str(layer)] = sorted({weight_map[key] for key in keys})
 
@@ -115,6 +158,40 @@ def compile_model_manifest(
       files.append(record)
 
    components = {name: list(prefixes) for name, prefixes in adapter.components.items()}
+   component_tensor_keys = _static_component_tensor_keys(weight_map, adapter.components)
+   recognized_tensor_keys = {
+      key
+      for keys in tensor_keys_by_layer.values()
+      for key in keys
+   }
+   recognized_tensor_keys.update(
+      key
+      for keys in component_tensor_keys.values()
+      for key in keys
+   )
+   unowned_tensor_keys = sorted(set(weight_map) - recognized_tensor_keys)
+   if unowned_tensor_keys:
+      preview = ", ".join(unowned_tensor_keys[:5])
+      suffix = "" if len(unowned_tensor_keys) <= 5 else f" (+{len(unowned_tensor_keys) - 5} more)"
+      raise ValueError(f"unowned tensor keys for {adapter.architecture}: {preview}{suffix}")
+   component_aliases: dict[str, str] = {}
+   if _is_causal_lm(config):
+      for required in ("input_embedding", "final_norm"):
+         if not component_tensor_keys.get(required):
+            raise ValueError(f"causal LM missing {required} tensor coverage")
+      if config.get("tie_word_embeddings") is True:
+         tied_keys = sorted(
+            key
+            for key in weight_map
+            if any(key.startswith(prefix) for prefix in adapter.tied_lm_head_source)
+         )
+         if not tied_keys:
+            raise ValueError("tied lm_head source tensor coverage missing")
+         component_tensor_keys["lm_head"] = tied_keys
+         component_aliases["lm_head"] = "input_embedding"
+      elif not component_tensor_keys.get("lm_head"):
+         raise ValueError("causal LM missing lm_head tensors without explicit tied embeddings")
+   component_files = _component_files(weight_map, component_tensor_keys)
    manifest = {
       "protocol": "mycelium.model_manifest.v1",
       "model_id": model_id,
@@ -125,9 +202,11 @@ def compile_model_manifest(
       "index_file": index_file,
       "architecture": adapter.architecture,
       "num_layers": num_layers,
-      "block_prefix_template": adapter.block_prefix_template,
+      "block_prefix_template": block_prefix_template,
       "components": components,
-      "component_files": _static_component_files(weight_map, adapter.components),
+      "component_tensor_keys": component_tensor_keys,
+      "component_aliases": component_aliases,
+      "component_files": component_files,
       "files": files,
       "layer_files": layer_files,
       "tensor_keys_by_layer": tensor_keys_by_layer,

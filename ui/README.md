@@ -37,8 +37,8 @@ The contract-diff command reads two JSON files and reports normalized field-path
 ```bash
 cd ui/web
 npm run contracts:diff -- \
-  --baseline ../tests/fixtures/source/route-plan-v2.json \
-  --candidate /absolute/path/to/new-route-plan.json
+  --baseline ../tests/fixtures/source/manual-provisioning-route-v1.json \
+  --candidate /absolute/path/to/new-manual-provisioning-route.json
 ```
 
 Useful flags:

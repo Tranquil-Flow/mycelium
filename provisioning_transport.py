@@ -21,7 +21,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 import model_manifest as mm
 from layer_assignment import compile_layer_assignments, validate_assignment_identity
-from route_contract import validate_route_plan_v2
+from route_contract import validate_manual_provisioning_route_v1
 from weight_provisioning import artifact_report_errors, audit_provisioning, provision_assignment
 
 
@@ -71,7 +71,7 @@ def _validate_bundle(
    deployment_id: str | None = None,
    deployment_epoch: int | None = None,
 ) -> None:
-   validate_route_plan_v2(route_plan)
+   validate_manual_provisioning_route_v1(route_plan)
    route_nodes = [stage["node_id"] for stage in route_plan["route"]]
    assignment_nodes = [assignment.get("node_id") for assignment in assignments]
    if len(set(assignment_nodes)) != len(assignment_nodes):
@@ -83,7 +83,7 @@ def _validate_bundle(
    identity = None
    route_by_node = {stage["node_id"]: stage for stage in route_plan["route"]}
    for assignment in assignments:
-      if assignment.get("protocol") != "mycelium.layer_assignment.v1":
+      if assignment.get("protocol") != "mycelium.layer_assignment.v2":
          raise ValueError("invalid assignment protocol")
       node_id = assignment["node_id"]
       assignment_id = assignment.get("assignment_id")

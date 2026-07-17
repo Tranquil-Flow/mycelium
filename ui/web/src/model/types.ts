@@ -281,7 +281,7 @@ export interface ProvisioningEvidence {
   readonly nodeIds: readonly string[];
   readonly assignments: readonly ProvisioningAssignment[];
   readonly protocols: {
-    readonly routePlan: 'mycelium.route_plan.v2';
+    readonly manualProvisioningRoute: 'mycelium.manual_provisioning_route.v1';
     readonly provisioningAudit: 'mycelium.provisioning_audit.v1';
   };
   readonly auditedAt: string;
@@ -293,7 +293,7 @@ export interface ProvisioningEvidence {
   readonly provenance: EvidenceProvenance;
   readonly claimBoundary: string;
   readonly sourceClaimBoundaries: {
-    readonly routePlan: string;
+    readonly manualProvisioningRoute: string;
     readonly provisioningAudit: string;
   };
 }

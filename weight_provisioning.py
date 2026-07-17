@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from layer_assignment import validate_assignment_identity, validate_target_cache_root
-from route_contract import validate_route_plan_v2
+from route_contract import validate_manual_provisioning_route_v1
 
 
 _SHA256_REF_RE = re.compile(r"^sha256:([0-9a-f]{64})$")
@@ -96,8 +96,8 @@ def safetensors_tensor_names(path: str | Path) -> set[str]:
 
 
 def _validate_assignment(assignment: dict[str, Any]) -> None:
-   if assignment.get("protocol") != "mycelium.layer_assignment.v1":
-      raise ValueError("expected mycelium.layer_assignment.v1")
+   if assignment.get("protocol") != "mycelium.layer_assignment.v2":
+      raise ValueError("expected mycelium.layer_assignment.v2")
    validate_assignment_identity(assignment)
    if not _COMMIT_RE.fullmatch(str(assignment.get("resolved_commit", ""))):
       raise ValueError("assignment resolved_commit must be immutable 40-hex")
@@ -387,7 +387,7 @@ def audit_provisioning(
    assignments: list[dict[str, Any]],
    reports: list[dict[str, Any]],
 ) -> dict[str, Any]:
-   validate_route_plan_v2(route_plan)
+   validate_manual_provisioning_route_v1(route_plan)
    errors = []
    route_nodes = {stage["node_id"] for stage in route_plan["route"]}
 
@@ -409,10 +409,14 @@ def audit_provisioning(
    reports_by_node = index_evidence(reports, "report")
 
    deployment_identity = None
+   route_model = route_plan["model"]
    for assignment in assignments:
       node_id = assignment.get("node_id", "<unknown>")
-      if assignment.get("protocol") != "mycelium.layer_assignment.v1":
+      if assignment.get("protocol") != "mycelium.layer_assignment.v2":
          errors.append(f"{node_id} wrong assignment protocol")
+      for field in ("model_id", "manifest_digest", "resolved_commit"):
+         if assignment.get(field) != route_model.get(field):
+            errors.append(f"{node_id} assignment {field} does not match route")
       identity = tuple(
          assignment.get(field)
          for field in ("deployment_id", "deployment_epoch", "manifest_digest", "resolved_commit")
@@ -423,6 +427,7 @@ def audit_provisioning(
          errors.append(f"{node_id} assignment deployment identity mismatch")
 
    verified_nodes = []
+   assignment_bindings = []
    for stage in route_plan["route"]:
       node_id = stage["node_id"]
       assignment = assignments_by_node.get(node_id)
@@ -430,6 +435,11 @@ def audit_provisioning(
       if assignment is None:
          errors.append(f"missing assignment for {node_id}")
          continue
+      assignment_bindings.append({
+         "node_id": node_id,
+         "assignment_id": assignment.get("assignment_id"),
+         "range": stage["range"],
+      })
       if report is None:
          errors.append(f"missing report for {node_id}")
          continue
@@ -443,6 +453,10 @@ def audit_provisioning(
    all_verified = not errors and len(verified_nodes) == len(route_plan["route"])
    return {
       "protocol": "mycelium.provisioning_audit.v1",
+      "model": dict(route_model),
+      "deployment_id": deployment_identity[0] if deployment_identity is not None else None,
+      "deployment_epoch": deployment_identity[1] if deployment_identity is not None else None,
+      "assignment_bindings": assignment_bindings,
       "all_assignments_verified": all_verified,
       "ready_for_runtime_load": all_verified,
       "route_ready": False,
@@ -451,3 +465,33 @@ def audit_provisioning(
       "claim_boundary": "artifact provisioning only; runtime layer load, stage probe, and route challenge remain required",
       "timestamp": _timestamp(),
    }
+
+
+def provisioning_audit_errors(
+   route_plan: dict[str, Any],
+   assignments: list[dict[str, Any]],
+   reports: list[dict[str, Any]],
+   audit: Any,
+) -> list[str]:
+   """Validate one serialized audit against its complete route/evidence tranche."""
+   if not isinstance(audit, dict):
+      return ["provisioning audit must be an object"]
+   try:
+      expected = audit_provisioning(route_plan, assignments, reports)
+   except Exception as exc:
+      return [f"cannot validate provisioning audit inputs: {exc}"]
+
+   errors: list[str] = []
+   expected_fields = set(expected)
+   actual_fields = set(audit)
+   for field in sorted(expected_fields - actual_fields):
+      errors.append(f"provisioning audit missing field: {field}")
+   for field in sorted(actual_fields - expected_fields):
+      errors.append(f"provisioning audit has unexpected field: {field}")
+   for field in sorted(expected_fields - {"timestamp"}):
+      if audit.get(field) != expected[field]:
+         errors.append(f"provisioning audit {field} does not match evidence tranche")
+   timestamp = audit.get("timestamp")
+   if not isinstance(timestamp, str) or not timestamp.strip():
+      errors.append("provisioning audit timestamp must be a non-empty string")
+   return errors

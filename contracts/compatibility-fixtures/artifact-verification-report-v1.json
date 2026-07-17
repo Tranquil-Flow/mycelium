@@ -1,0 +1,39 @@
+{
+  "artifact_cache_root": "/var/lib/mycelium/node-a",
+  "assignment_id": "578d8ccb-09c8-5fec-a358-b3e8996ff5cc",
+  "cache_hit_bytes": 30,
+  "claim_boundary": "fixture proves artifact identity only; runtime layers are not loaded",
+  "deployment_epoch": 1,
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "expected_bytes": 30,
+  "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+  "network_download_bytes": 0,
+  "node_id": "node-a",
+  "protocol": "mycelium.artifact_verification_report.v1",
+  "range": {
+    "end_layer_exclusive": 2,
+    "layer_count": 2,
+    "start_layer": 0
+  },
+  "ready_for_load": true,
+  "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "route_ready": false,
+  "timestamp": "2026-07-17T00:00:00+00:00",
+  "verified_files": [
+    {
+      "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "path": "shard-1.safetensors",
+      "size_bytes": 10
+    },
+    {
+      "content_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "path": "shard-2.safetensors",
+      "size_bytes": 20
+    }
+  ],
+  "verified_tensor_count": 4,
+  "verified_tensor_prefixes": [
+    "transformer.h.0.",
+    "transformer.h.1."
+  ]
+}

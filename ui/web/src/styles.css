@@ -1906,12 +1906,12 @@ p {
   justify-self: start;
 }
 
-.scope-boundary-grid .route-plan-boundary {
+.scope-boundary-grid .manual-provisioning-route-boundary {
   border-color: #4f4267;
   background: #171321;
 }
 
-.scope-boundary-grid .route-plan-boundary .boundary-marker {
+.scope-boundary-grid .manual-provisioning-route-boundary .boundary-marker {
   color: var(--violet);
   border-color: #5c4e78;
 }

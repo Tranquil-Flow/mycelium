@@ -1,0 +1,33 @@
+{
+  "claim_boundary": "manual provisioning order only; not product Planner output",
+  "model": {
+    "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+    "model_id": "org/model",
+    "num_layers": 4,
+    "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "node_order": [
+    "node-a",
+    "node-b"
+  ],
+  "ok": true,
+  "protocol": "mycelium.manual_provisioning_route.v1",
+  "route": [
+    {
+      "node_id": "node-a",
+      "range": {
+        "end_layer_exclusive": 2,
+        "layer_count": 2,
+        "start_layer": 0
+      }
+    },
+    {
+      "node_id": "node-b",
+      "range": {
+        "end_layer_exclusive": 4,
+        "layer_count": 2,
+        "start_layer": 2
+      }
+    }
+  ]
+}

@@ -40,7 +40,7 @@ class DemoWeightProvisioningTests(unittest.TestCase):
          deployment_id="12345678-1234-5678-1234-567812345678",
          deployment_epoch=1,
       )
-      self.assertEqual(route["protocol"], "mycelium.route_plan.v2")
+      self.assertEqual(route["protocol"], "mycelium.manual_provisioning_route.v1")
       self.assertEqual(route["node_order"], ["m4pro", "evis-macbook-pro-1"])
       self.assertEqual(route["route"][0]["range"]["end_layer_exclusive"], 2)
       self.assertEqual(len(assignments), 2)
@@ -81,6 +81,8 @@ class DemoWeightProvisioningTests(unittest.TestCase):
          self.assertEqual(set(written), {"manifest", "route", "assignments", "deployment"})
          deployment_path = Path(written["deployment"])
          deployment = json.loads(deployment_path.read_text())
+         self.assertEqual(deployment["route"], "manual-provisioning-route-v1.json")
+         self.assertFalse((deployment_path.parent / "route-plan-v2.json").exists())
          self.assertEqual(set(deployment["assignments"]), {"node-a", "node-b"})
          artifact_references = [
             deployment["manifest"],

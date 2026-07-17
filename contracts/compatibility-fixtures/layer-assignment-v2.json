@@ -1,0 +1,60 @@
+{
+  "artifact_cache_root": "/var/lib/mycelium/node-a",
+  "assignment_id": "578d8ccb-09c8-5fec-a358-b3e8996ff5cc",
+  "claim_boundary": "minimal upstream shards assigned; runtime has not loaded or probed layers",
+  "component_aliases": {},
+  "component_tensor_keys": {
+    "decoder": [
+      "transformer.h.0.attn.weight",
+      "transformer.h.1.attn.weight"
+    ],
+    "input_embedding": [
+      "transformer.wpe.weight",
+      "transformer.wte.weight"
+    ]
+  },
+  "components": [
+    "input_embedding",
+    "decoder"
+  ],
+  "deployment_epoch": 1,
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "expected_tensor_keys": [
+    "transformer.h.0.attn.weight",
+    "transformer.h.1.attn.weight",
+    "transformer.wpe.weight",
+    "transformer.wte.weight"
+  ],
+  "expected_tensor_prefixes": [
+    "transformer.h.0.",
+    "transformer.h.1."
+  ],
+  "files": [
+    {
+      "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "path": "shard-1.safetensors",
+      "size_bytes": 10
+    },
+    {
+      "content_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "path": "shard-2.safetensors",
+      "size_bytes": 20
+    }
+  ],
+  "manifest_digest": "sha256:ef766c09c58656512fe01f1d12199e03de5e779ca785eee16ac0b63129872356",
+  "model_id": "org/model",
+  "node_id": "node-a",
+  "protocol": "mycelium.layer_assignment.v2",
+  "range": {
+    "end_layer_exclusive": 2,
+    "layer_count": 2,
+    "start_layer": 0
+  },
+  "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "route_ready": false,
+  "runtime": {
+    "backend": "mlx",
+    "dtype": "float16",
+    "quantization": "none"
+  }
+}

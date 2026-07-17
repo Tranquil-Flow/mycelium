@@ -77,8 +77,8 @@ export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceView
     },
     {
       kind: 'PLAN',
-      name: 'route-plan-v2.json',
-      detail: `separate provisioning scope · ${provisioning.protocols.routePlan}`,
+      name: 'manual-provisioning-route-v1.json',
+      detail: `separate provisioning scope · ${provisioning.protocols.manualProvisioningRoute}`,
       provenance: provisioning.provenance,
     },
     {
@@ -128,8 +128,8 @@ export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceView
 
         <div className="scope-protocols" aria-label="Provisioning source protocols">
           <div>
-            <span>Route plan protocol</span>
-            <code>{provisioning.protocols.routePlan}</code>
+            <span>Manual provisioning route protocol</span>
+            <code>{provisioning.protocols.manualProvisioningRoute}</code>
           </div>
           <div>
             <span>Provisioning audit protocol</span>
@@ -195,14 +195,14 @@ export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceView
             <span className="source-protocol">{provisioning.protocols.provisioningAudit}</span>
           </article>
 
-          <article className="claim-boundary route-plan-boundary" aria-labelledby="plan-boundary-title">
+          <article className="claim-boundary manual-provisioning-route-boundary" aria-labelledby="plan-boundary-title">
             <div className="boundary-marker" aria-hidden="true">!</div>
             <div>
-              <p className="panel-kicker">Verbatim route-plan boundary</p>
+              <p className="panel-kicker">Verbatim manual provisioning route boundary</p>
               <h4 id="plan-boundary-title">Allocation source limit</h4>
-              <blockquote>{provisioning.sourceClaimBoundaries.routePlan}</blockquote>
+              <blockquote>{provisioning.sourceClaimBoundaries.manualProvisioningRoute}</blockquote>
             </div>
-            <span className="source-protocol">{provisioning.protocols.routePlan}</span>
+            <span className="source-protocol">{provisioning.protocols.manualProvisioningRoute}</span>
           </article>
         </div>
       </section>

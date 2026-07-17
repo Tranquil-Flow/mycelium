@@ -13,7 +13,12 @@ from mycelium_gossip.service import (
     PeerState,
     QuarantineEntry,
 )
-from mycelium_gossip.views import build_allocator_view, build_router_view
+from mycelium_gossip.views import (
+    allocator_view_to_dict,
+    build_allocator_view,
+    build_router_view,
+    router_view_to_dict,
+)
 from tests.gossip.helpers import link_payload, make_record, offering_payload, status_payload
 
 
@@ -97,6 +102,22 @@ def test_router_view_exposes_frozen_evidence_not_route_decisions() -> None:
     assert view.edges[0].eligible is True
     assert not hasattr(view, "selected_route")
     assert not hasattr(view, "score")
+
+
+def test_derived_views_have_distinct_versioned_wire_envelopes() -> None:
+    clock = FakeClock()
+    store = populated_store(clock)
+    peers = (alive("node-a"), alive("node-b"))
+
+    router_payload = router_view_to_dict(build_router_view(store.snapshot(), peers, ()))
+    allocator_payload = allocator_view_to_dict(build_allocator_view(store.snapshot(), peers, ()))
+
+    assert router_payload["protocol"] == "mycelium.gossip.router_view.v1"
+    assert allocator_payload["protocol"] == "mycelium.gossip.allocator_view.v1"
+    assert router_payload["nodes"][0]["peer_state"] == "alive"
+    assert allocator_payload["nodes"][0]["peer_state"] == "alive"
+    assert len(router_payload["eligibility_generation"]) == 64
+    assert len(allocator_payload["eligibility_generation"]) == 64
 
 
 def test_old_incarnation_link_is_retired_after_source_restart() -> None:

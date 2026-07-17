@@ -1,0 +1,73 @@
+{
+  "eligibility_generation": "364a40b0c0edab15411adf5531c2075bc5a54eb8aac0c8468282f16eda6a562c",
+  "nodes": [
+    {
+      "boot_id": "boot-node-a-1",
+      "concurrency_limit": 2,
+      "eligible": true,
+      "exclusion_reasons": [],
+      "in_flight": 0,
+      "incarnation": 1,
+      "memory_domains": [
+        {
+          "allocatable_after_reservations_bytes": 34359738368,
+          "committed_bytes": 8589934592,
+          "kind": "unified",
+          "memory_domain_id": "unified-0",
+          "reclaimable_bytes": 2147483648,
+          "reservation_generation": 1,
+          "total_bytes": 51539607552
+        }
+      ],
+      "node_id": "node-a",
+      "peer_state": "alive",
+      "profile_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:b97d42fd68eb9d207f2e2e8a7df70b4feeadd11be19391c7ab4ca8731aac8245",
+        "sequence": 1
+      },
+      "queue_depth": 0,
+      "status_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:2aa8c668d3de0bad5932539a371437c338ec7fe84055aac8ea845146a2005272",
+        "sequence": 1
+      },
+      "total_allocatable_bytes": 34359738368
+    },
+    {
+      "boot_id": "boot-node-b-1",
+      "concurrency_limit": 2,
+      "eligible": true,
+      "exclusion_reasons": [],
+      "in_flight": 0,
+      "incarnation": 1,
+      "memory_domains": [
+        {
+          "allocatable_after_reservations_bytes": 34359738368,
+          "committed_bytes": 8589934592,
+          "kind": "unified",
+          "memory_domain_id": "unified-0",
+          "reclaimable_bytes": 2147483648,
+          "reservation_generation": 1,
+          "total_bytes": 51539607552
+        }
+      ],
+      "node_id": "node-b",
+      "peer_state": "alive",
+      "profile_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:1012c0ac1ff072b28eb7fbe06406e7f81f9b4e740ab9a423ce70c26b0e9b7ae5",
+        "sequence": 1
+      },
+      "queue_depth": 0,
+      "status_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:baafe1a5e0e5d08257a144862df6f873d37f18ccf9b97e3da3eea7e0ee183188",
+        "sequence": 1
+      },
+      "total_allocatable_bytes": 34359738368
+    }
+  ],
+  "protocol": "mycelium.gossip.allocator_view.v1",
+  "snapshot_generation": 7
+}

@@ -47,7 +47,7 @@ describe('Network Observatory', () => {
     expect(screen.getByText(/artifact provisioning only/i)).toBeInTheDocument();
     expect(screen.getByText(/separate scope.*not.*active simulation/i)).toBeInTheDocument();
     expect(screen.getAllByText(/tiny-random-GPT2Model-sharded/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/route-plan-v2\.json/i)).toBeInTheDocument();
+    expect(screen.getByText(/manual-provisioning-route-v1\.json/i)).toBeInTheDocument();
   });
 
   it('labels drain and request-local circuit triggers without calling every peer failed', () => {

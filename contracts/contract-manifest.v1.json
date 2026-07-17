@@ -1,0 +1,151 @@
+{
+  "claim_boundary": "hash-pinned executable contract fixtures and owning source files; not runtime qualification evidence",
+  "contracts": [
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/artifact-verification-report-v1.json",
+        "sha256": "137b32aa4d75418bc1f8efde64c00315fc04589e78ff60642fdbed1eecaf7f3a",
+        "size_bytes": 1282
+      },
+      "owner_sources": [
+        {
+          "path": "weight_provisioning.py",
+          "sha256": "eaa651bdb0a102a47a1863777b728aded850f62d2d499ef41d637095eb0da850",
+          "size_bytes": 20327
+        },
+        {
+          "path": "layer_assignment.py",
+          "sha256": "ad1a40df09535dc442ba42448a5dcb9e206fd3480c4e6b60cf45d643ac24b300",
+          "size_bytes": 8081
+        }
+      ],
+      "protocol": "mycelium.artifact_verification_report.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/gossip-allocator-view-v1.json",
+        "sha256": "0e063d7678ed4332b83ba94147a43d43dba2d5f998c3646a389e9151ec6c93d1",
+        "size_bytes": 2231
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_gossip/views.py",
+          "sha256": "46184d21d8a589e7cfa57f9bdc55763fbf0a96848601eb76d3b404b4c4998a8c",
+          "size_bytes": 17186
+        }
+      ],
+      "protocol": "mycelium.gossip.allocator_view.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/gossip-router-view-v1.json",
+        "sha256": "48126324a8a445492cf2b11a9b854163d64749f69401f0eb6a82d02a554c7fd7",
+        "size_bytes": 4288
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_gossip/views.py",
+          "sha256": "46184d21d8a589e7cfa57f9bdc55763fbf0a96848601eb76d3b404b4c4998a8c",
+          "size_bytes": 17186
+        }
+      ],
+      "protocol": "mycelium.gossip.router_view.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/layer-assignment-v2.json",
+        "sha256": "2de84a0f65449a5e0bbb7c86a3db4cfc5444599cd67520b77eac482fac580336",
+        "size_bytes": 1680
+      },
+      "owner_sources": [
+        {
+          "path": "layer_assignment.py",
+          "sha256": "ad1a40df09535dc442ba42448a5dcb9e206fd3480c4e6b60cf45d643ac24b300",
+          "size_bytes": 8081
+        },
+        {
+          "path": "model_manifest.py",
+          "sha256": "314f5be65d0631bdc23afe8faacf8e1a06b917f899b34b85d61e53ca80579d10",
+          "size_bytes": 10780
+        },
+        {
+          "path": "model_adapters.py",
+          "sha256": "27775ece84ced8ca9b095287eabebf36a6b1fae60eec64dfcfbca7cf8fcd0db1",
+          "size_bytes": 5614
+        },
+        {
+          "path": "route_contract.py",
+          "sha256": "15ad39c20060da5b0d47daab050e595f56196cee08e1f2ff42191512c9bf9681",
+          "size_bytes": 5291
+        }
+      ],
+      "protocol": "mycelium.layer_assignment.v2"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/manual-provisioning-route-v1.json",
+        "sha256": "2656f61c903eb587a41fe159c657733d1cddcb9da44c1635b0f19fc0b72fd949",
+        "size_bytes": 753
+      },
+      "owner_sources": [
+        {
+          "path": "route_contract.py",
+          "sha256": "15ad39c20060da5b0d47daab050e595f56196cee08e1f2ff42191512c9bf9681",
+          "size_bytes": 5291
+        }
+      ],
+      "protocol": "mycelium.manual_provisioning_route.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/provisioning-audit-v1.json",
+        "sha256": "07e48203cfc7f450fd14bfc16488e8ea0c7784ae2b982aab87c0d59c45b82be3",
+        "size_bytes": 1152
+      },
+      "owner_sources": [
+        {
+          "path": "weight_provisioning.py",
+          "sha256": "eaa651bdb0a102a47a1863777b728aded850f62d2d499ef41d637095eb0da850",
+          "size_bytes": 20327
+        },
+        {
+          "path": "layer_assignment.py",
+          "sha256": "ad1a40df09535dc442ba42448a5dcb9e206fd3480c4e6b60cf45d643ac24b300",
+          "size_bytes": 8081
+        },
+        {
+          "path": "route_contract.py",
+          "sha256": "15ad39c20060da5b0d47daab050e595f56196cee08e1f2ff42191512c9bf9681",
+          "size_bytes": 5291
+        }
+      ],
+      "protocol": "mycelium.provisioning_audit.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/route-plan-v2.json",
+        "sha256": "363b66e4d5d2eb3b337182bcb02ec38290539962820dbad40f4afe142caccdf6",
+        "size_bytes": 3747
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_layer_planner/contracts.py",
+          "sha256": "b3ed0deddcd8a651fb13c36db59ba254a076200d7454f2fd90d806801c2d7b2c",
+          "size_bytes": 11743
+        },
+        {
+          "path": "mycelium_layer_planner/serialization.py",
+          "sha256": "6bc7054d28b5372c4c3e7e775bd7b5d0ec883e260119b43888bebc13af45477c",
+          "size_bytes": 3248
+        },
+        {
+          "path": "mycelium_layer_planner/validation.py",
+          "sha256": "30e079ce1eee0b867490fee6793e33ef80fa5cf0cedac1460fab050ec203f891",
+          "size_bytes": 4892
+        }
+      ],
+      "protocol": "mycelium.route_plan.v2"
+    }
+  ],
+  "protocol": "mycelium.contract_manifest.v1"
+}

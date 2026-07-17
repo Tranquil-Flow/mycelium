@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from .registry import RecordSnapshot, RegistrySnapshot
@@ -120,6 +120,16 @@ class AllocatorView:
     snapshot_generation: int
     eligibility_generation: str
     nodes: Tuple[AllocatorNodeEvidence, ...]
+
+
+def router_view_to_dict(view: RouterView) -> Dict[str, Any]:
+    """Serialize immutable Router evidence under its owned wire identifier."""
+    return {"protocol": "mycelium.gossip.router_view.v1", **asdict(view)}
+
+
+def allocator_view_to_dict(view: AllocatorView) -> Dict[str, Any]:
+    """Serialize immutable Allocator evidence under its owned wire identifier."""
+    return {"protocol": "mycelium.gossip.allocator_view.v1", **asdict(view)}
 
 
 def _version(entry: Optional[RecordSnapshot]) -> Optional[EvidenceVersion]:

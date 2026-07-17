@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
-"""Versioned route contracts for Mycelium runtime-facing layer ranges."""
+"""Compatibility contract for ordered manual provisioning routes.
+
+The product Planner owns ``mycelium.route_plan.v2``. This module accepts only the
+legacy compact ``mycelium.route_plan.v1`` input and the distinct manual
+provisioning wire contract ``mycelium.manual_provisioning_route.v1``.
+"""
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
+
+
+LEGACY_ROUTE_PLAN_PROTOCOL = "mycelium.route_plan.v1"
+MANUAL_PROVISIONING_ROUTE_PROTOCOL = "mycelium.manual_provisioning_route.v1"
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def validate_layer_range(layer_range: dict[str, Any], *, num_layers: int) -> None:
@@ -22,17 +34,26 @@ def validate_layer_range(layer_range: dict[str, Any], *, num_layers: int) -> Non
       raise ValueError("layer_count does not match half-open range")
 
 
-def validate_route_plan_v2(plan: dict[str, Any]) -> None:
-   if plan.get("protocol") != "mycelium.route_plan.v2":
-      raise ValueError("expected mycelium.route_plan.v2")
+def validate_manual_provisioning_route_v1(plan: dict[str, Any]) -> None:
+   if not isinstance(plan, dict) or plan.get("protocol") != MANUAL_PROVISIONING_ROUTE_PROTOCOL:
+      raise ValueError(f"expected {MANUAL_PROVISIONING_ROUTE_PROTOCOL}")
    if plan.get("ok") is not True:
       raise ValueError("route plan is not successful")
    model = plan.get("model")
    if not isinstance(model, dict):
-      raise ValueError("route plan model must be an object")
+      raise ValueError("model must be an object")
+   if not isinstance(model.get("model_id"), str) or not model["model_id"]:
+      raise ValueError("model_id required")
    num_layers = model.get("num_layers")
-   if not isinstance(num_layers, int) or isinstance(num_layers, bool) or num_layers <= 0:
-      raise ValueError("model num_layers must be a positive integer")
+   if isinstance(num_layers, bool) or not isinstance(num_layers, int) or num_layers <= 0:
+      raise ValueError("num_layers must be positive")
+   if not _SHA256_REF_RE.fullmatch(str(model.get("manifest_digest", ""))):
+      raise ValueError("manifest_digest must be sha256:<64 lowercase hex>")
+   if not _COMMIT_RE.fullmatch(str(model.get("resolved_commit", ""))):
+      raise ValueError("resolved_commit must be immutable 40-hex")
+   claim_boundary = plan.get("claim_boundary")
+   if not isinstance(claim_boundary, str) or not claim_boundary.strip():
+      raise ValueError("claim_boundary must be a non-empty string")
    route = plan.get("route")
    if not isinstance(route, list) or not route:
       raise ValueError("route must contain at least one stage")
@@ -67,13 +88,17 @@ def validate_route_plan_v2(plan: dict[str, Any]) -> None:
       raise ValueError("node_order does not match route")
 
 
-def upgrade_route_plan_v1(plan: dict[str, Any]) -> dict[str, Any]:
-   """Convert legacy inclusive display ranges to explicit half-open ranges once."""
-   if plan.get("protocol") != "mycelium.route_plan.v1":
-      raise ValueError("expected mycelium.route_plan.v1")
-   upgraded = copy.deepcopy(plan)
-   upgraded["protocol"] = "mycelium.route_plan.v2"
-   upgraded["source_protocol"] = "mycelium.route_plan.v1"
+def upgrade_legacy_route_plan_v1(plan_v1: dict[str, Any]) -> dict[str, Any]:
+   """Convert the legacy inclusive compact route exactly once."""
+   if not isinstance(plan_v1, dict) or plan_v1.get("protocol") != LEGACY_ROUTE_PLAN_PROTOCOL:
+      raise ValueError(f"expected {LEGACY_ROUTE_PLAN_PROTOCOL}")
+   upgraded = copy.deepcopy(plan_v1)
+   upgraded["protocol"] = MANUAL_PROVISIONING_ROUTE_PROTOCOL
+   upgraded["source_protocol"] = LEGACY_ROUTE_PLAN_PROTOCOL
+   upgraded.setdefault(
+      "claim_boundary",
+      "legacy route conversion for manual provisioning only; not product Planner output",
+   )
    converted = []
    for stage in upgraded.get("route") or []:
       legacy = stage.pop("layers", None)
@@ -89,5 +114,5 @@ def upgrade_route_plan_v1(plan: dict[str, Any]) -> dict[str, Any]:
       }
       converted.append(stage)
    upgraded["route"] = converted
-   validate_route_plan_v2(upgraded)
+   validate_manual_provisioning_route_v1(upgraded)
    return upgraded

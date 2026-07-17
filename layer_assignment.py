@@ -8,14 +8,17 @@ from pathlib import PurePosixPath
 from typing import Any
 
 import model_manifest as mm
-from route_contract import upgrade_route_plan_v1, validate_layer_range, validate_route_plan_v2
+from route_contract import upgrade_legacy_route_plan_v1, validate_layer_range, validate_manual_provisioning_route_v1
 
 
 def _canonical(document: Any) -> str:
    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+LAYER_ASSIGNMENT_PROTOCOL = "mycelium.layer_assignment.v2"
+
 _ASSIGNMENT_ID_FIELDS = (
+   "protocol",
    "deployment_id",
    "deployment_epoch",
    "node_id",
@@ -24,6 +27,8 @@ _ASSIGNMENT_ID_FIELDS = (
    "resolved_commit",
    "range",
    "components",
+   "component_tensor_keys",
+   "component_aliases",
    "expected_tensor_prefixes",
    "expected_tensor_keys",
    "files",
@@ -90,14 +95,20 @@ def compile_layer_assignments(
    runtime_by_node: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
    if route_plan.get("protocol") == "mycelium.route_plan.v1":
-      route_plan = upgrade_route_plan_v1(route_plan)
-   validate_route_plan_v2(route_plan)
+      route_plan = upgrade_legacy_route_plan_v1(route_plan)
+   validate_manual_provisioning_route_v1(route_plan)
    if not mm.verify_manifest_digest(manifest):
       raise ValueError("manifest digest mismatch")
-   if route_plan.get("model", {}).get("model_id") != manifest.get("model_id"):
-      raise ValueError("route model_id does not match manifest model_id")
-   if route_plan.get("model", {}).get("num_layers") != manifest.get("num_layers"):
-      raise ValueError("route num_layers does not match manifest")
+   route_model = route_plan.get("model", {})
+   manifest_identity = {
+      "model_id": manifest.get("model_id"),
+      "num_layers": manifest.get("num_layers"),
+      "manifest_digest": mm.manifest_digest_ref(manifest),
+      "resolved_commit": manifest.get("resolved_commit"),
+   }
+   for field, expected in manifest_identity.items():
+      if route_model.get(field) != expected:
+         raise ValueError(f"route model {field} does not match manifest")
    try:
       namespace = uuid.UUID(deployment_id)
    except (TypeError, ValueError) as exc:
@@ -117,17 +128,49 @@ def compile_layer_assignments(
       _validate_runtime(runtime, node_id)
 
       layers = range(layer_range["start_layer"], layer_range["end_layer_exclusive"])
+      static_tensor_keys = manifest.get("component_tensor_keys", {})
+      components = ["decoder"]
+      if layer_range["start_layer"] == 0 and static_tensor_keys.get("input_embedding"):
+         components.insert(0, "input_embedding")
+      if layer_range["end_layer_exclusive"] == manifest["num_layers"]:
+         components.extend(
+            component
+            for component, tensor_keys in static_tensor_keys.items()
+            if component != "input_embedding" and tensor_keys
+         )
       tensor_prefixes = [manifest["block_prefix_template"].format(layer=layer) for layer in layers]
-      tensor_keys = sorted({
+      decoder_tensor_keys = sorted({
          key
          for layer in layers
          for key in manifest["tensor_keys_by_layer"][str(layer)]
       })
-      covering_paths = sorted({
+      component_tensor_keys = {
+         component: (
+            decoder_tensor_keys
+            if component == "decoder"
+            else list(static_tensor_keys[component])
+         )
+         for component in components
+      }
+      component_aliases = {
+         component: target
+         for component, target in manifest.get("component_aliases", {}).items()
+         if component in components
+      }
+      tensor_keys = sorted({
+         key
+         for keys in component_tensor_keys.values()
+         for key in keys
+      })
+      covering_paths = {
          path
          for layer in layers
          for path in manifest["layer_files"][str(layer)]
-      })
+      }
+      for component in components:
+         if component != "decoder":
+            covering_paths.update(manifest["component_files"][component])
+      covering_paths = sorted(covering_paths)
       files = []
       for path in covering_paths:
          record = file_records[path]
@@ -138,6 +181,7 @@ def compile_layer_assignments(
          })
 
       semantic_identity = {
+         "protocol": LAYER_ASSIGNMENT_PROTOCOL,
          "deployment_id": str(namespace),
          "deployment_epoch": deployment_epoch,
          "node_id": node_id,
@@ -145,7 +189,9 @@ def compile_layer_assignments(
          "model_id": manifest["model_id"],
          "resolved_commit": manifest["resolved_commit"],
          "range": layer_range,
-         "components": ["decoder"],
+         "components": components,
+         "component_tensor_keys": component_tensor_keys,
+         "component_aliases": component_aliases,
          "expected_tensor_prefixes": tensor_prefixes,
          "expected_tensor_keys": tensor_keys,
          "files": files,
@@ -154,7 +200,6 @@ def compile_layer_assignments(
       }
       assignment_id = assignment_id_for(semantic_identity)
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
          "assignment_id": assignment_id,
          **semantic_identity,
          "route_ready": False,

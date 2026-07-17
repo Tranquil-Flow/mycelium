@@ -87,7 +87,7 @@ Generated artifacts:
 Important files:
 
 - `model-manifest.json`
-- `route-plan-v2.json`
+- `route-plan-v2.json` (historical filename; this sealed bundle predates the namespace split)
 - `assignment-m4pro.json`
 - `assignment-evis-macbook-pro-1.json`
 - `report-m4pro-cold.json`
@@ -134,7 +134,7 @@ python3 demo_weight_provisioning.py orchestrate \
   --metadata-cache '/Users/evinova-self/Projects/mycelium/.demo-cache/coordinator-metadata'
 ```
 
-The coordinator downloads only `config.json` and `model.safetensors.index.json` while compiling the manifest. It does not need the full model.
+The coordinator downloads only `config.json` and `model.safetensors.index.json` while compiling the manifest. It does not need the full model. New orchestration bundles write the compact route as `manual-provisioning-route-v1.json` with protocol `mycelium.manual_provisioning_route.v1`; `mycelium.route_plan.v2` is reserved for the product Planner contract.
 
 ## Provision one peer
 
@@ -175,7 +175,7 @@ The hardened live bundle is:
 
 `/Users/evinova-self/Projects/mycelium/demo-runs/gpt2-two-peer-http-v1-hardened`
 
-Its `deployment.json` uses only relative references (`model-manifest.json`, `route-plan-v2.json`, and per-node assignment filenames). Copying the complete directory to another parent and loading it there succeeds. Peer cache roots remain absolute target-owned paths inside assignments and are never resolved by the coordinator.
+Its historical `deployment.json` uses only relative references (`model-manifest.json`, the legacy-named `route-plan-v2.json`, and per-node assignment filenames). New bundles use `manual-provisioning-route-v1.json`. Copying the complete directory to another parent and loading it there succeeds. Peer cache roots remain absolute target-owned paths inside assignments and are never resolved by the coordinator.
 
 Create a temporary bearer token with owner-only permissions:
 

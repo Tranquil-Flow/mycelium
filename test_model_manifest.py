@@ -55,8 +55,102 @@ class ModelManifestTests(unittest.TestCase):
       )
       self.assertEqual(manifest["component_files"]["input_embedding"], ["shard-1.safetensors"])
       self.assertEqual(manifest["component_files"]["final_norm"], ["shard-3.safetensors"])
+      self.assertEqual(manifest["component_tensor_keys"]["input_embedding"], ["wte.weight"])
+      self.assertEqual(manifest["component_tensor_keys"]["final_norm"], ["ln_f.weight"])
+      self.assertEqual(manifest["component_tensor_keys"]["lm_head"], [])
+      self.assertEqual(manifest["component_aliases"], {})
       self.assertEqual(manifest["manifest_digest"]["algorithm"], "sha256")
       self.assertEqual(len(manifest["manifest_digest"]["value"]), 64)
+
+   def test_namespaced_causal_lm_checkpoint_uses_transformer_prefixes(self):
+      manifest = mm.compile_model_manifest(
+         model_id="org/gpt2-lm",
+         requested_revision="main",
+         resolved_commit="a" * 40,
+         config={
+            "model_type": "gpt2",
+            "architectures": ["GPT2LMHeadModel"],
+            "n_layer": 1,
+            "tie_word_embeddings": False,
+         },
+         checkpoint_index={
+            "weight_map": {
+               "transformer.wte.weight": "shard.safetensors",
+               "transformer.wpe.weight": "shard.safetensors",
+               "transformer.h.0.attn.weight": "shard.safetensors",
+               "transformer.ln_f.weight": "shard.safetensors",
+               "lm_head.weight": "shard.safetensors",
+            },
+         },
+         file_metadata={
+            "shard.safetensors": {"size_bytes": 10, "sha256": "1" * 64},
+         },
+      )
+
+      self.assertEqual(manifest["block_prefix_template"], "transformer.h.{layer}.")
+      self.assertEqual(
+         manifest["component_tensor_keys"]["input_embedding"],
+         ["transformer.wpe.weight", "transformer.wte.weight"],
+      )
+      self.assertEqual(
+         manifest["component_tensor_keys"]["final_norm"],
+         ["transformer.ln_f.weight"],
+      )
+
+   def test_tied_lm_head_resolves_to_token_embedding_tensor_only(self):
+      config = self.config()
+      config["architectures"] = ["GPT2LMHeadModel"]
+      config["tie_word_embeddings"] = True
+      index = self.index()
+      index["weight_map"]["wpe.weight"] = "shard-1.safetensors"
+
+      manifest = mm.compile_model_manifest(
+         model_id="org/model",
+         requested_revision="main",
+         resolved_commit="a" * 40,
+         config=config,
+         checkpoint_index=index,
+         file_metadata=self.files(),
+      )
+
+      self.assertEqual(manifest["component_aliases"], {"lm_head": "input_embedding"})
+      self.assertEqual(manifest["component_tensor_keys"]["lm_head"], ["wte.weight"])
+      self.assertEqual(manifest["component_files"]["lm_head"], ["shard-1.safetensors"])
+
+   def test_tied_lm_head_uses_embedding_even_when_checkpoint_serializes_head(self):
+      config = self.config()
+      config["architectures"] = ["GPT2LMHeadModel"]
+      config["tie_word_embeddings"] = True
+      index = self.index()
+      index["weight_map"]["wpe.weight"] = "shard-1.safetensors"
+      index["weight_map"]["lm_head.weight"] = "shard-3.safetensors"
+
+      manifest = mm.compile_model_manifest(
+         model_id="org/model",
+         requested_revision="main",
+         resolved_commit="a" * 40,
+         config=config,
+         checkpoint_index=index,
+         file_metadata=self.files(),
+      )
+
+      self.assertEqual(manifest["component_aliases"], {"lm_head": "input_embedding"})
+      self.assertEqual(manifest["component_tensor_keys"]["lm_head"], ["wte.weight"])
+      self.assertNotIn("lm_head.weight", manifest["component_tensor_keys"]["lm_head"])
+
+   def test_untied_causal_lm_without_head_fails_closed(self):
+      config = self.config()
+      config["architectures"] = ["GPT2LMHeadModel"]
+      config["tie_word_embeddings"] = False
+      with self.assertRaisesRegex(ValueError, "lm_head"):
+         mm.compile_model_manifest(
+            model_id="org/model",
+            requested_revision="main",
+            resolved_commit="a" * 40,
+            config=config,
+            checkpoint_index=self.index(),
+            file_metadata=self.files(),
+         )
 
    def test_manifest_digest_is_canonical_and_deterministic(self):
       first = self.compile()

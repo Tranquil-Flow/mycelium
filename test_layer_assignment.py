@@ -11,16 +11,53 @@ class LayerAssignmentTests(unittest.TestCase):
          model_id="org/model",
          requested_revision="main",
          resolved_commit="a" * 40,
-         config={"model_type": "gpt2", "architectures": ["GPT2Model"], "n_layer": 3},
+         config={
+            "model_type": "gpt2",
+            "architectures": ["GPT2LMHeadModel"],
+            "n_layer": 3,
+            "tie_word_embeddings": False,
+         },
          checkpoint_index={
             "metadata": {"total_size": 50},
             "weight_map": {
-               "wte.weight": "shard-1.safetensors",
-               "h.0.attn.weight": "shard-2.safetensors",
-               "h.1.attn.weight": "shard-2.safetensors",
-               "h.1.mlp.weight": "shard-3.safetensors",
-               "h.2.attn.weight": "shard-3.safetensors",
-               "ln_f.weight": "shard-3.safetensors",
+               "transformer.wte.weight": "shard-1.safetensors",
+               "transformer.wpe.weight": "shard-1.safetensors",
+               "transformer.h.0.attn.weight": "shard-2.safetensors",
+               "transformer.h.1.attn.weight": "shard-2.safetensors",
+               "transformer.h.1.mlp.weight": "shard-3.safetensors",
+               "transformer.h.2.attn.weight": "shard-3.safetensors",
+               "transformer.ln_f.weight": "shard-3.safetensors",
+               "lm_head.weight": "shard-1.safetensors",
+            },
+         },
+         file_metadata={
+            "shard-1.safetensors": {"size_bytes": 10, "sha256": "1" * 64},
+            "shard-2.safetensors": {"size_bytes": 20, "sha256": "2" * 64},
+            "shard-3.safetensors": {"size_bytes": 30, "sha256": "3" * 64},
+         },
+      )
+
+   def tied_manifest(self):
+      return mm.compile_model_manifest(
+         model_id="org/model",
+         requested_revision="main",
+         resolved_commit="a" * 40,
+         config={
+            "model_type": "gpt2",
+            "architectures": ["GPT2LMHeadModel"],
+            "n_layer": 3,
+            "tie_word_embeddings": True,
+         },
+         checkpoint_index={
+            "metadata": {"total_size": 50},
+            "weight_map": {
+               "transformer.wte.weight": "shard-1.safetensors",
+               "transformer.wpe.weight": "shard-1.safetensors",
+               "transformer.h.0.attn.weight": "shard-2.safetensors",
+               "transformer.h.1.attn.weight": "shard-2.safetensors",
+               "transformer.h.1.mlp.weight": "shard-3.safetensors",
+               "transformer.h.2.attn.weight": "shard-3.safetensors",
+               "transformer.ln_f.weight": "shard-3.safetensors",
             },
          },
          file_metadata={
@@ -33,8 +70,14 @@ class LayerAssignmentTests(unittest.TestCase):
    def route(self):
       return {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
-         "model": {"model_id": "org/model", "num_layers": 3},
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": {
+            "model_id": "org/model",
+            "num_layers": 3,
+            "manifest_digest": mm.manifest_digest_ref(self.manifest()),
+            "resolved_commit": "a" * 40,
+         },
          "route": [
             {
                "node_id": "node-a",
@@ -69,18 +112,122 @@ class LayerAssignmentTests(unittest.TestCase):
       node_a = assignments["node-a"]
       node_b = assignments["node-b"]
 
-      self.assertEqual(node_a["protocol"], "mycelium.layer_assignment.v1")
+      self.assertEqual(node_a["protocol"], "mycelium.layer_assignment.v2")
+      self.assertEqual(node_a["components"], ["input_embedding", "decoder"])
+      self.assertEqual(node_b["components"], ["decoder", "final_norm", "lm_head"])
       self.assertEqual([f["path"] for f in node_a["files"]], [
+         "shard-1.safetensors",
          "shard-2.safetensors",
          "shard-3.safetensors",
       ])
-      self.assertEqual([f["path"] for f in node_b["files"]], ["shard-3.safetensors"])
-      self.assertEqual(node_a["expected_tensor_prefixes"], ["h.0.", "h.1."])
-      self.assertEqual(node_b["expected_tensor_prefixes"], ["h.2."])
-      self.assertIn("h.1.mlp.weight", node_a["expected_tensor_keys"])
+      self.assertEqual([f["path"] for f in node_b["files"]], [
+         "shard-1.safetensors",
+         "shard-3.safetensors",
+      ])
+      self.assertEqual(node_a["expected_tensor_prefixes"], ["transformer.h.0.", "transformer.h.1."])
+      self.assertEqual(node_b["expected_tensor_prefixes"], ["transformer.h.2."])
+      self.assertEqual(
+         node_a["component_tensor_keys"]["input_embedding"],
+         ["transformer.wpe.weight", "transformer.wte.weight"],
+      )
+      self.assertEqual(node_b["component_tensor_keys"]["final_norm"], ["transformer.ln_f.weight"])
+      self.assertEqual(node_b["component_tensor_keys"]["lm_head"], ["lm_head.weight"])
+      self.assertEqual(node_b["component_aliases"], {})
+      self.assertIn("transformer.wte.weight", node_a["expected_tensor_keys"])
+      self.assertIn("transformer.ln_f.weight", node_b["expected_tensor_keys"])
+      self.assertIn("lm_head.weight", node_b["expected_tensor_keys"])
       self.assertEqual(node_a["resolved_commit"], "a" * 40)
       self.assertEqual(node_a["manifest_digest"], mm.manifest_digest_ref(self.manifest()))
       self.assertFalse(node_a["route_ready"])
+
+   def test_tied_lm_head_assignment_receives_embedding_source(self):
+      manifest = self.tied_manifest()
+      route = self.route()
+      route["model"]["manifest_digest"] = mm.manifest_digest_ref(manifest)
+      assignments = la.compile_layer_assignments(
+         route_plan=route,
+         manifest=manifest,
+         deployment_id="12345678-1234-5678-1234-567812345678",
+         deployment_epoch=1,
+         cache_roots={"node-a": "/tmp/a", "node-b": "/tmp/b"},
+         runtime_by_node={
+            "node-a": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+            "node-b": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+         },
+      )
+      final = assignments[-1]
+      self.assertEqual(final["component_aliases"], {"lm_head": "input_embedding"})
+      self.assertEqual(final["component_tensor_keys"]["lm_head"], ["transformer.wte.weight"])
+      self.assertIn("transformer.wte.weight", final["expected_tensor_keys"])
+      self.assertIn("shard-1.safetensors", [item["path"] for item in final["files"]])
+
+   def test_final_stage_owns_all_present_non_decoder_static_components(self):
+      manifest = mm.compile_model_manifest(
+         model_id="org/bert-classifier",
+         requested_revision="main",
+         resolved_commit="b" * 40,
+         config={
+            "model_type": "bert",
+            "num_hidden_layers": 2,
+            "architectures": ["BertForSequenceClassification"],
+         },
+         checkpoint_index={
+            "weight_map": {
+               "bert.embeddings.word_embeddings.weight": "model.safetensors",
+               "bert.encoder.layer.0.attention.self.query.weight": "model.safetensors",
+               "bert.encoder.layer.1.attention.self.query.weight": "model.safetensors",
+               "bert.pooler.dense.weight": "model.safetensors",
+               "classifier.weight": "model.safetensors",
+            },
+         },
+         file_metadata={
+            "model.safetensors": {"size_bytes": 10, "sha256": "1" * 64},
+         },
+      )
+      route = {
+         "ok": True,
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
+         "model": {
+            "model_id": manifest["model_id"],
+            "num_layers": manifest["num_layers"],
+            "manifest_digest": mm.manifest_digest_ref(manifest),
+            "resolved_commit": manifest["resolved_commit"],
+         },
+         "route": [
+            {
+               "node_id": "node-a",
+               "range": {"start_layer": 0, "end_layer_exclusive": 1, "layer_count": 1},
+            },
+            {
+               "node_id": "node-b",
+               "range": {"start_layer": 1, "end_layer_exclusive": 2, "layer_count": 1},
+            },
+         ],
+         "node_order": ["node-a", "node-b"],
+      }
+      assignments = la.compile_layer_assignments(
+         route_plan=route,
+         manifest=manifest,
+         deployment_id="12345678-1234-5678-1234-567812345678",
+         deployment_epoch=1,
+         cache_roots={"node-a": "/tmp/a", "node-b": "/tmp/b"},
+         runtime_by_node={
+            "node-a": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+            "node-b": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+         },
+      )
+
+      self.assertEqual(assignments[0]["components"], ["input_embedding", "decoder"])
+      self.assertEqual(assignments[1]["components"], ["decoder", "pooler", "classifier"])
+      self.assertEqual(
+         assignments[1]["component_tensor_keys"]["pooler"],
+         ["bert.pooler.dense.weight"],
+      )
+      self.assertEqual(
+         assignments[1]["component_tensor_keys"]["classifier"],
+         ["classifier.weight"],
+      )
 
    def test_assignments_are_deterministic_for_same_deployment(self):
       first = self.compile()
@@ -90,9 +237,31 @@ class LayerAssignmentTests(unittest.TestCase):
          [item["assignment_id"] for item in second],
       )
 
+   def test_compile_rejects_route_manifest_identity_drift(self):
+      route = self.route()
+      route["model"]["manifest_digest"] = "sha256:" + "f" * 64
+      with self.assertRaisesRegex(ValueError, "manifest_digest"):
+         la.compile_layer_assignments(
+            route_plan=route,
+            manifest=self.manifest(),
+            deployment_id="12345678-1234-5678-1234-567812345678",
+            deployment_epoch=1,
+            cache_roots={"node-a": "/tmp/a", "node-b": "/tmp/b"},
+            runtime_by_node={
+               "node-a": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+               "node-b": {"backend": "artifact_verifier", "dtype": "source", "quantization": "none"},
+            },
+         )
+
    def test_assignment_identity_detects_semantic_tampering(self):
       assignment = self.compile()[0]
       assignment["files"][0]["size_bytes"] += 1
+      with self.assertRaisesRegex(ValueError, "assignment_id"):
+         la.validate_assignment_identity(assignment)
+
+   def test_assignment_identity_detects_protocol_tampering(self):
+      assignment = self.compile()[0]
+      assignment["protocol"] = "mycelium.layer_assignment.v1"
       with self.assertRaisesRegex(ValueError, "assignment_id"):
          la.validate_assignment_identity(assignment)
 
@@ -106,7 +275,12 @@ class LayerAssignmentTests(unittest.TestCase):
       route = {
          "ok": True,
          "protocol": "mycelium.route_plan.v1",
-         "model": {"model_id": "org/model", "num_layers": 3},
+         "model": {
+            "model_id": "org/model",
+            "num_layers": 3,
+            "manifest_digest": mm.manifest_digest_ref(self.manifest()),
+            "resolved_commit": "a" * 40,
+         },
          "route": [
             {"node_id": "node-a", "layers": [0, 1], "layer_count": 2},
             {"node_id": "node-b", "layers": [2, 2], "layer_count": 1},

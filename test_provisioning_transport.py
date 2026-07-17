@@ -24,7 +24,8 @@ class ProvisioningTransportTests(unittest.TestCase):
    def route(self):
       return {
          "ok": True,
-         "protocol": "mycelium.route_plan.v2",
+         "protocol": "mycelium.manual_provisioning_route.v1",
+         "claim_boundary": "manual provisioning only",
          "model": {
             "model_id": "org/model",
             "num_layers": 2,
@@ -46,7 +47,7 @@ class ProvisioningTransportTests(unittest.TestCase):
 
    def assignment(self, node_id, start, cache_root):
       assignment = {
-         "protocol": "mycelium.layer_assignment.v1",
+         "protocol": "mycelium.layer_assignment.v2",
          "deployment_id": DEPLOYMENT_ID,
          "deployment_epoch": 1,
          "assignment_id": "pending",
@@ -60,6 +61,8 @@ class ProvisioningTransportTests(unittest.TestCase):
             "layer_count": 1,
          },
          "components": ["decoder"],
+         "component_tensor_keys": {"decoder": [f"h.{start}.weight"]},
+         "component_aliases": {},
          "expected_tensor_prefixes": [f"h.{start}."],
          "expected_tensor_keys": [f"h.{start}.weight"],
          "files": [{

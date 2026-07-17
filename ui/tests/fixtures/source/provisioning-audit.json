@@ -1,7 +1,35 @@
 {
   "all_assignments_verified": true,
+  "assignment_bindings": [
+    {
+      "assignment_id": "202e4eb3-2e17-5973-9d7a-18483d73b8ca",
+      "node_id": "http-peer-a",
+      "range": {
+        "end_layer_exclusive": 3,
+        "layer_count": 3,
+        "start_layer": 0
+      }
+    },
+    {
+      "assignment_id": "ae0333c5-2de7-5d43-a176-3f3bb0537f16",
+      "node_id": "http-peer-b",
+      "range": {
+        "end_layer_exclusive": 5,
+        "layer_count": 2,
+        "start_layer": 3
+      }
+    }
+  ],
   "claim_boundary": "artifact provisioning only; runtime layer load, stage probe, and route challenge remain required",
+  "deployment_epoch": 1,
+  "deployment_id": "382b6079-1ebb-50b2-9a8e-99ff36cea86a",
   "errors": [],
+  "model": {
+    "manifest_digest": "sha256:75a58126d140ab3b945d80482314a92d6047fa163d37c2b37d0bfc4c420ddf46",
+    "model_id": "bumblebee-testing/tiny-random-GPT2Model-sharded",
+    "num_layers": 5,
+    "resolved_commit": "4fca22a84867aacca5dcf7317144782ea1807e1a"
+  },
   "protocol": "mycelium.provisioning_audit.v1",
   "ready_for_runtime_load": true,
   "route_ready": false,

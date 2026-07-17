@@ -1,0 +1,134 @@
+{
+  "edges": [
+    {
+      "connect_rtt_ema_ms": 1.2,
+      "dst_endpoint_id": "http-overlay",
+      "dst_node_id": "node-b",
+      "eligible": true,
+      "exclusion_reasons": [],
+      "goodput_mbps": 900.0,
+      "jitter_ms": 0.1,
+      "loss_ratio": 0.0,
+      "measurement_method": "active_probe",
+      "reachable": true,
+      "rtt_p95_ms": 1.8,
+      "sample_count": 16,
+      "src_endpoint_id": "http-overlay",
+      "src_node_id": "node-a",
+      "version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:81d7549041bc2d5aa9d9380f7c614d0b7a3759871ba4794482c3c97baa1c32ae",
+        "sequence": 1
+      }
+    }
+  ],
+  "eligibility_generation": "df5c0a7230d72176f2903cc961a7276772a34890e878bf9f3c179ded9cb76f53",
+  "nodes": [
+    {
+      "boot_id": "boot-node-a-1",
+      "concurrency_limit": 2,
+      "eligible": true,
+      "endpoints": [
+        {
+          "endpoint_id": "http-overlay",
+          "host": "100.64.0.1",
+          "inbound": true,
+          "port": 9000,
+          "scope": "overlay",
+          "transport": "http"
+        }
+      ],
+      "exclusion_reasons": [],
+      "in_flight": 0,
+      "incarnation": 1,
+      "node_id": "node-a",
+      "offerings": [
+        {
+          "assignment_id": "assignment-node-a",
+          "deployment_epoch": 1,
+          "deployment_id": "deploy-1",
+          "end_layer_exclusive": 2,
+          "inference_endpoint_id": "http-overlay",
+          "load_generation": 1,
+          "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "model_id": "model-a",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "runtime_instance_id": "runtime-node-a-1",
+          "start_layer": 0,
+          "version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:e7d71cc9b14567117ddb62b7fa9e709aadc48bf387aef1ef609c7a78cc30db49",
+            "sequence": 1
+          }
+        }
+      ],
+      "peer_state": "alive",
+      "profile_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:b97d42fd68eb9d207f2e2e8a7df70b4feeadd11be19391c7ab4ca8731aac8245",
+        "sequence": 1
+      },
+      "queue_depth": 0,
+      "status_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:2aa8c668d3de0bad5932539a371437c338ec7fe84055aac8ea845146a2005272",
+        "sequence": 1
+      }
+    },
+    {
+      "boot_id": "boot-node-b-1",
+      "concurrency_limit": 2,
+      "eligible": true,
+      "endpoints": [
+        {
+          "endpoint_id": "http-overlay",
+          "host": "100.64.0.2",
+          "inbound": true,
+          "port": 9000,
+          "scope": "overlay",
+          "transport": "http"
+        }
+      ],
+      "exclusion_reasons": [],
+      "in_flight": 0,
+      "incarnation": 1,
+      "node_id": "node-b",
+      "offerings": [
+        {
+          "assignment_id": "assignment-node-b",
+          "deployment_epoch": 1,
+          "deployment_id": "deploy-1",
+          "end_layer_exclusive": 4,
+          "inference_endpoint_id": "http-overlay",
+          "load_generation": 1,
+          "manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "model_id": "model-a",
+          "proof_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "resolved_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "runtime_instance_id": "runtime-node-b-1",
+          "start_layer": 2,
+          "version": {
+            "incarnation": 1,
+            "payload_hash": "sha256:2a7096b2ab72c6e95dfe77d4883917abb33923701e907fa2eb1676e39f9cd2dc",
+            "sequence": 1
+          }
+        }
+      ],
+      "peer_state": "alive",
+      "profile_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:1012c0ac1ff072b28eb7fbe06406e7f81f9b4e740ab9a423ce70c26b0e9b7ae5",
+        "sequence": 1
+      },
+      "queue_depth": 0,
+      "status_version": {
+        "incarnation": 1,
+        "payload_hash": "sha256:baafe1a5e0e5d08257a144862df6f873d37f18ccf9b97e3da3eea7e0ee183188",
+        "sequence": 1
+      }
+    }
+  ],
+  "protocol": "mycelium.gossip.router_view.v1",
+  "snapshot_generation": 7
+}

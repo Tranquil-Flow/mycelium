@@ -4,7 +4,7 @@ import simulationFixture from '../../tests/fixtures/source/planner-simulation.js
 import geographyFixture from '../../tests/fixtures/source/synthetic-geo.json';
 import fixtureManifest from '../../tests/fixtures/source/ui-fixture-manifest.json';
 import failoverFixture from '../../tests/fixtures/failover/failover-scenarios.json';
-import routePlanFixture from '../../tests/fixtures/source/route-plan-v2.json';
+import manualProvisioningRouteFixture from '../../tests/fixtures/source/manual-provisioning-route-v1.json';
 import provisioningAudit from '../../tests/fixtures/source/provisioning-audit.json';
 import { AppShell, type ObservatoryView } from './components/AppShell';
 import { adaptSimulator } from './model/adapter';
@@ -39,7 +39,7 @@ function loadOfflineBundle(): BundleResult {
       knownNodeIds: snapshot.nodes.map((node) => node.id),
       numLayers: snapshot.model.numLayers,
     });
-    const provisioning = adaptProvisioningEvidence(routePlanFixture, provisioningAudit);
+    const provisioning = adaptProvisioningEvidence(manualProvisioningRouteFixture, provisioningAudit);
 
     return {
       state: 'ready',

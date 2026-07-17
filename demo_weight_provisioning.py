@@ -12,7 +12,7 @@ from typing import Any
 
 import model_manifest as mm
 from layer_assignment import compile_layer_assignments, validate_target_cache_root
-from route_contract import validate_route_plan_v2
+from route_contract import validate_manual_provisioning_route_v1
 from weight_provisioning import audit_provisioning, provision_assignment
 
 
@@ -74,7 +74,7 @@ def build_demo_artifacts(
       }
    route_plan = {
       "ok": True,
-      "protocol": "mycelium.route_plan.v2",
+      "protocol": "mycelium.manual_provisioning_route.v1",
       "model": {
          "model_id": manifest["model_id"],
          "num_layers": manifest["num_layers"],
@@ -85,7 +85,7 @@ def build_demo_artifacts(
       "node_order": [spec.node_id for spec in node_specs],
       "claim_boundary": "manual demo allocation; allocator integration remains separate",
    }
-   validate_route_plan_v2(route_plan)
+   validate_manual_provisioning_route_v1(route_plan)
    assignments = compile_layer_assignments(
       route_plan=route_plan,
       manifest=manifest,
@@ -136,7 +136,7 @@ def write_orchestration(
 
    output_dir.mkdir(parents=True, exist_ok=True)
    manifest_path = _write_json(output_dir / "model-manifest.json", manifest)
-   route_path = _write_json(output_dir / "route-plan-v2.json", route_plan)
+   route_path = _write_json(output_dir / "manual-provisioning-route-v1.json", route_plan)
    assignment_paths = {}
    assignment_references = {}
    for assignment in assignments:
