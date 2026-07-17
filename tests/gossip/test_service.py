@@ -15,6 +15,7 @@ from mycelium_gossip.service import (
     GossipService,
     PeerHealthState,
     ServiceError,
+    ServiceLifecycleState,
 )
 from mycelium_gossip.transport import (
     InMemoryMesh,
@@ -84,6 +85,38 @@ class FailingStartupTransport(SpyTransport):
     def subscribe_liveness(self, callback, *, history: bool = True):
         self.calls.append("subscribe_liveness")
         raise RuntimeError("subscription failed")
+
+
+class LifecycleSpyTransport(SpyTransport):
+    def subscribe_records(self, callback):
+        self.calls.append("subscribe_records")
+        self.record_callback = callback
+
+        def unsubscribe() -> None:
+            self.calls.append("unsubscribe_records")
+
+        return unsubscribe
+
+    def subscribe_liveness(self, callback, *, history: bool = True):
+        self.calls.append("subscribe_liveness")
+        self.liveness_callback = callback
+
+        def unsubscribe() -> None:
+            self.calls.append("unsubscribe_liveness")
+
+        return unsubscribe
+
+
+class BlockingStartTransport(LifecycleSpyTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_entered = threading.Event()
+        self.release_start = threading.Event()
+
+    def start(self) -> None:
+        self.calls.append("start")
+        self.start_entered.set()
+        assert self.release_start.wait(2.0)
 
 
 class BlockingSnapshotStore(VersionedRecordStore):
@@ -163,6 +196,114 @@ def test_start_failure_rolls_back_transport_and_acquired_subscriptions() -> None
         "unsubscribe_records",
         "stop",
     ]
+
+
+def test_concurrent_start_initializes_transport_once_and_waiters_observe_running() -> None:
+    clock = FakeClock()
+    transport = BlockingStartTransport()
+    service = make_service(clock, transport=transport)
+    completed: list[str] = []
+
+    first = threading.Thread(target=lambda: (service.start(background=False), completed.append("first")))
+    second = threading.Thread(target=lambda: (service.start(background=False), completed.append("second")))
+    first.start()
+    assert transport.start_entered.wait(1.0)
+    second.start()
+
+    time.sleep(0.02)
+    assert completed == []
+    assert service.started is False
+    assert service.lifecycle_state is ServiceLifecycleState.STARTING
+
+    transport.release_start.set()
+    first.join(1.0)
+    second.join(1.0)
+
+    assert sorted(completed) == ["first", "second"]
+    assert transport.calls.count("start") == 1
+    assert service.lifecycle_state is ServiceLifecycleState.RUNNING
+    service.stop()
+
+
+def test_stop_is_idempotent_and_tears_down_each_resource_once() -> None:
+    clock = FakeClock()
+    transport = LifecycleSpyTransport()
+    service = make_service(clock, transport=transport)
+    service.start(background=False)
+
+    service.stop()
+    service.stop()
+
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPED
+    assert transport.calls.count("unsubscribe_liveness") == 1
+    assert transport.calls.count("unsubscribe_records") == 1
+    assert transport.calls.count("stop") == 1
+    assert transport.calls.index("unsubscribe_liveness") < transport.calls.index("stop")
+    assert transport.calls.index("unsubscribe_records") < transport.calls.index("stop")
+
+
+def test_second_worker_start_failure_preserves_error_and_allows_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FakeClock()
+    transport = LifecycleSpyTransport()
+    service = make_service(clock, transport=transport)
+    real_start = threading.Thread.start
+
+    def fail_repair_worker(thread: threading.Thread) -> None:
+        if thread.name.startswith("mycelium-gossip-repair-"):
+            raise OSError("repair thread start failed")
+        real_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", fail_repair_worker)
+    with pytest.raises(OSError, match="repair thread start failed"):
+        service.start(background=True)
+
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPED
+    assert transport.calls.count("stop") == 1
+    service.start(background=False)
+    assert service.lifecycle_state is ServiceLifecycleState.RUNNING
+    service.stop()
+
+
+def test_callback_admitted_during_stop_cannot_leak_into_next_run() -> None:
+    clock = FakeClock()
+    transport = LifecycleSpyTransport()
+    service = make_service(clock, transport=transport)
+    service.start(background=False)
+    assert transport.record_callback is not None
+    old_callback = transport.record_callback
+    record = make_record(RecordKind.STATUS, node_id="node-a", ttl_ms=10_000)
+    callback_entered = threading.Event()
+    release_callback = threading.Event()
+    original_submit = service.submit_received
+
+    def blocked_submit(received: ReceivedRecord) -> bool:
+        callback_entered.set()
+        assert release_callback.wait(1.0)
+        return original_submit(received)
+
+    service.submit_received = blocked_submit  # type: ignore[method-assign]
+    callback_thread = threading.Thread(
+        target=lambda: old_callback(ReceivedRecord(transport_key(record), record, clock())),
+        daemon=True,
+    )
+    callback_thread.start()
+    assert callback_entered.wait(1.0)
+    stopper = threading.Thread(target=service.stop, daemon=True)
+    stopper.start()
+    time.sleep(0.02)
+    release_callback.set()
+    callback_thread.join(1.0)
+    stopper.join(1.0)
+    assert not callback_thread.is_alive()
+    assert not stopper.is_alive()
+
+    service.submit_received = original_submit  # type: ignore[method-assign]
+    service.start(background=False)
+    service.drain()
+    assert service.registry.snapshot().records == ()
+    service.stop()
 
 
 def test_two_peer_startup_converges_from_liveness_history_and_query_repair() -> None:
@@ -269,6 +410,35 @@ def test_same_incarnation_boot_collision_is_excluded() -> None:
 
     assert service.peer_state("node-a").state is PeerHealthState.IDENTITY_CONFLICT
     assert service.diagnostics.identity_conflicts == 1
+
+
+def test_peer_change_callbacks_run_without_service_state_lock() -> None:
+    clock = FakeClock()
+    service = make_service(clock)
+    callback_probe_results = []
+    probe_threads = []
+
+    def callback(_event) -> None:
+        acquired = threading.Event()
+
+        def probe_lock() -> None:
+            with service._lock:  # type: ignore[attr-defined]
+                acquired.set()
+
+        thread = threading.Thread(target=probe_lock, daemon=True)
+        probe_threads.append(thread)
+        thread.start()
+        callback_probe_results.append(acquired.wait(0.2))
+
+    service.subscribe_events(callback)
+    service.submit_liveness(
+        LivenessEvent(LivenessKind.PUT, "swarm-a", "node-a", 1, "boot-a", clock())
+    )
+    service.drain()
+    for thread in probe_threads:
+        thread.join(1.0)
+
+    assert callback_probe_results == [True]
 
 
 def test_same_incarnation_recovery_requires_liveness_challenge_and_fresh_status() -> None:
@@ -496,6 +666,64 @@ def test_repair_skips_known_versions_so_rate_limited_tail_eventually_converges()
     }
 
 
+def test_repair_submits_same_version_from_conflicting_boot_identity() -> None:
+    clock = FakeClock()
+    spy = SpyTransport()
+    service = make_service(clock, transport=spy)
+    service.start(background=False)
+    accepted = make_record(
+        RecordKind.STATUS,
+        node_id="node-a",
+        boot_id="boot-a",
+        ttl_ms=10_000,
+    )
+    service.submit_received(ReceivedRecord(transport_key(accepted), accepted, clock()))
+    service.drain()
+    conflicting = make_record(
+        RecordKind.STATUS,
+        node_id="node-a",
+        boot_id="boot-b",
+        ttl_ms=10_000,
+    )
+    spy.replies = (ReceivedRecord(transport_key(conflicting), conflicting, clock()),)
+
+    submitted = service.repair_once()
+    service.drain()
+
+    assert submitted == 1
+    assert service.registry.diagnostics.identity_conflict == 1
+
+
+def test_public_repair_cancellation_blocks_restart_and_skips_stale_query() -> None:
+    clock = FakeClock()
+    store = BlockingSnapshotStore("swarm-a", monotonic=clock)
+    transport = SpyTransport()
+    service = make_service(clock, transport=transport, registry=store)
+    service.start(background=False)
+    initial_query_count = transport.calls.count("query")
+    store.block_snapshot = True
+    results = []
+
+    repair_thread = threading.Thread(target=lambda: results.append(service.repair_once()), daemon=True)
+    repair_thread.start()
+    assert store.snapshot_started.wait(1.0)
+    try:
+        service.stop()
+        assert service.lifecycle_state is ServiceLifecycleState.STOPPING
+        with pytest.raises(ServiceError, match="stopping"):
+            service.start(background=False)
+    finally:
+        store.release_snapshot.set()
+        repair_thread.join(1.0)
+        if service.lifecycle_state is ServiceLifecycleState.RUNNING:
+            service.stop()
+
+    assert not repair_thread.is_alive()
+    assert results == [0]
+    assert transport.calls.count("query") == initial_query_count
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPED
+
+
 class BlockingRepairTransport(SpyTransport):
     def __init__(self) -> None:
         super().__init__()
@@ -509,7 +737,7 @@ class BlockingRepairTransport(SpyTransport):
         if self.query_count > 1:
             self.repair_started.set()
             self.release_repair.wait(2.0)
-        return ()
+        return self.replies
 
 
 def test_blocked_repair_query_does_not_block_priority_liveness_processing() -> None:
@@ -529,3 +757,65 @@ def test_blocked_repair_query_does_not_block_priority_liveness_processing() -> N
     finally:
         transport.release_repair.set()
         service.stop()
+
+
+def test_cancelled_public_repair_cannot_enqueue_reply_after_stop() -> None:
+    clock = FakeClock()
+    record = make_record(RecordKind.STATUS, node_id="node-a", ttl_ms=10_000)
+    transport = BlockingRepairTransport()
+    service = make_service(clock, transport=transport, shutdown_timeout_seconds=0.02)
+    service.start(background=False)
+    transport.replies = (ReceivedRecord(transport_key(record), record, clock()),)
+    results = []
+    repair_thread = threading.Thread(target=lambda: results.append(service.repair_once()), daemon=True)
+    repair_thread.start()
+    assert transport.repair_started.wait(1.0)
+
+    service.stop()
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPING
+    transport.release_repair.set()
+    repair_thread.join(1.0)
+
+    assert not repair_thread.is_alive()
+    assert results == [0]
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPED
+    transport.replies = ()
+    service.start(background=False)
+    service.drain()
+    assert service.registry.snapshot().records == ()
+    service.stop()
+
+
+def test_restart_rejected_until_timed_out_repair_worker_exits() -> None:
+    clock = FakeClock()
+    transport = BlockingRepairTransport()
+    service = make_service(
+        clock,
+        transport=transport,
+        repair_interval_seconds=0.01,
+        shutdown_timeout_seconds=0.02,
+    )
+    service.start(background=True)
+    assert transport.repair_started.wait(1.0)
+
+    started_at = time.monotonic()
+    service.stop()
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.25
+    assert service.started is False
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPING
+    with pytest.raises(ServiceError, match="stopping"):
+        service.start(background=False)
+
+    transport.release_repair.set()
+    deadline = time.monotonic() + 1.0
+    while service.lifecycle_state is ServiceLifecycleState.STOPPING and time.monotonic() < deadline:
+        time.sleep(0.005)
+        service.stop()
+
+    assert service.lifecycle_state is ServiceLifecycleState.STOPPED
+    assert service.diagnostics.repair_runs == 0
+    service.start(background=False)
+    assert service.lifecycle_state is ServiceLifecycleState.RUNNING
+    service.stop()
