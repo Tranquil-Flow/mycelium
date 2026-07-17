@@ -1,0 +1,155 @@
+{
+  "base_snapshot": "product-v1-replicated.json",
+  "cases": [
+    {
+      "event": {
+        "edges": [],
+        "event_id": "replica-drop-n4",
+        "kind": "device_unavailable",
+        "node_ids": [
+          "n4"
+        ],
+        "snapshot_generation": 2
+      },
+      "name": "replica-drop"
+    },
+    {
+      "event": {
+        "edges": [],
+        "event_id": "unique-stage-drop-n1",
+        "kind": "device_unavailable",
+        "node_ids": [
+          "n1"
+        ],
+        "snapshot_generation": 3
+      },
+      "name": "unique-interior-stage-drop"
+    },
+    {
+      "event": {
+        "edges": [
+          [
+            "n2",
+            "n3"
+          ]
+        ],
+        "event_id": "directed-edge-drop-n2-n3",
+        "kind": "edge_unavailable",
+        "node_ids": [],
+        "snapshot_generation": 4
+      },
+      "name": "directed-edge-drop"
+    },
+    {
+      "add_links": [
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n0",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n6"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n6",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n0"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n1",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n6"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n6",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n1"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n2",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n6"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n6",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n2"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n3",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n6"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n6",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n3"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n4",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n6"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n6",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n4"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n5",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n6"
+        },
+        {
+          "bandwidth_Bps": 1000000000,
+          "dst": "n6",
+          "jitter_ms": 0.01,
+          "rtt_ms": 0.2,
+          "src": "n5"
+        }
+      ],
+      "add_nodes": [
+        {
+          "decode_ms_per_layer_token": 0.0001,
+          "fast_memory_bytes": 100000000,
+          "memory_bandwidth_Bps": 2000000000,
+          "node_id": "n6",
+          "prefill_ms_per_layer_token": 0.0001,
+          "spill_bandwidth_Bps": 2000000000,
+          "total_memory_bytes": 200000000
+        }
+      ],
+      "event": {
+        "edges": [],
+        "event_id": "fast-node-join-n6",
+        "kind": "device_joined",
+        "node_ids": [
+          "n6"
+        ],
+        "snapshot_generation": 5
+      },
+      "min_capacity_gain_fraction": 0.05,
+      "name": "fast-node-join"
+    }
+  ],
+  "protocol": "mycelium.layer_replan_simulation.v1"
+}

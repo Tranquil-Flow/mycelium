@@ -1,0 +1,73 @@
+{
+  "protocol": "mycelium.ui_failover_fixture.v1",
+  "claim_boundary": "synthetic incident evidence for offline UI qualification; no live failover occurred",
+  "provenance": "synthetic",
+  "scenarios": [
+    {
+      "incident_id": "incident-drain-001",
+      "title": "Planned peer drain",
+      "mode": "stable_drain",
+      "status": "resumed",
+      "request_ids": ["rq-118", "rq-119"],
+      "deployment_id": "demo-hypothetical-3b",
+      "deployment_epoch": 4,
+      "old_route": {"route_id": "ring-primary", "generation": 42, "nodes": ["cedar-3060", "atlas-4090", "birch-m4pro", "ember-laptop"], "state": "draining"},
+      "new_route": {"route_id": "ring-drain-replacement", "generation": 43, "nodes": ["cedar-3060", "atlas-4090", "delta-edge", "ember-laptop"], "state": "active"},
+      "trigger": {"kind": "planned_departure", "peer_id": "birch-m4pro", "scope": "route", "detected_at": "2026-07-16T20:14:00.000Z"},
+      "cutover": {"policy": "drain_old", "last_good_layer": null, "last_committed_token": null, "checkpoint_kind": "none"},
+      "backup_readiness": "hot",
+      "compatibility": "verified",
+      "transitions": [
+        {"state": "DETECTED", "at_ms": 0, "detail": "Best-effort departure received"},
+        {"state": "REPLAN_STARTED", "at_ms": 12, "detail": "New route requested for fresh work"},
+        {"state": "CANDIDATE_SELECTED", "at_ms": 41, "detail": "Generation 43 selected"},
+        {"state": "CUTOVER_STARTED", "at_ms": 74, "detail": "New requests pinned to generation 43"},
+        {"state": "RESUMED", "at_ms": 93, "detail": "Old requests continue on generation 42"}
+      ]
+    },
+    {
+      "incident_id": "incident-active-002",
+      "title": "Decode-stage timeout",
+      "mode": "active_failover",
+      "status": "resumed",
+      "request_ids": ["rq-204"],
+      "deployment_id": "demo-hypothetical-3b",
+      "deployment_epoch": 4,
+      "old_route": {"route_id": "ring-primary", "generation": 42, "nodes": ["cedar-3060", "atlas-4090", "birch-m4pro", "ember-laptop"], "state": "failed"},
+      "new_route": {"route_id": "ring-failover", "generation": 44, "nodes": ["cedar-3060", "atlas-4090", "delta-edge", "ember-laptop"], "state": "active"},
+      "trigger": {"kind": "timeout", "peer_id": "birch-m4pro", "scope": "observer_local", "detected_at": "2026-07-16T20:18:00.000Z"},
+      "cutover": {"policy": "checkpoint_resume", "last_good_layer": 21, "last_committed_token": 37, "checkpoint_kind": "hidden_state"},
+      "backup_readiness": "warm",
+      "compatibility": "verified",
+      "transitions": [
+        {"state": "DETECTED", "at_ms": 0, "detail": "Stage response timed out"},
+        {"state": "QUARANTINED_LOCAL", "at_ms": 18, "detail": "Peer excluded for rq-204"},
+        {"state": "ROUTE_AT_RISK", "at_ms": 24, "detail": "Fast risk event published"},
+        {"state": "REPLAN_STARTED", "at_ms": 91, "detail": "Router snapshot 91 consumed"},
+        {"state": "CANDIDATE_SELECTED", "at_ms": 204, "detail": "Generation 44 selected"},
+        {"state": "REPLACEMENT_LOADING", "at_ms": 318, "detail": "Warm backup loading stages 22–24"},
+        {"state": "CUTOVER_STARTED", "at_ms": 671, "detail": "Resume from layer 21 checkpoint"},
+        {"state": "RESUMED", "at_ms": 842, "detail": "Decode resumed at token 37"}
+      ]
+    },
+    {
+      "incident_id": "incident-break-003",
+      "title": "Unsafe activation tensor",
+      "mode": "circuit_break",
+      "status": "aborted",
+      "request_ids": ["rq-301"],
+      "deployment_id": "demo-hypothetical-3b",
+      "deployment_epoch": 4,
+      "old_route": {"route_id": "ring-primary", "generation": 42, "nodes": ["cedar-3060", "atlas-4090", "birch-m4pro", "ember-laptop"], "state": "aborted"},
+      "new_route": null,
+      "trigger": {"kind": "corrupt_tensor", "peer_id": "atlas-4090", "scope": "request", "detected_at": "2026-07-16T20:22:00.000Z"},
+      "cutover": {"policy": "abort", "last_good_layer": 4, "last_committed_token": 12, "checkpoint_kind": "hidden_state"},
+      "backup_readiness": "unknown",
+      "compatibility": "unverified",
+      "transitions": [
+        {"state": "DETECTED", "at_ms": 0, "detail": "NaN/Inf sanity check failed"},
+        {"state": "ABORTED", "at_ms": 7, "detail": "Output rejected; requester returned 503"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Virtual environments and local spikes
+.venv/
+venv/
+.spikes/
+
+# JavaScript / Rust / build output
+node_modules/
+dist/
+build/
+target/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Model and dependency caches
+.demo-cache/
+**/models--*/
+**/blobs/
+**/.locks/
+*.safetensors
+*.gguf
+
+# Generated run artifacts; curate redacted evidence before tracking
+demo-runs/
+outputs/
+*.log
+*.pid
+*.lock
+*.exit
+*.tar.gz
+.tmp/
+tmp/
+
+# Internal planning, handovers, and local recovery backups
+.hermes/
+.integration-backups/
+docs/plans/
+*HANDOVER*.md
+*.bak
+*.pre-*
+M4PRO_SYNC_MANIFEST.sha256

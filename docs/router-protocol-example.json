@@ -1,0 +1,171 @@
+{
+  "activation_bytes": 2,
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-1",
+  "edges": [
+    {
+      "edge_id": "e-0a-1b",
+      "from_placement_id": "node-a-stage-000",
+      "link_id": "a-b",
+      "to_placement_id": "node-b-stage-001"
+    },
+    {
+      "edge_id": "e-0a-1c",
+      "from_placement_id": "node-a-stage-000",
+      "link_id": "a-c",
+      "to_placement_id": "node-c-stage-001"
+    },
+    {
+      "edge_id": "e-0b-1b",
+      "from_placement_id": "node-b-stage-000",
+      "link_id": "b-b",
+      "to_placement_id": "node-b-stage-001"
+    },
+    {
+      "edge_id": "e-1b-2a",
+      "from_placement_id": "node-b-stage-001",
+      "link_id": "b-a",
+      "to_placement_id": "node-a-stage-002"
+    },
+    {
+      "edge_id": "e-1c-2a",
+      "from_placement_id": "node-c-stage-001",
+      "link_id": "c-a",
+      "to_placement_id": "node-a-stage-002"
+    }
+  ],
+  "entry_stage_id": "stage-000",
+  "final_stage_id": "stage-002",
+  "hidden_size": 4096,
+  "loopback_edges": [
+    {
+      "edge_id": "loop-2a-0a",
+      "from_placement_id": "node-a-stage-002",
+      "link_id": "a-a",
+      "to_placement_id": "node-a-stage-000"
+    },
+    {
+      "edge_id": "loop-2a-0b",
+      "from_placement_id": "node-a-stage-002",
+      "link_id": "a-b",
+      "to_placement_id": "node-b-stage-000"
+    }
+  ],
+  "manifest_digest": "sha256:model-manifest",
+  "model_id": "test/model",
+  "protocol": "mycelium.execution_graph.v1",
+  "resolved_commit": "0123456789abcdef0123456789abcdef01234567",
+  "stages": [
+    {
+      "component_roles": [
+        "decoder"
+      ],
+      "placements": [
+        {
+          "assignment_id": "assignment-node-a-stage-000",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:proof-node-a-stage-000",
+          "node_id": "node-a",
+          "placement_id": "node-a-stage-000",
+          "replica_group_id": "stage-000-replicas",
+          "runtime_backend": "test",
+          "runtime_endpoint": "memory://node-a/stage-000",
+          "stage_signature": "sha256:signature-stage-000"
+        },
+        {
+          "assignment_id": "assignment-node-b-stage-000",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:proof-node-b-stage-000",
+          "node_id": "node-b",
+          "placement_id": "node-b-stage-000",
+          "replica_group_id": "stage-000-replicas",
+          "runtime_backend": "test",
+          "runtime_endpoint": "memory://node-b/stage-000",
+          "stage_signature": "sha256:signature-stage-000"
+        }
+      ],
+      "range": {
+        "end_layer_exclusive": 4,
+        "layer_count": 4,
+        "start_layer": 0
+      },
+      "stage_cost": {
+        "decode_work_units_per_token": 1.0,
+        "kv_bytes_per_context_token": 32,
+        "prefill_work_units_per_prompt_token": 1.0
+      },
+      "stage_id": "stage-000"
+    },
+    {
+      "component_roles": [
+        "decoder"
+      ],
+      "placements": [
+        {
+          "assignment_id": "assignment-node-b-stage-001",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:proof-node-b-stage-001",
+          "node_id": "node-b",
+          "placement_id": "node-b-stage-001",
+          "replica_group_id": "stage-001-replicas",
+          "runtime_backend": "test",
+          "runtime_endpoint": "memory://node-b/stage-001",
+          "stage_signature": "sha256:signature-stage-001"
+        },
+        {
+          "assignment_id": "assignment-node-c-stage-001",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:proof-node-c-stage-001",
+          "node_id": "node-c",
+          "placement_id": "node-c-stage-001",
+          "replica_group_id": "stage-001-replicas",
+          "runtime_backend": "test",
+          "runtime_endpoint": "memory://node-c/stage-001",
+          "stage_signature": "sha256:signature-stage-001"
+        }
+      ],
+      "range": {
+        "end_layer_exclusive": 8,
+        "layer_count": 4,
+        "start_layer": 4
+      },
+      "stage_cost": {
+        "decode_work_units_per_token": 1.0,
+        "kv_bytes_per_context_token": 32,
+        "prefill_work_units_per_prompt_token": 1.0
+      },
+      "stage_id": "stage-001"
+    },
+    {
+      "component_roles": [
+        "decoder"
+      ],
+      "placements": [
+        {
+          "assignment_id": "assignment-node-a-stage-002",
+          "lifecycle_state": "ACTIVE",
+          "load_proof_digest": "sha256:proof-node-a-stage-002",
+          "node_id": "node-a",
+          "placement_id": "node-a-stage-002",
+          "replica_group_id": "stage-002-replicas",
+          "runtime_backend": "test",
+          "runtime_endpoint": "memory://node-a/stage-002",
+          "stage_signature": "sha256:signature-stage-002"
+        }
+      ],
+      "range": {
+        "end_layer_exclusive": 12,
+        "layer_count": 4,
+        "start_layer": 8
+      },
+      "stage_cost": {
+        "decode_work_units_per_token": 1.0,
+        "kv_bytes_per_context_token": 32,
+        "prefill_work_units_per_prompt_token": 1.0
+      },
+      "stage_id": "stage-002"
+    }
+  ],
+  "token_envelope_bytes": 64,
+  "topology_version": 3
+}

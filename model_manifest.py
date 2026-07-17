@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Immutable, architecture-aware Hugging Face model manifest compiler."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+from model_adapters import adapter_for_config
+
+
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def canonical_json(document: Any) -> str:
+   return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _digest_document(document: dict[str, Any]) -> dict[str, str]:
+   value = hashlib.sha256(canonical_json(document).encode("utf-8")).hexdigest()
+   return {"algorithm": "sha256", "value": value}
+
+
+def manifest_digest_ref(manifest: dict[str, Any]) -> str:
+   digest = manifest.get("manifest_digest") or {}
+   if digest.get("algorithm") != "sha256" or not _SHA256_RE.fullmatch(str(digest.get("value", ""))):
+      raise ValueError("manifest has invalid manifest_digest")
+   return f"sha256:{digest['value']}"
+
+
+def verify_manifest_digest(manifest: dict[str, Any]) -> bool:
+   unsigned = copy.deepcopy(manifest)
+   supplied = unsigned.pop("manifest_digest", None)
+   return supplied == _digest_document(unsigned)
+
+
+def _static_component_files(
+   weight_map: dict[str, str],
+   components: dict[str, tuple[str, ...]],
+) -> dict[str, list[str]]:
+   result: dict[str, list[str]] = {}
+   for name, prefixes in components.items():
+      if name == "decoder":
+         continue
+      matching = {
+         filename
+         for tensor, filename in weight_map.items()
+         if any("{layer}" not in prefix and tensor.startswith(prefix) for prefix in prefixes)
+      }
+      result[name] = sorted(matching)
+   return result
+
+
+def compile_model_manifest(
+   *,
+   model_id: str,
+   requested_revision: str,
+   resolved_commit: str,
+   config: dict[str, Any],
+   checkpoint_index: dict[str, Any],
+   file_metadata: dict[str, dict[str, Any]],
+   index_file: str = "model.safetensors.index.json",
+) -> dict[str, Any]:
+   if not isinstance(model_id, str) or "/" not in model_id:
+      raise ValueError("model_id must be a repository ID")
+   if not isinstance(requested_revision, str) or not requested_revision:
+      raise ValueError("requested_revision is required")
+   if not _COMMIT_RE.fullmatch(resolved_commit):
+      raise ValueError("resolved_commit must be a lowercase 40-hex commit")
+   if not isinstance(checkpoint_index, dict):
+      raise ValueError("checkpoint index must be an object")
+   weight_map = checkpoint_index.get("weight_map")
+   if not isinstance(weight_map, dict) or not weight_map:
+      raise ValueError("checkpoint index requires non-empty weight_map")
+   if not all(isinstance(key, str) and isinstance(value, str) for key, value in weight_map.items()):
+      raise ValueError("checkpoint weight_map must map tensor names to files")
+
+   adapter = adapter_for_config(config)
+   num_layers = adapter.layer_count(config)
+   tensor_keys_by_layer: dict[str, list[str]] = {}
+   layer_files: dict[str, list[str]] = {}
+   for layer in range(num_layers):
+      prefix = adapter.block_prefix_template.format(layer=layer)
+      keys = sorted(key for key in weight_map if key.startswith(prefix))
+      if not keys:
+         raise ValueError(f"missing tensor coverage for layer {layer}")
+      tensor_keys_by_layer[str(layer)] = keys
+      layer_files[str(layer)] = sorted({weight_map[key] for key in keys})
+
+   referenced_files = sorted(set(weight_map.values()))
+   missing = [path for path in referenced_files if path not in file_metadata]
+   if missing:
+      raise ValueError(f"missing file metadata for: {', '.join(missing)}")
+
+   files = []
+   for path in referenced_files:
+      metadata = file_metadata[path]
+      size = metadata.get("size_bytes")
+      digest = metadata.get("sha256")
+      if not isinstance(size, int) or isinstance(size, bool) or size <= 0:
+         raise ValueError(f"invalid size metadata for {path}")
+      if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+         raise ValueError(f"invalid sha256 metadata for {path}")
+      record = {
+         "path": path,
+         "size_bytes": size,
+         "content_digest": {"algorithm": "sha256", "value": digest},
+      }
+      if metadata.get("source_etag"):
+         record["source_etag"] = str(metadata["source_etag"])
+      files.append(record)
+
+   components = {name: list(prefixes) for name, prefixes in adapter.components.items()}
+   manifest = {
+      "protocol": "mycelium.model_manifest.v1",
+      "model_id": model_id,
+      "source": "huggingface",
+      "requested_revision": requested_revision,
+      "resolved_commit": resolved_commit,
+      "format": "safetensors_sharded",
+      "index_file": index_file,
+      "architecture": adapter.architecture,
+      "num_layers": num_layers,
+      "block_prefix_template": adapter.block_prefix_template,
+      "components": components,
+      "component_files": _static_component_files(weight_map, adapter.components),
+      "files": files,
+      "layer_files": layer_files,
+      "tensor_keys_by_layer": tensor_keys_by_layer,
+   }
+   manifest["manifest_digest"] = _digest_document(manifest)
+   return manifest
+
+
+def resolve_huggingface_manifest(
+   model_id: str,
+   *,
+   requested_revision: str = "main",
+   cache_root: str | Path | None = None,
+) -> dict[str, Any]:
+   """Resolve metadata online, pin commit, then invoke pure manifest compiler."""
+   try:
+      from huggingface_hub import HfApi, hf_hub_download
+   except ImportError as exc:
+      raise RuntimeError("huggingface_hub is required for online resolution") from exc
+
+   api = HfApi()
+   info = api.model_info(model_id, revision=requested_revision, files_metadata=True)
+   resolved_commit = str(info.sha)
+   if not _COMMIT_RE.fullmatch(resolved_commit):
+      raise ValueError("Hub did not resolve revision to a 40-hex commit")
+   siblings = {item.rfilename: item for item in info.siblings or []}
+   index_file = "model.safetensors.index.json"
+   if index_file not in siblings:
+      raise ValueError("V1 supports sharded Safetensors with model.safetensors.index.json only")
+   if "config.json" not in siblings:
+      raise ValueError("resolved commit lacks config.json")
+
+   cache_dir = str(Path(cache_root).expanduser().resolve()) if cache_root is not None else None
+   config_path = hf_hub_download(
+      repo_id=model_id,
+      filename="config.json",
+      revision=resolved_commit,
+      cache_dir=cache_dir,
+   )
+   index_path = hf_hub_download(
+      repo_id=model_id,
+      filename=index_file,
+      revision=resolved_commit,
+      cache_dir=cache_dir,
+   )
+   config = json.loads(Path(config_path).read_text())
+   checkpoint_index = json.loads(Path(index_path).read_text())
+   weight_map = checkpoint_index.get("weight_map") or {}
+
+   file_metadata: dict[str, dict[str, Any]] = {}
+   for path in sorted(set(weight_map.values())):
+      sibling = siblings.get(path)
+      if sibling is None:
+         raise ValueError(f"index references file absent at resolved commit: {path}")
+      lfs = getattr(sibling, "lfs", None)
+      sha256 = getattr(lfs, "sha256", None)
+      size = getattr(sibling, "size", None)
+      if not _SHA256_RE.fullmatch(str(sha256 or "")):
+         raise ValueError(f"upstream file lacks SHA-256 metadata: {path}")
+      if not isinstance(size, int) or size <= 0:
+         raise ValueError(f"upstream file lacks size metadata: {path}")
+      file_metadata[path] = {
+         "size_bytes": size,
+         "sha256": sha256,
+         "source_etag": getattr(sibling, "blob_id", None),
+      }
+
+   return compile_model_manifest(
+      model_id=model_id,
+      requested_revision=requested_revision,
+      resolved_commit=resolved_commit,
+      config=config,
+      checkpoint_index=checkpoint_index,
+      file_metadata=file_metadata,
+      index_file=index_file,
+   )

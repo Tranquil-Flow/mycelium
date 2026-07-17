@@ -1,0 +1,1283 @@
+{
+  "assumptions": {
+    "disk_offloading": false,
+    "exact_ring_search_at_or_below_nodes": 12,
+    "exact_single_request_ring_search_at_or_below_nodes": 7,
+    "node_drop_minimum_relative_throughput_improvement": 0.05,
+    "prefill_and_decode_share_layer_allocation": true,
+    "ram_weight_execution": "minimum_of_cpu_execution_and_gpu_streaming",
+    "recommended_initial_ring_metric": "modeled_end_to_end_single_request_tokens_s",
+    "secondary_members_contribute_to_primary_throughput": false,
+    "secondary_router_policy": "out_of_scope",
+    "secondary_runtime_capacity_reserved": false,
+    "shortest_ring_metric": "single_expected_request_network_time"
+  },
+  "capacity_ineligible": [],
+  "model": {
+    "activation_bytes": 2,
+    "decode_gflops_per_layer": 0.3,
+    "head_dim": 128,
+    "hidden_size": 3072,
+    "kv_bytes": 2,
+    "kv_heads": 8,
+    "layer_weight_gb": 0.22,
+    "model_id": "hypothetical-3b-gqa",
+    "num_layers": 28,
+    "prefill_gflops_per_layer_per_token": 0.4,
+    "token_envelope_bytes": 128
+  },
+  "ok": true,
+  "protocol": "mycelium.planner_simulation.v1",
+  "ranking": [
+    {
+      "active_nodes": 4,
+      "combined_tokens_s": 848.175345,
+      "decode_tokens_s": 158.860063,
+      "prefill_tokens_s": 4550.0,
+      "strategy": "throughput_pruned_local"
+    },
+    {
+      "active_nodes": 4,
+      "combined_tokens_s": 819.48749,
+      "decode_tokens_s": 156.077633,
+      "prefill_tokens_s": 4036.307663,
+      "strategy": "throughput_pruned_reoptimized"
+    },
+    {
+      "active_nodes": 4,
+      "combined_tokens_s": 819.48749,
+      "decode_tokens_s": 156.077633,
+      "prefill_tokens_s": 4036.307663,
+      "strategy": "global_best_shortest_subset"
+    },
+    {
+      "active_nodes": 6,
+      "combined_tokens_s": 300.078842,
+      "decode_tokens_s": 55.835486,
+      "prefill_tokens_s": 1668.853272,
+      "strategy": "shortest_all"
+    },
+    {
+      "active_nodes": 6,
+      "combined_tokens_s": 298.521805,
+      "decode_tokens_s": 59.252297,
+      "prefill_tokens_s": 1229.256953,
+      "strategy": "single_request_throughput_all"
+    },
+    {
+      "active_nodes": 6,
+      "combined_tokens_s": 267.975813,
+      "decode_tokens_s": 53.904102,
+      "prefill_tokens_s": 1049.350324,
+      "strategy": "random_ring"
+    }
+  ],
+  "scenario": "hypothetical-six-node-prefill-decode",
+  "strategies": {
+    "global_best_shortest_subset": {
+      "estimated_combined_tokens_s": 819.48749,
+      "estimated_decode_latency_ms_per_token": 22.793904,
+      "estimated_decode_tokens_s": 156.077633,
+      "estimated_prefill_latency_ms": 784.938606,
+      "estimated_prefill_tokens_s": 4036.307663,
+      "estimated_single_request_tokens_s": 235.596443,
+      "evaluated_subsets": 62,
+      "network_workload_cost_ms": 1034.180582,
+      "node_order": [
+        "cedar-3060",
+        "atlas-4090",
+        "birch-m4pro",
+        "ember-laptop"
+      ],
+      "ok": true,
+      "path_class": "primary",
+      "path_priority": 0,
+      "ring_id": "ring-8de3b52284d92a25",
+      "route": [
+        {
+          "decode_compute_ms": 4.365079,
+          "decode_outgoing_ms": 0.707547,
+          "layer_count": 5,
+          "layers": [
+            0,
+            4
+          ],
+          "memory": {
+            "kv_cache_gb": 0.097656,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 5,
+            "vram_used_gb": 1.597656,
+            "weights_gb": 1.1
+          },
+          "node_id": "cedar-3060",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 225.054945,
+          "prefill_outgoing_ms": 28.642267,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-eaabe552e01a32ed"
+        },
+        {
+          "decode_compute_ms": 5.936508,
+          "decode_outgoing_ms": 0.47056,
+          "layer_count": 17,
+          "layers": [
+            5,
+            21
+          ],
+          "memory": {
+            "kv_cache_gb": 0.332031,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 17,
+            "vram_used_gb": 4.572031,
+            "weights_gb": 3.74
+          },
+          "node_id": "atlas-4090",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 121.310105,
+          "prefill_outgoing_ms": 21.4216,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-efe90ec6e6ac3c6c"
+        },
+        {
+          "decode_compute_ms": 3.453689,
+          "decode_outgoing_ms": 1.720508,
+          "layer_count": 3,
+          "layers": [
+            22,
+            24
+          ],
+          "memory": {
+            "kv_cache_gb": 0.058594,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 1.218594,
+            "resident_layer_count": 3,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.66
+          },
+          "node_id": "birch-m4pro",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 97.52381,
+          "prefill_outgoing_ms": 71.557308,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-194eb5f6411bad6f"
+        },
+        {
+          "decode_compute_ms": 4.285714,
+          "decode_outgoing_ms": 1.854298,
+          "layer_count": 3,
+          "layers": [
+            25,
+            27
+          ],
+          "memory": {
+            "kv_cache_gb": 0.058594,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 3,
+            "vram_used_gb": 1.068594,
+            "weights_gb": 0.66
+          },
+          "node_id": "ember-laptop",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 219.428571,
+          "prefill_outgoing_ms": 0.0,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-39e082def01a25fa"
+        }
+      ],
+      "strategy": "global-best-shortest-subset"
+    },
+    "random_ring": {
+      "estimated_combined_tokens_s": 267.975813,
+      "estimated_decode_latency_ms_per_token": 69.790031,
+      "estimated_decode_tokens_s": 53.904102,
+      "estimated_prefill_latency_ms": 2991.437267,
+      "estimated_prefill_tokens_s": 1049.350324,
+      "estimated_single_request_tokens_s": 74.186496,
+      "network_workload_cost_ms": 8839.344006,
+      "node_order": [
+        "ember-laptop",
+        "atlas-4090",
+        "fern-mobile",
+        "delta-edge",
+        "birch-m4pro",
+        "cedar-3060"
+      ],
+      "ok": true,
+      "path_class": "primary",
+      "path_priority": 0,
+      "ring_id": "ring-29005e68e2bf746f",
+      "route": [
+        {
+          "decode_compute_ms": 1.428571,
+          "decode_outgoing_ms": 2.229122,
+          "layer_count": 1,
+          "layers": [
+            0,
+            0
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.589531,
+            "weights_gb": 0.22
+          },
+          "node_id": "ember-laptop",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 73.142857,
+          "prefill_outgoing_ms": 79.586808,
+          "ring_id": "ring-29005e68e2bf746f",
+          "stage_signature": "stage-e653a619b54516fa"
+        },
+        {
+          "decode_compute_ms": 0.349206,
+          "decode_outgoing_ms": 16.943741,
+          "layer_count": 1,
+          "layers": [
+            1,
+            1
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.739531,
+            "weights_gb": 0.22
+          },
+          "node_id": "atlas-4090",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 7.135889,
+          "prefill_outgoing_ms": 608.502518,
+          "ring_id": "ring-29005e68e2bf746f",
+          "stage_signature": "stage-ea0690b3983b5ba1"
+        },
+        {
+          "decode_compute_ms": 5.714286,
+          "decode_outgoing_ms": 12.837178,
+          "layer_count": 1,
+          "layers": [
+            2,
+            2
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.539531,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.22
+          },
+          "node_id": "fern-mobile",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 292.571429,
+          "prefill_outgoing_ms": 683.270458,
+          "ring_id": "ring-29005e68e2bf746f",
+          "stage_signature": "stage-79fdf2fe250f7a44"
+        },
+        {
+          "decode_compute_ms": 1.746032,
+          "decode_outgoing_ms": 3.811714,
+          "layer_count": 1,
+          "layers": [
+            3,
+            3
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.589531,
+            "weights_gb": 0.22
+          },
+          "node_id": "delta-edge",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 97.52381,
+          "prefill_outgoing_ms": 108.566914,
+          "ring_id": "ring-29005e68e2bf746f",
+          "stage_signature": "stage-82b40ae621c7d091"
+        },
+        {
+          "decode_compute_ms": 5.756149,
+          "decode_outgoing_ms": 0.532432,
+          "layer_count": 5,
+          "layers": [
+            4,
+            8
+          ],
+          "memory": {
+            "kv_cache_gb": 0.097656,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 1.697656,
+            "resident_layer_count": 5,
+            "vram_used_gb": 0.0,
+            "weights_gb": 1.1
+          },
+          "node_id": "birch-m4pro",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 162.539683,
+          "prefill_outgoing_ms": 23.388112,
+          "ring_id": "ring-29005e68e2bf746f",
+          "stage_signature": "stage-6164b9cee6abfbf2"
+        },
+        {
+          "decode_compute_ms": 16.587302,
+          "decode_outgoing_ms": 1.854298,
+          "layer_count": 19,
+          "layers": [
+            9,
+            27
+          ],
+          "memory": {
+            "kv_cache_gb": 0.371094,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 19,
+            "vram_used_gb": 4.951094,
+            "weights_gb": 4.18
+          },
+          "node_id": "cedar-3060",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 855.208791,
+          "prefill_outgoing_ms": 0.0,
+          "ring_id": "ring-29005e68e2bf746f",
+          "stage_signature": "stage-230be4d13935dab7"
+        }
+      ],
+      "strategy": "random-ring"
+    },
+    "shortest_all": {
+      "estimated_combined_tokens_s": 300.078842,
+      "estimated_decode_latency_ms_per_token": 52.457966,
+      "estimated_decode_tokens_s": 55.835486,
+      "estimated_prefill_latency_ms": 1673.322267,
+      "estimated_prefill_tokens_s": 1668.853272,
+      "estimated_single_request_tokens_s": 103.531199,
+      "network_workload_cost_ms": 6490.445107,
+      "node_order": [
+        "delta-edge",
+        "cedar-3060",
+        "atlas-4090",
+        "birch-m4pro",
+        "ember-laptop",
+        "fern-mobile"
+      ],
+      "ok": true,
+      "path_class": "primary",
+      "path_priority": 0,
+      "ring_id": "ring-b6d003c1fbee1863",
+      "route": [
+        {
+          "decode_compute_ms": 1.746032,
+          "decode_outgoing_ms": 3.557017,
+          "layer_count": 1,
+          "layers": [
+            0,
+            0
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.589531,
+            "weights_gb": 0.22
+          },
+          "node_id": "delta-edge",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 97.52381,
+          "prefill_outgoing_ms": 104.122009,
+          "ring_id": "ring-b6d003c1fbee1863",
+          "stage_signature": "stage-e653a619b54516fa"
+        },
+        {
+          "decode_compute_ms": 4.365079,
+          "decode_outgoing_ms": 0.707547,
+          "layer_count": 5,
+          "layers": [
+            1,
+            5
+          ],
+          "memory": {
+            "kv_cache_gb": 0.097656,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 5,
+            "vram_used_gb": 1.597656,
+            "weights_gb": 1.1
+          },
+          "node_id": "cedar-3060",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 225.054945,
+          "prefill_outgoing_ms": 28.642267,
+          "ring_id": "ring-b6d003c1fbee1863",
+          "stage_signature": "stage-ba5132f3796058fb"
+        },
+        {
+          "decode_compute_ms": 5.936508,
+          "decode_outgoing_ms": 0.47056,
+          "layer_count": 17,
+          "layers": [
+            6,
+            22
+          ],
+          "memory": {
+            "kv_cache_gb": 0.332031,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 17,
+            "vram_used_gb": 4.572031,
+            "weights_gb": 3.74
+          },
+          "node_id": "atlas-4090",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 121.310105,
+          "prefill_outgoing_ms": 21.4216,
+          "ring_id": "ring-b6d003c1fbee1863",
+          "stage_signature": "stage-e68f1b0c82f22f50"
+        },
+        {
+          "decode_compute_ms": 3.453689,
+          "decode_outgoing_ms": 1.720508,
+          "layer_count": 3,
+          "layers": [
+            23,
+            25
+          ],
+          "memory": {
+            "kv_cache_gb": 0.058594,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 1.218594,
+            "resident_layer_count": 3,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.66
+          },
+          "node_id": "birch-m4pro",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 97.52381,
+          "prefill_outgoing_ms": 71.557308,
+          "ring_id": "ring-b6d003c1fbee1863",
+          "stage_signature": "stage-95ca7237eebc2914"
+        },
+        {
+          "decode_compute_ms": 1.428571,
+          "decode_outgoing_ms": 11.162697,
+          "layer_count": 1,
+          "layers": [
+            26,
+            26
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.589531,
+            "weights_gb": 0.22
+          },
+          "node_id": "ember-laptop",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 73.142857,
+          "prefill_outgoing_ms": 540.452129,
+          "ring_id": "ring-b6d003c1fbee1863",
+          "stage_signature": "stage-fb474dcc9a26d165"
+        },
+        {
+          "decode_compute_ms": 5.714286,
+          "decode_outgoing_ms": 12.195472,
+          "layer_count": 1,
+          "layers": [
+            27,
+            27
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.539531,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.22
+          },
+          "node_id": "fern-mobile",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 292.571429,
+          "prefill_outgoing_ms": 0.0,
+          "ring_id": "ring-b6d003c1fbee1863",
+          "stage_signature": "stage-b5da75e974a8de2a"
+        }
+      ],
+      "strategy": "shortest-ring-all-feasible"
+    },
+    "single_request_throughput_all": {
+      "estimated_combined_tokens_s": 298.521805,
+      "estimated_decode_latency_ms_per_token": 48.758682,
+      "estimated_decode_tokens_s": 59.252297,
+      "estimated_prefill_latency_ms": 1471.077769,
+      "estimated_prefill_tokens_s": 1229.256953,
+      "estimated_single_request_tokens_s": 112.252254,
+      "network_workload_cost_ms": 6490.445107,
+      "node_order": [
+        "fern-mobile",
+        "ember-laptop",
+        "birch-m4pro",
+        "atlas-4090",
+        "cedar-3060",
+        "delta-edge"
+      ],
+      "ok": true,
+      "path_class": "primary",
+      "path_priority": 0,
+      "ring_id": "ring-e1d9229c1e6ee9eb",
+      "route": [
+        {
+          "decode_compute_ms": 5.714286,
+          "decode_outgoing_ms": 11.162697,
+          "layer_count": 1,
+          "layers": [
+            0,
+            0
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.539531,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.22
+          },
+          "node_id": "fern-mobile",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 292.571429,
+          "prefill_outgoing_ms": 540.452129,
+          "ring_id": "ring-e1d9229c1e6ee9eb",
+          "stage_signature": "stage-e653a619b54516fa"
+        },
+        {
+          "decode_compute_ms": 1.428571,
+          "decode_outgoing_ms": 1.720508,
+          "layer_count": 1,
+          "layers": [
+            1,
+            1
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.589531,
+            "weights_gb": 0.22
+          },
+          "node_id": "ember-laptop",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 73.142857,
+          "prefill_outgoing_ms": 71.557308,
+          "ring_id": "ring-e1d9229c1e6ee9eb",
+          "stage_signature": "stage-ea0690b3983b5ba1"
+        },
+        {
+          "decode_compute_ms": 1.15123,
+          "decode_outgoing_ms": 0.47056,
+          "layer_count": 1,
+          "layers": [
+            2,
+            2
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.739531,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.22
+          },
+          "node_id": "birch-m4pro",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 32.507937,
+          "prefill_outgoing_ms": 21.4216,
+          "ring_id": "ring-e1d9229c1e6ee9eb",
+          "stage_signature": "stage-79fdf2fe250f7a44"
+        },
+        {
+          "decode_compute_ms": 8.031746,
+          "decode_outgoing_ms": 0.707547,
+          "layer_count": 23,
+          "layers": [
+            3,
+            25
+          ],
+          "memory": {
+            "kv_cache_gb": 0.449219,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 23,
+            "vram_used_gb": 6.009219,
+            "weights_gb": 5.06
+          },
+          "node_id": "atlas-4090",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 164.125436,
+          "prefill_outgoing_ms": 28.642267,
+          "ring_id": "ring-e1d9229c1e6ee9eb",
+          "stage_signature": "stage-1b4258b8c5f29269"
+        },
+        {
+          "decode_compute_ms": 0.873016,
+          "decode_outgoing_ms": 3.557017,
+          "layer_count": 1,
+          "layers": [
+            26,
+            26
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.639531,
+            "weights_gb": 0.22
+          },
+          "node_id": "cedar-3060",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 45.010989,
+          "prefill_outgoing_ms": 104.122009,
+          "ring_id": "ring-e1d9229c1e6ee9eb",
+          "stage_signature": "stage-fb474dcc9a26d165"
+        },
+        {
+          "decode_compute_ms": 1.746032,
+          "decode_outgoing_ms": 12.195472,
+          "layer_count": 1,
+          "layers": [
+            27,
+            27
+          ],
+          "memory": {
+            "kv_cache_gb": 0.019531,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 1,
+            "vram_used_gb": 0.589531,
+            "weights_gb": 0.22
+          },
+          "node_id": "delta-edge",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 97.52381,
+          "prefill_outgoing_ms": 0.0,
+          "ring_id": "ring-e1d9229c1e6ee9eb",
+          "stage_signature": "stage-b5da75e974a8de2a"
+        }
+      ],
+      "strategy": "single-request-throughput-ring-all-feasible"
+    },
+    "throughput_pruned_local": {
+      "estimated_combined_tokens_s": 848.175345,
+      "estimated_decode_latency_ms_per_token": 23.318586,
+      "estimated_decode_tokens_s": 158.860063,
+      "estimated_prefill_latency_ms": 769.675733,
+      "estimated_prefill_tokens_s": 4550.0,
+      "estimated_single_request_tokens_s": 231.758357,
+      "initial_node_order": [
+        "fern-mobile",
+        "ember-laptop",
+        "birch-m4pro",
+        "atlas-4090",
+        "cedar-3060",
+        "delta-edge"
+      ],
+      "initial_ring_id": "ring-e1d9229c1e6ee9eb",
+      "network_workload_cost_ms": 1034.180582,
+      "node_order": [
+        "ember-laptop",
+        "birch-m4pro",
+        "atlas-4090",
+        "cedar-3060"
+      ],
+      "ok": true,
+      "path_class": "primary",
+      "path_priority": 0,
+      "pruning_trace": [
+        {
+          "dropped_node_id": "fern-mobile",
+          "relative_improvement": 1.39856033,
+          "throughput_after": 716.022559,
+          "throughput_before": 298.521805
+        },
+        {
+          "dropped_node_id": "delta-edge",
+          "relative_improvement": 0.184565115,
+          "throughput_after": 848.175345,
+          "throughput_before": 716.022559
+        }
+      ],
+      "ring_id": "ring-6a92b20265dc9d21",
+      "route": [
+        {
+          "decode_compute_ms": 2.857143,
+          "decode_outgoing_ms": 1.720508,
+          "layer_count": 2,
+          "layers": [
+            0,
+            1
+          ],
+          "memory": {
+            "kv_cache_gb": 0.039062,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 2,
+            "vram_used_gb": 0.829063,
+            "weights_gb": 0.44
+          },
+          "node_id": "ember-laptop",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 146.285714,
+          "prefill_outgoing_ms": 71.557308,
+          "ring_id": "ring-6a92b20265dc9d21",
+          "stage_signature": "stage-fedbe1fff8e9688d"
+        },
+        {
+          "decode_compute_ms": 5.756149,
+          "decode_outgoing_ms": 0.47056,
+          "layer_count": 5,
+          "layers": [
+            2,
+            6
+          ],
+          "memory": {
+            "kv_cache_gb": 0.097656,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 1.697656,
+            "resident_layer_count": 5,
+            "vram_used_gb": 0.0,
+            "weights_gb": 1.1
+          },
+          "node_id": "birch-m4pro",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 162.539683,
+          "prefill_outgoing_ms": 21.4216,
+          "ring_id": "ring-6a92b20265dc9d21",
+          "stage_signature": "stage-f1c1bd86ea6b145a"
+        },
+        {
+          "decode_compute_ms": 5.587302,
+          "decode_outgoing_ms": 0.707547,
+          "layer_count": 16,
+          "layers": [
+            7,
+            22
+          ],
+          "memory": {
+            "kv_cache_gb": 0.3125,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 16,
+            "vram_used_gb": 4.3325,
+            "weights_gb": 3.52
+          },
+          "node_id": "atlas-4090",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 114.174216,
+          "prefill_outgoing_ms": 28.642267,
+          "ring_id": "ring-6a92b20265dc9d21",
+          "stage_signature": "stage-a24cef25ff9444d3"
+        },
+        {
+          "decode_compute_ms": 4.365079,
+          "decode_outgoing_ms": 1.854298,
+          "layer_count": 5,
+          "layers": [
+            23,
+            27
+          ],
+          "memory": {
+            "kv_cache_gb": 0.097656,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 5,
+            "vram_used_gb": 1.597656,
+            "weights_gb": 1.1
+          },
+          "node_id": "cedar-3060",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 225.054945,
+          "prefill_outgoing_ms": 0.0,
+          "ring_id": "ring-6a92b20265dc9d21",
+          "stage_signature": "stage-c3504ebd909e7a17"
+        }
+      ],
+      "secondary_structure": {
+        "activation_condition": "router_may_splice_exact_layer_fragments_into_compatible_primary_chain",
+        "capacity_policy": "model_only_report_shared_primary_bottlenecks",
+        "capacity_reservation_fraction": 0.0,
+        "covered_layer_count": 2,
+        "executable_complete_ring": false,
+        "executable_hybrid_routes": true,
+        "kind": "alternative_stage_routes",
+        "members": [
+          {
+            "hybrid_entry": {
+              "after_layer": null,
+              "from_node_id": "token_input"
+            },
+            "hybrid_exit": {
+              "before_layer": 1,
+              "to_node_id": "ember-laptop"
+            },
+            "layer_count": 1,
+            "node_id": "fern-mobile",
+            "original_layers": [
+              0,
+              0
+            ],
+            "path_class": "secondary",
+            "path_priority": 1,
+            "replica_mode": "exact_layer_fragment",
+            "requires_partial_primary_stage_execution": true,
+            "role": "secondary_stage_member",
+            "runtime_capacity_reserved": false,
+            "shared_primary_node_ids": [
+              "ember-laptop",
+              "birch-m4pro",
+              "atlas-4090",
+              "cedar-3060"
+            ],
+            "source_initial_ring_id": "ring-e1d9229c1e6ee9eb",
+            "stage_signature": "stage-e653a619b54516fa"
+          },
+          {
+            "hybrid_entry": {
+              "after_layer": 26,
+              "from_node_id": "cedar-3060"
+            },
+            "hybrid_exit": {
+              "before_layer": null,
+              "to_node_id": "token_output"
+            },
+            "layer_count": 1,
+            "node_id": "delta-edge",
+            "original_layers": [
+              27,
+              27
+            ],
+            "path_class": "secondary",
+            "path_priority": 1,
+            "replica_mode": "exact_layer_fragment",
+            "requires_partial_primary_stage_execution": true,
+            "role": "secondary_stage_member",
+            "runtime_capacity_reserved": false,
+            "shared_primary_node_ids": [
+              "ember-laptop",
+              "birch-m4pro",
+              "atlas-4090",
+              "cedar-3060"
+            ],
+            "source_initial_ring_id": "ring-e1d9229c1e6ee9eb",
+            "stage_signature": "stage-b5da75e974a8de2a"
+          }
+        ],
+        "path_class": "secondary",
+        "path_priority": 1,
+        "required_layer_count": 28,
+        "router_policy": "out_of_scope",
+        "runtime_capacity_reserved": false,
+        "secondary_path_id": "secondary-8d458c7537342d01",
+        "shared_primary_bottlenecks": [
+          {
+            "estimated_decode_stage_ms": 4.577651,
+            "estimated_prefill_stage_ms": 217.843022,
+            "layers": [
+              0,
+              1
+            ],
+            "node_id": "ember-laptop"
+          },
+          {
+            "estimated_decode_stage_ms": 6.226709,
+            "estimated_prefill_stage_ms": 183.961283,
+            "layers": [
+              2,
+              6
+            ],
+            "node_id": "birch-m4pro"
+          },
+          {
+            "estimated_decode_stage_ms": 6.294849,
+            "estimated_prefill_stage_ms": 142.816483,
+            "layers": [
+              7,
+              22
+            ],
+            "node_id": "atlas-4090"
+          },
+          {
+            "estimated_decode_stage_ms": 6.219377,
+            "estimated_prefill_stage_ms": 225.054945,
+            "layers": [
+              23,
+              27
+            ],
+            "node_id": "cedar-3060"
+          }
+        ]
+      },
+      "strategy": "throughput-pruned-local"
+    },
+    "throughput_pruned_reoptimized": {
+      "estimated_combined_tokens_s": 819.48749,
+      "estimated_decode_latency_ms_per_token": 22.793904,
+      "estimated_decode_tokens_s": 156.077633,
+      "estimated_prefill_latency_ms": 784.938606,
+      "estimated_prefill_tokens_s": 4036.307663,
+      "estimated_single_request_tokens_s": 235.596443,
+      "initial_node_order": [
+        "fern-mobile",
+        "ember-laptop",
+        "birch-m4pro",
+        "atlas-4090",
+        "cedar-3060",
+        "delta-edge"
+      ],
+      "initial_ring_id": "ring-e1d9229c1e6ee9eb",
+      "network_workload_cost_ms": 1034.180582,
+      "node_order": [
+        "cedar-3060",
+        "atlas-4090",
+        "birch-m4pro",
+        "ember-laptop"
+      ],
+      "ok": true,
+      "path_class": "primary",
+      "path_priority": 0,
+      "pruning_trace": [
+        {
+          "dropped_node_id": "fern-mobile",
+          "relative_improvement": 1.39856033,
+          "throughput_after": 716.022559,
+          "throughput_before": 298.521805
+        },
+        {
+          "dropped_node_id": "delta-edge",
+          "relative_improvement": 0.144499541,
+          "throughput_after": 819.48749,
+          "throughput_before": 716.022559
+        }
+      ],
+      "ring_id": "ring-8de3b52284d92a25",
+      "route": [
+        {
+          "decode_compute_ms": 4.365079,
+          "decode_outgoing_ms": 0.707547,
+          "layer_count": 5,
+          "layers": [
+            0,
+            4
+          ],
+          "memory": {
+            "kv_cache_gb": 0.097656,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 5,
+            "vram_used_gb": 1.597656,
+            "weights_gb": 1.1
+          },
+          "node_id": "cedar-3060",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 225.054945,
+          "prefill_outgoing_ms": 28.642267,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-eaabe552e01a32ed"
+        },
+        {
+          "decode_compute_ms": 5.936508,
+          "decode_outgoing_ms": 0.47056,
+          "layer_count": 17,
+          "layers": [
+            5,
+            21
+          ],
+          "memory": {
+            "kv_cache_gb": 0.332031,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 17,
+            "vram_used_gb": 4.572031,
+            "weights_gb": 3.74
+          },
+          "node_id": "atlas-4090",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 121.310105,
+          "prefill_outgoing_ms": 21.4216,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-efe90ec6e6ac3c6c"
+        },
+        {
+          "decode_compute_ms": 3.453689,
+          "decode_outgoing_ms": 1.720508,
+          "layer_count": 3,
+          "layers": [
+            22,
+            24
+          ],
+          "memory": {
+            "kv_cache_gb": 0.058594,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 1.218594,
+            "resident_layer_count": 3,
+            "vram_used_gb": 0.0,
+            "weights_gb": 0.66
+          },
+          "node_id": "birch-m4pro",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 97.52381,
+          "prefill_outgoing_ms": 71.557308,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-194eb5f6411bad6f"
+        },
+        {
+          "decode_compute_ms": 4.285714,
+          "decode_outgoing_ms": 1.854298,
+          "layer_count": 3,
+          "layers": [
+            25,
+            27
+          ],
+          "memory": {
+            "kv_cache_gb": 0.058594,
+            "kv_cache_in_ram_gb": 0.0,
+            "ram_execution": null,
+            "ram_layer_count": 0,
+            "ram_used_gb": 0.0,
+            "resident_layer_count": 3,
+            "vram_used_gb": 1.068594,
+            "weights_gb": 0.66
+          },
+          "node_id": "ember-laptop",
+          "path_class": "primary",
+          "path_priority": 0,
+          "prefill_compute_ms": 219.428571,
+          "prefill_outgoing_ms": 0.0,
+          "ring_id": "ring-8de3b52284d92a25",
+          "stage_signature": "stage-39e082def01a25fa"
+        }
+      ],
+      "secondary_structure": {
+        "activation_condition": "router_may_splice_exact_layer_fragments_into_compatible_primary_chain",
+        "capacity_policy": "model_only_report_shared_primary_bottlenecks",
+        "capacity_reservation_fraction": 0.0,
+        "covered_layer_count": 2,
+        "executable_complete_ring": false,
+        "executable_hybrid_routes": true,
+        "kind": "alternative_stage_routes",
+        "members": [
+          {
+            "hybrid_entry": {
+              "after_layer": null,
+              "from_node_id": "token_input"
+            },
+            "hybrid_exit": {
+              "before_layer": 1,
+              "to_node_id": "cedar-3060"
+            },
+            "layer_count": 1,
+            "node_id": "fern-mobile",
+            "original_layers": [
+              0,
+              0
+            ],
+            "path_class": "secondary",
+            "path_priority": 1,
+            "replica_mode": "exact_layer_fragment",
+            "requires_partial_primary_stage_execution": true,
+            "role": "secondary_stage_member",
+            "runtime_capacity_reserved": false,
+            "shared_primary_node_ids": [
+              "cedar-3060",
+              "atlas-4090",
+              "birch-m4pro",
+              "ember-laptop"
+            ],
+            "source_initial_ring_id": "ring-e1d9229c1e6ee9eb",
+            "stage_signature": "stage-e653a619b54516fa"
+          },
+          {
+            "hybrid_entry": {
+              "after_layer": 26,
+              "from_node_id": "ember-laptop"
+            },
+            "hybrid_exit": {
+              "before_layer": null,
+              "to_node_id": "token_output"
+            },
+            "layer_count": 1,
+            "node_id": "delta-edge",
+            "original_layers": [
+              27,
+              27
+            ],
+            "path_class": "secondary",
+            "path_priority": 1,
+            "replica_mode": "exact_layer_fragment",
+            "requires_partial_primary_stage_execution": true,
+            "role": "secondary_stage_member",
+            "runtime_capacity_reserved": false,
+            "shared_primary_node_ids": [
+              "cedar-3060",
+              "atlas-4090",
+              "birch-m4pro",
+              "ember-laptop"
+            ],
+            "source_initial_ring_id": "ring-e1d9229c1e6ee9eb",
+            "stage_signature": "stage-b5da75e974a8de2a"
+          }
+        ],
+        "path_class": "secondary",
+        "path_priority": 1,
+        "required_layer_count": 28,
+        "router_policy": "out_of_scope",
+        "runtime_capacity_reserved": false,
+        "secondary_path_id": "secondary-8d458c7537342d01",
+        "shared_primary_bottlenecks": [
+          {
+            "estimated_decode_stage_ms": 5.072626,
+            "estimated_prefill_stage_ms": 253.697212,
+            "layers": [
+              0,
+              4
+            ],
+            "node_id": "cedar-3060"
+          },
+          {
+            "estimated_decode_stage_ms": 6.407068,
+            "estimated_prefill_stage_ms": 142.731705,
+            "layers": [
+              5,
+              21
+            ],
+            "node_id": "atlas-4090"
+          },
+          {
+            "estimated_decode_stage_ms": 5.174197,
+            "estimated_prefill_stage_ms": 169.081118,
+            "layers": [
+              22,
+              24
+            ],
+            "node_id": "birch-m4pro"
+          },
+          {
+            "estimated_decode_stage_ms": 6.140012,
+            "estimated_prefill_stage_ms": 219.428571,
+            "layers": [
+              25,
+              27
+            ],
+            "node_id": "ember-laptop"
+          }
+        ]
+      },
+      "strategy": "throughput-pruned-reoptimized"
+    }
+  },
+  "timestamp": "2026-07-14T23:02:43+0200",
+  "workload": {
+    "assumed_prompt_tokens_per_request": 1024,
+    "concurrent_requests": 4,
+    "context_fraction_per_request": 0.25,
+    "context_window": 4096,
+    "kv_safety_multiplier": 1.25,
+    "output_tokens": 192,
+    "planned_kv_tokens_per_request": 1280
+  }
+}

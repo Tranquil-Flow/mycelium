@@ -1,0 +1,66 @@
+{
+  "name": "hypothetical-ram-spill-versus-network-hop",
+  "model": {
+    "model_id": "hypothetical-2b-gqa",
+    "num_layers": 20,
+    "hidden_size": 2048,
+    "layer_weight_gb": 0.35,
+    "decode_gflops_per_layer": 0.24,
+    "prefill_gflops_per_layer_per_token": 0.32,
+    "activation_bytes": 2,
+    "kv_heads": 8,
+    "head_dim": 128,
+    "kv_bytes": 2,
+    "token_envelope_bytes": 128
+  },
+  "workload": {
+    "context_window": 2048,
+    "context_fraction_per_request": 0.25,
+    "kv_safety_multiplier": 1.25,
+    "concurrent_requests": 3,
+    "output_tokens": 128
+  },
+  "nodes": [
+    {
+      "node_id": "fast-small-vram",
+      "gpu_tflops": 40.0,
+      "cpu_tflops": 1.1,
+      "vram_available_gb": 2.5,
+      "ram_available_gb": 32.0,
+      "gpu_memory_bandwidth_gbps": 700.0,
+      "ram_bandwidth_gbps": 65.0,
+      "vram_ram_bandwidth_gbps": 28.0,
+      "unified_memory": false,
+      "workspace_gb": 0.4
+    },
+    {
+      "node_id": "lan-helper",
+      "gpu_tflops": 10.0,
+      "cpu_tflops": 0.7,
+      "vram_available_gb": 3.0,
+      "ram_available_gb": 16.0,
+      "gpu_memory_bandwidth_gbps": 300.0,
+      "ram_bandwidth_gbps": 45.0,
+      "vram_ram_bandwidth_gbps": 10.0,
+      "unified_memory": false,
+      "workspace_gb": 0.35
+    },
+    {
+      "node_id": "wan-helper",
+      "gpu_tflops": 8.0,
+      "cpu_tflops": 0.6,
+      "vram_available_gb": 3.0,
+      "ram_available_gb": 12.0,
+      "gpu_memory_bandwidth_gbps": 240.0,
+      "ram_bandwidth_gbps": 38.0,
+      "vram_ram_bandwidth_gbps": 8.0,
+      "unified_memory": false,
+      "workspace_gb": 0.35
+    }
+  ],
+  "links": [
+    {"src": "fast-small-vram", "dst": "lan-helper", "rtt_ms": 0.8, "jitter_ms": 0.05, "bandwidth_mbps": 2500, "loss_ratio": 0.0001, "bidirectional": true},
+    {"src": "fast-small-vram", "dst": "wan-helper", "rtt_ms": 28.0, "jitter_ms": 4.0, "bandwidth_mbps": 80, "loss_ratio": 0.012, "bidirectional": true},
+    {"src": "lan-helper", "dst": "wan-helper", "rtt_ms": 31.0, "jitter_ms": 5.0, "bandwidth_mbps": 65, "loss_ratio": 0.015, "bidirectional": true}
+  ]
+}

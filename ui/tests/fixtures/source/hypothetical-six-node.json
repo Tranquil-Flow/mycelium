@@ -1,0 +1,114 @@
+{
+  "name": "hypothetical-six-node-prefill-decode",
+  "model": {
+    "model_id": "hypothetical-3b-gqa",
+    "num_layers": 28,
+    "hidden_size": 3072,
+    "layer_weight_gb": 0.22,
+    "decode_gflops_per_layer": 0.3,
+    "prefill_gflops_per_layer_per_token": 0.4,
+    "activation_bytes": 2,
+    "kv_heads": 8,
+    "head_dim": 128,
+    "kv_bytes": 2,
+    "token_envelope_bytes": 128
+  },
+  "workload": {
+    "context_window": 4096,
+    "context_fraction_per_request": 0.25,
+    "kv_safety_multiplier": 1.25,
+    "concurrent_requests": 4,
+    "output_tokens": 192
+  },
+  "nodes": [
+    {
+      "node_id": "atlas-4090",
+      "gpu_tflops": 82.0,
+      "cpu_tflops": 1.2,
+      "vram_available_gb": 20.0,
+      "ram_available_gb": 48.0,
+      "gpu_memory_bandwidth_gbps": 900.0,
+      "ram_bandwidth_gbps": 70.0,
+      "vram_ram_bandwidth_gbps": 24.0,
+      "unified_memory": false,
+      "workspace_gb": 0.5
+    },
+    {
+      "node_id": "birch-m4pro",
+      "gpu_tflops": 18.0,
+      "cpu_tflops": 1.5,
+      "vram_available_gb": 0.0,
+      "ram_available_gb": 30.0,
+      "gpu_memory_bandwidth_gbps": 273.0,
+      "ram_bandwidth_gbps": 273.0,
+      "vram_ram_bandwidth_gbps": 273.0,
+      "unified_memory": true,
+      "workspace_gb": 0.5
+    },
+    {
+      "node_id": "cedar-3060",
+      "gpu_tflops": 13.0,
+      "cpu_tflops": 0.7,
+      "vram_available_gb": 9.0,
+      "ram_available_gb": 24.0,
+      "gpu_memory_bandwidth_gbps": 360.0,
+      "ram_bandwidth_gbps": 48.0,
+      "vram_ram_bandwidth_gbps": 12.0,
+      "unified_memory": false,
+      "workspace_gb": 0.4
+    },
+    {
+      "node_id": "delta-edge",
+      "gpu_tflops": 6.0,
+      "cpu_tflops": 0.45,
+      "vram_available_gb": 6.0,
+      "ram_available_gb": 14.0,
+      "gpu_memory_bandwidth_gbps": 180.0,
+      "ram_bandwidth_gbps": 35.0,
+      "vram_ram_bandwidth_gbps": 8.0,
+      "unified_memory": false,
+      "workspace_gb": 0.35
+    },
+    {
+      "node_id": "ember-laptop",
+      "gpu_tflops": 8.0,
+      "cpu_tflops": 0.55,
+      "vram_available_gb": 6.0,
+      "ram_available_gb": 12.0,
+      "gpu_memory_bandwidth_gbps": 220.0,
+      "ram_bandwidth_gbps": 42.0,
+      "vram_ram_bandwidth_gbps": 8.0,
+      "unified_memory": false,
+      "workspace_gb": 0.35
+    },
+    {
+      "node_id": "fern-mobile",
+      "gpu_tflops": 2.0,
+      "cpu_tflops": 0.25,
+      "vram_available_gb": 0.0,
+      "ram_available_gb": 7.0,
+      "gpu_memory_bandwidth_gbps": 55.0,
+      "ram_bandwidth_gbps": 45.0,
+      "vram_ram_bandwidth_gbps": 45.0,
+      "unified_memory": true,
+      "workspace_gb": 0.3
+    }
+  ],
+  "links": [
+    {"src": "atlas-4090", "dst": "birch-m4pro", "rtt_ms": 0.8, "jitter_ms": 0.05, "bandwidth_mbps": 2400, "loss_ratio": 0.0001, "bidirectional": true},
+    {"src": "atlas-4090", "dst": "cedar-3060", "rtt_ms": 1.2, "jitter_ms": 0.08, "bandwidth_mbps": 1800, "loss_ratio": 0.0002, "bidirectional": true},
+    {"src": "atlas-4090", "dst": "delta-edge", "rtt_ms": 7.0, "jitter_ms": 0.7, "bandwidth_mbps": 420, "loss_ratio": 0.002, "bidirectional": true},
+    {"src": "atlas-4090", "dst": "ember-laptop", "rtt_ms": 3.5, "jitter_ms": 0.4, "bandwidth_mbps": 650, "loss_ratio": 0.001, "bidirectional": true},
+    {"src": "atlas-4090", "dst": "fern-mobile", "rtt_ms": 24.0, "jitter_ms": 4.0, "bandwidth_mbps": 85, "loss_ratio": 0.015, "bidirectional": true},
+    {"src": "birch-m4pro", "dst": "cedar-3060", "rtt_ms": 0.9, "jitter_ms": 0.06, "bandwidth_mbps": 2200, "loss_ratio": 0.0001, "bidirectional": true},
+    {"src": "birch-m4pro", "dst": "delta-edge", "rtt_ms": 6.2, "jitter_ms": 0.6, "bandwidth_mbps": 480, "loss_ratio": 0.0015, "bidirectional": true},
+    {"src": "birch-m4pro", "dst": "ember-laptop", "rtt_ms": 2.8, "jitter_ms": 0.25, "bandwidth_mbps": 720, "loss_ratio": 0.0008, "bidirectional": true},
+    {"src": "birch-m4pro", "dst": "fern-mobile", "rtt_ms": 22.0, "jitter_ms": 3.8, "bandwidth_mbps": 90, "loss_ratio": 0.012, "bidirectional": true},
+    {"src": "cedar-3060", "dst": "delta-edge", "rtt_ms": 5.8, "jitter_ms": 0.55, "bandwidth_mbps": 500, "loss_ratio": 0.0015, "bidirectional": true},
+    {"src": "cedar-3060", "dst": "ember-laptop", "rtt_ms": 3.1, "jitter_ms": 0.3, "bandwidth_mbps": 680, "loss_ratio": 0.0009, "bidirectional": true},
+    {"src": "cedar-3060", "dst": "fern-mobile", "rtt_ms": 23.0, "jitter_ms": 4.2, "bandwidth_mbps": 80, "loss_ratio": 0.014, "bidirectional": true},
+    {"src": "delta-edge", "dst": "ember-laptop", "rtt_ms": 8.0, "jitter_ms": 1.0, "bandwidth_mbps": 280, "loss_ratio": 0.003, "bidirectional": true},
+    {"src": "delta-edge", "dst": "fern-mobile", "rtt_ms": 18.0, "jitter_ms": 3.0, "bandwidth_mbps": 75, "loss_ratio": 0.01, "bidirectional": true},
+    {"src": "ember-laptop", "dst": "fern-mobile", "rtt_ms": 16.0, "jitter_ms": 2.5, "bandwidth_mbps": 95, "loss_ratio": 0.009, "bidirectional": true}
+  ]
+}

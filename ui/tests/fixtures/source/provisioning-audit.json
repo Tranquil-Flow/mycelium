@@ -1,0 +1,13 @@
+{
+  "all_assignments_verified": true,
+  "claim_boundary": "artifact provisioning only; runtime layer load, stage probe, and route challenge remain required",
+  "errors": [],
+  "protocol": "mycelium.provisioning_audit.v1",
+  "ready_for_runtime_load": true,
+  "route_ready": false,
+  "timestamp": "2026-07-15T21:58:30.217626+00:00",
+  "verified_nodes": [
+    "http-peer-a",
+    "http-peer-b"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "protocol": "mycelium.ui_fixture_manifest.v1",
+  "evidence_state": "offline",
+  "provenance": "synthetic",
+  "claim_boundary": "copied hypothetical simulator artifacts and synthetic geography for offline UI qualification only; no observed peer or live route state",
+  "simulator": {
+    "scenario_name": "hypothetical-six-node-prefill-decode",
+    "report_protocol": "mycelium.planner_simulation.v1",
+    "files": [
+      "hypothetical-six-node.json",
+      "planner-simulation.json",
+      "synthetic-geo.json"
+    ]
+  }
+}

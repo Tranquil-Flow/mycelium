@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+message_file=$1
+trailer='Co-authored-by: Astra.K <145781196+Astra-K@users.noreply.github.com>'
+
+if ! grep -Fqi "$trailer" "$message_file"; then
+  printf '\n%s\n' "$trailer" >> "$message_file"
+fi
