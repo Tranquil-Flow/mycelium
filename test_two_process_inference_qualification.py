@@ -225,7 +225,8 @@ def test_two_persistent_spawned_mlx_workers_execute_real_router_path(
     assert result["negative_claims"] == list(NEGATIVE_CLAIMS)
     assert "local loopback TCP and bounded parent/child pipes" in CLAIM_BOUNDARY
     assert any("authenticated multi-host" in item for item in NEGATIVE_CLAIMS)
-    assert any("KV continuity" in item for item in NEGATIVE_CLAIMS)
+    assert "stage-local KV" in CLAIM_BOUNDARY
+    assert not any("complete token history" in item for item in NEGATIVE_CLAIMS)
     assert any("performance" in item for item in NEGATIVE_CLAIMS)
 
     processes = result["process_evidence"]
@@ -265,9 +266,11 @@ def test_two_persistent_spawned_mlx_workers_execute_real_router_path(
     assert parity["all_passed"] is True
     assert parity["prefill"]["passed"] is True
     assert parity["prefill"]["actual_token"] == parity["prefill"]["reference_token"]
-    assert len(parity["decode"]["actual_tokens"]) == 2
+    assert len(parity["decode"]["actual_tokens"]) == 8
     assert parity["decode"]["actual_tokens"] == parity["decode"]["reference_tokens"]
     assert parity["decode"]["passed"] is True
+    assert parity["decode"]["numeric_tolerance"] == 1e-5
+    assert parity["decode"]["max_hidden_abs_error"] <= 1e-5
     assert parity["reference"]["parent_pid"] == os.getpid()
     assert parity["reference"]["api"] == "runtime_loader.execute_loaded_stage"
     assert parity["reference"]["kind"] == "independent_full_model_stage"
@@ -289,23 +292,30 @@ def test_two_persistent_spawned_mlx_workers_execute_real_router_path(
     assert wire["bound_hosts"] == ["127.0.0.1"]
     assert wire["connection_count"] > 0
     assert wire["frame_count"] >= wire["activation_frame_count"]
-    assert wire["activation_frame_count"] == 3
-    assert wire["stage0_to_stage1_exact_reference_bytes"] is True
+    assert wire["activation_frame_count"] == 9
+    assert wire["stage0_to_stage1_within_numeric_tolerance"] is True
+    assert wire["numeric_tolerance"] == 1e-5
+    assert wire["maximum_absolute_error"] <= wire["numeric_tolerance"]
     assert [item["phase"] for item in wire["activation_frames"]] == [
         "PREFILL",
-        "DECODE",
-        "DECODE",
+        *("DECODE",) * 8,
     ]
-    assert [item["token_index"] for item in wire["activation_frames"]] == [-1, 0, 1]
-    assert all(item["exact_reference_bytes"] for item in wire["activation_frames"])
+    assert [item["token_index"] for item in wire["activation_frames"]] == [
+        -1,
+        *range(1, 9),
+    ]
+    assert all(
+        item["within_numeric_tolerance"] for item in wire["activation_frames"]
+    )
     for item in wire["activation_frames"]:
+        assert item["maximum_absolute_error"] <= item["numeric_tolerance"]
         assert item["request_id"] == "phase6-local-route-challenge"
         assert item["path_id"] == path["path_id"]
         assert item["path_attempt"] == 0
         assert item["hop_index"] == 1
         assert item["topology_version"] == 1
         assert item["tcp_payload_sha256"].startswith("sha256:")
-        assert item["tcp_payload_sha256"] == item["reference_payload_sha256"]
+        assert item["reference_payload_sha256"].startswith("sha256:")
         assert item["tcp_payload_sha256"] == item["stage0_output_sha256"]
         assert item["tcp_payload_sha256"] == item["stage1_input_sha256"]
         assert item["tcp_frame_sha256"].startswith("sha256:")
@@ -317,14 +327,26 @@ def test_two_persistent_spawned_mlx_workers_execute_real_router_path(
         assert child["node_id"] == node_id
         assert child["pid"] in processes["child_pids"]
         assert child["runtime_bound"] is True
-        assert child["phases"] == ["PREFILL", "DECODE", "DECODE"]
-        assert child["phase_counts"] == {"PREFILL": 1, "DECODE": 2}
-        assert child["rpc_call_count"] == 3
-    assert runtimes["node-a"]["cancellations"]
+        assert child["phases"] == ["PREFILL", *("DECODE",) * 8]
+        assert child["phase_counts"] == {"PREFILL": 1, "DECODE": 8}
+        assert child["rpc_call_count"] == 9
+        decode_calls = [call for call in child["calls"] if call["phase"] == "DECODE"]
+        assert [call["input_sequence_tokens"] for call in decode_calls] == [1] * 8
+        assert [call["position"] for call in decode_calls] == list(range(3, 11))
+        assert child["kv"]["mode"] == "stage_local_kv"
+        assert child["kv"]["active_state_count"] == 0
+        assert child["kv"]["release_counts"]["normal_completion"] == 1
+
+    kv_lifecycle = result["kv_lifecycle"]
+    assert kv_lifecycle["prefill_active_states"] == {"node-a": 1, "node-b": 1}
+    assert kv_lifecycle["prefill_cached_context_tokens"] == {"node-a": 3, "node-b": 3}
+    assert kv_lifecycle["completion_active_states"] == {"node-a": 0, "node-b": 0}
+    assert kv_lifecycle["capacity_after_completion"] == 0
+    assert kv_lifecycle["cross_request_leakage"] is False
 
     cleanup = result["cleanup"]
     assert cleanup == {
-        "request_cancelled": True,
+        "request_completed": True,
         "capacity_released": True,
         "mesh_closed": True,
         "worker_connections_closed": True,

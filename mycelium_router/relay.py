@@ -46,6 +46,9 @@ class RelayEngine:
    ):
       self.node_id = node_id
       self.runtime = runtime
+      self.decode_mode = getattr(runtime, "decode_mode", "complete_context_replay")
+      if self.decode_mode not in {"complete_context_replay", "stage_local_kv"}:
+         raise ValueError("invalid_runtime_decode_mode")
       self.transport = transport
       self.scheduler = scheduler
       self.batch_scheduler = HopScheduler(scheduler.config)
@@ -71,6 +74,44 @@ class RelayEngine:
          tuple[ProgressivePrefillResult, float, str],
       ] = {}
       self._pending_hops: dict[str, tuple[HopHeader, HopWorkItem]] = {}
+
+   @staticmethod
+   def _runtime_unavailable() -> RuntimeResult:
+      return RuntimeResult(
+         success=False,
+         failure_scope="PLACEMENT",
+         failure_reason="worker_runtime_unavailable",
+      )
+
+   def _execute_runtime(self, item: HopWorkItem) -> RuntimeResult:
+      try:
+         return self.runtime.execute(item)
+      except Exception:
+         return self._runtime_unavailable()
+
+   def _execute_runtime_batch(self, batch) -> tuple[RuntimeResult, ...]:
+      try:
+         return tuple(self.runtime.execute_batch(batch))
+      except Exception:
+         return tuple(self._runtime_unavailable() for _ in batch.items)
+
+   @staticmethod
+   def _kv_position(request: RequestContext, phase: str, token_index: int) -> int:
+      if phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         return 0
+      if phase == "DECODE":
+         return len(request.prompt_token_ids) + token_index - 1
+      return 0
+
+   @staticmethod
+   def _is_terminal(request: RequestContext, phase: str, token_index: int) -> bool:
+      if phase == "PREFILL":
+         return request.max_new_tokens == 1
+      if phase == "RECOVERY_PREFILL":
+         return token_index + 1 >= request.max_new_tokens
+      if phase == "DECODE":
+         return token_index + 1 >= request.max_new_tokens
+      return False
 
    def register_path(
       self,
@@ -180,7 +221,7 @@ class RelayEngine:
       if placement.node_id != self.node_id:
          return ProgressivePrefillResult("REJECTED", "destination_not_local")
       cached = self._prefill_results.get(header.idempotency_key)
-      if cached is not None:
+      if cached is not None and self.decode_mode == "complete_context_replay":
          return cached[0]
 
       state = HopStateMachine(path_attempt=header.path_attempt)
@@ -199,6 +240,9 @@ class RelayEngine:
          idempotency_key=header.idempotency_key,
          payload=context.payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
+         position=0,
+         terminal=self._is_terminal(context.request, "PREFILL", -1),
+         lease_expires_at=hop.reservation_expires_at,
          batch_key=self._runtime_batch_key(
             graph=context.graph,
             placement=placement,
@@ -217,7 +261,7 @@ class RelayEngine:
       selected = self.scheduler.pop_next(now=now)
       state.transition("ACCEPTED", path_attempt=header.path_attempt)
       state.transition("EXECUTING", path_attempt=header.path_attempt)
-      runtime_result = self.runtime.execute(selected)
+      runtime_result = self._execute_runtime(selected)
       if not runtime_result.success:
          state.transition("FAILED", path_attempt=header.path_attempt)
          report = FailureReport(
@@ -236,6 +280,7 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
+         self.release_path(build.path_id)
          self._remember_prefill(header, result)
          return result
 
@@ -260,6 +305,7 @@ class RelayEngine:
                reason=report.reason,
                failure_report=report,
             )
+            self.release_path(build.path_id)
             self._remember_prefill(header, result)
             return result
          confirmation = ManifestLocked(
@@ -270,8 +316,43 @@ class RelayEngine:
             build=build,
          )
          self.register_path(context.request, manifest, context.graph)
+         if (
+            self.decode_mode == "stage_local_kv"
+            and runtime_result.token_id is None
+         ):
+            state.transition("FAILED", path_attempt=header.path_attempt)
+            report = FailureReport(
+               request_id=context.request.request_id,
+               path_id=build.path_id,
+               path_attempt=build.path_attempt,
+               token_index=-1,
+               scope="PLACEMENT",
+               reason="final_stage_missing_token",
+               placement_id=hop.placement_id,
+               node_id=placement.node_id,
+            )
+            self.transport.send_failure_report(report)
+            result = ProgressivePrefillResult(
+               "FAILED",
+               reason=report.reason,
+               failure_report=report,
+            )
+            self.release_path(build.path_id)
+            self._remember_prefill(header, result)
+            return result
          self.transport.send_manifest_locked(confirmation)
          state.transition("FORWARDED", path_attempt=header.path_attempt)
+         if runtime_result.token_id is not None:
+            self.transport.send_token_event(
+               TokenEvent(
+                  request_id=context.request.request_id,
+                  path_id=build.path_id,
+                  path_attempt=build.path_attempt,
+                  token_index=0,
+                  token_id=runtime_result.token_id,
+                  sampling_counter=1,
+               )
+            )
          result = ProgressivePrefillResult(
             "LOCKED",
             confirmation=confirmation,
@@ -303,6 +384,7 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
+         self.release_path(build.path_id)
          self._remember_prefill(header, result)
          return result
       next_index = len(updated.ordered_hops) - 1
@@ -417,7 +499,7 @@ class RelayEngine:
       if placement.node_id != self.node_id:
          return HopReceiveResult("REJECTED", "destination_not_local")
       cached = self._hop_results.get(header.idempotency_key)
-      if cached is not None:
+      if cached is not None and self.decode_mode == "complete_context_replay":
          return cached[0]
       if header.idempotency_key in self._pending_hops:
          return HopReceiveResult("QUEUED", "duplicate_pending")
@@ -438,6 +520,9 @@ class RelayEngine:
          idempotency_key=header.idempotency_key,
          payload=payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
+         position=self._kv_position(request, header.phase, header.token_index),
+         terminal=self._is_terminal(request, header.phase, header.token_index),
+         lease_expires_at=hop.reservation_expires_at,
          batch_key=self._runtime_batch_key(
             graph=graph,
             placement=placement,
@@ -460,7 +545,7 @@ class RelayEngine:
       selected = self.scheduler.pop_next(now=now)
       state.transition("ACCEPTED", path_attempt=header.path_attempt)
       state.transition("EXECUTING", path_attempt=header.path_attempt)
-      runtime_result = self.runtime.execute(selected)
+      runtime_result = self._execute_runtime(selected)
       if not runtime_result.success:
          state.transition("FAILED", path_attempt=header.path_attempt)
          report = FailureReport(
@@ -588,7 +673,7 @@ class RelayEngine:
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
       cached = self._hop_results.get(header.idempotency_key)
-      if cached is not None:
+      if cached is not None and self.decode_mode == "complete_context_replay":
          return cached[0]
       if header.idempotency_key in self._pending_hops:
          return HopReceiveResult("QUEUED", "duplicate_pending")
@@ -641,6 +726,9 @@ class RelayEngine:
          idempotency_key=header.idempotency_key,
          payload=payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
+         position=self._kv_position(request, header.phase, header.token_index),
+         terminal=self._is_terminal(request, header.phase, header.token_index),
+         lease_expires_at=hop.reservation_expires_at,
          batch_key=self._runtime_batch_key(
             graph=graph,
             placement=placement,
@@ -696,7 +784,7 @@ class RelayEngine:
             decision=decision,
          )
          started_at = self.clock.now()
-         runtime_results = tuple(self.runtime.execute_batch(batch))
+         runtime_results = self._execute_runtime_batch(batch)
          execution_ms = max(0.0, self.clock.now() - started_at) * 1_000.0
          if len(runtime_results) != len(batch.items):
             runtime_results = tuple(
@@ -890,7 +978,7 @@ class RelayEngine:
       phase: str,
       token_span: int,
    ) -> RuntimeBatchKey | None:
-      if phase not in {"PREFILL", "PREFILL_CHUNK", "DECODE"}:
+      if phase not in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL", "DECODE"}:
          return None
       if token_span <= 0:
          return None
@@ -929,7 +1017,7 @@ class RelayEngine:
       now = self.clock.now()
       self._evict_outcomes(now=now)
       cached = self._outcomes.get(execution_key)
-      if cached is not None:
+      if cached is not None and self.decode_mode == "complete_context_replay":
          return cached[0]
       placement_map = {
          placement.placement_id: placement
@@ -963,6 +1051,9 @@ class RelayEngine:
                hop_index=hop_index,
             ),
             payload=current_payload,
+            position=self._kv_position(request, phase, token_index),
+            terminal=self._is_terminal(request, phase, token_index),
+            lease_expires_at=hop.reservation_expires_at,
             batch_key=self._runtime_batch_key(
                graph=graph,
                placement=placement_map[hop.placement_id],
@@ -970,15 +1061,16 @@ class RelayEngine:
                token_span=(
                   1
                   if phase == "DECODE"
-                  else len(request.prompt_token_ids)
-                  if phase == "PREFILL"
+                  else len(payload)
+                  if phase in {"PREFILL", "RECOVERY_PREFILL"}
+                  and isinstance(payload, (tuple, list))
                   else 0
                ),
             ),
          )
          self.scheduler.enqueue(work)
          selected = self.scheduler.pop_next(now=self.clock.now())
-         result = self.runtime.execute(selected)
+         result = self._execute_runtime(selected)
          if not result.success:
             placement = placement_map[hop.placement_id]
             edge_id = ""
@@ -1026,6 +1118,39 @@ class RelayEngine:
             )
             self.transport.send_hop(header, current_payload)
 
+      if phase == "PREFILL" or (
+         phase == "RECOVERY_PREFILL" and self.decode_mode == "stage_local_kv"
+      ):
+         if final_result is None or final_result.token_id is None:
+            if self.decode_mode == "complete_context_replay":
+               outcome = RelayOutcome()
+               self._remember(execution_key, outcome, manifest.path_id)
+               return outcome
+            report = FailureReport(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               token_index=token_index,
+               scope="PLACEMENT",
+               reason="final_stage_missing_token",
+               placement_id=manifest.ordered_hops[-1].placement_id,
+            )
+            self.transport.send_failure_report(report)
+            outcome = RelayOutcome(failure_report=report)
+            self._remember(execution_key, outcome, manifest.path_id)
+            return outcome
+         event = TokenEvent(
+            request_id=request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=0 if phase == "PREFILL" else token_index,
+            token_id=final_result.token_id,
+            sampling_counter=1 if phase == "PREFILL" else token_index + 1,
+         )
+         self.transport.send_token_event(event)
+         outcome = RelayOutcome(token_event=event)
+         self._remember(execution_key, outcome, manifest.path_id)
+         return outcome
       if phase != "DECODE":
          outcome = RelayOutcome()
          self._remember(execution_key, outcome, manifest.path_id)
@@ -1081,6 +1206,10 @@ class RelayEngine:
       return outcome
 
    def release_path(self, path_id: str) -> None:
+      try:
+         self.runtime.cancel(path_id)
+      except Exception:
+         pass
       self._outcomes = {
          key: value
          for key, value in self._outcomes.items()

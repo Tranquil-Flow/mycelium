@@ -304,6 +304,9 @@ class HopWorkItem:
    prefill_chunk_token_count: int = 0
    batch_key: RuntimeBatchKey | None = None
    deadline_at: float = float("inf")
+   position: int = 0
+   terminal: bool = False
+   lease_expires_at: float = float("inf")
 
 
 @dataclass(frozen=True)

@@ -75,6 +75,7 @@ from weight_provisioning import artifact_report_errors, provision_assignment
 
 QUALIFICATION_PROTOCOL = "mycelium.two_process_inference_qualification.v1"
 RUNTIME_RPC_PROTOCOL = "mycelium.local_runtime_pipe_rpc.v1"
+KV_NUMERIC_TOLERANCE = 1e-5
 CLAIM = (
     "Two persistent spawned local MLX runtime workers executed their exact "
     "assignment-bound stages through two production Routers, production relay "
@@ -82,15 +83,13 @@ CLAIM = (
 )
 CLAIM_BOUNDARY = (
     "Qualified only for local loopback TCP and bounded parent/child pipes: exactly "
-    "two assignment-bound MLX runtime workers exercised the Router path; no "
-    "authenticated multi-host transport, KV continuity, or performance claim."
+    "two assignment-bound MLX runtime workers exercised stage-local KV-backed "
+    "prefill/decode through the Router path; no authenticated multi-host transport "
+    "or performance claim."
 )
 NEGATIVE_CLAIMS = (
     "No authenticated multi-host transport or remote-peer security was demonstrated.",
-    (
-        "No KV continuity is claimed; complete token history was replayed and "
-        "PREFILL_CHUNK was disabled."
-    ),
+    "PREFILL_CHUNK continuity remains disabled and is not qualified.",
     "No performance, throughput, latency, scalability, or device-residency claim is made.",
     (
         "Process-local lease capacity and local loopback/pipe coordination are "
@@ -198,6 +197,11 @@ def _runtime_call_evidence(operation: str, item: Any, result: RuntimeResult) -> 
         "path_id": getattr(item, "path_id", ""),
         "path_attempt": getattr(item, "path_attempt", -1),
         "token_index": getattr(item, "token_index", -1),
+        "position": getattr(item, "position", -1),
+        "terminal": getattr(item, "terminal", False),
+        "input_sequence_tokens": getattr(
+            getattr(item, "batch_key", None), "token_span", 0
+        ),
         "hop_index": getattr(item, "hop_index", -1),
         "idempotency_key": getattr(item, "idempotency_key", ""),
         "input_payload_sha256": (
@@ -280,6 +284,7 @@ def _runtime_worker(
             "calls": list(calls),
             "cancellations": list(cancellations),
             "network_event_count": len(network_events),
+            "kv": runtime.kv_snapshot() if runtime is not None else None,
         }
 
     try:
@@ -308,12 +313,25 @@ def _runtime_worker(
                 if operation == "bind_graph":
                     if runtime is not None:
                         raise QualificationError("runtime graph already bound")
-                    if not isinstance(payload, ExecutionGraph):
+                    if (
+                        not isinstance(payload, tuple)
+                        or len(payload) != 2
+                        or not isinstance(payload[0], ExecutionGraph)
+                        or (
+                            payload[1] is not None
+                            and (
+                                not isinstance(payload[1], (int, float))
+                                or isinstance(payload[1], bool)
+                                or not math.isfinite(float(payload[1]))
+                            )
+                        )
+                    ):
                         raise QualificationError("invalid runtime graph binding")
+                    bound_graph, clock_now = payload
                     local = next(
                         (
                             placement
-                            for stage in payload.stages
+                            for stage in bound_graph.stages
                             for placement in stage.placements
                             if placement.node_id == assignment["node_id"]
                             and placement.assignment_id == assignment["assignment_id"]
@@ -324,10 +342,11 @@ def _runtime_worker(
                         raise QualificationError("assignment placement missing from graph")
                     runtime = MLXRuntimePort(
                         assignment["node_id"],
-                        payload,
+                        bound_graph,
                         {local.placement_id: loaded},
+                        clock=(None if clock_now is None else lambda: float(clock_now)),
                     )
-                    graph = payload
+                    graph = bound_graph
                     result: Any = {
                         "pid": os.getpid(),
                         "node_id": assignment["node_id"],
@@ -338,6 +357,8 @@ def _runtime_worker(
                 elif operation == "shutdown":
                     if payload is not None:
                         raise QualificationError("invalid runtime shutdown RPC payload")
+                    if runtime is not None:
+                        runtime.close(reason="worker_shutdown")
                     result = snapshot()
                     connection.send(_response(request_id, ok=True, result=result))
                     break
@@ -571,6 +592,8 @@ class _WorkerChannel:
 class _MLXWorkerProxy:
     """Router RuntimePort proxy backed by one assignment-bound child."""
 
+    decode_mode = "stage_local_kv"
+
     def __init__(self, channel: _WorkerChannel) -> None:
         self.channel = channel
 
@@ -613,10 +636,15 @@ class _RuntimeWorkerSet:
     def proxies(self) -> tuple[_MLXWorkerProxy, ...]:
         return tuple(_MLXWorkerProxy(channel) for channel in self.channels)
 
-    def bind_graph(self, graph: ExecutionGraph) -> list[dict[str, Any]]:
+    def bind_graph(
+        self,
+        graph: ExecutionGraph,
+        *,
+        clock_now: float | None = None,
+    ) -> list[dict[str, Any]]:
         bindings: list[dict[str, Any]] = []
         for channel in self.channels:
-            result = channel.request("bind_graph", graph)
+            result = channel.request("bind_graph", (graph, clock_now))
             if not isinstance(result, dict) or set(result) != {
                 "pid",
                 "node_id",
@@ -864,7 +892,7 @@ def _spawn_runtime_workers(
 def _prepare_assignments(
     root: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], _LocalOnlyFetcher]:
-    manifest, _ = _build_local_model(root)
+    manifest, _ = _build_local_model(root, n_positions=16)
     route = _route_for_manifest(manifest)
     assignments = compile_layer_assignments(
         route_plan=route,
@@ -1108,12 +1136,15 @@ def _reference_execution(
     loaded_stages: Sequence[Any],
     monolithic_stage: Any,
     token_ids: tuple[int, ...],
+    *,
+    last_position_only: bool = False,
 ) -> tuple[bytes, bytes, int]:
     tokens = mx.array((token_ids,), dtype=mx.uint32)
     hidden = execute_loaded_stage(loaded_stages[0], token_ids=tokens)
     split_logits = execute_loaded_stage(loaded_stages[1], hidden_states=hidden)
     monolithic_logits = execute_loaded_stage(monolithic_stage, token_ids=tokens)
-    contiguous = mx.contiguous(hidden)
+    activation = hidden[:, -1:, :] if last_position_only else hidden
+    contiguous = mx.contiguous(activation)
     mx.eval(contiguous, split_logits, monolithic_logits)
     split_token = int(mx.argmax(split_logits[0, -1, :]).item())
     monolithic_token = int(mx.argmax(monolithic_logits[0, -1, :]).item())
@@ -1220,21 +1251,34 @@ def _activation_wire_evidence(
         )
 
     evidence: list[dict[str, Any]] = []
+    maximum_absolute_error = 0.0
     for key in expected_keys:
         frame, header, payload = captured[key]
         reference_payload, reference_hidden, _ = references[key]
         envelope = decode_activation(payload)
+        reference_envelope = decode_activation(reference_payload)
         payload_sha256 = _sha256(payload)
         reference_sha256 = _sha256(reference_payload)
         stage0_sha256 = first_calls[key].get("output_payload_sha256")
         stage1_sha256 = second_calls[key].get("input_payload_sha256")
         if (
-            payload != reference_payload
-            or envelope.data != reference_hidden
-            or payload_sha256 != reference_sha256
+            envelope.dtype != reference_envelope.dtype
+            or envelope.shape != reference_envelope.shape
+            or reference_envelope.data != reference_hidden
         ):
             raise QualificationError(
-                f"activation payload parity mismatch for {header.phase}:{header.token_index}"
+                f"activation envelope parity mismatch for {header.phase}:{header.token_index}"
+            )
+        actual_hidden = mx.array(memoryview(envelope.data)).view(mx.float32)
+        expected_hidden = mx.array(memoryview(reference_hidden)).view(mx.float32)
+        absolute_error = float(mx.max(mx.abs(actual_hidden - expected_hidden)).item())
+        maximum_absolute_error = max(maximum_absolute_error, absolute_error)
+        within_tolerance = absolute_error <= KV_NUMERIC_TOLERANCE
+        if not within_tolerance:
+            raise QualificationError(
+                "activation numeric parity mismatch for "
+                f"{header.phase}:{header.token_index}: "
+                f"max_abs={absolute_error}, tolerance={KV_NUMERIC_TOLERANCE}"
             )
         if payload_sha256 != stage0_sha256:
             raise QualificationError("captured wire activation differs from worker output")
@@ -1261,13 +1305,18 @@ def _activation_wire_evidence(
                 "tcp_frame_sha256": _sha256(frame),
                 "hidden_state_bytes": len(envelope.data),
                 "hidden_state_sha256": _sha256(envelope.data),
-                "exact_reference_bytes": True,
+                "exact_reference_bytes": payload == reference_payload,
+                "maximum_absolute_error": absolute_error,
+                "numeric_tolerance": KV_NUMERIC_TOLERANCE,
+                "within_numeric_tolerance": within_tolerance,
             }
         )
     return {
         "activation_frame_count": len(evidence),
         "activation_frames": evidence,
-        "stage0_to_stage1_exact_reference_bytes": True,
+        "maximum_absolute_error": maximum_absolute_error,
+        "numeric_tolerance": KV_NUMERIC_TOLERANCE,
+        "stage0_to_stage1_within_numeric_tolerance": True,
     }
 
 
@@ -1322,27 +1371,32 @@ def run_qualification(
             )
 
         graph = _build_execution_graph(assignments, child_proofs)
-        bindings = workers.bind_graph(graph)
+        clock = _FixedClock()
+        bindings = workers.bind_graph(graph, clock_now=clock.now())
         proxies = workers.proxies
 
         prompt = (1, 2, 3)
         prefill_reference = _reference_execution(
             parent_loaded, reference_loaded, prompt
         )
-        first_decode_reference = _reference_execution(
-            parent_loaded, reference_loaded, prompt
-        )
-        second_decode_context = prompt + (first_decode_reference[2],)
-        second_decode_reference = _reference_execution(
-            parent_loaded, reference_loaded, second_decode_context
-        )
-        references = {
+        references: dict[tuple[str, int], tuple[bytes, bytes, int]] = {
             ("PREFILL", -1): prefill_reference,
-            ("DECODE", 0): first_decode_reference,
-            ("DECODE", 1): second_decode_reference,
         }
+        expected_decode_tokens: list[int] = []
+        reference_context = prompt
+        reference_input_token = prefill_reference[2]
+        for token_index in range(1, 9):
+            reference_context = reference_context + (reference_input_token,)
+            decode_reference = _reference_execution(
+                parent_loaded,
+                reference_loaded,
+                reference_context,
+                last_position_only=True,
+            )
+            references[("DECODE", token_index)] = decode_reference
+            expected_decode_tokens.append(decode_reference[2])
+            reference_input_token = decode_reference[2]
 
-        clock = _FixedClock()
         ids = _SequenceIdSource()
         topology = PublishedTopologyProvider(graph)
         states = PublishedDeviceStateProvider(topology, _device_states())
@@ -1356,8 +1410,8 @@ def run_qualification(
         request = RequestContext(
             request_id="phase6-local-route-challenge",
             prompt_token_ids=prompt,
-            max_new_tokens=3,
-            expected_new_tokens=2,
+            max_new_tokens=9,
+            expected_new_tokens=9,
             qos_class="interactive",
             admitted_at=clock.now(),
             target_ttft_ms=1_000.0,
@@ -1411,24 +1465,47 @@ def run_qualification(
             for item in committed_snapshot.reservations.values()
         )
         _require_parity(committed_count, 2, "committed route reservation")
+        prefill_snapshots = workers.snapshots()
+        prefill_active_states = {
+            item["node_id"]: item["kv"]["active_state_count"]
+            for item in prefill_snapshots
+        }
+        prefill_cached_context_tokens = {
+            item["node_id"]: next(iter(item["kv"]["states"].values()))[
+                "cached_context_tokens"
+            ]
+            for item in prefill_snapshots
+        }
+        _require_parity(
+            prefill_active_states,
+            {"node-a": 1, "node-b": 1},
+            "prefill KV active state",
+        )
+        _require_parity(
+            prefill_cached_context_tokens,
+            {"node-a": len(prompt), "node-b": len(prompt)},
+            "prefill KV context length",
+        )
 
-        if not entry.decode_one_distributed(request_id):
-            raise QualificationError("first distributed decode was not dispatched")
-        if not entry.decode_one_distributed(request_id):
-            raise QualificationError("second distributed decode was not dispatched")
-        actual_decode_tokens = list(sink.token_ids)
-        expected_decode_tokens = [
-            first_decode_reference[2],
-            second_decode_reference[2],
-        ]
-        _require_parity(actual_decode_tokens, expected_decode_tokens, "decode token")
-        _require_parity(sink.token_indexes, [0, 1], "decode token index")
+        _require_parity(
+            list(sink.token_ids),
+            [prefill_reference[2]],
+            "prefill token",
+        )
+        for decode_step in range(8):
+            if not entry.decode_one_distributed(request_id):
+                raise QualificationError(
+                    f"distributed decode step {decode_step + 1} was not dispatched"
+                )
+        actual_decode_tokens = list(sink.token_ids[1:])
+        _require_parity(sink.token_indexes, list(range(9)), "generated token index")
+        _require_parity(entry.request_status(request_id), "COMPLETED", "request completion")
 
-        pre_cancel_snapshots = workers.snapshots()
-        if len(pre_cancel_snapshots) != 2:
+        completed_snapshots = workers.snapshots()
+        if len(completed_snapshots) != 2:
             raise QualificationError("runtime snapshot count mismatch")
-        final_calls = pre_cancel_snapshots[1].get("calls")
-        if not isinstance(final_calls, list) or len(final_calls) != 3:
+        final_calls = completed_snapshots[1].get("calls")
+        if not isinstance(final_calls, list) or len(final_calls) != 9:
             raise QualificationError("final runtime trace call count mismatch")
         actual_prefill_token = final_calls[0].get("token_id")
         _require_parity(
@@ -1436,10 +1513,10 @@ def run_qualification(
             prefill_reference[2],
             "final-stage PREFILL token",
         )
-        expected_phases = ["PREFILL", "DECODE", "DECODE"]
-        for snapshot in pre_cancel_snapshots:
+        expected_phases = ["PREFILL"] + ["DECODE"] * 8
+        for snapshot in completed_snapshots:
             _require_parity(snapshot.get("phases"), expected_phases, "runtime phase")
-            _require_parity(snapshot.get("rpc_call_count"), 3, "runtime call count")
+            _require_parity(snapshot.get("rpc_call_count"), 9, "runtime call count")
             if snapshot.get("network_event_count") != 0:
                 raise QualificationError("runtime worker observed network activity")
 
@@ -1452,9 +1529,10 @@ def run_qualification(
             path_attempt=locked_manifest.path_attempt,
             topology_version=graph.topology_version,
             references=references,
-            first_runtime_calls=pre_cancel_snapshots[0]["calls"],
-            second_runtime_calls=pre_cancel_snapshots[1]["calls"],
+            first_runtime_calls=completed_snapshots[0]["calls"],
+            second_runtime_calls=completed_snapshots[1]["calls"],
         )
+        _require_parity(actual_decode_tokens, expected_decode_tokens, "decode token")
         endpoints = mesh.endpoints()
         bound_hosts = sorted(mesh.bound_hosts())
         connection_count = mesh.connection_count
@@ -1475,24 +1553,33 @@ def run_qualification(
         }
         challenge_digest = _sha256(_canonical_json(challenge_material).encode("utf-8"))
 
-        request_cancelled = entry.cancel(request_id)
-        if request_cancelled is not True:
-            raise QualificationError("qualified request did not cancel cleanly")
-        runtime_snapshots = workers.snapshots()
-        if len(runtime_snapshots) != 2:
-            raise QualificationError("post-cancel runtime snapshot count mismatch")
+        request_completed = entry.request_status(request_id) == "COMPLETED"
+        runtime_snapshots = completed_snapshots
         for snapshot in runtime_snapshots:
             _require_parity(
-                snapshot.get("rpc_call_count"), 3, "post-cancel runtime call count"
+                snapshot.get("rpc_call_count"), 9, "completed runtime call count"
             )
+            kv_snapshot = snapshot.get("kv")
+            if (
+                not isinstance(kv_snapshot, dict)
+                or kv_snapshot.get("active_state_count") != 0
+                or kv_snapshot.get("release_counts", {}).get("normal_completion") != 1
+            ):
+                raise QualificationError("worker KV state was not released on completion")
             if snapshot.get("network_event_count") != 0:
                 raise QualificationError(
                     "runtime worker observed network activity during request lifecycle"
                 )
         released_snapshot = capacity.snapshot()
-        capacity_released = all(
-            value == 0 for value in released_snapshot.node_reserved_kv_bytes.values()
-        ) and all(
+        completion_active_states = {
+            item["node_id"]: item["kv"]["active_state_count"]
+            for item in runtime_snapshots
+        }
+        capacity_after_completion = sum(
+            released_snapshot.node_reserved_kv_bytes.values()
+        )
+        cross_request_leakage = any(completion_active_states.values())
+        capacity_released = capacity_after_completion == 0 and all(
             item.status == "RELEASED"
             for item in released_snapshot.reservations.values()
         )
@@ -1623,6 +1710,10 @@ def run_qualification(
                 "decode": {
                     "actual_tokens": actual_decode_tokens,
                     "reference_tokens": expected_decode_tokens,
+                    "numeric_tolerance": KV_NUMERIC_TOLERANCE,
+                    "max_hidden_abs_error": wire_activation[
+                        "maximum_absolute_error"
+                    ],
                     "passed": True,
                 },
                 "reference": {
@@ -1636,8 +1727,15 @@ def run_qualification(
                 },
                 "all_passed": True,
             },
+            "kv_lifecycle": {
+                "prefill_active_states": prefill_active_states,
+                "prefill_cached_context_tokens": prefill_cached_context_tokens,
+                "completion_active_states": completion_active_states,
+                "capacity_after_completion": capacity_after_completion,
+                "cross_request_leakage": cross_request_leakage,
+            },
             "cleanup": {
-                "request_cancelled": request_cancelled,
+                "request_completed": request_completed,
                 "capacity_released": capacity_released,
                 "mesh_closed": mesh_closed,
                 "worker_connections_closed": worker_connections_closed,

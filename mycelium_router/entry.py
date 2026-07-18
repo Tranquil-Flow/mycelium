@@ -128,6 +128,14 @@ class EntryCoordinator:
       else:
          state_machine.transition("LOCKED", path_attempt=manifest.path_attempt)
          state_machine.transition("DECODING", path_attempt=manifest.path_attempt)
+         if outcome.token_event is not None:
+            prefill_accepted = self.receive_token_event(outcome.token_event)
+         else:
+            prefill_accepted = self.relay.decode_mode == "complete_context_replay"
+         if not prefill_accepted:
+            state_machine.transition("FAILED", path_attempt=manifest.path_attempt)
+            self._cleanup_record(record)
+            raise RoutingError("prefill_missing_token")
       return request.request_id
 
    def start_distributed_prefill(
@@ -423,12 +431,17 @@ class EntryCoordinator:
             hop_index=0,
          ),
       )
+      if self.relay.decode_mode == "stage_local_kv":
+         if not record.generated_token_ids:
+            return False
+         decode_tokens = (record.generated_token_ids[-1],)
+      else:
+         decode_tokens = (
+            record.request.prompt_token_ids + tuple(record.generated_token_ids)
+         )
       self.transport.send_hop(
          header,
-         encode_token_ids(
-            record.request.prompt_token_ids
-            + tuple(record.generated_token_ids)
-         ),
+         encode_token_ids(decode_tokens),
       )
       return True
 
@@ -440,16 +453,21 @@ class EntryCoordinator:
          return False
       token_index = len(record.generated_token_ids)
       while record.status == "DECODING":
+         if self.relay.decode_mode == "stage_local_kv":
+            if not record.generated_token_ids:
+               return False
+            decode_tokens = (record.generated_token_ids[-1],)
+         else:
+            decode_tokens = (
+               record.request.prompt_token_ids + tuple(record.generated_token_ids)
+            )
          outcome = self.relay.execute_manifest(
             graph=record.graph,
             manifest=record.manifest,
             request=record.request,
             phase="DECODE",
             token_index=token_index,
-            payload=(
-               record.request.prompt_token_ids
-               + tuple(record.generated_token_ids)
-            ),
+            payload=decode_tokens,
          )
          if outcome.failure_report is not None:
             if not self.receive_failure_report(outcome.failure_report):
@@ -574,7 +592,6 @@ class EntryCoordinator:
          hop.reservation_id for hop in manifest.ordered_hops
       )
       self.capacity.release(old_reservations)
-      self.runtime.cancel(manifest.path_id)
       self.relay.release_path(manifest.path_id)
       new_attempt = manifest.path_attempt + 1
       record.state_machine.begin_recovery(path_attempt=new_attempt)
@@ -607,10 +624,17 @@ class EntryCoordinator:
          manifest=new_manifest,
          request=record.request,
          phase="RECOVERY_PREFILL",
-         token_index=len(record.generated_token_ids) - 1,
+         token_index=(
+            len(record.generated_token_ids)
+            if self.relay.decode_mode == "stage_local_kv"
+            else len(record.generated_token_ids) - 1
+         ),
          payload=replay_tokens,
       )
-      if outcome.failure_report is not None:
+      if outcome.failure_report is not None or (
+         self.relay.decode_mode == "stage_local_kv"
+         and outcome.token_event is None
+      ):
          record.state_machine.transition(
             "FAILED",
             path_attempt=new_manifest.path_attempt,
@@ -625,6 +649,8 @@ class EntryCoordinator:
          "DECODING",
          path_attempt=new_manifest.path_attempt,
       )
+      if outcome.token_event is not None:
+         return self.receive_token_event(outcome.token_event)
       return True
 
    def _failure_identity_matches_locked_path(
@@ -707,9 +733,10 @@ class EntryCoordinator:
       self.capacity.release(
          tuple(hop.reservation_id for hop in record.manifest.ordered_hops)
       )
-      self.runtime.cancel(record.manifest.path_id)
-      self.relay.release_path(record.manifest.path_id)
-      record.cleaned_up = True
+      try:
+         self.relay.release_path(record.manifest.path_id)
+      finally:
+         record.cleaned_up = True
 
    def _build_path(
       self,

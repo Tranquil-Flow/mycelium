@@ -189,7 +189,7 @@ def _layer_tensors(layer: int) -> dict[str, mx.array]:
     return tensors
 
 
-def _model_config() -> dict[str, Any]:
+def _model_config(*, n_positions: int = 8) -> dict[str, Any]:
     return {
         "model_type": "gpt2",
         "architectures": ["GPT2LMHeadModel"],
@@ -198,7 +198,7 @@ def _model_config() -> dict[str, Any]:
         "n_head": 2,
         "n_inner": 8,
         "vocab_size": 7,
-        "n_positions": 8,
+        "n_positions": n_positions,
         "layer_norm_epsilon": 1e-5,
         "activation_function": "gelu_new",
         "scale_attn_weights": True,
@@ -223,10 +223,14 @@ def _save_shard(path: Path, tensors: dict[str, mx.array]) -> None:
         raise QualificationError(f"generated shard is not an isolated regular file: {path}")
 
 
-def _build_local_model(work_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+def _build_local_model(
+    work_dir: Path, *, n_positions: int = 8
+) -> tuple[dict[str, Any], dict[str, Any]]:
     first_shard = {
         "transformer.wte.weight": _values((7, 4), offset=1, scale=0.01),
-        "transformer.wpe.weight": _values((8, 4), offset=2, scale=0.005),
+        "transformer.wpe.weight": _values(
+            (n_positions, 4), offset=2, scale=0.005
+        ),
         **_layer_tensors(0),
     }
     second_shard = {
@@ -239,7 +243,7 @@ def _build_local_model(work_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     for shard_name, tensors in zip(SHARD_NAMES, shards):
         _save_shard(work_dir / shard_name, tensors)
 
-    config = _model_config()
+    config = _model_config(n_positions=n_positions)
     weight_map = {
         tensor_name: shard_name
         for shard_name, tensors in zip(SHARD_NAMES, shards)
