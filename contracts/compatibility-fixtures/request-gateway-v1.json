@@ -1,0 +1,20 @@
+{
+  "max_new_tokens": 16,
+  "prompt": "synthetic compatibility prompt",
+  "protocol": "mycelium.request_gateway.v1",
+  "qualification": {
+    "deployment_epoch": 1,
+    "deployment_id": "deployment-fixture",
+    "manifest_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "model_id": "org/model",
+    "path_manifest_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "qualification_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "qualification_id": "qualification-fixture",
+    "resolved_commit": "immutable-revision",
+    "stage_load_proof_digests": [
+      "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "topology_version": 1
+  }
+}

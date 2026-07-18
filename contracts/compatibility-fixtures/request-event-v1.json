@@ -1,0 +1,8 @@
+{
+  "protocol": "mycelium.request_event.v1",
+  "request_id": "request-fixture",
+  "sequence": 1,
+  "text": "fixture-token",
+  "token_index": 0,
+  "type": "token"
+}

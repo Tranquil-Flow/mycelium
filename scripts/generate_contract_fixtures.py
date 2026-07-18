@@ -35,6 +35,11 @@ from mycelium_qualification.contracts import (
     route_qualification_to_dict,
     synthetic_route_qualification_fixture,
 )
+from mycelium_request_gateway.contracts import (
+    InferenceSubmission,
+    QualificationBinding,
+    StreamEvent,
+)
 from mycelium_router.layer_builder import build_execution_graph
 from planner_assignment import compile_bound_layer_assignments, validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
@@ -526,6 +531,42 @@ def layer_load_proofs(tranche: dict[str, Any]) -> list[dict[str, Any]]:
     return proofs
 
 
+def request_gateway_binding() -> QualificationBinding:
+    return QualificationBinding(
+        qualification_id="qualification-fixture",
+        qualification_digest="sha256:" + "1" * 64,
+        deployment_id="deployment-fixture",
+        deployment_epoch=1,
+        topology_version=1,
+        model_id="org/model",
+        resolved_commit="immutable-revision",
+        manifest_digest="sha256:" + "2" * 64,
+        path_manifest_digest="sha256:" + "3" * 64,
+        stage_load_proof_digests=(
+            "sha256:" + "4" * 64,
+            "sha256:" + "5" * 64,
+        ),
+    )
+
+
+def request_gateway_submission() -> dict[str, Any]:
+    return InferenceSubmission(
+        prompt="synthetic compatibility prompt",
+        max_new_tokens=16,
+        qualification=request_gateway_binding(),
+    ).to_dict()
+
+
+def request_event() -> dict[str, Any]:
+    return StreamEvent(
+        request_id="request-fixture",
+        sequence=1,
+        kind="token",
+        token_index=0,
+        text="fixture-token",
+    ).to_dict()
+
+
 def documents() -> dict[str, dict[str, Any]]:
     assignments, reports = assignments_and_reports()
     router, allocator, evidence_bundle = gossip_documents()
@@ -546,6 +587,8 @@ def documents() -> dict[str, dict[str, Any]]:
         "route-qualification-v1.json": route_qualification_to_dict(
             synthetic_route_qualification_fixture()
         ),
+        "request-gateway-v1.json": request_gateway_submission(),
+        "request-event-v1.json": request_event(),
     }
     if set(generated) != EXPECTED_FIXTURE_NAMES:
         raise ValueError("generated fixture set differs from authoritative contract registry")

@@ -13,6 +13,7 @@ from layer_assignment import validate_assignment_identity
 from mycelium_gossip.evidence_bundle import evidence_bundle_from_dict
 from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_binding
 from mycelium_layer_planner.serialization import route_plan_from_dict
+from mycelium_request_gateway.contracts import InferenceSubmission, StreamEvent
 from planner_assignment import validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
 from runtime_contracts import GPT2_DECODER_TENSOR_SUFFIXES
@@ -44,6 +45,8 @@ EXPECTED_PROTOCOLS = {
     "control-plane-tranche-v1.json": "mycelium.control_plane_tranche.v1",
     "layer-load-proof-v1.json": "mycelium.layer_load_proof.v1",
     "route-qualification-v1.json": "mycelium.route_qualification.v1",
+    "request-gateway-v1.json": "mycelium.request_gateway.v1",
+    "request-event-v1.json": "mycelium.request_event.v1",
 }
 
 
@@ -469,3 +472,8 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     assert load_proof["loaded_tensor_keys"] == sorted(
         tranche["assignments"][0]["expected_tensor_keys"]
     )
+
+    submission_document = load_fixture("request-gateway-v1.json")
+    assert InferenceSubmission.from_dict(submission_document).to_dict() == submission_document
+    event_document = load_fixture("request-event-v1.json")
+    assert StreamEvent.from_dict(event_document).to_dict() == event_document

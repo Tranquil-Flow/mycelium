@@ -107,6 +107,16 @@ CONTRACT_SPECS = (
             "mycelium_qualification/qualifier.py",
         ),
     ),
+    ContractSpec(
+        "request-gateway-v1.json",
+        "mycelium.request_gateway.v1",
+        ("mycelium_request_gateway/contracts.py",),
+    ),
+    ContractSpec(
+        "request-event-v1.json",
+        "mycelium.request_event.v1",
+        ("mycelium_request_gateway/contracts.py",),
+    ),
 )
 
 SPECS_BY_FIXTURE = {spec.fixture_name: spec for spec in CONTRACT_SPECS}

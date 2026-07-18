@@ -253,6 +253,36 @@
     },
     {
       "fixture": {
+        "path": "contracts/compatibility-fixtures/request-event-v1.json",
+        "sha256": "3a834e41b7f19ea053f16314157f1a51f9b6a001d5387972a1c97552d5f77024",
+        "size_bytes": 164
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_request_gateway/contracts.py",
+          "sha256": "b01932827a519ce4cd9797171fa178f2ab4805b840f8dfbc67908c3df14f645e",
+          "size_bytes": 11832
+        }
+      ],
+      "protocol": "mycelium.request_event.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/request-gateway-v1.json",
+        "sha256": "06443c0cb7f24fc3d760a5d012f03e3ce23987bc9dec580a7984ab78aa107c1a",
+        "size_bytes": 869
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_request_gateway/contracts.py",
+          "sha256": "b01932827a519ce4cd9797171fa178f2ab4805b840f8dfbc67908c3df14f645e",
+          "size_bytes": 11832
+        }
+      ],
+      "protocol": "mycelium.request_gateway.v1"
+    },
+    {
+      "fixture": {
         "path": "contracts/compatibility-fixtures/route-plan-v2.json",
         "sha256": "363b66e4d5d2eb3b337182bcb02ec38290539962820dbad40f4afe142caccdf6",
         "size_bytes": 3747
