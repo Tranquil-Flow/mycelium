@@ -94,8 +94,12 @@ class Router:
          source_node_id=source_node_id,
       )
 
-   def receive_hop(self, header, payload):
-      return self.relay.receive_hop(header, payload)
+   def receive_hop(self, header, payload, *, source_node_id=None):
+      return self.relay.receive_hop(
+         header,
+         payload,
+         source_node_id=source_node_id,
+      )
 
    def enqueue_hop(self, header, payload):
       return self.relay.enqueue_hop(header, payload)

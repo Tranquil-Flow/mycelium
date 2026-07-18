@@ -247,6 +247,8 @@ class InProcessMesh:
       header: HopHeader,
       payload: object,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       if isinstance(payload, ProgressivePrefillContext):
          graph = payload.graph
          self._entry_by_request.setdefault(header.request_id, source_node_id)
@@ -270,7 +272,11 @@ class InProcessMesh:
       if isinstance(payload, ProgressivePrefillContext):
          result = router.receive_progressive_prefill(header, payload)
       else:
-         result = router.receive_hop(header, payload)
+         result = router.receive_hop(
+            header,
+            payload,
+            source_node_id=source_node_id,
+         )
       self.hop_results.append(result)
 
    def send_manifest_delta(

@@ -116,6 +116,74 @@ class LoopbackSocketMeshTests(unittest.TestCase):
       finally:
          mesh.close()
 
+   def test_tcp_hop_source_must_own_previous_locked_placement(self):
+      graph = three_device_graph()
+      states = state_table(slow_b_bandwidth=True)
+      states["node-d"] = replace(states["node-a"], node_id="node-d")
+      capacity = FakeCapacityPort()
+      clock = ManualClock()
+      mesh = LoopbackSocketMesh()
+      runtimes = {}
+      routers = {}
+      sink = InMemoryClientSink()
+      request = replace(request_fixture(), request_id="request-socket-hop-origin")
+
+      for node_id in ("node-a", "node-c", "node-d"):
+         runtime = FakeRuntimePort()
+         router = Router(
+            node_id=node_id,
+            topology=FakeTopologyProvider(graph),
+            device_states=FakeDeviceStateProvider(states),
+            capacity=capacity,
+            runtime=runtime,
+            transport=mesh.transport_for(node_id),
+            clock=clock,
+            id_source=SequenceIdSource(),
+            config=RouterConfig(prefill_chunk_size_tokens=0),
+         )
+         mesh.register_router(node_id, router)
+         runtimes[node_id] = runtime
+         routers[node_id] = router
+
+      mesh.start()
+      try:
+         entry = routers["node-a"]
+         entry.start_distributed_prefill(
+            request,
+            sink,
+            excluded_placements=frozenset({"node-b-stage-000"}),
+         )
+         record = entry.get_request(request.request_id)
+         previous_hop, destination_hop = record.manifest.ordered_hops[:2]
+         forged_header = HopHeader(
+            request_id=request.request_id,
+            path_id=record.manifest.path_id,
+            path_attempt=record.manifest.path_attempt,
+            phase="DECODE",
+            token_index=0,
+            hop_index=1,
+            source_placement_id=previous_hop.placement_id,
+            destination_placement_id=destination_hop.placement_id,
+            topology_version=record.manifest.topology_version,
+            idempotency_key=hop_idempotency_key(
+               request_id=request.request_id,
+               path_id=record.manifest.path_id,
+               path_attempt=record.manifest.path_attempt,
+               phase="DECODE",
+               token_index=0,
+               hop_index=1,
+            ),
+         )
+         executions_before = len(runtimes["node-c"].executed)
+
+         mesh.transport_for("node-d").send_hop(forged_header, b"forged")
+
+         self.assertEqual(len(runtimes["node-c"].executed), executions_before)
+         self.assertEqual(record.generated_token_ids, [])
+         self.assertEqual(sink.token_ids, [])
+      finally:
+         mesh.close()
+
    def test_tcp_manifest_lock_source_cannot_register_forged_participant_path(self):
       graph = three_device_graph()
       states = state_table(slow_b_bandwidth=True)

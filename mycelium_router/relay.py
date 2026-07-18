@@ -319,7 +319,13 @@ class RelayEngine:
       self._remember_prefill(header, result)
       return result
 
-   def receive_hop(self, header: HopHeader, payload: object) -> HopReceiveResult:
+   def receive_hop(
+      self,
+      header: HopHeader,
+      payload: object,
+      *,
+      source_node_id: str | None = None,
+   ) -> HopReceiveResult:
       now = self.clock.now()
       self._evict_hop_results(now=now)
       expected_key = hop_idempotency_key(
@@ -368,6 +374,16 @@ class RelayEngine:
          for stage in graph.stages
          for placement in stage.placements
       }
+      # Hop zero is admitted by the requesting entry node. In Phase 6 decode its
+      # source placement names the prior logical final hop even though the entry
+      # replays the whole context; transport ownership starts at hop one.
+      if source_node_id is not None and header.hop_index > 0:
+         source_placement = placement_map.get(header.source_placement_id)
+         if (
+            source_placement is None
+            or source_placement.node_id != source_node_id
+         ):
+            return HopReceiveResult("REJECTED", "source_node_mismatch")
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return HopReceiveResult("REJECTED", "destination_not_local")

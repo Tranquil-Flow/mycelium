@@ -286,7 +286,15 @@ class LoopbackSocketMesh:
             return
          if not isinstance(message, HopHeader):
             raise SocketTransportError("invalid_hop_message")
-         router.receive_hop(message, decoded.payload)
+         router.receive_hop(
+            message,
+            decoded.payload,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
          return
       if action == _ACTION_REGISTER_LOCK:
          if not isinstance(message, ManifestLocked):

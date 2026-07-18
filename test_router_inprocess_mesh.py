@@ -124,6 +124,43 @@ class InProcessMeshTests(unittest.TestCase):
             node_id,
          )
 
+   def test_hop_source_must_own_previous_locked_placement(self):
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(self.request.request_id)
+      previous_hop, destination_hop = record.manifest.ordered_hops[:2]
+      forged_header = HopHeader(
+         request_id=self.request.request_id,
+         path_id=record.manifest.path_id,
+         path_attempt=record.manifest.path_attempt,
+         phase="DECODE",
+         token_index=0,
+         hop_index=1,
+         source_placement_id=previous_hop.placement_id,
+         destination_placement_id=destination_hop.placement_id,
+         topology_version=record.manifest.topology_version,
+         idempotency_key=hop_idempotency_key(
+            request_id=self.request.request_id,
+            path_id=record.manifest.path_id,
+            path_attempt=record.manifest.path_attempt,
+            phase="DECODE",
+            token_index=0,
+            hop_index=1,
+         ),
+      )
+      executions_before = len(self.runtimes["node-c"].executed)
+
+      self.mesh.transport_for("node-d").send_hop(forged_header, b"forged")
+
+      self.assertEqual(self.mesh.hop_results[-1].disposition, "REJECTED")
+      self.assertEqual(self.mesh.hop_results[-1].reason, "source_node_mismatch")
+      self.assertEqual(len(self.runtimes["node-c"].executed), executions_before)
+      self.assertEqual(record.generated_token_ids, [])
+      self.assertEqual(self.sink.token_ids, [])
+
    def test_manifest_lock_source_cannot_register_forged_participant_path(self):
       captured_locks = []
       receive_manifest_locked = self.entry.receive_manifest_locked
