@@ -24,7 +24,9 @@ def _admitted(*, buffer_capacity: int = 4):
     model = GatewayModel(current=CURRENT, buffer_capacity=buffer_capacity)
     admitted = model.apply(Action.admit(CURRENT, payload="prompt-a"))
     assert admitted.code == "admitted"
-    return model, admitted.state
+    started = model.apply(Action.start(), state=admitted.state)
+    assert started.code == "started"
+    return model, started.state
 
 
 def test_admission_requires_exact_current_qualification():
@@ -32,10 +34,13 @@ def test_admission_requires_exact_current_qualification():
 
     accepted = model.apply(Action.admit(CURRENT, payload="prompt-a"))
     assert accepted.code == "admitted"
-    assert accepted.state.phase is Phase.STREAMING
-    assert accepted.state.counters.runtime_starts == 1
-    assert accepted.state.counters.capacity_acquires == 1
-    assert accepted.state.counters.kv_acquires == 1
+    assert accepted.state.phase is Phase.ADMITTED
+    assert accepted.state.counters.runtime_starts == 0
+    started = model.apply(Action.start(), state=accepted.state)
+    assert started.state.phase is Phase.STREAMING
+    assert started.state.counters.runtime_starts == 1
+    assert started.state.counters.capacity_acquires == 1
+    assert started.state.counters.kv_acquires == 1
 
     variants = (
         (replace(CURRENT, deployment="deploy-old"), "deployment_changed"),
@@ -94,7 +99,7 @@ def test_tokens_are_ordered_and_exact_token_replay_is_side_effect_free():
 @pytest.mark.parametrize(
     "action, code",
     (
-        (Action.token(0, "different"), "conflicting_token_replay"),
+        (Action.token(0, "different"), "token_order_violation"),
         (Action.token(2, "future"), "token_order_violation"),
     ),
 )
@@ -160,7 +165,10 @@ def test_bounded_buffer_reserves_terminal_slot_and_ack_releases_backpressure():
     assert blocked.state.counters.maximum_buffered == 2
 
     connected = model.apply(Action.reconnect(-1), state=blocked.state)
-    acknowledged = model.apply(Action.ack(1), state=connected.state)
+    delivered_accepted = model.apply(Action.next_event(), state=connected.state)
+    acked_accepted = model.apply(Action.ack(0), state=delivered_accepted.state)
+    delivered_token = model.apply(Action.next_event(), state=acked_accepted.state)
+    acknowledged = model.apply(Action.ack(1), state=delivered_token.state)
     second = model.apply(Action.token(1, "beta"), state=acknowledged.state)
     completed = model.apply(Action.complete(), state=second.state)
 
@@ -175,13 +183,45 @@ def test_expired_replay_cursor_fails_without_mutation():
     model, state = _admitted(buffer_capacity=3)
     first = model.apply(Action.token(0, "alpha"), state=state)
     connected = model.apply(Action.reconnect(-1), state=first.state)
-    acknowledged = model.apply(Action.ack(1), state=connected.state)
+    delivered_accepted = model.apply(Action.next_event(), state=connected.state)
+    acked_accepted = model.apply(Action.ack(0), state=delivered_accepted.state)
+    delivered_token = model.apply(Action.next_event(), state=acked_accepted.state)
+    acknowledged = model.apply(Action.ack(1), state=delivered_token.state)
     disconnected = model.apply(Action.disconnect(), state=acknowledged.state)
 
     expired = model.apply(Action.reconnect(-1), state=disconnected.state)
 
     assert expired.code == "resume_cursor_expired"
     assert expired.state == disconnected.state
+
+
+def test_cancel_before_start_has_no_runtime_capacity_or_cleanup_effects():
+    model = GatewayModel(current=CURRENT)
+    admitted = model.apply(Action.admit(CURRENT, payload="prompt-a"))
+    cancelled = model.apply(Action.cancel(), state=admitted.state)
+    late_start = model.apply(Action.start(), state=cancelled.state)
+
+    assert cancelled.state.phase is Phase.CANCELLED
+    assert cancelled.state.counters.runtime_starts == 0
+    assert cancelled.state.counters.backend_cancels == 0
+    assert cancelled.state.counters.capacity_acquires == 0
+    assert cancelled.state.counters.capacity_releases == 0
+    assert cancelled.state.counters.kv_acquires == 0
+    assert cancelled.state.counters.kv_cleanups == 0
+    assert late_start.state == cancelled.state
+
+
+def test_non_utf8_token_text_fails_as_invalid_backend_token():
+    model, state = _admitted()
+
+    failed = model.apply(Action.token(0, "\ud800"), state=state)
+
+    assert failed.code == "invalid_backend_token"
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.counters.token_events == 0
+    assert failed.state.counters.failures == 1
+    assert failed.state.counters.capacity_releases == 1
+    assert failed.state.counters.kv_cleanups == 1
 
 
 def test_errors_and_events_never_echo_payload_or_token_text_in_codes():
