@@ -349,6 +349,14 @@ class ManifestDelta:
 
 
 @dataclass(frozen=True)
+class PathCancellation:
+   request_id: str
+   path_id: str
+   path_attempt: int
+   topology_version: int
+
+
+@dataclass(frozen=True)
 class TokenEvent:
    request_id: str
    path_id: str

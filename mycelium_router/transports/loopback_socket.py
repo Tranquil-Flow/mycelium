@@ -15,6 +15,7 @@ from mycelium_router.contracts import (
    HopHeader,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
    ProgressivePrefillMessage,
@@ -35,6 +36,7 @@ _ACTION_MANIFEST_DELTA = 4
 _ACTION_TOKEN_EVENT = 5
 _ACTION_FAILURE_REPORT = 6
 _ACTION_PREFILL_CHUNK_COMPLETED = 7
+_ACTION_PATH_CANCELLATION = 8
 _MAX_PACKET_BYTES = 285_212_672
 _PACKET_LENGTH = struct.Struct(">I")
 _RESPONSE = struct.Struct(">BI")
@@ -87,6 +89,9 @@ class LoopbackSocketTransport:
    def send_manifest_locked(self, locked: ManifestLocked) -> None:
       self.mesh._send_manifest_locked(self.source_node_id, locked)
 
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None:
+      self.mesh._send_path_cancellation(self.source_node_id, cancellation)
+
    def send_failure_report(self, report: FailureReport) -> None:
       self.mesh._send_to_entry(
          self.source_node_id,
@@ -125,6 +130,7 @@ class LoopbackSocketMesh:
       self._endpoints: dict[str, _Endpoint] = {}
       self._entry_nodes: dict[str, str] = {}
       self._path_graphs: dict[str, object] = {}
+      self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
       self.frames: list[bytes] = []
       self.manifest_deltas: list[ManifestDelta] = []
       self.connection_count = 0
@@ -353,6 +359,20 @@ class LoopbackSocketMesh:
          with self._lock:
             self.manifest_deltas.append(message)
          return
+      if action == _ACTION_PATH_CANCELLATION:
+         if not isinstance(message, PathCancellation):
+            raise SocketTransportError("invalid_path_cancellation_message")
+         accepted = router.receive_path_cancellation(
+            message,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
+         if not accepted:
+            raise SocketTransportError("path_cancellation_rejected")
+         return
       if action == _ACTION_TOKEN_EVENT:
          if not isinstance(message, TokenEvent):
             raise SocketTransportError("invalid_token_event_message")
@@ -396,6 +416,10 @@ class LoopbackSocketMesh:
          graph = payload.graph
          self._entry_nodes.setdefault(header.request_id, source_node_id)
          self._path_graphs[header.path_id] = graph
+         self._participant_nodes_by_path[header.path_id] = frozenset(
+            self._node_for_placement(graph, hop.placement_id)
+            for hop in payload.build.ordered_hops
+         )
          frame = encode_progressive_prefill(header, payload)
       else:
          if not isinstance(payload, bytes):
@@ -421,6 +445,7 @@ class LoopbackSocketMesh:
          self._node_for_placement(graph, hop.placement_id)
          for hop in locked.manifest.ordered_hops
       }
+      self._participant_nodes_by_path[locked.path_id] = frozenset(participants)
       for node_id in sorted(participants):
          self._send(source_node_id, node_id, _ACTION_REGISTER_LOCK, frame)
       self._path_graphs[locked.path_id] = graph
@@ -430,6 +455,28 @@ class LoopbackSocketMesh:
          _ACTION_ENTRY_LOCK,
          frame,
       )
+
+   def _send_path_cancellation(
+      self,
+      source_node_id: str,
+      cancellation: PathCancellation,
+   ) -> None:
+      if self._entry_node(cancellation.request_id) != source_node_id:
+         raise SocketTransportError("path_cancellation_source_not_entry")
+      participants = self._participant_nodes_by_path.get(cancellation.path_id)
+      if participants is None:
+         raise SocketTransportError(f"unknown_path:{cancellation.path_id}")
+      frame = encode_frame(cancellation)
+      for node_id in sorted(participants - {source_node_id}):
+         self._send(
+            source_node_id,
+            node_id,
+            _ACTION_PATH_CANCELLATION,
+            frame,
+         )
+      self._path_graphs.pop(cancellation.path_id, None)
+      self._participant_nodes_by_path.pop(cancellation.path_id, None)
+      self._entry_nodes.pop(cancellation.request_id, None)
 
    def _send_to_entry(
       self,

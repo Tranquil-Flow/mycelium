@@ -7,6 +7,7 @@ from mycelium_router.contracts import (
    HopHeader,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PathBuildState,
    PathHop,
    PathManifest,
@@ -62,6 +63,7 @@ class RouterWireTests(unittest.TestCase):
             idempotency_key="request:path:1:DECODE:2:1",
          ),
          ManifestDelta("request", "path", 1, 0, hop),
+         PathCancellation("request", "path", 1, 3),
          ReservationRequest(
             request_id="request",
             path_id="path",

@@ -19,6 +19,7 @@ pub enum MessageType {
     HopHeader,
     ManifestDelta,
     ManifestLocked,
+    PathCancellation,
     ProgressivePrefillMessage,
     PrefillChunkCompleted,
     ReservationRequest,
@@ -34,6 +35,7 @@ impl MessageType {
             Self::HopHeader => "HopHeader",
             Self::ManifestDelta => "ManifestDelta",
             Self::ManifestLocked => "ManifestLocked",
+            Self::PathCancellation => "PathCancellation",
             Self::ProgressivePrefillMessage => "ProgressivePrefillMessage",
             Self::PrefillChunkCompleted => "PrefillChunkCompleted",
             Self::ReservationRequest => "ReservationRequest",
@@ -49,6 +51,7 @@ impl MessageType {
             "HopHeader" => Ok(Self::HopHeader),
             "ManifestDelta" => Ok(Self::ManifestDelta),
             "ManifestLocked" => Ok(Self::ManifestLocked),
+            "PathCancellation" => Ok(Self::PathCancellation),
             "ProgressivePrefillMessage" => Ok(Self::ProgressivePrefillMessage),
             "PrefillChunkCompleted" => Ok(Self::PrefillChunkCompleted),
             "ReservationRequest" => Ok(Self::ReservationRequest),
@@ -76,6 +79,9 @@ impl MessageType {
             ],
             Self::ManifestDelta => &["request_id", "path_id", "path_attempt", "hop_index", "hop"],
             Self::ManifestLocked => &["request_id", "path_id", "path_attempt", "manifest", "build"],
+            Self::PathCancellation => {
+                &["request_id", "path_id", "path_attempt", "topology_version"]
+            }
             Self::ProgressivePrefillMessage => &[
                 "header",
                 "graph",

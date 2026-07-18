@@ -9,6 +9,7 @@ from mycelium_router.contracts import (
    ManifestDelta,
    ManifestLocked,
    PathBuildState,
+   PathCancellation,
    PathManifest,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
@@ -377,8 +378,17 @@ class EntryCoordinator:
             "CANCELLED",
             path_attempt=pending.build.path_attempt,
          )
-         self.builder.abort(pending.build)
-         self.relay.release_path(pending.build.path_id)
+         cancellation = PathCancellation(
+            request_id=request_id,
+            path_id=pending.build.path_id,
+            path_attempt=pending.build.path_attempt,
+            topology_version=pending.graph.topology_version,
+         )
+         try:
+            self.transport.send_path_cancellation(cancellation)
+         finally:
+            self.builder.abort(pending.build)
+            self.relay.release_path(pending.build.path_id)
          return True
       record = self._requests.get(request_id)
       if record is None or record.status in {
@@ -391,7 +401,16 @@ class EntryCoordinator:
          "CANCELLED",
          path_attempt=record.manifest.path_attempt,
       )
-      self._cleanup_record(record)
+      cancellation = PathCancellation(
+         request_id=request_id,
+         path_id=record.manifest.path_id,
+         path_attempt=record.manifest.path_attempt,
+         topology_version=record.manifest.topology_version,
+      )
+      try:
+         self.transport.send_path_cancellation(cancellation)
+      finally:
+         self._cleanup_record(record)
       return True
 
    def generate(self, request_id: str, *, token_count: int) -> tuple[int, ...]:

@@ -4,6 +4,7 @@ from dataclasses import replace
 from mycelium_router.contracts import (
    FailureReport,
    HopHeader,
+   PathCancellation,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
    RouterConfig,
@@ -501,6 +502,48 @@ class InProcessMeshTests(unittest.TestCase):
 
       self.assertEqual(record.status, "LOCKED")
       self.assertEqual(record.completed_prefill_chunks, 1)
+
+   def test_entry_cancellation_releases_every_participating_router_path(self):
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(self.request.request_id)
+      path_id = record.manifest.path_id
+
+      self.assertTrue(self.entry.cancel(self.request.request_id))
+
+      for node_id, router in self.routers.items():
+         with self.subTest(node_id=node_id):
+            self.assertNotIn(path_id, router.relay._paths)
+            self.assertIn(path_id, self.runtimes[node_id].cancelled_path_ids)
+
+   def test_remote_cancellation_rejects_non_entry_source_without_releasing_path(self):
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(self.request.request_id)
+      cancellation = PathCancellation(
+         request_id=self.request.request_id,
+         path_id=record.manifest.path_id,
+         path_attempt=record.manifest.path_attempt,
+         topology_version=record.manifest.topology_version,
+      )
+
+      self.assertFalse(
+         self.routers["node-c"].receive_path_cancellation(
+            cancellation,
+            source_node_id="node-d",
+         )
+      )
+      self.assertIn(record.manifest.path_id, self.routers["node-c"].relay._paths)
+      self.assertNotIn(
+         record.manifest.path_id,
+         self.runtimes["node-c"].cancelled_path_ids,
+      )
 
 
 if __name__ == "__main__":

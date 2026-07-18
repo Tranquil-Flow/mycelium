@@ -9,6 +9,7 @@ from mycelium_router.contracts import (
    HopWorkItem,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
    ReservationCommitResult,
@@ -148,6 +149,7 @@ class FakeTransportPort:
       self.hops: list[tuple[HopHeader, object]] = []
       self.manifest_deltas: list[ManifestDelta] = []
       self.manifest_locks: list[ManifestLocked] = []
+      self.path_cancellations: list[PathCancellation] = []
       self.failure_reports: list[FailureReport] = []
       self.token_events: list[TokenEvent] = []
       self.prefill_chunk_completions: list[PrefillChunkCompleted] = []
@@ -165,6 +167,9 @@ class FakeTransportPort:
 
    def send_manifest_locked(self, locked: ManifestLocked) -> None:
       self.manifest_locks.append(locked)
+
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None:
+      self.path_cancellations.append(cancellation)
 
    def send_failure_report(self, report: FailureReport) -> None:
       self.failure_reports.append(report)
@@ -205,6 +210,9 @@ class InProcessMeshTransport:
    def send_manifest_locked(self, locked: ManifestLocked) -> None:
       self.mesh.send_manifest_locked(self.node_id, locked)
 
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None:
+      self.mesh.send_path_cancellation(self.node_id, cancellation)
+
    def send_failure_report(self, report: FailureReport) -> None:
       self.mesh.send_failure_report(self.node_id, report)
 
@@ -226,10 +234,12 @@ class InProcessMesh:
       self._transports: dict[str, InProcessMeshTransport] = {}
       self._entry_by_request: dict[str, str] = {}
       self._graph_by_path: dict[str, ExecutionGraph] = {}
+      self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
       self.hop_deliveries: list[InProcessHopDelivery] = []
       self.hop_results: list[object] = []
       self.manifest_deltas: list[tuple[str, ManifestDelta]] = []
       self.manifest_locks: list[tuple[str, ManifestLocked]] = []
+      self.path_cancellations: list[tuple[str, PathCancellation]] = []
       self.failure_reports: list[tuple[str, FailureReport]] = []
       self.token_events: list[tuple[str, TokenEvent]] = []
       self.prefill_chunk_completions: list[
@@ -327,6 +337,7 @@ class InProcessMesh:
          placement_map[hop.placement_id].node_id
          for hop in locked.manifest.ordered_hops
       }
+      self._participant_nodes_by_path[locked.path_id] = frozenset(participant_nodes)
       entry_node_id = self._entry_by_request.get(locked.request_id)
       entry = self.routers.get(entry_node_id) if entry_node_id else None
       if entry is None:
@@ -350,6 +361,30 @@ class InProcessMesh:
          source_node_id=source_node_id,
       ):
          raise ValueError("manifest_lock_rejected")
+
+   def send_path_cancellation(
+      self,
+      source_node_id: str,
+      cancellation: PathCancellation,
+   ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
+      entry_node_id = self._entry_by_request.get(cancellation.request_id)
+      if entry_node_id != source_node_id:
+         raise ValueError("path_cancellation_source_not_entry")
+      participant_nodes = self._participant_nodes_by_path.get(cancellation.path_id)
+      if participant_nodes is None:
+         raise ValueError("unknown_mesh_path")
+      self.path_cancellations.append((source_node_id, cancellation))
+      for node_id in sorted(participant_nodes - {source_node_id}):
+         router = self.routers.get(node_id)
+         if router is None:
+            raise ValueError(f"unknown_mesh_node:{node_id}")
+         if not router.receive_path_cancellation(
+            cancellation,
+            source_node_id=source_node_id,
+         ):
+            raise ValueError("path_cancellation_rejected")
 
    def send_failure_report(
       self,

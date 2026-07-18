@@ -188,7 +188,7 @@ def test_two_rust_sidecars_transfer_only_canonical_router_frames(sidecars) -> No
     first, second = sidecars
     sender, receiver = configure_pair(first, second)
     frame_paths = sorted(GOLDEN_DIR.glob("*.bin"))
-    assert len(frame_paths) == 10
+    assert len(frame_paths) == 11
     try:
         for frame_path in frame_paths:
             frame = frame_path.read_bytes()

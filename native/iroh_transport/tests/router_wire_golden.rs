@@ -45,7 +45,7 @@ fn sha256(bytes: &[u8]) -> String {
 fn python_golden_frames_decode_and_reencode_byte_identically() {
     let index = index();
     assert_eq!(index.protocol, "mycelium.router_wire.v1");
-    assert_eq!(index.frames.len(), 10);
+    assert_eq!(index.frames.len(), 11);
 
     for entry in index.frames {
         let frame = fs::read(fixture_dir().join(&entry.file)).expect("read golden frame");
@@ -345,6 +345,9 @@ fn required_body_fields(message_type: MessageType) -> &'static [&'static str] {
         }
         MessageType::ManifestLocked => {
             &["request_id", "path_id", "path_attempt", "manifest", "build"]
+        }
+        MessageType::PathCancellation => {
+            &["request_id", "path_id", "path_attempt", "topology_version"]
         }
         MessageType::ProgressivePrefillMessage => &[
             "header",

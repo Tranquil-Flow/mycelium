@@ -32,6 +32,7 @@ from mycelium_router.contracts import (
    HopHeader,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
    ProgressivePrefillMessage,
@@ -161,6 +162,7 @@ class IrohTransport:
       self.poll_interval_seconds = poll_interval_seconds
       self._client_factory = client_factory
       self._send_slots = threading.BoundedSemaphore(queue_capacity)
+      self._cancellation_slots = threading.BoundedSemaphore(queue_capacity)
       self._manifest_delta_capacity = queue_capacity
       self._state_lock = threading.RLock()
       self._lifecycle_lock = threading.Lock()
@@ -170,6 +172,7 @@ class IrohTransport:
       self._receive_client: Any | None = None
       self._control_client: Any | None = None
       self._receiver_thread: threading.Thread | None = None
+      self._cancellation_threads: dict[str, threading.Thread] = {}
       self._stop = threading.Event()
       self._running = False
       self._closed = False
@@ -181,6 +184,7 @@ class IrohTransport:
       self._router_frames_dispatched = 0
       self._duplicate_frames = 0
       self._path_graphs: dict[str, Any] = {}
+      self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
       self._entry_nodes: dict[str, str] = {}
       self.manifest_deltas: list[ManifestDelta] = []
 
@@ -572,6 +576,8 @@ class IrohTransport:
                   self._reconnect_receive_client()
                   continue
                except BaseException as reconnect_error:
+                  if self._stop.is_set():
+                     return
                   self._set_fatal(
                      self._map_sidecar_error(
                         "sidecar_receive_reconnect_failed",
@@ -702,6 +708,10 @@ class IrohTransport:
                source_node_id,
             )
             self._path_graphs[header.path_id] = context.graph
+            self._participant_nodes_by_path[header.path_id] = frozenset(
+               self._node_for_placement(context.graph, hop.placement_id)
+               for hop in context.build.ordered_hops
+            )
          router.receive_progressive_prefill(
             header,
             context,
@@ -731,6 +741,10 @@ class IrohTransport:
          if not accepted:
             raise IrohTransportError("manifest_registration_rejected")
          self._path_graphs[message.path_id] = message.build.graph
+         self._participant_nodes_by_path[message.path_id] = frozenset(
+            self._node_for_placement(message.build.graph, hop.placement_id)
+            for hop in message.manifest.ordered_hops
+         )
          self._entry_nodes.setdefault(message.request_id, entry_node)
          if entry_node == self.node_id:
             router.receive_manifest_locked(
@@ -743,6 +757,15 @@ class IrohTransport:
             if len(self.manifest_deltas) >= self._manifest_delta_capacity:
                raise IrohTransportError("manifest_delta_queue_full")
             self.manifest_deltas.append(message)
+         return
+      if isinstance(message, PathCancellation):
+         accepted = router.receive_path_cancellation(
+            message,
+            source_node_id=source_node_id,
+         )
+         if not accepted:
+            raise IrohTransportError("path_cancellation_rejected")
+         self._forget_path(message.request_id, message.path_id)
          return
       if isinstance(message, TokenEvent):
          router.receive_token_event(message, source_node_id=source_node_id)
@@ -776,6 +799,10 @@ class IrohTransport:
          graph = payload.graph
          self._entry_nodes.setdefault(header.request_id, self.node_id)
          self._path_graphs[header.path_id] = graph
+         self._participant_nodes_by_path[header.path_id] = frozenset(
+            self._node_for_placement(graph, hop.placement_id)
+            for hop in payload.build.ordered_hops
+         )
          frame = encode_progressive_prefill(header, payload)
       else:
          if not isinstance(payload, bytes):
@@ -811,8 +838,62 @@ class IrohTransport:
       entry = self._entry_nodes.get(locked.request_id)
       if entry is not None:
          destinations.add(entry)
+      self._participant_nodes_by_path[locked.path_id] = frozenset(destinations)
       for destination in sorted(destinations):
          self._send_or_dispatch(destination, encode_frame(locked))
+
+   def send_path_cancellation(self, cancellation: PathCancellation) -> None:
+      with self._state_lock:
+         self._require_running()
+         entry_node = self._entry_nodes.get(cancellation.request_id)
+         participants = self._participant_nodes_by_path.get(cancellation.path_id)
+         peer_node = self._peer.node_id
+      if entry_node != self.node_id:
+         raise IrohTransportError("path_cancellation_source_not_entry")
+      if participants is None:
+         raise IrohTransportError("unknown_path", cancellation.path_id)
+      if participants - {self.node_id, peer_node}:
+         raise IrohTransportError("path_cancellation_participant_unbound")
+      frame = encode_frame(cancellation)
+      if peer_node not in participants:
+         self._forget_path(cancellation.request_id, cancellation.path_id)
+         return
+      if not self._cancellation_slots.acquire(blocking=False):
+         raise IrohTransportError("path_cancellation_queue_full")
+      with self._state_lock:
+         if cancellation.path_id in self._cancellation_threads:
+            self._cancellation_slots.release()
+            raise IrohTransportError("path_cancellation_already_pending")
+         thread = threading.Thread(
+            target=self._deliver_path_cancellation,
+            args=(cancellation, peer_node, frame),
+            name=f"mycelium-iroh-path-cancel-{cancellation.path_id}",
+            daemon=True,
+         )
+         self._cancellation_threads[cancellation.path_id] = thread
+      thread.start()
+
+   def _deliver_path_cancellation(
+      self,
+      cancellation: PathCancellation,
+      peer_node: str,
+      frame: bytes,
+   ) -> None:
+      delivered = False
+      try:
+         self._send_or_dispatch(peer_node, frame)
+         delivered = True
+      except BaseException as error:
+         if not self._stop.is_set():
+            self._set_fatal(
+               self._map_sidecar_error("path_cancellation_delivery_failed", error)
+            )
+      finally:
+         if delivered:
+            self._forget_path(cancellation.request_id, cancellation.path_id)
+         with self._state_lock:
+            self._cancellation_threads.pop(cancellation.path_id, None)
+         self._cancellation_slots.release()
 
    def send_failure_report(self, report: FailureReport) -> None:
       self._send_or_dispatch(
@@ -845,6 +926,12 @@ class IrohTransport:
       if node_id is None:
          raise IrohTransportError("unknown_entry_node", request_id)
       return node_id
+
+   def _forget_path(self, request_id: str, path_id: str) -> None:
+      with self._state_lock:
+         self._path_graphs.pop(path_id, None)
+         self._participant_nodes_by_path.pop(path_id, None)
+         self._entry_nodes.pop(request_id, None)
 
    @staticmethod
    def _node_for_placement(graph: Any, placement_id: str) -> str:
@@ -903,6 +990,7 @@ class IrohTransport:
             self._send_client = None
             self._control_client = None
          thread = self._receiver_thread
+         cancellation_threads = tuple(self._cancellation_threads.values())
       for message_id in pending_ids:
          self._cancel_with_client(control, message_id)
       for client in clients:
@@ -918,12 +1006,20 @@ class IrohTransport:
             client.close()
          except BaseException:
             pass
-      if thread is threading.current_thread():
-         return
-      if thread is not None:
+      if thread is not None and thread is not threading.current_thread():
          thread.join(timeout=max(1.0, self.poll_interval_seconds * 4))
          if thread.is_alive():
             error = IrohTransportError("receiver_shutdown_timeout")
+            self._set_fatal(error)
+            raise error
+      for cancellation_thread in cancellation_threads:
+         if cancellation_thread is threading.current_thread():
+            continue
+         cancellation_thread.join(
+            timeout=max(1.0, self.delivery_timeout_seconds)
+         )
+         if cancellation_thread.is_alive():
+            error = IrohTransportError("path_cancellation_shutdown_timeout")
             self._set_fatal(error)
             raise error
       with self._state_lock:

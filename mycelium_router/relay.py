@@ -11,6 +11,7 @@ from mycelium_router.contracts import (
    HopWorkItem,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PathManifest,
    PrefillChunkCompleted,
    ProgressivePrefillContext,
@@ -1280,6 +1281,31 @@ class RelayEngine:
       outcome = RelayOutcome(token_event=event)
       self._remember(execution_key, outcome, manifest.path_id, payload_digest)
       return outcome
+
+   def receive_path_cancellation(
+      self,
+      cancellation: PathCancellation,
+      *,
+      source_node_id: str | None,
+   ) -> bool:
+      registered = self._paths.get(cancellation.path_id)
+      if registered is None:
+         return False
+      graph, manifest, request = registered
+      entry_node_id = self._entry_node_by_path.get(cancellation.path_id)
+      if (
+         not source_node_id
+         or not entry_node_id
+         or source_node_id != entry_node_id
+         or cancellation.request_id != request.request_id
+         or cancellation.path_id != manifest.path_id
+         or cancellation.path_attempt != manifest.path_attempt
+         or cancellation.topology_version != graph.topology_version
+         or cancellation.topology_version != manifest.topology_version
+      ):
+         return False
+      self.release_path(cancellation.path_id)
+      return True
 
    def release_path(self, path_id: str) -> None:
       try:

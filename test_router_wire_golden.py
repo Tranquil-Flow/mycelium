@@ -23,6 +23,7 @@ EXPECTED_TYPES = {
    "HopHeader",
    "ManifestDelta",
    "ManifestLocked",
+   "PathCancellation",
    "PrefillChunkCompleted",
    "ProgressivePrefillMessage",
    "ReservationCommitResult",
@@ -52,7 +53,7 @@ def test_python_goldens_are_complete_canonical_and_self_consistent():
    index = _index()
    assert index["schema"] == "mycelium.router_wire.golden.v1"
    assert index["protocol"] == ROUTER_WIRE_PROTOCOL
-   assert len(index["frames"]) == 10
+   assert len(index["frames"]) == 11
    assert {entry["message_type"] for entry in index["frames"]} == EXPECTED_TYPES
    assert any(entry["payload_length"] > 0 for entry in index["frames"])
 
@@ -88,7 +89,7 @@ def test_golden_generation_is_deterministic_across_repeated_runs():
          capture_output=True,
          text=True,
       )
-      assert completed.stdout == "generated 10 Router wire golden frames\n"
+      assert completed.stdout == "generated 11 Router wire golden frames\n"
    assert _fixture_hashes() == before
 
 

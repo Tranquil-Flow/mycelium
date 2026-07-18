@@ -11,6 +11,7 @@ from mycelium_router.contracts import (
    HopHeader,
    ManifestDelta,
    ManifestLocked,
+   PathCancellation,
    PathBuildState,
    PathHop,
    PathManifest,
@@ -54,6 +55,7 @@ _MESSAGE_TYPES = {
       HopHeader,
       ManifestDelta,
       ManifestLocked,
+      PathCancellation,
       ProgressivePrefillMessage,
       PrefillChunkCompleted,
       ReservationRequest,
@@ -354,7 +356,15 @@ def _validate_message(message: object) -> None:
          raise WireError("invalid_manifest_locked", error.code) from error
    if isinstance(
       message,
-      (HopHeader, ManifestDelta, ReservationRequest, TokenEvent, PrefillChunkCompleted, FailureReport),
+      (
+         HopHeader,
+         ManifestDelta,
+         PathCancellation,
+         ReservationRequest,
+         TokenEvent,
+         PrefillChunkCompleted,
+         FailureReport,
+      ),
    ):
       if not message.request_id or not message.path_id:
          raise WireError("invalid_wire_identity")
@@ -371,6 +381,9 @@ def _validate_message(message: object) -> None:
    elif isinstance(message, ManifestDelta):
       if message.hop_index < 0 or not message.hop.reservation_id:
          raise WireError("invalid_manifest_delta")
+   elif isinstance(message, PathCancellation):
+      if message.topology_version < 0:
+         raise WireError("invalid_path_cancellation")
    elif isinstance(message, ReservationRequest):
       if (
          not message.placement_id

@@ -158,7 +158,11 @@ class RouterSessionBackend:
             if request_id in self._cancelled:
                 return
             self._cancelled.add(request_id)
-        self._router.cancel(request_id)
+        try:
+            self._router.cancel(request_id)
+        finally:
+            with self._lock:
+                self._cancelled.discard(request_id)
 
     def _is_cancelled(self, request_id: str) -> bool:
         with self._lock:
