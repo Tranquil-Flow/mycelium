@@ -1,0 +1,1 @@
+"""Qualification-authority tests."""

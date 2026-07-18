@@ -327,6 +327,11 @@
           "path": "mycelium_qualification/qualifier.py",
           "sha256": "a2f9ec7f8bd3648468e2c17ffd0823fc0b4db21aa9bbdc9cc8db4b66aeb10cdd",
           "size_bytes": 50773
+        },
+        {
+          "path": "mycelium_qualification/authority.py",
+          "sha256": "d95a9850fbcc90b01075d5837e9f58f704060bf4db8861bfa5e3537718ee1ec4",
+          "size_bytes": 9989
         }
       ],
       "protocol": "mycelium.route_qualification.v1"

@@ -105,6 +105,7 @@ CONTRACT_SPECS = (
             "mycelium_qualification/contracts.py",
             "mycelium_qualification/evidence.py",
             "mycelium_qualification/qualifier.py",
+            "mycelium_qualification/authority.py",
         ),
     ),
     ContractSpec(
