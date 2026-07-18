@@ -144,12 +144,18 @@ class FakeDeviceStateProvider:
 
 class FakeTransportPort:
    def __init__(self):
+      self.entry_nodes: dict[str, str] = {}
       self.hops: list[tuple[HopHeader, object]] = []
       self.manifest_deltas: list[ManifestDelta] = []
       self.manifest_locks: list[ManifestLocked] = []
       self.failure_reports: list[FailureReport] = []
       self.token_events: list[TokenEvent] = []
       self.prefill_chunk_completions: list[PrefillChunkCompleted] = []
+
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      existing = self.entry_nodes.setdefault(request_id, node_id)
+      if existing != node_id:
+         raise ValueError("request_entry_conflict")
 
    def send_hop(self, header: HopHeader, payload: object) -> None:
       self.hops.append((header, payload))
@@ -184,6 +190,11 @@ class InProcessMeshTransport:
    def __init__(self, mesh, node_id: str):
       self.mesh = mesh
       self.node_id = node_id
+
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      if node_id != self.node_id:
+         raise ValueError("request_entry_transport_mismatch")
+      self.mesh.remember_entry(request_id, node_id)
 
    def send_hop(self, header: HopHeader, payload: object) -> None:
       self.mesh.send_hop(self.node_id, header, payload)
@@ -241,6 +252,13 @@ class InProcessMesh:
          raise ValueError("duplicate_mesh_node")
       self.routers[node_id] = router
 
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      if node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_entry:{node_id}")
+      existing = self._entry_by_request.setdefault(request_id, node_id)
+      if existing != node_id:
+         raise ValueError("request_entry_conflict")
+
    def send_hop(
       self,
       source_node_id: str,
@@ -274,6 +292,7 @@ class InProcessMesh:
             header,
             payload,
             source_node_id=source_node_id,
+            entry_node_id=self._entry_by_request.get(header.request_id),
          )
       else:
          result = router.receive_hop(

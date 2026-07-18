@@ -152,6 +152,7 @@ class EntryCoordinator:
          or request.request_id in self._pending_prefills
       ):
          raise ValueError("duplicate_request_id")
+      self.transport.remember_entry(request.request_id, self.node_id)
       graph = self.topology.snapshot()
       build = self.builder.start(
          request,

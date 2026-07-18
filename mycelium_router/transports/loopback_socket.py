@@ -68,6 +68,11 @@ class LoopbackSocketTransport:
       self.mesh = mesh
       self.source_node_id = source_node_id
 
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      if node_id != self.source_node_id:
+         raise SocketTransportError("request_entry_transport_mismatch")
+      self.mesh.remember_entry(request_id, node_id)
+
    def send_hop(self, header: HopHeader, payload: object) -> None:
       self.mesh._send_hop(self.source_node_id, header, payload)
 
@@ -144,6 +149,14 @@ class LoopbackSocketMesh:
       if node_id in self.routers:
          raise SocketTransportError(f"duplicate_router:{node_id}")
       self.routers[node_id] = router
+
+   def remember_entry(self, request_id: str, node_id: str) -> None:
+      if node_id not in self.routers:
+         raise SocketTransportError(f"unknown_entry_node:{node_id}")
+      with self._lock:
+         existing = self._entry_nodes.setdefault(request_id, node_id)
+         if existing != node_id:
+            raise SocketTransportError("request_entry_conflict")
 
    def start(self) -> None:
       if self._started:
@@ -290,6 +303,7 @@ class LoopbackSocketMesh:
                   "source_node_id",
                   None,
                ),
+               entry_node_id=self._entry_node(header.request_id),
             )
             return
          if not isinstance(message, HopHeader):

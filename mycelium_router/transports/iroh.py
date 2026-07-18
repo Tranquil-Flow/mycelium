@@ -696,12 +696,17 @@ class IrohTransport:
       if isinstance(message, ProgressivePrefillMessage):
          frame = encode_frame(message, decoded.payload)
          header, context = decode_progressive_prefill(frame)
-         self._entry_nodes.setdefault(header.request_id, source_node_id)
-         self._path_graphs[header.path_id] = context.graph
+         with self._state_lock:
+            entry_node_id = self._entry_nodes.setdefault(
+               header.request_id,
+               source_node_id,
+            )
+            self._path_graphs[header.path_id] = context.graph
          router.receive_progressive_prefill(
             header,
             context,
             source_node_id=source_node_id,
+            entry_node_id=entry_node_id,
          )
          return
       if isinstance(message, HopHeader):
@@ -757,7 +762,12 @@ class IrohTransport:
       )
 
    def remember_entry(self, request_id: str, node_id: str) -> None:
-      self._entry_nodes.setdefault(request_id, node_id)
+      if node_id != self.node_id:
+         raise IrohTransportError("request_entry_transport_mismatch")
+      with self._state_lock:
+         existing = self._entry_nodes.setdefault(request_id, node_id)
+         if existing != node_id:
+            raise IrohTransportError("request_entry_conflict")
 
    def send_hop(self, header: HopHeader, payload: object) -> None:
       with self._state_lock:

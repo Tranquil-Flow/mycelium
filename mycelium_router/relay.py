@@ -176,6 +176,7 @@ class RelayEngine:
       context: ProgressivePrefillContext,
       *,
       source_node_id: str | None = None,
+      entry_node_id: str | None = None,
    ) -> ProgressivePrefillResult:
       now = self.clock.now()
       self._evict_prefill_results(now=now)
@@ -209,6 +210,12 @@ class RelayEngine:
       )
       if header.source_placement_id != expected_source:
          return ProgressivePrefillResult("REJECTED", "source_placement_mismatch")
+      if (
+         source_node_id is not None
+         and header.hop_index == 0
+         and entry_node_id != source_node_id
+      ):
+         return ProgressivePrefillResult("REJECTED", "entry_node_mismatch")
       placement_map = {
          placement.placement_id: placement
          for stage in context.graph.stages

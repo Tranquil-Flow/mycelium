@@ -188,6 +188,46 @@ class InProcessMeshTests(unittest.TestCase):
       self.assertEqual(len(self.runtimes["node-c"].executed), 0)
       self.assertEqual(len(self.runtimes["node-d"].executed), 0)
 
+   def test_route_building_hop_zero_source_must_match_admitted_entry(self):
+      entry_transport = self.mesh.transport_for("node-a")
+      honest_send_hop = entry_transport.send_hop
+
+      def forge_first_route_building_hop(header, payload):
+         if isinstance(payload, ProgressivePrefillContext) and header.hop_index == 0:
+            return self.mesh.transport_for("node-d").send_hop(header, payload)
+         return honest_send_hop(header, payload)
+
+      entry_transport.send_hop = forge_first_route_building_hop
+
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+
+      self.assertEqual(self.entry.request_status(self.request.request_id), "PREFILL")
+      self.assertEqual(self.mesh.hop_results[-1].disposition, "REJECTED")
+      self.assertEqual(self.mesh.hop_results[-1].reason, "entry_node_mismatch")
+      self.assertEqual(len(self.runtimes["node-a"].executed), 0)
+      self.assertEqual(len(self.runtimes["node-c"].executed), 0)
+      self.assertEqual(len(self.runtimes["node-d"].executed), 0)
+
+   def test_conflicting_request_entry_registration_fails_before_reservation(self):
+      self.mesh.remember_entry(self.request.request_id, "node-d")
+
+      with self.assertRaisesRegex(ValueError, "request_entry_conflict"):
+         self.entry.start_distributed_prefill(
+            self.request,
+            self.sink,
+            excluded_placements=frozenset({"node-b-stage-000"}),
+         )
+
+      with self.assertRaises(KeyError):
+         self.entry.request_status(self.request.request_id)
+      self.assertEqual(self.capacity.requests, [])
+      self.assertEqual(self.mesh.manifest_deltas, [])
+      self.assertEqual(self.mesh.hop_deliveries, [])
+
    def test_cached_route_building_hop_revalidates_transport_source(self):
       send_hop = self.mesh.send_hop
       captured = {}

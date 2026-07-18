@@ -134,11 +134,19 @@ class Router:
    def next_batch_deadline(self):
       return self.relay.next_batch_deadline()
 
-   def receive_progressive_prefill(self, header, context, *, source_node_id=None):
+   def receive_progressive_prefill(
+      self,
+      header,
+      context,
+      *,
+      source_node_id=None,
+      entry_node_id=None,
+   ):
       return self.relay.receive_progressive_prefill(
          header,
          context,
          source_node_id=source_node_id,
+         entry_node_id=entry_node_id,
       )
 
    def receive_token_event(self, event, *, source_node_id=None):
