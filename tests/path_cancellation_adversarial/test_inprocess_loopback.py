@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
-import pytest
-
 from mycelium_router.contracts import PathCancellation
-from mycelium_router.state import StateTransitionError
 from mycelium_router.transports.loopback_socket import LoopbackSocketMesh
 from mycelium_router.wire import decode_frame
 
@@ -20,24 +18,6 @@ from ._harness import (
    join_bounded,
    run_in_thread,
 )
-
-
-POST_CANCEL_RED = (
-   "PRODUCTION RED PC-RACE-1: completed blocked runtime forwards tensor bytes "
-   "after local cancellation released path"
-)
-COMPLETION_RED = (
-   "PRODUCTION RED PC-RACE-2: cancellation during blocked sink emit raises "
-   "CANCELLED-to-COMPLETED transition"
-)
-
-
-class _PostCancelPayloadProductionRed(AssertionError):
-   """Expected only for the precisely shaped PC-RACE-1 defect."""
-
-
-class _CompletionTransitionProductionRed(AssertionError):
-   """Expected only for the precisely shaped PC-RACE-2 defect."""
 
 
 def test_mesh_fanout_excludes_source_and_releases_each_participant_once() -> None:
@@ -98,11 +78,6 @@ def test_cancellation_during_blocked_decode_emits_no_client_token_and_leaks_no_t
       assert runtime.cancel_calls == [case.cancellation.path_id]
 
 
-@pytest.mark.xfail(
-   strict=True,
-   raises=_PostCancelPayloadProductionRed,
-   reason=POST_CANCEL_RED,
-)
 def test_blocked_decode_cancellation_sends_no_later_remote_tensor_hop() -> None:
    case, blocker, thread, _results, errors = _blocked_decode_case(
       "request-blocked-no-remote-payload"
@@ -122,24 +97,77 @@ def test_blocked_decode_cancellation_sends_no_later_remote_tensor_hop() -> None:
    join_bounded(thread)
 
    assert errors == []
-   if len(late_hops) != 1:
-      raise RuntimeError(f"unexpected_post_cancel_hop_count:{len(late_hops)}")
-   source_node_id, header, payload = late_hops[0]
-   if (
-      source_node_id != ENTRY_NODE
-      or getattr(header, "hop_index", None) != 1
-      or not isinstance(payload, bytes)
-      or not payload
-   ):
-      raise RuntimeError("unexpected_post_cancel_hop_shape")
-   raise _PostCancelPayloadProductionRed("one post-cancel remote payload hop observed")
+   assert late_hops == []
+   for router in case.routers.values():
+      assert all(
+         cached[2] != case.cancellation.path_id
+         for cached in router.relay._hop_results.values()
+      )
+      assert all(
+         cached[2] != case.cancellation.path_id
+         for cached in router.relay._outcomes.values()
+      )
 
 
-@pytest.mark.xfail(
-   strict=True,
-   raises=_CompletionTransitionProductionRed,
-   reason=COMPLETION_RED,
-)
+def test_local_execute_permit_is_invalidated_before_runtime_work_starts() -> None:
+   case = build_mesh_case(request_id="request-local-execute-fence")
+   relay = case.entry.relay
+   entered = threading.Event()
+   release = threading.Event()
+   original_execute_manifest = relay.execute_manifest
+
+   def paused_execute_manifest(*args, **kwargs):
+      entered.set()
+      assert release.wait(timeout=1.0)
+      return original_execute_manifest(*args, **kwargs)
+
+   relay.execute_manifest = paused_execute_manifest
+   executed_before = len(case.runtimes[ENTRY_NODE].executed)
+   thread, results, errors = run_in_thread(
+      lambda: case.entry.decode_one(case.request.request_id)
+   )
+   assert entered.wait(timeout=1.0)
+   try:
+      assert case.entry.cancel(case.request.request_id)
+   finally:
+      release.set()
+   join_bounded(thread)
+
+   assert errors == []
+   assert results == [False]
+   assert len(case.runtimes[ENTRY_NODE].executed) == executed_before
+   assert case.sink.token_ids == []
+
+
+def test_cancel_during_scheduler_enqueue_prevents_runtime_start() -> None:
+   case = build_mesh_case(request_id="request-scheduler-enqueue-fence")
+   relay = case.entry.relay
+   entered = threading.Event()
+   release = threading.Event()
+   original_enqueue = relay.scheduler.enqueue
+
+   def paused_enqueue(item) -> None:
+      original_enqueue(item)
+      entered.set()
+      assert release.wait(timeout=1.0)
+
+   relay.scheduler.enqueue = paused_enqueue
+   executed_before = len(case.runtimes[ENTRY_NODE].executed)
+   thread, results, errors = run_in_thread(
+      lambda: case.entry.decode_one(case.request.request_id)
+   )
+   assert entered.wait(timeout=1.0)
+   try:
+      assert case.entry.cancel(case.request.request_id)
+   finally:
+      release.set()
+   join_bounded(thread)
+
+   assert errors == []
+   assert results == [False]
+   assert len(case.runtimes[ENTRY_NODE].executed) == executed_before
+
+
 def test_cancellation_wins_when_completion_is_blocked_inside_sink() -> None:
    sink = BlockingSink()
    case = build_mesh_case(
@@ -157,22 +185,6 @@ def test_cancellation_wins_when_completion_is_blocked_inside_sink() -> None:
       sink.release_emit.set()
    join_bounded(thread)
 
-   if errors:
-      if len(errors) != 1:
-         raise RuntimeError(f"unexpected_completion_error_count:{len(errors)}")
-      error = errors[0]
-      if (
-         not isinstance(error, StateTransitionError)
-         or error.code != "illegal_state_transition"
-         or error.detail != "CANCELLED->COMPLETED"
-      ):
-         raise RuntimeError("unexpected_completion_race_error_shape") from error
-      assert results == []
-      assert case.entry.request_status(case.request.request_id) == "CANCELLED"
-      assert len(case.capacity.release_calls) == 1
-      raise _CompletionTransitionProductionRed(
-         "precise CANCELLED-to-COMPLETED worker transition observed"
-      )
    assert errors == []
    assert results == [True]
    assert case.entry.request_status(case.request.request_id) == "CANCELLED"

@@ -137,6 +137,7 @@ def encode_frame(message: object, payload: bytes = b"") -> bytes:
    message_type = type(message).__name__
    if message_type not in _MESSAGE_TYPES:
       raise WireError("unknown_message_type", message_type)
+   _validate_message(message)
    if not isinstance(payload, bytes):
       raise WireError("payload_must_be_bytes")
    if len(payload) > _MAX_PAYLOAD_BYTES:
@@ -326,6 +327,11 @@ def _build_from_dict(body: dict[str, Any]) -> PathBuildState:
 
 
 def _validate_message(message: object) -> None:
+   if isinstance(message, PathCancellation) and (
+      type(message.path_attempt) is not int
+      or type(message.topology_version) is not int
+   ):
+      raise WireError("invalid_wire_field", "path_cancellation_identity")
    if isinstance(message, ProgressivePrefillMessage):
       header = message.header
       _validate_message(header)

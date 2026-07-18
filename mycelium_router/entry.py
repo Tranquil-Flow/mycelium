@@ -1,6 +1,8 @@
 """Request admission, checkpointing, decode, and failure recovery."""
 
 from dataclasses import dataclass, field
+from threading import RLock
+from typing import Any
 
 from mycelium_router.contracts import (
    ExecutionGraph,
@@ -37,6 +39,7 @@ class RequestRecord:
    excluded_edges: frozenset[str] = frozenset()
    excluded_devices: frozenset[str] = frozenset()
    cleaned_up: bool = False
+   lock: Any = field(default_factory=RLock, repr=False, compare=False)
 
    @property
    def status(self) -> str:
@@ -51,6 +54,7 @@ class PendingPrefill:
    client_sink: object
    state_machine: RequestStateMachine
    prefill_chunks: tuple[tuple[int, ...], ...]
+   lock: Any = field(default_factory=RLock, repr=False, compare=False)
 
 
 class EntryCoordinator:
@@ -115,6 +119,15 @@ class EntryCoordinator:
          excluded_devices=build.excluded_devices,
       )
       self._requests[request.request_id] = record
+      if not self.relay.register_path(
+         request,
+         manifest,
+         graph,
+         entry_node_id=self.node_id,
+      ):
+         self._cleanup_record(record)
+         raise RoutingError("path_registration_failed")
+      generation = self.relay.path_generation(manifest.path_id)
       outcome = self.relay.execute_manifest(
          graph=graph,
          manifest=manifest,
@@ -122,19 +135,31 @@ class EntryCoordinator:
          phase="PREFILL",
          token_index=-1,
          payload=request.prompt_token_ids,
+         expected_generation=generation,
       )
       if outcome.failure_report is not None:
          if not self.receive_failure_report(outcome.failure_report):
+            if record.status == "CANCELLED":
+               return request.request_id
             raise RoutingError("prefill_failed", outcome.failure_report.reason)
       else:
-         state_machine.transition("LOCKED", path_attempt=manifest.path_attempt)
-         state_machine.transition("DECODING", path_attempt=manifest.path_attempt)
+         with record.lock:
+            if record.status != "PREFILL":
+               return request.request_id
+            state_machine.transition("LOCKED", path_attempt=manifest.path_attempt)
+            state_machine.transition("DECODING", path_attempt=manifest.path_attempt)
          if outcome.token_event is not None:
             prefill_accepted = self.receive_token_event(outcome.token_event)
          else:
             prefill_accepted = self.relay.decode_mode == "complete_context_replay"
          if not prefill_accepted:
-            state_machine.transition("FAILED", path_attempt=manifest.path_attempt)
+            with record.lock:
+               if record.status == "CANCELLED":
+                  return request.request_id
+               record.state_machine.transition(
+                  "FAILED",
+                  path_attempt=manifest.path_attempt,
+               )
             self._cleanup_record(record)
             raise RoutingError("prefill_missing_token")
       return request.request_id
@@ -249,32 +274,49 @@ class EntryCoordinator:
       validate_manifest(locked.manifest, pending.graph)
       if locked.manifest.ordered_hops != locked.build.ordered_hops:
          return False
-      pending.state_machine.transition(
-         "LOCKED",
-         path_attempt=locked.path_attempt,
-      )
-      record = RequestRecord(
-         request=pending.request,
-         graph=pending.graph,
-         manifest=locked.manifest,
-         client_sink=pending.client_sink,
-         state_machine=pending.state_machine,
-         prefill_chunks=pending.prefill_chunks,
-         completed_prefill_chunks=1,
-         excluded_placements=locked.build.excluded_placements,
-         excluded_edges=locked.build.excluded_edges,
-         excluded_devices=locked.build.excluded_devices,
-      )
-      self._requests[locked.request_id] = record
-      self._pending_prefills.pop(locked.request_id, None)
-      self.relay.register_path(record.request, record.manifest, record.graph)
-      if len(record.prefill_chunks) == 1:
-         record.state_machine.transition(
-            "DECODING",
+      with pending.lock:
+         if pending.state_machine.state != "PREFILL":
+            return False
+         pending.state_machine.transition(
+            "LOCKED",
             path_attempt=locked.path_attempt,
          )
-      else:
-         self._send_prefill_chunk(record, chunk_index=1)
+         record = RequestRecord(
+            request=pending.request,
+            graph=pending.graph,
+            manifest=locked.manifest,
+            client_sink=pending.client_sink,
+            state_machine=pending.state_machine,
+            prefill_chunks=pending.prefill_chunks,
+            completed_prefill_chunks=1,
+            excluded_placements=locked.build.excluded_placements,
+            excluded_edges=locked.build.excluded_edges,
+            excluded_devices=locked.build.excluded_devices,
+         )
+         self._requests[locked.request_id] = record
+         self._pending_prefills.pop(locked.request_id, None)
+         if not self.relay.register_path(
+            record.request,
+            record.manifest,
+            record.graph,
+            entry_node_id=self.node_id,
+         ):
+            record.state_machine.transition(
+               "FAILED",
+               path_attempt=locked.path_attempt,
+            )
+            self._cleanup_record(record)
+            return False
+         if len(record.prefill_chunks) == 1:
+            record.state_machine.transition(
+               "DECODING",
+               path_attempt=locked.path_attempt,
+            )
+            send_chunk = False
+         else:
+            send_chunk = True
+      if send_chunk:
+         return self._send_prefill_chunk(record, chunk_index=1)
       return True
 
    def receive_prefill_chunk_completed(
@@ -284,33 +326,39 @@ class EntryCoordinator:
       source_node_id: str | None = None,
    ) -> bool:
       record = self._requests.get(event.request_id)
-      if record is None or record.status != "LOCKED":
+      if record is None:
          return False
-      if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
-         record,
-         source_node_id,
-      ):
-         return False
-      manifest = record.manifest
-      expected_index = record.completed_prefill_chunks
-      if (
-         event.path_id != manifest.path_id
-         or event.path_attempt != manifest.path_attempt
-         or event.chunk_index != expected_index
-         or event.chunk_index >= len(record.prefill_chunks)
-         or event.token_count != len(record.prefill_chunks[event.chunk_index])
-      ):
-         return False
-      record.completed_prefill_chunks += 1
-      if record.completed_prefill_chunks == len(record.prefill_chunks):
-         record.state_machine.transition(
-            "DECODING",
-            path_attempt=manifest.path_attempt,
-         )
-      else:
-         self._send_prefill_chunk(
+      with record.lock:
+         if record.status != "LOCKED":
+            return False
+         if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
             record,
-            chunk_index=record.completed_prefill_chunks,
+            source_node_id,
+         ):
+            return False
+         manifest = record.manifest
+         expected_index = record.completed_prefill_chunks
+         if (
+            event.path_id != manifest.path_id
+            or event.path_attempt != manifest.path_attempt
+            or event.chunk_index != expected_index
+            or event.chunk_index >= len(record.prefill_chunks)
+            or event.token_count != len(record.prefill_chunks[event.chunk_index])
+         ):
+            return False
+         record.completed_prefill_chunks += 1
+         if record.completed_prefill_chunks == len(record.prefill_chunks):
+            record.state_machine.transition(
+               "DECODING",
+               path_attempt=manifest.path_attempt,
+            )
+            next_chunk_index = None
+         else:
+            next_chunk_index = record.completed_prefill_chunks
+      if next_chunk_index is not None:
+         return self._send_prefill_chunk(
+            record,
+            chunk_index=next_chunk_index,
          )
       return True
 
@@ -319,8 +367,12 @@ class EntryCoordinator:
       record: RequestRecord,
       *,
       chunk_index: int,
-   ) -> None:
-      manifest = record.manifest
+   ) -> bool:
+      with record.lock:
+         if record.status != "LOCKED":
+            return False
+         manifest = record.manifest
+         generation = self.relay.path_generation(manifest.path_id)
       first = manifest.ordered_hops[0]
       chunk = record.prefill_chunks[chunk_index]
       header = HopHeader(
@@ -343,7 +395,12 @@ class EntryCoordinator:
          ),
          prefill_chunk_token_count=len(chunk),
       )
-      self.transport.send_hop(header, encode_token_ids(chunk))
+      return self.relay.dispatch_if_current(
+         path_id=manifest.path_id,
+         path_attempt=manifest.path_attempt,
+         generation=generation,
+         sender=lambda: self.transport.send_hop(header, encode_token_ids(chunk)),
+      )
 
    def _prefill_chunks(
       self,
@@ -372,41 +429,50 @@ class EntryCoordinator:
    def cancel(self, request_id: str) -> bool:
       pending = self._pending_prefills.get(request_id)
       if pending is not None:
-         if pending.state_machine.state != "PREFILL":
-            return False
-         pending.state_machine.transition(
+         with pending.lock:
+            if pending.state_machine.state == "PREFILL":
+               pending.state_machine.transition(
+                  "CANCELLED",
+                  path_attempt=pending.build.path_attempt,
+               )
+               cancellation = PathCancellation(
+                  request_id=request_id,
+                  path_id=pending.build.path_id,
+                  path_attempt=pending.build.path_attempt,
+                  topology_version=pending.graph.topology_version,
+               )
+            else:
+               cancellation = None
+         if cancellation is not None:
+            try:
+               self.transport.send_path_cancellation(cancellation)
+            finally:
+               self.builder.abort(pending.build)
+               self.relay.release_path(
+                  pending.build.path_id,
+                  path_attempt=pending.build.path_attempt,
+               )
+            return True
+      record = self._requests.get(request_id)
+      if record is None:
+         return False
+      with record.lock:
+         if record.status in {
+            "COMPLETED",
+            "FAILED",
             "CANCELLED",
-            path_attempt=pending.build.path_attempt,
+         }:
+            return False
+         record.state_machine.transition(
+            "CANCELLED",
+            path_attempt=record.manifest.path_attempt,
          )
          cancellation = PathCancellation(
             request_id=request_id,
-            path_id=pending.build.path_id,
-            path_attempt=pending.build.path_attempt,
-            topology_version=pending.graph.topology_version,
+            path_id=record.manifest.path_id,
+            path_attempt=record.manifest.path_attempt,
+            topology_version=record.manifest.topology_version,
          )
-         try:
-            self.transport.send_path_cancellation(cancellation)
-         finally:
-            self.builder.abort(pending.build)
-            self.relay.release_path(pending.build.path_id)
-         return True
-      record = self._requests.get(request_id)
-      if record is None or record.status in {
-         "COMPLETED",
-         "FAILED",
-         "CANCELLED",
-      }:
-         return False
-      record.state_machine.transition(
-         "CANCELLED",
-         path_attempt=record.manifest.path_attempt,
-      )
-      cancellation = PathCancellation(
-         request_id=request_id,
-         path_id=record.manifest.path_id,
-         path_attempt=record.manifest.path_attempt,
-         topology_version=record.manifest.topology_version,
-      )
       try:
          self.transport.send_path_cancellation(cancellation)
       finally:
@@ -426,12 +492,22 @@ class EntryCoordinator:
       if request_id in self._pending_prefills:
          return False
       record = self.get_request(request_id)
-      if record.status != "DECODING":
-         return False
-      token_index = len(record.generated_token_ids)
-      manifest = record.manifest
-      first = manifest.ordered_hops[0]
-      final = manifest.ordered_hops[-1]
+      with record.lock:
+         if record.status != "DECODING":
+            return False
+         token_index = len(record.generated_token_ids)
+         manifest = record.manifest
+         first = manifest.ordered_hops[0]
+         final = manifest.ordered_hops[-1]
+         if self.relay.decode_mode == "stage_local_kv":
+            if not record.generated_token_ids:
+               return False
+            decode_tokens = (record.generated_token_ids[-1],)
+         else:
+            decode_tokens = (
+               record.request.prompt_token_ids + tuple(record.generated_token_ids)
+            )
+         generation = self.relay.path_generation(manifest.path_id)
       header = HopHeader(
          request_id=record.request.request_id,
          path_id=manifest.path_id,
@@ -451,43 +527,46 @@ class EntryCoordinator:
             hop_index=0,
          ),
       )
-      if self.relay.decode_mode == "stage_local_kv":
-         if not record.generated_token_ids:
-            return False
-         decode_tokens = (record.generated_token_ids[-1],)
-      else:
-         decode_tokens = (
-            record.request.prompt_token_ids + tuple(record.generated_token_ids)
-         )
-      self.transport.send_hop(
-         header,
-         encode_token_ids(decode_tokens),
+      return self.relay.dispatch_if_current(
+         path_id=manifest.path_id,
+         path_attempt=manifest.path_attempt,
+         generation=generation,
+         sender=lambda: self.transport.send_hop(
+            header,
+            encode_token_ids(decode_tokens),
+         ),
       )
-      return True
 
    def decode_one(self, request_id: str) -> bool:
       if request_id in self._pending_prefills:
          return False
       record = self.get_request(request_id)
-      if record.status != "DECODING":
-         return False
-      token_index = len(record.generated_token_ids)
-      while record.status == "DECODING":
-         if self.relay.decode_mode == "stage_local_kv":
-            if not record.generated_token_ids:
+      while True:
+         with record.lock:
+            if record.status != "DECODING":
                return False
-            decode_tokens = (record.generated_token_ids[-1],)
-         else:
-            decode_tokens = (
-               record.request.prompt_token_ids + tuple(record.generated_token_ids)
-            )
+            token_index = len(record.generated_token_ids)
+            manifest = record.manifest
+            graph = record.graph
+            request = record.request
+            if self.relay.decode_mode == "stage_local_kv":
+               if not record.generated_token_ids:
+                  return False
+               decode_tokens = (record.generated_token_ids[-1],)
+            else:
+               decode_tokens = (
+                  record.request.prompt_token_ids
+                  + tuple(record.generated_token_ids)
+               )
+            generation = self.relay.path_generation(manifest.path_id)
          outcome = self.relay.execute_manifest(
-            graph=record.graph,
-            manifest=record.manifest,
-            request=record.request,
+            graph=graph,
+            manifest=manifest,
+            request=request,
             phase="DECODE",
             token_index=token_index,
             payload=decode_tokens,
+            expected_generation=generation,
          )
          if outcome.failure_report is not None:
             if not self.receive_failure_report(outcome.failure_report):
@@ -495,14 +574,16 @@ class EntryCoordinator:
             record = self.get_request(request_id)
             continue
          if outcome.token_event is None:
-            record.state_machine.transition(
-               "FAILED",
-               path_attempt=record.manifest.path_attempt,
-            )
+            with record.lock:
+               if record.status != "DECODING":
+                  return False
+               record.state_machine.transition(
+                  "FAILED",
+                  path_attempt=record.manifest.path_attempt,
+               )
             self._cleanup_record(record)
             return False
          return self.receive_token_event(outcome.token_event)
-      return False
 
    def receive_token_event(
       self,
@@ -511,28 +592,37 @@ class EntryCoordinator:
       source_node_id: str | None = None,
    ) -> bool:
       record = self._requests.get(event.request_id)
-      if record is None or record.status != "DECODING":
+      if record is None:
          return False
-      manifest = record.manifest
-      if (
-         event.path_id != manifest.path_id
-         or event.path_attempt != manifest.path_attempt
-         or event.token_index != len(record.generated_token_ids)
-         or event.sampling_counter != event.token_index + 1
-      ):
-         return False
-      if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
-         record,
-         source_node_id,
-      ):
-         return False
-      record.generated_token_ids.append(event.token_id)
+      with record.lock:
+         if record.status != "DECODING":
+            return False
+         manifest = record.manifest
+         if (
+            event.path_id != manifest.path_id
+            or event.path_attempt != manifest.path_attempt
+            or event.token_index != len(record.generated_token_ids)
+            or event.sampling_counter != event.token_index + 1
+         ):
+            return False
+         if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
+            record,
+            source_node_id,
+         ):
+            return False
+         record.generated_token_ids.append(event.token_id)
       record.client_sink.emit(event.token_index, event.token_id)
-      if len(record.generated_token_ids) >= record.request.max_new_tokens:
-         record.state_machine.transition(
-            "COMPLETED",
-            path_attempt=record.manifest.path_attempt,
-         )
+      should_cleanup = False
+      with record.lock:
+         if record.status != "DECODING":
+            return True
+         if len(record.generated_token_ids) >= record.request.max_new_tokens:
+            record.state_machine.transition(
+               "COMPLETED",
+               path_attempt=record.manifest.path_attempt,
+            )
+            should_cleanup = True
+      if should_cleanup:
          self._cleanup_record(record)
       return True
 
@@ -558,63 +648,71 @@ class EntryCoordinator:
       source_node_id: str | None = None,
    ) -> bool:
       record = self._requests.get(report.request_id)
-      if record is None or record.status in {
-         "COMPLETED",
-         "FAILED",
-         "CANCELLED",
-      }:
+      if record is None:
          return False
-      manifest = record.manifest
-      if (
-         report.path_id != manifest.path_id
-         or report.path_attempt != manifest.path_attempt
-      ):
-         return False
-      if (
-         record.status == "DECODING"
-         and report.token_index != len(record.generated_token_ids)
-      ):
-         return False
-      if not self._failure_identity_matches_locked_path(record, report):
-         return False
-      if source_node_id is not None and not self._failure_origin_matches_locked_path(
-         record,
-         report,
-         source_node_id,
-      ):
-         return False
-      if report.scope == "DEVICE" and report.node_id == self.node_id:
-         record.state_machine.transition(
+      terminal_failure = False
+      excluded_placements: frozenset[str] = frozenset()
+      excluded_edges: frozenset[str] = frozenset()
+      excluded_devices: frozenset[str] = frozenset()
+      old_reservations: tuple[str, ...] = ()
+      new_attempt = 0
+      with record.lock:
+         if record.status in {
+            "COMPLETED",
             "FAILED",
-            path_attempt=manifest.path_attempt,
-         )
+            "CANCELLED",
+         }:
+            return False
+         manifest = record.manifest
+         if (
+            report.path_id != manifest.path_id
+            or report.path_attempt != manifest.path_attempt
+         ):
+            return False
+         if (
+            record.status == "DECODING"
+            and report.token_index != len(record.generated_token_ids)
+         ):
+            return False
+         if not self._failure_identity_matches_locked_path(record, report):
+            return False
+         if source_node_id is not None and not self._failure_origin_matches_locked_path(
+            record,
+            report,
+            source_node_id,
+         ):
+            return False
+         terminal_failure = (
+            report.scope == "DEVICE" and report.node_id == self.node_id
+         ) or manifest.path_attempt >= self.config.maximum_recovery_attempts
+         if terminal_failure:
+            record.state_machine.transition(
+               "FAILED",
+               path_attempt=manifest.path_attempt,
+            )
+         else:
+            excluded_placements = record.excluded_placements
+            excluded_edges = record.excluded_edges
+            excluded_devices = record.excluded_devices
+            if report.scope == "EDGE" and report.edge_id:
+               excluded_edges |= frozenset({report.edge_id})
+            elif report.scope == "DEVICE" and report.node_id:
+               excluded_devices |= frozenset({report.node_id})
+            elif report.placement_id:
+               excluded_placements |= frozenset({report.placement_id})
+            old_reservations = tuple(
+               hop.reservation_id for hop in manifest.ordered_hops
+            )
+            new_attempt = manifest.path_attempt + 1
+            record.state_machine.begin_recovery(path_attempt=new_attempt)
+      if terminal_failure:
          self._cleanup_record(record)
          return False
-      if manifest.path_attempt >= self.config.maximum_recovery_attempts:
-         record.state_machine.transition(
-            "FAILED",
-            path_attempt=manifest.path_attempt,
-         )
-         self._cleanup_record(record)
-         return False
-
-      excluded_placements = record.excluded_placements
-      excluded_edges = record.excluded_edges
-      excluded_devices = record.excluded_devices
-      if report.scope == "EDGE" and report.edge_id:
-         excluded_edges |= frozenset({report.edge_id})
-      elif report.scope == "DEVICE" and report.node_id:
-         excluded_devices |= frozenset({report.node_id})
-      elif report.placement_id:
-         excluded_placements |= frozenset({report.placement_id})
-
-      old_reservations = tuple(
-         hop.reservation_id for hop in manifest.ordered_hops
-      )
       self.capacity.release(old_reservations)
-      self.relay.release_path(manifest.path_id)
-      new_attempt = manifest.path_attempt + 1
-      record.state_machine.begin_recovery(path_attempt=new_attempt)
+      self.relay.release_path(
+         manifest.path_id,
+         path_attempt=manifest.path_attempt,
+      )
       try:
          graph, new_manifest, build = self._build_path(
             record.request,
@@ -624,51 +722,100 @@ class EntryCoordinator:
             excluded_devices=excluded_devices,
          )
       except RoutingError:
-         record.state_machine.transition(
-            "FAILED",
-            path_attempt=new_attempt,
-         )
-         record.cleaned_up = True
+         with record.lock:
+            if record.status == "CANCELLED":
+               return False
+            record.state_machine.transition(
+               "FAILED",
+               path_attempt=new_attempt,
+            )
+            record.cleaned_up = True
          return False
 
-      record.graph = graph
-      record.manifest = new_manifest
-      record.excluded_placements = build.excluded_placements
-      record.excluded_edges = build.excluded_edges
-      record.excluded_devices = build.excluded_devices
-      replay_tokens = (
-         record.request.prompt_token_ids + tuple(record.generated_token_ids)
-      )
+      registration_failed = False
+      generation = 0
+      replay_tokens: tuple[int, ...] = ()
+      recovery_token_index = 0
+      with record.lock:
+         if record.status != "PREFILL":
+            cancelled_during_build = True
+         else:
+            cancelled_during_build = False
+            record.graph = graph
+            record.manifest = new_manifest
+            record.excluded_placements = build.excluded_placements
+            record.excluded_edges = build.excluded_edges
+            record.excluded_devices = build.excluded_devices
+            record.cleaned_up = False
+            if not self.relay.register_path(
+               record.request,
+               new_manifest,
+               graph,
+               entry_node_id=self.node_id,
+            ):
+               record.state_machine.transition(
+                  "FAILED",
+                  path_attempt=new_attempt,
+               )
+               registration_failed = True
+            else:
+               registration_failed = False
+               generation = self.relay.path_generation(new_manifest.path_id)
+               replay_tokens = (
+                  record.request.prompt_token_ids
+                  + tuple(record.generated_token_ids)
+               )
+               recovery_token_index = (
+                  len(record.generated_token_ids)
+                  if self.relay.decode_mode == "stage_local_kv"
+                  else len(record.generated_token_ids) - 1
+               )
+      if cancelled_during_build:
+         self.capacity.release(
+            tuple(hop.reservation_id for hop in new_manifest.ordered_hops)
+         )
+         self.relay.release_path(
+            new_manifest.path_id,
+            path_attempt=new_manifest.path_attempt,
+         )
+         return False
+      if registration_failed:
+         self._cleanup_record(record)
+         return False
       outcome = self.relay.execute_manifest(
          graph=graph,
          manifest=new_manifest,
          request=record.request,
          phase="RECOVERY_PREFILL",
-         token_index=(
-            len(record.generated_token_ids)
-            if self.relay.decode_mode == "stage_local_kv"
-            else len(record.generated_token_ids) - 1
-         ),
+         token_index=recovery_token_index,
          payload=replay_tokens,
+         expected_generation=generation,
       )
-      if outcome.failure_report is not None or (
-         self.relay.decode_mode == "stage_local_kv"
-         and outcome.token_event is None
-      ):
-         record.state_machine.transition(
-            "FAILED",
-            path_attempt=new_manifest.path_attempt,
-         )
+      with record.lock:
+         if record.status != "PREFILL":
+            return False
+         if outcome.failure_report is not None or (
+            self.relay.decode_mode == "stage_local_kv"
+            and outcome.token_event is None
+         ):
+            record.state_machine.transition(
+               "FAILED",
+               path_attempt=new_manifest.path_attempt,
+            )
+            failed = True
+         else:
+            record.state_machine.transition(
+               "LOCKED",
+               path_attempt=new_manifest.path_attempt,
+            )
+            record.state_machine.transition(
+               "DECODING",
+               path_attempt=new_manifest.path_attempt,
+            )
+            failed = False
+      if failed:
          self._cleanup_record(record)
          return False
-      record.state_machine.transition(
-         "LOCKED",
-         path_attempt=new_manifest.path_attempt,
-      )
-      record.state_machine.transition(
-         "DECODING",
-         path_attempt=new_manifest.path_attempt,
-      )
       if outcome.token_event is not None:
          return self.receive_token_event(outcome.token_event)
       return True
@@ -748,15 +895,18 @@ class EntryCoordinator:
       return not report.node_id or report.node_id == source_node_id
 
    def _cleanup_record(self, record: RequestRecord) -> None:
-      if record.cleaned_up:
-         return
-      self.capacity.release(
-         tuple(hop.reservation_id for hop in record.manifest.ordered_hops)
-      )
-      try:
-         self.relay.release_path(record.manifest.path_id)
-      finally:
+      with record.lock:
+         if record.cleaned_up:
+            return
          record.cleaned_up = True
+         manifest = record.manifest
+      self.capacity.release(
+         tuple(hop.reservation_id for hop in manifest.ordered_hops)
+      )
+      self.relay.release_path(
+         manifest.path_id,
+         path_attempt=manifest.path_attempt,
+      )
 
    def _build_path(
       self,

@@ -6,6 +6,8 @@ from dataclasses import replace
 import hashlib
 import json
 import struct
+from threading import Event, Thread
+import time
 
 import pytest
 
@@ -26,13 +28,6 @@ from test_router_inprocess_mesh import three_device_graph
 from test_router_policy import request_fixture, state_table
 
 from ._harness import build_mesh_case
-
-
-BOOL_RED = "PRODUCTION RED PC-BOOL-1: bool passes as cancellation integer identity"
-
-
-class _BoolIdentityProductionRed(AssertionError):
-   """Expected only when the precisely shaped PC-BOOL-1 defect is present."""
 
 
 def _mutate_wire_body(frame: bytes, field: str, value: object) -> bytes:
@@ -76,20 +71,23 @@ def test_path_cancellation_wire_is_scalar_control_only() -> None:
 
 
 @pytest.mark.parametrize("field", ["path_attempt", "topology_version"])
-@pytest.mark.xfail(strict=True, raises=_BoolIdentityProductionRed, reason=BOOL_RED)
 def test_wire_rejects_bool_as_integer_identity(field: str) -> None:
    frame = encode_frame(PathCancellation("request-1", "path-1", 0, 3))
    forged = _mutate_wire_body(frame, field, True)
-   try:
-      decoded = decode_frame(forged)
-   except WireError as error:
-      if error.code != "invalid_wire_field":
-         raise RuntimeError(f"unexpected_wire_error:{error.code}") from error
-      return
-   observed = getattr(decoded.message, field)
-   if observed is not True:
-      raise RuntimeError(f"unexpected_bool_defect_shape:{field}={observed!r}")
-   raise _BoolIdentityProductionRed(f"wire accepted bool identity:{field}")
+   with pytest.raises(WireError) as captured:
+      decode_frame(forged)
+   assert captured.value.code == "invalid_wire_field"
+
+
+@pytest.mark.parametrize("field", ["path_attempt", "topology_version"])
+def test_wire_encoder_rejects_bool_as_integer_identity(field: str) -> None:
+   forged = replace(
+      PathCancellation("request-1", "path-1", 0, 3),
+      **{field: True},
+   )
+   with pytest.raises(WireError) as captured:
+      encode_frame(forged)
+   assert captured.value.code == "invalid_wire_field"
 
 
 @pytest.mark.parametrize(
@@ -132,6 +130,117 @@ def test_unknown_and_already_released_paths_fail_closed() -> None:
    assert case.runtimes["node-c"].cancel_calls == [case.cancellation.path_id]
 
 
+def test_cancelled_attempt_cannot_re_register_but_newer_attempt_can() -> None:
+   case = build_mesh_case(request_id="request-cancel-tombstone")
+   target = case.routers["node-c"]
+
+   assert target.receive_path_cancellation(
+      case.cancellation,
+      source_node_id="node-a",
+   )
+   assert not target.relay.register_path(
+      case.request,
+      case.record.manifest,
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+   assert target.relay.register_path(
+      case.request,
+      replace(case.record.manifest, path_attempt=1),
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+   cancel_calls = len(case.runtimes["node-c"].cancel_calls)
+   target.relay.release_path(case.cancellation.path_id, path_attempt=0)
+   assert target.relay._paths[case.cancellation.path_id][1].path_attempt == 1
+   assert len(case.runtimes["node-c"].cancel_calls) == cancel_calls
+
+
+def test_runtime_cancel_finishes_before_new_attempt_registration() -> None:
+   case = build_mesh_case(request_id="request-cancel-runtime-fence")
+   target = case.routers["node-c"]
+   runtime = case.runtimes["node-c"]
+   entered = Event()
+   release = Event()
+   original_cancel = runtime.cancel
+
+   def blocking_cancel(path_id: str) -> None:
+      entered.set()
+      assert release.wait(timeout=1.0)
+      original_cancel(path_id)
+
+   runtime.cancel = blocking_cancel
+   cancellation_results: list[bool] = []
+   cancellation_thread = Thread(
+      target=lambda: cancellation_results.append(
+         target.relay.receive_path_cancellation(
+            case.cancellation,
+            source_node_id="node-a",
+         )
+      )
+   )
+   cancellation_thread.start()
+   assert entered.wait(timeout=1.0)
+
+   registration_results: list[bool] = []
+   registration_thread = Thread(
+      target=lambda: registration_results.append(
+         target.relay.register_path(
+            case.request,
+            replace(case.record.manifest, path_attempt=1),
+            case.record.graph,
+            entry_node_id="node-a",
+         )
+      )
+   )
+   registration_thread.start()
+   time.sleep(0.02)
+   assert registration_thread.is_alive()
+   release.set()
+   cancellation_thread.join(timeout=1.0)
+   registration_thread.join(timeout=1.0)
+
+   assert not cancellation_thread.is_alive()
+   assert not registration_thread.is_alive()
+   assert cancellation_results == [True]
+   assert registration_results == [True]
+   assert runtime.cancel_calls == [case.cancellation.path_id]
+   assert target.relay._paths[case.cancellation.path_id][1].path_attempt == 1
+
+
+def test_terminal_path_metadata_is_bounded() -> None:
+   case = build_mesh_case(request_id="request-metadata-bound")
+   relay = case.routers["node-c"].relay
+
+   for index in range(4_200):
+      relay.release_path(f"synthetic-terminal-path-{index}", path_attempt=0)
+
+   assert len(relay._cancelled_path_attempts) <= 4_096
+   assert len(relay._path_generations) <= 4_097
+   replay = replace(
+      case.record.manifest,
+      path_id="synthetic-terminal-path-0",
+      path_attempt=0,
+   )
+   assert not relay.register_path(
+      case.request,
+      replay,
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+
+
+def test_unknown_unscoped_release_does_not_grow_generation_metadata() -> None:
+   case = build_mesh_case(request_id="request-unscoped-release-bound")
+   relay = case.routers["node-c"].relay
+   generations_before = len(relay._path_generations)
+
+   for index in range(4_200):
+      relay.release_path(f"unknown-unscoped-path-{index}")
+
+   assert len(relay._path_generations) == generations_before
+
+
 @pytest.mark.parametrize("source_node_id", ["node-c", "node-forged"])
 def test_non_entry_or_unregistered_source_cannot_cancel_registered_path(
    source_node_id: str,
@@ -147,21 +256,12 @@ def test_non_entry_or_unregistered_source_cannot_cancel_registered_path(
    assert case.runtimes["node-d"].cancel_calls == []
 
 
-@pytest.mark.xfail(strict=True, raises=_BoolIdentityProductionRed, reason=BOOL_RED)
 def test_relay_rejects_bool_path_attempt_without_release() -> None:
    case = build_mesh_case(request_id="request-bool-direct")
    target = case.routers["node-c"]
    forged = replace(case.cancellation, path_attempt=False)
 
-   accepted = target.receive_path_cancellation(forged, source_node_id="node-a")
-   if accepted:
-      if (
-         case.record.manifest.path_id in target.relay._paths
-         or case.runtimes["node-c"].cancel_calls != [forged.path_id]
-      ):
-         raise RuntimeError("unexpected_bool_relay_defect_shape")
-      raise _BoolIdentityProductionRed("relay accepted and released bool identity")
-   assert not accepted
+   assert not target.receive_path_cancellation(forged, source_node_id="node-a")
    assert case.record.manifest.path_id in target.relay._paths
    assert case.runtimes["node-c"].cancel_calls == []
 

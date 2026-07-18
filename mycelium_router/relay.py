@@ -1,5 +1,9 @@
 """Inter-layer relay execution over an already locked path manifest."""
 
+from collections import OrderedDict
+import hashlib
+from threading import RLock
+
 from mycelium_router.batching import PhaseAwareBatchController
 from mycelium_router.contracts import (
    BatchExecutionObservation,
@@ -37,6 +41,11 @@ from mycelium_router.state import HopStateMachine
 from mycelium_router.validation import validate_manifest
 
 
+_MAX_TERMINAL_PATH_METADATA = 4096
+_CANCELLED_PATH_FILTER_BYTES = 1 << 20
+_CANCELLED_PATH_FILTER_HASHES = 5
+
+
 class RelayEngine:
    def __init__(
       self,
@@ -69,6 +78,14 @@ class RelayEngine:
          str,
          tuple[ExecutionGraph, PathManifest, RequestContext],
       ] = {}
+      self._path_lock = RLock()
+      self._path_generations: OrderedDict[str, int] = OrderedDict()
+      self._cancelled_path_attempts: OrderedDict[str, int] = OrderedDict()
+      self._cancelled_path_filter = bytearray(_CANCELLED_PATH_FILTER_BYTES)
+      self._provisional_paths: dict[
+         str,
+         tuple[str, int, int, str | None],
+      ] = {}
       self._entry_node_by_path: dict[str, str] = {}
       self._hop_results: dict[
          str,
@@ -78,7 +95,133 @@ class RelayEngine:
          str,
          tuple[ProgressivePrefillResult, float, str, str],
       ] = {}
-      self._pending_hops: dict[str, tuple[HopHeader, HopWorkItem, str]] = {}
+      self._pending_hops: dict[
+         str,
+         tuple[HopHeader, HopWorkItem, str, int],
+      ] = {}
+
+   def path_generation(self, path_id: str) -> int:
+      """Return the generation used to fence entry-side dispatches."""
+      with self._path_lock:
+         return self._path_generations.get(path_id, 0)
+
+   def _path_generation(self, path_id: str) -> int:
+      return self.path_generation(path_id)
+
+   def _prune_terminal_path_metadata_locked(self) -> None:
+      while len(self._cancelled_path_attempts) > _MAX_TERMINAL_PATH_METADATA:
+         path_id, _ = self._cancelled_path_attempts.popitem(last=False)
+         if path_id not in self._paths and path_id not in self._provisional_paths:
+            self._path_generations.pop(path_id, None)
+
+   @staticmethod
+   def _cancelled_path_filter_positions(
+      path_id: str,
+      path_attempt: int,
+   ) -> tuple[int, ...]:
+      digest = hashlib.blake2b(
+         f"{path_id}\x00{path_attempt}".encode("utf-8"),
+         digest_size=20,
+      ).digest()
+      bit_count = _CANCELLED_PATH_FILTER_BYTES * 8
+      return tuple(
+         int.from_bytes(digest[index * 4 : index * 4 + 4], "big") % bit_count
+         for index in range(_CANCELLED_PATH_FILTER_HASHES)
+      )
+
+   def _mark_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> None:
+      for position in self._cancelled_path_filter_positions(path_id, path_attempt):
+         self._cancelled_path_filter[position // 8] |= 1 << (position % 8)
+
+   def _was_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> bool:
+      return all(
+         self._cancelled_path_filter[position // 8] & (1 << (position % 8))
+         for position in self._cancelled_path_filter_positions(path_id, path_attempt)
+      )
+
+   def _path_is_current_locked(
+      self,
+      path_id: str,
+      path_attempt: int,
+      generation: int,
+   ) -> bool:
+      if self._path_generations.get(path_id, 0) != generation:
+         return False
+      if self._was_cancelled_attempt_locked(path_id, path_attempt):
+         return False
+      cancelled_attempt = self._cancelled_path_attempts.get(path_id)
+      return cancelled_attempt is None or path_attempt > cancelled_attempt
+
+   def _send_if_path_current(
+      self,
+      path_id: str,
+      path_attempt: int,
+      generation: int,
+      sender,
+   ) -> bool:
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            path_id,
+            path_attempt,
+            generation,
+         ):
+            return False
+      # Acquiring this generation-checked permit is the dispatch linearization
+      # point. Cancellation invalidates the generation, preventing every
+      # dispatch that has not acquired a permit yet. Already-permitted work is
+      # in flight and cannot be retracted from an arbitrary transport.
+      sender()
+      return True
+
+   def dispatch_if_current(
+      self,
+      *,
+      path_id: str,
+      path_attempt: int,
+      generation: int,
+      sender,
+   ) -> bool:
+      """Dispatch only if cancellation has not invalidated the path permit."""
+      return self._send_if_path_current(
+         path_id,
+         path_attempt,
+         generation,
+         sender,
+      )
+
+   def _send_token_if_path_current(
+      self,
+      path_id: str,
+      path_attempt: int,
+      generation: int,
+      sender,
+   ) -> bool:
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            path_id,
+            path_attempt,
+            generation,
+         ):
+            return False
+      sender()
+      return True
+
+   @staticmethod
+   def _path_cancelled_outcome(
+      request: RequestContext,
+      manifest: PathManifest,
+      token_index: int,
+   ) -> RelayOutcome:
+      return RelayOutcome(
+         failure_report=FailureReport(
+            request_id=request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            token_index=token_index,
+            scope="REQUEST",
+            reason="path_cancelled",
+         )
+      )
 
    @staticmethod
    def _runtime_unavailable() -> RuntimeResult:
@@ -141,14 +284,53 @@ class RelayEngine:
             return False
          if not entry_node_id:
             return False
-      existing = self._paths.get(manifest.path_id)
-      if existing is not None:
-         existing_manifest = existing[1]
-         if manifest.path_attempt < existing_manifest.path_attempt:
+      with self._path_lock:
+         if self._was_cancelled_attempt_locked(
+            manifest.path_id,
+            manifest.path_attempt,
+         ):
             return False
-         if manifest.path_attempt == existing_manifest.path_attempt:
-            if existing != (graph, manifest, request):
+         cancelled_attempt = self._cancelled_path_attempts.get(manifest.path_id)
+         if (
+            cancelled_attempt is not None
+            and manifest.path_attempt <= cancelled_attempt
+         ):
+            return False
+         existing = self._paths.get(manifest.path_id)
+         provisional = self._provisional_paths.get(manifest.path_id)
+         if provisional is not None:
+            if provisional[:3] != (
+               request.request_id,
+               manifest.path_attempt,
+               graph.topology_version,
+            ):
                return False
+            provisional_entry = provisional[3]
+            if (
+               entry_node_id is not None
+               and provisional_entry is not None
+               and entry_node_id != provisional_entry
+            ):
+               return False
+            if entry_node_id is None:
+               entry_node_id = provisional_entry
+         if existing is not None:
+            existing_manifest = existing[1]
+            if manifest.path_attempt < existing_manifest.path_attempt:
+               return False
+            if manifest.path_attempt == existing_manifest.path_attempt:
+               if existing != (graph, manifest, request):
+                  return False
+               existing_entry = self._entry_node_by_path.get(manifest.path_id)
+               if (
+                  entry_node_id is not None
+                  and existing_entry is not None
+                  and entry_node_id != existing_entry
+               ):
+                  return False
+               if entry_node_id is not None:
+                  self._entry_node_by_path[manifest.path_id] = entry_node_id
+               return True
             existing_entry = self._entry_node_by_path.get(manifest.path_id)
             if (
                entry_node_id is not None
@@ -156,20 +338,66 @@ class RelayEngine:
                and entry_node_id != existing_entry
             ):
                return False
-            if entry_node_id is not None:
-               self._entry_node_by_path[manifest.path_id] = entry_node_id
-            return True
-         existing_entry = self._entry_node_by_path.get(manifest.path_id)
-         if (
-            entry_node_id is not None
-            and existing_entry is not None
-            and entry_node_id != existing_entry
-         ):
-            return False
-      self._paths[manifest.path_id] = (graph, manifest, request)
-      if entry_node_id is not None:
-         self._entry_node_by_path[manifest.path_id] = entry_node_id
-      return True
+            self._mark_cancelled_attempt_locked(
+               manifest.path_id,
+               existing_manifest.path_attempt,
+            )
+            self._cancelled_path_attempts[manifest.path_id] = max(
+               existing_manifest.path_attempt,
+               self._cancelled_path_attempts.get(
+                  manifest.path_id,
+                  existing_manifest.path_attempt,
+               ),
+            )
+         self._paths[manifest.path_id] = (graph, manifest, request)
+         self._provisional_paths.pop(manifest.path_id, None)
+         self._path_generations[manifest.path_id] = (
+            self._path_generations.get(manifest.path_id, 0) + 1
+         )
+         self._path_generations.move_to_end(manifest.path_id)
+         if manifest.path_id in self._cancelled_path_attempts:
+            self._cancelled_path_attempts.move_to_end(manifest.path_id)
+         self._prune_terminal_path_metadata_locked()
+         if entry_node_id is not None:
+            self._entry_node_by_path[manifest.path_id] = entry_node_id
+         return True
+
+   def _register_provisional_path(
+      self,
+      *,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+      topology_version: int,
+      entry_node_id: str | None,
+   ) -> int | None:
+      identity = (
+         request_id,
+         path_attempt,
+         topology_version,
+         entry_node_id,
+      )
+      with self._path_lock:
+         if self._was_cancelled_attempt_locked(path_id, path_attempt):
+            return None
+         cancelled_attempt = self._cancelled_path_attempts.get(path_id)
+         if cancelled_attempt is not None and path_attempt <= cancelled_attempt:
+            return None
+         existing = self._provisional_paths.get(path_id)
+         if existing is not None:
+            if existing[:3] != identity[:3]:
+               return None
+            if (
+               existing[3] is not None
+               and entry_node_id is not None
+               and existing[3] != entry_node_id
+            ):
+               return None
+            return self._path_generations[path_id]
+         self._provisional_paths[path_id] = identity
+         self._path_generations[path_id] = self._path_generations.get(path_id, 0) + 1
+         self._path_generations.move_to_end(path_id)
+         return self._path_generations[path_id]
 
    def receive_progressive_prefill(
       self,
@@ -232,6 +460,18 @@ class RelayEngine:
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return ProgressivePrefillResult("REJECTED", "destination_not_local")
+      provisional_entry = entry_node_id
+      if provisional_entry is None and header.hop_index == 0:
+         provisional_entry = source_node_id
+      generation = self._register_provisional_path(
+         request_id=context.request.request_id,
+         path_id=build.path_id,
+         path_attempt=build.path_attempt,
+         topology_version=context.graph.topology_version,
+         entry_node_id=provisional_entry,
+      )
+      if generation is None:
+         return ProgressivePrefillResult("REJECTED", "cancelled_path")
       try:
          accepted_payload = snapshot_payload(context.payload)
          payload_digest = payload_fingerprint(accepted_payload)
@@ -280,10 +520,31 @@ class RelayEngine:
             reason=f"backpressure:{error.reason}",
             retry_after_seconds=error.retry_after_seconds,
          )
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            build.path_id,
+            build.path_attempt,
+            generation,
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
       selected = self.scheduler.pop_next(now=now)
       state.transition("ACCEPTED", path_attempt=header.path_attempt)
       state.transition("EXECUTING", path_attempt=header.path_attempt)
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            build.path_id,
+            build.path_attempt,
+            generation,
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
       runtime_result = self._execute_runtime(selected)
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            build.path_id,
+            build.path_attempt,
+            generation,
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
       if not runtime_result.success:
          state.transition("FAILED", path_attempt=header.path_attempt)
          report = FailureReport(
@@ -296,14 +557,20 @@ class RelayEngine:
             placement_id=hop.placement_id,
             node_id=placement.node_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            build.path_id,
+            build.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
          result = ProgressivePrefillResult(
             "FAILED",
             reason=report.reason,
             failure_report=report,
          )
-         self.release_path(build.path_id)
-         self._remember_prefill(header, result, payload_digest)
+         self.release_path(build.path_id, path_attempt=build.path_attempt)
+         self._remember_prefill(header, result, payload_digest, generation)
          return result
 
       if self.builder.is_complete(build):
@@ -321,14 +588,20 @@ class RelayEngine:
                placement_id=hop.placement_id,
                node_id=placement.node_id,
             )
-            self.transport.send_failure_report(report)
+            if not self._send_if_path_current(
+               build.path_id,
+               build.path_attempt,
+               generation,
+               lambda: self.transport.send_failure_report(report),
+            ):
+               return ProgressivePrefillResult("REJECTED", "cancelled_path")
             result = ProgressivePrefillResult(
                "FAILED",
                reason=report.reason,
                failure_report=report,
             )
-            self.release_path(build.path_id)
-            self._remember_prefill(header, result, payload_digest)
+            self.release_path(build.path_id, path_attempt=build.path_attempt)
+            self._remember_prefill(header, result, payload_digest, generation)
             return result
          confirmation = ManifestLocked(
             request_id=context.request.request_id,
@@ -337,7 +610,14 @@ class RelayEngine:
             manifest=manifest,
             build=build,
          )
-         self.register_path(context.request, manifest, context.graph)
+         if not self.register_path(
+            context.request,
+            manifest,
+            context.graph,
+            entry_node_id=provisional_entry,
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
+         generation = self.path_generation(build.path_id)
          if (
             self.decode_mode == "stage_local_kv"
             and runtime_result.token_id is None
@@ -353,33 +633,52 @@ class RelayEngine:
                placement_id=hop.placement_id,
                node_id=placement.node_id,
             )
-            self.transport.send_failure_report(report)
+            if not self._send_if_path_current(
+               build.path_id,
+               build.path_attempt,
+               generation,
+               lambda: self.transport.send_failure_report(report),
+            ):
+               return ProgressivePrefillResult("REJECTED", "cancelled_path")
             result = ProgressivePrefillResult(
                "FAILED",
                reason=report.reason,
                failure_report=report,
             )
-            self.release_path(build.path_id)
-            self._remember_prefill(header, result, payload_digest)
+            self.release_path(build.path_id, path_attempt=build.path_attempt)
+            self._remember_prefill(header, result, payload_digest, generation)
             return result
-         self.transport.send_manifest_locked(confirmation)
-         state.transition("FORWARDED", path_attempt=header.path_attempt)
-         if runtime_result.token_id is not None:
-            self.transport.send_token_event(
-               TokenEvent(
-                  request_id=context.request.request_id,
-                  path_id=build.path_id,
-                  path_attempt=build.path_attempt,
-                  token_index=0,
-                  token_id=runtime_result.token_id,
-                  sampling_counter=1,
-               )
+         token_event = (
+            TokenEvent(
+               request_id=context.request.request_id,
+               path_id=build.path_id,
+               path_attempt=build.path_attempt,
+               token_index=0,
+               token_id=runtime_result.token_id,
+               sampling_counter=1,
             )
+            if runtime_result.token_id is not None
+            else None
+         )
+
+         def send_locked_result() -> None:
+            self.transport.send_manifest_locked(confirmation)
+            if token_event is not None:
+               self.transport.send_token_event(token_event)
+
+         if not self._send_if_path_current(
+            build.path_id,
+            build.path_attempt,
+            generation,
+            send_locked_result,
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
+         state.transition("FORWARDED", path_attempt=header.path_attempt)
          result = ProgressivePrefillResult(
             "LOCKED",
             confirmation=confirmation,
          )
-         self._remember_prefill(header, result, payload_digest)
+         self._remember_prefill(header, result, payload_digest, generation)
          return result
 
       try:
@@ -400,25 +699,29 @@ class RelayEngine:
             placement_id=hop.placement_id,
             node_id=placement.node_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            build.path_id,
+            build.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return ProgressivePrefillResult("REJECTED", "cancelled_path")
          result = ProgressivePrefillResult(
             "FAILED",
             reason=report.reason,
             failure_report=report,
          )
-         self.release_path(build.path_id)
-         self._remember_prefill(header, result, payload_digest)
+         self.release_path(build.path_id, path_attempt=build.path_attempt)
+         self._remember_prefill(header, result, payload_digest, generation)
          return result
       next_index = len(updated.ordered_hops) - 1
       next_hop = updated.ordered_hops[next_index]
-      self.transport.send_manifest_delta(
-         ManifestDelta(
-            request_id=context.request.request_id,
-            path_id=updated.path_id,
-            path_attempt=updated.path_attempt,
-            hop_index=next_index,
-            hop=next_hop,
-         )
+      delta = ManifestDelta(
+         request_id=context.request.request_id,
+         path_id=updated.path_id,
+         path_attempt=updated.path_attempt,
+         hop_index=next_index,
+         hop=next_hop,
       )
       next_header = HopHeader(
          request_id=context.request.request_id,
@@ -446,14 +749,24 @@ class RelayEngine:
          build=updated,
          payload=runtime_result.payload,
       )
-      self.transport.send_hop(next_header, next_context)
+      def send_progressive_hop() -> None:
+         self.transport.send_manifest_delta(delta)
+         self.transport.send_hop(next_header, next_context)
+
+      if not self._send_if_path_current(
+         build.path_id,
+         build.path_attempt,
+         generation,
+         send_progressive_hop,
+      ):
+         return ProgressivePrefillResult("REJECTED", "cancelled_path")
       state.transition("FORWARDED", path_attempt=header.path_attempt)
       result = ProgressivePrefillResult(
          "FORWARDED",
          forwarded_header=next_header,
          context=next_context,
       )
-      self._remember_prefill(header, result, payload_digest)
+      self._remember_prefill(header, result, payload_digest, generation)
       return result
 
    def receive_hop(
@@ -475,7 +788,9 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
-      registration = self._paths.get(header.path_id)
+      with self._path_lock:
+         registration = self._paths.get(header.path_id)
+         generation = self._path_generations.get(header.path_id, 0)
       if registration is None:
          return HopReceiveResult("REJECTED", "unknown_path")
       graph, manifest, request = registration
@@ -574,10 +889,31 @@ class RelayEngine:
             reason=f"backpressure:{error.reason}",
             retry_after_seconds=error.retry_after_seconds,
          )
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            header.path_id,
+            header.path_attempt,
+            generation,
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
       selected = self.scheduler.pop_next(now=now)
       state.transition("ACCEPTED", path_attempt=header.path_attempt)
       state.transition("EXECUTING", path_attempt=header.path_attempt)
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            header.path_id,
+            header.path_attempt,
+            generation,
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
       runtime_result = self._execute_runtime(selected)
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            header.path_id,
+            header.path_attempt,
+            generation,
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
       if not runtime_result.success:
          state.transition("FAILED", path_attempt=header.path_attempt)
          report = FailureReport(
@@ -590,13 +926,19 @@ class RelayEngine:
             placement_id=hop.placement_id,
             node_id=placement.node_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          result = HopReceiveResult(
             "FAILED",
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
 
       if header.hop_index + 1 < len(manifest.ordered_hops):
@@ -621,13 +963,19 @@ class RelayEngine:
             ),
             prefill_chunk_token_count=header.prefill_chunk_token_count,
          )
-         self.transport.send_hop(next_header, runtime_result.payload)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_hop(next_header, runtime_result.payload),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          state.transition("FORWARDED", path_attempt=header.path_attempt)
          result = HopReceiveResult(
             "FORWARDED",
             forwarded_header=next_header,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
 
       if header.phase == "PREFILL_CHUNK":
@@ -638,18 +986,24 @@ class RelayEngine:
             chunk_index=header.token_index,
             token_count=header.prefill_chunk_token_count,
          )
-         self.transport.send_prefill_chunk_completed(event)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_prefill_chunk_completed(event),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          state.transition("FORWARDED", path_attempt=header.path_attempt)
          result = HopReceiveResult(
             "COMPLETED",
             prefill_chunk_completed=event,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
       if header.phase != "DECODE":
          state.transition("FORWARDED", path_attempt=header.path_attempt)
          result = HopReceiveResult("COMPLETED")
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
       if runtime_result.token_id is None:
          state.transition("FAILED", path_attempt=header.path_attempt)
@@ -663,13 +1017,19 @@ class RelayEngine:
             placement_id=hop.placement_id,
             node_id=placement.node_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          result = HopReceiveResult(
             "FAILED",
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
       event = TokenEvent(
          request_id=request.request_id,
@@ -679,10 +1039,16 @@ class RelayEngine:
          token_id=runtime_result.token_id,
          sampling_counter=header.token_index + 1,
       )
-      self.transport.send_token_event(event)
+      if not self._send_token_if_path_current(
+         header.path_id,
+         header.path_attempt,
+         generation,
+         lambda: self.transport.send_token_event(event),
+      ):
+         return HopReceiveResult("REJECTED", "path_cancelled")
       state.transition("FORWARDED", path_attempt=header.path_attempt)
       result = HopReceiveResult("COMPLETED", token_event=event)
-      self._remember_hop(header, result, payload_digest)
+      self._remember_hop(header, result, payload_digest, generation)
       return result
 
    def enqueue_hop(self, header: HopHeader, payload: object) -> HopReceiveResult:
@@ -704,7 +1070,9 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
-      registration = self._paths.get(header.path_id)
+      with self._path_lock:
+         registration = self._paths.get(header.path_id)
+         generation = self._path_generations.get(header.path_id, 0)
       if registration is None:
          return HopReceiveResult("REJECTED", "unknown_path")
       graph, manifest, request = registration
@@ -793,11 +1161,20 @@ class RelayEngine:
          )
       except DuplicateHopError:
          return HopReceiveResult("QUEUED", "duplicate_pending")
-      self._pending_hops[header.idempotency_key] = (
-         header,
-         work,
-         payload_digest,
-      )
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            header.path_id,
+            header.path_attempt,
+            generation,
+         ):
+            self.batch_scheduler.release_path(header.path_id)
+            return HopReceiveResult("REJECTED", "path_cancelled")
+         self._pending_hops[header.idempotency_key] = (
+            header,
+            work,
+            payload_digest,
+            generation,
+         )
       return HopReceiveResult("QUEUED")
 
    def drain_ready_batches(
@@ -830,7 +1207,25 @@ class RelayEngine:
             decision=decision,
          )
          started_at = self.clock.now()
-         runtime_results = self._execute_runtime_batch(batch)
+         with self._path_lock:
+            active = tuple(
+               item.idempotency_key in self._pending_hops
+               and self._path_is_current_locked(
+                  item.path_id,
+                  item.path_attempt,
+                  self._pending_hops[item.idempotency_key][3],
+               )
+               for item in batch.items
+            )
+         if all(active):
+            runtime_results = self._execute_runtime_batch(batch)
+         else:
+            runtime_results = tuple(
+               self._execute_runtime(item)
+               if is_active
+               else self._runtime_unavailable()
+               for item, is_active in zip(batch.items, active)
+            )
          execution_ms = max(0.0, self.clock.now() - started_at) * 1_000.0
          if len(runtime_results) != len(batch.items):
             runtime_results = tuple(
@@ -854,16 +1249,18 @@ class RelayEngine:
             )
          )
          for item, runtime_result in zip(batch.items, runtime_results):
-            pending = self._pending_hops.pop(item.idempotency_key, None)
+            with self._path_lock:
+               pending = self._pending_hops.pop(item.idempotency_key, None)
             if pending is None:
                continue
-            header, _, payload_digest = pending
+            header, _, payload_digest, generation = pending
             completed.append(
                self._complete_queued_hop(
                   header,
                   item,
                   runtime_result,
                   payload_digest,
+                  generation,
                )
             )
          drained += 1
@@ -902,8 +1299,17 @@ class RelayEngine:
       item: HopWorkItem,
       runtime_result: RuntimeResult,
       payload_digest: str,
+      generation: int,
    ) -> HopReceiveResult:
-      graph, manifest, request = self._paths[item.path_id]
+      with self._path_lock:
+         registration = self._paths.get(item.path_id)
+         if registration is None or not self._path_is_current_locked(
+            item.path_id,
+            item.path_attempt,
+            generation,
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
+         graph, manifest, request = registration
       hop = manifest.ordered_hops[header.hop_index]
       placement = next(
          placement
@@ -922,13 +1328,19 @@ class RelayEngine:
             placement_id=hop.placement_id,
             node_id=placement.node_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          result = HopReceiveResult(
             "FAILED",
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
 
       if header.hop_index + 1 < len(manifest.ordered_hops):
@@ -953,9 +1365,15 @@ class RelayEngine:
             ),
             prefill_chunk_token_count=header.prefill_chunk_token_count,
          )
-         self.transport.send_hop(next_header, runtime_result.payload)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_hop(next_header, runtime_result.payload),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          result = HopReceiveResult("FORWARDED", forwarded_header=next_header)
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
 
       if header.phase == "PREFILL_CHUNK":
@@ -966,16 +1384,22 @@ class RelayEngine:
             chunk_index=header.token_index,
             token_count=header.prefill_chunk_token_count,
          )
-         self.transport.send_prefill_chunk_completed(event)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_prefill_chunk_completed(event),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          result = HopReceiveResult(
             "COMPLETED",
             prefill_chunk_completed=event,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
       if header.phase != "DECODE":
          result = HopReceiveResult("COMPLETED")
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
       if runtime_result.token_id is None:
          report = FailureReport(
@@ -988,13 +1412,19 @@ class RelayEngine:
             placement_id=hop.placement_id,
             node_id=placement.node_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
          result = HopReceiveResult(
             "FAILED",
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result, payload_digest)
+         self._remember_hop(header, result, payload_digest, generation)
          return result
       event = TokenEvent(
          request_id=request.request_id,
@@ -1004,9 +1434,15 @@ class RelayEngine:
          token_id=runtime_result.token_id,
          sampling_counter=header.token_index + 1,
       )
-      self.transport.send_token_event(event)
+      if not self._send_token_if_path_current(
+         header.path_id,
+         header.path_attempt,
+         generation,
+         lambda: self.transport.send_token_event(event),
+      ):
+         return HopReceiveResult("REJECTED", "path_cancelled")
       result = HopReceiveResult("COMPLETED", token_event=event)
-      self._remember_hop(header, result, payload_digest)
+      self._remember_hop(header, result, payload_digest, generation)
       return result
 
    @staticmethod
@@ -1059,7 +1495,20 @@ class RelayEngine:
       phase: str,
       token_index: int,
       payload: object,
+      expected_generation: int | None = None,
    ) -> RelayOutcome:
+      generation = (
+         self._path_generation(manifest.path_id)
+         if expected_generation is None
+         else expected_generation
+      )
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            manifest.path_id,
+            manifest.path_attempt,
+            generation,
+         ):
+            return self._path_cancelled_outcome(request, manifest, token_index)
       execution_key = (
          manifest.path_id,
          manifest.path_attempt,
@@ -1146,8 +1595,26 @@ class RelayEngine:
             ),
          )
          self.scheduler.enqueue(work)
+         with self._path_lock:
+            if not self._path_is_current_locked(
+               manifest.path_id,
+               manifest.path_attempt,
+               generation,
+            ):
+               return self._path_cancelled_outcome(
+                  request,
+                  manifest,
+                  token_index,
+               )
          selected = self.scheduler.pop_next(now=self.clock.now())
          result = self._execute_runtime(selected)
+         with self._path_lock:
+            if not self._path_is_current_locked(
+               manifest.path_id,
+               manifest.path_attempt,
+               generation,
+            ):
+               return self._path_cancelled_outcome(request, manifest, token_index)
          if not result.success:
             placement = placement_map[hop.placement_id]
             edge_id = ""
@@ -1166,9 +1633,21 @@ class RelayEngine:
                edge_id=edge_id,
                node_id=placement.node_id,
             )
-            self.transport.send_failure_report(report)
+            if not self._send_if_path_current(
+               manifest.path_id,
+               manifest.path_attempt,
+               generation,
+               lambda: self.transport.send_failure_report(report),
+            ):
+               return self._path_cancelled_outcome(request, manifest, token_index)
             outcome = RelayOutcome(failure_report=report)
-            self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+            self._remember(
+               execution_key,
+               outcome,
+               manifest.path_id,
+               payload_digest,
+               generation,
+            )
             return outcome
          current_payload = result.payload
          final_result = result
@@ -1193,7 +1672,13 @@ class RelayEngine:
                   hop_index=hop_index + 1,
                ),
             )
-            self.transport.send_hop(header, current_payload)
+            if not self._send_if_path_current(
+               manifest.path_id,
+               manifest.path_attempt,
+               generation,
+               lambda: self.transport.send_hop(header, current_payload),
+            ):
+               return self._path_cancelled_outcome(request, manifest, token_index)
 
       if phase == "PREFILL" or (
          phase == "RECOVERY_PREFILL" and self.decode_mode == "stage_local_kv"
@@ -1201,7 +1686,13 @@ class RelayEngine:
          if final_result is None or final_result.token_id is None:
             if self.decode_mode == "complete_context_replay":
                outcome = RelayOutcome()
-               self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+               self._remember(
+                  execution_key,
+                  outcome,
+                  manifest.path_id,
+                  payload_digest,
+                  generation,
+               )
                return outcome
             report = FailureReport(
                request_id=request.request_id,
@@ -1212,9 +1703,21 @@ class RelayEngine:
                reason="final_stage_missing_token",
                placement_id=manifest.ordered_hops[-1].placement_id,
             )
-            self.transport.send_failure_report(report)
+            if not self._send_if_path_current(
+               manifest.path_id,
+               manifest.path_attempt,
+               generation,
+               lambda: self.transport.send_failure_report(report),
+            ):
+               return self._path_cancelled_outcome(request, manifest, token_index)
             outcome = RelayOutcome(failure_report=report)
-            self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+            self._remember(
+               execution_key,
+               outcome,
+               manifest.path_id,
+               payload_digest,
+               generation,
+            )
             return outcome
          event = TokenEvent(
             request_id=request.request_id,
@@ -1224,13 +1727,31 @@ class RelayEngine:
             token_id=final_result.token_id,
             sampling_counter=1 if phase == "PREFILL" else token_index + 1,
          )
-         self.transport.send_token_event(event)
+         if not self._send_token_if_path_current(
+            manifest.path_id,
+            manifest.path_attempt,
+            generation,
+            lambda: self.transport.send_token_event(event),
+         ):
+            return self._path_cancelled_outcome(request, manifest, token_index)
          outcome = RelayOutcome(token_event=event)
-         self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+         self._remember(
+            execution_key,
+            outcome,
+            manifest.path_id,
+            payload_digest,
+            generation,
+         )
          return outcome
       if phase != "DECODE":
          outcome = RelayOutcome()
-         self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+         self._remember(
+            execution_key,
+            outcome,
+            manifest.path_id,
+            payload_digest,
+            generation,
+         )
          return outcome
       if final_result is None or final_result.token_id is None:
          report = FailureReport(
@@ -1242,9 +1763,21 @@ class RelayEngine:
             reason="final_stage_missing_token",
             placement_id=manifest.ordered_hops[-1].placement_id,
          )
-         self.transport.send_failure_report(report)
+         if not self._send_if_path_current(
+            manifest.path_id,
+            manifest.path_attempt,
+            generation,
+            lambda: self.transport.send_failure_report(report),
+         ):
+            return self._path_cancelled_outcome(request, manifest, token_index)
          outcome = RelayOutcome(failure_report=report)
-         self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+         self._remember(
+            execution_key,
+            outcome,
+            manifest.path_id,
+            payload_digest,
+            generation,
+         )
          return outcome
 
       event = TokenEvent(
@@ -1255,7 +1788,6 @@ class RelayEngine:
          token_id=final_result.token_id,
          sampling_counter=token_index + 1,
       )
-      self.transport.send_token_event(event)
       final_hop = manifest.ordered_hops[-1]
       first_hop = manifest.ordered_hops[0]
       loopback_header = HopHeader(
@@ -1277,9 +1809,29 @@ class RelayEngine:
             hop_index=0,
          ),
       )
-      self.transport.send_hop(loopback_header, event.token_id)
+
+      if not self._send_token_if_path_current(
+         manifest.path_id,
+         manifest.path_attempt,
+         generation,
+         lambda: self.transport.send_token_event(event),
+      ):
+         return self._path_cancelled_outcome(request, manifest, token_index)
+      if not self._send_if_path_current(
+         manifest.path_id,
+         manifest.path_attempt,
+         generation,
+         lambda: self.transport.send_hop(loopback_header, event.token_id),
+      ):
+         return self._path_cancelled_outcome(request, manifest, token_index)
       outcome = RelayOutcome(token_event=event)
-      self._remember(execution_key, outcome, manifest.path_id, payload_digest)
+      self._remember(
+         execution_key,
+         outcome,
+         manifest.path_id,
+         payload_digest,
+         generation,
+      )
       return outcome
 
    def receive_path_cancellation(
@@ -1288,30 +1840,87 @@ class RelayEngine:
       *,
       source_node_id: str | None,
    ) -> bool:
-      registered = self._paths.get(cancellation.path_id)
-      if registered is None:
-         return False
-      graph, manifest, request = registered
-      entry_node_id = self._entry_node_by_path.get(cancellation.path_id)
-      if (
-         not source_node_id
-         or not entry_node_id
-         or source_node_id != entry_node_id
-         or cancellation.request_id != request.request_id
-         or cancellation.path_id != manifest.path_id
-         or cancellation.path_attempt != manifest.path_attempt
-         or cancellation.topology_version != graph.topology_version
-         or cancellation.topology_version != manifest.topology_version
-      ):
-         return False
-      self.release_path(cancellation.path_id)
+      with self._path_lock:
+         registered = self._paths.get(cancellation.path_id)
+         provisional = self._provisional_paths.get(cancellation.path_id)
+         if registered is None and provisional is None:
+            return False
+         if registered is not None:
+            graph, manifest, request = registered
+            expected = (
+               request.request_id,
+               manifest.path_attempt,
+               graph.topology_version,
+            )
+            entry_node_id = self._entry_node_by_path.get(cancellation.path_id)
+         else:
+            assert provisional is not None
+            expected = provisional[:3]
+            entry_node_id = provisional[3]
+         if (
+            not source_node_id
+            or not entry_node_id
+            or type(cancellation.path_attempt) is not int
+            or type(cancellation.topology_version) is not int
+            or source_node_id != entry_node_id
+            or (
+               cancellation.request_id,
+               cancellation.path_attempt,
+               cancellation.topology_version,
+            )
+            != expected
+         ):
+            return False
+         if not self._release_path_locked(
+            cancellation.path_id,
+            path_attempt=cancellation.path_attempt,
+         ):
+            return False
+         self._cancel_runtime(cancellation.path_id)
       return True
 
-   def release_path(self, path_id: str) -> None:
+   def _cancel_runtime(self, path_id: str) -> None:
       try:
          self.runtime.cancel(path_id)
       except Exception:
          pass
+
+   def _release_path_locked(
+      self,
+      path_id: str,
+      *,
+      path_attempt: int | None = None,
+   ) -> bool:
+      registered = self._paths.get(path_id)
+      if registered is not None:
+         registered_attempt = registered[1].path_attempt
+         if path_attempt is not None and path_attempt != registered_attempt:
+            return False
+         path_attempt = registered_attempt
+      provisional = self._provisional_paths.get(path_id)
+      if provisional is not None:
+         provisional_attempt = provisional[1]
+         if path_attempt is not None and path_attempt != provisional_attempt:
+            return False
+         path_attempt = provisional_attempt
+      known_path = (
+         registered is not None
+         or provisional is not None
+         or path_attempt is not None
+         or path_id in self._path_generations
+      )
+      if path_attempt is not None:
+         self._mark_cancelled_attempt_locked(path_id, path_attempt)
+         self._cancelled_path_attempts[path_id] = max(
+            path_attempt,
+            self._cancelled_path_attempts.get(path_id, path_attempt),
+         )
+         self._cancelled_path_attempts.move_to_end(path_id)
+      if known_path:
+         self._path_generations[path_id] = (
+            self._path_generations.get(path_id, 0) + 1
+         )
+         self._path_generations.move_to_end(path_id)
       self._outcomes = {
          key: value
          for key, value in self._outcomes.items()
@@ -1328,6 +1937,7 @@ class RelayEngine:
          if value[2] != path_id
       }
       self._paths.pop(path_id, None)
+      self._provisional_paths.pop(path_id, None)
       self._entry_node_by_path.pop(path_id, None)
       self._pending_hops = {
          key: value
@@ -1336,6 +1946,18 @@ class RelayEngine:
       }
       self.scheduler.release_path(path_id)
       self.batch_scheduler.release_path(path_id)
+      self._prune_terminal_path_metadata_locked()
+      return known_path
+
+   def release_path(
+      self,
+      path_id: str,
+      *,
+      path_attempt: int | None = None,
+   ) -> None:
+      with self._path_lock:
+         if self._release_path_locked(path_id, path_attempt=path_attempt):
+            self._cancel_runtime(path_id)
 
    def cached_outcome_count(self) -> int:
       return len(self._outcomes)
@@ -1345,14 +1967,22 @@ class RelayEngine:
       header: HopHeader,
       result: ProgressivePrefillResult,
       payload_digest: str,
+      generation: int,
    ) -> None:
-      self._prefill_results[header.idempotency_key] = (
-         result,
-         self.clock.now(),
-         header.path_id,
-         payload_digest,
-      )
-      self._evict_prefill_results(now=self.clock.now())
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            header.path_id,
+            header.path_attempt,
+            generation,
+         ):
+            return
+         self._prefill_results[header.idempotency_key] = (
+            result,
+            self.clock.now(),
+            header.path_id,
+            payload_digest,
+         )
+         self._evict_prefill_results(now=self.clock.now())
 
    def _evict_prefill_results(self, *, now: float) -> None:
       retention = max(
@@ -1379,14 +2009,22 @@ class RelayEngine:
       header: HopHeader,
       result: HopReceiveResult,
       payload_digest: str,
+      expected_generation: int,
    ) -> None:
-      self._hop_results[header.idempotency_key] = (
-         result,
-         self.clock.now(),
-         header.path_id,
-         payload_digest,
-      )
-      self._evict_hop_results(now=self.clock.now())
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            header.path_id,
+            header.path_attempt,
+            expected_generation,
+         ):
+            return
+         self._hop_results[header.idempotency_key] = (
+            result,
+            self.clock.now(),
+            header.path_id,
+            payload_digest,
+         )
+         self._evict_hop_results(now=self.clock.now())
 
    def _evict_hop_results(self, *, now: float) -> None:
       retention = max(
@@ -1414,14 +2052,22 @@ class RelayEngine:
       outcome: RelayOutcome,
       path_id: str,
       payload_digest: str,
+      expected_generation: int,
    ) -> None:
-      self._outcomes[key] = (
-         outcome,
-         self.clock.now(),
-         path_id,
-         payload_digest,
-      )
-      self._evict_outcomes(now=self.clock.now())
+      with self._path_lock:
+         if not self._path_is_current_locked(
+            path_id,
+            key[1],
+            expected_generation,
+         ):
+            return
+         self._outcomes[key] = (
+            outcome,
+            self.clock.now(),
+            path_id,
+            payload_digest,
+         )
+         self._evict_outcomes(now=self.clock.now())
 
    def _evict_outcomes(self, *, now: float) -> None:
       retention = max(
