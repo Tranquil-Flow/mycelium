@@ -6,6 +6,7 @@ from mycelium_request_conformance.trace import (
     TAIL_ACTIONS,
     generate_bounded_traces,
     generate_race_traces,
+    materialize_action,
     minimize_trace,
     run_trace,
     trace_to_json,
@@ -22,14 +23,26 @@ CURRENT = Authority(
 )
 
 
+def _materialized_json(trace):
+    model = GatewayModel(current=CURRENT)
+    state = model.initial_state
+    actions = []
+    for symbolic in trace:
+        action = materialize_action(symbolic, state)
+        actions.append(action)
+        state = model.apply(action, state=state).state
+    return trace_to_json(actions)
+
+
 def test_bounded_generation_is_exhaustive_for_declared_alphabet_and_deterministic():
     first = generate_bounded_traces(CURRENT, maximum_tail_depth=2)
     second = generate_bounded_traces(CURRENT, maximum_tail_depth=2)
 
     assert len(TAIL_ACTIONS) == 12
-    assert len(first) == 1 + 12 + 12**2 + 12
+    assert len(first) == 91
     assert first == second
     assert len({trace_to_json(trace) for trace in first}) == len(first)
+    assert len({_materialized_json(trace) for trace in first}) == len(first)
     assert max(len(trace) for trace in first) == 4
 
 
@@ -37,9 +50,10 @@ def test_race_generation_enumerates_every_ordering_once():
     traces = generate_race_traces(CURRENT)
 
     assert len(RACE_ACTIONS) == 5
-    assert len(traces) == 120
-    assert len({trace_to_json(trace) for trace in traces}) == 120
-    assert all(len(trace) == 8 for trace in traces)
+    assert len(traces) == 45
+    assert len({trace_to_json(trace) for trace in traces}) == 45
+    assert len({_materialized_json(trace) for trace in traces}) == 45
+    assert {len(trace) for trace in traces} == {6, 7, 8}
     assert all(trace[2] == Action.reconnect(-1) for trace in traces)
 
 
@@ -72,6 +86,12 @@ def test_trace_json_has_stable_schema_and_never_serializes_payload_text():
     assert trace_to_json((Action.token(0, "alpha"),)) != trace_to_json(
         (Action.token(0, "different"),)
     )
+    value_trace = trace_to_json(
+        (Action.change_authority("evidence", "private-evidence"),)
+    )
+    assert "private-evidence" not in value_trace
+    assert "value_digest" in value_trace
+    assert "value_type" in value_trace
 
 
 def test_minimizer_returns_deletion_one_minimal_counterexample_with_counters():

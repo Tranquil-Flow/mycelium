@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 
 import pytest
 
@@ -91,8 +92,10 @@ def test_tokens_are_ordered_and_exact_token_replay_is_side_effect_free():
     assert replay.code == "exact_token_replay"
     assert replay.state == before
     assert replay.state.counters.token_events == 1
-    assert [event.text for event in replay.state.events if event.kind == "token"] == [
-        "alpha"
+    assert [
+        event.text_digest for event in replay.state.events if event.kind == "token"
+    ] == [
+        hashlib.sha256(b"alpha").hexdigest()
     ]
 
 
@@ -252,3 +255,94 @@ def test_errors_and_events_never_echo_payload_or_token_text_in_codes():
     assert "secret-prompt" not in rejected.code
     assert "secret-token" not in conflict.code
     assert "different-secret" not in conflict.code
+
+
+def test_acknowledged_replay_is_trimmed_before_next_token_capacity_check():
+    model = GatewayModel(current=CURRENT, buffer_capacity=2)
+    state = model.apply(Action.admit(CURRENT, payload="prompt")).state
+    state = model.apply(Action.start(), state=state).state
+    state = model.apply(Action.reconnect(-1), state=state).state
+    state = model.apply(Action.next_event(), state=state).state
+    state = model.apply(Action.ack(0), state=state).state
+
+    accepted = model.apply(Action.token(0, "alpha"), state=state)
+
+    assert accepted.code == "token_accepted"
+    assert [event.kind for event in accepted.state.events] == ["token"]
+    assert accepted.state.discarded_through == 0
+    assert len(accepted.state.events) == 1
+
+
+def test_admission_max_new_tokens_is_enforced_and_part_of_replay_identity():
+    model = GatewayModel(current=CURRENT)
+    admitted = model.apply(
+        Action.admit(CURRENT, payload="prompt", max_new_tokens=1)
+    ).state
+    replay = model.apply(
+        Action.admit(CURRENT, payload="prompt", max_new_tokens=1),
+        state=admitted,
+    )
+    conflict = model.apply(
+        Action.admit(CURRENT, payload="prompt", max_new_tokens=2),
+        state=admitted,
+    )
+    state = model.apply(Action.start(), state=admitted).state
+    state = model.apply(Action.token(0, "alpha"), state=state).state
+    overflow = model.apply(Action.token(1, "beta"), state=state)
+
+    assert replay.code == "exact_request_replay"
+    assert replay.state == admitted
+    assert conflict.code == "conflicting_request_replay"
+    assert conflict.state == admitted
+    assert overflow.state.phase is Phase.FAILED
+    assert overflow.code == "token_order_violation"
+
+
+def test_terminal_model_state_retains_only_digests_and_exact_replay_identity():
+    model = GatewayModel(current=CURRENT)
+    admission = Action.admit(CURRENT, payload="private-prompt", max_new_tokens=1)
+    state = model.apply(admission).state
+    state = model.apply(Action.start(), state=state).state
+    state = model.apply(Action.token(0, "private-token"), state=state).state
+    terminal = model.apply(Action.complete(), state=state).state
+
+    assert terminal.captured is None
+    assert terminal.payload_digest is None
+    assert terminal.max_new_tokens is None
+    assert terminal.token_digests == ()
+    assert "private-prompt" not in repr(terminal)
+    assert "private-token" not in repr(terminal)
+    replay = model.apply(admission, state=terminal)
+    assert replay.code == "exact_request_replay"
+    assert replay.state == terminal
+
+
+def test_next_event_is_at_least_once_delivery_until_ack_like_production():
+    model, state = _admitted()
+    state = model.apply(Action.token(0, "alpha"), state=state).state
+    state = model.apply(Action.reconnect(-1), state=state).state
+
+    first = model.apply(Action.next_event(), state=state)
+    repeated = model.apply(Action.next_event(), state=first.state)
+
+    assert first.code == "delivered_accepted"
+    assert repeated.code == "delivered_accepted"
+    assert repeated.state == first.state
+
+
+def test_authority_changes_reject_values_outside_field_contract():
+    model, state = _admitted()
+
+    invalid_epoch = model.apply(
+        Action.change_authority("epoch", 1.5),
+        state=state,
+    )
+    invalid_ready = model.apply(
+        Action.change_authority("ready", 1),
+        state=state,
+    )
+
+    assert invalid_epoch.code == "invalid_authority_change"
+    assert invalid_epoch.state == state
+    assert invalid_ready.code == "invalid_authority_change"
+    assert invalid_ready.state == state

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import threading
 import time
 from typing import Callable, Protocol
@@ -17,8 +18,17 @@ from .observability import GatewayMetrics
 from .qualification import CapturedQualification, QualificationGate, QualificationSource
 
 
+_MAX_BACKEND_TOKEN_TEXT_BYTES = 1 << 20
+
+
 class InferenceBackend(Protocol):
-    """Production session seam; implementations own Router/KV cleanup."""
+    """Production session seam; implementations own Router/KV cleanup.
+
+    ``cancel`` must be idempotent and sticky: if it wins before ``run`` enters,
+    a later ``run`` for that request must return ``cancelled`` before acquiring
+    runtime, capacity, or KV resources. The production Router backend enforces
+    this request-ID latch.
+    """
 
     def run(
         self,
@@ -47,11 +57,13 @@ class _Session:
     discarded_through: int = -1
     acknowledged_through: int = -1
     expected_token_index: int = 0
+    token_digests: list[bytes] = field(default_factory=list)
     terminal_event: StreamEvent | None = None
     terminal_count: int = 0
     maximum_buffered: int = 0
     active_subscription: bool = False
     cancellation_started: bool = False
+    backend_started: bool = False
     backend_cancelled: bool = False
     worker_done: bool = False
     thread: threading.Thread | None = None
@@ -218,7 +230,9 @@ class RequestGatewayService:
             session.cancellation_started = True
             session.stop.set()
             session.condition.notify_all()
-        self._cancel_backend_once(session)
+            backend_started = session.backend_started
+        if backend_started:
+            self._cancel_backend_once(session)
         self._append_terminal(session, "cancelled")
         return True
 
@@ -263,6 +277,18 @@ class RequestGatewayService:
             if captured is None or submission is None:
                 raise AdmissionError("request_state_released")
             self._gate.revalidate(captured)
+            with session.condition:
+                if session.cancellation_started:
+                    session.outcome = "cancelled"
+                    cancellation_started = True
+                else:
+                    # Logical backend-start linearization point. Cancellation
+                    # and start race only while holding this same condition.
+                    session.backend_started = True
+                    cancellation_started = False
+            if cancellation_started:
+                self._append_terminal(session, "cancelled")
+                return
             outcome = self._backend.run(
                 session.request_id,
                 submission,
@@ -278,6 +304,10 @@ class RequestGatewayService:
             if cancellation_started:
                 self._append_terminal(session, "cancelled")
             elif outcome == "completed":
+                captured = session.captured
+                if captured is None:
+                    raise AdmissionError("request_state_released")
+                self._gate.revalidate(captured)
                 self._append_terminal(session, "completed")
             elif outcome == "cancelled":
                 self._append_terminal(session, "cancelled")
@@ -304,10 +334,28 @@ class RequestGatewayService:
             with session.condition:
                 session.submission = None
                 session.captured = None
+                session.token_digests.clear()
                 session.worker_done = True
                 session.condition.notify_all()
 
     def _accept_token(self, session: _Session, token_index: int, token_text: str) -> None:
+        if (
+            not isinstance(token_index, int)
+            or isinstance(token_index, bool)
+            or token_index < 0
+            or not isinstance(token_text, str)
+            or len(token_text) > _MAX_BACKEND_TOKEN_TEXT_BYTES
+        ):
+            raise AdmissionError("invalid_backend_token")
+        try:
+            token_bytes = token_text.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise AdmissionError("invalid_backend_token") from exc
+        if len(token_bytes) > _MAX_BACKEND_TOKEN_TEXT_BYTES:
+            raise AdmissionError("invalid_backend_token")
+        token_digest = hashlib.sha256(token_bytes).digest()
+        del token_bytes
+
         while True:
             captured = session.captured
             if captured is None:
@@ -316,14 +364,12 @@ class RequestGatewayService:
             with session.condition:
                 if session.stop.is_set() or session.terminal_event is not None:
                     raise AdmissionError("request_cancelled")
-                if (
-                    not isinstance(token_index, int)
-                    or isinstance(token_index, bool)
-                    or token_index < 0
-                    or not isinstance(token_text, str)
-                ):
-                    raise AdmissionError("invalid_backend_token")
                 if token_index < session.expected_token_index:
+                    if (
+                        token_index >= len(session.token_digests)
+                        or session.token_digests[token_index] != token_digest
+                    ):
+                        raise AdmissionError("token_order_violation")
                     return
                 if (
                     token_index != session.expected_token_index
@@ -346,6 +392,7 @@ class RequestGatewayService:
                         text=token_text,
                     )
                     self._append_event_locked(session, event)
+                    session.token_digests.append(token_digest)
                     session.expected_token_index += 1
                     self._metrics.increment("token_events_total")
                     return
@@ -465,7 +512,7 @@ class RequestGatewayService:
 
     def _cancel_backend_once(self, session: _Session) -> None:
         with session.condition:
-            if session.backend_cancelled:
+            if not session.backend_started or session.backend_cancelled:
                 return
             session.backend_cancelled = True
         try:

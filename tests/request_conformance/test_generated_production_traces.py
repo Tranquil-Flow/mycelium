@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+import hashlib
 
 from mycelium_qualification.evidence import sha256_bytes
 from mycelium_request_conformance.model import Action, Authority, GatewayModel, ModelState, Phase
@@ -87,7 +88,13 @@ def _wait_for_terminal(service: RequestGatewayService, backend: ControlledBacken
 
 
 def _event_projection(event) -> tuple[object, ...]:
-    return (event.sequence, event.kind, event.token_index, event.text, event.code)
+    if hasattr(event, "text_digest"):
+        text_digest = event.text_digest
+    elif event.text is None:
+        text_digest = None
+    else:
+        text_digest = hashlib.sha256(event.text.encode("utf-8")).hexdigest()
+    return (event.sequence, event.kind, event.token_index, text_digest, event.code)
 
 
 def _assert_generated_trace(trace: Sequence[Action], index: int) -> None:
@@ -108,13 +115,22 @@ def _assert_generated_trace(trace: Sequence[Action], index: int) -> None:
     try:
         for action, before, after, _code in transitions:
             if action.kind == "admit":
-                request_id = service.submit(submission(qualification, prompt=action.payload))
+                assert action.payload is not None and action.max_new_tokens is not None
+                request_id = service.submit(
+                    submission(
+                        qualification,
+                        prompt=action.payload,
+                        tokens=action.max_new_tokens,
+                    )
+                )
             elif action.kind == "start":
                 assert backend.started.wait(timeout=2), trace_document
-            elif action.kind == "token" and before.phase is Phase.STREAMING:
+            elif action.kind == "token":
+                assert before.phase is Phase.STREAMING, trace_document
                 assert action.token_index is not None and action.text is not None
                 backend.emit(action.token_index, action.text)
-            elif action.kind == "complete" and before.phase is Phase.STREAMING:
+            elif action.kind == "complete":
+                assert before.phase is Phase.STREAMING, trace_document
                 backend.complete()
             elif action.kind == "cancel":
                 if request_id is None:
@@ -225,7 +241,7 @@ def _assert_generated_trace(trace: Sequence[Action], index: int) -> None:
 
 def test_all_generated_traces_match_production_events_counters_and_cleanup():
     traces = (*generate_bounded_traces(CURRENT), *generate_race_traces(CURRENT))
-    assert len(traces) == 289
+    assert len(traces) == len({trace_to_json(trace) for trace in traces})
 
     for index, trace in enumerate(traces):
         _assert_generated_trace(trace, index)

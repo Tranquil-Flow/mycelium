@@ -84,3 +84,29 @@ def test_capacity_cancel_before_start_needs_no_resource_cleanup():
     assert record.cleanup_count == 0
     admitted = model.admit(state, "request-b")
     assert admitted.code == "admitted"
+
+
+def test_capacity_precedes_duplicate_detection_for_live_full_session():
+    model = CapacityModel(max_sessions=1)
+    state = model.admit(model.initial_state(), "request-a").state
+    state = model.start(state, "request-a").state
+
+    duplicate = model.admit(state, "request-a")
+
+    assert duplicate.code == "gateway_capacity_exhausted"
+    assert duplicate.state.admission_rejections == 1
+    assert duplicate.state.sessions == state.sessions
+
+
+def test_room_is_made_before_duplicate_detection_like_production_submit():
+    model = CapacityModel(max_sessions=2)
+    state = model.admit(model.initial_state(), "request-live").state
+    state = model.start(state, "request-live").state
+    state = model.admit(state, "request-old").state
+    state = model.terminate(state, "request-old", "completed").state
+    state = model.finish_worker(state, "request-old").state
+
+    duplicate = model.admit(state, "request-live")
+
+    assert duplicate.code == "duplicate_request_id"
+    assert [item.request_id for item in duplicate.state.sessions] == ["request-live"]
