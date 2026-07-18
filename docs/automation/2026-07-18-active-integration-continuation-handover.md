@@ -160,3 +160,50 @@ The remaining four lane worktrees were re-probed after these gates. Each still
 contains tracked, staged, or untracked work and therefore remains intentionally
 unintegrated. `route_ready=false`; capacity profiles are bounded local evidence,
 not qualification or route-promotion authority.
+
+## Canonical capacity-profile document verification
+
+A second disjoint capacity tranche was built from the exact prior integration
+head `54b43f037da5c55a24589f9a13a956b0575884d2`, reviewed in its own worktree,
+and integrated without conflict.
+
+| Source commit | Integration commit | Result |
+|---|---|---|
+| `3180c6e03b25a6a93e12e6610fbb7469cb6565ef` | `55ebe8261e935f5bd5fe4d7401f79fdf7a029522` | Exact canonical document parser, full reconstruction, 256 KiB input bound, 256-observation compiler bound, and tests. Stable patch ID `0d4daa1560a7c8b7069d2ecb5fdde8fb6f9bf336` matches. |
+| `98f9de1d60f83d1729966f930aa89cf8347db1c8` | `c409e4f946fe6c93b27cc0941b2058e499abc197` | Source handover. Stable patch ID `911b11a3ebfd1291d3f7202be68cc58f01e438df` matches. |
+
+The parser accepts only exact compiler-produced bytes, rejects duplicate keys,
+non-canonical encodings, schema aliases, non-finite/deep/oversized input, and
+rebuilds every key, policy, observation, limit, boundary, evidence binding,
+readiness value, and digest before acceptance. Compiler sequence validation no
+longer allocates a range from attacker-selected terminal concurrency.
+
+TDD/review evidence:
+
+- initial RED: 22 failures because the parser was absent;
+- initial GREEN: 22 passes; adjacent capacity suite: 35 passes;
+- spec review: PASS;
+- first quality review timed out and remains uncounted;
+- second quality/security review: APPROVED, with a `bytes`-subclass length
+  override bypass noted;
+- follow-up RED reproduced the bypass; exact-`bytes` enforcement closed it.
+
+Final integrated gates on committed head `c409e4f946fe6c93b27cc0941b2058e499abc197`:
+
+- full Python: 1162 passed, 2 skipped, 117 subtests passed;
+- contract audit: 14 contracts;
+- compileall, Ruff, and all diff checks: passed;
+- release-security audit: 386 tracked files accepted;
+- claim-boundary audit: 150 source files accepted;
+- Rust fmt and clippy: passed; Rust tests: 21 passed;
+- UI: 98 Vitest and 3 Node contract tests; typecheck and production build passed.
+
+The UI gate reused existing canonical dependencies through a temporary symlink,
+removed afterward; no install ran. The existing Vite chunk-size advisory is the
+only non-failing diagnostic.
+
+This verifier has no router, scheduler, admission, gossip, status, publication,
+or activation consumer. It proves local document integrity only. Trusted
+publisher/replacement authority, freshness/deprecation semantics, accepted
+physical evidence, and runtime consumption remain absent. `route_ready=false`,
+`release_ready=false`, and `qualification_evaluated=false` remain mandatory.
