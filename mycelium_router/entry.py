@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from mycelium_router.contracts import (
+   ExecutionGraph,
    FailureReport,
    HopHeader,
    ManifestDelta,
@@ -24,7 +25,7 @@ from mycelium_router.validation import validate_manifest
 @dataclass
 class RequestRecord:
    request: RequestContext
-   graph: object
+   graph: ExecutionGraph
    manifest: PathManifest
    client_sink: object
    state_machine: RequestStateMachine
@@ -44,7 +45,7 @@ class RequestRecord:
 @dataclass
 class PendingPrefill:
    request: RequestContext
-   graph: object
+   graph: ExecutionGraph
    build: PathBuildState
    client_sink: object
    state_machine: RequestStateMachine
@@ -483,6 +484,8 @@ class EntryCoordinator:
          and report.token_index != len(record.generated_token_ids)
       ):
          return False
+      if not self._failure_identity_matches_locked_path(record, report):
+         return False
       if report.scope == "DEVICE" and report.node_id == self.node_id:
          record.state_machine.transition(
             "FAILED",
@@ -565,6 +568,46 @@ class EntryCoordinator:
       )
       return True
 
+   def _failure_identity_matches_locked_path(
+      self,
+      record: RequestRecord,
+      report: FailureReport,
+   ) -> bool:
+      manifest = record.manifest
+      selected_placement_ids = {
+         hop.placement_id for hop in manifest.ordered_hops
+      }
+      if report.scope == "PLACEMENT":
+         return report.placement_id in selected_placement_ids
+
+      placement_by_id = {
+         placement.placement_id: placement
+         for stage in record.graph.stages
+         for placement in stage.placements
+      }
+      if report.scope == "DEVICE":
+         return report.node_id == self.node_id or any(
+            placement_by_id[placement_id].node_id == report.node_id
+            for placement_id in selected_placement_ids
+         )
+      if report.scope != "EDGE":
+         return False
+
+      selected_pairs = {
+         (left.placement_id, right.placement_id)
+         for left, right in zip(
+            manifest.ordered_hops,
+            manifest.ordered_hops[1:],
+         )
+      }
+      selected_edge_ids = {
+         edge.edge_id
+         for edge in record.graph.edges
+         if (edge.from_placement_id, edge.to_placement_id) in selected_pairs
+      }
+      selected_edge_ids.add(manifest.loopback_edge_id)
+      return report.edge_id in selected_edge_ids
+
    def _cleanup_record(self, record: RequestRecord) -> None:
       if record.cleaned_up:
          return
@@ -583,7 +626,7 @@ class EntryCoordinator:
       excluded_placements: frozenset[str],
       excluded_edges: frozenset[str],
       excluded_devices: frozenset[str],
-   ) -> tuple[object, PathManifest, PathBuildState]:
+   ) -> tuple[ExecutionGraph, PathManifest, PathBuildState]:
       graph = self.topology.snapshot()
       build = self.builder.start(
          request,
