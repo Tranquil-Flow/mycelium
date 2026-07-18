@@ -125,3 +125,38 @@ Still absent:
 - fresh-machine release/bootstrap proof.
 
 No merge to `main` and no push occurred.
+
+## Capacity-profile continuation
+
+While the four remaining lanes continued, the independent capacity-profile
+compiler tranche was completed, reviewed, and integrated after this handover's
+first documentation commit.
+
+| Source commit | Integration commit | Result |
+|---|---|---|
+| `a614bc7b8c702ba832805951079993b99c26f56d` | `ab33b1b2bc36e50b6c0128108290ee8e3132a79d` | Compiler, contracts, STATUS adapter, and 13 tests; stable patch ID `4250c8f346f00aca5640905f4026d23907da6b51` matches. |
+| `82a99964a8075e9ad5ff1d473d0df5b0a190f994` | `a927093398d1cc2993c2635d4c3bdf4b9e5ce488` | Capacity-profile handover; stable patch ID `3b29df6b15fa0207eea07521ba7bf83d74346a96` matches. |
+
+The six capacity-tranche paths had zero overlap with the 24 paths changed on the
+continuation branch after `5bd2dc0`. Both commits cherry-picked without conflict.
+Exact design, review, and claim boundaries are recorded in
+`docs/automation/2026-07-18-capacity-profile-compiler-handover.md`.
+
+Final committed code head before this documentation update:
+`a927093398d1cc2993c2635d4c3bdf4b9e5ce488`.
+
+Final integrated gates on that head:
+
+- full Python: 1140 passed, 2 skipped, 117 subtests passed;
+- combined capacity/Observatory/release-verifier focus: 135 passed;
+- contract audit: 14 contracts;
+- compileall and all diff checks: passed;
+- Rust fmt and clippy: passed; Rust tests: 21 passed;
+- UI: 98 Vitest and 3 Node tests; typecheck and production build passed;
+- release-security audit: 383 tracked files accepted;
+- claim-boundary audit: 149 source files accepted.
+
+The remaining four lane worktrees were re-probed after these gates. Each still
+contains tracked, staged, or untracked work and therefore remains intentionally
+unintegrated. `route_ready=false`; capacity profiles are bounded local evidence,
+not qualification or route-promotion authority.
