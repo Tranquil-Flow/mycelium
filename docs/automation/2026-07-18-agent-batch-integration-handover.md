@@ -1,6 +1,6 @@
 # Mycelium completed-agent batch integration handover
 
-Status snapshot: 2026-07-18 13:18:24 CEST
+Status snapshot: 2026-07-18 13:35:37 CEST
 
 ## State
 
@@ -11,12 +11,13 @@ Integration worktree: `/Users/evinova-self/Projects/mycelium-wt-agent-batch`
 Integration branch: `integration/mycelium-agent-batch-20260718`
 
 Verified code head before this documentation-only handover commit:
-`a278e1140ecbaceb4b0ed97a398be47cd492af78`.
+`932409a5b9feeddae798e66a8abc15096cdda837`.
 
 No merge to `main`, push, PR, fetch, pull, package install, remote-host action,
 credential access, or physical qualification occurred. Old source worktrees were
-read-only provenance inputs. Agent session 2 remains active in
-`mycelium-wt-router-iroh-adapter`; this integration did not edit it.
+read-only provenance inputs. The completed Router-to-iroh source worktree remained
+clean and was integrated by commit; three newer agent lanes remain isolated from
+this branch.
 
 ## Integrated work
 
@@ -35,6 +36,7 @@ All selected commits were applied after the verified manual-driver head
 | `1c4a865` | `96361326` | Read-only lane-topology audit integrated. |
 | uncommitted conformance source tranche | `3803f0cd` | Imported read-only, reproduced RED replay collisions, repaired, and committed with expanded tests. |
 | `23c1679` | `a278e114` | Authenticated request/token-stream gateway integrated cleanly. |
+| `ca2b59d` | `932409a5` | Authenticated production Router-to-iroh adapter integrated cleanly from its completed, clean source lane. |
 
 The request-gateway source branch contains parent `db8df22`, an alternate
 qualification implementation. It was deliberately not integrated: the batch
@@ -48,6 +50,25 @@ Historical overnight decisions remain unchanged: preserve `e9e6928` and
 `main`; integrate `b759305` through `d412777` in order. Exact mapping and
 clean-checkout document provenance remain in
 `docs/automation/2026-07-18-manual-driver-handover.md`.
+
+All previously completed parallel implementation sessions are now represented
+in this integration history. Stable patch IDs match for the nine source commits
+through the request gateway. The Router-to-iroh commit was then cherry-picked
+directly and preserved its nine-path source diff and authorship.
+
+## Authenticated Router-to-iroh adapter
+
+The integrated adapter keeps the Python Router authoritative while Rust owns the
+authenticated bounded carrier. It uses canonical `mycelium.router_wire.v1`
+frames, EndpointID plus generation binding, stale-connection fencing,
+dispatch-confirmed acknowledgements, replay/sequence rejection, absolute
+deadlines, bounded queues, reconnect lifecycle fencing, and explicit shutdown.
+
+Observed local integration uses one Python pytest process and two native sidecar
+processes. The five-run stability gate exercised production Router prefill and
+decode traversal; the focused suite also covered the exact 16 MiB canonical frame
+boundary. This establishes local process-path evidence only. Delivery remains
+process-lifetime `remote_router_dispatch_ack`, not crash-durable delivery.
 
 ## Router replay repair
 
@@ -70,7 +91,9 @@ cached success. The repair:
 
 | Command | Exit | Result |
 |---|---:|---|
-| `python3.14 -m pytest -q` | 0 | 965 passed, 2 skipped, 117 subtests passed. |
+| `python3.14 -m pytest -q` | 0 | 1002 passed, 2 skipped, 117 subtests passed. |
+| integrated iroh focused suite | 0 | 49 passed. |
+| local three-process iroh stability | 0 | 2 passed per run across 5 consecutive runs. |
 | `python3.14 -m pytest -q tests/conformance` | 0 | 35 passed. |
 | request gateway plus contract fixtures | 0 | 57 passed. |
 | reference oracle | 0 | 7 passed. |
@@ -86,8 +109,8 @@ cached success. The repair:
 | `cargo clippy --all-targets --all-features -- -D warnings` | 0 | Passed. |
 | `cargo test` | 0 | 21 passed, 0 failed. |
 | `npm run check` | 0 | 70 Vitest plus 3 Node tests passed; typecheck and build passed. |
-| release-security audit | 0 | 349 tracked files accepted. |
-| claim-boundary audit | 0 | 137 source files accepted. |
+| release-security audit | 0 | 353 tracked files accepted. |
+| claim-boundary audit | 0 | 138 source files accepted. |
 
 A combined focused pytest invocation first exited 2 because the two test trees
 both expose a top-level module named `conftest`. Running each authority in its
@@ -101,12 +124,12 @@ removed the symlink. Vite emitted only its existing large-chunk warning.
 
 This is a planning indicator, not a readiness claim:
 
-`[##############------] 68% locally built/verified | 32% remaining`
+`[###############-----] 74% locally built/verified | 26% remaining`
 
 - baseline/integration/contracts: 10/10
 - control plane/planner/provision/load/graph: 14/15
 - Router/runtime/stage-KV/conformance: 18/20
-- native iroh plus Router adapter: 8/15
+- native iroh plus Router adapter: 13/15
 - qualification plus physical proof: 7/20
 - request gateway plus Observatory: 8.5/10
 - recovery plus release: 3/10
@@ -121,8 +144,8 @@ route readiness.
 
 Remaining critical path:
 
-1. Let session 2 complete the production Router-to-iroh adapter; integrate and
-   rerun all gates.
+1. Reconcile the three current isolated lanes only after each reaches a clean,
+   committed, independently reviewed state.
 2. With explicit authorization and a written staging/cleanup plan, run real
    authenticated two-Mac stage compute, cold-cache provisioning, at least eight
    decode steps, parity checks, negative runs, and immutable evidence sealing.
