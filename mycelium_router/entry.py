@@ -478,6 +478,11 @@ class EntryCoordinator:
          or report.path_attempt != manifest.path_attempt
       ):
          return False
+      if (
+         record.status == "DECODING"
+         and report.token_index != len(record.generated_token_ids)
+      ):
+         return False
       if report.scope == "DEVICE" and report.node_id == self.node_id:
          record.state_machine.transition(
             "FAILED",

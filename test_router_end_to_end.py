@@ -130,6 +130,52 @@ class RouterEndToEndTests(unittest.TestCase):
       self.assertFalse(accepted)
       self.assertEqual(self.sink.token_ids, [])
 
+   def test_stale_failure_from_completed_decode_step_is_ignored(self):
+      request_id = self.admit()
+      self.assertEqual(self.router.generate(request_id, token_count=1), (101,))
+      record = self.router.get_request(request_id)
+      original_manifest = record.manifest
+
+      recovered = self.router.receive_failure_report(
+         FailureReport(
+            request_id=request_id,
+            path_id=original_manifest.path_id,
+            path_attempt=original_manifest.path_attempt,
+            token_index=0,
+            scope="PLACEMENT",
+            reason="delayed_failure",
+            placement_id=original_manifest.ordered_hops[1].placement_id,
+         )
+      )
+
+      self.assertFalse(recovered)
+      self.assertEqual(self.router.get_request(request_id).manifest, original_manifest)
+      self.assertEqual(self.router.request_status(request_id), "DECODING")
+      self.assertEqual(self.router.generate(request_id, token_count=1), (102,))
+      self.assertEqual(self.sink.token_ids, [101, 102])
+
+   def test_future_failure_report_cannot_advance_recovery_state(self):
+      request_id = self.admit()
+      record = self.router.get_request(request_id)
+      original_manifest = record.manifest
+
+      recovered = self.router.receive_failure_report(
+         FailureReport(
+            request_id=request_id,
+            path_id=original_manifest.path_id,
+            path_attempt=original_manifest.path_attempt,
+            token_index=1,
+            scope="PLACEMENT",
+            reason="future_failure",
+            placement_id=original_manifest.ordered_hops[1].placement_id,
+         )
+      )
+
+      self.assertFalse(recovered)
+      self.assertEqual(self.router.get_request(request_id).manifest, original_manifest)
+      self.assertEqual(self.router.request_status(request_id), "DECODING")
+      self.assertEqual(self.runtime.cancel_calls, [])
+
    def test_entry_device_failure_is_explicitly_unrecoverable(self):
       request_id = self.admit()
       record = self.router.get_request(request_id)
