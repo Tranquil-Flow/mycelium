@@ -129,6 +129,8 @@ class RelayEngine:
       self,
       header: HopHeader,
       context: ProgressivePrefillContext,
+      *,
+      source_node_id: str | None = None,
    ) -> ProgressivePrefillResult:
       now = self.clock.now()
       self._evict_prefill_results(now=now)
@@ -142,9 +144,6 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return ProgressivePrefillResult("REJECTED", "invalid_idempotency_key")
-      cached = self._prefill_results.get(header.idempotency_key)
-      if cached is not None:
-         return cached[0]
       build = context.build
       if (
          header.phase != "PREFILL"
@@ -170,9 +169,19 @@ class RelayEngine:
          for stage in context.graph.stages
          for placement in stage.placements
       }
+      if source_node_id is not None and header.hop_index > 0:
+         source_placement = placement_map.get(header.source_placement_id)
+         if (
+            source_placement is None
+            or source_placement.node_id != source_node_id
+         ):
+            return ProgressivePrefillResult("REJECTED", "source_node_mismatch")
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return ProgressivePrefillResult("REJECTED", "destination_not_local")
+      cached = self._prefill_results.get(header.idempotency_key)
+      if cached is not None:
+         return cached[0]
 
       state = HopStateMachine(path_attempt=header.path_attempt)
       state.transition("QUEUED", path_attempt=header.path_attempt)

@@ -270,7 +270,11 @@ class InProcessMesh:
          )
       )
       if isinstance(payload, ProgressivePrefillContext):
-         result = router.receive_progressive_prefill(header, payload)
+         result = router.receive_progressive_prefill(
+            header,
+            payload,
+            source_node_id=source_node_id,
+         )
       else:
          result = router.receive_hop(
             header,

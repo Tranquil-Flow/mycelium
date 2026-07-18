@@ -5,6 +5,7 @@ from mycelium_router.contracts import (
    FailureReport,
    HopHeader,
    PrefillChunkCompleted,
+   ProgressivePrefillContext,
    RouterConfig,
    TokenEvent,
 )
@@ -160,6 +161,57 @@ class InProcessMeshTests(unittest.TestCase):
       self.assertEqual(len(self.runtimes["node-c"].executed), executions_before)
       self.assertEqual(record.generated_token_ids, [])
       self.assertEqual(self.sink.token_ids, [])
+
+   def test_route_building_hop_source_must_own_previous_selected_placement(self):
+      send_hop = self.mesh.send_hop
+
+      def forge_second_route_building_hop(source_node_id, header, payload):
+         if isinstance(payload, ProgressivePrefillContext) and header.hop_index == 1:
+            source_node_id = "node-d"
+         return send_hop(source_node_id, header, payload)
+
+      self.mesh.send_hop = forge_second_route_building_hop
+
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+
+      self.assertEqual(self.entry.request_status(self.request.request_id), "PREFILL")
+      rejected_reasons = [
+         getattr(result, "reason", "")
+         for result in self.mesh.hop_results
+         if getattr(result, "disposition", "") == "REJECTED"
+      ]
+      self.assertIn("source_node_mismatch", rejected_reasons)
+      self.assertEqual(len(self.runtimes["node-c"].executed), 0)
+      self.assertEqual(len(self.runtimes["node-d"].executed), 0)
+
+   def test_cached_route_building_hop_revalidates_transport_source(self):
+      send_hop = self.mesh.send_hop
+      captured = {}
+
+      def capture_second_route_building_hop(source_node_id, header, payload):
+         if isinstance(payload, ProgressivePrefillContext) and header.hop_index == 1:
+            captured["header"] = header
+            captured["payload"] = payload
+         return send_hop(source_node_id, header, payload)
+
+      self.mesh.send_hop = capture_second_route_building_hop
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      executions_before = len(self.runtimes["node-c"].executed)
+
+      send_hop("node-d", captured["header"], captured["payload"])
+
+      result = self.mesh.hop_results[-1]
+      self.assertEqual(getattr(result, "disposition", ""), "REJECTED")
+      self.assertEqual(getattr(result, "reason", ""), "source_node_mismatch")
+      self.assertEqual(len(self.runtimes["node-c"].executed), executions_before)
 
    def test_hop_zero_source_must_match_admitted_request_entry(self):
       self.entry.start_distributed_prefill(

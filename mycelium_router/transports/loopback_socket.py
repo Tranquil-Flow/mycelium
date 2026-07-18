@@ -282,7 +282,15 @@ class LoopbackSocketMesh:
       if action == _ACTION_HOP:
          if isinstance(message, ProgressivePrefillMessage):
             header, context = decode_progressive_prefill(frame)
-            router.receive_progressive_prefill(header, context)
+            router.receive_progressive_prefill(
+               header,
+               context,
+               source_node_id=getattr(
+                  self._dispatch_context,
+                  "source_node_id",
+                  None,
+               ),
+            )
             return
          if not isinstance(message, HopHeader):
             raise SocketTransportError("invalid_hop_message")

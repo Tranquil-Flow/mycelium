@@ -184,6 +184,63 @@ class LoopbackSocketMeshTests(unittest.TestCase):
       finally:
          mesh.close()
 
+   def test_tcp_route_building_hop_source_must_own_previous_selected_placement(self):
+      graph = three_device_graph()
+      states = state_table(slow_b_bandwidth=True)
+      states["node-d"] = replace(states["node-a"], node_id="node-d")
+      capacity = FakeCapacityPort()
+      clock = ManualClock()
+      mesh = LoopbackSocketMesh()
+      runtimes = {}
+      routers = {}
+      sink = InMemoryClientSink()
+      request = replace(
+         request_fixture(),
+         request_id="request-socket-route-building-origin",
+      )
+
+      for node_id in ("node-a", "node-c", "node-d"):
+         runtime = FakeRuntimePort()
+         router = Router(
+            node_id=node_id,
+            topology=FakeTopologyProvider(graph),
+            device_states=FakeDeviceStateProvider(states),
+            capacity=capacity,
+            runtime=runtime,
+            transport=mesh.transport_for(node_id),
+            clock=clock,
+            id_source=SequenceIdSource(),
+            config=RouterConfig(),
+         )
+         mesh.register_router(node_id, router)
+         runtimes[node_id] = runtime
+         routers[node_id] = router
+
+      honest_send_hop = mesh.transport_for("node-a").send_hop
+
+      def forge_second_route_building_hop(header, payload):
+         if header.phase == "PREFILL" and header.hop_index == 1:
+            return mesh.transport_for("node-d").send_hop(header, payload)
+         return honest_send_hop(header, payload)
+
+      mesh.transport_for("node-a").send_hop = forge_second_route_building_hop
+      mesh.start()
+      try:
+         entry = routers["node-a"]
+         entry.start_distributed_prefill(
+            request,
+            sink,
+            excluded_placements=frozenset({"node-b-stage-000"}),
+         )
+
+         self.assertEqual(entry.request_status(request.request_id), "PREFILL")
+         self.assertEqual(len(runtimes["node-a"].executed), 1)
+         self.assertEqual(runtimes["node-c"].executed, [])
+         self.assertEqual(runtimes["node-d"].executed, [])
+         self.assertEqual(sink.token_ids, [])
+      finally:
+         mesh.close()
+
    def test_tcp_hop_zero_source_must_match_admitted_request_entry(self):
       graph = three_device_graph()
       states = state_table(slow_b_bandwidth=True)
