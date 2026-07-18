@@ -80,6 +80,16 @@ This is local evidence only. `route_ready=false` remains mandatory. The branch d
 
 Feature lanes must base new work on the final `integration/mycelium-manual-driver` tip after this handover commit, not on `automation/mycelium-overnight`. Recommended dependency order remains: stage-local KV semantics; production Router-to-iroh adapter; qualification/evidence authority rebased across both; explicitly authorized physical qualification; separate request/token-stream gateway; read-only Observatory event consumption; recovery; release orchestration.
 
+### 0.5 Concurrent feature-lane topology at final probe
+
+Three feature worktrees existed at the final topology probe. The manual driver did not edit, stage, commit, reset, switch, or clean them:
+
+- `/Users/evinova-self/Projects/mycelium-stage-local-kv`, branch `feature/stage-local-kv`: clean at `1d458f5474294f11ae3ff12cf333fe28a799931f`; no feature commit yet.
+- `/Users/evinova-self/Projects/mycelium-wt-route-qualification`, branch `feature/route-qualification-authority`: 12 dirty/untracked feature paths at `1d458f5474294f11ae3ff12cf333fe28a799931f` under the contract registry/manifest/generator, `mycelium_qualification/`, compatibility fixture, and qualification tests.
+- `/Users/evinova-self/Projects/mycelium-wt-router-iroh-adapter`, branch `feature/router-iroh-adapter`: 5 dirty/untracked feature paths at `1d458f5474294f11ae3ff12cf333fe28a799931f` in the sidecar client/native local and sidecar code plus cross-language/Router adapter tests.
+
+Those branches began from the overnight documentation head before manual reconciliation completed. Do not reset or clean them. For each dirty lane, first let its owner finish verification and create explicit feature-only commit(s); then create a fresh branch/worktree from the final `integration/mycelium-manual-driver` tip and cherry-pick only those feature commits. Do not rebase or merge the entire overnight-derived branch history. The clean stage-local-KV lane should be recreated from the final integration tip before implementation begins.
+
 ## 1. Source handover executive state (historical snapshot)
 
 The overnight automation ran successfully, was canceled after the requested overnight window, and no Mycelium cron job remains registered. Work is isolated on `automation/mycelium-overnight`; it is not yet folded into canonical `main`.
