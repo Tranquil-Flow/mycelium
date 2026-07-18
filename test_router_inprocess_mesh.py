@@ -161,6 +161,67 @@ class InProcessMeshTests(unittest.TestCase):
       self.assertEqual(record.generated_token_ids, [])
       self.assertEqual(self.sink.token_ids, [])
 
+   def test_hop_zero_source_must_match_admitted_request_entry(self):
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(self.request.request_id)
+      first_hop = record.manifest.ordered_hops[0]
+      final_hop = record.manifest.ordered_hops[-1]
+      forged_header = HopHeader(
+         request_id=self.request.request_id,
+         path_id=record.manifest.path_id,
+         path_attempt=record.manifest.path_attempt,
+         phase="DECODE",
+         token_index=0,
+         hop_index=0,
+         source_placement_id=final_hop.placement_id,
+         destination_placement_id=first_hop.placement_id,
+         topology_version=record.manifest.topology_version,
+         idempotency_key=hop_idempotency_key(
+            request_id=self.request.request_id,
+            path_id=record.manifest.path_id,
+            path_attempt=record.manifest.path_attempt,
+            phase="DECODE",
+            token_index=0,
+            hop_index=0,
+         ),
+      )
+      executions_before = len(self.runtimes["node-a"].executed)
+
+      self.mesh.transport_for("node-d").send_hop(forged_header, b"forged")
+
+      self.assertEqual(self.mesh.hop_results[-1].disposition, "REJECTED")
+      self.assertEqual(self.mesh.hop_results[-1].reason, "entry_node_mismatch")
+      self.assertEqual(len(self.runtimes["node-a"].executed), executions_before)
+      self.assertEqual(record.generated_token_ids, [])
+      self.assertEqual(self.sink.token_ids, [])
+      self.assertTrue(self.entry.decode_one_distributed(self.request.request_id))
+      self.assertEqual(self.sink.token_ids, [101])
+
+   def test_cached_hop_zero_still_rejects_non_entry_source(self):
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      self.assertTrue(self.entry.decode_one_distributed(self.request.request_id))
+      genuine = next(
+         delivery.header
+         for delivery in self.mesh.hop_deliveries
+         if delivery.header.phase == "DECODE" and delivery.header.hop_index == 0
+      )
+      executions_before = len(self.runtimes["node-a"].executed)
+
+      self.mesh.transport_for("node-d").send_hop(genuine, b"forged-duplicate")
+
+      self.assertEqual(self.mesh.hop_results[-1].disposition, "REJECTED")
+      self.assertEqual(self.mesh.hop_results[-1].reason, "entry_node_mismatch")
+      self.assertEqual(len(self.runtimes["node-a"].executed), executions_before)
+      self.assertEqual(self.sink.token_ids, [101])
+
    def test_manifest_lock_source_cannot_register_forged_participant_path(self):
       captured_locks = []
       receive_manifest_locked = self.entry.receive_manifest_locked

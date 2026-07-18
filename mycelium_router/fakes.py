@@ -304,6 +304,10 @@ class InProcessMesh:
          placement_map[hop.placement_id].node_id
          for hop in locked.manifest.ordered_hops
       }
+      entry_node_id = self._entry_by_request.get(locked.request_id)
+      entry = self.routers.get(entry_node_id) if entry_node_id else None
+      if entry is None:
+         raise ValueError("unknown_mesh_entry")
       for node_id in participant_nodes:
          router = self.routers.get(node_id)
          if router is None:
@@ -313,14 +317,11 @@ class InProcessMesh:
             locked.manifest,
             graph,
             source_node_id=source_node_id,
+            entry_node_id=entry_node_id,
          )
          if not accepted:
             raise ValueError("manifest_lock_rejected")
       self._graph_by_path[locked.path_id] = graph
-      entry_node_id = self._entry_by_request.get(locked.request_id)
-      entry = self.routers.get(entry_node_id) if entry_node_id else None
-      if entry is None:
-         raise ValueError("unknown_mesh_entry")
       if not entry.receive_manifest_locked(
          locked,
          source_node_id=source_node_id,

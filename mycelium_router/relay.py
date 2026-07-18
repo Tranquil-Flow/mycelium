@@ -61,6 +61,7 @@ class RelayEngine:
          str,
          tuple[ExecutionGraph, PathManifest, RequestContext],
       ] = {}
+      self._entry_node_by_path: dict[str, str] = {}
       self._hop_results: dict[
          str,
          tuple[HopReceiveResult, float, str],
@@ -78,6 +79,7 @@ class RelayEngine:
       graph: ExecutionGraph,
       *,
       source_node_id: str | None = None,
+      entry_node_id: str | None = None,
    ) -> bool:
       validate_manifest(manifest, graph)
       if request.request_id != manifest.request_id:
@@ -91,14 +93,36 @@ class RelayEngine:
          final_placement = placement_map[manifest.ordered_hops[-1].placement_id]
          if not source_node_id or final_placement.node_id != source_node_id:
             return False
+         if not entry_node_id:
+            return False
       existing = self._paths.get(manifest.path_id)
       if existing is not None:
          existing_manifest = existing[1]
          if manifest.path_attempt < existing_manifest.path_attempt:
             return False
          if manifest.path_attempt == existing_manifest.path_attempt:
-            return existing == (graph, manifest, request)
+            if existing != (graph, manifest, request):
+               return False
+            existing_entry = self._entry_node_by_path.get(manifest.path_id)
+            if (
+               entry_node_id is not None
+               and existing_entry is not None
+               and entry_node_id != existing_entry
+            ):
+               return False
+            if entry_node_id is not None:
+               self._entry_node_by_path[manifest.path_id] = entry_node_id
+            return True
+         existing_entry = self._entry_node_by_path.get(manifest.path_id)
+         if (
+            entry_node_id is not None
+            and existing_entry is not None
+            and entry_node_id != existing_entry
+         ):
+            return False
       self._paths[manifest.path_id] = (graph, manifest, request)
+      if entry_node_id is not None:
+         self._entry_node_by_path[manifest.path_id] = entry_node_id
       return True
 
    def receive_progressive_prefill(
@@ -338,11 +362,6 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
-      cached = self._hop_results.get(header.idempotency_key)
-      if cached is not None:
-         return cached[0]
-      if header.idempotency_key in self._pending_hops:
-         return HopReceiveResult("QUEUED", "duplicate_pending")
       registration = self._paths.get(header.path_id)
       if registration is None:
          return HopReceiveResult("REJECTED", "unknown_path")
@@ -374,19 +393,25 @@ class RelayEngine:
          for stage in graph.stages
          for placement in stage.placements
       }
-      # Hop zero is admitted by the requesting entry node. In Phase 6 decode its
-      # source placement names the prior logical final hop even though the entry
-      # replays the whole context; transport ownership starts at hop one.
-      if source_node_id is not None and header.hop_index > 0:
-         source_placement = placement_map.get(header.source_placement_id)
-         if (
-            source_placement is None
-            or source_placement.node_id != source_node_id
-         ):
-            return HopReceiveResult("REJECTED", "source_node_mismatch")
+      if source_node_id is not None:
+         if header.hop_index == 0:
+            if self._entry_node_by_path.get(header.path_id) != source_node_id:
+               return HopReceiveResult("REJECTED", "entry_node_mismatch")
+         else:
+            source_placement = placement_map.get(header.source_placement_id)
+            if (
+               source_placement is None
+               or source_placement.node_id != source_node_id
+            ):
+               return HopReceiveResult("REJECTED", "source_node_mismatch")
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return HopReceiveResult("REJECTED", "destination_not_local")
+      cached = self._hop_results.get(header.idempotency_key)
+      if cached is not None:
+         return cached[0]
+      if header.idempotency_key in self._pending_hops:
+         return HopReceiveResult("QUEUED", "duplicate_pending")
 
       state = HopStateMachine(path_attempt=header.path_attempt)
       state.transition("QUEUED", path_attempt=header.path_attempt)
@@ -1063,6 +1088,7 @@ class RelayEngine:
          if value[2] != path_id
       }
       self._paths.pop(path_id, None)
+      self._entry_node_by_path.pop(path_id, None)
       self._pending_hops = {
          key: value
          for key, value in self._pending_hops.items()

@@ -308,6 +308,7 @@ class LoopbackSocketMesh:
                "source_node_id",
                None,
             ),
+            entry_node_id=self._entry_node(message.request_id),
          )
          if not accepted:
             raise SocketTransportError("manifest_registration_rejected")
@@ -400,7 +401,6 @@ class LoopbackSocketMesh:
       }
       for node_id in sorted(participants):
          self._send(source_node_id, node_id, _ACTION_REGISTER_LOCK, frame)
-      self._entry_nodes.setdefault(locked.request_id, source_node_id)
       self._path_graphs[locked.path_id] = graph
       self._send(
          source_node_id,

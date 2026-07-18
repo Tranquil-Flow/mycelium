@@ -86,12 +86,21 @@ class Router:
    def cancel(self, request_id):
       return self.entry.cancel(request_id)
 
-   def register_path(self, request, manifest, graph, *, source_node_id=None):
+   def register_path(
+      self,
+      request,
+      manifest,
+      graph,
+      *,
+      source_node_id=None,
+      entry_node_id=None,
+   ):
       return self.relay.register_path(
          request,
          manifest,
          graph,
          source_node_id=source_node_id,
+         entry_node_id=entry_node_id,
       )
 
    def receive_hop(self, header, payload, *, source_node_id=None):
