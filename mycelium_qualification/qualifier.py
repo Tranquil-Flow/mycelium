@@ -33,19 +33,17 @@ from .evidence import (
     validate_evidence_manifest,
 )
 
-REQUIRED_NEGATIVE_RUNS = frozenset(
-    {
-        "stale_proof",
-        "wrong_revision",
-        "wrong_endpoint",
-        "missing_tensor",
-        "expired_reservation",
-        "sequence_replay",
-        "dropped_peer",
-        "full_model_fallback",
-        "simulator_participation",
-        "synthetic_timing",
-    }
+REQUIRED_NEGATIVE_RUNS = (
+    "stale_proof",
+    "wrong_revision",
+    "wrong_endpoint",
+    "missing_tensor",
+    "expired_reservation",
+    "sequence_replay",
+    "dropped_peer",
+    "full_model_fallback",
+    "simulator_participation",
+    "synthetic_timing",
 )
 _REQUIRED_DOCUMENTS = {
     "qualification/source-provenance.json": "source_provenance",
@@ -484,7 +482,8 @@ def _validate_identity(
         ("manifest_digest", mm.manifest_digest_ref(manifest), "manifest_digest_mismatch"),
     )
     for field, value, code in expected:
-        _require(challenge.get(field) == value, code)
+        observed = challenge.get(field)
+        _require(type(observed) is type(value) and observed == value, code)
 
 
 def _validate_path_and_stages(
@@ -1008,7 +1007,7 @@ def _validate_negative_runs(value: Any, run_id: str) -> dict[str, Any]:
             "missing_negative_run_evidence",
         )
         indexed[kind] = run
-    _require(set(indexed) == REQUIRED_NEGATIVE_RUNS, "missing_negative_run_evidence")
+    _require(tuple(indexed) == REQUIRED_NEGATIVE_RUNS, "missing_negative_run_evidence")
     return document
 
 
