@@ -21,10 +21,12 @@ import pytest
 from mycelium_iroh_sidecar import (
     AuthenticationError,
     OPERATIONAL_MAX_FRAME_BYTES,
+    ProtocolError,
     SidecarClient,
     SidecarError,
 )
 from mycelium_iroh_sidecar import client as sidecar_client_module
+from mycelium_router.wire import decode_frame, encode_frame
 
 ROOT = Path(__file__).resolve().parent
 CRATE = ROOT / "native" / "iroh_transport"
@@ -338,33 +340,317 @@ def test_unknown_and_terminal_cancellation_fail_explicitly(short_root: Path) -> 
         sidecar.stop()
 
 
-def test_peer_reconfiguration_does_not_retarget_queued_message(short_root: Path) -> None:
-    first = RunningSidecar(short_root / "first", b"a" * 32)
-    second = RunningSidecar(short_root / "second", b"b" * 32)
-    third = RunningSidecar(short_root / "third", b"c" * 32)
-    sender = first.client()
-    second_receiver = second.client()
-    third_receiver = third.client()
+def test_delivery_exposes_authenticated_peer_generation(sidecars) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    frame = GOLDEN.read_bytes()
+    message_id = b"g" * 16
     try:
-        sender.configure_peer(second.ready["endpoint_id"], second.ready["endpoint_addr"])
-        message_id = sender.send(GOLDEN.read_bytes())
-        time.sleep(0.2)
-        sender.configure_peer(third.ready["endpoint_id"], third.ready["endpoint_addr"])
-        second_receiver.configure_peer(first.ready["endpoint_id"], first.ready["endpoint_addr"])
-        third_receiver.configure_peer(first.ready["endpoint_id"], first.ready["endpoint_addr"])
-
-        delivered_id, delivered = second_receiver.recv(timeout=10)
-        assert (delivered_id, delivered) == (message_id, GOLDEN.read_bytes())
-        second_receiver.ack(delivered_id)
-        with pytest.raises(TimeoutError):
-            third_receiver.recv(timeout=0.75)
+        sender.send(frame, message_id)
+        delivered_id, generation, delivered = receiver.recv_with_generation(timeout=10)
+        assert (delivered_id, generation, delivered) == (message_id, 1, frame)
+        receiver.ack(message_id)
     finally:
         sender.close()
-        second_receiver.close()
-        third_receiver.close()
+        receiver.close()
+
+
+def test_confirmed_send_waits_for_remote_adapter_ack(sidecars) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    frame = GOLDEN.read_bytes()
+    message_id = b"c" * 16
+    outcome: list[bytes | BaseException] = []
+
+    def send_confirmed() -> None:
+        try:
+            outcome.append(
+                sender.send_confirmed(frame, message_id, timeout=10)
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=send_confirmed)
+    thread.start()
+    try:
+        delivered_id, delivered = receiver.recv(timeout=10)
+        assert (delivered_id, delivered) == (message_id, frame)
+        time.sleep(0.1)
+        assert thread.is_alive()
+        assert outcome == []
+
+        receiver.ack(delivered_id)
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert outcome == [message_id]
+    finally:
+        sender.close()
+        receiver.close()
+
+
+def test_exact_operational_cap_frame_is_delivered_and_confirmed(sidecars) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    header = decode_frame(GOLDEN.read_bytes()).message
+    envelope_bytes = len(encode_frame(header, b""))
+    payload_bytes = OPERATIONAL_MAX_FRAME_BYTES - envelope_bytes
+    frame = encode_frame(header, b"x" * payload_bytes)
+    while len(frame) != OPERATIONAL_MAX_FRAME_BYTES:
+        payload_bytes -= len(frame) - OPERATIONAL_MAX_FRAME_BYTES
+        frame = encode_frame(header, b"x" * payload_bytes)
+    assert len(frame) == OPERATIONAL_MAX_FRAME_BYTES
+    message_id = b"m" * 16
+    outcome: list[bytes | BaseException] = []
+
+    def send_confirmed() -> None:
+        try:
+            outcome.append(sender.send_confirmed(frame, message_id, timeout=10))
+        except BaseException as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=send_confirmed)
+    thread.start()
+    try:
+        delivered_id, delivered = receiver.recv(timeout=10)
+        assert delivered_id == message_id
+        assert delivered == frame
+        receiver.ack(delivered_id)
+        thread.join(timeout=10)
+        assert outcome == [message_id]
+    finally:
+        sender.close()
+        receiver.close()
+
+
+def test_replay_collision_never_inherits_pending_or_completed_confirmation(sidecars) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    duplicate_sender = first.client()
+    original = GOLDEN.read_bytes()
+    collision = (GOLDEN_DIR / "03-manifest-locked.bin").read_bytes()
+    message_id = b"r" * 16
+    outcome: list[bytes | BaseException] = []
+
+    def send_original() -> None:
+        try:
+            outcome.append(sender.send_confirmed(original, message_id, timeout=10))
+        except BaseException as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=send_original)
+    thread.start()
+    try:
+        delivered_id, delivered = receiver.recv(timeout=10)
+        assert (delivered_id, delivered) == (message_id, original)
+
+        with pytest.raises(SidecarError, match="replay_collision"):
+            duplicate_sender.send_confirmed(
+                collision,
+                message_id,
+                timeout=1,
+                expected_generation=1,
+            )
+
+        receiver.ack(delivered_id)
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert outcome == [message_id]
+
+        with pytest.raises(SidecarError, match="replay_collision"):
+            duplicate_sender.send_confirmed(
+                collision,
+                message_id,
+                timeout=1,
+                expected_generation=1,
+            )
+        with pytest.raises(TimeoutError):
+            receiver.recv(timeout=0.5)
+    finally:
+        sender.close()
+        duplicate_sender.close()
+        receiver.close()
+
+
+def test_timed_out_confirmed_sends_release_local_session_capacity(
+    short_root: Path,
+) -> None:
+    sidecar = RunningSidecar(short_root / "only", b"l" * 32, queue_capacity=32)
+    unreachable_peer = RunningSidecar(short_root / "unreachable-peer", b"u" * 32)
+    admin = sidecar.client()
+    try:
+        admin.configure_peer(
+            unreachable_peer.ready["endpoint_id"],
+            unreachable_peer.ready["endpoint_addr"],
+            generation=1,
+        )
+        admin.close()
+        for index in range(16):
+            client = SidecarClient(sidecar.socket_path, sidecar.secret, timeout=0.25)
+            client.connect()
+            try:
+                with pytest.raises(TimeoutError, match="confirmed delivery deadline"):
+                    client.send_confirmed(
+                        GOLDEN.read_bytes(),
+                        index.to_bytes(16, "big"),
+                        timeout=0.05,
+                        expected_generation=1,
+                    )
+            finally:
+                client.close()
+
+        survivor = SidecarClient(sidecar.socket_path, sidecar.secret, timeout=2.0)
+        survivor.connect()
+        try:
+            survivor.ping()
+        finally:
+            survivor.close()
+    finally:
+        admin.close()
+        sidecar.stop()
+        unreachable_peer.stop()
+
+
+def test_rotation_fences_frames_queued_before_initial_peer_binding(
+    short_root: Path,
+) -> None:
+    sender_sidecar = RunningSidecar(short_root / "sender", b"s" * 32)
+    first_peer = RunningSidecar(short_root / "first-peer", b"f" * 32)
+    replacement_peer = RunningSidecar(short_root / "replacement-peer", b"r" * 32)
+    sender = sender_sidecar.client()
+    first_receiver = first_peer.client()
+    replacement_receiver = replacement_peer.client()
+    try:
+        first_id = sender.send(GOLDEN.read_bytes(), b"1" * 16)
+        second_id = sender.send(GOLDEN.read_bytes(), b"2" * 16)
+        first_receiver.configure_peer(
+            sender_sidecar.ready["endpoint_id"],
+            sender_sidecar.ready["endpoint_addr"],
+            generation=1,
+        )
+        replacement_receiver.configure_peer(
+            sender_sidecar.ready["endpoint_id"],
+            sender_sidecar.ready["endpoint_addr"],
+            generation=2,
+        )
+        sender.configure_peer(
+            first_peer.ready["endpoint_id"],
+            first_peer.ready["endpoint_addr"],
+            generation=1,
+        )
+        delivered_id, _ = first_receiver.recv(timeout=10)
+        assert delivered_id == first_id
+
+        sender.configure_peer(
+            replacement_peer.ready["endpoint_id"],
+            replacement_peer.ready["endpoint_addr"],
+            generation=2,
+        )
+        with pytest.raises(TimeoutError):
+            replacement_receiver.recv(timeout=1)
+        with pytest.raises(SidecarError, match="unknown_message"):
+            sender.cancel(second_id)
+    finally:
+        sender.close()
+        first_receiver.close()
+        replacement_receiver.close()
+        sender_sidecar.stop()
+        first_peer.stop()
+        replacement_peer.stop()
+
+
+def test_confirmed_send_fails_if_sender_sidecar_crashes_before_confirmation(
+    sidecars,
+) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    outcome: list[bytes | BaseException] = []
+
+    def send_confirmed() -> None:
+        try:
+            outcome.append(
+                sender.send_confirmed(GOLDEN.read_bytes(), b"x" * 16, timeout=10)
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=send_confirmed)
+    thread.start()
+    try:
+        delivered_id, _ = receiver.recv(timeout=10)
+        assert delivered_id == b"x" * 16
         first.stop()
-        second.stop()
-        third.stop()
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], ProtocolError)
+        assert outcome[0].code == "sidecar_disconnected"
+    finally:
+        sender.close()
+        receiver.close()
+
+
+def test_peer_generation_rotation_fences_inflight_remote_delivery(sidecars) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    frame = GOLDEN.read_bytes()
+    message_id = b"g" * 16
+    outcome: list[bytes | BaseException] = []
+
+    def send_confirmed() -> None:
+        try:
+            outcome.append(sender.send_confirmed(frame, message_id, timeout=10))
+        except BaseException as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=send_confirmed)
+    thread.start()
+    try:
+        delivered_id, delivered = receiver.recv(timeout=10)
+        assert (delivered_id, delivered) == (message_id, frame)
+        receiver.configure_peer(
+            first.ready["endpoint_id"],
+            first.ready["endpoint_addr"],
+            generation=2,
+        )
+
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], SidecarError)
+        assert outcome[0].code == "peer_rotated"
+        with pytest.raises(TimeoutError):
+            receiver.recv(timeout=0.75)
+    finally:
+        sender.close()
+        receiver.close()
+
+
+def test_confirmed_send_cannot_retarget_across_generation_rotation(sidecars) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    try:
+        receiver.configure_peer(
+            first.ready["endpoint_id"],
+            first.ready["endpoint_addr"],
+            generation=2,
+        )
+        sender.configure_peer(
+            second.ready["endpoint_id"],
+            second.ready["endpoint_addr"],
+            generation=2,
+        )
+        with pytest.raises(SidecarError, match="peer_rotated"):
+            sender.send_confirmed(
+                GOLDEN.read_bytes(),
+                b"z" * 16,
+                timeout=1,
+                expected_generation=1,
+            )
+        with pytest.raises(TimeoutError):
+            receiver.recv(timeout=0.5)
+    finally:
+        sender.close()
+        receiver.close()
 
 
 def test_malformed_server_hello_type_fails_as_authentication_error(

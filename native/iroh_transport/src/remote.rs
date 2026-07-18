@@ -5,7 +5,10 @@ use std::error::Error;
 use std::fmt;
 
 pub const REMOTE_PROTOCOL_VERSION: u8 = 1;
-pub const REMOTE_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+pub const REMOTE_GENERATION_BYTES: usize = 8;
+pub const REMOTE_OPERATIONAL_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub const REMOTE_MAX_PAYLOAD_BYTES: usize =
+    REMOTE_GENERATION_BYTES + REMOTE_OPERATIONAL_FRAME_BYTES;
 pub const REMOTE_HEADER_BYTES: usize = 1 + 1 + 16 + 4;
 pub const REMOTE_MAX_FRAME_BYTES: usize = REMOTE_HEADER_BYTES + REMOTE_MAX_PAYLOAD_BYTES;
 

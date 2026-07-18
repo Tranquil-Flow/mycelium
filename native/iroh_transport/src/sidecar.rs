@@ -18,9 +18,10 @@ use std::time::Duration;
 use iroh::endpoint::{RecvStream, SendStream, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, TransportAddr};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore, watch};
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use zeroize::{Zeroize, Zeroizing};
@@ -44,8 +45,15 @@ const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 const CANCEL_CODE: VarInt = VarInt::from_u32(7);
 const REJECT_CODE: VarInt = VarInt::from_u32(8);
 const MAX_LOCAL_SESSIONS: usize = 16;
+const REMOTE_GENERATION_BYTES: usize = 8;
+const REMOTE_MAX_TRANSFER_BYTES: usize = REMOTE_MAX_FRAME_BYTES;
 
 type MessageId = [u8; 16];
+type FrameDigest = [u8; 32];
+
+fn frame_digest(frame: &[u8]) -> FrameDigest {
+    Sha256::digest(frame).into()
+}
 
 #[derive(Debug)]
 pub enum IngressError {
@@ -334,6 +342,7 @@ impl Drop for SocketCleanup {
 struct ConfigurePeerPayload {
     endpoint_id: String,
     endpoint_addr: EndpointAddr,
+    generation: u64,
 }
 
 #[derive(Serialize)]
@@ -390,7 +399,28 @@ async fn authenticated_session_loop(
         let encoded = read_length_prefixed(stream, LOCAL_MAX_RECORD_BYTES).await?;
         let record = decode_record(&encoded, &keys.client_to_sidecar, &mut receive_sequence)
             .map_err(|_| SessionError::Authentication)?;
-        let response = process_local_record(record, session_id, &state).await;
+        let confirmed = record.kind == RecordKind::SendConfirmed;
+        let response = process_local_record(record, session_id, &state);
+        tokio::pin!(response);
+        let response = if confirmed {
+            loop {
+                tokio::select! {
+                    response = &mut response => break response,
+                    readable = stream.readable() => {
+                        readable.map_err(|_| SessionError::Disconnected)?;
+                        let mut unexpected = [0_u8; 1];
+                        match stream.try_read(&mut unexpected) {
+                            Ok(0) => return Ok(()),
+                            Ok(_) => return Err(SessionError::Protocol),
+                            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+                            Err(_) => return Err(SessionError::Disconnected),
+                        }
+                    }
+                }
+            }
+        } else {
+            response.await
+        };
         write_authenticated_record(
             stream,
             response,
@@ -413,25 +443,64 @@ async fn process_local_record(
     state: &Arc<RuntimeState>,
 ) -> ResponseRecord {
     match record.kind {
-        RecordKind::Send => {
-            if validate_router_ingress(&record.payload).is_err() {
+        RecordKind::Send | RecordKind::SendConfirmed => {
+            let confirmed = record.kind == RecordKind::SendConfirmed;
+            let (payload, expected_generation) = if confirmed {
+                if record.payload.len() < REMOTE_GENERATION_BYTES {
+                    return error_response(record.message_id, "invalid_generation");
+                }
+                let generation = u64::from_be_bytes(
+                    record.payload[..REMOTE_GENERATION_BYTES]
+                        .try_into()
+                        .expect("generation prefix has fixed length"),
+                );
+                if generation == 0 {
+                    return error_response(record.message_id, "invalid_generation");
+                }
+                (
+                    record.payload[REMOTE_GENERATION_BYTES..].to_vec(),
+                    Some(generation),
+                )
+            } else {
+                (record.payload, None)
+            };
+            if validate_router_ingress(&payload).is_err() {
                 return error_response(record.message_id, "invalid_frame");
             }
             match state
-                .enqueue_outbound(record.message_id, record.payload)
+                .enqueue_outbound(record.message_id, payload, expected_generation)
                 .await
             {
-                EnqueueOutcome::Queued | EnqueueOutcome::Duplicate => {
-                    ack_response(record.message_id)
+                EnqueueOutcome::Queued(control) | EnqueueOutcome::Duplicate(control) => {
+                    if !confirmed {
+                        ack_response(record.message_id)
+                    } else {
+                        match control.wait_for_terminal().await {
+                            OutboundTerminal::Delivered => ack_response(record.message_id),
+                            OutboundTerminal::PeerRotated => {
+                                error_response(record.message_id, "peer_rotated")
+                            }
+                            OutboundTerminal::Cancelled => {
+                                error_response(record.message_id, "cancelled")
+                            }
+                            OutboundTerminal::ReplayCollision => {
+                                error_response(record.message_id, "replay_collision")
+                            }
+                        }
+                    }
                 }
+                EnqueueOutcome::ReplayCollision => {
+                    error_response(record.message_id, "replay_collision")
+                }
+                EnqueueOutcome::PeerRotated => error_response(record.message_id, "peer_rotated"),
                 EnqueueOutcome::Full => error_response(record.message_id, "queue_full"),
             }
         }
         RecordKind::Receive => match state.receive(session_id, RECEIVE_POLL_WAIT).await {
-            Some((message_id, payload)) => ResponseRecord {
+            Some((message_id, generation, payload)) => ResponseRecord {
                 kind: RecordKind::Delivery,
                 message_id,
-                payload,
+                payload: [generation.to_be_bytes().as_slice(), payload.as_slice()].concat(),
             },
             None => error_response(record.message_id, "empty"),
         },
@@ -542,8 +611,15 @@ enum SessionError {
     Runtime,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PeerBinding {
+    address: EndpointAddr,
+    generation: u64,
+}
+
 struct RuntimeState {
-    peer: RwLock<Option<EndpointAddr>>,
+    peer: RwLock<Option<PeerBinding>>,
+    peer_generation: watch::Sender<u64>,
     peer_changed: Notify,
     local_only: bool,
     inbound: Mutex<InboundState>,
@@ -559,54 +635,179 @@ struct RuntimeState {
 struct InboundState {
     pending: VecDeque<InboundItem>,
     inflight: HashMap<u64, VecDeque<InboundItem>>,
-    seen: HashSet<MessageId>,
-    seen_order: VecDeque<MessageId>,
+    active: HashMap<MessageId, Arc<InboundControl>>,
+    completed: HashMap<MessageId, FrameDigest>,
+    completed_order: VecDeque<MessageId>,
+    rotated: HashSet<MessageId>,
+    rotated_order: VecDeque<MessageId>,
 }
 
 struct InboundItem {
     message_id: MessageId,
+    generation: u64,
     payload: Vec<u8>,
+    control: Arc<InboundControl>,
     _permit: OwnedSemaphorePermit,
+}
+
+struct InboundControl {
+    digest: FrameDigest,
+    terminal: std::sync::atomic::AtomicU8,
+    completed: Notify,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum InboundTerminal {
+    Acknowledged = 1,
+    PeerRotated = 2,
+}
+
+impl InboundControl {
+    fn terminal(&self) -> Option<InboundTerminal> {
+        match self.terminal.load(Ordering::Acquire) {
+            1 => Some(InboundTerminal::Acknowledged),
+            2 => Some(InboundTerminal::PeerRotated),
+            _ => None,
+        }
+    }
+
+    fn finish(&self, terminal: InboundTerminal) {
+        if self
+            .terminal
+            .compare_exchange(0, terminal as u8, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.completed.notify_waiters();
+        }
+    }
+
+    async fn wait_for_terminal(&self) -> InboundTerminal {
+        loop {
+            let notified = self.completed.notified();
+            if let Some(terminal) = self.terminal() {
+                return terminal;
+            }
+            notified.await;
+        }
+    }
 }
 
 struct OutboundItem {
     message_id: MessageId,
     payload: Vec<u8>,
-    target: Option<EndpointAddr>,
+    target: Option<PeerBinding>,
     control: Arc<OutboundControl>,
 }
 
 struct OutboundControl {
     cancellation: CancellationToken,
     permit: Mutex<Option<OwnedSemaphorePermit>>,
+    digest: FrameDigest,
+    generation: AtomicU64,
+    terminal: std::sync::atomic::AtomicU8,
+    completed: Notify,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum OutboundTerminal {
+    Delivered = 1,
+    PeerRotated = 2,
+    Cancelled = 3,
+    ReplayCollision = 4,
+}
+
+impl OutboundControl {
+    fn terminal(&self) -> Option<OutboundTerminal> {
+        match self.terminal.load(Ordering::Acquire) {
+            1 => Some(OutboundTerminal::Delivered),
+            2 => Some(OutboundTerminal::PeerRotated),
+            3 => Some(OutboundTerminal::Cancelled),
+            4 => Some(OutboundTerminal::ReplayCollision),
+            _ => None,
+        }
+    }
+
+    fn finish(&self, terminal: OutboundTerminal) {
+        if self
+            .terminal
+            .compare_exchange(0, terminal as u8, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.completed.notify_waiters();
+        }
+    }
+
+    async fn wait_for_terminal(&self) -> OutboundTerminal {
+        loop {
+            let notified = self.completed.notified();
+            if let Some(terminal) = self.terminal() {
+                return terminal;
+            }
+            notified.await;
+        }
+    }
+}
+
 enum EnqueueOutcome {
-    Queued,
-    Duplicate,
+    Queued(Arc<OutboundControl>),
+    Duplicate(Arc<OutboundControl>),
+    ReplayCollision,
+    PeerRotated,
     Full,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AdmissionOutcome {
-    Admitted,
-    Duplicate,
+    Admitted(Arc<InboundControl>),
+    PendingDuplicate(Arc<InboundControl>),
+    CompletedDuplicate,
+    ReplayCollision,
+    PeerRotated,
     Full,
+}
+
+impl InboundState {
+    fn remember_completed(&mut self, message_id: MessageId, digest: FrameDigest, limit: usize) {
+        if self.completed.insert(message_id, digest).is_none() {
+            self.completed_order.push_back(message_id);
+        }
+        while self.completed_order.len() > limit {
+            if let Some(expired) = self.completed_order.pop_front() {
+                self.completed.remove(&expired);
+            }
+        }
+    }
+
+    fn remember_rotated(&mut self, message_id: MessageId, limit: usize) {
+        if self.rotated.insert(message_id) {
+            self.rotated_order.push_back(message_id);
+        }
+        while self.rotated_order.len() > limit {
+            if let Some(expired) = self.rotated_order.pop_front() {
+                self.rotated.remove(&expired);
+            }
+        }
+    }
 }
 
 impl RuntimeState {
     fn new(capacity: usize, local_only: bool) -> Arc<Self> {
         let seen_limit = capacity.saturating_mul(8).max(64);
+        let (peer_generation, _) = watch::channel(0);
         Arc::new(Self {
             peer: RwLock::new(None),
+            peer_generation,
             peer_changed: Notify::new(),
             local_only,
             inbound: Mutex::new(InboundState {
                 pending: VecDeque::with_capacity(capacity),
                 inflight: HashMap::new(),
-                seen: HashSet::with_capacity(seen_limit),
-                seen_order: VecDeque::with_capacity(seen_limit),
+                active: HashMap::with_capacity(capacity),
+                completed: HashMap::with_capacity(seen_limit),
+                completed_order: VecDeque::with_capacity(seen_limit),
+                rotated: HashSet::with_capacity(seen_limit),
+                rotated_order: VecDeque::with_capacity(seen_limit),
             }),
             inbound_slots: Arc::new(Semaphore::new(capacity)),
             inbound_ready: Notify::new(),
@@ -623,7 +824,7 @@ impl RuntimeState {
             .endpoint_id
             .parse::<EndpointId>()
             .map_err(|_| ())?;
-        if endpoint_id != configuration.endpoint_addr.id {
+        if configuration.generation == 0 || endpoint_id != configuration.endpoint_addr.id {
             return Err(());
         }
         if configuration.endpoint_addr.id.to_string() != configuration.endpoint_id {
@@ -637,64 +838,161 @@ impl RuntimeState {
         {
             return Err(());
         }
-        *self.peer.write().await = Some(configuration.endpoint_addr);
+
+        let replacement = PeerBinding {
+            address: configuration.endpoint_addr,
+            generation: configuration.generation,
+        };
+        let generation = replacement.generation;
+        let mut peer = self.peer.write().await;
+        match peer.as_ref() {
+            Some(current) if current == &replacement => return Ok(()),
+            Some(current) if replacement.generation <= current.generation => return Err(()),
+            Some(_) => {
+                *peer = Some(replacement);
+                self.fence_outbound_for_rotation().await;
+                self.fence_inbound_for_rotation().await;
+            }
+            None => *peer = Some(replacement),
+        }
+        drop(peer);
+        self.peer_generation.send_replace(generation);
         self.peer_changed.notify_waiters();
+        self.inbound_ready.notify_waiters();
         Ok(())
     }
 
-    async fn peer_addr(&self) -> Option<EndpointAddr> {
+    async fn fence_outbound_for_rotation(&self) {
+        let mut tokens = self.outbound_tokens.lock().await;
+        let stale_ids: HashSet<_> = tokens.keys().copied().collect();
+        let controls: Vec<_> = stale_ids
+            .iter()
+            .filter_map(|message_id| tokens.remove(message_id))
+            .collect();
+        self.outbound
+            .lock()
+            .await
+            .retain(|item| !stale_ids.contains(&item.message_id));
+        drop(tokens);
+
+        for control in controls {
+            control.finish(OutboundTerminal::PeerRotated);
+            control.cancellation.cancel();
+            control.permit.lock().await.take();
+        }
+    }
+
+    async fn fence_inbound_for_rotation(&self) {
+        let mut inbound = self.inbound.lock().await;
+        let active: Vec<_> = inbound.active.drain().collect();
+        let completed: Vec<_> = inbound.completed.drain().map(|(id, _)| id).collect();
+        inbound.completed_order.clear();
+        inbound.pending.clear();
+        inbound.inflight.clear();
+        for (message_id, _) in &active {
+            inbound.remember_rotated(*message_id, self.seen_limit);
+        }
+        for message_id in completed {
+            inbound.remember_rotated(message_id, self.seen_limit);
+        }
+        drop(inbound);
+        for (_, control) in active {
+            control.finish(InboundTerminal::PeerRotated);
+        }
+    }
+
+    async fn peer_binding(&self) -> Option<PeerBinding> {
         self.peer.read().await.clone()
     }
 
-    async fn peer_id(&self) -> Option<EndpointId> {
-        self.peer.read().await.as_ref().map(|address| address.id)
+    async fn peer_matches(&self, endpoint_id: EndpointId, generation: u64) -> bool {
+        self.peer.read().await.as_ref().is_some_and(|binding| {
+            binding.address.id == endpoint_id && binding.generation == generation
+        })
     }
 
-    async fn enqueue_outbound(&self, message_id: MessageId, payload: Vec<u8>) -> EnqueueOutcome {
-        let target = self.peer_addr().await;
+    async fn bind_outbound(&self, control: &OutboundControl) -> Option<PeerBinding> {
+        let peer = self.peer.read().await;
+        let binding = peer.as_ref()?.clone();
+        let generation = control.generation.load(Ordering::Acquire);
+        if generation == 0 {
+            control
+                .generation
+                .store(binding.generation, Ordering::Release);
+            Some(binding)
+        } else if generation == binding.generation {
+            Some(binding)
+        } else {
+            None
+        }
+    }
+
+    async fn enqueue_outbound(
+        &self,
+        message_id: MessageId,
+        payload: Vec<u8>,
+        expected_generation: Option<u64>,
+    ) -> EnqueueOutcome {
+        let digest = frame_digest(&payload);
+        let peer = self.peer.read().await;
+        if expected_generation.is_some_and(|generation| {
+            peer.as_ref().map(|binding| binding.generation) != Some(generation)
+        }) {
+            return EnqueueOutcome::PeerRotated;
+        }
+        let mut tokens = self.outbound_tokens.lock().await;
+        if let Some(control) = tokens.get(&message_id) {
+            return if control.digest == digest {
+                EnqueueOutcome::Duplicate(control.clone())
+            } else {
+                EnqueueOutcome::ReplayCollision
+            };
+        }
         let permit = match self.outbound_slots.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => return EnqueueOutcome::Full,
         };
+        let target = peer.as_ref().cloned();
         let control = Arc::new(OutboundControl {
             cancellation: CancellationToken::new(),
             permit: Mutex::new(Some(permit)),
+            digest,
+            generation: AtomicU64::new(target.as_ref().map_or(0, |binding| binding.generation)),
+            terminal: std::sync::atomic::AtomicU8::new(0),
+            completed: Notify::new(),
         });
-        {
-            let mut tokens = self.outbound_tokens.lock().await;
-            if tokens.contains_key(&message_id) {
-                return EnqueueOutcome::Duplicate;
-            }
-            tokens.insert(message_id, control.clone());
-        }
         let item = OutboundItem {
             message_id,
             payload,
             target,
             control: control.clone(),
         };
+        tokens.insert(message_id, control.clone());
         self.outbound.lock().await.push_back(item);
+        drop(tokens);
+        drop(peer);
         self.outbound_ready.notify_one();
-        EnqueueOutcome::Queued
+        EnqueueOutcome::Queued(control)
     }
 
     async fn cancel_outbound(&self, message_id: MessageId) -> bool {
-        let control = self.outbound_tokens.lock().await.remove(&message_id);
-        if let Some(control) = control {
-            control.cancellation.cancel();
-            let mut outbound = self.outbound.lock().await;
-            if let Some(position) = outbound
-                .iter()
-                .position(|item| item.message_id == message_id)
-            {
-                outbound.remove(position);
-            }
-            drop(outbound);
-            control.permit.lock().await.take();
-            true
-        } else {
-            false
+        let mut tokens = self.outbound_tokens.lock().await;
+        let Some(control) = tokens.remove(&message_id) else {
+            return false;
+        };
+        let mut outbound = self.outbound.lock().await;
+        if let Some(position) = outbound
+            .iter()
+            .position(|item| Arc::ptr_eq(&item.control, &control))
+        {
+            outbound.remove(position);
         }
+        drop(outbound);
+        drop(tokens);
+        control.finish(OutboundTerminal::Cancelled);
+        control.cancellation.cancel();
+        control.permit.lock().await.take();
+        true
     }
 
     async fn next_outbound(&self) -> OutboundItem {
@@ -707,78 +1005,113 @@ impl RuntimeState {
         }
     }
 
-    async fn finish_outbound(&self, message_id: MessageId) {
-        if let Some(control) = self.outbound_tokens.lock().await.remove(&message_id) {
-            control.permit.lock().await.take();
+    async fn finish_outbound(
+        &self,
+        message_id: MessageId,
+        control: &Arc<OutboundControl>,
+        terminal: OutboundTerminal,
+    ) {
+        control.finish(terminal);
+        let mut tokens = self.outbound_tokens.lock().await;
+        if tokens
+            .get(&message_id)
+            .is_some_and(|current| Arc::ptr_eq(current, control))
+        {
+            tokens.remove(&message_id);
         }
+        drop(tokens);
+        control.permit.lock().await.take();
     }
 
+    #[cfg(test)]
     async fn admit_inbound(&self, message_id: MessageId, payload: Vec<u8>) -> AdmissionOutcome {
+        self.admit_inbound_inner(None, message_id, payload).await
+    }
+
+    async fn admit_remote_inbound(
+        &self,
+        endpoint_id: EndpointId,
+        generation: u64,
+        message_id: MessageId,
+        payload: Vec<u8>,
+    ) -> AdmissionOutcome {
+        self.admit_inbound_inner(Some((endpoint_id, generation)), message_id, payload)
+            .await
+    }
+
+    async fn admit_inbound_inner(
+        &self,
+        origin: Option<(EndpointId, u64)>,
+        message_id: MessageId,
+        payload: Vec<u8>,
+    ) -> AdmissionOutcome {
+        let digest = frame_digest(&payload);
+        let generation = origin.as_ref().map_or(0, |(_, generation)| *generation);
+        let peer = self.peer.read().await;
+        if let Some((endpoint_id, generation)) = origin {
+            let current = peer.as_ref().is_some_and(|binding| {
+                binding.address.id == endpoint_id && binding.generation == generation
+            });
+            if !current {
+                let mut inbound = self.inbound.lock().await;
+                inbound.remember_rotated(message_id, self.seen_limit);
+                return AdmissionOutcome::PeerRotated;
+            }
+        }
+        let mut inbound = self.inbound.lock().await;
+        if inbound.rotated.contains(&message_id) {
+            return AdmissionOutcome::PeerRotated;
+        }
+        if let Some(control) = inbound.active.get(&message_id) {
+            return if control.digest == digest {
+                AdmissionOutcome::PendingDuplicate(control.clone())
+            } else {
+                AdmissionOutcome::ReplayCollision
+            };
+        }
+        if let Some(completed_digest) = inbound.completed.get(&message_id) {
+            return if *completed_digest == digest {
+                AdmissionOutcome::CompletedDuplicate
+            } else {
+                AdmissionOutcome::ReplayCollision
+            };
+        }
         let permit = match self.inbound_slots.clone().try_acquire_owned() {
             Ok(permit) => permit,
-            Err(_) => {
-                if self.inbound.lock().await.seen.contains(&message_id) {
-                    return AdmissionOutcome::Duplicate;
-                }
-                return AdmissionOutcome::Full;
-            }
+            Err(_) => return AdmissionOutcome::Full,
         };
-        let mut inbound = self.inbound.lock().await;
-        if inbound.seen.contains(&message_id) {
-            return AdmissionOutcome::Duplicate;
-        }
-        inbound.seen.insert(message_id);
-        inbound.seen_order.push_back(message_id);
-        while inbound.seen_order.len() > self.seen_limit {
-            let candidates = inbound.seen_order.len();
-            let mut evicted = false;
-            for _ in 0..candidates {
-                let Some(expired) = inbound.seen_order.pop_front() else {
-                    break;
-                };
-                let active = expired == message_id
-                    || inbound
-                        .pending
-                        .iter()
-                        .any(|item| item.message_id == expired)
-                    || inbound
-                        .inflight
-                        .values()
-                        .any(|items| items.iter().any(|item| item.message_id == expired));
-                if active {
-                    inbound.seen_order.push_back(expired);
-                } else {
-                    inbound.seen.remove(&expired);
-                    evicted = true;
-                    break;
-                }
-            }
-            if !evicted {
-                break;
-            }
-        }
+        let control = Arc::new(InboundControl {
+            digest,
+            terminal: std::sync::atomic::AtomicU8::new(0),
+            completed: Notify::new(),
+        });
+        inbound.active.insert(message_id, control.clone());
         inbound.pending.push_back(InboundItem {
             message_id,
+            generation,
             payload,
+            control: control.clone(),
             _permit: permit,
         });
         drop(inbound);
+        drop(peer);
         self.inbound_ready.notify_waiters();
-        AdmissionOutcome::Admitted
+        AdmissionOutcome::Admitted(control)
     }
 
     async fn receive(
         &self,
         session_id: u64,
         maximum_wait: Duration,
-    ) -> Option<(MessageId, Vec<u8>)> {
+    ) -> Option<(MessageId, u64, Vec<u8>)> {
         let deadline = Instant::now() + maximum_wait;
         loop {
             let notified = self.inbound_ready.notified();
             {
+                let _peer = self.peer.read().await;
                 let mut inbound = self.inbound.lock().await;
                 if let Some(item) = inbound.pending.pop_front() {
-                    let result = (item.message_id, item.payload.clone());
+                    let result = (item.message_id, item.generation, item.payload.clone());
                     inbound
                         .inflight
                         .entry(session_id)
@@ -795,6 +1128,7 @@ impl RuntimeState {
     }
 
     async fn ack_inbound(&self, session_id: u64, message_id: MessageId) -> bool {
+        let _peer = self.peer.read().await;
         let mut inbound = self.inbound.lock().await;
         let Some(items) = inbound.inflight.get_mut(&session_id) else {
             return false;
@@ -802,14 +1136,24 @@ impl RuntimeState {
         let Some(position) = items.iter().position(|item| item.message_id == message_id) else {
             return false;
         };
-        items.remove(position);
+        let item = items.remove(position).expect("inflight position exists");
         if items.is_empty() {
             inbound.inflight.remove(&session_id);
         }
+        if inbound
+            .active
+            .get(&message_id)
+            .is_some_and(|control| Arc::ptr_eq(control, &item.control))
+        {
+            inbound.active.remove(&message_id);
+        }
+        inbound.remember_completed(message_id, item.control.digest, self.seen_limit);
+        item.control.finish(InboundTerminal::Acknowledged);
         true
     }
 
     async fn redeliver_session(&self, session_id: u64) {
+        let _peer = self.peer.read().await;
         let mut inbound = self.inbound.lock().await;
         let Some(mut inflight) = inbound.inflight.remove(&session_id) else {
             return;
@@ -827,20 +1171,23 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
         let item = state.next_outbound().await;
         let mut retry_delay = INITIAL_RETRY_DELAY;
         let mut bound_peer = item.target.clone();
-        loop {
+        let terminal = loop {
             if item.control.cancellation.is_cancelled() {
-                break;
+                break item
+                    .control
+                    .terminal()
+                    .unwrap_or(OutboundTerminal::Cancelled);
             }
             let peer = match bound_peer.clone() {
                 Some(peer) => peer,
-                None => match state.peer_addr().await {
+                None => match state.bind_outbound(&item.control).await {
                     Some(peer) => {
                         bound_peer = Some(peer.clone());
                         peer
                     }
                     None => {
                         tokio::select! {
-                            () = item.control.cancellation.cancelled() => break,
+                            () = item.control.cancellation.cancelled() => {},
                             () = state.peer_changed.notified() => {},
                             () = sleep(INITIAL_RETRY_DELAY) => {},
                         }
@@ -848,19 +1195,32 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
                     }
                 },
             };
+            if !state.peer_matches(peer.address.id, peer.generation).await {
+                break OutboundTerminal::PeerRotated;
+            }
             match send_outbound_once(&endpoint, &peer, &item).await {
-                SendAttempt::Delivered | SendAttempt::Cancelled => break,
+                SendAttempt::Delivered => break OutboundTerminal::Delivered,
+                SendAttempt::Cancelled => {
+                    break item
+                        .control
+                        .terminal()
+                        .unwrap_or(OutboundTerminal::Cancelled);
+                }
+                SendAttempt::PeerRotated => break OutboundTerminal::PeerRotated,
+                SendAttempt::ReplayCollision => break OutboundTerminal::ReplayCollision,
                 SendAttempt::Retry => {
                     tokio::select! {
-                        () = item.control.cancellation.cancelled() => break,
+                        () = item.control.cancellation.cancelled() => {},
                         () = state.peer_changed.notified() => {},
                         () = sleep(retry_delay) => {},
                     }
                     retry_delay = retry_delay.saturating_mul(2).min(MAX_RETRY_DELAY);
                 }
             }
-        }
-        state.finish_outbound(item.message_id).await;
+        };
+        state
+            .finish_outbound(item.message_id, &item.control, terminal)
+            .await;
     }
 }
 
@@ -868,24 +1228,26 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
 enum SendAttempt {
     Delivered,
     Cancelled,
+    PeerRotated,
+    ReplayCollision,
     Retry,
 }
 
 async fn send_outbound_once(
     endpoint: &Endpoint,
-    peer: &EndpointAddr,
+    peer: &PeerBinding,
     item: &OutboundItem,
 ) -> SendAttempt {
     let connection = tokio::select! {
         () = item.control.cancellation.cancelled() => return SendAttempt::Cancelled,
-        result = timeout(STREAM_IO_TIMEOUT, endpoint.connect(peer.clone(), IROH_ALPN)) => {
+        result = timeout(STREAM_IO_TIMEOUT, endpoint.connect(peer.address.clone(), IROH_ALPN)) => {
             match result {
                 Ok(Ok(connection)) => connection,
                 _ => return SendAttempt::Retry,
             }
         }
     };
-    if connection.remote_id() != peer.id {
+    if connection.remote_id() != peer.address.id {
         connection.close(REJECT_CODE, b"identity");
         return SendAttempt::Retry;
     }
@@ -899,7 +1261,10 @@ async fn send_outbound_once(
             }
         }
     };
-    let encoded = match encode_remote_frame(RemoteKind::Transfer, item.message_id, &item.payload) {
+    let mut transfer = Vec::with_capacity(REMOTE_GENERATION_BYTES + item.payload.len());
+    transfer.extend_from_slice(&peer.generation.to_be_bytes());
+    transfer.extend_from_slice(&item.payload);
+    let encoded = match encode_remote_frame(RemoteKind::Transfer, item.message_id, &transfer) {
         Ok(encoded) => encoded,
         Err(_) => return SendAttempt::Cancelled,
     };
@@ -934,11 +1299,15 @@ async fn send_outbound_once(
     let Ok(response) = decode_remote_frame(&response) else {
         return SendAttempt::Retry;
     };
-    if response.kind == RemoteKind::Ack
-        && response.message_id == item.message_id
-        && response.payload.is_empty()
-    {
+    if response.message_id != item.message_id {
+        return SendAttempt::Retry;
+    }
+    if response.kind == RemoteKind::Ack && response.payload.is_empty() {
         SendAttempt::Delivered
+    } else if response.kind == RemoteKind::Error && response.payload == b"peer_rotated" {
+        SendAttempt::PeerRotated
+    } else if response.kind == RemoteKind::Error && response.payload == b"replay_collision" {
+        SendAttempt::ReplayCollision
     } else {
         SendAttempt::Retry
     }
@@ -966,15 +1335,22 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
             let Ok(connection) = incoming.await else {
                 return;
             };
-            let Some(expected) = connection_state.peer_id().await else {
+            let Some(expected) = connection_state.peer_binding().await else {
                 connection.close(REJECT_CODE, b"unconfigured");
                 return;
             };
-            if connection.remote_id() != expected {
+            if connection.remote_id() != expected.address.id {
                 connection.close(REJECT_CODE, b"identity");
                 return;
             }
-            handle_remote_connection(connection, connection_state).await;
+            let generation_changes = connection_state.peer_generation.subscribe();
+            handle_remote_connection(
+                connection,
+                connection_state,
+                expected.generation,
+                generation_changes,
+            )
+            .await;
         });
     }
 }
@@ -982,19 +1358,30 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
 async fn handle_remote_connection(
     connection: iroh::endpoint::Connection,
     state: Arc<RuntimeState>,
+    connection_generation: u64,
+    mut generation_changes: watch::Receiver<u64>,
 ) {
     loop {
-        if state.peer_id().await != Some(connection.remote_id()) {
-            connection.close(REJECT_CODE, b"identity");
+        let remote_id = connection.remote_id();
+        if !state.peer_matches(remote_id, connection_generation).await {
+            connection.close(REJECT_CODE, b"peer_rotated");
             return;
         }
-        let (mut send, mut receive) = match connection.accept_bi().await {
+        let streams = tokio::select! {
+            streams = connection.accept_bi() => streams,
+            changed = generation_changes.changed() => {
+                let _ = changed;
+                connection.close(REJECT_CODE, b"peer_rotated");
+                return;
+            }
+        };
+        let (mut send, mut receive) = match streams {
             Ok(streams) => streams,
             Err(_) => return,
         };
         let request = match timeout(
             STREAM_IO_TIMEOUT,
-            receive.read_to_end(REMOTE_MAX_FRAME_BYTES),
+            receive.read_to_end(REMOTE_MAX_TRANSFER_BYTES),
         )
         .await
         {
@@ -1011,21 +1398,56 @@ async fn handle_remote_connection(
                 continue;
             }
         };
+        if request.payload.len() < REMOTE_GENERATION_BYTES {
+            cancel_streams(&mut send, &mut receive);
+            continue;
+        }
+        let generation = u64::from_be_bytes(
+            request.payload[..REMOTE_GENERATION_BYTES]
+                .try_into()
+                .expect("generation prefix has fixed length"),
+        );
+        let router_frame = request.payload[REMOTE_GENERATION_BYTES..].to_vec();
 
-        let (response_kind, response_payload) =
-            if validate_router_ingress(&request.payload).is_err() {
-                (RemoteKind::Error, b"invalid_frame".as_slice())
+        let (response_kind, response_payload) = if generation != connection_generation
+            || validate_router_ingress(&router_frame).is_err()
+        {
+            if generation != connection_generation {
+                (RemoteKind::Error, b"peer_rotated".as_slice())
             } else {
-                match state
-                    .admit_inbound(request.message_id, request.payload)
-                    .await
-                {
-                    AdmissionOutcome::Admitted | AdmissionOutcome::Duplicate => {
-                        (RemoteKind::Ack, b"".as_slice())
+                (RemoteKind::Error, b"invalid_frame".as_slice())
+            }
+        } else {
+            match state
+                .admit_remote_inbound(
+                    remote_id,
+                    connection_generation,
+                    request.message_id,
+                    router_frame,
+                )
+                .await
+            {
+                AdmissionOutcome::Admitted(control)
+                | AdmissionOutcome::PendingDuplicate(control) => {
+                    match timeout(STREAM_IO_TIMEOUT, control.wait_for_terminal()).await {
+                        Ok(InboundTerminal::Acknowledged) => (RemoteKind::Ack, b"".as_slice()),
+                        Ok(InboundTerminal::PeerRotated) => {
+                            (RemoteKind::Error, b"peer_rotated".as_slice())
+                        }
+                        Err(_) => {
+                            cancel_streams(&mut send, &mut receive);
+                            continue;
+                        }
                     }
-                    AdmissionOutcome::Full => (RemoteKind::Error, b"queue_full".as_slice()),
                 }
-            };
+                AdmissionOutcome::CompletedDuplicate => (RemoteKind::Ack, b"".as_slice()),
+                AdmissionOutcome::ReplayCollision => {
+                    (RemoteKind::Error, b"replay_collision".as_slice())
+                }
+                AdmissionOutcome::PeerRotated => (RemoteKind::Error, b"peer_rotated".as_slice()),
+                AdmissionOutcome::Full => (RemoteKind::Error, b"queue_full".as_slice()),
+            }
+        };
         let response =
             match encode_remote_frame(response_kind, request.message_id, response_payload) {
                 Ok(response) => response,
@@ -1067,18 +1489,18 @@ mod tests {
     async fn inbound_disconnect_redelivers_until_ack() {
         let state = RuntimeState::new(1, false);
         let payload = valid_frame();
-        assert_eq!(
+        assert!(matches!(
             state.admit_inbound([1; 16], payload.clone()).await,
-            AdmissionOutcome::Admitted
-        );
+            AdmissionOutcome::Admitted(_)
+        ));
         assert_eq!(
             state.receive(7, Duration::ZERO).await,
-            Some(([1; 16], payload.clone()))
+            Some(([1; 16], 0, payload.clone()))
         );
         state.redeliver_session(7).await;
         assert_eq!(
             state.receive(8, Duration::ZERO).await,
-            Some(([1; 16], payload))
+            Some(([1; 16], 0, payload))
         );
         assert!(state.ack_inbound(8, [1; 16]).await);
         assert!(state.receive(8, Duration::ZERO).await.is_none());
@@ -1087,60 +1509,60 @@ mod tests {
     #[tokio::test]
     async fn queues_are_bounded_and_duplicates_do_not_consume_slots() {
         let state = RuntimeState::new(1, false);
-        assert_eq!(
+        assert!(matches!(
             state.admit_inbound([1; 16], valid_frame()).await,
-            AdmissionOutcome::Admitted
-        );
-        assert_eq!(
+            AdmissionOutcome::Admitted(_)
+        ));
+        assert!(matches!(
             state.admit_inbound([1; 16], valid_frame()).await,
-            AdmissionOutcome::Duplicate
-        );
-        assert_eq!(
+            AdmissionOutcome::PendingDuplicate(_)
+        ));
+        assert!(matches!(
             state.admit_inbound([2; 16], valid_frame()).await,
             AdmissionOutcome::Full
-        );
+        ));
     }
 
     #[tokio::test]
     async fn cancellation_is_explicit_and_releases_capacity_before_worker_traversal() {
         let state = RuntimeState::new(1, false);
         assert!(!state.cancel_outbound([9; 16]).await);
-        assert_eq!(
-            state.enqueue_outbound([1; 16], valid_frame()).await,
-            EnqueueOutcome::Queued
-        );
+        assert!(matches!(
+            state.enqueue_outbound([1; 16], valid_frame(), None).await,
+            EnqueueOutcome::Queued(_)
+        ));
         assert!(state.cancel_outbound([1; 16]).await);
         assert!(!state.cancel_outbound([1; 16]).await);
         assert_eq!(state.outbound_slots.available_permits(), 1);
-        assert_eq!(
-            state.enqueue_outbound([2; 16], valid_frame()).await,
-            EnqueueOutcome::Queued
-        );
+        assert!(matches!(
+            state.enqueue_outbound([2; 16], valid_frame(), None).await,
+            EnqueueOutcome::Queued(_)
+        ));
     }
 
     #[tokio::test]
     async fn active_inbound_id_is_never_evicted_by_completed_history() {
         let state = RuntimeState::new(2, false);
         let active_id = [1; 16];
-        assert_eq!(
+        assert!(matches!(
             state.admit_inbound(active_id, valid_frame()).await,
-            AdmissionOutcome::Admitted
-        );
+            AdmissionOutcome::Admitted(_)
+        ));
         assert!(state.receive(7, Duration::ZERO).await.is_some());
 
         for counter in 2_u8..=70 {
             let completed_id = [counter; 16];
-            assert_eq!(
+            assert!(matches!(
                 state.admit_inbound(completed_id, valid_frame()).await,
-                AdmissionOutcome::Admitted
-            );
+                AdmissionOutcome::Admitted(_)
+            ));
             assert!(state.receive(8, Duration::ZERO).await.is_some());
             assert!(state.ack_inbound(8, completed_id).await);
         }
 
-        assert_eq!(
+        assert!(matches!(
             state.admit_inbound(active_id, valid_frame()).await,
-            AdmissionOutcome::Duplicate
-        );
+            AdmissionOutcome::PendingDuplicate(_)
+        ));
     }
 }

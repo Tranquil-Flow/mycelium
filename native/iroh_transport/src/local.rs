@@ -17,7 +17,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const LOCAL_PROTOCOL: &str = "mycelium.iroh_sidecar.local.v1";
 pub const LOCAL_RECORD_VERSION: u8 = 1;
-pub const LOCAL_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
+pub const LOCAL_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024 + 8;
 pub const LOCAL_RECORD_HEADER_BYTES: usize = 1 + 1 + 8 + 16 + 4;
 pub const LOCAL_RECORD_TAG_BYTES: usize = 32;
 pub const LOCAL_MAX_RECORD_BYTES: usize =
@@ -44,6 +44,7 @@ pub enum RecordKind {
     ConfigurePeer = 6,
     Ping = 7,
     Error = 8,
+    SendConfirmed = 9,
 }
 
 impl TryFrom<u8> for RecordKind {
@@ -59,6 +60,7 @@ impl TryFrom<u8> for RecordKind {
             6 => Ok(Self::ConfigurePeer),
             7 => Ok(Self::Ping),
             8 => Ok(Self::Error),
+            9 => Ok(Self::SendConfirmed),
             _ => Err(LocalProtocolError::UnknownRecordKind),
         }
     }
