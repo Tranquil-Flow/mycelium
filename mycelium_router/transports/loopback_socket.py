@@ -323,7 +323,14 @@ class LoopbackSocketMesh:
       if action == _ACTION_PREFILL_CHUNK_COMPLETED:
          if not isinstance(message, PrefillChunkCompleted):
             raise SocketTransportError("invalid_prefill_chunk_completed_message")
-         router.receive_prefill_chunk_completed(message)
+         router.receive_prefill_chunk_completed(
+            message,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
          return
       if action == _ACTION_FAILURE_REPORT:
          if not isinstance(message, FailureReport):

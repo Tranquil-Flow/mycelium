@@ -26,6 +26,23 @@ from test_router_inprocess_mesh import three_device_graph
 from test_router_policy import request_fixture, state_table
 
 
+class _DeferringPrefillCompletionMesh(LoopbackSocketMesh):
+   def __init__(self):
+      super().__init__()
+      self.defer_prefill_completion = True
+      self.deferred_prefill_completions = []
+
+   def _dispatch(self, node_id, action, frame):
+      message = decode_frame(frame).message
+      if self.defer_prefill_completion and isinstance(
+         message,
+         PrefillChunkCompleted,
+      ):
+         self.deferred_prefill_completions.append(message)
+         return
+      return super()._dispatch(node_id, action, frame)
+
+
 class LoopbackSocketMeshTests(unittest.TestCase):
    def test_three_routers_prefill_and_decode_through_real_tcp_frames(self):
       graph = three_device_graph()
@@ -203,6 +220,56 @@ class LoopbackSocketMeshTests(unittest.TestCase):
          self.assertEqual(sink.token_ids, [])
          self.assertEqual(record.generated_token_ids, [])
          self.assertEqual(entry.request_status(request.request_id), "DECODING")
+      finally:
+         mesh.close()
+
+   def test_tcp_prefill_completion_rejects_non_final_hop_source(self):
+      graph = three_device_graph()
+      states = state_table(slow_b_bandwidth=True)
+      states["node-d"] = replace(states["node-a"], node_id="node-d")
+      capacity = FakeCapacityPort()
+      clock = ManualClock()
+      mesh = _DeferringPrefillCompletionMesh()
+      routers = {}
+      request = replace(
+         request_fixture(),
+         request_id="request-socket-prefill-completion-origin",
+         prompt_token_ids=(11, 12, 13, 14),
+      )
+
+      for node_id in ("node-a", "node-c", "node-d"):
+         router = Router(
+            node_id=node_id,
+            topology=FakeTopologyProvider(graph),
+            device_states=FakeDeviceStateProvider(states),
+            capacity=capacity,
+            runtime=FakeRuntimePort(),
+            transport=mesh.transport_for(node_id),
+            clock=clock,
+            id_source=SequenceIdSource(),
+            config=RouterConfig(prefill_chunk_size_tokens=2),
+         )
+         mesh.register_router(node_id, router)
+         routers[node_id] = router
+
+      mesh.start()
+      try:
+         entry = routers["node-a"]
+         entry.start_distributed_prefill(
+            request,
+            InMemoryClientSink(),
+            excluded_placements=frozenset({"node-b-stage-000"}),
+         )
+         record = entry.get_request(request.request_id)
+         self.assertEqual(record.status, "LOCKED")
+         self.assertEqual(record.completed_prefill_chunks, 1)
+         genuine_event = mesh.deferred_prefill_completions[0]
+
+         mesh.defer_prefill_completion = False
+         mesh.transport_for("node-c").send_prefill_chunk_completed(genuine_event)
+
+         self.assertEqual(record.status, "LOCKED")
+         self.assertEqual(record.completed_prefill_chunks, 1)
       finally:
          mesh.close()
 

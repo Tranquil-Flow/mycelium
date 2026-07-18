@@ -122,8 +122,11 @@ class Router:
          source_node_id=source_node_id,
       )
 
-   def receive_prefill_chunk_completed(self, event):
-      return self.entry.receive_prefill_chunk_completed(event)
+   def receive_prefill_chunk_completed(self, event, *, source_node_id=None):
+      return self.entry.receive_prefill_chunk_completed(
+         event,
+         source_node_id=source_node_id,
+      )
 
    def receive_failure_report(self, report, *, source_node_id=None):
       return self.entry.receive_failure_report(

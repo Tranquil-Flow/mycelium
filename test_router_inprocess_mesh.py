@@ -1,7 +1,12 @@
 import unittest
 from dataclasses import replace
 
-from mycelium_router.contracts import FailureReport, RouterConfig, TokenEvent
+from mycelium_router.contracts import (
+   FailureReport,
+   PrefillChunkCompleted,
+   RouterConfig,
+   TokenEvent,
+)
 from mycelium_router.fakes import (
    FakeCapacityPort,
    FakeDeviceStateProvider,
@@ -215,6 +220,34 @@ class InProcessMeshTests(unittest.TestCase):
       self.assertEqual(self.sink.token_ids, [])
       self.assertEqual(record.generated_token_ids, [])
       self.assertEqual(self.entry.request_status(self.request.request_id), "DECODING")
+
+   def test_prefill_completion_source_must_own_final_locked_hop(self):
+      self.entry.entry.config = replace(
+         self.entry.entry.config,
+         prefill_chunk_size_tokens=2,
+      )
+      request = replace(
+         self.request,
+         request_id="request-prefill-completion-origin",
+         prompt_token_ids=(11, 12, 13, 14),
+      )
+      self.mesh.defer_prefill_chunk_completions = True
+      self.entry.start_distributed_prefill(
+         request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(request.request_id)
+      self.assertEqual(record.status, "LOCKED")
+      self.assertEqual(record.completed_prefill_chunks, 1)
+      _, genuine_event = self.mesh.deferred_prefill_chunk_completions[0]
+      self.assertIsInstance(genuine_event, PrefillChunkCompleted)
+
+      self.mesh.defer_prefill_chunk_completions = False
+      self.mesh.transport_for("node-c").send_prefill_chunk_completed(genuine_event)
+
+      self.assertEqual(record.status, "LOCKED")
+      self.assertEqual(record.completed_prefill_chunks, 1)
 
 
 if __name__ == "__main__":

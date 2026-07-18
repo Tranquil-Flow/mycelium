@@ -254,9 +254,16 @@ class EntryCoordinator:
    def receive_prefill_chunk_completed(
       self,
       event: PrefillChunkCompleted,
+      *,
+      source_node_id: str | None = None,
    ) -> bool:
       record = self._requests.get(event.request_id)
       if record is None or record.status != "LOCKED":
+         return False
+      if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
+         record,
+         source_node_id,
+      ):
          return False
       manifest = record.manifest
       expected_index = record.completed_prefill_chunks
@@ -460,7 +467,7 @@ class EntryCoordinator:
          or event.sampling_counter != event.token_index + 1
       ):
          return False
-      if source_node_id is not None and not self._token_origin_matches_locked_path(
+      if source_node_id is not None and not self._final_hop_origin_matches_locked_path(
          record,
          source_node_id,
       ):
@@ -476,7 +483,7 @@ class EntryCoordinator:
       return True
 
    @staticmethod
-   def _token_origin_matches_locked_path(
+   def _final_hop_origin_matches_locked_path(
       record: RequestRecord,
       source_node_id: str,
    ) -> bool:

@@ -340,20 +340,25 @@ class InProcessMesh:
       source_node_id: str,
       event: PrefillChunkCompleted,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       delivery = (source_node_id, event)
       self.prefill_chunk_completions.append(delivery)
       if self.defer_prefill_chunk_completions:
          self.deferred_prefill_chunk_completions.append(delivery)
          return
       entry = self._entry_router(event.request_id)
-      entry.receive_prefill_chunk_completed(event)
+      entry.receive_prefill_chunk_completed(event, source_node_id=source_node_id)
 
    def deliver_next_prefill_chunk_completion(self) -> bool:
       if not self.deferred_prefill_chunk_completions:
          return False
-      _, event = self.deferred_prefill_chunk_completions.pop(0)
+      source_node_id, event = self.deferred_prefill_chunk_completions.pop(0)
       entry = self._entry_router(event.request_id)
-      return entry.receive_prefill_chunk_completed(event)
+      return entry.receive_prefill_chunk_completed(
+         event,
+         source_node_id=source_node_id,
+      )
 
    def _entry_router(self, request_id: str):
       node_id = self._entry_by_request.get(request_id)
