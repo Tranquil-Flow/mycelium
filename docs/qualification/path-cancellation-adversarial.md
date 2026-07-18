@@ -10,7 +10,7 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 
 ## Corpus
 
-23 collected cases:
+31 collected cases:
 
 | Surface | Adversarial behavior | Evidence |
 |---|---|---|
@@ -30,6 +30,11 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 | In-process mesh | cancellation during blocked decode | pass: bounded join, no client token |
 | In-process mesh | blocked decode must not forward bytes after cancellation | pass: zero later hops, PC-RACE-1 regression |
 | Entry/mesh | cancellation racing completion blocked in client sink | pass: cancellation wins without worker exception, PC-RACE-2 regression |
+| Entry/Relay | cancellation during local scheduler enqueue | pass: stale generation rejected before runtime start |
+| Relay | stale attempt-scoped release after newer registration | pass: newer attempt remains active and is not cancelled |
+| Relay | runtime cancellation concurrent with newer registration | pass: registration waits for old-attempt runtime cancellation |
+| Relay | cancelled-attempt replay after exact tombstone eviction | pass: bounded filter rejects replay |
+| Relay | unknown unscoped release flood | pass: generation metadata remains bounded |
 | Loopback TCP | cancellation frames only, empty payload, source excluded | pass |
 | Loopback TCP | bounded connection count, close latency, server-thread cleanup | pass |
 | Iroh adapter | unknown path, wrong source, unbound participant | 3 pass cases; no cancellation worker created |
@@ -117,4 +122,4 @@ python3.14 -m compileall -q tests/path_cancellation_adversarial
 git diff --check
 ```
 
-Integration result: 23 passed, 0 xfailed, 0 failed. Adjacent router/Iroh/E2E verification: 286 passed and 46 subtests passed. Claim remains local evidence only, `route_ready=false`.
+Integration result: 31 passed, 0 xfailed, 0 failed. The three newly integrated adversarial lanes pass 117 tests together. Adjacent Router/Iroh/request verification passes 370 tests and 46 subtests. Full Python verification passes 1,650 tests, skips 2, and passes 121 subtests. Claim remains local evidence only, `route_ready=false`.
