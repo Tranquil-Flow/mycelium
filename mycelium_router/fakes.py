@@ -285,9 +285,10 @@ class InProcessMesh:
       source_node_id: str,
       locked: ManifestLocked,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       self.manifest_locks.append((source_node_id, locked))
       graph = locked.build.graph
-      self._graph_by_path[locked.path_id] = graph
       placement_map = {
          placement.placement_id: placement
          for stage in graph.stages
@@ -301,11 +302,15 @@ class InProcessMesh:
          router = self.routers.get(node_id)
          if router is None:
             raise ValueError(f"unknown_mesh_node:{node_id}")
-         router.register_path(
+         accepted = router.register_path(
             locked.build.request,
             locked.manifest,
             graph,
+            source_node_id=source_node_id,
          )
+         if not accepted:
+            raise ValueError("manifest_lock_rejected")
+      self._graph_by_path[locked.path_id] = graph
       entry_node_id = self._entry_by_request.get(locked.request_id)
       entry = self.routers.get(entry_node_id) if entry_node_id else None
       if entry is None:

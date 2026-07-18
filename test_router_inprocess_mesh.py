@@ -3,6 +3,7 @@ from dataclasses import replace
 
 from mycelium_router.contracts import (
    FailureReport,
+   HopHeader,
    PrefillChunkCompleted,
    RouterConfig,
    TokenEvent,
@@ -17,6 +18,7 @@ from mycelium_router.fakes import (
    ManualClock,
    SequenceIdSource,
 )
+from mycelium_router.idempotency import hop_idempotency_key
 from mycelium_router.router import Router
 from test_router_contracts import graph_fixture
 from test_router_policy import request_fixture, state_table
@@ -122,7 +124,7 @@ class InProcessMeshTests(unittest.TestCase):
             node_id,
          )
 
-   def test_manifest_lock_source_must_own_final_locked_hop(self):
+   def test_manifest_lock_source_cannot_register_forged_participant_path(self):
       captured_locks = []
       receive_manifest_locked = self.entry.receive_manifest_locked
 
@@ -144,10 +146,43 @@ class InProcessMeshTests(unittest.TestCase):
       self.assertEqual(len(captured_locks), 1)
       locked = captured_locks[0]
       self.assertEqual(locked.manifest.ordered_hops[-1].placement_id, "node-d-stage-002")
+      forged_path_id = f"{locked.path_id}-forged"
+      forged = replace(
+         locked,
+         path_id=forged_path_id,
+         manifest=replace(locked.manifest, path_id=forged_path_id),
+         build=replace(locked.build, path_id=forged_path_id),
+      )
+      middle_hop = forged.manifest.ordered_hops[1]
+      previous_hop = forged.manifest.ordered_hops[0]
+      forged_header = HopHeader(
+         request_id=forged.request_id,
+         path_id=forged.path_id,
+         path_attempt=forged.path_attempt,
+         phase="DECODE",
+         token_index=0,
+         hop_index=1,
+         source_placement_id=previous_hop.placement_id,
+         destination_placement_id=middle_hop.placement_id,
+         topology_version=forged.manifest.topology_version,
+         idempotency_key=hop_idempotency_key(
+            request_id=forged.request_id,
+            path_id=forged.path_id,
+            path_attempt=forged.path_attempt,
+            phase="DECODE",
+            token_index=0,
+            hop_index=1,
+         ),
+      )
+      executions_before = len(self.runtimes["node-c"].executed)
 
       with self.assertRaisesRegex(ValueError, "manifest_lock_rejected"):
-         self.mesh.transport_for("node-c").send_manifest_locked(locked)
+         self.mesh.transport_for("node-c").send_manifest_locked(forged)
 
+      result = self.routers["node-c"].receive_hop(forged_header, b"forged")
+      self.assertEqual(result.disposition, "REJECTED")
+      self.assertEqual(result.reason, "unknown_path")
+      self.assertEqual(len(self.runtimes["node-c"].executed), executions_before)
       self.assertEqual(self.entry.request_status(self.request.request_id), "PREFILL")
 
    def test_failure_report_source_must_own_reported_placement(self):

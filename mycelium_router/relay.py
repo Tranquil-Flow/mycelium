@@ -76,10 +76,21 @@ class RelayEngine:
       request: RequestContext,
       manifest: PathManifest,
       graph: ExecutionGraph,
+      *,
+      source_node_id: str | None = None,
    ) -> bool:
       validate_manifest(manifest, graph)
       if request.request_id != manifest.request_id:
          return False
+      if source_node_id is not None:
+         placement_map = {
+            placement.placement_id: placement
+            for stage in graph.stages
+            for placement in stage.placements
+         }
+         final_placement = placement_map[manifest.ordered_hops[-1].placement_id]
+         if not source_node_id or final_placement.node_id != source_node_id:
+            return False
       existing = self._paths.get(manifest.path_id)
       if existing is not None:
          existing_manifest = existing[1]

@@ -291,11 +291,18 @@ class LoopbackSocketMesh:
       if action == _ACTION_REGISTER_LOCK:
          if not isinstance(message, ManifestLocked):
             raise SocketTransportError("invalid_manifest_lock_message")
-         router.register_path(
+         accepted = router.register_path(
             message.build.request,
             message.manifest,
             message.build.graph,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
          )
+         if not accepted:
+            raise SocketTransportError("manifest_registration_rejected")
          return
       if action == _ACTION_ENTRY_LOCK:
          if not isinstance(message, ManifestLocked):
@@ -378,8 +385,6 @@ class LoopbackSocketMesh:
       locked: ManifestLocked,
    ) -> None:
       graph = locked.build.graph
-      self._entry_nodes.setdefault(locked.request_id, source_node_id)
-      self._path_graphs[locked.path_id] = graph
       frame = encode_frame(locked)
       participants = {
          self._node_for_placement(graph, hop.placement_id)
@@ -387,6 +392,8 @@ class LoopbackSocketMesh:
       }
       for node_id in sorted(participants):
          self._send(source_node_id, node_id, _ACTION_REGISTER_LOCK, frame)
+      self._entry_nodes.setdefault(locked.request_id, source_node_id)
+      self._path_graphs[locked.path_id] = graph
       self._send(
          source_node_id,
          self._entry_node(locked.request_id),

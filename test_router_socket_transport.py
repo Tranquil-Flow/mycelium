@@ -19,8 +19,12 @@ from mycelium_router.fakes import (
    ManualClock,
    SequenceIdSource,
 )
+from mycelium_router.idempotency import hop_idempotency_key
 from mycelium_router.router import Router
-from mycelium_router.transports.loopback_socket import LoopbackSocketMesh
+from mycelium_router.transports.loopback_socket import (
+   LoopbackSocketMesh,
+   SocketTransportError,
+)
 from mycelium_router.wire import decode_frame
 from test_router_inprocess_mesh import three_device_graph
 from test_router_policy import request_fixture, state_table
@@ -112,7 +116,7 @@ class LoopbackSocketMeshTests(unittest.TestCase):
       finally:
          mesh.close()
 
-   def test_tcp_manifest_lock_dispatch_rejects_non_final_hop_source(self):
+   def test_tcp_manifest_lock_source_cannot_register_forged_participant_path(self):
       graph = three_device_graph()
       states = state_table(slow_b_bandwidth=True)
       states["node-d"] = replace(states["node-a"], node_id="node-d")
@@ -167,9 +171,49 @@ class LoopbackSocketMeshTests(unittest.TestCase):
             locked.manifest.ordered_hops[-1].placement_id,
             "node-d-stage-002",
          )
+         forged_path_id = f"{locked.path_id}-forged"
+         forged = replace(
+            locked,
+            path_id=forged_path_id,
+            manifest=replace(locked.manifest, path_id=forged_path_id),
+            build=replace(locked.build, path_id=forged_path_id),
+         )
+         middle_hop = forged.manifest.ordered_hops[1]
+         previous_hop = forged.manifest.ordered_hops[0]
+         forged_header = HopHeader(
+            request_id=forged.request_id,
+            path_id=forged.path_id,
+            path_attempt=forged.path_attempt,
+            phase="DECODE",
+            token_index=0,
+            hop_index=1,
+            source_placement_id=previous_hop.placement_id,
+            destination_placement_id=middle_hop.placement_id,
+            topology_version=forged.manifest.topology_version,
+            idempotency_key=hop_idempotency_key(
+               request_id=forged.request_id,
+               path_id=forged.path_id,
+               path_attempt=forged.path_attempt,
+               phase="DECODE",
+               token_index=0,
+               hop_index=1,
+            ),
+         )
+         executions_before = len(routers["node-c"].relay.runtime.executed)
 
-         mesh.transport_for("node-c").send_manifest_locked(locked)
+         with self.assertRaisesRegex(
+            SocketTransportError,
+            "manifest_registration_rejected",
+         ):
+            mesh.transport_for("node-c").send_manifest_locked(forged)
 
+         result = routers["node-c"].receive_hop(forged_header, b"forged")
+         self.assertEqual(result.disposition, "REJECTED")
+         self.assertEqual(result.reason, "unknown_path")
+         self.assertEqual(
+            len(routers["node-c"].relay.runtime.executed),
+            executions_before,
+         )
          self.assertEqual(entry.request_status(request.request_id), "PREFILL")
       finally:
          mesh.close()
