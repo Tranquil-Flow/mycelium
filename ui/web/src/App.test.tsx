@@ -3,23 +3,30 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import App from './App';
 import {
   StaticObservatorySource,
+  type LiveObservatorySourceState,
   type ObservatoryDataSource,
   type ObservatorySourceListener,
   type ObservatorySourceState,
 } from './data/observatorySource';
+import { decodeObservatorySnapshot } from './model/semanticProjection';
+import { validSemanticSnapshot } from './test/semanticFixture';
 
 class InjectedLiveSource implements ObservatoryDataSource {
+  readonly source_mode = 'live' as const;
   readonly kind = 'live' as const;
   readonly calls: string[] = [];
   private readonly listeners = new Set<ObservatorySourceListener>();
-  private state: ObservatorySourceState;
+  private state: LiveObservatorySourceState;
 
   constructor() {
-    const staticState = new StaticObservatorySource().loadInitial();
     this.state = {
+      source_mode: 'live',
       status: 'disconnected',
       generation: 7,
-      bundle: staticState.bundle,
+      snapshot: decodeObservatorySnapshot(validSemanticSnapshot()),
+      live_qualified: false,
+      qualification_reasons: ['transport_not_current'],
+      freshness: 'current',
       reason: 'test disconnect',
     };
   }
@@ -30,20 +37,23 @@ class InjectedLiveSource implements ObservatoryDataSource {
     return () => this.listeners.delete(listener);
   };
 
-  loadInitial(): ObservatorySourceState {
+  loadInitial(): LiveObservatorySourceState {
     this.calls.push('loadInitial');
     return this.state;
   }
 
-  getState(): ObservatorySourceState {
+  getState(): LiveObservatorySourceState {
     return this.state;
   }
 
   reconnect(): void {
     this.state = {
+      ...this.state,
       status: 'connected',
       generation: 8,
-      bundle: this.state.bundle,
+      live_qualified: true,
+      qualification_reasons: [],
+      reason: undefined,
     };
     for (const listener of this.listeners) listener(this.state);
   }
@@ -154,27 +164,40 @@ describe('Network Observatory', () => {
     expect(screen.getByText(/no fallback values/i)).toBeInTheDocument();
   });
 
-  it('accepts an injected read-only live source and reflects disconnect then reconnect state', () => {
+  it('does not label disconnected semantic evidence live, then gates live on qualification', () => {
     const source = new InjectedLiveSource();
     render(<App source={source} />);
 
-    expect(screen.getByText(/live · read only/i)).toBeInTheDocument();
+    expect(screen.getByText(/semantic projection · not live/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^live · qualified$/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /disconnected · g7/i })).toBeDisabled();
+    expect(screen.getAllByText(/deployment-alpha/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/route-primary/i)).toBeInTheDocument();
     expect(source.calls).toEqual(['subscribe', 'loadInitial']);
 
     act(() => source.reconnect());
 
+    expect(screen.getByText(/^live · qualified$/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /current · g8/i })).toBeDisabled();
   });
 
-  it('never renders a previous source bundle under a replacement source identity', async () => {
+  it('never renders a previous fixture bundle under a replacement live source identity', async () => {
     const staticSource = new StaticObservatorySource();
-    const bundle = staticSource.loadInitial().bundle;
+    const semanticState: LiveObservatorySourceState = {
+      source_mode: 'live',
+      status: 'connected',
+      generation: 12,
+      snapshot: decodeObservatorySnapshot(validSemanticSnapshot()),
+      live_qualified: true,
+      qualification_reasons: [],
+      freshness: 'current',
+    };
     let resolveInitial: ((state: ObservatorySourceState) => void) | undefined;
     const loading = new Promise<ObservatorySourceState>((resolve) => {
       resolveInitial = resolve;
     });
     const replacement: ObservatoryDataSource = {
+      source_mode: 'live',
       kind: 'live',
       getState: () => null,
       loadInitial: () => loading,
@@ -185,17 +208,19 @@ describe('Network Observatory', () => {
     rerender(<App source={replacement} />);
 
     expect(
-      screen.getByRole('heading', { name: /loading coherent evidence snapshot/i }),
+      screen.getByRole('heading', { name: /loading semantic observatory snapshot/i }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
-    expect(screen.getByText(/live · read only/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^live · qualified$/i)).not.toBeInTheDocument();
 
     await act(async () => {
-      resolveInitial?.({ status: 'connected', generation: 12, bundle });
+      resolveInitial?.(semanticState);
       await loading;
     });
 
-    expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/deployment-alpha/i).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /current · g12/i })).toBeDisabled();
+    expect(screen.getByText(/^live · qualified$/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
   });
 });

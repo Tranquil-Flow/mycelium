@@ -6,14 +6,9 @@ from contextlib import suppress
 import inspect
 import json
 import queue
-from typing import Any, Awaitable, Callable, Mapping, Optional, Union
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol, Sequence, Union
 
-from .observatory import (
-    CoherentSnapshotPublisher,
-    MAX_SAFE_GENERATION,
-    Publication,
-    SubscriberLimitError,
-)
+from .observatory import MAX_SAFE_GENERATION, SubscriberLimitError
 
 
 SNAPSHOT_PATH = "/v1/observatory/snapshot"
@@ -22,6 +17,32 @@ ReadPolicyResult = Union[bool, Awaitable[bool]]
 ReadPolicy = Callable[[Mapping[str, Any]], ReadPolicyResult]
 Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
+
+
+class PublishedEnvelope(Protocol):
+    @property
+    def generation(self) -> int: ...
+
+    @property
+    def envelope_json(self) -> bytes: ...
+
+
+class SnapshotSubscriptionLike(Protocol):
+    @property
+    def replay(self) -> Sequence[PublishedEnvelope]: ...
+
+    @property
+    def closed(self) -> bool: ...
+
+    def get_nowait(self) -> PublishedEnvelope: ...
+
+    def close(self) -> None: ...
+
+
+class SnapshotPublisherLike(Protocol):
+    def snapshot_json(self) -> Optional[bytes]: ...
+
+    def subscribe(self, *, last_event_id: Optional[int] = None) -> SnapshotSubscriptionLike: ...
 
 
 def _headers(scope: Mapping[str, Any], name: bytes) -> list[bytes]:
@@ -54,7 +75,7 @@ async def _send_json(
     await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
-def _event_bytes(publication: Publication) -> bytes:
+def _event_bytes(publication: PublishedEnvelope) -> bytes:
     return (
         f"id: {publication.generation}\nevent: snapshot\ndata: ".encode("ascii")
         + publication.envelope_json
@@ -74,7 +95,7 @@ class ObservatoryASGIApplication:
 
     def __init__(
         self,
-        publisher: CoherentSnapshotPublisher,
+        publisher: SnapshotPublisherLike,
         *,
         read_policy: Optional[ReadPolicy] = None,
         heartbeat_interval: float = 15.0,

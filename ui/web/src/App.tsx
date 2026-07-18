@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AppShell, type ObservatoryView } from './components/AppShell';
 import {
   createObservatorySource,
+  type LiveObservatorySourceState,
   type ObservatoryDataSource,
   type ObservatorySourceState,
 } from './data/observatorySource';
@@ -24,8 +25,7 @@ export interface AppProps {
   readonly source?: ObservatoryDataSource;
 }
 
-const defaultSource = createObservatorySource();
-
+const defaultSource = createObservatorySource({ source_mode: 'fixture' });
 const OBSERVATORY_VIEWS: readonly ObservatoryView[] = [
   'network',
   'plans',
@@ -47,8 +47,7 @@ function sourceErrorMessage(reason: unknown): string {
 function initialSourceResult(source: ObservatoryDataSource): SourceResult {
   const current = source.getState();
   if (current !== null) return { source, state: 'ready', sourceState: current };
-  if (source.kind !== 'static') return { source, state: 'loading' };
-
+  if (source.source_mode !== 'fixture') return { source, state: 'loading' };
   try {
     const initial = source.loadInitial();
     return initial instanceof Promise
@@ -61,19 +60,19 @@ function initialSourceResult(source: ObservatoryDataSource): SourceResult {
 
 function BundleError({
   message,
-  sourceKind,
+  sourceMode,
 }: {
   readonly message: string;
-  readonly sourceKind: ObservatoryDataSource['kind'];
+  readonly sourceMode: ObservatoryDataSource['source_mode'];
 }) {
   return (
     <section className="bundle-error panel" role="alert">
       <span aria-hidden="true">!</span>
       <div>
         <p className="eyebrow caution">
-          {sourceKind === 'static' ? 'Offline fixture error' : 'Live source error'}
+          {sourceMode === 'fixture' ? 'Offline fixture error' : 'Semantic source error'}
         </p>
-        <h2>Evidence bundle unavailable</h2>
+        <h2>Evidence projection unavailable</h2>
         <p>{message}</p>
         <small>No fallback values were inferred or presented.</small>
       </div>
@@ -81,15 +80,40 @@ function BundleError({
   );
 }
 
-function BundleLoading() {
+function BundleLoading({ sourceMode }: { readonly sourceMode: ObservatoryDataSource['source_mode'] }) {
   return (
     <section className="bundle-error panel" role="status" aria-live="polite">
       <span className="layout-loader" aria-hidden="true" />
       <div>
         <p className="eyebrow">Read-only source</p>
-        <h2>Loading coherent evidence snapshot</h2>
+        <h2>
+          {sourceMode === 'fixture'
+            ? 'Loading coherent evidence snapshot'
+            : 'Loading semantic Observatory snapshot'}
+        </h2>
         <small>No partial generation is rendered.</small>
       </div>
+    </section>
+  );
+}
+
+function SemanticProjectionView({ state }: { readonly state: LiveObservatorySourceState }) {
+  const { snapshot } = state;
+  return (
+    <section className="panel semantic-observatory" aria-label="Semantic Observatory projection">
+      <p className="eyebrow">Privacy-preserving semantic projection</p>
+      <h2>Semantic deployment observation</h2>
+      <dl>
+        <div><dt>Deployment</dt><dd>{snapshot.binding.deployment.id}</dd></div>
+        <div><dt>Model</dt><dd>{snapshot.binding.model.id} · {snapshot.binding.model.revision}</dd></div>
+        <div><dt>Route</dt><dd>{snapshot.binding.route.id} · g{snapshot.binding.route.generation}</dd></div>
+        <div><dt>Challenge</dt><dd>{snapshot.route_challenge.status}</dd></div>
+        <div><dt>Request lifecycle</dt><dd>{snapshot.request_lifecycle.state}</dd></div>
+        <div><dt>Conflicts</dt><dd>{snapshot.conflicts.length}</dd></div>
+      </dl>
+      {!state.live_qualified && (
+        <p role="status">Not live: {state.qualification_reasons.join(', ')}</p>
+      )}
     </section>
   );
 }
@@ -112,7 +136,6 @@ export default function App({ source = defaultSource }: AppProps) {
       }
       setActiveView(nextView);
     };
-
     synchronizeHash();
     window.addEventListener('hashchange', synchronizeHash);
     return () => window.removeEventListener('hashchange', synchronizeHash);
@@ -123,16 +146,22 @@ export default function App({ source = defaultSource }: AppProps) {
     let unsubscribe: (() => void) | undefined;
 
     const acceptState = (nextState: ObservatorySourceState) => {
-      if (active) setSourceResult({ source, state: 'ready', sourceState: nextState });
+      if (!active) return;
+      if (nextState.source_mode !== source.source_mode) {
+        setSourceResult({
+          source,
+          state: 'error',
+          message: 'Observatory source_mode/state mismatch',
+        });
+        return;
+      }
+      setSourceResult({ source, state: 'ready', sourceState: nextState });
     };
     const acceptError = (reason: unknown) => {
       if (!active) return;
       const current = source.getState();
-      if (current !== null) {
-        acceptState(current);
-      } else {
-        setSourceResult({ source, state: 'error', message: sourceErrorMessage(reason) });
-      }
+      if (current !== null) acceptState(current);
+      else setSourceResult({ source, state: 'error', message: sourceErrorMessage(reason) });
     };
 
     const current = source.getState();
@@ -165,21 +194,21 @@ export default function App({ source = defaultSource }: AppProps) {
   const navigate = (view: ObservatoryView) => {
     setActiveView(view);
     const nextHash = `#${view}`;
-    if (window.location.hash !== nextHash) {
-      window.history.pushState(null, '', nextHash);
-    }
+    if (window.location.hash !== nextHash) window.history.pushState(null, '', nextHash);
   };
 
-  const renderedSourceResult: SourceResult =
+  const rendered: SourceResult =
     sourceResult.source === source ? sourceResult : { source, state: 'loading' };
 
   let content;
-  if (renderedSourceResult.state === 'loading') {
-    content = <BundleLoading />;
-  } else if (renderedSourceResult.state === 'error') {
-    content = <BundleError message={renderedSourceResult.message} sourceKind={source.kind} />;
+  if (rendered.state === 'loading') {
+    content = <BundleLoading sourceMode={source.source_mode} />;
+  } else if (rendered.state === 'error') {
+    content = <BundleError message={rendered.message} sourceMode={source.source_mode} />;
+  } else if (rendered.sourceState.source_mode === 'live') {
+    content = <SemanticProjectionView state={rendered.sourceState} />;
   } else {
-    const { snapshot, incidents, provisioning } = renderedSourceResult.sourceState.bundle;
+    const { snapshot, incidents, provisioning } = rendered.sourceState.bundle;
     switch (activeView) {
       case 'network':
         content = <NetworkView snapshot={snapshot} />;
@@ -202,21 +231,22 @@ export default function App({ source = defaultSource }: AppProps) {
     }
   }
 
-  const sourceState =
-    renderedSourceResult.state === 'ready' ? renderedSourceResult.sourceState : null;
+  const sourceState = rendered.state === 'ready' ? rendered.sourceState : null;
   const scopeLabel =
     sourceState === null
-      ? source.kind === 'static'
+      ? source.source_mode === 'fixture'
         ? 'offline fixture'
-        : 'live gateway'
-      : sourceState.bundle.snapshot.source.scenarioName;
+        : 'semantic gateway'
+      : sourceState.source_mode === 'fixture'
+        ? sourceState.bundle.snapshot.source.scenarioName
+        : sourceState.snapshot.binding.deployment.id;
 
   return (
     <AppShell
       activeView={activeView}
       onViewChange={navigate}
       scopeLabel={scopeLabel}
-      sourceKind={source.kind}
+      sourceMode={source.source_mode}
       sourceState={sourceState}
     >
       {content}

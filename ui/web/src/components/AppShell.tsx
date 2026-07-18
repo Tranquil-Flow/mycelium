@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import type {
-  ObservatorySourceKind,
+  ObservatorySourceMode,
   ObservatorySourceState,
 } from '../data/observatorySource';
 
@@ -10,7 +10,7 @@ interface AppShellProps {
   readonly activeView: ObservatoryView;
   readonly onViewChange: (view: ObservatoryView) => void;
   readonly scopeLabel: string;
-  readonly sourceKind: ObservatorySourceKind;
+  readonly sourceMode: ObservatorySourceMode;
   readonly sourceState: ObservatorySourceState | null;
   readonly children: ReactNode;
 }
@@ -63,18 +63,22 @@ export function AppShell({
   activeView,
   onViewChange,
   scopeLabel,
-  sourceKind,
+  sourceMode,
   sourceState,
   children,
 }: AppShellProps) {
-  const isStatic = sourceKind === 'static';
-  const currentLabel = isStatic
+  const isFixture = sourceMode === 'fixture';
+  const isLiveQualified =
+    sourceState?.source_mode === 'live' && sourceState.live_qualified;
+  const currentLabel = isFixture
     ? 'Current unavailable'
     : sourceState === null
       ? 'Connecting'
       : sourceState.status === 'disconnected'
         ? `Disconnected · g${sourceState.generation}`
-        : `Current · g${sourceState.generation}`;
+        : isLiveQualified
+          ? `Current · g${sourceState.generation}`
+          : `Not live · g${sourceState.generation}`;
 
   return (
     <div className="app-shell">
@@ -96,10 +100,20 @@ export function AppShell({
 
         <div
           className="fixture-badge"
-          aria-label={isStatic ? 'Offline evidence mode' : 'Live read-only evidence mode'}
+          aria-label={
+            isFixture
+              ? 'Offline evidence mode'
+              : isLiveQualified
+                ? 'Qualified live semantic mode'
+                : 'Semantic projection not live'
+          }
         >
           <span className="fixture-dot" aria-hidden="true" />
-          {isStatic ? 'SIMULATION · FIXTURE' : 'LIVE · READ ONLY'}
+          {isFixture
+            ? 'SIMULATION · FIXTURE'
+            : isLiveQualified
+              ? 'LIVE · QUALIFIED'
+              : 'SEMANTIC PROJECTION · NOT LIVE'}
         </div>
 
         <nav className="primary-nav" aria-label="Observatory sections">
@@ -126,8 +140,8 @@ export function AppShell({
           <div className="source-state">
             <span className="source-glyph" aria-hidden="true">◇</span>
             <div>
-              <strong>{isStatic ? 'Local evidence bundle' : 'Gateway evidence source'}</strong>
-              <span>{isStatic ? 'No network dependency' : 'GET + inbound event stream only'}</span>
+              <strong>{isFixture ? 'Local evidence bundle' : 'Gateway semantic source'}</strong>
+              <span>{isFixture ? 'No network dependency' : 'Same-origin GET + SSE only'}</span>
             </div>
           </div>
           <p>Read-only qualification surface</p>
@@ -140,7 +154,7 @@ export function AppShell({
             <span className="topbar-label">Scope</span>
             <strong>{scopeLabel}</strong>
             <span className="separator" aria-hidden="true">/</span>
-            <span>{isStatic ? 'offline replay' : 'gateway projection'}</span>
+            <span>{isFixture ? 'offline replay' : 'semantic gateway projection'}</span>
           </div>
           <button type="button" className="current-control" disabled>
             <span className="status-ring" aria-hidden="true" />
