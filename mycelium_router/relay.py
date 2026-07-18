@@ -21,7 +21,11 @@ from mycelium_router.contracts import (
    RuntimeResult,
    TokenEvent,
 )
-from mycelium_router.idempotency import hop_idempotency_key
+from mycelium_router.idempotency import (
+   hop_idempotency_key,
+   payload_fingerprint,
+   snapshot_payload,
+)
 from mycelium_router.routing import RoutingError
 from mycelium_router.scheduler import (
    BackpressureError,
@@ -58,7 +62,7 @@ class RelayEngine:
       self.device_states = device_states
       self._outcomes: dict[
          tuple[str, int, str, int],
-         tuple[RelayOutcome, float, str],
+         tuple[RelayOutcome, float, str, str],
       ] = {}
       self._paths: dict[
          str,
@@ -67,13 +71,13 @@ class RelayEngine:
       self._entry_node_by_path: dict[str, str] = {}
       self._hop_results: dict[
          str,
-         tuple[HopReceiveResult, float, str],
+         tuple[HopReceiveResult, float, str, str],
       ] = {}
       self._prefill_results: dict[
          str,
-         tuple[ProgressivePrefillResult, float, str],
+         tuple[ProgressivePrefillResult, float, str, str],
       ] = {}
-      self._pending_hops: dict[str, tuple[HopHeader, HopWorkItem]] = {}
+      self._pending_hops: dict[str, tuple[HopHeader, HopWorkItem, str]] = {}
 
    @staticmethod
    def _runtime_unavailable() -> RuntimeResult:
@@ -220,8 +224,18 @@ class RelayEngine:
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return ProgressivePrefillResult("REJECTED", "destination_not_local")
+      try:
+         accepted_payload = snapshot_payload(context.payload)
+         payload_digest = payload_fingerprint(accepted_payload)
+      except TypeError:
+         return ProgressivePrefillResult("REJECTED", "unsupported_payload_type")
       cached = self._prefill_results.get(header.idempotency_key)
-      if cached is not None and self.decode_mode == "complete_context_replay":
+      if cached is not None:
+         if cached[3] != payload_digest:
+            return ProgressivePrefillResult(
+               "REJECTED",
+               "idempotency_payload_mismatch",
+            )
          return cached[0]
 
       state = HopStateMachine(path_attempt=header.path_attempt)
@@ -238,7 +252,7 @@ class RelayEngine:
          deficit_ratio=0.0,
          enqueued_at=now,
          idempotency_key=header.idempotency_key,
-         payload=context.payload,
+         payload=accepted_payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
          position=0,
          terminal=self._is_terminal(context.request, "PREFILL", -1),
@@ -281,7 +295,7 @@ class RelayEngine:
             failure_report=report,
          )
          self.release_path(build.path_id)
-         self._remember_prefill(header, result)
+         self._remember_prefill(header, result, payload_digest)
          return result
 
       if self.builder.is_complete(build):
@@ -306,7 +320,7 @@ class RelayEngine:
                failure_report=report,
             )
             self.release_path(build.path_id)
-            self._remember_prefill(header, result)
+            self._remember_prefill(header, result, payload_digest)
             return result
          confirmation = ManifestLocked(
             request_id=context.request.request_id,
@@ -338,7 +352,7 @@ class RelayEngine:
                failure_report=report,
             )
             self.release_path(build.path_id)
-            self._remember_prefill(header, result)
+            self._remember_prefill(header, result, payload_digest)
             return result
          self.transport.send_manifest_locked(confirmation)
          state.transition("FORWARDED", path_attempt=header.path_attempt)
@@ -357,7 +371,7 @@ class RelayEngine:
             "LOCKED",
             confirmation=confirmation,
          )
-         self._remember_prefill(header, result)
+         self._remember_prefill(header, result, payload_digest)
          return result
 
       try:
@@ -385,7 +399,7 @@ class RelayEngine:
             failure_report=report,
          )
          self.release_path(build.path_id)
-         self._remember_prefill(header, result)
+         self._remember_prefill(header, result, payload_digest)
          return result
       next_index = len(updated.ordered_hops) - 1
       next_hop = updated.ordered_hops[next_index]
@@ -431,7 +445,7 @@ class RelayEngine:
          forwarded_header=next_header,
          context=next_context,
       )
-      self._remember_prefill(header, result)
+      self._remember_prefill(header, result, payload_digest)
       return result
 
    def receive_hop(
@@ -498,10 +512,20 @@ class RelayEngine:
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return HopReceiveResult("REJECTED", "destination_not_local")
+      try:
+         accepted_payload = snapshot_payload(payload)
+         payload_digest = payload_fingerprint(accepted_payload)
+      except TypeError:
+         return HopReceiveResult("REJECTED", "unsupported_payload_type")
       cached = self._hop_results.get(header.idempotency_key)
-      if cached is not None and self.decode_mode == "complete_context_replay":
+      if cached is not None:
+         if cached[3] != payload_digest:
+            return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
          return cached[0]
-      if header.idempotency_key in self._pending_hops:
+      pending = self._pending_hops.get(header.idempotency_key)
+      if pending is not None:
+         if pending[2] != payload_digest:
+            return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
          return HopReceiveResult("QUEUED", "duplicate_pending")
 
       state = HopStateMachine(path_attempt=header.path_attempt)
@@ -518,7 +542,7 @@ class RelayEngine:
          deficit_ratio=0.0,
          enqueued_at=now,
          idempotency_key=header.idempotency_key,
-         payload=payload,
+         payload=accepted_payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
          position=self._kv_position(request, header.phase, header.token_index),
          terminal=self._is_terminal(request, header.phase, header.token_index),
@@ -564,7 +588,7 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
 
       if header.hop_index + 1 < len(manifest.ordered_hops):
@@ -595,7 +619,7 @@ class RelayEngine:
             "FORWARDED",
             forwarded_header=next_header,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
 
       if header.phase == "PREFILL_CHUNK":
@@ -612,12 +636,12 @@ class RelayEngine:
             "COMPLETED",
             prefill_chunk_completed=event,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
       if header.phase != "DECODE":
          state.transition("FORWARDED", path_attempt=header.path_attempt)
          result = HopReceiveResult("COMPLETED")
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
       if runtime_result.token_id is None:
          state.transition("FAILED", path_attempt=header.path_attempt)
@@ -637,7 +661,7 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
       event = TokenEvent(
          request_id=request.request_id,
@@ -650,7 +674,7 @@ class RelayEngine:
       self.transport.send_token_event(event)
       state.transition("FORWARDED", path_attempt=header.path_attempt)
       result = HopReceiveResult("COMPLETED", token_event=event)
-      self._remember_hop(header, result)
+      self._remember_hop(header, result, payload_digest)
       return result
 
    def enqueue_hop(self, header: HopHeader, payload: object) -> HopReceiveResult:
@@ -672,11 +696,6 @@ class RelayEngine:
       )
       if header.idempotency_key != expected_key:
          return HopReceiveResult("REJECTED", "invalid_idempotency_key")
-      cached = self._hop_results.get(header.idempotency_key)
-      if cached is not None and self.decode_mode == "complete_context_replay":
-         return cached[0]
-      if header.idempotency_key in self._pending_hops:
-         return HopReceiveResult("QUEUED", "duplicate_pending")
       registration = self._paths.get(header.path_id)
       if registration is None:
          return HopReceiveResult("REJECTED", "unknown_path")
@@ -711,6 +730,21 @@ class RelayEngine:
       placement = placement_map[hop.placement_id]
       if placement.node_id != self.node_id:
          return HopReceiveResult("REJECTED", "destination_not_local")
+      try:
+         accepted_payload = snapshot_payload(payload)
+         payload_digest = payload_fingerprint(accepted_payload)
+      except TypeError:
+         return HopReceiveResult("REJECTED", "unsupported_payload_type")
+      cached = self._hop_results.get(header.idempotency_key)
+      if cached is not None:
+         if cached[3] != payload_digest:
+            return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
+         return cached[0]
+      pending = self._pending_hops.get(header.idempotency_key)
+      if pending is not None:
+         if pending[2] != payload_digest:
+            return HopReceiveResult("REJECTED", "idempotency_payload_mismatch")
+         return HopReceiveResult("QUEUED", "duplicate_pending")
 
       work = HopWorkItem(
          request_id=request.request_id,
@@ -724,7 +758,7 @@ class RelayEngine:
          deficit_ratio=0.0,
          enqueued_at=now,
          idempotency_key=header.idempotency_key,
-         payload=payload,
+         payload=accepted_payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
          position=self._kv_position(request, header.phase, header.token_index),
          terminal=self._is_terminal(request, header.phase, header.token_index),
@@ -751,7 +785,11 @@ class RelayEngine:
          )
       except DuplicateHopError:
          return HopReceiveResult("QUEUED", "duplicate_pending")
-      self._pending_hops[header.idempotency_key] = (header, work)
+      self._pending_hops[header.idempotency_key] = (
+         header,
+         work,
+         payload_digest,
+      )
       return HopReceiveResult("QUEUED")
 
    def drain_ready_batches(
@@ -811,9 +849,14 @@ class RelayEngine:
             pending = self._pending_hops.pop(item.idempotency_key, None)
             if pending is None:
                continue
-            header, _ = pending
+            header, _, payload_digest = pending
             completed.append(
-               self._complete_queued_hop(header, item, runtime_result)
+               self._complete_queued_hop(
+                  header,
+                  item,
+                  runtime_result,
+                  payload_digest,
+               )
             )
          drained += 1
       return tuple(completed)
@@ -850,6 +893,7 @@ class RelayEngine:
       header: HopHeader,
       item: HopWorkItem,
       runtime_result: RuntimeResult,
+      payload_digest: str,
    ) -> HopReceiveResult:
       graph, manifest, request = self._paths[item.path_id]
       hop = manifest.ordered_hops[header.hop_index]
@@ -876,7 +920,7 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
 
       if header.hop_index + 1 < len(manifest.ordered_hops):
@@ -903,7 +947,7 @@ class RelayEngine:
          )
          self.transport.send_hop(next_header, runtime_result.payload)
          result = HopReceiveResult("FORWARDED", forwarded_header=next_header)
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
 
       if header.phase == "PREFILL_CHUNK":
@@ -919,11 +963,11 @@ class RelayEngine:
             "COMPLETED",
             prefill_chunk_completed=event,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
       if header.phase != "DECODE":
          result = HopReceiveResult("COMPLETED")
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
       if runtime_result.token_id is None:
          report = FailureReport(
@@ -942,7 +986,7 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
-         self._remember_hop(header, result)
+         self._remember_hop(header, result, payload_digest)
          return result
       event = TokenEvent(
          request_id=request.request_id,
@@ -954,7 +998,7 @@ class RelayEngine:
       )
       self.transport.send_token_event(event)
       result = HopReceiveResult("COMPLETED", token_event=event)
-      self._remember_hop(header, result)
+      self._remember_hop(header, result, payload_digest)
       return result
 
    @staticmethod
@@ -1016,8 +1060,33 @@ class RelayEngine:
       )
       now = self.clock.now()
       self._evict_outcomes(now=now)
+      try:
+         accepted_payload = snapshot_payload(payload)
+         payload_digest = payload_fingerprint(accepted_payload)
+      except TypeError:
+         return RelayOutcome(
+            failure_report=FailureReport(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               token_index=token_index,
+               scope="REQUEST",
+               reason="unsupported_payload_type",
+            )
+         )
       cached = self._outcomes.get(execution_key)
-      if cached is not None and self.decode_mode == "complete_context_replay":
+      if cached is not None:
+         if cached[3] != payload_digest:
+            return RelayOutcome(
+               failure_report=FailureReport(
+                  request_id=request.request_id,
+                  path_id=manifest.path_id,
+                  path_attempt=manifest.path_attempt,
+                  token_index=token_index,
+                  scope="REQUEST",
+                  reason="idempotency_payload_mismatch",
+               )
+            )
          return cached[0]
       placement_map = {
          placement.placement_id: placement
@@ -1028,7 +1097,7 @@ class RelayEngine:
          (edge.from_placement_id, edge.to_placement_id): edge
          for edge in graph.edges
       }
-      current_payload = payload
+      current_payload = accepted_payload
       final_result = None
       for hop_index, hop in enumerate(manifest.ordered_hops):
          work = HopWorkItem(
@@ -1091,7 +1160,7 @@ class RelayEngine:
             )
             self.transport.send_failure_report(report)
             outcome = RelayOutcome(failure_report=report)
-            self._remember(execution_key, outcome, manifest.path_id)
+            self._remember(execution_key, outcome, manifest.path_id, payload_digest)
             return outcome
          current_payload = result.payload
          final_result = result
@@ -1124,7 +1193,7 @@ class RelayEngine:
          if final_result is None or final_result.token_id is None:
             if self.decode_mode == "complete_context_replay":
                outcome = RelayOutcome()
-               self._remember(execution_key, outcome, manifest.path_id)
+               self._remember(execution_key, outcome, manifest.path_id, payload_digest)
                return outcome
             report = FailureReport(
                request_id=request.request_id,
@@ -1137,7 +1206,7 @@ class RelayEngine:
             )
             self.transport.send_failure_report(report)
             outcome = RelayOutcome(failure_report=report)
-            self._remember(execution_key, outcome, manifest.path_id)
+            self._remember(execution_key, outcome, manifest.path_id, payload_digest)
             return outcome
          event = TokenEvent(
             request_id=request.request_id,
@@ -1149,11 +1218,11 @@ class RelayEngine:
          )
          self.transport.send_token_event(event)
          outcome = RelayOutcome(token_event=event)
-         self._remember(execution_key, outcome, manifest.path_id)
+         self._remember(execution_key, outcome, manifest.path_id, payload_digest)
          return outcome
       if phase != "DECODE":
          outcome = RelayOutcome()
-         self._remember(execution_key, outcome, manifest.path_id)
+         self._remember(execution_key, outcome, manifest.path_id, payload_digest)
          return outcome
       if final_result is None or final_result.token_id is None:
          report = FailureReport(
@@ -1167,7 +1236,7 @@ class RelayEngine:
          )
          self.transport.send_failure_report(report)
          outcome = RelayOutcome(failure_report=report)
-         self._remember(execution_key, outcome, manifest.path_id)
+         self._remember(execution_key, outcome, manifest.path_id, payload_digest)
          return outcome
 
       event = TokenEvent(
@@ -1202,7 +1271,7 @@ class RelayEngine:
       )
       self.transport.send_hop(loopback_header, event.token_id)
       outcome = RelayOutcome(token_event=event)
-      self._remember(execution_key, outcome, manifest.path_id)
+      self._remember(execution_key, outcome, manifest.path_id, payload_digest)
       return outcome
 
    def release_path(self, path_id: str) -> None:
@@ -1242,11 +1311,13 @@ class RelayEngine:
       self,
       header: HopHeader,
       result: ProgressivePrefillResult,
+      payload_digest: str,
    ) -> None:
       self._prefill_results[header.idempotency_key] = (
          result,
          self.clock.now(),
          header.path_id,
+         payload_digest,
       )
       self._evict_prefill_results(now=self.clock.now())
 
@@ -1255,7 +1326,7 @@ class RelayEngine:
          0.0,
          self.scheduler.config.idempotency_retention_seconds,
       )
-      for key, (_, created_at, _) in tuple(self._prefill_results.items()):
+      for key, (_, created_at, _, _) in tuple(self._prefill_results.items()):
          if now - created_at > retention:
             self._prefill_results.pop(key, None)
       maximum = max(
@@ -1264,7 +1335,7 @@ class RelayEngine:
       )
       oldest = sorted(
          (created_at, key)
-         for key, (_, created_at, _) in self._prefill_results.items()
+         for key, (_, created_at, _, _) in self._prefill_results.items()
       )
       while len(self._prefill_results) > maximum:
          _, key = oldest.pop(0)
@@ -1274,11 +1345,13 @@ class RelayEngine:
       self,
       header: HopHeader,
       result: HopReceiveResult,
+      payload_digest: str,
    ) -> None:
       self._hop_results[header.idempotency_key] = (
          result,
          self.clock.now(),
          header.path_id,
+         payload_digest,
       )
       self._evict_hop_results(now=self.clock.now())
 
@@ -1287,7 +1360,7 @@ class RelayEngine:
          0.0,
          self.scheduler.config.idempotency_retention_seconds,
       )
-      for key, (_, created_at, _) in tuple(self._hop_results.items()):
+      for key, (_, created_at, _, _) in tuple(self._hop_results.items()):
          if now - created_at > retention:
             self._hop_results.pop(key, None)
       maximum = max(
@@ -1296,7 +1369,7 @@ class RelayEngine:
       )
       oldest = sorted(
          (created_at, key)
-         for key, (_, created_at, _) in self._hop_results.items()
+         for key, (_, created_at, _, _) in self._hop_results.items()
       )
       while len(self._hop_results) > maximum:
          _, key = oldest.pop(0)
@@ -1307,8 +1380,14 @@ class RelayEngine:
       key: tuple[str, int, str, int],
       outcome: RelayOutcome,
       path_id: str,
+      payload_digest: str,
    ) -> None:
-      self._outcomes[key] = (outcome, self.clock.now(), path_id)
+      self._outcomes[key] = (
+         outcome,
+         self.clock.now(),
+         path_id,
+         payload_digest,
+      )
       self._evict_outcomes(now=self.clock.now())
 
    def _evict_outcomes(self, *, now: float) -> None:
@@ -1318,7 +1397,7 @@ class RelayEngine:
       )
       expired = [
          key
-         for key, (_, created_at, _) in self._outcomes.items()
+         for key, (_, created_at, _, _) in self._outcomes.items()
          if now - created_at > retention
       ]
       for key in expired:
@@ -1330,7 +1409,7 @@ class RelayEngine:
       )
       oldest = sorted(
          (created_at, key)
-         for key, (_, created_at, _) in self._outcomes.items()
+         for key, (_, created_at, _, _) in self._outcomes.items()
       )
       while len(self._outcomes) > maximum:
          _, key = oldest.pop(0)
