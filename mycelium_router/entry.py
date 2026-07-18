@@ -465,7 +465,12 @@ class EntryCoordinator:
          self._cleanup_record(record)
       return True
 
-   def receive_failure_report(self, report: FailureReport) -> bool:
+   def receive_failure_report(
+      self,
+      report: FailureReport,
+      *,
+      source_node_id: str | None = None,
+   ) -> bool:
       record = self._requests.get(report.request_id)
       if record is None or record.status in {
          "COMPLETED",
@@ -485,6 +490,12 @@ class EntryCoordinator:
       ):
          return False
       if not self._failure_identity_matches_locked_path(record, report):
+         return False
+      if source_node_id is not None and not self._failure_origin_matches_locked_path(
+         record,
+         report,
+         source_node_id,
+      ):
          return False
       if report.scope == "DEVICE" and report.node_id == self.node_id:
          record.state_machine.transition(
@@ -607,6 +618,40 @@ class EntryCoordinator:
       }
       selected_edge_ids.add(manifest.loopback_edge_id)
       return report.edge_id in selected_edge_ids
+
+   @staticmethod
+   def _failure_origin_matches_locked_path(
+      record: RequestRecord,
+      report: FailureReport,
+      source_node_id: str,
+   ) -> bool:
+      if not source_node_id:
+         return False
+      placement_by_id = {
+         placement.placement_id: placement
+         for stage in record.graph.stages
+         for placement in stage.placements
+      }
+      if report.scope == "DEVICE":
+         return report.node_id == source_node_id
+      placement = placement_by_id.get(report.placement_id)
+      if placement is None or placement.node_id != source_node_id:
+         return False
+      if report.scope == "EDGE":
+         edge = next(
+            (
+               edge
+               for edge in (*record.graph.edges, *record.graph.loopback_edges)
+               if edge.edge_id == report.edge_id
+            ),
+            None,
+         )
+         if edge is None or report.placement_id not in {
+            edge.from_placement_id,
+            edge.to_placement_id,
+         }:
+            return False
+      return not report.node_id or report.node_id == source_node_id
 
    def _cleanup_record(self, record: RequestRecord) -> None:
       if record.cleaned_up:

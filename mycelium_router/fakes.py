@@ -318,9 +318,11 @@ class InProcessMesh:
       source_node_id: str,
       report: FailureReport,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       self.failure_reports.append((source_node_id, report))
       entry = self._entry_router(report.request_id)
-      entry.receive_failure_report(report)
+      entry.receive_failure_report(report, source_node_id=source_node_id)
 
    def send_token_event(
       self,

@@ -2,6 +2,7 @@ import unittest
 from dataclasses import replace
 
 from mycelium_router.contracts import (
+   FailureReport,
    HopHeader,
    ManifestLocked,
    PrefillChunkCompleted,
@@ -91,6 +92,64 @@ class LoopbackSocketMeshTests(unittest.TestCase):
             decode_work = [item for item in runtime.executed if item.phase == "DECODE"]
             self.assertEqual(len(decode_work), 1)
             self.assertIsInstance(decode_work[0].payload, bytes)
+      finally:
+         mesh.close()
+
+   def test_tcp_failure_report_dispatch_preserves_registered_source_identity(self):
+      graph = three_device_graph()
+      states = state_table(slow_b_bandwidth=True)
+      states["node-d"] = replace(states["node-a"], node_id="node-d")
+      capacity = FakeCapacityPort()
+      clock = ManualClock()
+      mesh = LoopbackSocketMesh()
+      routers = {}
+      request = replace(request_fixture(), request_id="request-socket-origin")
+
+      for node_id in ("node-a", "node-c", "node-d"):
+         config = RouterConfig(
+            maximum_recovery_attempts=0 if node_id == "node-a" else 3,
+            prefill_chunk_size_tokens=0,
+         )
+         router = Router(
+            node_id=node_id,
+            topology=FakeTopologyProvider(graph),
+            device_states=FakeDeviceStateProvider(states),
+            capacity=capacity,
+            runtime=FakeRuntimePort(),
+            transport=mesh.transport_for(node_id),
+            clock=clock,
+            id_source=SequenceIdSource(),
+            config=config,
+         )
+         mesh.register_router(node_id, router)
+         routers[node_id] = router
+
+      mesh.start()
+      try:
+         entry = routers["node-a"]
+         entry.start_distributed_prefill(
+            request,
+            InMemoryClientSink(),
+            excluded_placements=frozenset({"node-b-stage-000"}),
+         )
+         original_manifest = entry.get_request(request.request_id).manifest
+
+         mesh.transport_for("node-d").send_failure_report(
+            FailureReport(
+               request_id=request.request_id,
+               path_id=original_manifest.path_id,
+               path_attempt=original_manifest.path_attempt,
+               token_index=0,
+               scope="PLACEMENT",
+               reason="forged_tcp_peer_origin",
+               placement_id=original_manifest.ordered_hops[1].placement_id,
+               node_id="node-d",
+            )
+         )
+
+         self.assertEqual(entry.request_status(request.request_id), "DECODING")
+         self.assertEqual(entry.get_request(request.request_id).manifest, original_manifest)
+         self.assertEqual(entry.entry.runtime.cancel_calls, [])
       finally:
          mesh.close()
 

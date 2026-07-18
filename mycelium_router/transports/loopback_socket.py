@@ -59,6 +59,7 @@ class _Endpoint:
 @dataclass
 class _PendingDelivery:
    completed: threading.Event
+   source_node_id: str
    error: str = ""
 
 
@@ -126,6 +127,7 @@ class LoopbackSocketMesh:
       self.maximum_active_connections = 0
       self._next_delivery_id = 1
       self._pending_deliveries: dict[int, _PendingDelivery] = {}
+      self._dispatch_context = threading.local()
       self._lock = threading.Lock()
       self._started = False
 
@@ -214,7 +216,15 @@ class LoopbackSocketMesh:
             packet[1 : 1 + _DELIVERY_ID.size]
          )[0]
          frame = packet[1 + _DELIVERY_ID.size :]
+         if delivery_id is None:
+            raise SocketTransportError("missing_delivery_id")
          with self._lock:
+            pending = self._pending_deliveries.get(delivery_id)
+            if pending is None:
+               raise SocketTransportError("unknown_delivery_id")
+            source_node_id = pending.source_node_id
+            if source_node_id not in self.routers:
+               raise SocketTransportError("unknown_source_node")
             self.frames.append(frame)
             self.connection_count += 1
       except (
@@ -248,6 +258,7 @@ class LoopbackSocketMesh:
          connection.close()
 
       error_detail = ""
+      self._dispatch_context.source_node_id = source_node_id
       try:
          self._dispatch(node_id, action, frame)
       except (
@@ -260,6 +271,8 @@ class LoopbackSocketMesh:
          struct.error,
       ) as error:
          error_detail = f"{type(error).__name__}:{error}"[:4096]
+      finally:
+         del self._dispatch_context.source_node_id
       self._complete_delivery(delivery_id, error_detail)
 
    def _dispatch(self, node_id: str, action: int, frame: bytes) -> None:
@@ -308,7 +321,14 @@ class LoopbackSocketMesh:
       if action == _ACTION_FAILURE_REPORT:
          if not isinstance(message, FailureReport):
             raise SocketTransportError("invalid_failure_report_message")
-         router.receive_failure_report(message)
+         router.receive_failure_report(
+            message,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
          return
       raise SocketTransportError(f"unknown_delivery_action:{action}")
 
@@ -329,7 +349,7 @@ class LoopbackSocketMesh:
          graph,
          header.destination_placement_id,
       )
-      self._send(destination_node, _ACTION_HOP, frame)
+      self._send(source_node_id, destination_node, _ACTION_HOP, frame)
 
    def _send_manifest_locked(
       self,
@@ -345,8 +365,9 @@ class LoopbackSocketMesh:
          for hop in locked.manifest.ordered_hops
       }
       for node_id in sorted(participants):
-         self._send(node_id, _ACTION_REGISTER_LOCK, frame)
+         self._send(source_node_id, node_id, _ACTION_REGISTER_LOCK, frame)
       self._send(
+         source_node_id,
          self._entry_node(locked.request_id),
          _ACTION_ENTRY_LOCK,
          frame,
@@ -360,18 +381,34 @@ class LoopbackSocketMesh:
       frame: bytes,
    ) -> None:
       self._entry_nodes.setdefault(request_id, source_node_id)
-      self._send(self._entry_node(request_id), action, frame)
+      self._send(
+         source_node_id,
+         self._entry_node(request_id),
+         action,
+         frame,
+      )
 
-   def _send(self, node_id: str, action: int, frame: bytes) -> None:
+   def _send(
+      self,
+      source_node_id: str,
+      node_id: str,
+      action: int,
+      frame: bytes,
+   ) -> None:
       if not self._started:
          raise SocketTransportError("socket_mesh_not_started")
+      if source_node_id not in self.routers:
+         raise SocketTransportError(f"unknown_source_node:{source_node_id}")
       endpoint = self._endpoints.get(node_id)
       if endpoint is None:
          raise SocketTransportError(f"unknown_node:{node_id}")
       with self._lock:
          delivery_id = self._next_delivery_id
          self._next_delivery_id += 1
-         pending = _PendingDelivery(threading.Event())
+         pending = _PendingDelivery(
+            completed=threading.Event(),
+            source_node_id=source_node_id,
+         )
          self._pending_deliveries[delivery_id] = pending
       packet = (
          bytes((action,))

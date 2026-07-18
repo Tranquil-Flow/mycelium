@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import replace
 
-from mycelium_router.contracts import RouterConfig
+from mycelium_router.contracts import FailureReport, RouterConfig
 from mycelium_router.fakes import (
    FakeCapacityPort,
    FakeDeviceStateProvider,
@@ -116,6 +116,81 @@ class InProcessMeshTests(unittest.TestCase):
             placement_nodes[local_decode[0].placement_id],
             node_id,
          )
+
+   def test_failure_report_source_must_own_reported_placement(self):
+      self.entry.entry.config = replace(
+         self.entry.entry.config,
+         maximum_recovery_attempts=0,
+      )
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      original_manifest = self.entry.get_request(self.request.request_id).manifest
+      reported_placement = original_manifest.ordered_hops[1].placement_id
+
+      self.mesh.transport_for("node-d").send_failure_report(
+         FailureReport(
+            request_id=self.request.request_id,
+            path_id=original_manifest.path_id,
+            path_attempt=original_manifest.path_attempt,
+            token_index=0,
+            scope="PLACEMENT",
+            reason="forged_peer_origin",
+            placement_id=reported_placement,
+            node_id="node-d",
+         )
+      )
+
+      self.assertEqual(
+         self.entry.get_request(self.request.request_id).manifest,
+         original_manifest,
+      )
+      self.assertEqual(self.entry.request_status(self.request.request_id), "DECODING")
+      self.assertEqual(self.entry.entry.runtime.cancel_calls, [])
+
+   def test_failure_report_source_must_be_endpoint_of_reported_edge(self):
+      self.entry.entry.config = replace(
+         self.entry.entry.config,
+         maximum_recovery_attempts=0,
+      )
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(self.request.request_id)
+      original_manifest = record.manifest
+      first_pair = tuple(
+         hop.placement_id for hop in original_manifest.ordered_hops[:2]
+      )
+      reported_edge = next(
+         edge
+         for edge in record.graph.edges
+         if (edge.from_placement_id, edge.to_placement_id) == first_pair
+      )
+
+      self.mesh.transport_for("node-d").send_failure_report(
+         FailureReport(
+            request_id=self.request.request_id,
+            path_id=original_manifest.path_id,
+            path_attempt=original_manifest.path_attempt,
+            token_index=0,
+            scope="EDGE",
+            reason="forged_unrelated_edge_origin",
+            placement_id=original_manifest.ordered_hops[-1].placement_id,
+            edge_id=reported_edge.edge_id,
+            node_id="node-d",
+         )
+      )
+
+      self.assertEqual(
+         self.entry.get_request(self.request.request_id).manifest,
+         original_manifest,
+      )
+      self.assertEqual(self.entry.request_status(self.request.request_id), "DECODING")
+      self.assertEqual(self.entry.entry.runtime.cancel_calls, [])
 
 
 if __name__ == "__main__":
