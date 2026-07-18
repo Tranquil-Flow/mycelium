@@ -311,7 +311,14 @@ class LoopbackSocketMesh:
       if action == _ACTION_TOKEN_EVENT:
          if not isinstance(message, TokenEvent):
             raise SocketTransportError("invalid_token_event_message")
-         router.receive_token_event(message)
+         router.receive_token_event(
+            message,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
          return
       if action == _ACTION_PREFILL_CHUNK_COMPLETED:
          if not isinstance(message, PrefillChunkCompleted):

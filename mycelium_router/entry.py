@@ -443,7 +443,12 @@ class EntryCoordinator:
          return self.receive_token_event(outcome.token_event)
       return False
 
-   def receive_token_event(self, event: TokenEvent) -> bool:
+   def receive_token_event(
+      self,
+      event: TokenEvent,
+      *,
+      source_node_id: str | None = None,
+   ) -> bool:
       record = self._requests.get(event.request_id)
       if record is None or record.status != "DECODING":
          return False
@@ -455,6 +460,11 @@ class EntryCoordinator:
          or event.sampling_counter != event.token_index + 1
       ):
          return False
+      if source_node_id is not None and not self._token_origin_matches_locked_path(
+         record,
+         source_node_id,
+      ):
+         return False
       record.generated_token_ids.append(event.token_id)
       record.client_sink.emit(event.token_index, event.token_id)
       if len(record.generated_token_ids) >= record.request.max_new_tokens:
@@ -464,6 +474,21 @@ class EntryCoordinator:
          )
          self._cleanup_record(record)
       return True
+
+   @staticmethod
+   def _token_origin_matches_locked_path(
+      record: RequestRecord,
+      source_node_id: str,
+   ) -> bool:
+      if not source_node_id:
+         return False
+      final_placement_id = record.manifest.ordered_hops[-1].placement_id
+      return any(
+         placement.placement_id == final_placement_id
+         and placement.node_id == source_node_id
+         for stage in record.graph.stages
+         for placement in stage.placements
+      )
 
    def receive_failure_report(
       self,

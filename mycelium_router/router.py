@@ -116,8 +116,11 @@ class Router:
    def receive_progressive_prefill(self, header, context):
       return self.relay.receive_progressive_prefill(header, context)
 
-   def receive_token_event(self, event):
-      return self.entry.receive_token_event(event)
+   def receive_token_event(self, event, *, source_node_id=None):
+      return self.entry.receive_token_event(
+         event,
+         source_node_id=source_node_id,
+      )
 
    def receive_prefill_chunk_completed(self, event):
       return self.entry.receive_prefill_chunk_completed(event)

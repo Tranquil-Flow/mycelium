@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import replace
 
-from mycelium_router.contracts import FailureReport, RouterConfig
+from mycelium_router.contracts import FailureReport, RouterConfig, TokenEvent
 from mycelium_router.fakes import (
    FakeCapacityPort,
    FakeDeviceStateProvider,
@@ -191,6 +191,30 @@ class InProcessMeshTests(unittest.TestCase):
       )
       self.assertEqual(self.entry.request_status(self.request.request_id), "DECODING")
       self.assertEqual(self.entry.entry.runtime.cancel_calls, [])
+
+   def test_token_event_source_must_own_final_locked_hop(self):
+      self.entry.start_distributed_prefill(
+         self.request,
+         self.sink,
+         excluded_placements=frozenset({"node-b-stage-000"}),
+      )
+      record = self.entry.get_request(self.request.request_id)
+      self.assertEqual(record.manifest.ordered_hops[-1].placement_id, "node-d-stage-002")
+
+      self.mesh.transport_for("node-c").send_token_event(
+         TokenEvent(
+            request_id=self.request.request_id,
+            path_id=record.manifest.path_id,
+            path_attempt=record.manifest.path_attempt,
+            token_index=0,
+            token_id=999,
+            sampling_counter=1,
+         )
+      )
+
+      self.assertEqual(self.sink.token_ids, [])
+      self.assertEqual(record.generated_token_ids, [])
+      self.assertEqual(self.entry.request_status(self.request.request_id), "DECODING")
 
 
 if __name__ == "__main__":

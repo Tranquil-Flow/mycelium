@@ -329,9 +329,11 @@ class InProcessMesh:
       source_node_id: str,
       event: TokenEvent,
    ) -> None:
+      if source_node_id not in self.routers:
+         raise ValueError(f"unknown_mesh_source:{source_node_id}")
       self.token_events.append((source_node_id, event))
       entry = self._entry_router(event.request_id)
-      entry.receive_token_event(event)
+      entry.receive_token_event(event, source_node_id=source_node_id)
 
    def send_prefill_chunk_completed(
       self,
