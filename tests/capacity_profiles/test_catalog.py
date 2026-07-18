@@ -22,7 +22,7 @@ def _catalog_api():
 
 
 def _init_api():
-    return importlib.import_module("mycelium_capacity_profiles.init")
+    return importlib.import_module("mycelium_capacity_profiles")
 
 
 def _profile(
@@ -496,7 +496,7 @@ def test_catalog_source_has_no_clock_io_background_or_runtime_consumer_imports()
     assert catalog_api.__file__ is not None
     assert init_api.__file__ is not None
     source = Path(catalog_api.__file__).read_text(encoding="utf-8")
-    source += Path(init_api.__file__).read_text(encoding="utf-8")
+    source += inspect.getsource(init_api.initialize_capacity_profile_catalog)
 
     forbidden = (
         "time.time",

@@ -81,6 +81,19 @@ class RouterSessionBackend:
         emit_token: Callable[[int, str], None],
         is_cancelled: Callable[[], bool],
     ) -> str:
+        try:
+            return self._run(request_id, submission, emit_token, is_cancelled)
+        finally:
+            with self._lock:
+                self._cancelled.discard(request_id)
+
+    def _run(
+        self,
+        request_id: str,
+        submission: InferenceSubmission,
+        emit_token: Callable[[int, str], None],
+        is_cancelled: Callable[[], bool],
+    ) -> str:
         if is_cancelled() or self._is_cancelled(request_id):
             return "cancelled"
         prompt_token_ids = self._codec.encode(submission.prompt)
@@ -158,11 +171,7 @@ class RouterSessionBackend:
             if request_id in self._cancelled:
                 return
             self._cancelled.add(request_id)
-        try:
-            self._router.cancel(request_id)
-        finally:
-            with self._lock:
-                self._cancelled.discard(request_id)
+        self._router.cancel(request_id)
 
     def _is_cancelled(self, request_id: str) -> bool:
         with self._lock:
