@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from itertools import islice
 from typing import Any, Iterable
 
 from .contracts import (
@@ -15,6 +16,7 @@ from .contracts import (
 
 PROTOCOL = "mycelium.capacity_profile.v1"
 EVIDENCE_SCOPE = "bounded_local_samples"
+MAX_CAPACITY_OBSERVATIONS = 256
 
 
 def _validate_sequence(
@@ -23,12 +25,19 @@ def _validate_sequence(
 ) -> None:
     if not points:
         raise ValueError("at least one capacity observation is required")
+    if len(points) > MAX_CAPACITY_OBSERVATIONS:
+        raise ValueError(
+            f"capacity profiles may contain at most {MAX_CAPACITY_OBSERVATIONS} observations"
+        )
     concurrencies = [point.concurrency for point in points]
     if len(set(concurrencies)) != len(concurrencies):
         raise ValueError("capacity observation concurrency values must be unique")
     if concurrencies[0] != 1:
         raise ValueError("capacity observations must start at 1")
-    if concurrencies != list(range(1, concurrencies[-1] + 1)):
+    if any(
+        concurrency != expected
+        for expected, concurrency in enumerate(concurrencies, start=1)
+    ):
         raise ValueError("capacity observations must cover contiguous concurrency")
 
     for point in points:
@@ -190,7 +199,12 @@ def compile_capacity_profile(
     observations: Iterable[CapacityObservation],
     policy: CapacityProfilePolicy,
 ) -> CapacityProfile:
-    ordered = sorted(tuple(observations), key=lambda point: point.concurrency)
+    bounded = tuple(islice(iter(observations), MAX_CAPACITY_OBSERVATIONS + 1))
+    if len(bounded) > MAX_CAPACITY_OBSERVATIONS:
+        raise ValueError(
+            f"capacity profiles may contain at most {MAX_CAPACITY_OBSERVATIONS} observations"
+        )
+    ordered = sorted(bounded, key=lambda point: point.concurrency)
     evaluated = tuple(
         EvaluatedCapacityObservation.from_observation(point, policy)
         for point in ordered

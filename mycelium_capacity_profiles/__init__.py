@@ -6,6 +6,7 @@ from .contracts import (
     EvaluatedCapacityObservation,
     canonical_json_bytes,
 )
+from .document import MAX_PROFILE_DOCUMENT_BYTES, parse_capacity_profile_bytes
 from .status import status_with_capacity_profile
 
 __all__ = [
@@ -14,7 +15,9 @@ __all__ = [
     "CapacityProfileKey",
     "CapacityProfilePolicy",
     "EvaluatedCapacityObservation",
+    "MAX_PROFILE_DOCUMENT_BYTES",
     "canonical_json_bytes",
     "compile_capacity_profile",
+    "parse_capacity_profile_bytes",
     "status_with_capacity_profile",
 ]
