@@ -22,6 +22,9 @@ MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_FILE_COUNT = 4096
+MAX_BUNDLE_PATH_BYTES = 1024
+MAX_BUNDLE_PATH_COMPONENTS = 32
+MAX_BUNDLE_PATH_COMPONENT_BYTES = 255
 REQUIRED_PHYSICAL_INPUTS = (
     "assignment",
     "dependency_lock",
@@ -606,8 +609,15 @@ def _validate_relative_path(value: Any, *, subject: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise _VerificationFailure("unsafe_bundle_path", subject)
     pure = PurePosixPath(value)
+    encoded = value.encode("utf-8")
     if (
-        pure.is_absolute()
+        len(encoded) > MAX_BUNDLE_PATH_BYTES
+        or len(pure.parts) > MAX_BUNDLE_PATH_COMPONENTS
+        or any(
+            len(component.encode("utf-8")) > MAX_BUNDLE_PATH_COMPONENT_BYTES
+            for component in pure.parts
+        )
+        or pure.is_absolute()
         or _WINDOWS_ABSOLUTE.match(value) is not None
         or "\\" in value
         or "//" in value
@@ -777,7 +787,20 @@ def _contains_private_endpoint(value: str) -> bool:
             host = urlsplit(lowered).hostname
         except ValueError:
             return True
+    elif lowered.startswith("["):
+        closing = lowered.find("]")
+        if closing > 1:
+            suffix = lowered[closing + 1 :]
+            if not suffix or (suffix.startswith(":") and len(suffix) > 1):
+                host = lowered[1:closing]
+    elif lowered.count(":") == 1:
+        candidate, port = lowered.rsplit(":", 1)
+        if candidate and port:
+            host = candidate
+    else:
+        host = lowered
     if host is not None:
+        host = host.rstrip(".")
         if host == "localhost" or host.endswith((".internal", ".local", ".localhost")):
             return True
         try:
@@ -887,9 +910,12 @@ def _validate_artifact_fields(value: Any, *, subject: str) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             normalized = _normalized_key(key)
-            if normalized not in _ALLOWED_ARTIFACT_FIELDS and (
-                not normalized.endswith(("_digest", "_digests"))
-                or not _is_digest_material(child)
+            if key != normalized or (
+                normalized not in _ALLOWED_ARTIFACT_FIELDS
+                and (
+                    not normalized.endswith(("_digest", "_digests"))
+                    or not _is_digest_material(child)
+                )
             ):
                 raise _VerificationFailure("unsupported_artifact_field", subject)
             _validate_artifact_fields(child, subject=subject)
@@ -905,7 +931,10 @@ def _scan_raw_content(content: bytes, subject: str) -> None:
 
 def _synthetic_acceptance_present(value: Any) -> bool:
     if isinstance(value, dict):
-        if value.get("route_ready") is True or value.get("release_ready") is True:
+        if any(
+            _normalized_key(key) in {"route_ready", "release_ready"} and child is True
+            for key, child in value.items()
+        ):
             return True
         return any(_synthetic_acceptance_present(child) for child in value.values())
     if isinstance(value, list):
@@ -1168,6 +1197,8 @@ def verify_bundle(
                 )
             if entry["media_type"] == "application/json":
                 artifact = _load_artifact_json(content, subject)
+                _scan_sensitive_json(artifact, subject=subject)
+                _validate_artifact_fields(artifact, subject=subject)
                 if body["synthetic_fixture"]:
                     if (
                         not isinstance(artifact, dict)
@@ -1185,8 +1216,6 @@ def verify_bundle(
                     raise _VerificationFailure(
                         "physical_bundle_contains_synthetic_marker", subject
                     )
-                _scan_sensitive_json(artifact, subject=subject)
-                _validate_artifact_fields(artifact, subject=subject)
                 documents[entry["path"]] = artifact
             result["observed"]["scanned_files"] += 1
             result["observed"]["scanned_bytes"] += len(content)

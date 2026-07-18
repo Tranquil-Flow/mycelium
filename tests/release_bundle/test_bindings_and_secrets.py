@@ -262,7 +262,19 @@ def test_bundle_id_is_a_bounded_identifier_not_a_payload_channel(
 
 @pytest.mark.parametrize(
     "endpoint_id",
-    ["fd00::1", "fe80::1", "::1", "https://api.example.com"],
+    [
+        "fd00::1",
+        "fe80::1",
+        "::1",
+        "[fd00::1]:9000",
+        "[fd00::1]:https",
+        "[::1]:9000",
+        "node.internal:9000",
+        "db.internal:https",
+        "localhost:9000",
+        "localhost:http",
+        "https://api.example.com",
+    ],
 )
 def test_endpoint_id_cannot_encode_an_endpoint_address(
     synthetic_bundle: tuple[Path, dict[str, Any]], endpoint_id: str
@@ -486,6 +498,25 @@ def test_synthetic_fixture_cannot_claim_route_readiness(
 
     assert result["findings"] == [
         {"code": "synthetic_acceptance_forbidden", "subject": "artifact:0002"}
+    ]
+    assert result["physical_evidence_accepted"] is False
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+
+
+@pytest.mark.parametrize("alias", ["route-ready", "release.ready"])
+def test_synthetic_readiness_aliases_are_not_accepted_as_schema_fields(
+    synthetic_bundle: tuple[Path, dict[str, Any]], alias: str
+) -> None:
+    root, manifest = synthetic_bundle
+    summary = _summary(root)
+    summary[alias] = True
+    replace_artifact(root, manifest, SUMMARY_PATH, canonical_bytes(summary))
+
+    result = verify_bundle(root)
+
+    assert result["findings"] == [
+        {"code": "unsupported_artifact_field", "subject": "artifact:0002"}
     ]
     assert result["physical_evidence_accepted"] is False
     assert result["route_ready"] is False

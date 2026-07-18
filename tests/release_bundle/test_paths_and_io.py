@@ -64,6 +64,29 @@ def test_traversal_absolute_and_noncanonical_paths_are_rejected(
     assert result["release_ready"] is False
 
 
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "qualification/" + "/".join(["level"] * 64) + "/evidence.json",
+        "qualification/" + "x" * 256 + ".json",
+        "qualification/" + "é" * 600 + ".json",
+    ],
+)
+def test_manifest_paths_have_byte_component_and_depth_bounds(
+    synthetic_bundle: tuple[Path, dict[str, object]], unsafe: str
+) -> None:
+    root, manifest = synthetic_bundle
+    _rewrite_entry_path(root, manifest, unsafe)
+
+    result = verify_bundle(root)
+
+    assert result["findings"] == [
+        {"code": "unsafe_bundle_path", "subject": "artifact:0001"}
+    ]
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+
+
 def test_non_allowlisted_top_level_path_is_rejected(
     synthetic_bundle: tuple[Path, dict[str, object]],
 ) -> None:
