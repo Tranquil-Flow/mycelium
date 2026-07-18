@@ -43,6 +43,7 @@ EXPECTED_PROTOCOLS = {
     "layer-planner-snapshot-v1.json": "mycelium.layer_planner_snapshot.v1",
     "control-plane-tranche-v1.json": "mycelium.control_plane_tranche.v1",
     "layer-load-proof-v1.json": "mycelium.layer_load_proof.v1",
+    "route-qualification-v1.json": "mycelium.route_qualification.v1",
 }
 
 

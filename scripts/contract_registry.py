@@ -98,6 +98,15 @@ CONTRACT_SPECS = (
             "mycelium_router/layer_builder.py",
         ),
     ),
+    ContractSpec(
+        "route-qualification-v1.json",
+        "mycelium.route_qualification.v1",
+        (
+            "mycelium_qualification/contracts.py",
+            "mycelium_qualification/evidence.py",
+            "mycelium_qualification/qualifier.py",
+        ),
+    ),
 )
 
 SPECS_BY_FIXTURE = {spec.fixture_name: spec for spec in CONTRACT_SPECS}

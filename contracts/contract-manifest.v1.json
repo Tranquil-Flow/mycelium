@@ -275,6 +275,31 @@
         }
       ],
       "protocol": "mycelium.route_plan.v2"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/route-qualification-v1.json",
+        "sha256": "30b1bcfae0df4aea829e8f6f9c94183faf26035965e6a0eca236af0e8641968b",
+        "size_bytes": 3532
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_qualification/contracts.py",
+          "sha256": "3145f69165b58d78d87696dae75773b87c77a3c99a805a75f80ab1cd0b8f0ebd",
+          "size_bytes": 18858
+        },
+        {
+          "path": "mycelium_qualification/evidence.py",
+          "sha256": "ee0f29c7ff71ddcbc9cb4addd223ab6972ef8b012ea158e84b0d3dbaa810189c",
+          "size_bytes": 8213
+        },
+        {
+          "path": "mycelium_qualification/qualifier.py",
+          "sha256": "6e7555f4216e542b6b5ce2226141e6491de53201f37dfc33a5934e6e52fc4982",
+          "size_bytes": 50770
+        }
+      ],
+      "protocol": "mycelium.route_qualification.v1"
     }
   ],
   "protocol": "mycelium.contract_manifest.v1"

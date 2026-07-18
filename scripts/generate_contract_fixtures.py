@@ -31,6 +31,10 @@ from mycelium_layer_planner.gossip_adapter import (
 )
 from mycelium_layer_planner.planner import plan_snapshot
 from mycelium_layer_planner.serialization import route_plan_to_dict
+from mycelium_qualification.contracts import (
+    route_qualification_to_dict,
+    synthetic_route_qualification_fixture,
+)
 from mycelium_router.layer_builder import build_execution_graph
 from planner_assignment import compile_bound_layer_assignments, validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
@@ -539,6 +543,9 @@ def documents() -> dict[str, dict[str, Any]]:
         "layer-planner-snapshot-v1.json": planner_evidence_snapshot,
         "control-plane-tranche-v1.json": control_plane_tranche,
         "layer-load-proof-v1.json": load_proofs[0],
+        "route-qualification-v1.json": route_qualification_to_dict(
+            synthetic_route_qualification_fixture()
+        ),
     }
     if set(generated) != EXPECTED_FIXTURE_NAMES:
         raise ValueError("generated fixture set differs from authoritative contract registry")
