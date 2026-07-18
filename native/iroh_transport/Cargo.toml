@@ -9,6 +9,16 @@ description = "Clean-room native codec for Mycelium Router wire framing"
 publish = false
 
 [dependencies]
+clap = { version = "4", features = ["derive"] }
+getrandom = "0.3"
+hex = "0.4"
+hkdf = "0.12"
+hmac = "0.12"
+iroh = "=1.0.2"
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision"] }
 sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+zeroize = { version = "1", features = ["derive"] }
