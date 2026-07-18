@@ -97,11 +97,12 @@ def test_minimal_conflicting_token_replay_matches_reference_failure_and_cleanup(
 
         model = GatewayModel(current=MODEL_AUTHORITY)
         state = model.apply(Action.admit(MODEL_AUTHORITY, payload="prompt")).state
+        state = model.apply(Action.start(), state=state).state
         state = model.apply(Action.token(0, "alpha"), state=state).state
         expected = model.apply(Action.token(0, "different"), state=state).state
 
         assert expected.phase is Phase.FAILED
-        assert expected.outcome == "conflicting_token_replay"
+        assert expected.outcome == "token_order_violation"
         assert [event.kind for event in events] == ["accepted", "token", "failed"]
         assert events[-1].code == expected.outcome
         assert service.terminal_event_count(request_id) == expected.terminal_count == 1
@@ -127,7 +128,16 @@ def test_minimal_conflicting_token_replay_matches_reference_failure_and_cleanup(
             "readiness_revoked",
         ),
         (
-            lambda value: clone_qualification(value, deployment_epoch=value.deployment_epoch + 1),
+            lambda value: clone_qualification(
+                value, deployment_id="changed-deployment"
+            ),
+            Action.change_authority("deployment", "changed"),
+            "qualification_mismatch",
+        ),
+        (
+            lambda value: clone_qualification(
+                value, deployment_epoch=value.deployment_epoch + 1
+            ),
             Action.change_authority("epoch", 2),
             "deployment_epoch_changed",
         ),
@@ -185,6 +195,7 @@ def test_completion_revalidates_every_qualification_dimension(
 
         model = GatewayModel(current=MODEL_AUTHORITY)
         state = model.apply(Action.admit(MODEL_AUTHORITY, payload="prompt")).state
+        state = model.apply(Action.start(), state=state).state
         state = model.apply(model_action, state=state).state
         expected = model.apply(Action.complete(), state=state).state
 

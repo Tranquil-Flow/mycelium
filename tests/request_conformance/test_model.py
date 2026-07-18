@@ -43,12 +43,12 @@ def test_admission_requires_exact_current_qualification():
     assert started.state.counters.kv_acquires == 1
 
     variants = (
-        (replace(CURRENT, deployment="deploy-old"), "deployment_changed"),
-        (replace(CURRENT, epoch=6), "epoch_changed"),
+        (replace(CURRENT, deployment="deploy-old"), "qualification_mismatch"),
+        (replace(CURRENT, epoch=6), "deployment_epoch_changed"),
         (replace(CURRENT, path="path-old"), "path_changed"),
-        (replace(CURRENT, evidence="evidence-old"), "evidence_changed"),
-        (replace(CURRENT, qualification="qualification-old"), "qualification_changed"),
-        (replace(CURRENT, ready=False), "route_not_ready"),
+        (replace(CURRENT, evidence="evidence-old"), "qualification_mismatch"),
+        (replace(CURRENT, qualification="qualification-old"), "stale_qualification"),
+        (replace(CURRENT, ready=False), "readiness_revoked"),
     )
     for stale, expected_code in variants:
         rejected = GatewayModel(current=CURRENT).apply(
@@ -62,12 +62,12 @@ def test_admission_requires_exact_current_qualification():
 
 def test_continuous_revalidation_covers_all_authority_dimensions():
     variants = (
-        ("deployment", "deploy-b", "deployment_changed"),
-        ("epoch", 8, "epoch_changed"),
+        ("deployment", "deploy-b", "qualification_mismatch"),
+        ("epoch", 8, "deployment_epoch_changed"),
         ("path", "path-b", "path_changed"),
-        ("evidence", "evidence-b", "evidence_changed"),
-        ("qualification", "qualification-b", "qualification_changed"),
-        ("ready", False, "route_not_ready"),
+        ("evidence", "evidence-b", "qualification_mismatch"),
+        ("qualification", "qualification-b", "stale_qualification"),
+        ("ready", False, "readiness_revoked"),
     )
     for field, value, expected_code in variants:
         model, state = _admitted()
@@ -218,8 +218,23 @@ def test_non_utf8_token_text_fails_as_invalid_backend_token():
 
     assert failed.code == "invalid_backend_token"
     assert failed.state.phase is Phase.FAILED
+    assert failed.state.events[-1].code == "invalid_backend_token"
     assert failed.state.counters.token_events == 0
     assert failed.state.counters.failures == 1
+    assert failed.state.counters.capacity_releases == 1
+    assert failed.state.counters.kv_cleanups == 1
+
+
+def test_oversized_utf8_token_text_fails_before_buffer_side_effects():
+    model, state = _admitted()
+
+    failed = model.apply(Action.token(0, "x" * 1_048_577), state=state)
+
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.events[-1].code == "invalid_backend_token"
+    assert failed.state.counters.token_events == 0
+    assert failed.state.counters.failures == 1
+    assert failed.state.counters.maximum_buffered == 2
     assert failed.state.counters.capacity_releases == 1
     assert failed.state.counters.kv_cleanups == 1
 

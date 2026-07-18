@@ -9,9 +9,10 @@ from __future__ import annotations
 from dataclasses import fields
 import importlib.util
 from pathlib import Path
+import queue
 import sys
 import threading
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from mycelium_qualification.evidence import sha256_bytes
 from mycelium_qualification.qualifier import qualify_route
@@ -110,6 +111,96 @@ class CountingBackend:
         with self._lock:
             self.backend_cancels += 1
         self.release.set()
+
+    def counters(self) -> tuple[int, ...]:
+        with self._lock:
+            return (
+                self.runtime_starts,
+                self.backend_cancels,
+                self.capacity_acquires,
+                self.capacity_releases,
+                self.kv_acquires,
+                self.kv_cleanups,
+                self.active_capacity,
+                self.active_kv,
+            )
+
+
+class ControlledBackend:
+    """Command-driven backend for deterministic generated-trace execution."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._commands: queue.Queue[tuple[object, ...]] = queue.Queue()
+        self.started = threading.Event()
+        self.finished = threading.Event()
+        self.runtime_starts = 0
+        self.backend_cancels = 0
+        self.capacity_acquires = 0
+        self.capacity_releases = 0
+        self.kv_acquires = 0
+        self.kv_cleanups = 0
+        self.active_capacity = 0
+        self.active_kv = 0
+
+    def run(self, request_id, submission, emit_token, is_cancelled):
+        del request_id, submission, is_cancelled
+        with self._lock:
+            self.runtime_starts += 1
+            self.capacity_acquires += 1
+            self.kv_acquires += 1
+            self.active_capacity += 1
+            self.active_kv += 1
+        self.started.set()
+        try:
+            while True:
+                command = self._commands.get()
+                kind = command[0]
+                if kind == "cancel":
+                    return "cancelled"
+                done = cast(threading.Event, command[-2])
+                result = cast(list[BaseException], command[-1])
+                try:
+                    if kind == "token":
+                        emit_token(command[1], command[2])
+                    elif kind == "complete":
+                        return "completed"
+                    else:
+                        raise AssertionError("unknown_controlled_backend_command")
+                except BaseException as exc:
+                    result.append(exc)
+                    raise
+                finally:
+                    done.set()
+        finally:
+            with self._lock:
+                self.active_capacity -= 1
+                self.active_kv -= 1
+                self.capacity_releases += 1
+                self.kv_cleanups += 1
+            self.finished.set()
+
+    def emit(self, token_index: int, text: str) -> BaseException | None:
+        done = threading.Event()
+        result: list[BaseException] = []
+        self._commands.put(("token", token_index, text, done, result))
+        if not done.wait(timeout=2):
+            raise TimeoutError("controlled_backend_token_timeout")
+        return result[0] if result else None
+
+    def complete(self) -> BaseException | None:
+        done = threading.Event()
+        result: list[BaseException] = []
+        self._commands.put(("complete", done, result))
+        if not done.wait(timeout=2):
+            raise TimeoutError("controlled_backend_completion_timeout")
+        return result[0] if result else None
+
+    def cancel(self, request_id: str) -> None:
+        del request_id
+        with self._lock:
+            self.backend_cancels += 1
+        self._commands.put(("cancel",))
 
     def counters(self) -> tuple[int, ...]:
         with self._lock:

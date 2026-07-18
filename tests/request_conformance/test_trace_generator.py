@@ -30,7 +30,7 @@ def test_bounded_generation_is_exhaustive_for_declared_alphabet_and_deterministi
     assert len(first) == 1 + 12 + 12**2 + 12
     assert first == second
     assert len({trace_to_json(trace) for trace in first}) == len(first)
-    assert max(len(trace) for trace in first) == 3
+    assert max(len(trace) for trace in first) == 4
 
 
 def test_race_generation_enumerates_every_ordering_once():
@@ -39,7 +39,8 @@ def test_race_generation_enumerates_every_ordering_once():
     assert len(RACE_ACTIONS) == 5
     assert len(traces) == 120
     assert len({trace_to_json(trace) for trace in traces}) == 120
-    assert all(len(trace) == 6 for trace in traces)
+    assert all(len(trace) == 8 for trace in traces)
+    assert all(trace[2] == Action.reconnect(-1) for trace in traces)
 
 
 def test_reference_replay_is_byte_deterministic_including_side_effect_counters():
@@ -52,6 +53,7 @@ def test_reference_replay_is_byte_deterministic_including_side_effect_counters()
 def test_trace_json_has_stable_schema_and_never_serializes_payload_text():
     trace = (
         Action.admit(CURRENT, payload="private-prompt"),
+        Action.start(),
         Action.token(0, "private-token"),
         Action.complete(),
     )
@@ -59,15 +61,24 @@ def test_trace_json_has_stable_schema_and_never_serializes_payload_text():
     encoded = trace_to_json(trace)
     document = json.loads(encoded)
 
-    assert [item["kind"] for item in document] == ["admit", "token", "complete"]
+    assert [item["kind"] for item in document] == [
+        "admit",
+        "start",
+        "token",
+        "complete",
+    ]
     assert "private-prompt" not in encoded
     assert "private-token" not in encoded
+    assert trace_to_json((Action.token(0, "alpha"),)) != trace_to_json(
+        (Action.token(0, "different"),)
+    )
 
 
 def test_minimizer_returns_deletion_one_minimal_counterexample_with_counters():
     trace = (
         Action.disconnect(),
         Action.admit(CURRENT, payload="private-prompt"),
+        Action.start(),
         Action.token(0, "alpha"),
         Action.token(0, "different"),
         Action.change_authority("epoch", 8),
@@ -78,7 +89,7 @@ def test_minimizer_returns_deletion_one_minimal_counterexample_with_counters():
         state = result.state
         return (
             state.phase is Phase.FAILED
-            and state.outcome == "conflicting_token_replay"
+            and state.outcome == "token_order_violation"
             and state.counters.token_events == 1
             and state.counters.failures == 1
             and state.counters.capacity_releases == 1
@@ -87,7 +98,12 @@ def test_minimizer_returns_deletion_one_minimal_counterexample_with_counters():
 
     minimized = minimize_trace(trace, failure)
 
-    assert [action.kind for action in minimized] == ["admit", "token", "token"]
+    assert [action.kind for action in minimized] == [
+        "admit",
+        "start",
+        "token",
+        "token",
+    ]
     assert failure(minimized)
     for index in range(len(minimized)):
         assert not failure(minimized[:index] + minimized[index + 1 :])

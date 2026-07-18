@@ -13,6 +13,7 @@ from mycelium_request_gateway.service import RequestGatewayService
 from .support import (
     CountingBackend,
     MutableQualificationSource,
+    clone_qualification,
     drain,
     submission,
     synthetic_qualification,
@@ -324,6 +325,107 @@ def test_non_utf8_backend_token_fails_closed_with_stable_code_and_cleanup():
         assert [event.kind for event in events] == ["accepted", "failed"]
         assert events[-1].code == "invalid_backend_token"
         assert service.terminal_event_count(request_id) == 1
+        assert backend.counters() == (1, 1, 1, 1, 1, 1, 0, 0)
+    finally:
+        service.close()
+
+
+def test_revocation_between_admission_and_start_never_enters_or_cancels_backend():
+    qualification = synthetic_qualification()
+    source = PausingRevalidationSource(qualification)
+
+    def script(_backend, _request_id, _submission, _emit_token, _is_cancelled):
+        raise AssertionError("revoked request reached backend runtime")
+
+    backend = CountingBackend(script)
+    service = RequestGatewayService(
+        qualification_source=source,
+        backend=backend,
+        request_id_source=lambda: "request-revoked-before-start",
+        max_buffered_events=4,
+    )
+    try:
+        request_id = service.submit(submission(qualification))
+        assert source.blocked.wait(timeout=2)
+        source.value = clone_qualification(
+            qualification,
+            route_ready=False,
+            reason_codes=("synthetic_revocation",),
+        )
+        source.release.set()
+        events = drain(service, request_id)
+
+        assert [event.kind for event in events] == ["accepted", "failed"]
+        assert events[-1].code == "readiness_revoked"
+        assert backend.finished.is_set() is False
+        assert backend.counters() == (0, 0, 0, 0, 0, 0, 0, 0)
+    finally:
+        source.release.set()
+        service.close()
+
+
+def test_generated_request_id_collision_fails_before_gateway_side_effects():
+    qualification = synthetic_qualification()
+
+    def script(backend, _request_id, _submission, _emit_token, is_cancelled):
+        backend.release.wait()
+        return "cancelled" if is_cancelled() else "completed"
+
+    backend = CountingBackend(script)
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "request-collision",
+        max_buffered_events=4,
+        max_sessions=2,
+    )
+    try:
+        request_id = service.submit(submission(qualification, prompt="same"))
+        assert backend.started.wait(timeout=2)
+        before = (
+            backend.counters(),
+            service.metrics_snapshot(),
+            service.buffered_event_count(request_id),
+            service.terminal_event_count(request_id),
+        )
+
+        for prompt in ("same", "different"):
+            with pytest.raises(AdmissionError) as collision:
+                service.submit(submission(qualification, prompt=prompt))
+            assert collision.value.code == "duplicate_request_id"
+            after = (
+                backend.counters(),
+                service.metrics_snapshot(),
+                service.buffered_event_count(request_id),
+                service.terminal_event_count(request_id),
+            )
+            assert after == before
+    finally:
+        service.close()
+
+
+def test_oversized_backend_token_fails_before_buffer_growth():
+    qualification = synthetic_qualification()
+
+    def script(_backend, _request_id, _submission, emit_token, _is_cancelled):
+        emit_token(0, "x" * 1_048_577)
+        return "completed"
+
+    backend = CountingBackend(script)
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "request-oversized-token",
+        max_buffered_events=4,
+    )
+    try:
+        request_id = service.submit(submission(qualification))
+        events = drain(service, request_id)
+
+        assert [event.kind for event in events] == ["accepted", "failed"]
+        assert events[-1].code == "invalid_backend_token"
+        assert service.maximum_observed_buffered_events(request_id) == 2
+        assert service.metrics_snapshot()["token_events_total"] == 0
         assert backend.counters() == (1, 1, 1, 1, 1, 1, 0, 0)
     finally:
         service.close()
