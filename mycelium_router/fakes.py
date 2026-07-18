@@ -310,7 +310,10 @@ class InProcessMesh:
       entry = self.routers.get(entry_node_id) if entry_node_id else None
       if entry is None:
          raise ValueError("unknown_mesh_entry")
-      if not entry.receive_manifest_locked(locked):
+      if not entry.receive_manifest_locked(
+         locked,
+         source_node_id=source_node_id,
+      ):
          raise ValueError("manifest_lock_rejected")
 
    def send_failure_report(

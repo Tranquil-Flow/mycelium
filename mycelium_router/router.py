@@ -65,8 +65,11 @@ class Router:
    def request_status(self, request_id):
       return self.entry.request_status(request_id)
 
-   def receive_manifest_locked(self, locked):
-      return self.entry.receive_manifest_locked(locked)
+   def receive_manifest_locked(self, locked, *, source_node_id=None):
+      return self.entry.receive_manifest_locked(
+         locked,
+         source_node_id=source_node_id,
+      )
 
    def get_request(self, request_id):
       return self.entry.get_request(request_id)

@@ -300,7 +300,14 @@ class LoopbackSocketMesh:
       if action == _ACTION_ENTRY_LOCK:
          if not isinstance(message, ManifestLocked):
             raise SocketTransportError("invalid_manifest_lock_message")
-         router.receive_manifest_locked(message)
+         router.receive_manifest_locked(
+            message,
+            source_node_id=getattr(
+               self._dispatch_context,
+               "source_node_id",
+               None,
+            ),
+         )
          return
       if action == _ACTION_MANIFEST_DELTA:
          if not isinstance(message, ManifestDelta):

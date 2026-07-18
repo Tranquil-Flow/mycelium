@@ -208,10 +208,26 @@ class EntryCoordinator:
       self.transport.send_hop(header, context)
       return request.request_id
 
-   def receive_manifest_locked(self, locked: ManifestLocked) -> bool:
+   def receive_manifest_locked(
+      self,
+      locked: ManifestLocked,
+      *,
+      source_node_id: str | None = None,
+   ) -> bool:
       pending = self._pending_prefills.get(locked.request_id)
       if pending is None or pending.state_machine.state != "PREFILL":
          return False
+      if source_node_id is not None:
+         if not source_node_id or not locked.manifest.ordered_hops:
+            return False
+         final_placement_id = locked.manifest.ordered_hops[-1].placement_id
+         if not any(
+            placement.placement_id == final_placement_id
+            and placement.node_id == source_node_id
+            for stage in pending.graph.stages
+            for placement in stage.placements
+         ):
+            return False
       if (
          locked.path_id != pending.build.path_id
          or locked.path_attempt != pending.build.path_attempt

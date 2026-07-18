@@ -122,6 +122,34 @@ class InProcessMeshTests(unittest.TestCase):
             node_id,
          )
 
+   def test_manifest_lock_source_must_own_final_locked_hop(self):
+      captured_locks = []
+      receive_manifest_locked = self.entry.receive_manifest_locked
+
+      def capture_manifest_lock(locked, **_kwargs):
+         captured_locks.append(locked)
+         return True
+
+      self.entry.receive_manifest_locked = capture_manifest_lock
+      try:
+         self.entry.start_distributed_prefill(
+            self.request,
+            self.sink,
+            excluded_placements=frozenset({"node-b-stage-000"}),
+         )
+      finally:
+         self.entry.receive_manifest_locked = receive_manifest_locked
+
+      self.assertEqual(self.entry.request_status(self.request.request_id), "PREFILL")
+      self.assertEqual(len(captured_locks), 1)
+      locked = captured_locks[0]
+      self.assertEqual(locked.manifest.ordered_hops[-1].placement_id, "node-d-stage-002")
+
+      with self.assertRaisesRegex(ValueError, "manifest_lock_rejected"):
+         self.mesh.transport_for("node-c").send_manifest_locked(locked)
+
+      self.assertEqual(self.entry.request_status(self.request.request_id), "PREFILL")
+
    def test_failure_report_source_must_own_reported_placement(self):
       self.entry.entry.config = replace(
          self.entry.entry.config,

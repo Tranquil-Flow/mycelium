@@ -112,6 +112,68 @@ class LoopbackSocketMeshTests(unittest.TestCase):
       finally:
          mesh.close()
 
+   def test_tcp_manifest_lock_dispatch_rejects_non_final_hop_source(self):
+      graph = three_device_graph()
+      states = state_table(slow_b_bandwidth=True)
+      states["node-d"] = replace(states["node-a"], node_id="node-d")
+      capacity = FakeCapacityPort()
+      clock = ManualClock()
+      mesh = LoopbackSocketMesh()
+      routers = {}
+      request = replace(
+         request_fixture(),
+         request_id="request-socket-manifest-lock-origin",
+      )
+
+      for node_id in ("node-a", "node-c", "node-d"):
+         router = Router(
+            node_id=node_id,
+            topology=FakeTopologyProvider(graph),
+            device_states=FakeDeviceStateProvider(states),
+            capacity=capacity,
+            runtime=FakeRuntimePort(),
+            transport=mesh.transport_for(node_id),
+            clock=clock,
+            id_source=SequenceIdSource(),
+            config=RouterConfig(prefill_chunk_size_tokens=0),
+         )
+         mesh.register_router(node_id, router)
+         routers[node_id] = router
+
+      mesh.start()
+      try:
+         entry = routers["node-a"]
+         captured_locks = []
+         receive_manifest_locked = entry.receive_manifest_locked
+
+         def capture_manifest_lock(locked, **_kwargs):
+            captured_locks.append(locked)
+            return True
+
+         entry.receive_manifest_locked = capture_manifest_lock
+         try:
+            entry.start_distributed_prefill(
+               request,
+               InMemoryClientSink(),
+               excluded_placements=frozenset({"node-b-stage-000"}),
+            )
+         finally:
+            entry.receive_manifest_locked = receive_manifest_locked
+
+         self.assertEqual(entry.request_status(request.request_id), "PREFILL")
+         self.assertEqual(len(captured_locks), 1)
+         locked = captured_locks[0]
+         self.assertEqual(
+            locked.manifest.ordered_hops[-1].placement_id,
+            "node-d-stage-002",
+         )
+
+         mesh.transport_for("node-c").send_manifest_locked(locked)
+
+         self.assertEqual(entry.request_status(request.request_id), "PREFILL")
+      finally:
+         mesh.close()
+
    def test_tcp_failure_report_dispatch_preserves_registered_source_identity(self):
       graph = three_device_graph()
       states = state_table(slow_b_bandwidth=True)
