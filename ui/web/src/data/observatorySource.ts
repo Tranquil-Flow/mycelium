@@ -145,8 +145,8 @@ export interface LiveObservatorySourceOptions {
   readonly cancelSchedule?: CancelSchedule;
 }
 
-const browserFetch: LiveFetch = async (url, init) => fetch(url, init);
-const browserEventStreamFactory: LiveEventStreamFactory = (url) =>
+export const browserFetch: LiveFetch = async (url, init) => fetch(url, init);
+export const browserEventStreamFactory: LiveEventStreamFactory = (url) =>
   new EventSource(url) as unknown as LiveEventStream;
 const browserSchedule: Schedule = (callback, delayMs) => setTimeout(callback, delayMs);
 const browserCancelSchedule: CancelSchedule = (handle) => clearTimeout(handle);
