@@ -1,0 +1,41 @@
+"""Public surface for the read-only qualification evidence-diff inspector."""
+
+from .inspector import (
+    CLAIM_BOUNDARY,
+    MANIFEST_PROTOCOL,
+    MAX_CHANGES,
+    MAX_DOCUMENT_COUNT,
+    MAX_FILE_BYTES,
+    MAX_FILE_COUNT,
+    MAX_JSON_DEPTH,
+    MAX_JSON_NODES,
+    MAX_MANIFEST_BYTES,
+    MAX_MANIFEST_COUNT,
+    MAX_PATH_BYTES,
+    MAX_PATH_COMPONENT_BYTES,
+    MAX_PATH_COMPONENTS,
+    MAX_TOTAL_BYTES,
+    REPORT_PROTOCOL,
+    EvidenceDiffError,
+    inspect_evidence_diff,
+)
+
+__all__ = [
+    "CLAIM_BOUNDARY",
+    "MANIFEST_PROTOCOL",
+    "MAX_CHANGES",
+    "MAX_DOCUMENT_COUNT",
+    "MAX_FILE_BYTES",
+    "MAX_FILE_COUNT",
+    "MAX_JSON_DEPTH",
+    "MAX_JSON_NODES",
+    "MAX_MANIFEST_BYTES",
+    "MAX_MANIFEST_COUNT",
+    "MAX_PATH_BYTES",
+    "MAX_PATH_COMPONENT_BYTES",
+    "MAX_PATH_COMPONENTS",
+    "MAX_TOTAL_BYTES",
+    "REPORT_PROTOCOL",
+    "EvidenceDiffError",
+    "inspect_evidence_diff",
+]
