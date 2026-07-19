@@ -43,6 +43,7 @@ _CONTRACT_FIELDS = frozenset(
         "numeric_parity_digest",
         "execution_trace_digest",
         "kv_ownership_digest",
+        "lifecycle_evidence_digest",
         "negative_runs_digest",
         "source_provenance_digest",
         "source_manifest_digest",
@@ -92,6 +93,7 @@ _DIGEST_FIELDS = (
     "numeric_parity_digest",
     "execution_trace_digest",
     "kv_ownership_digest",
+    "lifecycle_evidence_digest",
     "negative_runs_digest",
     "source_provenance_digest",
     "source_manifest_digest",
@@ -166,6 +168,7 @@ class RouteQualificationV1:
     numeric_parity_digest: str
     execution_trace_digest: str
     kv_ownership_digest: str
+    lifecycle_evidence_digest: str
     negative_runs_digest: str
     source_provenance_digest: str
     source_manifest_digest: str
@@ -246,6 +249,7 @@ def route_qualification_to_dict(record: RouteQualificationV1) -> dict[str, Any]:
         "numeric_parity_digest": record.numeric_parity_digest,
         "execution_trace_digest": record.execution_trace_digest,
         "kv_ownership_digest": record.kv_ownership_digest,
+        "lifecycle_evidence_digest": record.lifecycle_evidence_digest,
         "negative_runs_digest": record.negative_runs_digest,
         "source_provenance_digest": record.source_provenance_digest,
         "source_manifest_digest": record.source_manifest_digest,
@@ -313,6 +317,7 @@ def _record_from_dict(document: dict[str, Any]) -> RouteQualificationV1:
             numeric_parity_digest=document["numeric_parity_digest"],
             execution_trace_digest=document["execution_trace_digest"],
             kv_ownership_digest=document["kv_ownership_digest"],
+            lifecycle_evidence_digest=document["lifecycle_evidence_digest"],
             negative_runs_digest=document["negative_runs_digest"],
             source_provenance_digest=document["source_provenance_digest"],
             source_manifest_digest=document["source_manifest_digest"],
@@ -457,6 +462,7 @@ def synthetic_route_qualification_fixture() -> RouteQualificationV1:
         numeric_parity_digest=zero,
         execution_trace_digest=zero,
         kv_ownership_digest=zero,
+        lifecycle_evidence_digest=zero,
         negative_runs_digest=zero,
         source_provenance_digest=zero,
         source_manifest_digest=zero,

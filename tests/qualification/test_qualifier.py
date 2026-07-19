@@ -102,6 +102,9 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
         challenge["execution_trace"]
     )
     assert document["kv_ownership_digest"] == sha256_document(challenge["kv_ownership"])
+    assert document["lifecycle_evidence_digest"] == sha256_document(
+        challenge["lifecycle_evidence"]
+    )
     assert document["timing_evidence_digest"] == sha256_document(
         challenge["transport"]["hop_timings"]
     )
@@ -539,6 +542,165 @@ def test_local_kv_ownership_is_stage_and_process_bound(qualification_case: Any) 
     _assert_rejected(case, "kv_ownership_invalid")
 
 
+def test_cancellation_lifecycle_requires_distributed_observation_and_cleanup(
+    qualification_case: Any,
+) -> None:
+    pristine = qualification_case.clone()
+    cancellation = qualification_case.documents["run/route-challenge.json"][
+        "lifecycle_evidence"
+    ]["cancellation"]
+    cancellation["transport_cancellation_observed"] = False
+    _assert_rejected(qualification_case, "cancellation_not_observed")
+
+    case = pristine.clone()
+    cancellation = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "cancellation"
+    ]
+    cancellation["post_cancel_token_count"] = 1
+    _assert_rejected(case, "post_cancel_token_emitted")
+
+    case = pristine.clone()
+    cancellation = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "cancellation"
+    ]
+    cancellation["remote_kv_released"] = False
+    _assert_rejected(case, "cancellation_cleanup_incomplete")
+
+    case = pristine.clone()
+    cancellation = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "cancellation"
+    ]
+    cancellation["capacity_released"] = False
+    _assert_rejected(case, "cancellation_cleanup_incomplete")
+
+    case = pristine
+    cancellation = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "cancellation"
+    ]
+    cancellation["pending_deliveries"] = 1
+    _assert_rejected(case, "cancellation_cleanup_incomplete")
+
+
+def test_recovery_lifecycle_requires_real_identity_and_generation_rotation(
+    qualification_case: Any,
+) -> None:
+    pristine = qualification_case.clone()
+    recovery = qualification_case.documents["run/route-challenge.json"][
+        "lifecycle_evidence"
+    ]["recovery"]
+    recovery["old_process_id"] = recovery["new_process_id"]
+    _assert_rejected(qualification_case, "recovery_identity_not_rotated")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["old_endpoint_id"] = recovery["new_endpoint_id"]
+    _assert_rejected(case, "recovery_identity_not_rotated")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["new_peer_generation"] = recovery["old_peer_generation"]
+    _assert_rejected(case, "recovery_generation_not_rotated")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["new_topology_version"] = recovery["old_topology_version"]
+    _assert_rejected(case, "recovery_topology_invalid")
+
+    case = pristine
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["new_path_attempt"] = recovery["old_path_attempt"]
+    _assert_rejected(case, "recovery_path_attempt_invalid")
+
+
+def test_recovery_lifecycle_requires_replay_continuity_stale_rejection_and_cleanup(
+    qualification_case: Any,
+) -> None:
+    pristine = qualification_case.clone()
+    recovery = qualification_case.documents["run/route-challenge.json"][
+        "lifecycle_evidence"
+    ]["recovery"]
+    recovery["recovery_phase"] = "PREFILL"
+    _assert_rejected(qualification_case, "recovery_prefill_missing")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["stale_generation_rejected"] = False
+    _assert_rejected(case, "stale_generation_accepted")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["stale_frame_rejected"] = False
+    _assert_rejected(case, "stale_generation_accepted")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["remote_disconnect_observed"] = False
+    _assert_rejected(case, "recovery_not_observed")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["peer_drop_observed"] = False
+    _assert_rejected(case, "recovery_not_observed")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["generated_token_ids_after_recovery"].pop()
+    _assert_rejected(case, "recovery_token_continuity_invalid")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["event_sequences"][3] = recovery["event_sequences"][2]
+    _assert_rejected(case, "sequence_replay")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["event_sequences"].pop()
+    _assert_rejected(case, "sequence_replay")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["full_model_fallback"] = True
+    _assert_rejected(case, "full_model_fallback")
+
+    case = pristine.clone()
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["capacity_released"] = False
+    _assert_rejected(case, "recovery_cleanup_incomplete")
+
+    case = pristine
+    recovery = case.documents["run/route-challenge.json"]["lifecycle_evidence"][
+        "recovery"
+    ]
+    recovery["pending_deliveries"] = 1
+    _assert_rejected(case, "recovery_cleanup_incomplete")
+
+
 def test_stale_load_proof_is_rejected(qualification_case: Any) -> None:
     challenge = qualification_case.documents["run/route-challenge.json"]
     challenge["stage_evidence"][0]["load_proof_generated_at_unix_ms"] = (
@@ -585,6 +747,18 @@ def test_missing_negative_run_evidence_is_rejected(qualification_case: Any) -> N
                 "stage_reports"
             ][0].__setitem__("unknown_field", True),
             "numeric_parity_invalid",
+        ),
+        (
+            lambda case: case.documents["run/route-challenge.json"][
+                "lifecycle_evidence"
+            ].__setitem__("unknown_field", True),
+            "lifecycle_evidence_invalid",
+        ),
+        (
+            lambda case: case.documents["run/route-challenge.json"][
+                "lifecycle_evidence"
+            ]["recovery"].__setitem__("unknown_field", True),
+            "recovery_evidence_invalid",
         ),
     ],
 )

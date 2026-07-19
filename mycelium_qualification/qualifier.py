@@ -987,6 +987,210 @@ def _validate_kv_ownership(
     return [ownership_by_stage[binding.stage_id] for binding in bindings]
 
 
+def _validate_lifecycle_evidence(
+    value: Any,
+    *,
+    run_id: str,
+    path_manifest: dict[str, Any],
+    graph: dict[str, Any],
+    bindings: tuple[StageQualificationBinding, ...],
+    token_parity: dict[str, Any],
+) -> dict[str, Any]:
+    document = _as_mapping(value, "lifecycle_evidence_invalid")
+    _require(
+        set(document) == {"kind", "run_id", "cancellation", "recovery"}
+        and document["kind"] == "route_lifecycle_evidence_v1"
+        and document["run_id"] == run_id,
+        "lifecycle_evidence_invalid",
+    )
+
+    cancellation = _as_mapping(document["cancellation"], "cancellation_evidence_invalid")
+    cancellation_fields = {
+        "request_id",
+        "path_id",
+        "path_attempt",
+        "path_cancellation_observed",
+        "transport_cancellation_observed",
+        "entry_terminal_state",
+        "remote_terminal_state",
+        "post_cancel_token_count",
+        "local_kv_released",
+        "remote_kv_released",
+        "reservations_released",
+        "capacity_released",
+        "pending_deliveries",
+        "trace_digest",
+    }
+    _require(set(cancellation) == cancellation_fields, "cancellation_evidence_invalid")
+    _require(
+        _nonempty_string(cancellation["request_id"])
+        and cancellation["request_id"] != path_manifest["request_id"]
+        and _nonempty_string(cancellation["path_id"])
+        and cancellation["path_id"] != path_manifest["path_id"]
+        and _integer(cancellation["path_attempt"], minimum=1)
+        and is_sha256_ref(cancellation["trace_digest"]),
+        "cancellation_evidence_invalid",
+    )
+    _require(
+        cancellation["path_cancellation_observed"] is True
+        and cancellation["transport_cancellation_observed"] is True
+        and cancellation["entry_terminal_state"] == "cancelled"
+        and cancellation["remote_terminal_state"] == "cancelled",
+        "cancellation_not_observed",
+    )
+    _require(
+        _integer(cancellation["post_cancel_token_count"])
+        and cancellation["post_cancel_token_count"] == 0,
+        "post_cancel_token_emitted",
+    )
+    _require(
+        cancellation["local_kv_released"] is True
+        and cancellation["remote_kv_released"] is True
+        and cancellation["reservations_released"] is True
+        and cancellation["capacity_released"] is True
+        and _integer(cancellation["pending_deliveries"])
+        and cancellation["pending_deliveries"] == 0,
+        "cancellation_cleanup_incomplete",
+    )
+
+    recovery = _as_mapping(document["recovery"], "recovery_evidence_invalid")
+    recovery_fields = {
+        "request_id",
+        "failed_stage_id",
+        "old_placement_id",
+        "replacement_placement_id",
+        "old_process_id",
+        "new_process_id",
+        "process_host_id",
+        "old_endpoint_id",
+        "new_endpoint_id",
+        "old_peer_generation",
+        "new_peer_generation",
+        "old_topology_version",
+        "new_topology_version",
+        "old_path_attempt",
+        "new_path_attempt",
+        "failure_observed",
+        "remote_disconnect_observed",
+        "peer_drop_observed",
+        "old_process_exited",
+        "replacement_process_started",
+        "stale_generation_rejected",
+        "stale_frame_rejected",
+        "recovery_phase",
+        "recovery_prefill_observed",
+        "generated_token_ids_before_failure",
+        "generated_token_ids_after_recovery",
+        "final_token_ids",
+        "reference_token_ids",
+        "event_sequences",
+        "full_model_fallback",
+        "local_kv_released",
+        "remote_kv_released",
+        "reservations_released",
+        "capacity_released",
+        "pending_deliveries",
+        "trace_digest",
+    }
+    _require(set(recovery) == recovery_fields, "recovery_evidence_invalid")
+    failed_stage_id = recovery["failed_stage_id"]
+    bindings_by_stage = {binding.stage_id: binding for binding in bindings}
+    _require(
+        _nonempty_string(failed_stage_id) and failed_stage_id in bindings_by_stage,
+        "recovery_stage_mismatch",
+    )
+    binding = bindings_by_stage[failed_stage_id]
+    _require(
+        recovery["request_id"] == path_manifest["request_id"]
+        and recovery["replacement_placement_id"] == binding.placement_id
+        and recovery["new_process_id"] == binding.process_id
+        and recovery["process_host_id"] == binding.process_host_id
+        and recovery["new_endpoint_id"] == binding.endpoint_id,
+        "recovery_stage_mismatch",
+    )
+    _require(
+        _nonempty_string(recovery["old_placement_id"])
+        and recovery["old_placement_id"] != recovery["replacement_placement_id"]
+        and _integer(recovery["old_process_id"], minimum=1)
+        and recovery["old_process_id"] != recovery["new_process_id"]
+        and _nonempty_string(recovery["old_endpoint_id"])
+        and recovery["old_endpoint_id"] != recovery["new_endpoint_id"],
+        "recovery_identity_not_rotated",
+    )
+    _require(
+        _integer(recovery["old_peer_generation"])
+        and _integer(recovery["new_peer_generation"], minimum=1)
+        and recovery["new_peer_generation"] > recovery["old_peer_generation"],
+        "recovery_generation_not_rotated",
+    )
+    _require(
+        _integer(recovery["old_topology_version"])
+        and _integer(recovery["new_topology_version"], minimum=1)
+        and recovery["old_topology_version"] < recovery["new_topology_version"]
+        and recovery["new_topology_version"] == graph["topology_version"],
+        "recovery_topology_invalid",
+    )
+    _require(
+        _integer(recovery["old_path_attempt"], minimum=1)
+        and _integer(recovery["new_path_attempt"], minimum=2)
+        and recovery["old_path_attempt"] < recovery["new_path_attempt"]
+        and recovery["new_path_attempt"] == path_manifest["path_attempt"],
+        "recovery_path_attempt_invalid",
+    )
+    _require(
+        recovery["failure_observed"] is True
+        and recovery["remote_disconnect_observed"] is True
+        and recovery["peer_drop_observed"] is True
+        and recovery["old_process_exited"] is True
+        and recovery["replacement_process_started"] is True,
+        "recovery_not_observed",
+    )
+    _require(
+        recovery["stale_generation_rejected"] is True
+        and recovery["stale_frame_rejected"] is True,
+        "stale_generation_accepted",
+    )
+    _require(
+        recovery["recovery_phase"] == "RECOVERY_PREFILL"
+        and recovery["recovery_prefill_observed"] is True,
+        "recovery_prefill_missing",
+    )
+    before = recovery["generated_token_ids_before_failure"]
+    after = recovery["generated_token_ids_after_recovery"]
+    final = recovery["final_token_ids"]
+    reference = recovery["reference_token_ids"]
+    _require(
+        isinstance(before, list)
+        and isinstance(after, list)
+        and isinstance(final, list)
+        and isinstance(reference, list)
+        and bool(before)
+        and bool(after)
+        and all(_integer(token) for token in before + after + final + reference)
+        and before + after == final
+        and final == reference == token_parity["distributed_token_ids"]
+        and final == token_parity["reference_token_ids"],
+        "recovery_token_continuity_invalid",
+    )
+    _require(
+        _strict_sequences(recovery["event_sequences"], minimum_count=len(final))
+        and recovery["event_sequences"] == token_parity["event_sequences"][1:],
+        "sequence_replay",
+    )
+    _require(recovery["full_model_fallback"] is False, "full_model_fallback")
+    _require(
+        recovery["local_kv_released"] is True
+        and recovery["remote_kv_released"] is True
+        and recovery["reservations_released"] is True
+        and recovery["capacity_released"] is True
+        and _integer(recovery["pending_deliveries"])
+        and recovery["pending_deliveries"] == 0,
+        "recovery_cleanup_incomplete",
+    )
+    _require(is_sha256_ref(recovery["trace_digest"]), "recovery_evidence_invalid")
+    return document
+
+
 def _validate_negative_runs(value: Any, run_id: str) -> dict[str, Any]:
     document = _as_mapping(value, "missing_negative_run_evidence")
     _require(
@@ -1062,6 +1266,7 @@ def qualify_route(
             "deployment_epoch", "topology_version", "model_id", "resolved_commit",
             "manifest_digest", "path_manifest", "stage_evidence", "transport",
             "token_parity", "numeric_parity", "execution_trace", "kv_ownership",
+            "lifecycle_evidence",
         },
         "route_challenge_invalid",
     )
@@ -1069,8 +1274,9 @@ def qualify_route(
         challenge.get("kind") == "route_challenge_evidence_v1",
         "route_challenge_invalid",
     )
-    run_id = challenge.get("run_id")
-    _require(_nonempty_string(run_id), "route_challenge_invalid")
+    run_id_value = challenge.get("run_id")
+    _require(_nonempty_string(run_id_value), "route_challenge_invalid")
+    run_id = str(run_id_value)
     _require(
         evidence_manifest.get("run_id") == run_id,
         "evidence_manifest_run_id_mismatch",
@@ -1152,6 +1358,14 @@ def qualify_route(
     kv_ownership = _validate_kv_ownership(
         challenge.get("kv_ownership"), bindings=bindings, assignments=assignments
     )
+    lifecycle_evidence = _validate_lifecycle_evidence(
+        challenge.get("lifecycle_evidence"),
+        run_id=run_id,
+        path_manifest=challenge["path_manifest"],
+        graph=graph,
+        bindings=bindings,
+        token_parity=token_parity,
+    )
     negative_runs = _validate_negative_runs(documents["negative_runs"], run_id)
 
     path_manifest = challenge["path_manifest"]
@@ -1164,6 +1378,7 @@ def qualify_route(
         "evidence_manifest_digest": manifest_binding,
         "execution_graph_digest": sha256_document(graph),
         "path_manifest_digest": sha256_document(path_manifest),
+        "lifecycle_evidence_digest": sha256_document(lifecycle_evidence),
         "negative_runs_digest": sha256_document(negative_runs),
     }
     record_values = dict(
@@ -1222,6 +1437,7 @@ def qualify_route(
         numeric_parity_digest=sha256_document(numeric_parity),
         execution_trace_digest=sha256_document(execution_trace),
         kv_ownership_digest=sha256_document(kv_ownership),
+        lifecycle_evidence_digest=sha256_document(lifecycle_evidence),
         negative_runs_digest=sha256_document(negative_runs),
         source_provenance_digest=sha256_document(source_provenance),
         source_manifest_digest=source_manifest_digest,
@@ -1233,7 +1449,8 @@ def qualify_route(
         claim_boundary=(
             "all RouteQualificationV1 identity, signed load proof, physical transport, timing, "
             "tensor scope, execution trace, token/output/numeric parity, local KV ownership, "
-            "negative-run, provenance, and immutable evidence-manifest gates passed"
+            "cancellation/recovery lifecycle, negative-run, provenance, and immutable "
+            "evidence-manifest gates passed"
         ),
     )
     record = object.__new__(RouteQualificationV1)

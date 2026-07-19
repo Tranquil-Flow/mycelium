@@ -53,6 +53,7 @@ EXPECTED_FIELDS = {
     "numeric_parity_digest",
     "execution_trace_digest",
     "kv_ownership_digest",
+    "lifecycle_evidence_digest",
     "negative_runs_digest",
     "source_provenance_digest",
     "source_manifest_digest",
