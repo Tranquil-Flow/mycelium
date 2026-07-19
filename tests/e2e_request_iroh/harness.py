@@ -166,14 +166,21 @@ class _RunningSidecar:
         process = self.process
         if process is None:
             return ""
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-        return process.stderr.read() if process.stderr else ""
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            if process.stderr is None or process.stderr.closed:
+                return ""
+            return process.stderr.read()
+        finally:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
 
 
 @dataclass(frozen=True)

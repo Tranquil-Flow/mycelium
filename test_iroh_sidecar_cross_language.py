@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -54,26 +56,32 @@ class RunningSidecar:
             os.write(write_fd, secret)
         finally:
             os.close(write_fd)
-        self.process = subprocess.Popen(
-            [
-                str(BINARY),
-                "--uds",
-                str(self.socket_path),
-                "--bootstrap-fd",
-                str(read_fd),
-                "--local-only",
-                "--queue-capacity",
-                str(queue_capacity),
-            ],
-            cwd=ROOT,
-            pass_fds=(read_fd,),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        os.close(read_fd)
-        self.ready = self._read_ready()
+        try:
+            self.process = subprocess.Popen(
+                [
+                    str(BINARY),
+                    "--uds",
+                    str(self.socket_path),
+                    "--bootstrap-fd",
+                    str(read_fd),
+                    "--local-only",
+                    "--queue-capacity",
+                    str(queue_capacity),
+                ],
+                cwd=ROOT,
+                pass_fds=(read_fd,),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        finally:
+            os.close(read_fd)
+        try:
+            self.ready = self._read_ready()
+        except BaseException:
+            self.stop()
+            raise
 
     def _read_ready(self) -> dict[str, Any]:
         assert self.process.stdout is not None
@@ -96,14 +104,22 @@ class RunningSidecar:
         return client
 
     def stop(self) -> str:
-        if self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
-        return self.process.stderr.read() if self.process.stderr else ""
+        process = self.process
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            if process.stderr is None or process.stderr.closed:
+                return ""
+            return process.stderr.read()
+        finally:
+            for stream in (process.stdout, process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
 
 
 @pytest.fixture
@@ -113,6 +129,75 @@ def short_root():
         yield root
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def test_running_sidecar_stop_closes_captured_child_streams() -> None:
+    sidecar = object.__new__(RunningSidecar)
+    stdout = io.StringIO("ready\n")
+    stderr = io.StringIO("diagnostic\n")
+    sidecar.__dict__["process"] = SimpleNamespace(
+        stdout=stdout,
+        stderr=stderr,
+        poll=lambda: 0,
+    )
+
+    assert sidecar.stop() == "diagnostic\n"
+    assert stdout.closed is True
+    assert stderr.closed is True
+    assert sidecar.stop() == ""
+
+
+def test_running_sidecar_init_closes_bootstrap_fd_when_popen_fails(
+    monkeypatch,
+) -> None:
+    read_fd, write_fd = os.pipe()
+    monkeypatch.setattr(os, "pipe", lambda: (read_fd, write_fd))
+
+    def fail_popen(*_args, **_kwargs):
+        raise OSError("synthetic spawn failure")
+
+    monkeypatch.setattr(subprocess, "Popen", fail_popen)
+    try:
+        with pytest.raises(OSError, match="synthetic spawn failure"):
+            RunningSidecar(Path("/unused"), b"s" * 32)
+        with pytest.raises(OSError):
+            os.fstat(read_fd)
+    finally:
+        for descriptor in (read_fd, write_fd):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def test_running_sidecar_init_stops_child_when_readiness_validation_fails(
+    monkeypatch,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    terminated = threading.Event()
+    process = SimpleNamespace(
+        stdout=stdout,
+        stderr=stderr,
+        poll=lambda: None,
+        terminate=terminated.set,
+        wait=lambda **_kwargs: 0,
+    )
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+
+    def reject_ready(_self):
+        raise ValueError("synthetic invalid readiness")
+
+    monkeypatch.setattr(RunningSidecar, "_read_ready", reject_ready)
+    try:
+        with pytest.raises(ValueError, match="synthetic invalid readiness"):
+            RunningSidecar(Path("/unused"), b"s" * 32)
+        assert terminated.is_set()
+        assert stdout.closed is True
+        assert stderr.closed is True
+    finally:
+        stdout.close()
+        stderr.close()
 
 
 @pytest.fixture

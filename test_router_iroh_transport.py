@@ -143,6 +143,39 @@ class _FakeClient:
         self.hub.cancels.append(message_id)
 
 
+class _PausedAcquireSemaphore:
+    """Pause first successful non-blocking acquire at a deterministic race point."""
+
+    def __init__(self, delegate) -> None:
+        self._delegate = delegate
+        self.entered = threading.Event()
+        self.resume = threading.Event()
+        self._pause_next = True
+        self._lock = threading.Lock()
+
+    def acquire(self, *args, **kwargs) -> bool:
+        acquired = self._delegate.acquire(*args, **kwargs)
+        should_pause = False
+        if acquired:
+            with self._lock:
+                if self._pause_next:
+                    self._pause_next = False
+                    should_pause = True
+        if should_pause:
+            self.entered.set()
+            assert self.resume.wait(timeout=1.0)
+        return acquired
+
+    def release(self) -> None:
+        self._delegate.release()
+
+    def permit_available(self) -> bool:
+        acquired = self._delegate.acquire(blocking=False)
+        if acquired:
+            self._delegate.release()
+        return acquired
+
+
 class _RecordingRouter:
     def __init__(self) -> None:
         self.token_events: list[tuple[TokenEvent, str | None]] = []
@@ -559,6 +592,43 @@ def test_local_dispatch_after_close_is_rejected_without_router_mutation() -> Non
     with pytest.raises(IrohTransportError, match="transport_closed"):
         transport.send_token_event(event)
     assert router.token_events == []
+
+
+def test_close_wins_send_admission_race_without_leaking_pending_or_permit() -> None:
+    hub = _Hub()
+    transport = _transport(hub, queue_capacity=1)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    paused = _PausedAcquireSemaphore(transport._send_slots)
+    transport.__dict__["_send_slots"] = paused
+    results: list[object] = []
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            results.append(
+                transport.send_router_frame(
+                    _event_frame(), destination_node_id="peer-node"
+                )
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send, name="send-admission-close-race")
+    sender.start()
+    assert paused.entered.wait(timeout=1.0)
+    transport.close()
+    paused.resume.set()
+    sender.join(timeout=1.0)
+
+    assert not sender.is_alive()
+    assert results == []
+    assert len(errors) == 1
+    assert isinstance(errors[0], IrohTransportError)
+    assert errors[0].code == "transport_closed"
+    assert transport._pending == {}
+    assert paused.permit_available()
+    assert hub.sent == []
 
 
 def test_concurrent_starts_create_one_client_set() -> None:

@@ -10,7 +10,7 @@ import pytest
 from mycelium_router.contracts import PathCancellation
 from mycelium_router.transports.iroh import IrohTransportError
 from mycelium_router.wire import decode_frame, encode_frame
-from test_router_iroh_transport import _Hub, _transport
+from test_router_iroh_transport import _Hub, _PausedAcquireSemaphore, _transport
 
 from ._harness import join_bounded, run_in_thread
 
@@ -200,3 +200,30 @@ def test_iroh_workers_are_queue_bounded_and_close_race_cleans_up() -> None:
       if close_thread is not None and close_thread.is_alive():
          join_bounded(close_thread)
       transport.close()
+
+
+def test_close_wins_cancellation_admission_race_without_starting_worker() -> None:
+   hub = _Hub()
+   transport = _transport(hub, queue_capacity=1)
+   transport.bind_router(_CancellationRouter())
+   cancellation = PathCancellation("request-admission-race", "path-admission-race", 0, 3)
+   transport.start()
+   _register_sender_path(transport, cancellation)
+   paused = _PausedAcquireSemaphore(transport._cancellation_slots)
+   transport.__dict__["_cancellation_slots"] = paused
+
+   sender, results, errors = run_in_thread(
+      lambda: transport.send_path_cancellation(cancellation)
+   )
+   assert paused.entered.wait(timeout=1.0)
+   transport.close()
+   paused.resume.set()
+   join_bounded(sender)
+
+   assert results == []
+   assert len(errors) == 1
+   assert isinstance(errors[0], IrohTransportError)
+   assert errors[0].code == "transport_closed"
+   assert transport._cancellation_threads == {}
+   assert paused.permit_available()
+   assert hub.sent == []

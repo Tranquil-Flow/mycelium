@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from tests.e2e_request_iroh.harness import (
+    _RunningSidecar,
     CancellationEvidence,
     CompleteRequestEvidence,
     GenerationRotationEvidence,
@@ -12,6 +15,22 @@ from tests.e2e_request_iroh.harness import (
     run_complete_request,
     run_generation_rotation_probe,
 )
+
+
+def test_e2e_sidecar_stop_closes_captured_child_streams() -> None:
+    sidecar = object.__new__(_RunningSidecar)
+    stdout = io.StringIO("ready\n")
+    stderr = io.StringIO("diagnostic\n")
+    sidecar.__dict__["process"] = SimpleNamespace(
+        stdout=stdout,
+        stderr=stderr,
+        poll=lambda: 0,
+    )
+
+    assert sidecar.stop() == "diagnostic\n"
+    assert stdout.closed is True
+    assert stderr.closed is True
+    assert sidecar.stop() == ""
 
 
 @pytest.fixture(scope="module")

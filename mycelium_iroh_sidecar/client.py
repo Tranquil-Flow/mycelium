@@ -159,13 +159,21 @@ class SidecarClient:
             self._receive_sequence = 0
             self.endpoint_id = endpoint_id
 
+    def interrupt(self) -> None:
+        """Interrupt blocked socket I/O without waiting for the request lock."""
+
+        stream = self._socket
+        if stream is None:
+            return
+        try:
+            stream.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
     def close(self) -> None:
+        self.interrupt()
         with self._lock:
             if self._socket is not None:
-                try:
-                    self._socket.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
                 self._socket.close()
                 self._socket = None
             _wipe(self._send_key)

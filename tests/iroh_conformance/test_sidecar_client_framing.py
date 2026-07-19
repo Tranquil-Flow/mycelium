@@ -207,6 +207,25 @@ def test_ping_accepts_byte_at_a_time_length_prefix_and_record_payload() -> None:
         assert client.connected is True
 
 
+def test_close_interrupts_in_flight_request_before_waiting_for_client_lock() -> None:
+    with _established_session() as (client, peer, _observed):
+        request_worker, request_completed, request_outcomes = _start_call(client.ping)
+        assert _read_request(peer)
+        close_worker, close_completed, close_outcomes = _start_call(client.close)
+        try:
+            assert close_completed.wait(0.2), "close waited behind blocked request"
+            assert request_completed.wait(0.2)
+        finally:
+            _join_worker(close_worker, close_completed, peer)
+            _join_worker(request_worker, request_completed, peer)
+
+        assert close_outcomes == [None]
+        assert len(request_outcomes) == 1
+        assert isinstance(request_outcomes[0], ProtocolError)
+        assert request_outcomes[0].code == "sidecar_disconnected"
+        _assert_session_poisoned(client)
+
+
 def test_deadline_covers_trickled_prefix_and_record_payload(monkeypatch) -> None:
     """Progress on individual bytes cannot restart the operation deadline."""
 

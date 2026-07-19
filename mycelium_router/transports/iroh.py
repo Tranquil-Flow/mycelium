@@ -339,18 +339,25 @@ class IrohTransport:
       message_id = uuid.uuid4().bytes
       deadline = time.monotonic() + self.delivery_timeout_seconds
       pending = _PendingSend(peer.generation)
-      with self._state_lock:
-         self._pending[message_id] = pending
-         client = self._send_client
-      cancel_timer = threading.Timer(
-         self.delivery_timeout_seconds,
-         self._expire_pending,
-         args=(message_id, pending, "delivery_deadline_exceeded"),
-      )
-      cancel_timer.daemon = True
-      cancel_timer.start()
-      assert client is not None
+      cancel_timer: threading.Timer | None = None
       try:
+         with self._state_lock:
+            self._require_running()
+            peer = self._peer
+            if destination_node_id != peer.node_id:
+               raise IrohTransportError("destination_binding_mismatch")
+            pending = _PendingSend(peer.generation)
+            client = self._send_client
+            if client is None:
+               raise IrohTransportError("transport_not_running")
+            self._pending[message_id] = pending
+         cancel_timer = threading.Timer(
+            self.delivery_timeout_seconds,
+            self._expire_pending,
+            args=(message_id, pending, "delivery_deadline_exceeded"),
+         )
+         cancel_timer.daemon = True
+         cancel_timer.start()
          self._send_confirmed(
             client,
             frame,
@@ -428,7 +435,8 @@ class IrohTransport:
                ) from retry_error
          raise self._map_sidecar_error("delivery_not_confirmed", error) from error
       finally:
-         cancel_timer.cancel()
+         if cancel_timer is not None:
+            cancel_timer.cancel()
          with self._state_lock:
             self._pending.pop(message_id, None)
          self._send_slots.release()
@@ -859,18 +867,29 @@ class IrohTransport:
          return
       if not self._cancellation_slots.acquire(blocking=False):
          raise IrohTransportError("path_cancellation_queue_full")
-      with self._state_lock:
-         if cancellation.path_id in self._cancellation_threads:
+      worker_started = False
+      try:
+         with self._state_lock:
+            self._require_running()
+            if cancellation.path_id in self._cancellation_threads:
+               raise IrohTransportError("path_cancellation_already_pending")
+            thread = threading.Thread(
+               target=self._deliver_path_cancellation,
+               args=(cancellation, peer_node, frame),
+               name=f"mycelium-iroh-path-cancel-{cancellation.path_id}",
+               daemon=True,
+            )
+            self._cancellation_threads[cancellation.path_id] = thread
+            try:
+               thread.start()
+            except BaseException:
+               self._cancellation_threads.pop(cancellation.path_id, None)
+               raise
+            worker_started = True
+      except BaseException:
+         if not worker_started:
             self._cancellation_slots.release()
-            raise IrohTransportError("path_cancellation_already_pending")
-         thread = threading.Thread(
-            target=self._deliver_path_cancellation,
-            args=(cancellation, peer_node, frame),
-            name=f"mycelium-iroh-path-cancel-{cancellation.path_id}",
-            daemon=True,
-         )
-         self._cancellation_threads[cancellation.path_id] = thread
-      thread.start()
+         raise
 
    def _deliver_path_cancellation(
       self,
