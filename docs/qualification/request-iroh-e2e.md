@@ -1,6 +1,6 @@
 # Request/Iroh local E2E qualification
 
-Status: **RED — production cancellation is non-conformant.**
+Status: **GREEN for the bounded local harness.**
 
 This report contains **local evidence only**. It does not establish physical,
 remote-host, performance, privacy, or production qualification. The qualification
@@ -43,14 +43,16 @@ ERROR tests/e2e_request_iroh/test_request_iroh_e2e.py
 ModuleNotFoundError: No module named 'tests.e2e_request_iroh.harness'
 ```
 
-After implementing only owned harness files, the conformant slice is GREEN:
+After implementing only owned harness files, the initially conformant slice was
+GREEN:
 
 ```text
 python3.14 -m pytest -q tests/e2e_request_iroh/test_request_iroh_e2e.py -k 'not cancellation'
 3 passed, 1 deselected
 ```
 
-The focused cancellation proof remains RED against production behavior:
+The focused cancellation proof initially remained RED against production
+behavior:
 
 ```text
 python3.14 -m pytest -q \
@@ -67,6 +69,16 @@ CancellationEvidence(
 )
 ```
 
+Production PathCancellation propagation and request-adapter cleanup were then
+implemented and hardened through adversarial review. The complete harness is now
+GREEN:
+
+```text
+CARGO_NET_OFFLINE=true PYTHONDONTWRITEBYTECODE=1 python3.14 -m pytest -q \
+  tests/e2e_request_iroh/test_request_iroh_e2e.py
+4 passed in 1.85s
+```
+
 ## Proof matrix
 
 | # | Required proof | Local result | Evidence |
@@ -78,7 +90,7 @@ CancellationEvidence(
 | 5 | Token events return through adapter and acknowledged gateway stream | PASS | Router receives token indexes `0..8`; gateway emits and acknowledges them through production service subscriptions. |
 | 6 | Stable activation, decode, and canonical token-frame digests | PASS | Two fresh complete topologies produce equal digest vectors: 3 activation, 24 decode payload, and 9 canonical token frames. |
 | 7 | Resume from acknowledged cursor without duplicate emission | PASS | First stream acknowledges through cursor 1, observes token 1 without acknowledgment, closes, then resumes from cursor 1. Applied replay is exactly token indexes `1..8`; final token cursor is 9. |
-| 8 | Cancellation releases Router, adapter, and gateway resources | **RED** | Gateway session payload/capture and entry Router path/capacity release. `RouterSessionBackend._cancelled` retains the request ID, and remote Router/runtime retain the registered path/state. Native pending deliveries reach zero. |
+| 8 | Cancellation releases Router, adapter, and gateway resources | PASS | Gateway, adapter, entry Router, remote Router/runtime, and native delivery state all release; pending deliveries reach zero. |
 | 9 | Endpoint generation rotation rejects stale delivery | PASS | Delivery pauses after native receive but before dispatch; generation rotates `1 -> 2`; sender receives `peer_rotated`; router sees no stale token; pending deliveries reach zero. |
 | 10 | Every report says local evidence only and `route_ready=false` | PASS | All three frozen evidence records contain `local_evidence_only=True` and `route_ready=False`; this document states the same scope. |
 
@@ -102,8 +114,8 @@ is local evidence only and leaves `route_ready=false`.
 
 | Gate | Result |
 |---|---|
-| Python 3.14 full suite | **RED:** 1 failed, 1005 passed, 2 skipped, 117 subtests passed. Sole failure is proof 8 above. |
-| Focused conformant harness slice | GREEN: 3 passed, 1 deselected. |
+| Python 3.14 full suite | GREEN: 1653 passed, 2 skipped, 121 subtests passed. |
+| Complete request/Iroh harness | GREEN: 4 passed. |
 | Rust format | GREEN: `cargo fmt --check`. |
 | Rust lint | GREEN: `cargo clippy --all-targets --all-features -- -D warnings`. |
 | Rust tests | GREEN: 21 passed across unit, capability, golden-wire, and sidecar-security tests. |
@@ -111,17 +123,16 @@ is local evidence only and leaves `route_ready=false`.
 | Contract and wire tests | GREEN: 17 contract tests and 3 cross-language golden-wire tests passed. |
 | Qualification and independent reference oracle | GREEN: 70 qualification and 24 oracle tests passed in separate invocations. |
 | Python compileall | GREEN under an external temporary bytecode cache. |
-| Existing-dependency UI check | GREEN: 70 UI tests and 3 contract-diff tests passed; typecheck and production build passed. No install ran. Package and lockfile digests matched the dependency-source checkout before use. |
-| Release-security audit | GREEN on the explicitly staged owned files: no findings, `release_ready=false`, `route_ready=false`. |
-| Claim-boundary audit | GREEN on the explicitly staged owned files: no findings, `release_ready=false`, `route_ready=false`. |
-| Diff/ownership checks | GREEN: no whitespace errors; staged paths are exactly the five owned files. |
+| Existing-dependency UI check | GREEN: 98 UI tests and 3 contract-diff tests passed; typecheck and production build passed. No install ran. |
+| Release-security audit | GREEN: 472 tests; `release_ready=false`, `route_ready=false`. |
+| Claim-boundary audit | GREEN: 176 tests; `release_ready=false`, `route_ready=false`. |
+| Diff checks | GREEN: no whitespace errors. |
 
-The UI build emitted only its existing chunk-size advisory. No commit is allowed
-because the full Python gate and cancellation qualification remain RED.
+The UI build emitted only its existing chunk-size advisory.
 
-## Production blocker
+## Production repair
 
-The minimized RED test identifies two release gaps without patching production:
+The minimized RED test identified two production gaps:
 
 1. `RouterSessionBackend._cancel_once()` inserts into `_cancelled`, but no
    lifecycle removes the request ID. This leaves an adapter tombstone after the
@@ -131,8 +142,15 @@ The minimized RED test identifies two release gaps without patching production:
    `IrohTransport` to remote Routers. The remote relay path and stage-local
    runtime state therefore remain active.
 
-These observations are local evidence only. They make proof 8 fail and keep the
-entire qualification RED with `route_ready=false`.
+Both gaps are repaired. Cancellation now propagates as a canonical
+`PathCancellation` frame to every participant, the adapter tombstone clears
+after the terminal request lifecycle, and stale/replayed cancellation attempts
+fail closed. Follow-up review also hardened per-path synchronization, atomic path
+generation capture, replay filtering, and cleanup lock boundaries.
+
+These observations remain local evidence only. Passing proof 8 closes the local
+harness defect but does not establish physical or production qualification;
+`route_ready=false` remains unchanged.
 
 ## Reproduction
 
@@ -144,6 +162,5 @@ PYTHONDONTWRITEBYTECODE=1 python3.14 -m pytest -q \
   tests/e2e_request_iroh/test_request_iroh_e2e.py
 ```
 
-The complete suite is expected to report three passes and the single preserved
-production RED above until production cancellation propagation and adapter
-cleanup are implemented outside this harness-only change.
+The complete focused suite reports four passes. Physical qualification remains a
+separate evidence lane.
