@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelium.local/schemas/product-ui-bootstrap-v1.schema.json",
+  "title": "Mycelium Product UI Bootstrap v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "source_mode", "session", "api", "limits", "qualification_authority"],
+  "properties": {
+    "protocol": { "const": "mycelium.product_ui.bootstrap.v1" },
+    "source_mode": { "enum": ["fixture", "live", "replay"] },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["csrf_header", "csrf_token", "expires_at_unix_ms"],
+      "properties": {
+        "csrf_header": { "const": "X-Mycelium-CSRF" },
+        "csrf_token": { "type": "string", "minLength": 16, "maxLength": 512 },
+        "expires_at_unix_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observatory_snapshot", "observatory_events", "qualification_current", "inference_submit", "swarm_status", "swarm_invites", "swarm_join", "swarm_leave"],
+      "properties": {
+        "observatory_snapshot": { "const": "/api/v1/observatory/snapshot" },
+        "observatory_events": { "const": "/api/v1/observatory/events" },
+        "qualification_current": { "const": "/api/v1/qualification/current" },
+        "inference_submit": { "const": "/api/v1/inference" },
+        "swarm_status": { "const": "/api/v1/swarm/status" },
+        "swarm_invites": { "const": "/api/v1/swarm/invites" },
+        "swarm_join": { "const": "/api/v1/swarm/join" },
+        "swarm_leave": { "const": "/api/v1/swarm/leave" }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_prompt_utf8_bytes", "max_new_tokens"],
+      "properties": {
+        "max_prompt_utf8_bytes": { "const": 131072 },
+        "max_new_tokens": { "const": 4096 }
+      }
+    },
+    "qualification_authority": {
+      "const": "mycelium_qualification.qualifier:RouteQualificationV1"
+    }
+  }
+}

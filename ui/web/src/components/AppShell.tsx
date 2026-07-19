@@ -1,34 +1,23 @@
 import type { ReactNode } from 'react';
+import { PRODUCT_ROUTES, productRouteHref, type ProductRouteId } from '../app/navigation';
+import type { RouteReadinessState } from '../app/ProductState';
+import type { ProductSourceMode } from '../app/contracts';
 import type {
-  ObservatorySourceMode,
   ObservatorySourceState,
 } from '../data/observatorySource';
 
-export type ObservatoryView = 'network' | 'plans' | 'incidents' | 'evidence';
-
 interface AppShellProps {
-  readonly activeView: ObservatoryView;
-  readonly onViewChange: (view: ObservatoryView) => void;
+  readonly activeView: ProductRouteId;
+  readonly onViewChange: (view: ProductRouteId) => void;
   readonly scopeLabel: string;
-  readonly sourceMode: ObservatorySourceMode;
+  readonly sourceMode: ProductSourceMode;
   readonly sourceState: ObservatorySourceState | null;
+  readonly routeReadiness: RouteReadinessState;
   readonly children: ReactNode;
 }
 
-const navItems: ReadonlyArray<{
-  id: ObservatoryView;
-  label: string;
-  detail: string;
-  icon: 'network' | 'plans' | 'incidents' | 'evidence';
-}> = [
-  { id: 'network', label: 'Network', detail: 'Route topology', icon: 'network' },
-  { id: 'plans', label: 'Plans', detail: 'Modeled strategies', icon: 'plans' },
-  { id: 'incidents', label: 'Incidents', detail: 'Fixture replays', icon: 'incidents' },
-  { id: 'evidence', label: 'Evidence', detail: 'Proof boundaries', icon: 'evidence' },
-];
-
-function NavIcon({ name }: { readonly name: 'network' | 'plans' | 'incidents' | 'evidence' }) {
-  if (name === 'network') {
+function NavIcon({ name }: { readonly name: ProductRouteId }) {
+  if (name === 'network' || name === 'nodes') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="5" cy="12" r="2.25" />
@@ -52,6 +41,21 @@ function NavIcon({ name }: { readonly name: 'network' | 'plans' | 'incidents' | 
       </svg>
     );
   }
+  if (name === 'inference') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6h16v12H4zM8 10l3 2-3 2M13 14h3" />
+      </svg>
+    );
+  }
+  if (name === 'settings') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M6 3.5h9l3 3v14H6zM15 3.5v4h3M9 12l2 2 4-4M9 17h6" />
@@ -65,20 +69,28 @@ export function AppShell({
   scopeLabel,
   sourceMode,
   sourceState,
+  routeReadiness,
   children,
 }: AppShellProps) {
   const isFixture = sourceMode === 'fixture';
-  const isLiveQualified =
-    sourceState?.source_mode === 'live' && sourceState.live_qualified;
+  const isReplay = sourceMode === 'replay';
+  const isLiveCurrent =
+    sourceState?.source_mode === 'live' &&
+    sourceState.status === 'connected' &&
+    sourceState.freshness === 'current';
   const currentLabel = isFixture
-    ? 'Current unavailable'
+    ? 'Fixture data · not current'
+    : isReplay
+      ? sourceState === null
+        ? 'Replay evidence · loading'
+        : `Replay evidence · g${sourceState.generation}`
     : sourceState === null
       ? 'Connecting'
       : sourceState.status === 'disconnected'
         ? `Disconnected · g${sourceState.generation}`
-        : isLiveQualified
-          ? `Current · g${sourceState.generation}`
-          : `Not live · g${sourceState.generation}`;
+        : isLiveCurrent
+          ? `Current evidence · g${sourceState.generation}`
+          : `Stale evidence · g${sourceState.generation}`;
 
   return (
     <div className="app-shell">
@@ -91,10 +103,10 @@ export function AppShell({
           </div>
           <div>
             <div className="brand-eyebrow-row">
-              <p className="eyebrow">Mycelium systems</p>
+              <p className="eyebrow">Private distributed inference</p>
               <span className="maturity-badge" aria-label="Product lifecycle: MVP">MVP</span>
             </div>
-            <h1>Network Observatory</h1>
+            <h1>Mycelium</h1>
           </div>
         </div>
 
@@ -102,31 +114,33 @@ export function AppShell({
           className="fixture-badge"
           aria-label={
             isFixture
-              ? 'Offline evidence mode'
-              : isLiveQualified
-                ? 'Qualified live semantic mode'
-                : 'Semantic projection not live'
+              ? 'Fixture data, not live'
+              : isReplay
+                ? 'Replay evidence, not live'
+                : 'Live semantic evidence state'
           }
         >
           <span className="fixture-dot" aria-hidden="true" />
           {isFixture
-            ? 'SIMULATION · FIXTURE'
-            : isLiveQualified
-              ? 'LIVE · QUALIFIED'
-              : 'SEMANTIC PROJECTION · NOT LIVE'}
+            ? 'FIXTURE DATA · NOT LIVE'
+            : isReplay
+              ? 'REPLAY EVIDENCE · NOT LIVE'
+            : isLiveCurrent
+              ? 'LIVE EVIDENCE · CURRENT'
+              : 'LIVE EVIDENCE · NOT CURRENT'}
         </div>
 
-        <nav className="primary-nav" aria-label="Observatory sections">
+        <nav className="primary-nav" aria-label="Product sections">
           <p className="nav-caption">Workspace</p>
-          {navItems.map((item) => (
+          {PRODUCT_ROUTES.map((item) => (
             <a
               key={item.id}
-              href={`#${item.id}`}
+              href={productRouteHref(item.id)}
               className="nav-button"
               aria-current={activeView === item.id ? 'page' : undefined}
               onClick={() => onViewChange(item.id)}
             >
-              <span className="nav-icon"><NavIcon name={item.icon} /></span>
+              <span className="nav-icon"><NavIcon name={item.id} /></span>
               <span className="nav-copy">
                 <span>{item.label}</span>
                 <small>{item.detail}</small>
@@ -140,11 +154,23 @@ export function AppShell({
           <div className="source-state">
             <span className="source-glyph" aria-hidden="true">◇</span>
             <div>
-              <strong>{isFixture ? 'Local evidence bundle' : 'Gateway semantic source'}</strong>
-              <span>{isFixture ? 'No network dependency' : 'Same-origin GET + SSE only'}</span>
+              <strong>
+                {isFixture
+                  ? 'Local evidence bundle'
+                  : isReplay
+                    ? 'Local evidence replay'
+                    : 'Same-origin product gateway'}
+              </strong>
+              <span>
+                {isFixture || isReplay
+                  ? 'No network dependency'
+                  : 'Browser credentials stay same-origin'}
+              </span>
             </div>
           </div>
-          <p>Read-only qualification surface</p>
+          <p>
+            Route readiness {routeReadiness.status} · {routeReadiness.authority}
+          </p>
         </div>
       </aside>
 
@@ -154,7 +180,13 @@ export function AppShell({
             <span className="topbar-label">Scope</span>
             <strong>{scopeLabel}</strong>
             <span className="separator" aria-hidden="true">/</span>
-            <span>{isFixture ? 'offline replay' : 'semantic gateway projection'}</span>
+            <span>
+              {isFixture
+                ? 'fixture evidence'
+                : isReplay
+                  ? 'replay evidence'
+                  : 'semantic gateway projection'}
+            </span>
           </div>
           <button type="button" className="current-control" disabled>
             <span className="status-ring" aria-hidden="true" />

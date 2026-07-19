@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react';
-import { AppShell, type ObservatoryView } from './components/AppShell';
+import { ProductFeatureSlot } from './app/ProductFeatureSlot';
+import { createInitialProductState, type ProductState } from './app/ProductState';
+import {
+  createProductFeatureRegistry,
+  parseProductRoute,
+  productRouteHref,
+  PRODUCT_ROUTES,
+  type ProductFeatureRegistry,
+  type ProductRouteId,
+} from './app/navigation';
+import { AppShell } from './components/AppShell';
 import {
   createObservatorySource,
   type LiveObservatorySourceState,
@@ -23,21 +33,15 @@ type SourceResult =
 
 export interface AppProps {
   readonly source?: ObservatoryDataSource;
+  readonly featureRegistry?: ProductFeatureRegistry;
+  readonly productState?: ProductState;
 }
 
 const defaultSource = createObservatorySource({ source_mode: 'fixture' });
-const OBSERVATORY_VIEWS: readonly ObservatoryView[] = [
-  'network',
-  'plans',
-  'incidents',
-  'evidence',
-];
+const emptyFeatureRegistry = createProductFeatureRegistry([]);
 
-function viewFromHash(hash: string): ObservatoryView | null {
-  const candidate = hash.replace(/^#/, '');
-  return OBSERVATORY_VIEWS.includes(candidate as ObservatoryView)
-    ? (candidate as ObservatoryView)
-    : null;
+function routeLabel(route: ProductRouteId): string {
+  return PRODUCT_ROUTES.find((candidate) => candidate.id === route)?.label ?? route;
 }
 
 function sourceErrorMessage(reason: unknown): string {
@@ -118,9 +122,58 @@ function SemanticProjectionView({ state }: { readonly state: LiveObservatorySour
   );
 }
 
-export default function App({ source = defaultSource }: AppProps) {
-  const [activeView, setActiveView] = useState<ObservatoryView>(
-    () => viewFromHash(window.location.hash) ?? 'network',
+function FeaturePlaceholder({
+  route,
+  productState,
+}: {
+  readonly route: ProductRouteId;
+  readonly productState: ProductState;
+}) {
+  const readiness = productState.route_readiness;
+  return (
+    <section className="panel bundle-error" aria-label={`${routeLabel(route)} feature slot`}>
+      <span aria-hidden="true">◇</span>
+      <div>
+        <p className="eyebrow">Product foundation</p>
+        <h2>{routeLabel(route)} workspace</h2>
+        <p>Feature slot reserved for its isolated product module.</p>
+        {route === 'inference' && (
+          <form aria-label="Inference request foundation">
+            <label htmlFor="foundation-inference-prompt">Prompt</label>
+            <textarea
+              id="foundation-inference-prompt"
+              aria-describedby="foundation-inference-blocked"
+              disabled
+            />
+            <button type="submit" disabled>
+              Submit request
+            </button>
+            <p id="foundation-inference-blocked">
+              Inference disabled: {readiness.reasons.join(', ')}
+            </p>
+          </form>
+        )}
+        <small>
+          Route readiness {readiness.status} · {readiness.authority}. No model request was made.
+        </small>
+      </div>
+    </section>
+  );
+}
+
+export default function App({
+  source = defaultSource,
+  featureRegistry = emptyFeatureRegistry,
+  productState,
+}: AppProps) {
+  const effectiveProductState =
+    productState ??
+    createInitialProductState({
+      source_mode: source.source_mode,
+      now_unix_ms: Date.now(),
+    });
+  const [activeView, setActiveView] = useState<ProductRouteId>(
+    () => parseProductRoute(window.location.hash) ?? 'inference',
   );
   const [sourceResult, setSourceResult] = useState<SourceResult>(() =>
     initialSourceResult(source),
@@ -128,11 +181,15 @@ export default function App({ source = defaultSource }: AppProps) {
 
   useEffect(() => {
     const synchronizeHash = () => {
-      const nextView = viewFromHash(window.location.hash);
+      const nextView = parseProductRoute(window.location.hash);
       if (nextView === null) {
-        window.history.replaceState(null, '', '#network');
-        setActiveView('network');
+        window.history.replaceState(null, '', productRouteHref('inference'));
+        setActiveView('inference');
         return;
+      }
+      const canonicalHash = productRouteHref(nextView);
+      if (window.location.hash !== canonicalHash) {
+        window.history.replaceState(null, '', canonicalHash);
       }
       setActiveView(nextView);
     };
@@ -191,9 +248,9 @@ export default function App({ source = defaultSource }: AppProps) {
     };
   }, [source]);
 
-  const navigate = (view: ObservatoryView) => {
+  const navigate = (view: ProductRouteId) => {
     setActiveView(view);
-    const nextHash = `#${view}`;
+    const nextHash = productRouteHref(view);
     if (window.location.hash !== nextHash) window.history.pushState(null, '', nextHash);
   };
 
@@ -201,7 +258,9 @@ export default function App({ source = defaultSource }: AppProps) {
     sourceResult.source === source ? sourceResult : { source, state: 'loading' };
 
   let content;
-  if (rendered.state === 'loading') {
+  if (activeView === 'inference' || activeView === 'nodes' || activeView === 'settings') {
+    content = <FeaturePlaceholder route={activeView} productState={effectiveProductState} />;
+  } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
   } else if (rendered.state === 'error') {
     content = <BundleError message={rendered.message} sourceMode={source.source_mode} />;
@@ -219,7 +278,7 @@ export default function App({ source = defaultSource }: AppProps) {
       case 'incidents':
         content = <IncidentsView incidents={incidents} />;
         break;
-      case 'evidence':
+      case 'readiness':
         content = (
           <EvidenceView
             snapshot={snapshot}
@@ -246,10 +305,17 @@ export default function App({ source = defaultSource }: AppProps) {
       activeView={activeView}
       onViewChange={navigate}
       scopeLabel={scopeLabel}
-      sourceMode={source.source_mode}
+      sourceMode={effectiveProductState.source_mode}
       sourceState={sourceState}
+      routeReadiness={effectiveProductState.route_readiness}
     >
-      {content}
+      <ProductFeatureSlot
+        route={activeView}
+        registry={featureRegistry}
+        productState={effectiveProductState}
+      >
+        {content}
+      </ProductFeatureSlot>
     </AppShell>
   );
 }

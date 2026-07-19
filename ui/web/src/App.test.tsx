@@ -66,10 +66,10 @@ describe('Network Observatory', () => {
   it('makes fixture mode and disabled live integration unmistakable', () => {
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: /network observatory/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Mycelium' })).toBeInTheDocument();
     expect(screen.getByText(/^MVP$/)).toBeInTheDocument();
-    expect(screen.getByText(/simulation · fixture/i)).toBeInTheDocument();
-    expect(screen.getByText(/current unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/fixture data · not live/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /fixture data · not current/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /pipeline/i })).toBeInTheDocument();
   });
 
@@ -123,8 +123,9 @@ describe('Network Observatory', () => {
     render(<App />);
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute('href', '#evidence');
-    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: /readiness/i })).toHaveAttribute('href', '#readiness');
+    expect(screen.getByRole('link', { name: /readiness/i })).toHaveAttribute('aria-current', 'page');
+    expect(window.location.hash).toBe('#readiness');
 
     fireEvent.click(screen.getByRole('link', { name: /plans/i }));
     expect(window.location.hash).toBe('#plans');
@@ -138,7 +139,7 @@ describe('Network Observatory', () => {
     act(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /evidence/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /readiness/i })).toHaveAttribute(
       'aria-current',
       'page',
     );
@@ -148,8 +149,8 @@ describe('Network Observatory', () => {
     window.history.replaceState(null, '', '#future-contract');
     render(<App />);
 
-    expect(window.location.hash).toBe('#network');
-    expect(screen.getByRole('heading', { name: /network topology/i })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#inference');
+    expect(screen.getByRole('heading', { name: /inference workspace/i })).toBeInTheDocument();
   });
 
   it('renders the existing fail-closed fixture error instead of crashing source construction', () => {
@@ -168,8 +169,8 @@ describe('Network Observatory', () => {
     const source = new InjectedLiveSource();
     render(<App source={source} />);
 
-    expect(screen.getByText(/semantic projection · not live/i)).toBeInTheDocument();
-    expect(screen.queryByText(/^live · qualified$/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/live evidence · not current/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^live evidence · current$/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /disconnected · g7/i })).toBeDisabled();
     expect(screen.getAllByText(/deployment-alpha/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/route-primary/i)).toBeInTheDocument();
@@ -177,8 +178,8 @@ describe('Network Observatory', () => {
 
     act(() => source.reconnect());
 
-    expect(screen.getByText(/^live · qualified$/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /current · g8/i })).toBeDisabled();
+    expect(screen.getByText(/^live evidence · current$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /current evidence · g8/i })).toBeDisabled();
   });
 
   it('never renders a previous fixture bundle under a replacement live source identity', async () => {
@@ -211,7 +212,7 @@ describe('Network Observatory', () => {
       screen.getByRole('heading', { name: /loading semantic observatory snapshot/i }),
     ).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/^live · qualified$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^live evidence · current$/i)).not.toBeInTheDocument();
 
     await act(async () => {
       resolveInitial?.(semanticState);
@@ -219,8 +220,8 @@ describe('Network Observatory', () => {
     });
 
     expect(screen.getAllByText(/deployment-alpha/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /current · g12/i })).toBeDisabled();
-    expect(screen.getByText(/^live · qualified$/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /current evidence · g12/i })).toBeDisabled();
+    expect(screen.getByText(/^live evidence · current$/i)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
   });
 });

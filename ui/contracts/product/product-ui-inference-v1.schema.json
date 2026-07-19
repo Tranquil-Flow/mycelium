@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mycelium.local/schemas/product-ui-inference-v1.schema.json",
+  "title": "Mycelium Product UI Inference Submission v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "prompt", "max_new_tokens", "qualification"],
+  "properties": {
+    "protocol": { "const": "mycelium.request_gateway.v1" },
+    "prompt": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 131072,
+      "maxUtf8Bytes": 131072
+    },
+    "max_new_tokens": { "type": "integer", "minimum": 1, "maximum": 4096 },
+    "qualification": { "$ref": "#/$defs/qualification_binding" }
+  },
+  "$defs": {
+    "sha256_ref": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "safe_nonnegative_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "safe_code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$"
+    },
+    "authority_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "qualification_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["qualification_id", "qualification_digest", "deployment_id", "deployment_epoch", "topology_version", "model_id", "resolved_commit", "manifest_digest", "path_manifest_digest", "stage_load_proof_digests"],
+      "properties": {
+        "qualification_id": { "$ref": "#/$defs/authority_string" },
+        "qualification_digest": { "$ref": "#/$defs/sha256_ref" },
+        "deployment_id": { "$ref": "#/$defs/authority_string" },
+        "deployment_epoch": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "topology_version": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "model_id": { "$ref": "#/$defs/authority_string" },
+        "resolved_commit": { "$ref": "#/$defs/authority_string" },
+        "manifest_digest": { "$ref": "#/$defs/sha256_ref" },
+        "path_manifest_digest": { "$ref": "#/$defs/sha256_ref" },
+        "stage_load_proof_digests": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256_ref" }
+        }
+      }
+    },
+    "qualification_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "issued_at_unix_ms", "evidence_class", "route_ready", "reason_codes", "binding"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_gateway.v1" },
+        "issued_at_unix_ms": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "evidence_class": { "enum": ["physical_qualification", "synthetic_test_fixture"] },
+        "route_ready": { "type": "boolean" },
+        "reason_codes": {
+          "type": "array",
+          "maxItems": 128,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/safe_code" }
+        },
+        "binding": { "$ref": "#/$defs/qualification_binding" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "route_ready": { "const": true } }, "required": ["route_ready"] },
+          "then": {
+            "properties": {
+              "evidence_class": { "const": "physical_qualification" },
+              "reason_codes": { "type": "array", "maxItems": 0 },
+              "binding": {
+                "allOf": [
+                  { "$ref": "#/$defs/qualification_binding" },
+                  { "type": "object", "properties": { "stage_load_proof_digests": { "type": "array", "minItems": 1 } } }
+                ]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason_codes": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "accepted_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "accepted", "event_path", "cancel_path"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_gateway.v1" },
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "accepted": { "const": true },
+        "event_path": { "type": "string", "pattern": "^/api/v1/inference/[A-Za-z0-9][A-Za-z0-9._~-]{0,127}/events$", "maxLength": 512 },
+        "cancel_path": { "type": "string", "pattern": "^/api/v1/inference/[A-Za-z0-9][A-Za-z0-9._~-]{0,127}/cancel$", "maxLength": 512 }
+      }
+    },
+    "cancel_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "cancelled"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_gateway.v1" },
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "cancelled": { "type": "boolean" }
+      }
+    },
+    "stable_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "code", "retryable"],
+      "properties": {
+        "protocol": { "const": "mycelium.product_ui.error.v1" },
+        "code": { "$ref": "#/$defs/safe_code" },
+        "retryable": { "type": "boolean" }
+      }
+    },
+    "stream_event": {
+      "oneOf": [
+        { "$ref": "#/$defs/status_event" },
+        { "$ref": "#/$defs/token_event" },
+        { "$ref": "#/$defs/failed_event" }
+      ]
+    },
+    "status_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "sequence", "type"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_event.v1" },
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "type": { "enum": ["accepted", "completed", "cancelled"] }
+      }
+    },
+    "token_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "sequence", "type", "token_index", "text"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_event.v1" },
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "type": { "const": "token" },
+        "token_index": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "text": { "type": "string", "maxLength": 65536, "maxUtf8Bytes": 262144 }
+      }
+    },
+    "failed_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "sequence", "type", "code"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_event.v1" },
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "type": { "const": "failed" },
+        "code": { "$ref": "#/$defs/safe_code" }
+      }
+    }
+  }
+}
