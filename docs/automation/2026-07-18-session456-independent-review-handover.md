@@ -383,3 +383,35 @@ remote-host action, new physical qualification, Observatory mutation, merge, or
 push occurred. These repairs strengthen local process and concurrency semantics;
 they do not promote readiness. `route_ready=false` and `release_ready=false`
 remain mandatory.
+
+## Atomic Iroh path-state publication
+
+Commit `54e9e4068407df5764d3b387054c35d04ca2362b` closes a further
+cancellation race in Iroh path registration. Previously,
+`send_manifest_locked()` published the graph and participant set in separate,
+unlocked operations. A concurrent cancellation could observe the graph without
+participants, fail with `unknown_path`, and be lost. The deterministic regression
+paused exactly between those publications and failed RED before repair.
+
+Path graph, participant set, and entry metadata now publish together under the
+transport state lock for outbound manifests, outbound progressive-prefill setup,
+and inbound accepted manifests. Running-state fences are rechecked before
+publication, while wire dispatch remains outside the lock. Manifest encoding is
+also performed once and reused for all destinations.
+
+Post-repair evidence:
+
+- deterministic publication/cancellation regression: 1 passed after observed RED;
+- publication race stress: 100/100 rounds, descriptors 4→4, threads 1→1;
+- focused Iroh/adversarial/conformance aggregate: 64 passed;
+- strict full Python 3.14 suite: 1,662 passed, 2 optional-Zenoh skips, 121
+  subtests passed;
+- contract audit: 14 contracts; security audit: 473 tracked files; claim audit:
+  176 source files; compileall, Ruff, and `git diff --check`: passed;
+- Rust fmt/clippy/tests: passed, 21 tests;
+- UI check using existing dependencies only: 98 Vitest tests, 3 Node tests,
+  typecheck, and production build passed; temporary dependency symlink removed.
+
+This remains local software evidence only. No new physical test ran;
+`route_ready=false`, `release_ready=false`, Observatory read-only, no merge to
+`main`, and no push remain mandatory.
