@@ -150,6 +150,8 @@ def make_case() -> QualificationCase:
         placement = stage["placements"][0]
         endpoint_id = endpoint_ids[assignment["assignment_id"]]
         reservation_id = f"synthetic-test-reservation-{index}"
+        process_id = 4_100 + index
+        process_host_id = f"synthetic-test-host-{index}"
         signed_peers.append(
             {
                 "node_id": assignment["node_id"],
@@ -163,6 +165,8 @@ def make_case() -> QualificationCase:
             "assignment_id": assignment["assignment_id"],
             "node_id": assignment["node_id"],
             "endpoint_id": endpoint_id,
+            "process_id": process_id,
+            "process_host_id": process_host_id,
             "deployment_id": assignment["deployment_id"],
             "deployment_epoch": assignment["deployment_epoch"],
             "model_id": assignment["model_id"],
@@ -214,8 +218,8 @@ def make_case() -> QualificationCase:
                 "endpoint_id": endpoint_id,
                 "authenticated_endpoint_id": endpoint_id,
                 "runtime_endpoint": placement["runtime_endpoint"],
-                "process_id": 4_100 + index,
-                "process_host_id": f"synthetic-test-host-{index}",
+                "process_id": process_id,
+                "process_host_id": process_host_id,
                 "assigned_tensor_keys": list(assignment["expected_tensor_keys"]),
                 "opened_tensor_keys": list(proof["loaded_tensor_keys"]),
                 "reservation_id": reservation_id,
@@ -226,8 +230,8 @@ def make_case() -> QualificationCase:
             {
                 "stage_id": stage["stage_id"],
                 "node_id": assignment["node_id"],
-                "process_id": 4_100 + index,
-                "process_host_id": f"synthetic-test-host-{index}",
+                "process_id": process_id,
+                "process_host_id": process_host_id,
                 "owned_layer_range": dict(assignment["range"]),
                 "local_kv_observed": True,
                 "remote_kv_access": False,

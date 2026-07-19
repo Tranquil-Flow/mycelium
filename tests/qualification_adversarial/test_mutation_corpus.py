@@ -110,6 +110,29 @@ def _resign_gossip(case: QualificationCase) -> None:
     )
 
 
+def _resign_load(case: QualificationCase, index: int) -> None:
+    signed = _at(
+        case,
+        "runtime/load-proof-signatures.json",
+        "signatures",
+        index,
+    )
+    signed["signature"]["signed_statement_digest"] = sha256_bytes(
+        canonical_json_bytes(signed["statement"])
+    )
+
+
+def _sync_signed_process_identities(case: QualificationCase) -> None:
+    stages = _at(case, "run/route-challenge.json", "stage_evidence")
+    stages_by_assignment = {stage["assignment_id"]: stage for stage in stages}
+    signatures = _at(case, "runtime/load-proof-signatures.json", "signatures")
+    for index, signed in enumerate(signatures):
+        stage = stages_by_assignment[signed["statement"]["assignment_id"]]
+        signed["statement"]["process_id"] = stage["process_id"]
+        signed["statement"]["process_host_id"] = stage["process_host_id"]
+        _resign_load(case, index)
+
+
 def _mutate_gossip_statement(*path: str | int, value: Any) -> CaseMutation:
     def mutate(case: QualificationCase) -> None:
         statement = _at(case, "control/gossip-signature.json", "statement")
@@ -128,12 +151,20 @@ def _swap_stage_assignment_ids(case: QualificationCase) -> None:
         stages[1]["assignment_id"],
         stages[0]["assignment_id"],
     )
+    _sync_signed_process_identities(case)
+
+
+def _set_stage_process_id(case: QualificationCase) -> None:
+    stages = _at(case, "run/route-challenge.json", "stage_evidence")
+    stages[0]["process_id"] = True
+    _sync_signed_process_identities(case)
 
 
 def _duplicate_process_identity(case: QualificationCase) -> None:
     stages = _at(case, "run/route-challenge.json", "stage_evidence")
     stages[1]["process_id"] = stages[0]["process_id"]
     stages[1]["process_host_id"] = stages[0]["process_host_id"]
+    _sync_signed_process_identities(case)
 
 
 def _remove_last_tensor(list_name: str) -> CaseMutation:
@@ -499,13 +530,7 @@ def _specs() -> tuple[MutationSpec, ...]:
             "process.bool-process-id",
             "endpoint-process-host",
             "process_identity_invalid",
-            _set(
-                "run/route-challenge.json",
-                "stage_evidence",
-                0,
-                "process_id",
-                value=True,
-            ),
+            _set_stage_process_id,
             **post_load,
         ),
         MutationSpec(

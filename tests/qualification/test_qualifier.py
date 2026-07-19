@@ -65,6 +65,13 @@ def _resign_gossip_statement(case: Any) -> None:
     )
 
 
+def _resign_load_statement(case: Any, index: int) -> None:
+    signed = case.documents["runtime/load-proof-signatures.json"]["signatures"][index]
+    signed["signature"]["signed_statement_digest"] = sha256_bytes(
+        canonical_json_bytes(signed["statement"])
+    )
+
+
 def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case: Any) -> None:
     files, manifest = qualification_case.render()
     record = _qualify(qualification_case)
@@ -380,6 +387,9 @@ def test_endpoint_process_and_tensor_scope_fail_closed(qualification_case: Any) 
     case = pristine.clone()
     stages = case.documents["run/route-challenge.json"]["stage_evidence"]
     stages[1]["process_host_id"] = stages[0]["process_host_id"]
+    signed = case.documents["runtime/load-proof-signatures.json"]["signatures"][1]
+    signed["statement"]["process_host_id"] = stages[1]["process_host_id"]
+    _resign_load_statement(case, 1)
     _assert_rejected(case, "process_identity_invalid")
 
     case = pristine
@@ -388,6 +398,25 @@ def test_endpoint_process_and_tensor_scope_fail_closed(qualification_case: Any) 
     ]
     opened.pop()
     _assert_rejected(case, "tensor_scope_mismatch")
+
+
+@pytest.mark.parametrize(
+    ("field", "forged_value"),
+    [
+        ("process_host_id", "forged-physical-host"),
+        ("process_id", 99_999),
+    ],
+)
+def test_process_identity_is_bound_to_signed_load_proof(
+    qualification_case: Any,
+    field: str,
+    forged_value: Any,
+) -> None:
+    challenge = qualification_case.documents["run/route-challenge.json"]
+    challenge["stage_evidence"][0][field] = forged_value
+    challenge["kv_ownership"][0][field] = forged_value
+
+    _assert_rejected(qualification_case, "signed_load_proof_mismatch")
 
 
 @pytest.mark.parametrize(

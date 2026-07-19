@@ -326,6 +326,8 @@ def _validate_load_proof_signatures(
         "assignment_id",
         "node_id",
         "endpoint_id",
+        "process_id",
+        "process_host_id",
         "deployment_id",
         "deployment_epoch",
         "model_id",
@@ -360,6 +362,7 @@ def _validate_load_proof_signatures(
         seen.add(assignment_id)
         assignment = assignments_by_id[assignment_id]
         proof = proofs_by_id[assignment_id]
+        evidence = evidence_by_assignment[assignment_id]
         endpoint_id = peer_endpoints.get(assignment["node_id"])
         expected = {
             "kind": "signed_load_proof_v1",
@@ -367,6 +370,8 @@ def _validate_load_proof_signatures(
             "assignment_id": assignment_id,
             "node_id": assignment["node_id"],
             "endpoint_id": endpoint_id,
+            "process_id": evidence.get("process_id"),
+            "process_host_id": evidence.get("process_host_id"),
             "deployment_id": assignment["deployment_id"],
             "deployment_epoch": assignment["deployment_epoch"],
             "model_id": assignment["model_id"],
