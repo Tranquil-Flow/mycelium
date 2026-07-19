@@ -6,15 +6,18 @@ Review only this clean integration worktree and branch:
 
 - worktree: `/Users/evinova-self/Projects/mycelium-wt-active-integration-456`
 - branch: `integration/mycelium-active-session456-20260718`
-- review head before this handover: `902905030f7d36232515c8b99530c394d915fc3c`
+- review-repair commit: `902905030f7d36232515c8b99530c394d915fc3c`
+- physical transport evidence commit: `3ca175d37a24e95f0f463c87c8b09ee39eb7cea7`
 - canonical baseline: `f2bc55b62c5e3103eda584c1c68c222244bde489`
 
 Canonical `main` and all source worktrees remain clean. No merge, push, PR,
-fetch, pull, package install, remote-host action, credential access, physical
-qualification, or readiness promotion occurred. Observatory remains read-only.
+fetch, pull, package install, credential transfer, readiness promotion, or
+Observatory mutation occurred. One user-authorized, bounded remote-host probe
+ran on `m4pro` and `Evis-MacBook-Pro`; its exact scope and cleanup appear below.
 
 `route_ready=false` and `release_ready=false`. Every result below is local
-structural, process-local, simulation, loopback, or native-library evidence.
+structural, process-local, simulation, loopback, native-library, or bounded
+two-host physical transport evidence.
 
 ## Integrated source lanes and provenance
 
@@ -27,6 +30,8 @@ All source worktrees were clean when re-probed after integration.
 | PathCancellation adversarial lane | `120d6fffd1a1fc35308d22d6988db50f57d70d37` | `485f3927932e2b8590e7fa5d0f6d3a9f7b81b176` | `ec66f4a317bbedeab21a6c95ef753553de036b10` | Clean cherry-pick; source and integration patch IDs match. Its strict RED corpus exposed production defects repaired in `92ac90f`. |
 | PathCancellation production hardening | integration review | `92ac90f34a4628d446ed6ecd6c97363be3d4d940` | n/a | Production fixes plus permanent regressions. |
 | Incomplete-review recovery and independent re-review | integration review | `902905030f7d36232515c8b99530c394d915fc3c` | n/a | Recovered partial findings; three confirmed gaps repaired with three RED/GREEN regressions; own cross-file review completed. |
+| Request/Iroh qualification documentation repair | integration cleanup | `dccb44c24104431dd08bba538a5f922cff285a86` | n/a | Reconciled stale RED/blocker language with the committed cancellation repair and current four-test pass. |
+| Two-host Iroh transport probe | authorized physical spike | `3ca175d37a24e95f0f463c87c8b09ee39eb7cea7` | n/a | Three fresh physical sidecar lifecycles; 96/96 authenticated canonical frames remotely dispatched; claim boundary remains false. |
 
 Focused collection at the review head:
 
@@ -38,7 +43,7 @@ Focused collection at the review head:
 The complete stacked range can be inspected without mutating state:
 
 ```text
-GIT_OPTIONAL_LOCKS=0 git log --reverse --oneline 9d65a75832c34f8cb876a9f7a06459ed60373414..902905030f7d36232515c8b99530c394d915fc3c
+GIT_OPTIONAL_LOCKS=0 git log --reverse --oneline 9d65a75832c34f8cb876a9f7a06459ed60373414..3ca175d37a24e95f0f463c87c8b09ee39eb7cea7
 ```
 
 It contains request lifecycle/model conformance, request-to-iroh qualification,
@@ -96,16 +101,17 @@ crash-durable replay authority.
 
 ## Observed gates
 
-All commands below ran against the integrated code and were repeated after the
-handover documentation commit. The final post-commit results are recorded.
+All commands below ran against the integrated code with the physical-evidence
+document staged. The final pre-handover-commit results are recorded.
 
 | Command | Exit | Observed result |
 |---|---:|---|
-| `python3.14 -m pytest -q` | 0 | 1,653 passed, 2 skipped, 121 subtests passed in 83.48s. |
+| `python3.14 -m pytest -q` | 0 | 1,653 passed, 2 skipped, 121 subtests passed in 87.90s. |
+| `python3.14 -m pytest -q tests/e2e_request_iroh/test_request_iroh_e2e.py` | 0 | 4 passed. |
 | `python3.14 -m pytest -q tests/qualification_diff tests/capacity_catalog_adversarial tests/path_cancellation_adversarial` | 0 | 120 passed. |
 | Router/Iroh/request focused aggregate | 0 | 370 passed, 46 subtests passed. |
 | `python3.14 scripts/contract_audit.py` | 0 | 14 contracts verified. |
-| `python3.14 scripts/release_security_audit.py` | 0 | 472 tracked files accepted. |
+| `python3.14 scripts/release_security_audit.py` | 0 | 473 tracked files accepted. |
 | `python3.14 scripts/claim_boundary_audit.py` | 0 | 176 source files accepted. |
 | `python3.14 -m compileall -q .` | 0 | No diagnostics. |
 | `/opt/homebrew/bin/ruff check` on changed Python/tests | 0 | All checks passed. |
@@ -184,17 +190,46 @@ Recommended new adversarial review targets:
 5. runtime adapters whose `cancel(path_id)` is non-sticky or delayed;
 6. transport calls that block or re-enter Entry/Relay callbacks.
 
+## Bounded physical transport evidence
+
+After the local review cleanup and gate pass, an authorized throwaway spike ran
+the production Python `IrohTransport` and native sidecar on `m4pro` and the
+separate `Evis-MacBook-Pro`. The exact evidence and claim boundary are in
+`docs/qualification/2026-07-19-two-host-iroh-transport-probe.md`.
+
+Observed across three fresh sidecar/EndpointID lifecycles:
+
+- 48/48 canonical `PathCancellation` frames sent from `m4pro` were dispatched
+  by the peer capture adapter before authenticated acknowledgement;
+- 48/48 canonical `TokenEvent` frames sent in reverse were dispatched on
+  `m4pro` before authenticated acknowledgement;
+- all 12 wrong-destination or malformed-frame probes failed closed with the
+  expected stable code;
+- each host reported 16 sent, 16 received, 16 dispatched, zero duplicates, and
+  `route_ready=false` in each run;
+- no source fetch, package install, model download, remote build, credential
+  transfer, or Observatory operation occurred.
+
+This used a narrow capture adapter rather than a production Router. It proves a
+two-host authenticated native-Iroh transport/dispatch boundary, not distributed
+inference or end-to-end cancellation. The sidecar advertised IP addresses but
+did not expose selected-path telemetry, so direct LAN selection is not claimed.
+Private raw evidence and the exact spike scripts remain mode 0600 outside the
+repository. All run-scoped staging and processes were removed on both hosts.
+
 ## Remaining semantic and physical gaps
 
-This branch is ready for independent code review and local testing, not readiness
-promotion. Still absent:
+This branch is ready for independent code review and bounded physical transport
+inspection, not readiness promotion. Still absent:
 
-- accepted two-host/two-Mac physical qualification;
-- authenticated physical EndpointID, transport, stage/load, parity, negative-run,
+- accepted end-to-end two-host/two-Mac inference qualification; the bounded
+  physical transport probe above is not a route qualification;
+- physical production-Router, stage/load, tensor/token parity, full negative-run,
   and qualifier-issued evidence;
 - real distributed model tensor and token parity against a trusted local oracle;
 - physical request-to-iroh-to-token-stream proof under loss, disconnect, and
   cancellation;
+- selected-path proof distinguishing direct LAN from any alternate Iroh path;
 - crash-durable replay/cancellation authority and remote-delivery recovery;
 - proof that each production runtime adapter implements prompt, sticky,
   attempt-aware cancellation semantics;
