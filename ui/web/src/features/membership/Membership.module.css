@@ -1,0 +1,13 @@
+.workspace { display: grid; gap: 1rem; }
+.workspace header, .panel { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 1rem; padding: 1rem; background: color-mix(in srgb, #10261f 84%, transparent); }
+.panel { display: grid; gap: .8rem; }
+.panel label { display: grid; gap: .35rem; }
+.panel input, .panel select { font: inherit; color: inherit; background: #0a1714; border: 1px solid #527267; border-radius: .5rem; padding: .65rem; }
+.panel button, .workspace > button { justify-self: start; border: 1px solid #6abfa1; border-radius: 999px; color: inherit; background: #16392f; padding: .65rem 1rem; cursor: pointer; }
+.panel button:disabled { opacity: .55; cursor: not-allowed; }
+.code { display: block; overflow-wrap: anywhere; padding: .85rem; border-radius: .5rem; background: #07110f; }
+.panel table { width: 100%; border-collapse: collapse; }
+.panel th, .panel td { padding: .65rem; border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent); text-align: left; vertical-align: top; }
+@media (max-width: 720px) { .panel { overflow-x: auto; } }
+@media (prefers-reduced-motion: reduce) { .workspace * { scroll-behavior: auto !important; transition: none !important; } }
+@media (forced-colors: active) { .panel, .workspace header, .panel button { border: 1px solid CanvasText; } }
