@@ -8,16 +8,21 @@ Review only this clean integration worktree and branch:
 - branch: `integration/mycelium-active-session456-20260718`
 - review-repair commit: `902905030f7d36232515c8b99530c394d915fc3c`
 - physical transport evidence commit: `3ca175d37a24e95f0f463c87c8b09ee39eb7cea7`
+- signed process-identity repair: `e9d5ff182db655042a01a1680cc9b70fbc9fe03e`
+- Fable review repair: `be1a4d8`
 - canonical baseline: `f2bc55b62c5e3103eda584c1c68c222244bde489`
 
 Canonical `main` and all source worktrees remain clean. No merge, push, PR,
-fetch, pull, package install, credential transfer, readiness promotion, or
-Observatory mutation occurred. One user-authorized, bounded remote-host probe
-ran on `m4pro` and `Evis-MacBook-Pro`; its exact scope and cleanup appear below.
+fetch, pull, package install, readiness promotion, or Observatory mutation
+occurred. Two user-authorized bounded physical sessions ran: the prior two-Mac
+probe and the current three-device session using `m4pro`,
+`Evis-MacBook-Pro`, and Pixel 8 Pro. Exact scope, evidence, and cleanup appear
+below.
 
 `route_ready=false` and `release_ready=false`. Every result below is local
-structural, process-local, simulation, loopback, native-library, or bounded
-two-host physical transport evidence.
+structural, process-local, simulation, loopback, native-library, bounded
+physical transport, or exact toy-stage evidence. No unified three-device
+production route or pretrained distributed inference is claimed.
 
 ## Integrated source lanes and provenance
 
@@ -415,3 +420,179 @@ Post-repair evidence:
 This remains local software evidence only. No new physical test ran;
 `route_ready=false`, `release_ready=false`, Observatory read-only, no merge to
 `main`, and no push remain mandatory.
+
+## 2026-07-19 signed-identity repair and live three-device session
+
+### Confirmed qualification defect and repair
+
+A fresh adversarial audit found that signed load-proof statements bound node,
+endpoint, deployment, model, assignment, tensor, and freshness facts, but did
+not bind `process_id` or `process_host_id`. An evidence bundle could therefore
+relabel both process fields consistently in stage and KV evidence after the
+load-proof statement was signed. The qualifier could still accept the forged
+physical-process labels.
+
+Commit `e9d5ff182db655042a01a1680cc9b70fbc9fe03e` adds both process fields to the
+exact signed statement schema and reconstructs their expected values from the
+corresponding stage evidence. Two permanent RED/GREEN regressions mutate host
+and process identity without re-signing and now fail with
+`signed_load_proof_mismatch`. Existing downstream adversarial cases explicitly
+re-sign their mutated statements so duplicate/invalid process identities still
+reach and exercise `process_identity_invalid` rather than being masked by the
+new earlier gate. The generated contract manifest was refreshed.
+
+This closes post-signature relabeling. It does not turn peer signatures into
+hardware attestation: a peer can still sign a false host claim unless an
+external trusted physical-identity authority proves it. The physical evidence
+below is therefore separate operator-controlled evidence, not a qualifier
+readiness promotion.
+
+### Final local gates at the repaired code head
+
+| Command | Exit | Observed result |
+|---|---:|---|
+| `python3.14 -m pytest -q` | 0 | 1,664 passed, 2 optional-Zenoh skips, 121 subtests passed. |
+| Focused qualification/request aggregate | 0 | 273 passed. |
+| `python3.14 scripts/contract_audit.py` | 0 | 14 contracts verified. |
+| `python3.14 -m compileall -q .` | 0 | No diagnostics. |
+| `/opt/homebrew/bin/ruff check .` | 0 | All checks passed. |
+| `python3.14 scripts/release_security_audit.py` | 0 | 473 tracked files accepted. |
+| `python3.14 scripts/claim_boundary_audit.py` | 0 | 176 source files accepted. |
+| `git diff --check` | 0 | No whitespace errors. |
+| Rust fmt, clippy with warnings denied, and tests | 0 | 21 tests passed. |
+| `npm run check` using existing dependencies only | 0 | 98 Vitest and 3 Node tests passed; typecheck and production build passed. |
+
+The UI dependency symlink was removed on command exit. No package install or
+dependency download ran.
+
+### Live physical observations
+
+The current integration code at `e9d5ff182db655042a01a1680cc9b70fbc9fe03e`
+was staged into fresh, mode-restricted throwaway roots on the two Macs. The
+remote files and native sidecar were digest-verified before execution. One
+fresh production-Iroh session observed:
+
+- 16/16 canonical `PathCancellation` frames confirmed from `m4pro` to
+  `Evis-MacBook-Pro`, all 16 dispatched to the peer capture adapter;
+- 16/16 canonical `TokenEvent` frames confirmed in reverse, all 16 dispatched
+  on `m4pro`;
+- 32 unique authenticated dispatch acknowledgements and no duplicate delivery;
+- four wrong-destination/malformed-frame probes rejected with the expected
+  stable codes;
+- `route_ready=false` and `release_ready=false` in the emitted evidence.
+
+Pixel 8 Pro was re-probed live as Android 16/SDK 36, `aarch64`, Python 3.14.6,
+through the existing authenticated argv-only bridge. The isolated mobile lab
+then ran 161 tests and verified 11 pinned canonical files. Two complete
+redeploy-and-execute cycles each observed:
+
+- exact deterministic toy-transformer parity with `max_abs_error=0.0`;
+- one physical Pixel stage request and 128 activation bytes round-tripped;
+- a pinned canonical graph/manifest fixture sourced from clean canonical
+  snapshot `f2bc55b62c5e3103eda584c1c68c222244bde489`;
+- a changed runtime-instance identity and changed load-proof digest after the
+  second redeploy, confirming restart invalidation in the lab fixture.
+
+Important source boundary: the two-Mac Iroh result exercised current integration
+head `e9d5ff1`; the Pixel graph fixture consumed pinned contracts from canonical
+main snapshot `f2bc55b`. These are two bounded physical tests in one
+three-device session, not one unified three-device production route. Pixel ran
+an exact deterministic toy stage, not a pretrained assigned Mycelium stage.
+Canonical RelayEngine/Router ports, live gossip publication, real capacity
+reservations, selected-path telemetry, and accepted qualifier output were not
+exercised.
+
+Pixel stage listener port 9021 was closed after testing. Remote stage source,
+PID, and stage-token artifacts were removed; the host stage token was removed.
+All two-Mac run processes stopped, and every local/remote throwaway staging root
+created by this session was removed. The long-lived authenticated bridge on
+port 9020 remains available; its token bytes are absent from the evidence
+archive. Observatory remained read-only.
+
+Exact private evidence archive:
+
+```text
+/Users/evinova-self/mycelium-physical-qualification-evidence/multi-device-live-20260719T074206Z
+```
+
+- `SHA256SUMS`: 9/9 artifacts independently re-verified;
+- `session-summary.json` SHA-256:
+  `ea554d0d90ca42766732c6d294f5254c554b8c3c0f3ca1fdf28f06a6a9799866`;
+- `SHA256SUMS` SHA-256:
+  `1cd70cc6b3e1d8ec1109bdf7056bbe3635f180d40c6b62b0ea5eefa28870fc98`.
+
+### Remaining feature-lane gaps
+
+`route_ready=false` and `release_ready=false` remain mandatory. Next feature
+lanes still need a single accepted route that combines canonical planner and
+assignment provenance, real target-owned load proofs, hardware/trusted process
+identity evidence, coherent live gossip/link state, production Router capacity
+and runtime ports, physical tensor/token execution, pretrained oracle parity,
+selected direct-versus-relay path proof, multi-token KV loopback, disconnect and
+restart behavior, end-to-end cancellation, recovery, and qualifier-issued
+evidence. No merge to `main` and no push occurred.
+
+## Fable review adjudication and final repair
+
+Commit `be1a4d8e1b357de791c5e8ecef699551e0b2a9dd` records the final code repair.
+Each reported finding was independently reproduced or refuted rather than
+accepted from prose alone:
+
+1. Cancel-before-arrival was confirmed. Relay now keeps a bounded 4,096-entry
+   pending-cancellation map for not-yet-registered attempts and atomically
+   consumes the cancellation when the manifest arrives. Four focused
+   regressions observed RED before repair and GREEN afterward.
+2. Replay wording was overstated. Documentation now says the two-window rotating
+   filter provides bounded process-local resistance only; cancelled identities
+   can age out and no crash-durable replay authority is claimed.
+3. Scattered generation fencing contained one duplicate implementation.
+   `_send_token_if_path_current` was removed and all callers use the single
+   `_send_if_path_current` helper. Existing send-boundary tests remain green.
+4. Canonical-evidence drift was confirmed where it changed acceptance behavior.
+   Qualification evidence now applies the same 48-level/100,000-node JSON bounds
+   and strict path byte/component/control-character bounds as the evidence-diff
+   inspector. Model-manifest serialization rejects NaN and infinity. Permanent
+   excessive-nesting, unsafe-path, and non-finite-number regressions cover these
+   boundaries. Protocol-specific serializers and error taxonomies were not
+   collapsed where their byte/newline/ASCII contracts intentionally differ.
+5. Claim-audit output redaction was confirmed missing. Secret-shaped values and
+   private-key markers are now replaced by deterministic SHA-256-based redaction
+   labels before findings are emitted. Its regression observed RED then GREEN.
+6. Final-hop source authentication had duplicated call shape, not a reproduced
+   bypass. The check now has one `_final_hop_origin_matches` predicate operating
+   directly on graph, manifest, and source identity.
+7. Parallel path-state containers remain an architectural review target, but no
+   state-resurrection defect beyond the repaired cancellation races was
+   reproduced. A broad unproven state-model rewrite was therefore not bundled
+   into this repair.
+8. The claimed 27 Ruff errors were refuted. Repository-wide and changed-file
+   Ruff checks both pass; the cited import/E402 findings describe an older code
+   state already repaired by `c11a358`.
+9. Repository hygiene scan found no tracked caches, build output, temporary
+   files, or large binary artifacts. Empty tracked files were package markers.
+   Ignored handover/plan files remain intentional provenance evidence; no history
+   rewrite, provenance deletion, or trailer rewrite was performed.
+
+Focused repaired surfaces passed 64 tests. The 39-case PathCancellation
+adversarial suite passed, then ten deterministic shuffled repetitions passed
+10/10. Final code-head gates observed after the repair:
+
+| Command or surface | Exit | Observed result |
+|---|---:|---|
+| `python3.14 -m pytest -q` | 0 | 1,670 passed, 2 optional-Zenoh skips, 121 subtests passed. |
+| Focused repaired surfaces | 0 | 64 passed. |
+| PathCancellation deterministic stress | 0 | 10/10 shuffled repetitions passed. |
+| Contract manifest check, contract audit, fixture checks | 0 | 14 contracts verified; manifest and fixtures passed. |
+| `python3.14 scripts/release_security_audit.py` | 0 | 473 tracked files accepted. |
+| `python3.14 scripts/claim_boundary_audit.py` | 0 | 176 source files accepted. |
+| `python3.14 -m compileall -q .` | 0 | No diagnostics. |
+| `/opt/homebrew/bin/ruff check .` | 0 | All checks passed. |
+| `git diff --check` | 0 | No whitespace errors. |
+| Rust fmt, clippy with warnings denied, and tests | 0 | 21 tests passed. |
+| `npm run check` using existing dependencies only | 0 | 98 Vitest and 3 Node tests passed; typecheck and production build passed. |
+
+The Fable verdict's claim-boundary correction is accepted: this branch is ready
+for further physical and feature-lane testing, not guaranteed deployment.
+Physical evidence above is bounded and does not establish one unified
+production route. `route_ready=false`, `release_ready=false`, Observatory
+read-only, no merge to `main`, and no push remain mandatory.
