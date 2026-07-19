@@ -10,7 +10,9 @@ The strongest production-path inference claim remains the same-host native-iroh 
 
 A separate live physical harness now runs a three-stage tiny-GPT-2-shaped split across two independent local MLX subprocesses and a Pixel 8 Pro Termux process. The phone executes a decoder substage derived from a deterministic, locally generated fixture; its dependency-free worker binds the exact tensor subset and supported attention/activation configuration to parent-assignment, parent-load-proof, pack, and worker-source digests. Across two four-token lifecycles, every phone hidden-state element and final logit matches the separate MLX reference within `1e-6`; round-to-even `1e-5`-quantized token selection also matches. The harness rejects bad authentication and a mismatched request assignment, proves the old phone PID exited and its endpoint became unreachable, then passes after worker restart. This proves physical Mac -> Pixel -> Mac stage execution, not production Router routing: transport is `stdin/http/stdin`, the Mac derives and provisions the phone subpack, the generic bootstrap bridge credential is RCE-equivalent, live ADB identity was unavailable for the final run, device authority evidence has not passed the production qualifier, and `route_ready` remains `false`.
 
-Both claims remain bounded. The production Router proof shares one host and a local SQLite lease coordinator. Generation/topology rotation, multi-host native-iroh routing, token-continuity recovery, and production authority qualification remain open.
+An interactive browser-swarm console now lets an operator enroll a browser worker with a single-use fragment link and run the same exact decoder stage through JavaScript. The host verifies every browser output against the local Python stage and monolithic MLX reference. Current browser evidence uses two independent local Chrome processes with isolated profiles; it is not physical cross-device, HTTPS-path, production-Router, or device-authority qualification. See [`docs/interactive-browser-swarm.md`](docs/interactive-browser-swarm.md).
+
+All claims remain bounded. The production Router proof shares one host and a local SQLite lease coordinator. Generation/topology rotation, multi-host native-iroh routing, token-continuity recovery, and production authority qualification remain open.
 
 ## Architecture direction
 
@@ -51,5 +53,13 @@ cd ui/web
 npm ci
 npm run check
 ```
+
+Interactive browser swarm:
+
+```bash
+python3.14 scripts/interactive_swarm_server.py
+```
+
+Open the emitted `operator_url`, create one join link, and open that link in the contributing browser. Non-loopback use requires HTTPS (direct TLS or a reverse proxy) and an explicit `--public-origin`; see the linked interactive guide. This remains local evidence with `route_ready=false`.
 
 The MVP remains incomplete until a physical multi-peer production-Router qualification demonstrates route-ready stage computation, token continuity through peer failure, and qualified device authority.
