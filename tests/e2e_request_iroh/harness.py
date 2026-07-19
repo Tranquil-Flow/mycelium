@@ -848,6 +848,8 @@ def run_cancellation_probe(native_binary: Path) -> CancellationEvidence:
         while (
             topology.runtime_c.has_path(path_id)
             or path_id in topology.router_c.relay._paths
+            or not topology.first.cancellation_cleanup_complete(REQUEST_ID, path_id)
+            or not topology.second.cancellation_cleanup_complete(REQUEST_ID, path_id)
         ):
             fatal = topology.first.fatal_error or topology.second.fatal_error
             if fatal is not None:
@@ -875,7 +877,10 @@ def run_cancellation_probe(native_binary: Path) -> CancellationEvidence:
             not topology.runtime_c.has_path(path_id)
             and path_id not in topology.router_c.relay._paths
         )
-        pending = len(topology.first._pending) + len(topology.second._pending)
+        pending = (
+            topology.first.pending_delivery_count
+            + topology.second.pending_delivery_count
+        )
         return CancellationEvidence(
             gateway_released=gateway_released,
             adapter_released=adapter_released,

@@ -10,10 +10,11 @@ simultaneous loss of both sidecars is not durable exactly-once delivery.
 
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+from queue import Empty, Full, Queue
 import threading
 import time
 from typing import Any, Callable, Mapping
@@ -115,6 +116,13 @@ class _PendingSend:
    completed: bool = False
 
 
+@dataclass
+class _AckRequest:
+   message_id: bytes
+   completed: threading.Event
+   error: BaseException | None = None
+
+
 ClientFactory = Callable[..., Any]
 
 
@@ -171,6 +179,11 @@ class IrohTransport:
       self._receive_client: Any | None = None
       self._control_client: Any | None = None
       self._receiver_thread: threading.Thread | None = None
+      self._dispatcher_thread: threading.Thread | None = None
+      self._dispatch_queue: Queue[
+         tuple[bytes, int, bytes, bytes, DecodedFrame | None]
+      ] = Queue(maxsize=queue_capacity)
+      self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
       self._stop = threading.Event()
       self._running = False
@@ -178,6 +191,9 @@ class IrohTransport:
       self._fatal_error: IrohTransportError | None = None
       self._pending: dict[bytes, _PendingSend] = {}
       self._seen: OrderedDict[bytes, bytes] = OrderedDict()
+      self._inflight_received: dict[bytes, bytes] = {}
+      self._dispatcher_phase = "idle"
+      self._outbound_trace: deque[str] = deque(maxlen=256)
       self._remote_frames_sent = 0
       self._remote_frames_received = 0
       self._router_frames_dispatched = 0
@@ -204,8 +220,42 @@ class IrohTransport:
 
    @property
    def worker_threads_alive(self) -> int:
-      thread = self._receiver_thread
-      return int(thread is not None and thread.is_alive())
+      threads = (self._receiver_thread, self._dispatcher_thread)
+      return sum(
+         int(thread is not None and thread.is_alive()) for thread in threads
+      )
+
+   @property
+   def pending_delivery_count(self) -> int:
+      with self._state_lock:
+         return len(self._pending)
+
+   def cancellation_cleanup_complete(self, request_id: str, path_id: str) -> bool:
+      """Return a lock-coherent local cleanup observation for one cancelled path."""
+      with self._state_lock:
+         state_clean = (
+            not self._pending
+            and not self._inflight_received
+            and path_id not in self._path_graphs
+            and path_id not in self._participant_nodes_by_path
+            and request_id not in self._entry_nodes
+            and path_id not in self._cancellation_threads
+         )
+      with self._dispatch_queue.all_tasks_done:
+         dispatch_clean = self._dispatch_queue.unfinished_tasks == 0
+      with self._ack_queue.all_tasks_done:
+         ack_clean = self._ack_queue.unfinished_tasks == 0
+      return state_clean and dispatch_clean and ack_clean
+
+   @property
+   def dispatcher_phase(self) -> str:
+      with self._state_lock:
+         return self._dispatcher_phase
+
+   @property
+   def outbound_trace(self) -> tuple[str, ...]:
+      with self._state_lock:
+         return tuple(self._outbound_trace)
 
    def bind_router(self, router: Any) -> None:
       with self._state_lock:
@@ -262,11 +312,17 @@ class IrohTransport:
          self._send_client, self._receive_client, self._control_client = clients
          self._stop.clear()
          self._running = True
+         self._dispatcher_thread = threading.Thread(
+            target=self._dispatch_loop,
+            name=f"mycelium-iroh-dispatch-{self.node_id}",
+            daemon=True,
+         )
          self._receiver_thread = threading.Thread(
             target=self._receive_loop,
             name=f"mycelium-iroh-{self.node_id}",
             daemon=True,
          )
+         self._dispatcher_thread.start()
          self._receiver_thread.start()
 
    @staticmethod
@@ -571,9 +627,32 @@ class IrohTransport:
                return
             self._set_fatal(IrohTransportError("sidecar_receive_client_missing"))
             return
+         if not self._drain_ack_requests(client):
+            return
+         with self._state_lock:
+            awaiting_dispatch_ack = bool(self._inflight_received)
+         if awaiting_dispatch_ack:
+            self._stop.wait(self.poll_interval_seconds)
+            continue
          try:
             delivery = self._recv(client)
          except TimeoutError:
+            if self._stop.is_set():
+               return
+            if getattr(client, "connected", True):
+               continue
+            try:
+               self._reconnect_receive_client()
+            except BaseException as reconnect_error:
+               if self._stop.is_set():
+                  return
+               self._set_fatal(
+                  self._map_sidecar_error(
+                     "sidecar_receive_reconnect_failed",
+                     reconnect_error,
+                  )
+               )
+               return
             continue
          except BaseException as error:
             if self._stop.is_set():
@@ -607,53 +686,121 @@ class IrohTransport:
                self._set_fatal(IrohTransportError("peer_rotated"))
                return
             previous = self._seen.get(message_id)
-            if previous is not None:
-               if previous != digest:
-                  self._set_fatal(IrohTransportError("replay_collision"))
-                  return
-               self._duplicate_frames += 1
-               duplicate = True
-            else:
-               duplicate = False
-         if duplicate:
-            try:
-               client.ack(message_id)
-            except BaseException as error:
-               self._set_fatal(self._map_sidecar_error("ack_failed", error))
+            inflight = self._inflight_received.get(message_id)
+            known_digest = previous if previous is not None else inflight
+            if known_digest is not None and known_digest != digest:
+               self._set_fatal(IrohTransportError("replay_collision"))
                return
+            duplicate = known_digest is not None
+            self._inflight_received[message_id] = digest
+         if duplicate:
+            decoded = None
+         else:
+            try:
+               decoded = decode_frame(frame)
+            except WireError as error:
+               with self._state_lock:
+                  self._inflight_received.pop(message_id, None)
+               self._set_fatal(
+                  IrohTransportError("malformed_router_frame", error.code)
+               )
+               return
+         try:
+            self._dispatch_queue.put_nowait(
+               (message_id, delivery_generation, frame, digest, decoded)
+            )
+         except Full:
+            with self._state_lock:
+               self._inflight_received.pop(message_id, None)
+            self._set_fatal(IrohTransportError("dispatch_queue_full"))
+            return
+
+   def _dispatch_loop(self) -> None:
+      while not self._stop.is_set():
+         try:
+            (
+               message_id,
+               delivery_generation,
+               _frame,
+               digest,
+               decoded,
+            ) = self._dispatch_queue.get(timeout=self.poll_interval_seconds)
+         except Empty:
             continue
          try:
-            decoded = decode_frame(frame)
-         except WireError as error:
-            self._set_fatal(
-               IrohTransportError("malformed_router_frame", error.code)
-            )
-            return
-         try:
+            with self._state_lock:
+               current_generation = self._peer.generation
+            if delivery_generation != current_generation:
+               raise IrohTransportError("peer_rotated_during_dispatch")
+            if decoded is None:
+               with self._state_lock:
+                  self._dispatcher_phase = "acknowledging_duplicate"
+                  self._duplicate_frames += 1
+               self._ack_after_dispatch(message_id)
+               with self._state_lock:
+                  self._dispatcher_phase = "idle"
+                  self._inflight_received.pop(message_id, None)
+               continue
+            with self._state_lock:
+               self._dispatcher_phase = f"dispatching:{type(decoded).__name__}"
             self._dispatch(decoded, source_node_id=self.peer_binding.node_id)
+            with self._state_lock:
+               self._dispatcher_phase = "awaiting_local_ack"
+               if delivery_generation != self._peer.generation:
+                  raise IrohTransportError("peer_rotated_during_dispatch")
+            self._ack_after_dispatch(message_id)
+            with self._state_lock:
+               self._dispatcher_phase = "idle"
+               self._inflight_received.pop(message_id, None)
+               self._seen[message_id] = digest
+               self._seen.move_to_end(message_id)
+               while len(self._seen) > _SEEN_LIMIT:
+                  self._seen.popitem(last=False)
+               self._remote_frames_received += 1
+               self._router_frames_dispatched += 1
          except BaseException as error:
+            with self._state_lock:
+               self._inflight_received.pop(message_id, None)
             self._set_fatal(
                error
                if isinstance(error, IrohTransportError)
                else IrohTransportError("router_dispatch_failed", str(error))
             )
             return
-         with self._state_lock:
-            if delivery_generation != self._peer.generation:
-               self._set_fatal(IrohTransportError("peer_rotated_during_dispatch"))
-               return
+         finally:
+            self._dispatch_queue.task_done()
+
+   def _ack_after_dispatch(self, message_id: bytes) -> None:
+      request = _AckRequest(message_id=message_id, completed=threading.Event())
+      try:
+         self._ack_queue.put_nowait(request)
+      except Full as error:
+         raise IrohTransportError("ack_queue_full") from error
+      deadline = time.monotonic() + self.delivery_timeout_seconds
+      while not request.completed.wait(timeout=self.poll_interval_seconds):
+         if self._stop.is_set():
+            raise IrohTransportError("transport_closed_during_ack")
+         if time.monotonic() >= deadline:
+            raise IrohTransportError("ack_dispatch_timeout")
+      if request.error is not None:
+         raise self._map_sidecar_error("ack_failed", request.error)
+
+   def _drain_ack_requests(self, client: Any) -> bool:
+      while True:
          try:
-            client.ack(message_id)
+            request = self._ack_queue.get_nowait()
+         except Empty:
+            return True
+         try:
+            client.ack(request.message_id)
          except BaseException as error:
+            request.error = error
+            request.completed.set()
+            self._ack_queue.task_done()
             self._set_fatal(self._map_sidecar_error("ack_failed", error))
-            return
-         with self._state_lock:
-            self._seen[message_id] = digest
-            self._seen.move_to_end(message_id)
-            while len(self._seen) > _SEEN_LIMIT:
-               self._seen.popitem(last=False)
-            self._remote_frames_received += 1
-            self._router_frames_dispatched += 1
+            return False
+         request.completed.set()
+         self._ack_queue.task_done()
 
    def _recv(self, client: Any) -> tuple[bytes, int, bytes] | None:
       receive = client.recv_with_generation
@@ -662,7 +809,7 @@ class IrohTransport:
       except TypeError as error:
          if "wait_seconds" not in str(error):
             raise
-         return receive(timeout=self.poll_interval_seconds)
+         return receive(timeout=max(self.poll_interval_seconds, 0.5))
 
    def _reconnect_receive_client(self) -> None:
       replacement = self._new_client()
@@ -738,13 +885,19 @@ class IrohTransport:
             message.build.graph,
             message.build.ordered_hops[0].placement_id,
          )
-         accepted = router.register_path(
-            message.build.request,
-            message.manifest,
-            message.build.graph,
-            source_node_id=source_node_id,
-            entry_node_id=entry_node,
-         )
+         if entry_node == self.node_id:
+            accepted = router.receive_manifest_locked(
+               message,
+               source_node_id=source_node_id,
+            )
+         else:
+            accepted = router.register_path(
+               message.build.request,
+               message.manifest,
+               message.build.graph,
+               source_node_id=source_node_id,
+               entry_node_id=entry_node,
+            )
          if not accepted:
             raise IrohTransportError("manifest_registration_rejected")
          participants = frozenset(
@@ -755,11 +908,6 @@ class IrohTransport:
             self._path_graphs[message.path_id] = message.build.graph
             self._participant_nodes_by_path[message.path_id] = participants
             self._entry_nodes.setdefault(message.request_id, entry_node)
-         if entry_node == self.node_id:
-            router.receive_manifest_locked(
-               message,
-               source_node_id=source_node_id,
-            )
          return
       if isinstance(message, ManifestDelta):
          with self._state_lock:
@@ -844,6 +992,10 @@ class IrohTransport:
       with self._state_lock:
          self._require_running()
       graph = locked.build.graph
+      entry_node = self._node_for_placement(
+         graph,
+         locked.build.ordered_hops[0].placement_id,
+      )
       destinations = {
          self._node_for_placement(graph, hop.placement_id)
          for hop in locked.manifest.ordered_hops
@@ -857,6 +1009,8 @@ class IrohTransport:
          self._participant_nodes_by_path[locked.path_id] = frozenset(destinations)
       frame = encode_frame(locked)
       for destination in sorted(destinations):
+         if destination == self.node_id and entry_node != self.node_id:
+            continue
          self._send_or_dispatch(destination, frame)
 
    def send_path_cancellation(self, cancellation: PathCancellation) -> None:
@@ -942,10 +1096,20 @@ class IrohTransport:
       )
 
    def _send_or_dispatch(self, destination: str, frame: bytes) -> None:
+      decoded = decode_frame(frame)
+      detail = (
+         f":{decoded.message.reason}"
+         if isinstance(decoded.message, FailureReport)
+         else ""
+      )
       with self._state_lock:
          self._require_running()
+         self._outbound_trace.append(
+            f"{type(decoded.message).__name__}->{destination}:"
+            f"{'local' if destination == self.node_id else 'remote'}{detail}"
+         )
       if destination == self.node_id:
-         self._dispatch(decode_frame(frame), source_node_id=self.node_id)
+         self._dispatch(decoded, source_node_id=self.node_id)
          return
       self.send_router_frame(frame, destination_node_id=destination)
 
@@ -1018,6 +1182,7 @@ class IrohTransport:
             self._send_client = None
             self._control_client = None
          thread = self._receiver_thread
+         dispatcher_thread = self._dispatcher_thread
          cancellation_threads = tuple(self._cancellation_threads.values())
       for message_id in pending_ids:
          self._cancel_with_client(control, message_id)
@@ -1040,6 +1205,15 @@ class IrohTransport:
             error = IrohTransportError("receiver_shutdown_timeout")
             self._set_fatal(error)
             raise error
+      if (
+         dispatcher_thread is not None
+         and dispatcher_thread is not threading.current_thread()
+      ):
+         dispatcher_thread.join(timeout=max(1.0, self.delivery_timeout_seconds))
+         if dispatcher_thread.is_alive():
+            error = IrohTransportError("dispatcher_shutdown_timeout")
+            self._set_fatal(error)
+            raise error
       for cancellation_thread in cancellation_threads:
          if cancellation_thread is threading.current_thread():
             continue
@@ -1053,6 +1227,8 @@ class IrohTransport:
       with self._state_lock:
          if self._receiver_thread is thread:
             self._receiver_thread = None
+         if self._dispatcher_thread is dispatcher_thread:
+            self._dispatcher_thread = None
 
    def _set_fatal(self, error: IrohTransportError) -> None:
       with self._state_lock:

@@ -6,7 +6,7 @@ Mycelium is a privacy-first distributed-inference system for assigning model sta
 
 The repository contains working Planner, provisioning, Gossip, Router, batching, transport-spike integration surfaces, tests, and a read-only Network Observatory UI.
 
-The strongest completed multi-host claim is two-peer, assignment-specific artifact provisioning. An offline local qualification now also demonstrates two independent spawned Python processes loading and probing disjoint, assignment-bound MLX stages from a generated sharded GPT-2 checkpoint. All of this evidence retains `route_ready: false`; Layer Builder integration, activation transfer, physical distributed prefill/decode, and route qualification remain under construction.
+The strongest completed multi-host claim remains two-peer, assignment-specific artifact provisioning. A same-host physical harness now also demonstrates two independent Python Router processes and two independent native iroh sidecars loading disjoint, assignment-bound MLX stages, exchanging canonical Router frames over authenticated iroh, and producing token parity with the single-process reference. The harness additionally verifies distributed cancellation cleanup, fail-closed peer loss, and successful inference after full process and endpoint restart. This is local evidence only: both workers share one host and a local SQLite lease coordinator, generation/topology rotation and token-continuity recovery are not yet physically qualified, immutable authority evidence has not passed the production qualifier, and `route_ready` remains `false`.
 
 ## Architecture direction
 

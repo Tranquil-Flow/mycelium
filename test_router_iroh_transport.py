@@ -292,6 +292,9 @@ def test_authenticated_inbound_is_acked_only_after_bounded_adapter_admission() -
         message_id = b"a" * 16
         hub.deliver(message_id, _event_frame())
         assert router.received.wait(1)
+        deadline = time.monotonic() + 1
+        while not hub.acks and time.monotonic() < deadline:
+            time.sleep(0.01)
         assert hub.acks == [message_id]
         assert router.token_events == [
             (
@@ -307,6 +310,10 @@ def test_authenticated_inbound_is_acked_only_after_bounded_adapter_admission() -
             )
         ]
         evidence = transport.evidence()
+        deadline = time.monotonic() + 1
+        while evidence.remote_frames_received != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+            evidence = transport.evidence()
         assert evidence.remote_frames_received == 1
         assert evidence.router_frames_dispatched == 1
         assert evidence.peer_endpoint_id == "peer-endpoint"
@@ -350,7 +357,12 @@ def test_duplicate_delivery_is_acked_but_dispatched_once() -> None:
             time.sleep(0.01)
         assert hub.acks == [message_id, message_id]
         assert len(router.token_events) == 1
-        assert transport.evidence().duplicate_frames == 1
+        evidence = transport.evidence()
+        deadline = time.monotonic() + 1
+        while evidence.duplicate_frames != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+            evidence = transport.evidence()
+        assert evidence.duplicate_frames == 1
     finally:
         transport.close()
 
@@ -509,6 +521,10 @@ def test_same_message_id_with_different_frame_is_fatal_replay_collision() -> Non
         message_id = b"r" * 16
         hub.deliver(message_id, _event_frame(101))
         assert router.received.wait(1)
+        deadline = time.monotonic() + 1
+        while not hub.acks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert hub.acks == [message_id]
         hub.deliver(message_id, _event_frame(102))
         deadline = time.monotonic() + 1
         while transport.fatal_error is None and time.monotonic() < deadline:
@@ -760,7 +776,7 @@ def test_close_reports_blocked_router_callback_instead_of_false_clean_shutdown()
     hub.deliver(b"b" * 16, _event_frame())
     assert entered.wait(timeout=1)
     try:
-        with pytest.raises(IrohTransportError, match="receiver_shutdown_timeout"):
+        with pytest.raises(IrohTransportError, match="dispatcher_shutdown_timeout"):
             transport.close()
         assert transport.worker_threads_alive == 1
     finally:
