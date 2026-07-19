@@ -29,8 +29,12 @@ from typing import Any, NoReturn
 
 import mlx.core as mx
 
-from layer_assignment import compile_layer_assignments
 from model_manifest import manifest_digest_ref
+from mycelium_qualification.physical_deployment import (
+    PhysicalDeploymentError,
+    prepare_assignment_artifacts,
+    prepare_monolithic_reference,
+)
 from mycelium_router.contracts import (
     DeviceState,
     ExecutionGraph,
@@ -61,16 +65,10 @@ from mycelium_router.transports.loopback_socket import LoopbackSocketMesh
 from mycelium_router.wire import ROUTER_WIRE_PROTOCOL, decode_frame
 from runtime_loader import canonical_json, execute_loaded_stage, load_assignment_stage
 from two_process_runtime_qualification import (
-    DEPLOYMENT_EPOCH,
-    DEPLOYMENT_ID,
     LOAD_GENERATION,
     _LocalOnlyFetcher,
-    _build_local_model,
-    _control_plane_binding,
     _install_network_audit_guard,
-    _route_for_manifest,
 )
-from weight_provisioning import artifact_report_errors, provision_assignment
 
 
 QUALIFICATION_PROTOCOL = "mycelium.two_process_inference_qualification.v1"
@@ -892,37 +890,10 @@ def _spawn_runtime_workers(
 def _prepare_assignments(
     root: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], _LocalOnlyFetcher]:
-    manifest, _ = _build_local_model(root, n_positions=16)
-    route = _route_for_manifest(manifest)
-    assignments = compile_layer_assignments(
-        route_plan=route,
-        manifest=manifest,
-        deployment_id=DEPLOYMENT_ID,
-        deployment_epoch=DEPLOYMENT_EPOCH,
-        cache_roots={node: str(root) for node in route["node_order"]},
-        runtime_by_node={
-            node: {"backend": "mlx", "dtype": "float32", "quantization": "none"}
-            for node in route["node_order"]
-        },
-        control_plane_binding=_control_plane_binding(),
-    )
-    if len(assignments) != 2:
-        raise QualificationError("compiled route does not contain exactly two assignments")
-    fetcher = _LocalOnlyFetcher(root)
-    reports = [
-        provision_assignment(
-            assignment,
-            fetch_file=fetcher,
-            local_files_only=True,
-        )
-        for assignment in assignments
-    ]
-    for assignment, report in zip(assignments, reports):
-        errors = artifact_report_errors(assignment, report)
-        if errors:
-            raise QualificationError(
-                "artifact verification report failed: " + "; ".join(errors)
-            )
+    try:
+        manifest, _, assignments, reports, fetcher = prepare_assignment_artifacts(root)
+    except PhysicalDeploymentError as exc:
+        raise QualificationError(str(exc)) from exc
     return manifest, assignments, reports, fetcher
 
 
@@ -933,50 +904,10 @@ def _prepare_monolithic_reference(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Compile and provision one independent full-model MLX reference stage."""
 
-    reference_node = "reference-node"
-    route = {
-        **_route_for_manifest(manifest),
-        "route": [
-            {
-                "node_id": reference_node,
-                "range": {
-                    "start_layer": 0,
-                    "end_layer_exclusive": manifest["num_layers"],
-                    "layer_count": manifest["num_layers"],
-                },
-            }
-        ],
-        "node_order": [reference_node],
-    }
-    reference_assignments = compile_layer_assignments(
-        route_plan=route,
-        manifest=manifest,
-        deployment_id=DEPLOYMENT_ID,
-        deployment_epoch=DEPLOYMENT_EPOCH,
-        cache_roots={reference_node: str(root)},
-        runtime_by_node={
-            reference_node: {
-                "backend": "mlx",
-                "dtype": "float32",
-                "quantization": "none",
-            }
-        },
-        control_plane_binding=_control_plane_binding(),
-    )
-    if len(reference_assignments) != 1:
-        raise QualificationError("monolithic reference did not compile one assignment")
-    assignment = reference_assignments[0]
-    report = provision_assignment(
-        assignment,
-        fetch_file=fetcher,
-        local_files_only=True,
-    )
-    errors = artifact_report_errors(assignment, report)
-    if errors:
-        raise QualificationError(
-            "monolithic reference artifact verification failed: " + "; ".join(errors)
-        )
-    return assignment, report
+    try:
+        return prepare_monolithic_reference(root, manifest, fetcher)
+    except PhysicalDeploymentError as exc:
+        raise QualificationError(str(exc)) from exc
 
 
 def _build_execution_graph(
