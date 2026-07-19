@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+from types import TracebackType
+from typing import Any, IO
 
 import pytest
 
@@ -175,6 +178,60 @@ def test_rejects_tracked_symlinks_without_following_them(tmp_path: Path) -> None
     assert result["ok"] is False
     assert [item for item in result["findings"] if item["path"] == "linked.txt"] == [
         {"code": "tracked_symlink", "path": "linked.txt"}
+    ]
+
+
+def test_same_size_mutation_with_restored_mtime_during_read_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safe_content = ("S" * 40) + "\n"
+    secret_content = "ghp_" + ("A" * 36) + "\n"
+    assert len(safe_content) == len(secret_content)
+    repo = _repo(tmp_path, {"app.py": safe_content})
+    target = repo / "app.py"
+    initial = target.stat()
+    real_open = Path.open
+
+    class MutatingHandle:
+        def __init__(self, handle: IO[Any]) -> None:
+            self._handle = handle
+
+        def __enter__(self) -> "MutatingHandle":
+            self._handle.__enter__()
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            self._handle.__exit__(exc_type, exc_value, traceback)
+
+        def fileno(self) -> int:
+            return self._handle.fileno()
+
+        def read(self, size: int = -1) -> bytes:
+            with real_open(target, "wb") as mutator:
+                mutator.write(secret_content.encode("ascii"))
+            os.utime(target, ns=(initial.st_atime_ns, initial.st_mtime_ns))
+            return self._handle.read(size)
+
+    def racing_open(
+        path: Path, mode: str = "r", *args: Any, **kwargs: Any
+    ) -> Any:
+        handle = real_open(path, mode, *args, **kwargs)
+        if path == target and mode == "rb":
+            return MutatingHandle(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", racing_open)
+
+    result = audit_repository(repo)
+
+    assert result["ok"] is False
+    assert [item for item in result["findings"] if item["path"] == "app.py"] == [
+        {"code": "tracked_file_changed_during_read", "path": "app.py"}
     ]
 
 

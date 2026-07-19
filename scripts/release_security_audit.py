@@ -201,10 +201,18 @@ def _read_regular_file(repo_root: Path, relative_path: str) -> tuple[bytes | Non
             if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
                 return None, "tracked_file_changed_during_read"
             content = handle.read(MAX_FILE_BYTES + 1)
+            final = os.fstat(handle.fileno())
     except OSError:
         return None, "tracked_file_read_error"
     if len(content) > MAX_FILE_BYTES:
         return None, "tracked_file_too_large"
+    if (
+        (final.st_dev, final.st_ino) != (metadata.st_dev, metadata.st_ino)
+        or final.st_size != metadata.st_size
+        or final.st_mtime_ns != metadata.st_mtime_ns
+        or final.st_ctime_ns != metadata.st_ctime_ns
+    ):
+        return None, "tracked_file_changed_during_read"
     return content, None
 
 
