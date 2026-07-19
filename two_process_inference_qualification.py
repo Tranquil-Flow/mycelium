@@ -22,7 +22,6 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, NoReturn
@@ -32,6 +31,8 @@ import mlx.core as mx
 from model_manifest import manifest_digest_ref
 from mycelium_qualification.physical_deployment import (
     PhysicalDeploymentError,
+    build_execution_graph as build_shared_execution_graph,
+    build_physical_device_states,
     prepare_assignment_artifacts,
     prepare_monolithic_reference,
 )
@@ -40,16 +41,11 @@ from mycelium_router.contracts import (
     ExecutionGraph,
     HopHeader,
     HopWorkItem,
-    LayerRange,
-    Placement,
-    PlacementEdge,
     ProgressivePrefillMessage,
     RequestContext,
     RouterConfig,
     RuntimeBatch,
     RuntimeResult,
-    Stage,
-    StageCost,
 )
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.live_ports import (
@@ -57,7 +53,7 @@ from mycelium_router.live_ports import (
     PublishedDeviceStateProvider,
     PublishedTopologyProvider,
 )
-from mycelium_router.mlx_runtime import MLXRuntimePort, _stage_signature
+from mycelium_router.mlx_runtime import MLXRuntimePort
 from mycelium_router.payloads import decode_activation, encode_activation
 from mycelium_router.relay import RelayEngine
 from mycelium_router.router import Router
@@ -914,86 +910,10 @@ def _build_execution_graph(
     assignments: Sequence[dict[str, Any]],
     proofs: Sequence[Mapping[str, Any]],
 ) -> ExecutionGraph:
-    if len(assignments) != 2 or len(proofs) != 2:
-        raise QualificationError("execution graph requires exactly two assignments")
-    stages: list[Stage] = []
-    placements: list[Placement] = []
-    for index, (assignment, proof) in enumerate(zip(assignments, proofs)):
-        stage_id = f"stage-{index:03d}"
-        placement = Placement(
-            placement_id=f"placement-{index:03d}",
-            node_id=assignment["node_id"],
-            replica_group_id=f"{stage_id}-replicas",
-            assignment_id=assignment["assignment_id"],
-            stage_signature="pending-stage-signature",
-            load_proof_digest=layer_load_proof_digest(proof),
-            runtime_backend=assignment["runtime"]["backend"],
-            runtime_endpoint=(
-                f"pipe://{assignment['node_id']}/{assignment['assignment_id']}"
-            ),
-        )
-        layer_range = assignment["range"]
-        stage = Stage(
-            stage_id=stage_id,
-            layer_range=LayerRange(
-                start_layer=layer_range["start_layer"],
-                end_layer_exclusive=layer_range["end_layer_exclusive"],
-                layer_count=layer_range["layer_count"],
-            ),
-            component_roles=tuple(assignment["components"]),
-            stage_cost=StageCost(
-                prefill_work_units_per_prompt_token=1.0,
-                decode_work_units_per_token=1.0,
-                kv_bytes_per_context_token=32,
-            ),
-            placements=(placement,),
-        )
-        placements.append(placement)
-        stages.append(stage)
-
-    graph = ExecutionGraph(
-        deployment_id=assignments[0]["deployment_id"],
-        deployment_epoch=assignments[0]["deployment_epoch"],
-        topology_version=1,
-        model_id=assignments[0]["model_id"],
-        resolved_commit=assignments[0]["resolved_commit"],
-        manifest_digest=assignments[0]["manifest_digest"],
-        entry_stage_id=stages[0].stage_id,
-        final_stage_id=stages[-1].stage_id,
-        hidden_size=assignments[0]["runtime"]["model_config"]["n_embd"],
-        activation_bytes=4,
-        token_envelope_bytes=9,
-        stages=tuple(stages),
-        edges=(
-            PlacementEdge(
-                edge_id="forward:placement-000->placement-001",
-                from_placement_id=placements[0].placement_id,
-                to_placement_id=placements[1].placement_id,
-                link_id="local-loopback:node-a->node-b",
-            ),
-        ),
-        loopback_edges=(
-            PlacementEdge(
-                edge_id="loopback:placement-001->placement-000",
-                from_placement_id=placements[1].placement_id,
-                to_placement_id=placements[0].placement_id,
-                link_id="local-loopback:node-b->node-a",
-            ),
-        ),
-    )
-    signed_stages = tuple(
-        replace(
-            stage,
-            placements=(
-                replace(
-                    stage.placements[0],
-                    stage_signature=_stage_signature(graph, stage, proof),
-                ),
-            ),
-        )
-        for stage, proof in zip(graph.stages, proofs)
-    )
-    return replace(graph, stages=signed_stages)
+    try:
+        return build_shared_execution_graph(assignments, proofs)
+    except PhysicalDeploymentError as exc:
+        raise QualificationError(str(exc)) from exc
 
 
 class _FixedClock:
@@ -1028,39 +948,11 @@ class _CaptureSink:
             self.token_ids.append(token_id)
 
 
-def _device_states() -> dict[str, DeviceState]:
-    return {
-        "node-a": DeviceState(
-            node_id="node-a",
-            state_seq=1,
-            last_updated=1.0,
-            availability="ALIVE",
-            compute_units_per_second=1_000.0,
-            free_compute_fraction=1.0,
-            available_kv_bytes=1_000_000,
-            pending_hop_queue_depth=0,
-            neighbor_rtt_ms={"node-a": 0.0, "node-b": 1.0},
-            neighbor_bandwidth_bytes_per_second={
-                "node-a": 1_000_000_000.0,
-                "node-b": 1_000_000_000.0,
-            },
-        ),
-        "node-b": DeviceState(
-            node_id="node-b",
-            state_seq=1,
-            last_updated=1.0,
-            availability="ALIVE",
-            compute_units_per_second=1_000.0,
-            free_compute_fraction=1.0,
-            available_kv_bytes=1_000_000,
-            pending_hop_queue_depth=0,
-            neighbor_rtt_ms={"node-a": 1.0, "node-b": 0.0},
-            neighbor_bandwidth_bytes_per_second={
-                "node-a": 1_000_000_000.0,
-                "node-b": 1_000_000_000.0,
-            },
-        ),
-    }
+def _device_states(graph: ExecutionGraph) -> dict[str, DeviceState]:
+    try:
+        return build_physical_device_states(graph)
+    except PhysicalDeploymentError as exc:
+        raise QualificationError(str(exc)) from exc
 
 
 def _reference_execution(
@@ -1330,7 +1222,7 @@ def run_qualification(
 
         ids = _SequenceIdSource()
         topology = PublishedTopologyProvider(graph)
-        states = PublishedDeviceStateProvider(topology, _device_states())
+        states = PublishedDeviceStateProvider(topology, _device_states(graph))
         capacity = InProcessLeaseCapacityPort(
             topology,
             {"node-a": 1_000_000, "node-b": 1_000_000},

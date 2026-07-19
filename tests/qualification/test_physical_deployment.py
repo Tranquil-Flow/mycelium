@@ -10,6 +10,8 @@ import mlx.core as mx
 import model_manifest
 from mycelium_qualification.physical_deployment import (
     PhysicalDeploymentError,
+    build_execution_graph,
+    build_physical_device_states,
     prepare_physical_deployment,
 )
 from runtime_loader import execute_loaded_stage, load_assignment_stage
@@ -96,6 +98,20 @@ def test_prepared_assignments_and_independent_reference_load_and_execute(
     mx.eval(reference_result)
     assert tuple(reference_result.shape) == (1, 3, 7)
     assert int(mx.argmax(reference_result[0, -1, :]).item()) in range(7)
+
+    graph = build_execution_graph(
+        deployment.assignments,
+        [stage.proof for stage in loaded_stages],
+        link_scheme="iroh",
+    )
+    assert [stage.placements[0].node_id for stage in graph.stages] == [
+        "node-a",
+        "node-b",
+    ]
+    assert graph.edges[0].link_id == "iroh:node-a->node-b"
+    states = build_physical_device_states(graph)
+    assert set(states) == {"node-a", "node-b"}
+    assert all(state.availability == "ALIVE" for state in states.values())
 
 
 def test_prepare_physical_deployment_rejects_reuse_and_bad_nodes(
