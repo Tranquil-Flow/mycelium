@@ -238,3 +238,101 @@ inspection, not readiness promotion. Still absent:
 
 No code path in this tranche may promote `route_ready` or mutate Observatory.
 No merge to `main` and no push occurred.
+
+## 2026-07-19 post-review MVP hardening
+
+This follow-up began from clean integration head
+`1882a4835abe4d1247cc5ac886e212072e033348` in the same worktree and branch.
+Its code commits are:
+
+- `da5b9e110fcfa4d1ce2205e486538c0d8235cc38` — fail closed on concurrent
+  tracked-file mutation during the release-security audit;
+- `c11a358aaaca062907f55d10b38f189f83a64667` — clear repository-wide Ruff
+  diagnostics while preserving compatibility exports.
+
+It did not merge, push, fetch, pull, install packages, access another repository,
+modify a source worktree, contact a remote host, run a new physical probe, or
+write through Observatory.
+
+### Audit findings and repairs
+
+Read-only release, concurrency, packaging, and test-discovery audits ranked three
+remaining classes:
+
+1. The tracked-working-tree security scanner checked inode identity only before
+   reading and did not prove that file metadata remained stable through the read.
+   A deterministic regression first failed when a same-size secret replacement
+   restored the original `mtime`; the scanner reported the secret finding rather
+   than `tracked_file_changed_during_read`. The final implementation compares
+   device, inode, size, `mtime_ns`, and `ctime_ns` after the bounded read and now
+   fails closed for that race.
+2. Fresh-checkout dependency materialization remains unproven. The bounded
+   bootstrap preflight correctly exited 1 in this isolated worktree because local
+   `node_modules` was absent and only 399 of 414 Cargo lockfile packages were
+   present in the inspected cache. No dependency was downloaded or installed.
+3. Physical route semantics remain outside this local hardening phase. The prior
+   two-host Iroh transport boundary evidence is preserved, but it is not full
+   Router/runtime/model qualification.
+
+The repository-wide Ruff gate initially exposed 55 existing diagnostics. Safe
+cleanup removed unused imports/locals and normalized import/string formatting.
+Independent diff review caught that an automatic cleanup would have removed the
+public compatibility-module `__all__` attributes; explicit re-exports preserve
+those APIs. Final Ruff and compatibility assertions pass.
+
+The first independent final-diff review found the restored-`mtime` TOCTOU gap
+above. Its stronger RED regression reproduced the bypass before the `ctime_ns`
+repair. A second independent read-only review after repair returned no actionable
+findings. Residual scanner limits remain explicit: this is not an atomic
+whole-tree snapshot; untracked files, history, dependency vulnerabilities,
+runtime security, authenticated-transport semantics, and physical qualification
+are outside the scanner's scope.
+
+### Deterministic stress evidence
+
+No random-order plugin was installed. A Python 3.14 subprocess harness collected
+node IDs, applied recorded deterministic shuffles, and failed on the first
+non-zero child exit.
+
+| Surface | Seeds / rounds | Observed result |
+|---|---:|---:|
+| PathCancellation plus concurrent lifecycle races | `45610` through `45619`, 10 rounds | 350/350 test executions passed. |
+| Request, model, and capacity conformance | `45620` through `45622`, 3 rounds | 444/444 passed. |
+| Two-process inference/runtime qualification | `45630` through `45632`, 3 rounds | 54/54 passed. |
+| Request-to-Iroh E2E | `45640` and `45641`, 2 rounds | 8/8 passed. |
+| Bootstrap, release, security, claims, and lane-audit tooling | `45650` and `45651`, 2 rounds | 356/356 passed. |
+| Total | 20 deterministic rounds | 1,212/1,212 passed. |
+
+### Final observed gates after all repairs
+
+| Command | Exit | Observed result |
+|---|---:|---|
+| `python3.14 -m pytest -q` | 0 | 1,654 passed, 2 skipped, 121 subtests passed in 82.96s. |
+| `python3.14 scripts/contract_audit.py` | 0 | 14 contracts verified. |
+| `python3.14 -m compileall -q .` | 0 | No diagnostics. |
+| `/opt/homebrew/bin/ruff check .` | 0 | All checks passed. |
+| `git diff --check` | 0 | No whitespace errors. |
+| `python3.14 scripts/release_security_audit.py --repo-root . --json` | 0 | 473/473 tracked files scanned; zero findings; readiness flags false. |
+| `python3.14 scripts/claim_boundary_audit.py --repo-root . --json` | 0 | 176 source files scanned; zero findings; readiness flags false. |
+| `cargo fmt --check` | 0 | Passed offline. |
+| `cargo clippy --all-targets --all-features -- -D warnings` | 0 | Passed offline. |
+| `cargo test` | 0 | 21 passed: 7 library, 2 capability, 9 wire-golden, 3 sidecar-security. |
+| `npm run check` | 0 | 98 Vitest and 3 Node tests passed; typecheck and production build passed. |
+
+The UI gate reused canonical's already-materialized `node_modules` through a
+temporary symlink, then removed it. No install ran. Vite emitted only the existing
+large-chunk advisory. Rust commands used the existing local cache with network
+access disabled.
+
+### Feature-lane handover boundary
+
+This branch is locally green and ready for feature-lane rebasing and independent
+review, not readiness promotion. `route_ready=false` and `release_ready=false`
+remain mandatory. Evidence is local except for the separately documented prior
+bounded two-host transport probe; no new physical evidence was produced here.
+
+Feature lanes must still prove production Router/runtime model execution, tensor
+and token parity against a trusted oracle, selected physical path, loss and
+disconnect behavior, end-to-end cancellation, crash-durable delivery/replay,
+stable-route recovery, accepted qualifier evidence, and a genuinely fresh-machine
+bootstrap. Observatory remains read-only. No merge to `main` and no push occurred.
