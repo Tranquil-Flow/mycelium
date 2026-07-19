@@ -59,7 +59,7 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
   await expect(page.getByText('FIXTURE DATA · NOT LIVE')).toBeVisible();
   await expect(page.getByText(/route readiness unknown/i).first()).toBeVisible();
   await expect(page.getByRole('textbox', { name: /prompt/i })).toBeDisabled();
-  await expect(page.getByRole('button', { name: /submit request/i })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /start inference/i })).toBeDisabled();
   await expect(page.getByText(/no model request was made/i)).toBeVisible();
 
   const navigation = page.getByRole('navigation', { name: 'Product sections' });
@@ -70,9 +70,9 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
     ['Plans', 'plans', /strategy comparison/i],
     ['Incidents', 'incidents', /failover replay/i],
     ['Readiness', 'readiness', /proof matrix/i],
-    ['Nodes', 'nodes', /nodes workspace/i],
-    ['Settings', 'settings', /settings workspace/i],
-    ['Inference', 'inference', /inference workspace/i],
+    ['Nodes', 'nodes', /^nodes$/i],
+    ['Settings', 'settings', /^settings$/i],
+    ['Inference', 'inference', /^inference$/i],
   ] as const;
 
   for (const [label, hash, heading] of routeChecks) {

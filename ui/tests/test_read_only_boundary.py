@@ -36,27 +36,43 @@ def production_source_files() -> list[Path]:
         if not path.name.startswith("test_")
         and not path.name.endswith(".test.ts")
         and not path.name.endswith(".test.tsx")
+        and "e2e" not in path.parts
+        and not ("src" in path.parts and "test" in path.parts[path.parts.index("src") + 1 :])
     ]
 
 
-def test_ui_contains_no_mutating_http_calls() -> None:
+def test_mutating_http_calls_are_confined_to_typed_product_action_clients() -> None:
+    allowed_clients = {
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
+    }
     forbidden = re.compile(
         r"method\s*:\s*['\"](?:POST|PUT|PATCH|DELETE)['\"]|"
         r"['\"](?:POST|PUT|PATCH|DELETE)['\"]",
         re.I,
     )
-    for path in production_source_files():
-        assert not forbidden.search(path.read_text(encoding="utf-8")), path
+    write_surfaces = {
+        path.resolve()
+        for path in production_source_files()
+        if forbidden.search(path.read_text(encoding="utf-8"))
+    }
+    assert write_surfaces == allowed_clients
 
 
-def test_browser_network_is_confined_to_read_only_source_transport() -> None:
-    allowed_transport = UI_ROOT / "web" / "src" / "data" / "observatorySource.ts"
+def test_browser_network_is_confined_to_read_only_source_and_typed_action_clients() -> None:
+    allowed_transports = {
+        (UI_ROOT / "web" / "src" / "data" / "observatorySource.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
+    }
     forbidden_browser_writes = ("WebSocket", "XMLHttpRequest", "sendBeacon", "WebTransport")
     for path in production_source_files():
         text = path.read_text(encoding="utf-8")
         assert all(surface not in text for surface in forbidden_browser_writes), path
         if re.search(r"\bfetch\s*\(|\bEventSource\s*\(", text):
-            assert path.resolve() == allowed_transport.resolve(), path
+            assert path.resolve() in allowed_transports, path
 
 
 def test_elk_remains_lazy_and_confined_to_graph_layout() -> None:

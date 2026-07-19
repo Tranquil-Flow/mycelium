@@ -8,7 +8,7 @@ describe('product shell feature slots', () => {
     window.history.replaceState(null, '', '#inference');
   });
 
-  it('renders all stable product routes and a truthful reserved slot', () => {
+  it('renders all stable product routes and the integrated inference workspace', () => {
     render(<App />);
 
     expect(screen.getByRole('heading', { name: 'Mycelium' })).toBeInTheDocument();
@@ -24,9 +24,9 @@ describe('product shell feature slots', () => {
     ]) {
       expect(navigation.querySelector(`a[href="#${name.toLowerCase()}"]`)).not.toBeNull();
     }
-    expect(screen.getByRole('heading', { name: /inference workspace/i })).toBeInTheDocument();
-    expect(screen.getByText(/feature slot reserved/i)).toBeInTheDocument();
-    expect(screen.getByText(/no model request was made/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
+    expect(screen.getByText(/session memory only/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
   });
 
   it('lazy-loads only the active registered feature module', async () => {
@@ -63,7 +63,7 @@ describe('product shell feature slots', () => {
 
     expect(inferenceLoader).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /unsafe inference/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /submit request/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
   });
 
   it('normalizes the legacy evidence hash to the readiness route', () => {
@@ -90,6 +90,6 @@ describe('product shell feature slots', () => {
     window.history.pushState(null, '', '#settings');
     act(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
 
-    expect(screen.getByRole('heading', { name: /settings workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument();
   });
 });

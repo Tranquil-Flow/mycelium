@@ -13,6 +13,7 @@ const encoder = new TextEncoder();
 export interface InferenceWorkspaceProps {
   readonly client?: InferenceClient;
   readonly now?: () => number;
+  readonly externalBlockReason?: string | null;
 }
 
 function phaseLabel(phase: ReturnType<typeof useInferenceSession>['phase']): string {
@@ -52,7 +53,7 @@ function executionLabel(
   return 'Execution source unknown — distributed execution disabled';
 }
 
-export function InferenceWorkspace({ client, now }: InferenceWorkspaceProps) {
+export function InferenceWorkspace({ client, now, externalBlockReason = null }: InferenceWorkspaceProps) {
   const defaultClient = useMemo(() => new ProductInferenceClient(), []);
   const session = useInferenceSession({ client: client ?? defaultClient, now });
   const [prompt, setPrompt] = useState('');
@@ -66,7 +67,7 @@ export function InferenceWorkspace({ client, now }: InferenceWorkspaceProps) {
   const tokenReason = !Number.isSafeInteger(maxNewTokens) || maxNewTokens < 1 || maxNewTokens > MAX_NEW_TOKENS
     ? `Maximum new tokens must be between 1 and ${MAX_NEW_TOKENS}`
     : null;
-  const formBlockReason = session.submit_block_reason ?? promptReason ?? tokenReason;
+  const formBlockReason = externalBlockReason ?? session.submit_block_reason ?? promptReason ?? tokenReason;
   const active = session.accepted_request !== null && !isTerminalInferencePhase(session.phase);
   const canResume = session.accepted_request !== null &&
     (session.phase === 'interrupted' || session.phase === 'cancelling');
@@ -127,7 +128,7 @@ export function InferenceWorkspace({ client, now }: InferenceWorkspaceProps) {
               aria-describedby="prompt-bound prompt-shortcut"
               autoComplete="off"
               spellCheck={false}
-              disabled={active}
+              disabled={active || externalBlockReason !== null}
             />
           </label>
           <div className={styles.hints}>
@@ -160,7 +161,7 @@ export function InferenceWorkspace({ client, now }: InferenceWorkspaceProps) {
                 step={1}
                 value={maxNewTokens}
                 onChange={(event) => setMaxNewTokens(event.currentTarget.valueAsNumber)}
-                disabled={active}
+                disabled={active || externalBlockReason !== null}
               />
             </label>
           </div>
@@ -194,6 +195,7 @@ export function InferenceWorkspace({ client, now }: InferenceWorkspaceProps) {
           <div className={styles.reason} id="submit-reason" aria-live="polite">
             {formBlockReason ?? 'Qualification and request bounds accepted'}
           </div>
+          {formBlockReason !== null ? <p>No model request was made.</p> : null}
           {session.form_error !== null ? (
             <p className={styles.error} role="alert">{session.form_error}</p>
           ) : null}

@@ -86,6 +86,7 @@ describe('InferenceWorkspace', () => {
     const start = await screen.findByRole('button', { name: 'Start inference' });
     await waitFor(() => expect(start).toBeDisabled());
     expect(screen.getByText('Route is not ready: physical_qualification_missing')).toBeVisible();
+    expect(screen.getByText('No model request was made.')).toBeVisible();
     expect(screen.getByText(/Local \/ synthetic test evidence/)).toBeVisible();
   });
 

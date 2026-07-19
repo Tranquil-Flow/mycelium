@@ -5,10 +5,11 @@ import {
   createProductFeatureRegistry,
   parseProductRoute,
   productRouteHref,
-  PRODUCT_ROUTES,
   type ProductFeatureRegistry,
   type ProductRouteId,
 } from './app/navigation';
+import { FixtureInferenceClient } from './app/fixtureInferenceClient';
+import { ProductNodesWorkspace } from './app/ProductNodesWorkspace';
 import { AppShell } from './components/AppShell';
 import {
   createObservatorySource,
@@ -17,6 +18,9 @@ import {
   type ObservatorySourceState,
 } from './data/observatorySource';
 import { EvidenceView } from './views/EvidenceView';
+import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
+import { SettingsProvider } from './features/settings/SettingsContext';
+import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
@@ -39,10 +43,7 @@ export interface AppProps {
 
 const defaultSource = createObservatorySource({ source_mode: 'fixture' });
 const emptyFeatureRegistry = createProductFeatureRegistry([]);
-
-function routeLabel(route: ProductRouteId): string {
-  return PRODUCT_ROUTES.find((candidate) => candidate.id === route)?.label ?? route;
-}
+const fixtureInferenceClient = new FixtureInferenceClient();
 
 function sourceErrorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'Unknown Observatory source error';
@@ -118,45 +119,6 @@ function SemanticProjectionView({ state }: { readonly state: LiveObservatorySour
       {!state.live_qualified && (
         <p role="status">Not live: {state.qualification_reasons.join(', ')}</p>
       )}
-    </section>
-  );
-}
-
-function FeaturePlaceholder({
-  route,
-  productState,
-}: {
-  readonly route: ProductRouteId;
-  readonly productState: ProductState;
-}) {
-  const readiness = productState.route_readiness;
-  return (
-    <section className="panel bundle-error" aria-label={`${routeLabel(route)} feature slot`}>
-      <span aria-hidden="true">◇</span>
-      <div>
-        <p className="eyebrow">Product foundation</p>
-        <h2>{routeLabel(route)} workspace</h2>
-        <p>Feature slot reserved for its isolated product module.</p>
-        {route === 'inference' && (
-          <form aria-label="Inference request foundation">
-            <label htmlFor="foundation-inference-prompt">Prompt</label>
-            <textarea
-              id="foundation-inference-prompt"
-              aria-describedby="foundation-inference-blocked"
-              disabled
-            />
-            <button type="submit" disabled>
-              Submit request
-            </button>
-            <p id="foundation-inference-blocked">
-              Inference disabled: {readiness.reasons.join(', ')}
-            </p>
-          </form>
-        )}
-        <small>
-          Route readiness {readiness.status} · {readiness.authority}. No model request was made.
-        </small>
-      </div>
     </section>
   );
 }
@@ -258,19 +220,31 @@ export default function App({
     sourceResult.source === source ? sourceResult : { source, state: 'loading' };
 
   let content;
-  if (activeView === 'inference' || activeView === 'nodes' || activeView === 'settings') {
-    content = <FeaturePlaceholder route={activeView} productState={effectiveProductState} />;
+  if (activeView === 'settings') {
+    content = <SettingsWorkspace />;
+  } else if (activeView === 'inference') {
+    content = (
+      <InferenceWorkspace
+        client={source.source_mode === 'fixture' ? fixtureInferenceClient : undefined}
+        externalBlockReason={effectiveProductState.route_readiness.value ? null : `Inference disabled: ${effectiveProductState.route_readiness.reasons.join(', ')}`}
+      />
+    );
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
   } else if (rendered.state === 'error') {
     content = <BundleError message={rendered.message} sourceMode={source.source_mode} />;
   } else if (rendered.sourceState.source_mode === 'live') {
-    content = <SemanticProjectionView state={rendered.sourceState} />;
+    content = activeView === 'nodes'
+      ? <ProductNodesWorkspace sourceMode="live" />
+      : <SemanticProjectionView state={rendered.sourceState} />;
   } else {
     const { snapshot, incidents, provisioning } = rendered.sourceState.bundle;
     switch (activeView) {
       case 'network':
         content = <NetworkView snapshot={snapshot} />;
+        break;
+      case 'nodes':
+        content = <ProductNodesWorkspace sourceMode="fixture" snapshot={snapshot} provisioning={provisioning} />;
         break;
       case 'plans':
         content = <PlansView snapshot={snapshot} />;
@@ -301,21 +275,23 @@ export default function App({
         : sourceState.snapshot.binding.deployment.id;
 
   return (
-    <AppShell
-      activeView={activeView}
-      onViewChange={navigate}
-      scopeLabel={scopeLabel}
-      sourceMode={effectiveProductState.source_mode}
-      sourceState={sourceState}
-      routeReadiness={effectiveProductState.route_readiness}
-    >
-      <ProductFeatureSlot
-        route={activeView}
-        registry={featureRegistry}
-        productState={effectiveProductState}
+    <SettingsProvider>
+      <AppShell
+        activeView={activeView}
+        onViewChange={navigate}
+        scopeLabel={scopeLabel}
+        sourceMode={effectiveProductState.source_mode}
+        sourceState={sourceState}
+        routeReadiness={effectiveProductState.route_readiness}
       >
-        {content}
-      </ProductFeatureSlot>
-    </AppShell>
+        <ProductFeatureSlot
+          route={activeView}
+          registry={featureRegistry}
+          productState={effectiveProductState}
+        >
+          {content}
+        </ProductFeatureSlot>
+      </AppShell>
+    </SettingsProvider>
   );
 }

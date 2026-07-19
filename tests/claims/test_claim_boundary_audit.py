@@ -80,7 +80,7 @@ def test_honest_tree_preserves_fixed_false_readiness_claims(tmp_path: Path) -> N
         "dynamic_dispatch_evaluated": False,
         "physical_qualification_evaluated": False,
         "runtime_semantics_evaluated": False,
-        "scope": "tracked production source literal claims and Observatory write surfaces only",
+        "scope": "tracked production source literal claims, read-only Observatory, and allowlisted product action clients only",
         "semantic_qualification_evaluated": False,
     }
     scan = result["scan"]
@@ -174,6 +174,26 @@ def test_observatory_backend_and_ui_write_surfaces_fail(tmp_path: Path) -> None:
             "path": "ui/web/src/data/observatorySource.ts",
             "subject": "POST",
         },
+    ]
+
+
+def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(tmp_path: Path) -> None:
+    repo = _repo(
+        tmp_path,
+        {
+            "ui/web/src/features/inference/requestClient.ts": "fetch('/api/v1/inference/requests', { method: 'POST' });\n",
+            "ui/web/src/features/swarm/SwarmClient.ts": "fetch('/api/v1/swarm/join', { method: 'POST' });\n",
+            "ui/web/src/features/membership/membershipClient.ts": "fetch('/api/v1/membership/join', { method: 'POST' });\n",
+            "ui/web/src/data/observatorySource.ts": "fetch('/api/v1/observatory', { method: 'POST' });\n",
+        },
+    )
+
+    result = audit_repository(repo)
+    findings = result["findings"]
+    assert isinstance(findings, list)
+
+    assert [item["path"] for item in findings] == [
+        "ui/web/src/data/observatorySource.ts"
     ]
 
 

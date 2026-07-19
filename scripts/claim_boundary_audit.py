@@ -22,7 +22,7 @@ CLAIM_BOUNDARY = {
     "dynamic_dispatch_evaluated": False,
     "physical_qualification_evaluated": False,
     "runtime_semantics_evaluated": False,
-    "scope": "tracked production source literal claims and Observatory write surfaces only",
+    "scope": "tracked production source literal claims, read-only Observatory, and allowlisted product action clients only",
     "semantic_qualification_evaluated": False,
 }
 
@@ -36,6 +36,13 @@ _UI_CLIENT_CALL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _UI_SUFFIXES = frozenset({".js", ".jsx", ".ts", ".tsx"})
+_ALLOWED_PRODUCT_ACTION_CLIENTS = frozenset(
+    {
+        "ui/web/src/features/inference/requestClient.ts",
+        "ui/web/src/features/membership/membershipClient.ts",
+        "ui/web/src/features/swarm/SwarmClient.ts",
+    }
+)
 _PREFIXED_TOKEN_PATTERN = re.compile(
     rb"(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
     rb"hf_[A-Za-z0-9]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{20,}|"
@@ -316,6 +323,8 @@ def _ui_findings(relative_path: str, content: bytes) -> list[dict[str, object]]:
         source = content.decode("utf-8", errors="strict")
     except UnicodeDecodeError:
         return [_finding("source_decode_error", relative_path)]
+    if relative_path in _ALLOWED_PRODUCT_ACTION_CLIENTS:
+        return []
     surfaces: set[tuple[int, str]] = set()
     for pattern in (_UI_METHOD_PATTERN, _UI_CLIENT_CALL_PATTERN):
         for match in pattern.finditer(source):

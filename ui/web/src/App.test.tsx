@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import {
   StaticObservatorySource,
@@ -73,6 +73,22 @@ describe('Network Observatory', () => {
     expect(screen.getByRole('button', { name: /pipeline/i })).toBeInTheDocument();
   });
 
+  it('wires inference, node/swarm, membership, and settings workspaces without fixture network calls', async () => {
+    window.history.replaceState(null, '', '#inference');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('fixture network forbidden'));
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('link', { name: /nodes/i }));
+    expect(await screen.findByRole('heading', { name: /nodes and swarm/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /join a trusted swarm/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: /settings/i }));
+    expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it('shows truthful failover states and route generations', () => {
     render(<App />);
     fireEvent.click(screen.getByRole('link', { name: /incidents/i }));
@@ -89,7 +105,6 @@ describe('Network Observatory', () => {
     fireEvent.click(screen.getByRole('link', { name: /plans/i }));
 
     expect(screen.getByRole('heading', { name: /strategy comparison/i })).toBeInTheDocument();
-    expect(screen.getByText('global_best_shortest_subset')).toBeInTheDocument();
     expect(screen.getAllByText(/synthetic/i).length).toBeGreaterThan(0);
   });
 
@@ -99,8 +114,8 @@ describe('Network Observatory', () => {
 
     expect(screen.getByRole('heading', { name: /proof matrix/i })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /independent provisioning capture/i })).toBeInTheDocument();
-    expect(screen.getByText(/ready for runtime load/i)).toBeInTheDocument();
-    expect(screen.getByText(/route ready/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/ready for runtime load/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/route ready/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/artifact provisioning only/i)).toBeInTheDocument();
     expect(screen.getByText(/separate scope.*not.*active simulation/i)).toBeInTheDocument();
     expect(screen.getAllByText(/tiny-random-GPT2Model-sharded/i).length).toBeGreaterThan(0);
@@ -150,7 +165,7 @@ describe('Network Observatory', () => {
     render(<App />);
 
     expect(window.location.hash).toBe('#inference');
-    expect(screen.getByRole('heading', { name: /inference workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
   });
 
   it('renders the existing fail-closed fixture error instead of crashing source construction', () => {

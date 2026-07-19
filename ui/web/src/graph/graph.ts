@@ -1,4 +1,5 @@
 import { geoEqualEarth } from 'd3-geo';
+import type { ElkNode } from 'elkjs/lib/elk.bundled.js';
 import type {
   EvidenceLink,
   EvidenceNode,
@@ -162,6 +163,21 @@ const UNKNOWN_TRAY_X = 980;
 const UNKNOWN_TRAY_GAP = 20;
 const EARTH_RADIUS_KM = 6_371.0088;
 const ELASTIC_KNEE_KM = 1_000;
+
+type ElkBundle = typeof import('elkjs/lib/elk.bundled.js');
+let elkBundlePromise: Promise<ElkBundle> | null = null;
+
+function loadElkBundle(): Promise<ElkBundle> {
+  elkBundlePromise ??= import('elkjs/lib/elk.bundled.js');
+  return elkBundlePromise;
+}
+
+function finiteCoordinate(value: number | undefined, context: string): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    throw new Error(`Layout did not produce a finite ${context}`);
+  }
+  return value;
+}
 
 function exactDirectedLink(
   links: readonly EvidenceLink[],
@@ -592,42 +608,56 @@ function finishScene(
   };
 }
 
-function pipelineLayout(graph: GraphIR): SceneGraph {
+async function pipelineLayout(graph: GraphIR): Promise<SceneGraph> {
+  const { default: ELK } = await loadElkBundle();
+  const elk = new ELK();
   const detail: SceneDetail = graph.nodes.length <= 24 ? 'detailed' : 'compact';
   const size = dimensions(detail);
   const layerScale = detail === 'detailed' ? 24 : 12;
   const assignment = clusterAssignments(graph.nodes);
-  const lanes: number[] = [];
-  let physicalOnlyIndex = 0;
-  const nodes = [...graph.nodes]
-    .sort((left, right) => {
-      const leftStart = left.stage?.startLayer ?? Number.MAX_SAFE_INTEGER;
-      const rightStart = right.stage?.startLayer ?? Number.MAX_SAFE_INTEGER;
-      return leftStart - rightStart || left.order - right.order || left.id.localeCompare(right.id);
-    })
-    .map((node) => {
-      if (node.stage === null) {
-        const x = SCENE_MARGIN + Math.max(1, ...graph.nodes.map((candidate) => candidate.stage?.endLayerExclusive ?? 0)) * layerScale + 100;
-        const y = SCENE_MARGIN + physicalOnlyIndex * (size.height + 20);
-        physicalOnlyIndex += 1;
-        return sceneNode(node, x, y, detail, {
-          tray: 'physical-only',
-          clusterId: assignment.get(node.id) ?? null,
-        });
-      }
-      const x = SCENE_MARGIN + node.stage.startLayer * layerScale;
-      let lane = lanes.findIndex((lastRight) => x > lastRight + 18);
-      if (lane < 0) {
-        lane = lanes.length;
-        lanes.push(0);
-      }
-      lanes[lane] = x + size.width;
-      const y = SCENE_MARGIN + lane * (size.height + 34);
-      return sceneNode(node, x, y, detail, {
-        layerScale,
-        clusterId: assignment.get(node.id) ?? null,
-      });
+  const routed = graph.nodes.filter((node) => node.stage !== null);
+  const routedIds = new Set(routed.map((node) => node.id));
+  const edges = graph.edges.filter(
+    (edge) => edge.kind === 'stage_handoff' && routedIds.has(edge.source) && routedIds.has(edge.target),
+  );
+  const layoutInput: ElkNode = {
+    id: `${graph.id}:pipeline-layout`,
+    layoutOptions: {
+      'elk.algorithm': 'layered',
+      'elk.direction': 'RIGHT',
+      'elk.padding': `[top=${SCENE_MARGIN},left=${SCENE_MARGIN},bottom=${SCENE_MARGIN},right=${SCENE_MARGIN}]`,
+      'elk.spacing.nodeNode': '48',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '88',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+    },
+    children: routed.map((node) => ({ id: node.id, width: size.width, height: size.height })),
+    edges: edges.map((edge) => ({ id: edge.id, sources: [edge.source], targets: [edge.target] })),
+  };
+  const laidOut = await elk.layout(layoutInput);
+  const positions = new Map(
+    (laidOut.children ?? []).map((child) => [
+      child.id,
+      {
+        x: finiteCoordinate(child.x, `x coordinate for ${child.id}`),
+        y: finiteCoordinate(child.y, `y coordinate for ${child.id}`),
+      },
+    ]),
+  );
+  const nodes: SceneNode[] = routed.map((node) => {
+    const position = positions.get(node.id);
+    if (position === undefined) throw new Error(`ELK omitted graph node: ${node.id}`);
+    return sceneNode(node, position.x, position.y, detail, {
+      layerScale,
+      clusterId: assignment.get(node.id) ?? null,
     });
+  });
+  const trayX = finiteCoordinate(laidOut.width, 'graph width') + 100;
+  graph.nodes.filter((node) => node.stage === null).forEach((node, index) => {
+    nodes.push(sceneNode(node, trayX, SCENE_MARGIN + index * (size.height + 20), detail, {
+      tray: 'physical-only',
+      clusterId: assignment.get(node.id) ?? null,
+    }));
+  });
   return finishScene(graph, 'pipeline', nodes, scaleClusters(nodes));
 }
 
@@ -941,7 +971,7 @@ export async function layoutGraph(graph: GraphIR, layout: GraphLayout): Promise<
   let scene: SceneGraph;
   switch (layout) {
     case 'pipeline':
-      scene = pipelineLayout(graph);
+      scene = await pipelineLayout(graph);
       break;
     case 'ring':
       scene = ringLayout(graph);

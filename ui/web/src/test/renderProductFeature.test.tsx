@@ -28,11 +28,11 @@ describe('renderProductFeature harness', () => {
     rendered = renderProductFeature({ recordNetwork: true });
 
     expect(window.location.hash).toBe('#inference');
-    expect(screen.getByRole('heading', { name: /inference workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /prompt/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /submit request/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
     expect(screen.getByText(/inference disabled: fixture_source_not_authoritative/i)).toBeVisible();
-    expect(screen.getByText(/no model request was made/i)).toBeInTheDocument();
+    expect(screen.getByText(/session memory only/i)).toBeInTheDocument();
     expect(rendered.networkRecorder?.requests).toHaveLength(0);
   });
 
@@ -54,7 +54,7 @@ describe('renderProductFeature harness', () => {
     });
     expect(rendered.productState.qualification?.route_ready).toBe(false);
     expect(screen.getByRole('textbox', { name: /prompt/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /submit request/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
     expect(screen.getByText(/physical_qualification_missing/i)).toBeVisible();
   });
 
@@ -66,7 +66,7 @@ describe('renderProductFeature harness', () => {
       }),
     });
     expect(screen.getByText(/replay evidence · not live/i)).toBeVisible();
-    expect(screen.getByRole('button', { name: /submit request/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
     expect(rendered.productState.route_readiness).toMatchObject({
       value: false,
       status: 'unknown',
