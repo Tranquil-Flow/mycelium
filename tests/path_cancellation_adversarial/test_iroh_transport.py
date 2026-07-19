@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import threading
 import time
 
 import pytest
 
 from mycelium_router.contracts import PathCancellation
-from mycelium_router.transports.iroh import IrohTransportError
+from mycelium_router.transports.iroh import IrohTransport, IrohTransportError
 from mycelium_router.wire import decode_frame, encode_frame
-from test_router_iroh_transport import _Hub, _PausedAcquireSemaphore, _transport
+from test_router_iroh_integration import _locked_route
+from test_router_iroh_transport import (
+   _Hub,
+   _PausedAcquireSemaphore,
+   _binding,
+   _transport,
+)
 
 from ._harness import join_bounded, run_in_thread
 
@@ -55,6 +62,22 @@ class _CloseObservedTransport:
    def close(self) -> None:
       self.entered.set()
       self.transport.close()
+
+
+class _PauseOnFirstSet(dict):
+   def __init__(self) -> None:
+      super().__init__()
+      self.entered = threading.Event()
+      self.release_set = threading.Event()
+      self._armed = True
+
+   def __setitem__(self, key, value) -> None:
+      super().__setitem__(key, value)
+      if self._armed:
+         self._armed = False
+         self.entered.set()
+         if not self.release_set.wait(timeout=1):
+            raise AssertionError("path publication barrier timed out")
 
 
 def test_iroh_cancellation_frame_is_control_only_then_path_is_forgotten() -> None:
@@ -199,6 +222,70 @@ def test_iroh_workers_are_queue_bounded_and_close_race_cleans_up() -> None:
       hub.release_confirmed_send.set()
       if close_thread is not None and close_thread.is_alive():
          join_bounded(close_thread)
+      transport.close()
+
+
+def test_manifest_publication_is_atomic_with_concurrent_cancellation() -> None:
+   hub = _Hub()
+   transport = IrohTransport(
+      node_id="node-a",
+      socket_path="/unused",
+      bootstrap_secret=b"s" * 32,
+      peer=replace(_binding(), node_id="node-b"),
+      expected_endpoint_id="local-endpoint",
+      queue_capacity=2,
+      delivery_timeout_seconds=0.2,
+      poll_interval_seconds=0.01,
+      client_factory=hub.client,
+   )
+   transport.bind_router(_CancellationRouter())
+   locked = _locked_route()
+   cancellation = PathCancellation(locked.request_id, locked.path_id, 0, 3)
+   published_graphs = _PauseOnFirstSet()
+   transport.__dict__["_path_graphs"] = published_graphs
+   dispatched: list[tuple[str, bytes]] = []
+   transport.__dict__["_send_or_dispatch"] = (
+      lambda destination, frame: dispatched.append((destination, frame))
+   )
+   transport.start()
+   transport.remember_entry(locked.request_id, "node-a")
+   manifest_thread = None
+   cancellation_thread = None
+   try:
+      manifest_thread, manifest_results, manifest_errors = run_in_thread(
+         lambda: transport.send_manifest_locked(locked)
+      )
+      assert published_graphs.entered.wait(timeout=1.0)
+      cancellation_thread, cancellation_results, cancellation_errors = run_in_thread(
+         lambda: transport.send_path_cancellation(cancellation)
+      )
+      cancellation_thread.join(timeout=0.05)
+      assert cancellation_thread.is_alive(), (
+         "cancellation observed a partially published path instead of waiting"
+      )
+
+      published_graphs.release_set.set()
+      join_bounded(manifest_thread)
+      join_bounded(cancellation_thread)
+      _wait_until(lambda: not transport._cancellation_threads)
+
+      assert manifest_results == [None]
+      assert manifest_errors == []
+      assert cancellation_results == [None]
+      assert cancellation_errors == []
+      assert [destination for destination, _frame in dispatched] == [
+         "node-a",
+         "node-b",
+         "node-b",
+      ]
+      assert locked.path_id not in transport._participant_nodes_by_path
+      assert locked.request_id not in transport._entry_nodes
+   finally:
+      published_graphs.release_set.set()
+      if manifest_thread is not None and manifest_thread.is_alive():
+         join_bounded(manifest_thread)
+      if cancellation_thread is not None and cancellation_thread.is_alive():
+         join_bounded(cancellation_thread)
       transport.close()
 
 

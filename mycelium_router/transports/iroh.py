@@ -747,12 +747,14 @@ class IrohTransport:
          )
          if not accepted:
             raise IrohTransportError("manifest_registration_rejected")
-         self._path_graphs[message.path_id] = message.build.graph
-         self._participant_nodes_by_path[message.path_id] = frozenset(
+         participants = frozenset(
             self._node_for_placement(message.build.graph, hop.placement_id)
             for hop in message.manifest.ordered_hops
          )
-         self._entry_nodes.setdefault(message.request_id, entry_node)
+         with self._state_lock:
+            self._path_graphs[message.path_id] = message.build.graph
+            self._participant_nodes_by_path[message.path_id] = participants
+            self._entry_nodes.setdefault(message.request_id, entry_node)
          if entry_node == self.node_id:
             router.receive_manifest_locked(
                message,
@@ -804,17 +806,22 @@ class IrohTransport:
          self._require_running()
       if isinstance(payload, ProgressivePrefillContext):
          graph = payload.graph
-         self._entry_nodes.setdefault(header.request_id, self.node_id)
-         self._path_graphs[header.path_id] = graph
-         self._participant_nodes_by_path[header.path_id] = frozenset(
+         participants = frozenset(
             self._node_for_placement(graph, hop.placement_id)
             for hop in payload.build.ordered_hops
          )
          frame = encode_progressive_prefill(header, payload)
+         with self._state_lock:
+            self._require_running()
+            self._entry_nodes.setdefault(header.request_id, self.node_id)
+            self._path_graphs[header.path_id] = graph
+            self._participant_nodes_by_path[header.path_id] = participants
       else:
          if not isinstance(payload, bytes):
             raise IrohTransportError("hop_payload_must_be_bytes")
-         graph = self._path_graphs.get(header.path_id)
+         with self._state_lock:
+            self._require_running()
+            graph = self._path_graphs.get(header.path_id)
          if graph is None:
             raise IrohTransportError("unknown_path", header.path_id)
          frame = encode_frame(header, payload)
@@ -837,17 +844,20 @@ class IrohTransport:
       with self._state_lock:
          self._require_running()
       graph = locked.build.graph
-      self._path_graphs[locked.path_id] = graph
       destinations = {
          self._node_for_placement(graph, hop.placement_id)
          for hop in locked.manifest.ordered_hops
       }
-      entry = self._entry_nodes.get(locked.request_id)
-      if entry is not None:
-         destinations.add(entry)
-      self._participant_nodes_by_path[locked.path_id] = frozenset(destinations)
+      with self._state_lock:
+         self._require_running()
+         entry = self._entry_nodes.get(locked.request_id)
+         if entry is not None:
+            destinations.add(entry)
+         self._path_graphs[locked.path_id] = graph
+         self._participant_nodes_by_path[locked.path_id] = frozenset(destinations)
+      frame = encode_frame(locked)
       for destination in sorted(destinations):
-         self._send_or_dispatch(destination, encode_frame(locked))
+         self._send_or_dispatch(destination, frame)
 
    def send_path_cancellation(self, cancellation: PathCancellation) -> None:
       with self._state_lock:
