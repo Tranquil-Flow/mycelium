@@ -6,7 +6,7 @@ Review only this clean integration worktree and branch:
 
 - worktree: `/Users/evinova-self/Projects/mycelium-wt-active-integration-456`
 - branch: `integration/mycelium-active-session456-20260718`
-- review head before this handover: `92ac90f34a4628d446ed6ecd6c97363be3d4d940`
+- review head before this handover: `902905030f7d36232515c8b99530c394d915fc3c`
 - canonical baseline: `f2bc55b62c5e3103eda584c1c68c222244bde489`
 
 Canonical `main` and all source worktrees remain clean. No merge, push, PR,
@@ -26,18 +26,19 @@ All source worktrees were clean when re-probed after integration.
 | Capacity-catalog adversarial model | `65c12811373335935770f060cedb7b6e7431e55a` | `cbd9b79ab0e6b20adffc66f74cc59a57e9c486f8` | `554c7035e0737ae7791bf650d89a5b12b207fff3` | Clean cherry-pick; source and integration patch IDs match. |
 | PathCancellation adversarial lane | `120d6fffd1a1fc35308d22d6988db50f57d70d37` | `485f3927932e2b8590e7fa5d0f6d3a9f7b81b176` | `ec66f4a317bbedeab21a6c95ef753553de036b10` | Clean cherry-pick; source and integration patch IDs match. Its strict RED corpus exposed production defects repaired in `92ac90f`. |
 | PathCancellation production hardening | integration review | `92ac90f34a4628d446ed6ecd6c97363be3d4d940` | n/a | Production fixes plus permanent regressions. |
+| Incomplete-review recovery and independent re-review | integration review | `902905030f7d36232515c8b99530c394d915fc3c` | n/a | Recovered partial findings; three confirmed gaps repaired with three RED/GREEN regressions; own cross-file review completed. |
 
 Focused collection at the review head:
 
 - `tests/qualification_diff`: 26 tests;
 - `tests/capacity_catalog_adversarial`: 60 tests;
-- `tests/path_cancellation_adversarial`: 31 tests;
-- combined focused execution: 117 passed.
+- `tests/path_cancellation_adversarial`: 34 tests;
+- combined focused execution: 120 passed.
 
 The complete stacked range can be inspected without mutating state:
 
 ```text
-GIT_OPTIONAL_LOCKS=0 git log --reverse --oneline 9d65a75832c34f8cb876a9f7a06459ed60373414..92ac90f34a4628d446ed6ecd6c97363be3d4d940
+GIT_OPTIONAL_LOCKS=0 git log --reverse --oneline 9d65a75832c34f8cb876a9f7a06459ed60373414..902905030f7d36232515c8b99530c394d915fc3c
 ```
 
 It contains request lifecycle/model conformance, request-to-iroh qualification,
@@ -59,12 +60,14 @@ cases:
 3. Relay registrations carry monotonic generations. Queued work, runtime
    outcomes, cache writes, and transport dispatches are accepted only for the
    captured generation and attempt.
-4. Cancellation invalidates path state and invokes runtime cancellation while
-   registration is serialized. A stale release scoped to attempt N cannot
-   remove a newer attempt.
-5. Entry local execution and distributed sends capture a generation permit;
-   cancellation between request-state inspection and relay dispatch rejects the
-   stale permit before runtime work starts.
+4. Cancellation invalidates path state under the path-state lock, then invokes
+   scheduler and runtime cancellation outside that lock while a fixed striped
+   per-path operation lock serializes attempt replacement. A stale release
+   scoped to attempt N cannot remove a newer attempt.
+5. Registration returns its monotonic generation in the same atomic operation.
+   Entry stores that generation permit on the request record for local
+   execution and distributed sends; cancellation between request-state
+   inspection and relay dispatch rejects stale permits before runtime work starts.
 6. Scheduler enqueue, immediate execution, queued batching, result caching, and
    post-runtime forwarding all revalidate path currency at the relevant
    boundary.
@@ -72,9 +75,11 @@ cases:
    runtime execution. Cancellation can invalidate provisional participants;
    post-runtime manifest, token, delta, and tensor forwarding are generation
    fenced.
-8. Recent exact tombstones are bounded to 4,096 path IDs. A fixed-size
+8. Recent exact tombstones are bounded to 4,096 path IDs. A two-window rotating
    cancelled-attempt filter preserves fail-closed replay rejection after recent
-   tombstone eviction. Unknown unscoped releases do not grow generation state.
+   tombstone eviction without permanent set-only saturation. Each 1 MiB window
+   rotates after 100,000 insertions. Unknown unscoped releases do not grow
+   generation state.
 9. Runtime work that obtained a dispatch permit before cancellation is treated
    as in flight. Cancellation invokes `runtime.cancel`; all result publication,
    caching, and later forwarding still require the original generation and are
@@ -82,10 +87,12 @@ cases:
    accepted by a transport before cancellation linearizes.
 
 Review the probabilistic cancelled-attempt filter and dispatch-permit
-linearization explicitly. False positives fail closed by rejecting a path
-attempt; false negatives are covered by five independent digest-derived bit
-positions and permanent tests, but this is still an in-memory process-local
-mechanism rather than durable replay authority.
+linearization explicitly. Five independent digest-derived bit positions yield
+an estimated two-window false-positive probability of approximately 1.30e-6
+(about 1 in 770,838) at configured capacity. False positives fail closed by
+rejecting a path attempt. Cancelled identities age out after two rotations, so
+this remains bounded in-memory process-local replay resistance rather than
+crash-durable replay authority.
 
 ## Observed gates
 
@@ -94,8 +101,8 @@ handover documentation commit. The final post-commit results are recorded.
 
 | Command | Exit | Observed result |
 |---|---:|---|
-| `python3.14 -m pytest -q` | 0 | 1,650 passed, 2 skipped, 121 subtests passed in 86.91s. |
-| `python3.14 -m pytest -q tests/qualification_diff tests/capacity_catalog_adversarial tests/path_cancellation_adversarial` | 0 | 117 passed in 1.25s. |
+| `python3.14 -m pytest -q` | 0 | 1,653 passed, 2 skipped, 121 subtests passed in 83.48s. |
+| `python3.14 -m pytest -q tests/qualification_diff tests/capacity_catalog_adversarial tests/path_cancellation_adversarial` | 0 | 120 passed. |
 | Router/Iroh/request focused aggregate | 0 | 370 passed, 46 subtests passed. |
 | `python3.14 scripts/contract_audit.py` | 0 | 14 contracts verified. |
 | `python3.14 scripts/release_security_audit.py` | 0 | 472 tracked files accepted. |
