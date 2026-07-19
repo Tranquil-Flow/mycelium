@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { EvidenceRoute, EvidenceSnapshot } from '../model/types';
+import { analyzePlan, compareStrategies, rankStrategies } from '../features/plans/planModel';
 
 interface PlansViewProps {
   readonly snapshot: EvidenceSnapshot;
@@ -29,6 +30,10 @@ export function PlansView({ snapshot }: PlansViewProps) {
   const initial = findInitialRoute(snapshot.routes);
   const [selectedId, setSelectedId] = useState(initial.id);
   const selected = snapshot.routes.find((route) => route.id === selectedId) ?? initial;
+  const ranked = rankStrategies(snapshot.routes);
+  const baseline = snapshot.routes.find((route) => route.id !== selected.id) ?? selected;
+  const comparison = compareStrategies(selected, baseline);
+  const analysis = analyzePlan(snapshot, selected.id);
 
   return (
     <div className="view plans-view">
@@ -61,7 +66,7 @@ export function PlansView({ snapshot }: PlansViewProps) {
           </div>
         </div>
         <div className="table-scroll">
-          <table className="strategy-table">
+          <table className="strategy-table" aria-label="Strategy ranking">
             <thead>
               <tr>
                 <th scope="col">Strategy</th>
@@ -75,11 +80,11 @@ export function PlansView({ snapshot }: PlansViewProps) {
               </tr>
             </thead>
             <tbody>
-              {snapshot.routes.map((route) => (
+              {ranked.map(({ rank, route }) => (
                 <tr key={route.id} className={selected.id === route.id ? 'is-selected' : undefined}>
                   <th scope="row">
-                    <span className="strategy-name">{route.id}</span>
-                    <span className="synthetic-inline">synthetic</span>
+                    <span className="strategy-name">{rank}. {route.id}</span>
+                    <span className="synthetic-inline">modeled · synthetic</span>
                   </th>
                   <td>{route.nodeOrder.length}</td>
                   <td><StrategyMetric value={route.metrics.combinedTokensPerSecond.value} unit="modeled" /></td>
@@ -110,11 +115,11 @@ export function PlansView({ snapshot }: PlansViewProps) {
           <div className="panel-titlebar compact">
             <div>
               <span className="panel-kicker">Selected strategy</span>
-              <h3 id="selected-plan-title">Plan summary</h3>
+              <h3 id="selected-plan-title">{selected.simulatorStrategy}</h3>
             </div>
             <span className="synthetic-tag">synthetic</span>
           </div>
-          <p className="selected-strategy-name">{selected.simulatorStrategy}</p>
+          <p className="selected-strategy-name">Read-only interpretation; selecting a row never mutates planner state.</p>
           <div className="plan-route-line" aria-label="Selected strategy stage order">
             {selected.nodeOrder.map((nodeId, index) => (
               <span key={nodeId}>
@@ -154,6 +159,22 @@ export function PlansView({ snapshot }: PlansViewProps) {
           </div>
         </section>
       </div>
+
+      <section className="panel" role="region" aria-label="Synchronized strategy comparison">
+        <div className="panel-titlebar compact"><div><span className="panel-kicker">Delta vs {baseline.id}</span><h3>Synchronized deltas</h3></div></div>
+        <dl className="plan-summary-list">
+          {Object.entries(comparison.metrics).map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value.deltaLabel} <small>baseline {baseline.id}</small></dd></div>)}
+        </dl>
+      </section>
+
+      <section className="panel" aria-labelledby="allocation-title">
+        <h3 id="allocation-title">Selected route layer allocation</h3>
+        <div className="table-scroll"><table className="strategy-table" aria-label="Selected route layer allocation"><thead><tr><th>Stage</th><th>Node</th><th>Exact range</th><th>Layers</th><th>Decode ms</th></tr></thead><tbody>{analysis.allocations.map((allocation) => <tr key={allocation.stageId}><th scope="row">{allocation.stageId}</th><td>{allocation.nodeId}</td><td>{allocation.exactRange}</td><td>{allocation.layerCount}</td><td>{metric(allocation.decodeStageMs, 2)}</td></tr>)}</tbody></table></div>
+        <p><strong>Predicted bottleneck:</strong> {analysis.bottleneck.stage.id} · {metric(analysis.bottleneck.decodeStageMs, 2)} modeled ms.</p>
+      </section>
+
+      <section className="panel" aria-labelledby="alternatives-title"><h3 id="alternatives-title">Route alternatives</h3><ul>{analysis.alternatives.map((route) => <li key={route.id}>{route.id} · {route.simulatorStrategy}</li>)}</ul></section>
+      <section className="panel" aria-labelledby="assumptions-title"><h3 id="assumptions-title">Model &amp; workload assumptions</h3><dl className="plan-summary-list">{analysis.assumptions.map((assumption) => <div key={assumption.label}><dt>{assumption.label}</dt><dd>{assumption.value} <small>{assumption.qualification.replace('_', ' ')}</small></dd></div>)}</dl><p><strong>Pruning trace not supplied.</strong> {analysis.pruningTrace.reason}</p></section>
     </div>
   );
 }

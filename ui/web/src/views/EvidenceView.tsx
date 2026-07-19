@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import type {
   EvidenceProvenance,
   EvidenceSnapshot,
   FailoverIncident,
   ProvisioningEvidence,
 } from '../model/types';
+import { buildReadinessModel, READINESS_STAGES, readinessStateLabel } from '../features/readiness/readinessModel';
+import { buildEvidenceTimeline, evidenceSources } from '../features/readiness/evidenceHistory';
+import { createPseudonymizedExport } from '../features/readiness/pseudonymizedExport';
 
 interface EvidenceViewProps {
   readonly snapshot: EvidenceSnapshot;
@@ -59,6 +63,9 @@ function simulatorSource(
 }
 
 export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceViewProps) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [timelineCursor, setTimelineCursor] = useState(0);
+  const [exportJson, setExportJson] = useState<string | null>(null);
   const routeReadiness = provisioning.routeReady ? 'YES' : 'NOT PROVEN';
   const routeSubgate = provisioning.routeReady ? 'NOT SEPARATELY REPORTED' : 'NOT PROVEN';
   const sourceLedger: readonly SourceLedgerEntry[] = [
@@ -88,6 +95,11 @@ export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceView
       provenance: provisioning.provenance,
     },
   ];
+  const readiness = buildReadinessModel(provisioning);
+  const sources = evidenceSources(snapshot, provisioning, incidents);
+  const timeline = buildEvidenceTimeline(snapshot, provisioning, incidents);
+  const timelineIndex = Math.max(0, Math.min(timelineCursor, timeline.length - 1));
+  const timelineFrame = timeline[timelineIndex];
 
   return (
     <div className="view evidence-view">
@@ -206,6 +218,27 @@ export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceView
           </article>
         </div>
       </section>
+
+      <section className="panel" aria-labelledby="readiness-matrix-title">
+        <h3 id="readiness-matrix-title">Node-by-stage readiness matrix</h3>
+        <p>Ready for runtime load is not runtime loaded; each proof gate remains independent.</p>
+        <div className="table-scroll"><table className="strategy-table" aria-label="Node-by-stage readiness matrix"><thead><tr><th scope="col">Node / assignment</th>{READINESS_STAGES.map((stage) => <th scope="col" key={stage.id}>{stage.label}</th>)}</tr></thead><tbody>{readiness.rows.map((row) => <tr key={row.nodeId}><th scope="row">{row.nodeId}<small>{row.assignment}</small></th>{READINESS_STAGES.map((stage) => <td key={stage.id} title={row.cells[stage.id].reason}>{readinessStateLabel(row.cells[stage.id].state)}</td>)}</tr>)}</tbody></table></div>
+      </section>
+
+      <button type="button" aria-expanded={drawerOpen} aria-controls="source-evidence-drawer" onClick={() => setDrawerOpen((open) => !open)}>{drawerOpen ? 'Close' : 'Open'} source &amp; evidence drawer</button>
+      {drawerOpen ? <section id="source-evidence-drawer" className="panel" role="region" aria-label="Source & evidence drawer">
+        <h3>Protocol records</h3><p><strong>Claim boundary:</strong> display-only validated projections; missing metadata remains unknown.</p>
+        <ul className="source-list">{sources.map((source) => <li key={source.id}><div><strong>{source.name}</strong><code>{source.protocol}</code><small>{source.rawDigest.state === 'unknown' ? 'Raw digest not supplied' : source.rawDigest.value}</small><small>{source.validation.state.toLowerCase()} · {source.claimBoundary}</small></div></li>)}</ul>
+      </section> : null}
+
+      <section className="panel" role="region" aria-label="Evidence timeline replay">
+        <h3>Evidence timeline replay</h3><p>Supplied evidence event; no prior comparable capture was supplied.</p>
+        <input type="range" aria-label="Evidence replay position" min={0} max={Math.max(0, timeline.length - 1)} value={timelineIndex} onChange={(event) => setTimelineCursor(Number(event.target.value))} />
+        <div className="actions"><button type="button" aria-label="Previous evidence event" onClick={() => setTimelineCursor((cursor) => Math.max(0, cursor - 1))}>Previous</button><button type="button" aria-label="Next evidence event" onClick={() => setTimelineCursor((cursor) => Math.min(timeline.length - 1, cursor + 1))}>Next</button></div>
+        <p role="status">Event {timelineIndex + 1} of {timeline.length}: {timelineFrame?.label ?? 'No supplied evidence event'}</p><p>{timelineFrame?.detail}</p>
+      </section>
+
+      <section className="panel"><h3>Pseudonymized evidence export</h3><button type="button" onClick={() => setExportJson(JSON.stringify(createPseudonymizedExport(snapshot, provisioning, incidents), null, 2))}>Create pseudonymized export</button>{exportJson === null ? null : <div role="region" aria-label="Pseudonymized export preview"><pre>{exportJson}</pre><a download="mycelium-evidence-pseudonymized.json" href={`data:application/json;charset=utf-8,${encodeURIComponent(exportJson)}`}>Download pseudonymized JSON</a></div>}</section>
 
       <div className="evidence-lower-grid">
         <section className="source-ledger panel" aria-labelledby="source-ledger-title">

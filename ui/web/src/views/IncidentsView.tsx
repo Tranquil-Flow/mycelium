@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { projectFailoverOverlay } from '../model/failover';
 import type { FailoverIncident, FailoverMode, FailoverOverlayRoute } from '../model/types';
+import { projectIncidentReplay } from '../features/readiness/incidentReplay';
 
 interface IncidentsViewProps {
   readonly incidents: readonly FailoverIncident[];
@@ -24,8 +25,8 @@ const modeCopy: Record<FailoverMode, { short: string; heading: string; descripti
   },
 };
 
-function routeState(route: FailoverOverlayRoute): string {
-  if (route.role === 'replacement') return 'active replacement';
+function routeState(route: FailoverOverlayRoute, replacementState?: string): string {
+  if (route.role === 'replacement') return `${replacementState ?? 'candidate'} replacement`;
   return route.state === 'failed' ? 'failed prior route' : `${route.state} prior route`;
 }
 
@@ -38,8 +39,10 @@ const triggerCopy: Record<FailoverMode, { label: string; className: string }> = 
 export function IncidentsView({ incidents }: IncidentsViewProps) {
   const initial = incidents.find((incident) => incident.mode === 'active_failover') ?? incidents[0];
   const [selectedId, setSelectedId] = useState(initial.id);
+  const [replayCursor, setReplayCursor] = useState(Math.max(0, initial.transitions.length - 1));
   const selected = incidents.find((incident) => incident.id === selectedId) ?? initial;
   const overlay = useMemo(() => projectFailoverOverlay(selected), [selected]);
+  const replay = projectIncidentReplay(selected, replayCursor);
   const circuitIncident = incidents.find((incident) => incident.mode === 'circuit_break');
   const circuitOverlay = circuitIncident === undefined ? null : projectFailoverOverlay(circuitIncident);
 
@@ -70,7 +73,10 @@ export function IncidentsView({ incidents }: IncidentsViewProps) {
               className={`incident-mode ${incident.mode}`}
               aria-label={`Inspect ${copy.short} scenario`}
               aria-pressed={incident.id === selected.id}
-              onClick={() => setSelectedId(incident.id)}
+              onClick={() => {
+                setSelectedId(incident.id);
+                setReplayCursor(Math.max(0, incident.transitions.length - 1));
+              }}
             >
               <span className="mode-index">0{index + 1}</span>
               <span className="mode-copy"><strong>{copy.short}</strong><small>{copy.description}</small></span>
@@ -93,6 +99,7 @@ export function IncidentsView({ incidents }: IncidentsViewProps) {
               <span className="synthetic-tag">synthetic</span>
             </div>
           </div>
+          <p>Supplied synthetic evidence · no severity inferred · detector scope {selected.trigger.scope}.</p>
 
           <div className="route-generation-panel" aria-label="Route generation comparison">
             <div className="route-generation-head">
@@ -105,7 +112,7 @@ export function IncidentsView({ incidents }: IncidentsViewProps) {
                   <div className="generation-label">
                     <span>{route.role === 'old' ? 'Prior route' : 'Replacement route'}</span>
                     <strong>{route.label}</strong>
-                    <small>{routeState(route)}</small>
+                    <small>{routeState(route, replay.replacement?.displayState)}</small>
                   </div>
                   <div className="generation-path">
                     {route.nodeIds.map((nodeId, index) => (
@@ -165,6 +172,12 @@ export function IncidentsView({ incidents }: IncidentsViewProps) {
               <h3 id="timeline-title">Transition timeline</h3>
             </div>
             <span className="elapsed-time">{selected.transitions.at(-1)?.atMs ?? 0} ms</span>
+          </div>
+          <div role="region" aria-label="Incident timeline replay controls">
+            <button type="button" aria-label="Previous transition" onClick={() => setReplayCursor((cursor) => Math.max(0, cursor - 1))}>Previous transition</button>
+            <button type="button" aria-label="Next transition" onClick={() => setReplayCursor((cursor) => Math.min(selected.transitions.length - 1, cursor + 1))}>Next transition</button>
+            <input type="range" aria-label="Incident replay position" min={0} max={Math.max(0, selected.transitions.length - 1)} value={replay.cursor} onChange={(event) => setReplayCursor(Number(event.target.value))} />
+            <p role="status">{replay.transitionState.replaceAll('_', ' ')} · {replay.transitionDetail}</p>
           </div>
           <ol className="incident-timeline">
             {selected.transitions.map((transition, index) => (
