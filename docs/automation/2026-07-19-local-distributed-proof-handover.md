@@ -8,6 +8,8 @@ Branch: `integration/mycelium-distributed-proof-20260719`
 
 Pre-proof HEAD: `6bd7c5449865acefa61cd766019012bf16bf01e0`
 
+Proof commit: `116125a9554086a38ed9a5d3c7738007886574ba`
+
 Canonical `main` and merge base: `f2bc55b62c5e3103eda584c1c68c222244bde489`
 
 This tranche establishes **local same-host evidence** that two independent Python
@@ -90,6 +92,11 @@ Latest complete observations before final handover update:
 - Qualification suite
   - exit `0`;
   - `94 passed in 1.23s`.
+- Sealer plus same-host fail-closed qualifier lane
+  - exit `0`;
+  - `10 passed in 0.18s`;
+  - the qualifier rejects two stage proofs sharing one `process_host_id` with
+    `process_identity_invalid`, so this local run cannot promote `route_ready`.
 - `python3.14 scripts/contract_audit.py`
   - exit `0`; `contract audit OK: 14 contracts`.
 - `python3.14 -m compileall -q .`
