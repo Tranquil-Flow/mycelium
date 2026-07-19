@@ -343,6 +343,7 @@ class SwarmCoordinator:
         self._invites: dict[str, _Invite] = {}
         self._peers: OrderedDict[str, _Peer] = OrderedDict()
         self._jobs: OrderedDict[str, _Job] = OrderedDict()
+        self._poll_waiters: dict[str, int] = {}
 
     def __repr__(self) -> str:
         with self._condition:
@@ -512,31 +513,63 @@ class SwarmCoordinator:
         with self._condition:
             now = self._now()
             deadline = now + timeout
-            while True:
-                self._expire_locked(now)
-                peer = self._authenticate_peer_locked(
-                    peer_id=peer_id,
-                    session_token=session_token,
-                    now=now,
-                )
-                if peer.outstanding_job_id is not None:
-                    existing = self._jobs.get(peer.outstanding_job_id)
-                    if existing is not None and existing.state == "assigned":
-                        return self._work_document(existing)
-                    peer.outstanding_job_id = None
-                for job in self._jobs.values():
-                    if job.state != "pending":
-                        continue
-                    job.state = "assigned"
-                    job.peer_id = peer.peer_id
-                    peer.outstanding_job_id = job.job_id
-                    self._condition.notify_all()
-                    return self._work_document(job)
-                remaining = deadline - now
-                if remaining <= 0.0:
-                    return None
-                self._condition.wait(timeout=remaining)
-                now = self._now()
+            self._expire_locked(now)
+            peer = self._authenticate_peer_locked(
+                peer_id=peer_id,
+                session_token=session_token,
+                now=now,
+            )
+            waiter_peer_id = peer.peer_id
+            self._poll_waiters[waiter_peer_id] = self._poll_waiters.get(waiter_peer_id, 0) + 1
+            self._condition.notify_all()
+            try:
+                while True:
+                    self._expire_locked(now)
+                    peer = self._authenticate_peer_locked(
+                        peer_id=peer_id,
+                        session_token=session_token,
+                        now=now,
+                    )
+                    if peer.outstanding_job_id is not None:
+                        existing = self._jobs.get(peer.outstanding_job_id)
+                        if existing is not None and existing.state == "assigned":
+                            return self._work_document(existing)
+                        peer.outstanding_job_id = None
+                    pending = next(
+                        (job for job in self._jobs.values() if job.state == "pending"),
+                        None,
+                    )
+                    if pending is not None:
+                        eligible = [
+                            candidate
+                            for candidate in self._peers.values()
+                            if candidate.state == "connected"
+                            and candidate.outstanding_job_id is None
+                            and self._poll_waiters.get(candidate.peer_id, 0) > 0
+                        ]
+                        selected = min(
+                            eligible,
+                            key=lambda candidate: (candidate.completed_jobs, candidate.peer_id),
+                            default=None,
+                        )
+                        if selected is not None and selected.peer_id == peer.peer_id:
+                            pending.state = "assigned"
+                            pending.peer_id = peer.peer_id
+                            peer.outstanding_job_id = pending.job_id
+                            self._condition.notify_all()
+                            return self._work_document(pending)
+                    remaining = deadline - now
+                    if remaining <= 0.0:
+                        return None
+                    self._condition.wait(timeout=remaining)
+                    now = self._now()
+            finally:
+                waiter_count = self._poll_waiters.get(waiter_peer_id, 0)
+                if waiter_count <= 1:
+                    self._poll_waiters.pop(waiter_peer_id, None)
+                else:
+                    self._poll_waiters[waiter_peer_id] = waiter_count - 1
+                self._condition.notify_all()
 
     def _work_document(self, job: _Job) -> dict[str, Any]:
         return {
@@ -750,6 +783,12 @@ class SwarmCoordinator:
                 "local_evidence_only": True,
                 "route_ready": False,
                 "peer_count": sum(peer["state"] == "connected" for peer in peers),
+                "ready_peer_count": sum(
+                    peer.state == "connected"
+                    and peer.outstanding_job_id is None
+                    and self._poll_waiters.get(peer.peer_id, 0) > 0
+                    for peer in self._peers.values()
+                ),
                 "pending_job_count": sum(
                     job.state in {"pending", "assigned"} for job in self._jobs.values()
                 ),

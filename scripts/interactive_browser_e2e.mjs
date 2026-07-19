@@ -177,14 +177,16 @@ async function main() {
   const executable = chromePath();
   const serverPort = await freePort();
   const hostDebugPort = await freePort();
-  const peerDebugPort = await freePort();
+  const peerOneDebugPort = await freePort();
+  const peerTwoDebugPort = await freePort();
   const stateRoot = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-state-'));
   const hostProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-host-'));
-  const peerProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-peer-'));
+  const peerOneProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-peer-one-'));
+  const peerTwoProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-peer-two-'));
   const origin = `http://127.0.0.1:${serverPort}`;
   const children = [];
   let host = null;
-  let peer = null;
+  const peers = [];
 
   const server = spawn('python3.14', [
     'scripts/interactive_swarm_server.py',
@@ -241,10 +243,40 @@ async function main() {
     }
 
     await host.cdp.evaluate("document.querySelector('#create-invite').click(); true");
-    const inviteUrl = await waitFor('invite_url', async () => host.cdp.evaluate(
-      "document.querySelector('#invite-url')?.value || ''",
-    ));
-    if (!inviteUrl.startsWith(`${origin}/#join/`)) fail('invite_origin_invalid');
+    await waitFor('first_invite_url', async () => host.cdp.evaluate(
+      "document.querySelectorAll('[data-invite-url]').length === 1",
+    ), 5_000);
+    await host.cdp.evaluate("document.querySelector('#create-invite').click(); true");
+    const inviteUrls = await waitFor('second_invite_url', async () => {
+      const values = await host.cdp.evaluate(
+        "Array.from(document.querySelectorAll('[data-invite-url]'), (element) => element.value)",
+      );
+      return values.length === 2 ? values : null;
+    });
+    if (new Set(inviteUrls).size !== 2) fail('invite_urls_not_unique');
+    if (!inviteUrls.every((value) => value.startsWith(`${origin}/#join/`))) {
+      fail('invite_origin_invalid');
+    }
+    await host.cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 390,
+      height: 844,
+      deviceScaleFactor: 1,
+      mobile: true,
+    });
+    const hostMobileLayout = await host.cdp.evaluate(`({
+      innerWidth: window.innerWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+      inviteCount: document.querySelectorAll('[data-invite-url]').length,
+      createVisible: !!document.querySelector('#create-invite')?.offsetParent,
+    })`);
+    if (
+      hostMobileLayout.innerWidth !== 390
+      || hostMobileLayout.scrollWidth > hostMobileLayout.innerWidth
+      || hostMobileLayout.inviteCount !== 2
+      || hostMobileLayout.createVisible !== true
+    ) {
+      fail(`host_mobile_layout_invalid:${JSON.stringify(hostMobileLayout)}`);
+    }
 
     await host.cdp.evaluate(`(() => {
       const prompt = document.querySelector('#prompt');
@@ -261,27 +293,47 @@ async function main() {
     );
     if (!preservedDraft) fail('host_draft_lost_during_status_refresh');
 
-    peer = await launchChrome({
-      executable,
-      debugPort: peerDebugPort,
-      profile: peerProfile,
-      url: inviteUrl,
-    });
-    children.push(peer.child);
-    await waitFor('peer_join', async () => (await peer.cdp.evaluate(
-      "document.body.innerText.includes('State\\nrunning')",
-    )) === true);
-    const peerLocation = await peer.cdp.evaluate(
-      "({href: location.href, hash: location.hash, subtle: !!crypto.subtle})",
-    );
-    if (peerLocation.hash !== '' || peerLocation.href !== `${origin}/`) {
-      fail('consumed_invite_fragment_not_cleared');
+    const peerSpecs = [
+      { debugPort: peerOneDebugPort, profile: peerOneProfile, url: inviteUrls[0] },
+      { debugPort: peerTwoDebugPort, profile: peerTwoProfile, url: inviteUrls[1] },
+    ];
+    for (const [index, spec] of peerSpecs.entries()) {
+      const peer = await launchChrome({ executable, ...spec });
+      peers.push(peer);
+      children.push(peer.child);
+      await waitFor(`peer_${index + 1}_join`, async () => (await peer.cdp.evaluate(
+        "document.body.innerText.includes('State\\nrunning')",
+      )) === true);
+      const peerLocation = await peer.cdp.evaluate(
+        "({href: location.href, hash: location.hash, subtle: !!crypto.subtle})",
+      );
+      if (peerLocation.hash !== '' || peerLocation.href !== `${origin}/`) {
+        fail(`peer_${index + 1}_consumed_invite_fragment_not_cleared`);
+      }
+      if (peerLocation.subtle !== true) fail(`peer_${index + 1}_browser_crypto_unavailable`);
+      await peer.cdp.send('Emulation.setDeviceMetricsOverride', {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+      });
+      const peerMobileLayout = await peer.cdp.evaluate(`({
+        innerWidth: window.innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        stopVisible: !!document.querySelector('#stop-peer')?.offsetParent,
+      })`);
+      if (
+        peerMobileLayout.innerWidth !== 390
+        || peerMobileLayout.scrollWidth > peerMobileLayout.innerWidth
+        || peerMobileLayout.stopVisible !== true
+      ) {
+        fail(`peer_${index + 1}_mobile_layout_invalid:${JSON.stringify(peerMobileLayout)}`);
+      }
     }
-    if (peerLocation.subtle !== true) fail('browser_crypto_unavailable');
 
     await waitFor('host_peer_status', async () => {
       const value = await readJson(`${origin}/api/interactive/status`, operatorOptions);
-      return value.status.peer_count === 1;
+      return value.status.peer_count === 2 && value.status.ready_peer_count === 2;
     });
     await waitFor('host_request_enabled', async () => (await host.cdp.evaluate(
       "document.querySelector('#request-form button')?.disabled === false",
@@ -297,8 +349,15 @@ async function main() {
     if (record.route_ready !== false || record.local_evidence_only !== true) {
       fail('claim_boundary_invalid');
     }
-    if (record.generated_tokens.length !== 2 || status.peers[0].completed_jobs !== 2) {
-      fail(`browser_stage_job_count_invalid:tokens=${record.generated_tokens.length}:status=${JSON.stringify(status.peers)}`);
+    const peerJobCounts = status.peers.map((item) => item.completed_jobs).sort((a, b) => a - b);
+    if (
+      record.generated_tokens.length !== 2
+      || new Set(record.peer_ids).size !== 2
+      || peerJobCounts.length !== 2
+      || peerJobCounts[0] !== 1
+      || peerJobCounts[1] !== 1
+    ) {
+      fail(`browser_stage_distribution_invalid:tokens=${record.generated_tokens.length}:record=${JSON.stringify(record.peer_ids)}:status=${JSON.stringify(status.peers)}`);
     }
     if (record.max_intermediate_error >= 1e-6 || record.max_logit_error >= 2e-6) {
       fail('browser_parity_tolerance_exceeded');
@@ -306,24 +365,51 @@ async function main() {
     await waitFor('host_evidence_render', async () => (await host.cdp.evaluate(
       "document.body.innerText.includes('Inference completed with local browser-stage evidence.')",
     )) === true);
-    await waitFor('peer_job_render', async () => (await peer.cdp.evaluate(
-      "document.body.innerText.includes('Completed jobs\\n2')",
-    )) === true);
+    for (const [index, peer] of peers.entries()) {
+      await waitFor(`peer_${index + 1}_job_render`, async () => (await peer.cdp.evaluate(
+        "document.body.innerText.includes('Completed jobs\\n1')",
+      )) === true);
+      await peer.cdp.evaluate("document.querySelector('#stop-peer').click(); true");
+      await waitFor(`peer_${index + 1}_clean_stop`, async () => (await peer.cdp.evaluate(
+        "document.body.innerText.includes('State\\nstopped') && !document.querySelector('[role=alert]')",
+      )) === true, 5_000);
+    }
+    await peers[0].cdp.send('Page.navigate', { url: 'about:blank' });
+    await waitFor('peer_blank_before_reuse', async () => (await peers[0].cdp.evaluate(
+      "location.href === 'about:blank'",
+    )) === true, 5_000);
+    await peers[0].cdp.send('Page.navigate', { url: inviteUrls[0] });
+    await waitFor('consumed_invite_reuse_failure', async () => (await peers[0].cdp.evaluate(
+      "document.body.innerText.includes('State\\nfailed') && document.querySelector('[role=alert]')?.textContent.includes('invite_invalid_or_consumed')",
+    )) === true, 5_000);
+    const reusedInviteLocation = await peers[0].cdp.evaluate(
+      "({ href: location.href, hash: location.hash })",
+    );
+    if (reusedInviteLocation.href !== `${origin}/` || reusedInviteLocation.hash !== '') {
+      fail('reused_invite_fragment_not_cleared');
+    }
 
     if (host.cdp.exceptions.length || host.cdp.consoleErrors.length) fail('host_browser_console_error');
-    if (peer.cdp.exceptions.length || peer.cdp.consoleErrors.length) fail('peer_browser_console_error');
+    for (const [index, peer] of peers.entries()) {
+      if (peer.cdp.exceptions.length || peer.cdp.consoleErrors.length) {
+        fail(`peer_${index + 1}_browser_console_error`);
+      }
+    }
 
     console.log(JSON.stringify({
-      protocol: 'mycelium.interactive_browser_e2e.v1',
+      protocol: 'mycelium.interactive_browser_e2e.v2',
       host_browser_process: true,
-      peer_browser_process: true,
-      independent_browser_profiles: true,
+      peer_browser_processes: peers.length,
+      independent_browser_profiles: 1 + peers.length,
       operator_capability_required: true,
       consumed_operator_fragment_cleared: true,
-      one_use_weblink_joined: true,
-      consumed_fragment_cleared: true,
+      one_use_weblinks_joined: inviteUrls.length,
+      consumed_peer_fragments_cleared: true,
+      mobile_viewport_checks: { host: true, peers: peers.length },
       draft_survived_status_refresh: true,
-      completed_jobs: status.peers[0].completed_jobs,
+      peer_completed_jobs: peerJobCounts,
+      clean_peer_stops: peers.length,
+      consumed_invite_reuse_rejected: true,
       request_id: record.request_id,
       generated_labels: record.generated_labels,
       max_intermediate_error: record.max_intermediate_error,
@@ -334,12 +420,13 @@ async function main() {
     }, null, 2));
   } finally {
     host?.cdp.close();
-    peer?.cdp.close();
+    for (const peer of peers) peer.cdp.close();
     for (const child of children.reverse()) await stopChild(child);
     await Promise.all([
       rm(stateRoot, { recursive: true, force: true }),
       rm(hostProfile, { recursive: true, force: true }),
-      rm(peerProfile, { recursive: true, force: true }),
+      rm(peerOneProfile, { recursive: true, force: true }),
+      rm(peerTwoProfile, { recursive: true, force: true }),
     ]);
   }
 }

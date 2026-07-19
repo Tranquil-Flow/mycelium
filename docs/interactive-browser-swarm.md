@@ -20,12 +20,14 @@ Startup prints one JSON document. Open its `operator_url` exactly; do not open o
 
 Then:
 
-1. Select **Create one-use join link**.
-2. Copy only that join link to the browser that should contribute compute.
-3. Open it once. The peer exchanges the fragment capability, clears the address bar, loads the assignment-bound stage pack, and starts long-polling for work.
-4. Wait until the operator page reports one connected peer.
-5. Enter a prompt, select 1–8 new tokens, and select **Run distributed inference**.
-6. Inspect generated labels, peer/job bindings, intermediate error, and final-logit error. Successful records still say `local evidence only` and `route_ready=false`.
+1. Select **Create link for next device** twice.
+2. Copy the Device 1 link to the first contributing browser and the distinct Device 2 link to the second. Never reuse or send the same link to both devices.
+3. Open each link once. Each peer exchanges its fragment capability, clears the address bar, loads the assignment-bound stage pack, and starts long-polling for work.
+4. Wait for **Devices joined: 2**, **Workers ready: 2**, and **Two-device UI test: READY**. A joined device is not counted ready until it has an active work poll.
+5. Enter a prompt, select 2–8 new tokens, and select **Run through browser swarm**.
+6. Inspect generated labels, peer/job bindings, per-peer completed-job counts, intermediate error, and final-logit error. Successful records still say `local evidence only` and `route_ready=false`.
+
+Waiting peers are selected by lowest completed-job count, then stable peer ID, so two ready peers receive balanced sequential stage jobs instead of depending on poll-thread wake order.
 
 A join link is single-use and expires after at most five minutes. Reloading a joined peer loses its in-memory session; create a new link. Reloading the operator page loses its in-memory operator capability; reopen the original `operator_url` printed at startup. A peer that stops polling expires after 45 seconds, so closed tabs do not hold swarm capacity for the full one-hour absolute session limit.
 
@@ -46,7 +48,16 @@ python3.14 scripts/interactive_swarm_server.py \
 
 For reverse-proxy TLS, omit `--tls-cert` and `--tls-key`, proxy the external HTTPS origin to the bound HTTP listener, and do not expose that upstream listener to an untrusted network.
 
-Open the emitted HTTPS `operator_url`, create a join link, and send that one link to the other device. For any non-loopback bind, `--public-origin` is mandatory and the server rejects startup without it; do not rely on the request `Host` header. The origin must contain only scheme, host, and optional port. Plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`.
+Open the emitted HTTPS `operator_url`, create two distinct join links, and send exactly one link to each standby device. For any non-loopback bind, `--public-origin` is mandatory and the server rejects startup without it; do not rely on the request `Host` header. The origin must contain only scheme, host, and optional port. Plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`.
+
+Physical two-device UI-test checklist:
+
+1. Keep the operator URL on the host only; send each device only its own join link.
+2. Confirm each device clears `#join/...` from its address bar and shows **State: running**.
+3. Confirm the operator reaches **Workers ready: 2** before running inference.
+4. Run at least two new tokens and confirm both peer IDs appear in Latest evidence with one or more jobs per peer.
+5. On each device, select **Stop peer worker** and confirm **State: stopped** without an alert.
+6. Treat this as physical UI/network-path evidence only. Keep `route_ready=false`; do not infer production Router readiness.
 
 This is a trusted-private-network test server, not an internet-facing multi-tenant service. Firewall policy, proxy connection limits, and access logging remain deployment responsibilities.
 
@@ -83,7 +94,7 @@ node scripts/interactive_browser_e2e.mjs
 cd ui/web && npm run check
 ```
 
-The browser E2E launches two independent headless Chrome processes with isolated profiles. One is the operator; the other joins via the generated one-use web link, executes two browser-stage jobs, and returns outputs that the host verifies against both local stage and monolithic references. It is a device-style process/isolation proof on one machine, not physical cross-device or network-path qualification.
+The browser E2E launches three independent headless Chrome processes with isolated profiles: one operator and two peer workers. The operator creates two distinct one-use web links; each peer consumes one link, clears its fragment, passes a 390×844 mobile-overflow check, and becomes work-ready. A two-token request is balanced one stage job per peer, both outputs pass local-stage and monolithic-reference checks, and both peers stop cleanly without an alert. This is a device-style process/isolation proof on one machine, not physical cross-device or network-path qualification.
 
 Repository-wide gates remain:
 

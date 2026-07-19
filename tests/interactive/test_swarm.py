@@ -189,6 +189,61 @@ def test_peer_limit_auth_revoke_leave_and_expiry() -> None:
         third.poll_work(peer_id=peer3, session_token=token3, timeout_seconds=0)
 
 
+def test_two_waiting_peers_are_reported_and_receive_balanced_jobs() -> None:
+    swarm = coordinator()
+    credentials = [join(swarm), join(swarm)]
+    stop = threading.Event()
+    received: list[str] = []
+    errors: list[BaseException] = []
+
+    def worker(peer_id: str, token: str) -> None:
+        try:
+            while not stop.is_set():
+                work = swarm.poll_work(
+                    peer_id=peer_id,
+                    session_token=token,
+                    timeout_seconds=0.05,
+                )
+                if work is None:
+                    continue
+                received.append(peer_id)
+                assert swarm.submit_result(
+                    peer_id=peer_id,
+                    session_token=token,
+                    document=valid_result(work, work["hidden"]),
+                ) == "accepted"
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=credential)
+        for credential in credentials
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        deadline = time.monotonic() + 2.0
+        while swarm.status()["ready_peer_count"] != 2:
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+
+        swarm.dispatch(request_id="request-balanced-1", hidden=[[1.0, 2.0]], timeout_seconds=2)
+        deadline = time.monotonic() + 2.0
+        while swarm.status()["ready_peer_count"] != 2:
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+        swarm.dispatch(request_id="request-balanced-2", hidden=[[3.0, 4.0]], timeout_seconds=2)
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=2)
+
+    assert not errors
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(received) == sorted(peer_id for peer_id, _ in credentials)
+    assert sorted(peer["completed_jobs"] for peer in swarm.status()["peers"]) == [1, 1]
+
+
 def test_dispatch_long_poll_result_and_duplicate_idempotence() -> None:
     swarm = coordinator()
     peer_id, token = join(swarm)

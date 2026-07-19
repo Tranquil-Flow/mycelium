@@ -4,7 +4,7 @@ const app = document.querySelector('#app');
 const state = {
   operatorToken: null,
   status: null,
-  invite: null,
+  invites: [],
   record: null,
   message: '',
   error: '',
@@ -111,8 +111,9 @@ async function createInvite() {
   state.error = '';
   render();
   try {
-    state.invite = (await operatorPost('/api/interactive/invite', { ttl_seconds: 300 })).invite;
-    state.message = 'Invite created. Open this link on another browser/device.';
+    const invite = (await operatorPost('/api/interactive/invite', { ttl_seconds: 300 })).invite;
+    state.invites.push(invite);
+    state.message = `Device ${state.invites.length} link created. Open it once on that device.`;
   } catch (error) {
     state.error = error instanceof Error ? error.message : 'invite_failed';
   }
@@ -121,13 +122,14 @@ async function createInvite() {
   await refreshStatus();
 }
 
-async function copyInvite() {
-  if (!state.invite) return;
+async function copyInvite(index) {
+  const invite = state.invites[index];
+  if (!invite) return;
   try {
-    await navigator.clipboard.writeText(state.invite.url);
-    state.message = 'Invite copied.';
+    await navigator.clipboard.writeText(invite.url);
+    state.message = `Device ${index + 1} link copied.`;
   } catch {
-    state.message = 'Copy failed; select the URL manually.';
+    state.message = `Copy failed for device ${index + 1}; select the URL manually.`;
   }
   render();
 }
@@ -170,6 +172,12 @@ async function startPeer(token) {
     render();
     await peerLoop();
   } catch (error) {
+    if (!state.peer.running && ['stopping', 'stopped'].includes(state.peer.state)) {
+      state.peer.state = 'stopped';
+      state.peer.error = '';
+      render();
+      return;
+    }
     state.peer.running = false;
     state.peer.state = 'failed';
     state.peer.error = error instanceof Error ? error.message : 'peer_failed';
@@ -202,6 +210,7 @@ async function peerLoop() {
       session_token: state.peer.sessionToken,
       timeout_seconds: 15,
     });
+    if (!state.peer.running) return;
     const work = response.work;
     if (work === null) {
       await sleep(250);
@@ -235,26 +244,39 @@ function hostHtml() {
   const status = state.status;
   const peers = status?.peers ?? [];
   const record = state.record;
+  const peerCount = status?.peer_count ?? 0;
+  const readyPeerCount = status?.ready_peer_count ?? 0;
+  const twoDeviceReady = readyPeerCount >= 2;
+  const inviteRows = state.invites.map((invite, index) => `
+    <div class="invite-row">
+      <div class="invite-title"><strong>Device ${index + 1}</strong><span>one use</span></div>
+      <label for="invite-url-${index}">Join link</label>
+      <input id="invite-url-${index}" data-invite-url readonly value="${h(invite.url)}">
+      <small>Expires ${h(formatUnix(invite.expires_at))}; open once on device ${index + 1}.</small>
+      <button data-copy-invite="${index}">Copy device ${index + 1} link</button>
+    </div>`).join('');
   return `
     <section class="hero">
       <p class="eyebrow">Interactive distributed inference test</p>
       <h1>Mycelium browser swarm</h1>
-      <p>Create a one-use link, open it on another browser/device, then route a bounded decoder-stage job through that peer. Observatory remains read-only; this is a separate local test console.</p>
-      <div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>same-origin API</span><span>HTTPS required for non-loopback use</span></div>
+      <p>Create one unique link per browser/device, wait for them to join, then route bounded decoder-stage jobs across the swarm. Observatory remains read-only; this is a separate local test console.</p>
+      <div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>same-origin API</span><span>HTTPS required for non-loopback use</span><span>${twoDeviceReady ? 'two-device test ready' : `${readyPeerCount}/2 workers ready`}</span></div>
     </section>
     <section class="grid">
       <div class="card"><p class="eyebrow">Swarm status</p><dl class="facts">
-        <div><dt>Peers</dt><dd>${h(status?.peer_count ?? '—')}</dd></div>
+        <div><dt>Devices joined</dt><dd>${h(peerCount || (status ? 0 : '—'))}</dd></div>
+        <div><dt>Workers ready</dt><dd>${h(status ? readyPeerCount : '—')}</dd></div>
+        <div><dt>Two-device UI test</dt><dd>${twoDeviceReady ? 'READY · 2/2+' : `WAITING · ${h(readyPeerCount)}/2`}</dd></div>
         <div><dt>Pending jobs</dt><dd>${h(status?.pending_job_count ?? '—')}</dd></div>
         <div><dt>Completed requests</dt><dd>${h(status?.completed_request_count ?? '—')}</dd></div>
         <div><dt>Stage pack</dt><dd>${h(short(status?.stage_pack_digest))}</dd></div>
         <div><dt>Route ready</dt><dd>${h(String(status?.route_ready ?? false))}</dd></div>
       </dl></div>
-      <div class="card stack"><p class="eyebrow">Invite peer</p><button id="create-invite" class="primary" ${state.busy ? 'disabled' : ''}>Create one-use join link</button>
-        ${state.invite ? `<label for="invite-url">Peer URL</label><input id="invite-url" readonly value="${h(state.invite.url)}"><small>Expires ${h(formatUnix(state.invite.expires_at))}; token is URL fragment until join.</small><button id="copy-invite">Copy link</button>` : ''}
+      <div class="card stack"><p class="eyebrow">Join devices</p><p>Create one unique link for each standby device. For the two-device UI test, create two links before opening either one.</p><button id="create-invite" class="primary" ${state.busy ? 'disabled' : ''}>Create link for next device</button>
+        <div class="invite-list">${inviteRows || '<small>No device links created yet.</small>'}</div>
       </div>
-      <form id="request-form" class="card stack"><p class="eyebrow">Request</p><label for="prompt">Prompt seed</label><textarea id="prompt" name="prompt" maxlength="512">${h(state.draft.prompt)}</textarea><label for="max-new">Max new tokens</label><input id="max-new" name="max_new_tokens" type="number" min="1" max="8" value="${h(state.draft.maxNewTokens)}"><button class="primary" ${state.busy || (status?.peer_count ?? 0) < 1 ? 'disabled' : ''}>Run through browser worker</button></form>
-      <div class="card"><p class="eyebrow">Connected peers</p><dl class="facts">${peers.map((peer) => `<div><dt>${h(peer.peer_id)}</dt><dd>${h(peer.state)} · jobs ${h(peer.completed_jobs)}</dd></div>`).join('') || '<div><dt>none</dt><dd>create invite</dd></div>'}</dl></div>
+      <form id="request-form" class="card stack"><p class="eyebrow">Request</p><label for="prompt">Prompt seed</label><textarea id="prompt" name="prompt" maxlength="512">${h(state.draft.prompt)}</textarea><label for="max-new">Max new tokens</label><input id="max-new" name="max_new_tokens" type="number" min="1" max="8" value="${h(state.draft.maxNewTokens)}"><button class="primary" ${state.busy || readyPeerCount < 1 ? 'disabled' : ''}>Run through browser swarm</button></form>
+      <div class="card"><p class="eyebrow">Connected peers</p><dl class="facts">${peers.map((peer) => `<div><dt>${h(peer.peer_id)}</dt><dd>${h(peer.state)} · jobs ${h(peer.completed_jobs)}</dd></div>`).join('') || '<div><dt>none</dt><dd>create device links</dd></div>'}</dl></div>
       ${state.message ? `<div class="card wide message">${h(state.message)}</div>` : ''}
       ${state.error ? `<div class="card wide error" role="alert">${h(state.error)}</div>` : ''}
       ${record ? `<div class="card wide"><p class="eyebrow">Latest evidence</p><h2>${h(record.generated_labels.join(' ') || '(no tokens)')}</h2><dl class="facts"><div><dt>Request</dt><dd>${h(record.request_id)}</dd></div><div><dt>Prompt digest</dt><dd>${h(short(record.prompt_digest))}</dd></div><div><dt>Max stage error</dt><dd>${h(record.max_intermediate_error.toExponential(3))}</dd></div><div><dt>Max logit error</dt><dd>${h(record.max_logit_error.toExponential(3))}</dd></div><div><dt>Peer IDs</dt><dd>${h(record.peer_ids.join(', '))}</dd></div><div><dt>Route ready</dt><dd>${h(String(record.route_ready))}</dd></div></dl></div>` : ''}
@@ -263,15 +285,18 @@ function hostHtml() {
 
 function peerHtml() {
   const peer = state.peer;
+  const canStop = ['running', 'stopping'].includes(peer.state);
   return `
     <section class="hero"><p class="eyebrow">Browser worker · one-link join</p><h1>Joined swarm worker</h1><p>This browser computes only the assigned decoder substage and returns digest-bound results. Session token stays in memory.</p><div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>exact stage JS</span></div></section>
-    <section class="grid"><div class="card"><p class="eyebrow">Peer state</p><dl class="facts"><div><dt>State</dt><dd>${h(peer.state)}</dd></div><div><dt>Peer</dt><dd>${h(peer.peerId ?? 'joining…')}</dd></div><div><dt>Completed jobs</dt><dd>${h(peer.completed)}</dd></div><div><dt>Last job</dt><dd>${h(peer.lastJob ?? 'none')}</dd></div><div><dt>Route ready</dt><dd>false</dd></div></dl><br><button id="stop-peer">Stop peer worker</button>${peer.error ? `<p class="error" role="alert">${h(peer.error)}</p>` : ''}</div></section>`;
+    <section class="grid"><div class="card"><p class="eyebrow">Peer state</p><dl class="facts"><div><dt>State</dt><dd>${h(peer.state)}</dd></div><div><dt>Peer</dt><dd>${h(peer.peerId ?? 'joining…')}</dd></div><div><dt>Completed jobs</dt><dd>${h(peer.completed)}</dd></div><div><dt>Last job</dt><dd>${h(peer.lastJob ?? 'none')}</dd></div><div><dt>Route ready</dt><dd>false</dd></div></dl><br>${canStop ? `<button id="stop-peer" ${peer.state === 'stopping' ? 'disabled' : ''}>${peer.state === 'stopping' ? 'Stopping…' : 'Stop peer worker'}</button>` : '<p class="message">Worker stopped. This one-use link cannot be reused.</p>'}${peer.error ? `<p class="error" role="alert">${h(peer.error)}</p>` : ''}</div></section>`;
 }
 
 function render() {
   app.innerHTML = state.peer.mode ? peerHtml() : hostHtml();
   document.querySelector('#create-invite')?.addEventListener('click', createInvite);
-  document.querySelector('#copy-invite')?.addEventListener('click', copyInvite);
+  for (const button of document.querySelectorAll('[data-copy-invite]')) {
+    button.addEventListener('click', () => copyInvite(Number(button.dataset.copyInvite)));
+  }
   document.querySelector('#request-form')?.addEventListener('submit', runInference);
   document.querySelector('#prompt')?.addEventListener('input', (event) => {
     state.draft.prompt = event.currentTarget.value;
