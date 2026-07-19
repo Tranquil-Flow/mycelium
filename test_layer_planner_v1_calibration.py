@@ -1,6 +1,6 @@
 import unittest
 
-from mycelium_layer_planner.calibration import CalibrationArtifact, ingest_calibration
+from mycelium_layer_planner.calibration import ingest_calibration
 
 
 class CalibrationTests(unittest.TestCase):

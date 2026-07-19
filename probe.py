@@ -4,7 +4,13 @@ Mycelium Node Capability Probe
 Join-time auto-profile for layer allocation.
 Stdlib only — no pip installs required.
 """
-import json, os, platform, subprocess, sys, time, urllib.request
+import json
+import os
+import platform
+import subprocess
+import sys
+import time
+import urllib.request
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,7 +204,6 @@ def get_gpu():
             if len(parts) >= 4:
                 name = parts[0]
                 vram_total_mb = int(parts[1])
-                vram_used_mb = int(parts[2])
                 vram_free_mb = int(parts[3])
                 bw = None
                 for key, val in NVIDIA_VRAM_BANDWIDTH.items():
@@ -364,8 +369,8 @@ def speedtest_download(bytes_to_fetch=5_000_000, timeout=20):
     """Download from multiple free endpoints, return Mbps or None."""
     endpoints = [
         f"https://speed.cloudflare.com/__down?bytes={bytes_to_fetch}",
-        f"https://speed.hetzner.de/100MB.bin",
-        f"http://ipv4.download.thinkbroadband.com/10MB.zip",
+        "https://speed.hetzner.de/100MB.bin",
+        "http://ipv4.download.thinkbroadband.com/10MB.zip",
     ]
     for url in endpoints:
         try:
@@ -489,7 +494,7 @@ def profile():
 
     print("  Speed test (download)...", file=sys.stderr)
     dl = speedtest_download()
-    print(f"  Speed test (upload)...", file=sys.stderr)
+    print("  Speed test (upload)...", file=sys.stderr)
     ul = speedtest_upload()
 
     location = get_location()

@@ -44,7 +44,6 @@ from runtime_loader import (
    LoadedStage,
    RuntimeExecutionError,
    canonical_json,
-   execute_loaded_stage,
 )
 
 

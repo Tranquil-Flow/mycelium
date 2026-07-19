@@ -14,7 +14,6 @@ from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
-import socket
 import threading
 import time
 from typing import Any, Callable, Mapping

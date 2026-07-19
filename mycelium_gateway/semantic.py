@@ -8,10 +8,9 @@ import ipaddress
 import json
 import os
 from pathlib import Path
-import queue
 import re
 import stat
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Mapping, Optional, Union
 
 from .observatory import CoherentSnapshotPublisher, MAX_SAFE_GENERATION, Publication
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from .allocation import stage_cost
-from .contracts import NUMERIC_EPSILON, LayerRange, ModelIdentity, PlanningPolicy, StagePlacement, WorkloadScenario
+from .contracts import NUMERIC_EPSILON, ModelIdentity, PlanningPolicy, StagePlacement, WorkloadScenario
 from .flow import FlowEdge, FlowResult, assign_flow
 from .network_cost import transfer_time_ms
 from .physical_graph import PhysicalGraph

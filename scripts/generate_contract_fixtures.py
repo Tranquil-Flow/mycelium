@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate deterministic executable compatibility fixtures for Mycelium contracts."""
+# ruff: noqa: E402 -- imports follow repository-root bootstrap for direct CLI execution.
 from __future__ import annotations
 
 import argparse

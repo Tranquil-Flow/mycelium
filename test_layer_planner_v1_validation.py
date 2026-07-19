@@ -1,7 +1,7 @@
 import unittest
 from dataclasses import replace
 
-from mycelium_layer_planner.contracts import LayerRange, LegalTrack
+from mycelium_layer_planner.contracts import LayerRange
 from mycelium_layer_planner.planner import plan_snapshot
 from mycelium_layer_planner.validation import validate_route_plan
 from test_layer_planner_v1_planner import snapshot

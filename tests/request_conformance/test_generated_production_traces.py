@@ -7,7 +7,7 @@ from collections.abc import Sequence
 import hashlib
 
 from mycelium_qualification.evidence import sha256_bytes
-from mycelium_request_conformance.model import Action, Authority, GatewayModel, ModelState, Phase
+from mycelium_request_conformance.model import Action, Authority, GatewayModel, Phase
 from mycelium_request_conformance.trace import (
     generate_bounded_traces,
     generate_race_traces,

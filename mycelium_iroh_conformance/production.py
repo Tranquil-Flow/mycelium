@@ -19,7 +19,7 @@ from mycelium_router.contracts import TokenEvent
 from mycelium_router.transports.iroh import IrohTransport, IrohTransportError, PeerBinding
 from mycelium_router.wire import encode_frame
 
-from .model import AdapterAction, CLIENT_ROLES, EvidenceCounters, ModelState
+from .model import AdapterAction, EvidenceCounters, ModelState
 
 _WAIT_SECONDS = 2.0
 

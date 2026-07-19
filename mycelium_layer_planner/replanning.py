@@ -243,7 +243,6 @@ def assess_topology_event(plan: RoutePlanV2, event: TopologyEvent) -> ReplanAsse
 
     unavailable_nodes = set(event.node_ids)
     unavailable_edges = set(event.edges)
-    placement_by_id = {placement.placement_id: placement for placement in plan.placements}
     unavailable_placement_ids = {
         placement.placement_id
         for placement in plan.placements

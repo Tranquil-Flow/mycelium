@@ -4,7 +4,11 @@ Mycelium Android/ADB Capability Probe
 Runs from a host that has adb access to an Android phone.
 Stdlib only. Emits join-time node capability JSON.
 """
-import json, re, subprocess, time, sys
+import json
+import re
+import subprocess
+import time
+import sys
 
 ADB = sys.argv[1:] if len(sys.argv) > 1 else ["adb"]
 
