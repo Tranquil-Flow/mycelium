@@ -336,3 +336,50 @@ and token parity against a trusted oracle, selected physical path, loss and
 disconnect behavior, end-to-end cancellation, crash-durable delivery/replay,
 stable-route recovery, accepted qualifier evidence, and a genuinely fresh-machine
 bootstrap. Observatory remains read-only. No merge to `main` and no push occurred.
+
+## Subsequent Iroh lifecycle hardening
+
+Commit `ab455ac408981c2d8a67e4b49917c045bea649b1` closes five locally
+reproducible lifecycle gaps found by strict resource testing and adversarial
+concurrency review:
+
+1. Both native-sidecar test harnesses close captured child stdout/stderr streams
+   after process termination. The cross-language harness also closes its
+   bootstrap descriptor when process creation fails and terminates the child on
+   every readiness-validation exception.
+2. `SidecarClient.close()` now interrupts blocked socket I/O before waiting for
+   the request lock. A deterministic socket-pair regression proves close cannot
+   deadlock behind an in-flight request whose peer withholds a response.
+3. `IrohTransport.send_router_frame()` rechecks the running fence after bounded
+   send admission, publishes pending state atomically with that recheck, replaces
+   an optimization-sensitive assertion with an explicit fail-closed error, and
+   releases pending/timer/semaphore state on every admitted exit.
+4. `IrohTransport.send_path_cancellation()` rechecks the running fence after
+   bounded cancellation admission and starts its registered worker while the
+   state lock still prevents close from observing an unstarted thread.
+5. Seven permanent regressions cover normal and exceptional process cleanup,
+   stream closure, blocked-request interruption, and both close/admission races.
+   Each confirmed defect was observed RED before its minimal repair passed.
+
+Post-repair evidence:
+
+| Command or surface | Exit | Observed result |
+|---|---:|---|
+| Python 3.14 full suite with `-X dev`, asyncio debug, fixed hash seed, and `ResourceWarning`/`RuntimeWarning` promoted to errors | 0 | 1,661 passed, 2 optional-Zenoh skips, 121 subtests passed in 87.83s. |
+| Focused Iroh/router/request/conformance/adversarial aggregate under the same strict warning policy | 0 | 151 passed. |
+| Deterministic close-race lifecycle loop | 0 | 100 rounds, 300 checks; descriptors 4→4 and threads 1→1. |
+| `python3.14 scripts/contract_audit.py` | 0 | 14 contracts verified. |
+| `python3.14 -m compileall -q .` | 0 | No diagnostics. |
+| `/opt/homebrew/bin/ruff check .` | 0 | All checks passed. |
+| `git diff --check` | 0 | No whitespace errors. |
+| `python3.14 scripts/release_security_audit.py` | 0 | 473 tracked files accepted. |
+| `python3.14 scripts/claim_boundary_audit.py` | 0 | 176 source files accepted. |
+| Rust fmt, clippy with warnings denied, and tests | 0 | 21 tests passed. |
+| `cargo audit --no-fetch --file Cargo.lock` | 0 | No vulnerability failure; one allowed unmaintained `paste 1.0.15` transitive warning in the pinned Iroh stack. |
+| `npm run check` using existing dependencies only | 0 | 98 Vitest and 3 Node tests passed; typecheck and production build passed. |
+
+The UI dependency symlink was removed after verification. No install, network,
+remote-host action, new physical qualification, Observatory mutation, merge, or
+push occurred. These repairs strengthen local process and concurrency semantics;
+they do not promote readiness. `route_ready=false` and `release_ready=false`
+remain mandatory.
