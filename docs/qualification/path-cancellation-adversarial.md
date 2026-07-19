@@ -10,7 +10,7 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 
 ## Corpus
 
-31 collected cases:
+34 collected cases:
 
 | Surface | Adversarial behavior | Evidence |
 |---|---|---|
@@ -34,6 +34,9 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 | Relay | stale attempt-scoped release after newer registration | pass: newer attempt remains active and is not cancelled |
 | Relay | runtime cancellation concurrent with newer registration | pass: registration waits for old-attempt runtime cancellation |
 | Relay | cancelled-attempt replay after exact tombstone eviction | pass: bounded filter rejects replay |
+| Relay | scheduler/runtime cleanup callbacks re-enter path-state reads | pass: callbacks run outside the path-state lock |
+| Entry/Relay | registration followed by generation capture | pass: one operation returns the exact generation permit |
+| Relay | cancelled-attempt filter saturation | pass: two bounded windows rotate instead of accumulating bits forever |
 | Relay | unknown unscoped release flood | pass: generation metadata remains bounded |
 | Loopback TCP | cancellation frames only, empty payload, source excluded | pass |
 | Loopback TCP | bounded connection count, close latency, server-thread cleanup | pass |
@@ -103,6 +106,35 @@ Deterministic sequence:
 
 Original exception: `StateTransitionError('illegal_state_transition: CANCELLED->COMPLETED')`. Repair: token handling rechecks request state after the potentially blocking client-sink emit; cancellation remains terminal and no completion transition is attempted. Cleanup remains exactly once.
 
+### Review follow-up — lock boundary, generation capture, and replay saturation
+
+An incomplete external review left three concrete counterexamples. Integration
+reproduced all three before changing production:
+
+1. Relay held its path-state lock while invoking scheduler cleanup and
+   `runtime.cancel(path_id)`. A callback waiting for a worker that needed a
+   path-state read could deadlock. Path mutation now completes under the state
+   lock, while scheduler/runtime cleanup runs afterward under a fixed striped
+   per-path operation lock. Attempt replacement remains serialized without
+   exposing the state lock to foreign code.
+2. Entry registered a path and then read its generation in a second operation.
+   Cancellation or replacement could linearize between those calls. Relay now
+   returns the accepted generation from `register_path_with_generation`, and
+   Entry stores that permit on the request record for all later execution and
+   send boundaries. The boolean `register_path` API remains as a compatibility
+   wrapper for transport callers that need acceptance only.
+3. The original set-only Bloom filter could only accumulate bits, eventually
+   rejecting every fresh path attempt. The filter now keeps current and previous
+   fixed-size windows and rotates after 100,000 insertions. A deterministic
+   small-filter regression verifies previous-window retention and continued
+   fresh-path availability across many rotations.
+
+Review also found one foreign `batch_scheduler.release_path` call in the queued
+hop cancellation branch under the path-state lock. It now runs after the lock is
+released. No state-tuple refactor or transport-send helper consolidation was
+accepted: review found no independently reproducible correctness defect in
+either shape.
+
 ## Boundedness and cleanup
 
 - Test barriers use `threading.Event` with 1-second deadlines; no unbounded waits.
@@ -111,6 +143,13 @@ Original exception: `StateTransitionError('illegal_state_transition: CANCELLED->
 - Iroh transport closes in `finally`; fake clients are closed, receiver and cancellation workers are joined, and worker maps are empty.
 - Iroh cancellation slots cap the adversarial run at two concurrent workers; third distinct cancellation fails with `path_cancellation_queue_full`.
 - Cancellation racing Iroh close finishes below the asserted 1-second local bound.
+- Cancelled-attempt replay memory uses two 1 MiB windows with five digest-derived
+  positions and 100,000 insertions per window. At capacity, the theoretical
+  combined false-positive probability is approximately `1.30e-6` (about one in
+  770,838) under standard Bloom assumptions. False positives fail closed.
+- The rotating filter is intentionally not permanent replay authority. An
+  identity ages out after two rotations, and all filter state is lost on process
+  restart. Exact metadata protects the 4,096 most recent terminal path IDs.
 
 ## Verification
 
@@ -122,4 +161,4 @@ python3.14 -m compileall -q tests/path_cancellation_adversarial
 git diff --check
 ```
 
-Integration result: 31 passed, 0 xfailed, 0 failed. The three newly integrated adversarial lanes pass 117 tests together. Adjacent Router/Iroh/request verification passes 370 tests and 46 subtests. Full Python verification passes 1,650 tests, skips 2, and passes 121 subtests. Claim remains local evidence only, `route_ready=false`.
+Integration result: 34 passed, 0 xfailed, 0 failed. The three newly integrated adversarial lanes pass 120 tests together. Adjacent Router/Iroh/request verification passes 370 tests and 46 subtests. Full Python verification passes 1,653 tests, skips 2, and passes 121 subtests. Claim remains local evidence only, `route_ready=false`.

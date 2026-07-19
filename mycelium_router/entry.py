@@ -32,6 +32,7 @@ class RequestRecord:
    manifest: PathManifest
    client_sink: object
    state_machine: RequestStateMachine
+   path_generation: int = 0
    generated_token_ids: list[int] = field(default_factory=list)
    prefill_chunks: tuple[tuple[int, ...], ...] = ()
    completed_prefill_chunks: int = 0
@@ -119,15 +120,16 @@ class EntryCoordinator:
          excluded_devices=build.excluded_devices,
       )
       self._requests[request.request_id] = record
-      if not self.relay.register_path(
+      generation = self.relay.register_path_with_generation(
          request,
          manifest,
          graph,
          entry_node_id=self.node_id,
-      ):
+      )
+      if generation is None:
          self._cleanup_record(record)
          raise RoutingError("path_registration_failed")
-      generation = self.relay.path_generation(manifest.path_id)
+      record.path_generation = generation
       outcome = self.relay.execute_manifest(
          graph=graph,
          manifest=manifest,
@@ -295,18 +297,20 @@ class EntryCoordinator:
          )
          self._requests[locked.request_id] = record
          self._pending_prefills.pop(locked.request_id, None)
-         if not self.relay.register_path(
+         generation = self.relay.register_path_with_generation(
             record.request,
             record.manifest,
             record.graph,
             entry_node_id=self.node_id,
-         ):
+         )
+         if generation is None:
             record.state_machine.transition(
                "FAILED",
                path_attempt=locked.path_attempt,
             )
             self._cleanup_record(record)
             return False
+         record.path_generation = generation
          if len(record.prefill_chunks) == 1:
             record.state_machine.transition(
                "DECODING",
@@ -372,7 +376,7 @@ class EntryCoordinator:
          if record.status != "LOCKED":
             return False
          manifest = record.manifest
-         generation = self.relay.path_generation(manifest.path_id)
+         generation = record.path_generation
       first = manifest.ordered_hops[0]
       chunk = record.prefill_chunks[chunk_index]
       header = HopHeader(
@@ -507,7 +511,7 @@ class EntryCoordinator:
             decode_tokens = (
                record.request.prompt_token_ids + tuple(record.generated_token_ids)
             )
-         generation = self.relay.path_generation(manifest.path_id)
+         generation = record.path_generation
       header = HopHeader(
          request_id=record.request.request_id,
          path_id=manifest.path_id,
@@ -558,7 +562,7 @@ class EntryCoordinator:
                   record.request.prompt_token_ids
                   + tuple(record.generated_token_ids)
                )
-            generation = self.relay.path_generation(manifest.path_id)
+            generation = record.path_generation
          outcome = self.relay.execute_manifest(
             graph=graph,
             manifest=manifest,
@@ -747,12 +751,13 @@ class EntryCoordinator:
             record.excluded_edges = build.excluded_edges
             record.excluded_devices = build.excluded_devices
             record.cleaned_up = False
-            if not self.relay.register_path(
+            registered_generation = self.relay.register_path_with_generation(
                record.request,
                new_manifest,
                graph,
                entry_node_id=self.node_id,
-            ):
+            )
+            if registered_generation is None:
                record.state_machine.transition(
                   "FAILED",
                   path_attempt=new_attempt,
@@ -760,7 +765,8 @@ class EntryCoordinator:
                registration_failed = True
             else:
                registration_failed = False
-               generation = self.relay.path_generation(new_manifest.path_id)
+               generation = registered_generation
+               record.path_generation = generation
                replay_tokens = (
                   record.request.prompt_token_ids
                   + tuple(record.generated_token_ids)

@@ -22,6 +22,7 @@ from mycelium_router.fakes import (
    ManualClock,
    SequenceIdSource,
 )
+from mycelium_router.relay import _RotatingReplayFilter
 from mycelium_router.router import Router
 from mycelium_router.wire import ROUTER_WIRE_PROTOCOL, WireError, decode_frame, encode_frame
 from test_router_inprocess_mesh import three_device_graph
@@ -206,6 +207,93 @@ def test_runtime_cancel_finishes_before_new_attempt_registration() -> None:
    assert registration_results == [True]
    assert runtime.cancel_calls == [case.cancellation.path_id]
    assert target.relay._paths[case.cancellation.path_id][1].path_attempt == 1
+
+
+def test_path_release_does_not_hold_registry_lock_across_foreign_calls() -> None:
+   case = build_mesh_case(request_id="request-release-lock-boundary")
+   relay = case.routers["node-c"].relay
+   path_id = case.cancellation.path_id
+   probes: list[tuple[str, bool]] = []
+   workers: list[Thread] = []
+
+   def probe(label: str) -> None:
+      completed = Event()
+      worker = Thread(
+         target=lambda: (relay.path_generation(path_id), completed.set()),
+      )
+      workers.append(worker)
+      worker.start()
+      probes.append((label, completed.wait(timeout=0.1)))
+
+   scheduler_release = relay.scheduler.release_path
+   batch_release = relay.batch_scheduler.release_path
+   runtime_cancel = relay.runtime.cancel
+
+   def release_scheduler(path_id: str) -> None:
+      probe("scheduler")
+      scheduler_release(path_id)
+
+   def release_batch_scheduler(path_id: str) -> None:
+      probe("batch_scheduler")
+      batch_release(path_id)
+
+   def cancel_runtime(path_id: str) -> None:
+      probe("runtime")
+      runtime_cancel(path_id)
+
+   relay.scheduler.release_path = release_scheduler
+   relay.batch_scheduler.release_path = release_batch_scheduler
+   relay.runtime.cancel = cancel_runtime
+
+   relay.release_path(path_id, path_attempt=case.cancellation.path_attempt)
+   for worker in workers:
+      worker.join(timeout=1.0)
+
+   assert probes == [
+      ("scheduler", True),
+      ("batch_scheduler", True),
+      ("runtime", True),
+   ]
+   assert all(not worker.is_alive() for worker in workers)
+
+
+def test_registration_returns_its_atomic_generation_permit() -> None:
+   case = build_mesh_case(request_id="request-registration-permit")
+   relay = case.routers["node-c"].relay
+   manifest = replace(case.record.manifest, path_attempt=1)
+
+   generation = relay.register_path_with_generation(
+      case.request,
+      manifest,
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+
+   assert type(generation) is int
+   assert generation == relay.path_generation(manifest.path_id)
+
+
+def test_rotating_replay_filter_retains_previous_window_without_saturation() -> None:
+   replay_filter = _RotatingReplayFilter(
+      byte_count=8,
+      hashes=3,
+      rotation_capacity=8,
+   )
+   first_window = tuple((f"cancelled-first-{index}", 0) for index in range(8))
+   for identity in first_window:
+      replay_filter.add(*identity)
+   for index in range(8):
+      replay_filter.add(f"cancelled-second-{index}", 0)
+
+   assert all(replay_filter.contains(*identity) for identity in first_window)
+
+   for index in range(8, 400):
+      replay_filter.add(f"cancelled-later-{index}", 0)
+   fresh_rejections = sum(
+      replay_filter.contains(f"fresh-path-{index}", 0)
+      for index in range(200)
+   )
+   assert fresh_rejections < 50
 
 
 def test_terminal_path_metadata_is_bounded() -> None:

@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 import hashlib
-from threading import RLock
+from threading import Lock, RLock
 
 from mycelium_router.batching import PhaseAwareBatchController
 from mycelium_router.contracts import (
@@ -44,6 +44,64 @@ from mycelium_router.validation import validate_manifest
 _MAX_TERMINAL_PATH_METADATA = 4096
 _CANCELLED_PATH_FILTER_BYTES = 1 << 20
 _CANCELLED_PATH_FILTER_HASHES = 5
+_CANCELLED_PATH_FILTER_ROTATION_CAPACITY = 100_000
+_PATH_OPERATION_LOCK_STRIPES = 64
+
+
+class _RotatingReplayFilter:
+   """Bounded two-window replay filter with a stable false-positive rate."""
+
+   def __init__(
+      self,
+      *,
+      byte_count: int,
+      hashes: int,
+      rotation_capacity: int,
+   ) -> None:
+      if byte_count <= 0 or hashes <= 0 or rotation_capacity <= 0:
+         raise ValueError("invalid_replay_filter_configuration")
+      self._byte_count = byte_count
+      self._hashes = hashes
+      self._rotation_capacity = rotation_capacity
+      self._current = bytearray(byte_count)
+      self._previous = bytearray(byte_count)
+      self._current_insertions = 0
+
+   def _positions(self, path_id: str, path_attempt: int) -> tuple[int, ...]:
+      digest = hashlib.blake2b(
+         f"{path_id}\x00{path_attempt}".encode("utf-8"),
+         digest_size=16,
+      ).digest()
+      first = int.from_bytes(digest[:8], "big")
+      second = int.from_bytes(digest[8:], "big") | 1
+      bit_count = self._byte_count * 8
+      return tuple(
+         (first + index * second) % bit_count
+         for index in range(self._hashes)
+      )
+
+   @staticmethod
+   def _contains(window: bytearray, positions: tuple[int, ...]) -> bool:
+      return all(
+         window[position // 8] & (1 << (position % 8))
+         for position in positions
+      )
+
+   def add(self, path_id: str, path_attempt: int) -> None:
+      if self._current_insertions >= self._rotation_capacity:
+         self._previous = self._current
+         self._current = bytearray(self._byte_count)
+         self._current_insertions = 0
+      for position in self._positions(path_id, path_attempt):
+         self._current[position // 8] |= 1 << (position % 8)
+      self._current_insertions += 1
+
+   def contains(self, path_id: str, path_attempt: int) -> bool:
+      positions = self._positions(path_id, path_attempt)
+      return self._contains(self._current, positions) or self._contains(
+         self._previous,
+         positions,
+      )
 
 
 class RelayEngine:
@@ -79,9 +137,16 @@ class RelayEngine:
          tuple[ExecutionGraph, PathManifest, RequestContext],
       ] = {}
       self._path_lock = RLock()
+      self._path_operation_locks = tuple(
+         Lock() for _ in range(_PATH_OPERATION_LOCK_STRIPES)
+      )
       self._path_generations: OrderedDict[str, int] = OrderedDict()
       self._cancelled_path_attempts: OrderedDict[str, int] = OrderedDict()
-      self._cancelled_path_filter = bytearray(_CANCELLED_PATH_FILTER_BYTES)
+      self._cancelled_path_filter = _RotatingReplayFilter(
+         byte_count=_CANCELLED_PATH_FILTER_BYTES,
+         hashes=_CANCELLED_PATH_FILTER_HASHES,
+         rotation_capacity=_CANCELLED_PATH_FILTER_ROTATION_CAPACITY,
+      )
       self._provisional_paths: dict[
          str,
          tuple[str, int, int, str | None],
@@ -114,30 +179,16 @@ class RelayEngine:
          if path_id not in self._paths and path_id not in self._provisional_paths:
             self._path_generations.pop(path_id, None)
 
-   @staticmethod
-   def _cancelled_path_filter_positions(
-      path_id: str,
-      path_attempt: int,
-   ) -> tuple[int, ...]:
-      digest = hashlib.blake2b(
-         f"{path_id}\x00{path_attempt}".encode("utf-8"),
-         digest_size=20,
-      ).digest()
-      bit_count = _CANCELLED_PATH_FILTER_BYTES * 8
-      return tuple(
-         int.from_bytes(digest[index * 4 : index * 4 + 4], "big") % bit_count
-         for index in range(_CANCELLED_PATH_FILTER_HASHES)
-      )
+   def _path_operation_lock(self, path_id: str) -> Lock:
+      digest = hashlib.blake2b(path_id.encode("utf-8"), digest_size=8).digest()
+      index = int.from_bytes(digest, "big") % len(self._path_operation_locks)
+      return self._path_operation_locks[index]
 
    def _mark_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> None:
-      for position in self._cancelled_path_filter_positions(path_id, path_attempt):
-         self._cancelled_path_filter[position // 8] |= 1 << (position % 8)
+      self._cancelled_path_filter.add(path_id, path_attempt)
 
    def _was_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> bool:
-      return all(
-         self._cancelled_path_filter[position // 8] & (1 << (position % 8))
-         for position in self._cancelled_path_filter_positions(path_id, path_attempt)
-      )
+      return self._cancelled_path_filter.contains(path_id, path_attempt)
 
    def _path_is_current_locked(
       self,
@@ -270,97 +321,115 @@ class RelayEngine:
       source_node_id: str | None = None,
       entry_node_id: str | None = None,
    ) -> bool:
-      validate_manifest(manifest, graph)
-      if request.request_id != manifest.request_id:
-         return False
-      if source_node_id is not None:
-         placement_map = {
-            placement.placement_id: placement
-            for stage in graph.stages
-            for placement in stage.placements
-         }
-         final_placement = placement_map[manifest.ordered_hops[-1].placement_id]
-         if not source_node_id or final_placement.node_id != source_node_id:
-            return False
-         if not entry_node_id:
-            return False
-      with self._path_lock:
-         if self._was_cancelled_attempt_locked(
-            manifest.path_id,
-            manifest.path_attempt,
-         ):
-            return False
-         cancelled_attempt = self._cancelled_path_attempts.get(manifest.path_id)
-         if (
-            cancelled_attempt is not None
-            and manifest.path_attempt <= cancelled_attempt
-         ):
-            return False
-         existing = self._paths.get(manifest.path_id)
-         provisional = self._provisional_paths.get(manifest.path_id)
-         if provisional is not None:
-            if provisional[:3] != (
-               request.request_id,
+      return self.register_path_with_generation(
+         request,
+         manifest,
+         graph,
+         source_node_id=source_node_id,
+         entry_node_id=entry_node_id,
+      ) is not None
+
+   def register_path_with_generation(
+      self,
+      request: RequestContext,
+      manifest: PathManifest,
+      graph: ExecutionGraph,
+      *,
+      source_node_id: str | None = None,
+      entry_node_id: str | None = None,
+   ) -> int | None:
+      with self._path_operation_lock(manifest.path_id):
+         validate_manifest(manifest, graph)
+         if request.request_id != manifest.request_id:
+            return None
+         if source_node_id is not None:
+            placement_map = {
+               placement.placement_id: placement
+               for stage in graph.stages
+               for placement in stage.placements
+            }
+            final_placement = placement_map[manifest.ordered_hops[-1].placement_id]
+            if not source_node_id or final_placement.node_id != source_node_id:
+               return None
+            if not entry_node_id:
+               return None
+         with self._path_lock:
+            if self._was_cancelled_attempt_locked(
+               manifest.path_id,
                manifest.path_attempt,
-               graph.topology_version,
             ):
-               return False
-            provisional_entry = provisional[3]
+               return None
+            cancelled_attempt = self._cancelled_path_attempts.get(manifest.path_id)
             if (
-               entry_node_id is not None
-               and provisional_entry is not None
-               and entry_node_id != provisional_entry
+               cancelled_attempt is not None
+               and manifest.path_attempt <= cancelled_attempt
             ):
-               return False
-            if entry_node_id is None:
-               entry_node_id = provisional_entry
-         if existing is not None:
-            existing_manifest = existing[1]
-            if manifest.path_attempt < existing_manifest.path_attempt:
-               return False
-            if manifest.path_attempt == existing_manifest.path_attempt:
-               if existing != (graph, manifest, request):
-                  return False
+               return None
+            existing = self._paths.get(manifest.path_id)
+            provisional = self._provisional_paths.get(manifest.path_id)
+            if provisional is not None:
+               if provisional[:3] != (
+                  request.request_id,
+                  manifest.path_attempt,
+                  graph.topology_version,
+               ):
+                  return None
+               provisional_entry = provisional[3]
+               if (
+                  entry_node_id is not None
+                  and provisional_entry is not None
+                  and entry_node_id != provisional_entry
+               ):
+                  return None
+               if entry_node_id is None:
+                  entry_node_id = provisional_entry
+            if existing is not None:
+               existing_manifest = existing[1]
+               if manifest.path_attempt < existing_manifest.path_attempt:
+                  return None
+               if manifest.path_attempt == existing_manifest.path_attempt:
+                  if existing != (graph, manifest, request):
+                     return None
+                  existing_entry = self._entry_node_by_path.get(manifest.path_id)
+                  if (
+                     entry_node_id is not None
+                     and existing_entry is not None
+                     and entry_node_id != existing_entry
+                  ):
+                     return None
+                  if entry_node_id is not None:
+                     self._entry_node_by_path[manifest.path_id] = entry_node_id
+                  return self._path_generations[manifest.path_id]
                existing_entry = self._entry_node_by_path.get(manifest.path_id)
                if (
                   entry_node_id is not None
                   and existing_entry is not None
                   and entry_node_id != existing_entry
                ):
-                  return False
-               if entry_node_id is not None:
-                  self._entry_node_by_path[manifest.path_id] = entry_node_id
-               return True
-            existing_entry = self._entry_node_by_path.get(manifest.path_id)
-            if (
-               entry_node_id is not None
-               and existing_entry is not None
-               and entry_node_id != existing_entry
-            ):
-               return False
-            self._mark_cancelled_attempt_locked(
-               manifest.path_id,
-               existing_manifest.path_attempt,
-            )
-            self._cancelled_path_attempts[manifest.path_id] = max(
-               existing_manifest.path_attempt,
-               self._cancelled_path_attempts.get(
+                  return None
+               self._mark_cancelled_attempt_locked(
                   manifest.path_id,
                   existing_manifest.path_attempt,
-               ),
+               )
+               self._cancelled_path_attempts[manifest.path_id] = max(
+                  existing_manifest.path_attempt,
+                  self._cancelled_path_attempts.get(
+                     manifest.path_id,
+                     existing_manifest.path_attempt,
+                  ),
+               )
+            self._paths[manifest.path_id] = (graph, manifest, request)
+            self._provisional_paths.pop(manifest.path_id, None)
+            self._path_generations[manifest.path_id] = (
+               self._path_generations.get(manifest.path_id, 0) + 1
             )
-         self._paths[manifest.path_id] = (graph, manifest, request)
-         self._provisional_paths.pop(manifest.path_id, None)
-         self._path_generations[manifest.path_id] = (
-            self._path_generations.get(manifest.path_id, 0) + 1
-         )
-         self._path_generations.move_to_end(manifest.path_id)
-         if manifest.path_id in self._cancelled_path_attempts:
-            self._cancelled_path_attempts.move_to_end(manifest.path_id)
-         self._prune_terminal_path_metadata_locked()
-         if entry_node_id is not None:
-            self._entry_node_by_path[manifest.path_id] = entry_node_id
-         return True
+            self._path_generations.move_to_end(manifest.path_id)
+            if manifest.path_id in self._cancelled_path_attempts:
+               self._cancelled_path_attempts.move_to_end(manifest.path_id)
+            self._prune_terminal_path_metadata_locked()
+            if entry_node_id is not None:
+               self._entry_node_by_path[manifest.path_id] = entry_node_id
+            return self._path_generations[manifest.path_id]
 
    def _register_provisional_path(
       self,
@@ -377,27 +446,30 @@ class RelayEngine:
          topology_version,
          entry_node_id,
       )
-      with self._path_lock:
-         if self._was_cancelled_attempt_locked(path_id, path_attempt):
-            return None
-         cancelled_attempt = self._cancelled_path_attempts.get(path_id)
-         if cancelled_attempt is not None and path_attempt <= cancelled_attempt:
-            return None
-         existing = self._provisional_paths.get(path_id)
-         if existing is not None:
-            if existing[:3] != identity[:3]:
+      with self._path_operation_lock(path_id):
+         with self._path_lock:
+            if self._was_cancelled_attempt_locked(path_id, path_attempt):
                return None
-            if (
-               existing[3] is not None
-               and entry_node_id is not None
-               and existing[3] != entry_node_id
-            ):
+            cancelled_attempt = self._cancelled_path_attempts.get(path_id)
+            if cancelled_attempt is not None and path_attempt <= cancelled_attempt:
                return None
+            existing = self._provisional_paths.get(path_id)
+            if existing is not None:
+               if existing[:3] != identity[:3]:
+                  return None
+               if (
+                  existing[3] is not None
+                  and entry_node_id is not None
+                  and existing[3] != entry_node_id
+               ):
+                  return None
+               return self._path_generations[path_id]
+            self._provisional_paths[path_id] = identity
+            self._path_generations[path_id] = (
+               self._path_generations.get(path_id, 0) + 1
+            )
+            self._path_generations.move_to_end(path_id)
             return self._path_generations[path_id]
-         self._provisional_paths[path_id] = identity
-         self._path_generations[path_id] = self._path_generations.get(path_id, 0) + 1
-         self._path_generations.move_to_end(path_id)
-         return self._path_generations[path_id]
 
    def receive_progressive_prefill(
       self,
@@ -610,14 +682,14 @@ class RelayEngine:
             manifest=manifest,
             build=build,
          )
-         if not self.register_path(
+         generation = self.register_path_with_generation(
             context.request,
             manifest,
             context.graph,
             entry_node_id=provisional_entry,
-         ):
+         )
+         if generation is None:
             return ProgressivePrefillResult("REJECTED", "cancelled_path")
-         generation = self.path_generation(build.path_id)
          if (
             self.decode_mode == "stage_local_kv"
             and runtime_result.token_id is None
@@ -1161,20 +1233,24 @@ class RelayEngine:
          )
       except DuplicateHopError:
          return HopReceiveResult("QUEUED", "duplicate_pending")
+      cancelled = False
       with self._path_lock:
          if not self._path_is_current_locked(
             header.path_id,
             header.path_attempt,
             generation,
          ):
-            self.batch_scheduler.release_path(header.path_id)
-            return HopReceiveResult("REJECTED", "path_cancelled")
-         self._pending_hops[header.idempotency_key] = (
-            header,
-            work,
-            payload_digest,
-            generation,
-         )
+            cancelled = True
+         else:
+            self._pending_hops[header.idempotency_key] = (
+               header,
+               work,
+               payload_digest,
+               generation,
+            )
+      if cancelled:
+         self.batch_scheduler.release_path(header.path_id)
+         return HopReceiveResult("REJECTED", "path_cancelled")
       return HopReceiveResult("QUEUED")
 
    def drain_ready_batches(
@@ -1840,43 +1916,44 @@ class RelayEngine:
       *,
       source_node_id: str | None,
    ) -> bool:
-      with self._path_lock:
-         registered = self._paths.get(cancellation.path_id)
-         provisional = self._provisional_paths.get(cancellation.path_id)
-         if registered is None and provisional is None:
-            return False
-         if registered is not None:
-            graph, manifest, request = registered
-            expected = (
-               request.request_id,
-               manifest.path_attempt,
-               graph.topology_version,
-            )
-            entry_node_id = self._entry_node_by_path.get(cancellation.path_id)
-         else:
-            assert provisional is not None
-            expected = provisional[:3]
-            entry_node_id = provisional[3]
-         if (
-            not source_node_id
-            or not entry_node_id
-            or type(cancellation.path_attempt) is not int
-            or type(cancellation.topology_version) is not int
-            or source_node_id != entry_node_id
-            or (
-               cancellation.request_id,
-               cancellation.path_attempt,
-               cancellation.topology_version,
-            )
-            != expected
-         ):
-            return False
-         if not self._release_path_locked(
-            cancellation.path_id,
-            path_attempt=cancellation.path_attempt,
-         ):
-            return False
-         self._cancel_runtime(cancellation.path_id)
+      with self._path_operation_lock(cancellation.path_id):
+         with self._path_lock:
+            registered = self._paths.get(cancellation.path_id)
+            provisional = self._provisional_paths.get(cancellation.path_id)
+            if registered is None and provisional is None:
+               return False
+            if registered is not None:
+               graph, manifest, request = registered
+               expected = (
+                  request.request_id,
+                  manifest.path_attempt,
+                  graph.topology_version,
+               )
+               entry_node_id = self._entry_node_by_path.get(cancellation.path_id)
+            else:
+               assert provisional is not None
+               expected = provisional[:3]
+               entry_node_id = provisional[3]
+            if (
+               not source_node_id
+               or not entry_node_id
+               or type(cancellation.path_attempt) is not int
+               or type(cancellation.topology_version) is not int
+               or source_node_id != entry_node_id
+               or (
+                  cancellation.request_id,
+                  cancellation.path_attempt,
+                  cancellation.topology_version,
+               )
+               != expected
+            ):
+               return False
+            if not self._release_path_state_locked(
+               cancellation.path_id,
+               path_attempt=cancellation.path_attempt,
+            ):
+               return False
+         self._release_path_resources(cancellation.path_id)
       return True
 
    def _cancel_runtime(self, path_id: str) -> None:
@@ -1885,7 +1962,12 @@ class RelayEngine:
       except Exception:
          pass
 
-   def _release_path_locked(
+   def _release_path_resources(self, path_id: str) -> None:
+      self.scheduler.release_path(path_id)
+      self.batch_scheduler.release_path(path_id)
+      self._cancel_runtime(path_id)
+
+   def _release_path_state_locked(
       self,
       path_id: str,
       *,
@@ -1944,8 +2026,6 @@ class RelayEngine:
          for key, value in self._pending_hops.items()
          if value[1].path_id != path_id
       }
-      self.scheduler.release_path(path_id)
-      self.batch_scheduler.release_path(path_id)
       self._prune_terminal_path_metadata_locked()
       return known_path
 
@@ -1955,9 +2035,14 @@ class RelayEngine:
       *,
       path_attempt: int | None = None,
    ) -> None:
-      with self._path_lock:
-         if self._release_path_locked(path_id, path_attempt=path_attempt):
-            self._cancel_runtime(path_id)
+      with self._path_operation_lock(path_id):
+         with self._path_lock:
+            known_path = self._release_path_state_locked(
+               path_id,
+               path_attempt=path_attempt,
+            )
+         if known_path:
+            self._release_path_resources(path_id)
 
    def cached_outcome_count(self) -> int:
       return len(self._outcomes)
