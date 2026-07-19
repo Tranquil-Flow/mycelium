@@ -8,6 +8,11 @@ from collections.abc import Mapping
 from typing import Any
 
 EVIDENCE_MANIFEST_PROTOCOL = "mycelium.route_qualification_evidence_manifest.v1"
+MAX_PATH_BYTES = 512
+MAX_PATH_COMPONENTS = 32
+MAX_PATH_COMPONENT_BYTES = 128
+MAX_JSON_DEPTH = 48
+MAX_JSON_NODES = 100_000
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MANIFEST_FIELDS = frozenset(
     {
@@ -36,9 +41,24 @@ def _require(condition: bool, code: str, detail: str = "") -> None:
         raise EvidenceValidationError(code, detail)
 
 
+def _validate_json_shape(value: Any) -> None:
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    nodes = 0
+    while stack:
+        current, depth = stack.pop()
+        _require(depth <= MAX_JSON_DEPTH, "noncanonical_json", "json_too_deep")
+        nodes += 1
+        _require(nodes <= MAX_JSON_NODES, "noncanonical_json", "too_many_json_nodes")
+        if isinstance(current, dict):
+            stack.extend((child, depth + 1) for child in current.values())
+        elif isinstance(current, (list, tuple)):
+            stack.extend((child, depth + 1) for child in current)
+
+
 def canonical_json_bytes(value: Any) -> bytes:
     """Serialize one value using RouteQualificationV1 canonical JSON."""
     try:
+        _validate_json_shape(value)
         return json.dumps(
             value,
             sort_keys=True,
@@ -46,7 +66,9 @@ def canonical_json_bytes(value: Any) -> bytes:
             ensure_ascii=False,
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+    except EvidenceValidationError:
+        raise
+    except (TypeError, ValueError, RecursionError, UnicodeEncodeError) as exc:
         raise EvidenceValidationError("noncanonical_json", str(exc)) from exc
 
 
@@ -75,9 +97,13 @@ def canonical_json_loads(content: bytes, *, path: str) -> Any:
         )
     except EvidenceValidationError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
         raise EvidenceValidationError("invalid_evidence_json", path) from exc
-    _require(canonical_json_bytes(value) == content, "noncanonical_evidence_json", path)
+    try:
+        canonical = canonical_json_bytes(value)
+    except EvidenceValidationError as exc:
+        raise EvidenceValidationError("invalid_evidence_json", path) from exc
+    _require(canonical == content, "noncanonical_evidence_json", path)
     return value
 
 
@@ -96,16 +122,31 @@ def is_sha256_ref(value: Any) -> bool:
 
 def _validate_path(path: Any) -> str:
     _require(isinstance(path, str) and path != "", "unsafe_evidence_path", str(path))
+    try:
+        encoded = path.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise EvidenceValidationError("unsafe_evidence_path") from exc
+    _require(len(encoded) <= MAX_PATH_BYTES, "unsafe_evidence_path", path)
     _require(path == path.strip(), "unsafe_evidence_path", path)
     _require(not path.startswith("/"), "unsafe_evidence_path", path)
     _require("\\" not in path and "//" not in path, "unsafe_evidence_path", path)
     segments = path.split("/")
+    _require(len(segments) <= MAX_PATH_COMPONENTS, "unsafe_evidence_path", path)
     _require(
         all(segment not in {"", ".", ".."} for segment in segments),
         "unsafe_evidence_path",
         path,
     )
-    _require(not any(ord(character) < 32 for character in path), "unsafe_evidence_path", path)
+    _require(
+        all(len(segment.encode("utf-8")) <= MAX_PATH_COMPONENT_BYTES for segment in segments),
+        "unsafe_evidence_path",
+        path,
+    )
+    _require(
+        not any(ord(character) < 32 or ord(character) == 127 for character in path),
+        "unsafe_evidence_path",
+        path,
+    )
     return path
 
 

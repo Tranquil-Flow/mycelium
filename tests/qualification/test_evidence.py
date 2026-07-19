@@ -84,7 +84,18 @@ def test_evidence_manifest_rejects_reordered_duplicate_and_unsafe_paths() -> Non
     with pytest.raises(EvidenceValidationError, match="duplicate_evidence_path"):
         validate_evidence_manifest(duplicate, files)
 
-    for unsafe in ("../escape", "/absolute", "a/./b", "a\\windows", "a//b"):
+    for unsafe in (
+        "../escape",
+        "/absolute",
+        "a/./b",
+        "a\\windows",
+        "a//b",
+        "a\x7fdel",
+        "a" * 513,
+        "/".join(["a"] * 33),
+        "a" * 129,
+        "a\ud800surrogate",
+    ):
         unsafe_files = {unsafe: b"x"}
         with pytest.raises(EvidenceValidationError, match="unsafe_evidence_path"):
             build_evidence_manifest(
@@ -107,6 +118,18 @@ def test_canonical_json_loader_rejects_noncanonical_and_duplicate_documents() ->
         canonical_json_loads(b'{"a":1,"a":2}', path="duplicate.json")
     with pytest.raises(EvidenceValidationError, match="invalid_evidence_json"):
         canonical_json_loads(b'{"value":NaN}', path="nan.json")
+
+
+def test_canonical_json_rejects_excessive_nesting_with_stable_error() -> None:
+    nested: object = None
+    for _ in range(2_000):
+        nested = [nested]
+    with pytest.raises(EvidenceValidationError, match="noncanonical_json"):
+        canonical_json_bytes(nested)
+
+    content = b"[" * 2_000 + b"null" + b"]" * 2_000
+    with pytest.raises(EvidenceValidationError, match="invalid_evidence_json"):
+        canonical_json_loads(content, path="deep.json")
 
 
 def test_manifest_digest_changes_for_every_manifest_mutation() -> None:

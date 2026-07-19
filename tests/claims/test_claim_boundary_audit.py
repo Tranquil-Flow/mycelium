@@ -208,6 +208,20 @@ def test_unreadable_source_shapes_fail_closed(tmp_path: Path) -> None:
     } <= _codes(result)
 
 
+def test_output_redacts_secret_shaped_tracked_paths(tmp_path: Path) -> None:
+    token = "ghp_" + ("a" * 36)
+    repo = _repo(tmp_path, {f"{token}.py": "route_ready = True\n"})
+
+    result = audit_repository(repo)
+    rendered = canonical_json(result)
+
+    assert result["ok"] is False
+    assert token not in rendered
+    findings = result["findings"]
+    assert isinstance(findings, list)
+    assert findings[0]["path"].startswith("<redacted:sha256:")
+
+
 def test_output_is_deterministic_and_repository_is_unchanged(tmp_path: Path) -> None:
     repo = _repo(
         tmp_path,

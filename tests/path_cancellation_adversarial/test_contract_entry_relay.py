@@ -47,6 +47,22 @@ def _mutate_wire_body(frame: bytes, field: str, value: object) -> bytes:
    return struct.pack(">I", len(header)) + header + payload
 
 
+def _unregistered_router_for_case(case, *, node_id: str = "node-c") -> Router:
+   states = state_table(slow_b_bandwidth=True)
+   states["node-d"] = replace(states["node-a"], node_id="node-d")
+   return Router(
+      node_id=node_id,
+      topology=FakeTopologyProvider(case.record.graph),
+      device_states=FakeDeviceStateProvider(states),
+      capacity=FakeCapacityPort(),
+      runtime=FakeRuntimePort(),
+      transport=FakeTransportPort(),
+      clock=ManualClock(),
+      id_source=SequenceIdSource(),
+      config=RouterConfig(prefill_chunk_size_tokens=0),
+   )
+
+
 def test_path_cancellation_wire_is_scalar_control_only() -> None:
    cancellation = PathCancellation("request-1", "path-1", 0, 3)
    frame = encode_frame(cancellation)
@@ -100,7 +116,7 @@ def test_wire_encoder_rejects_bool_as_integer_identity(field: str) -> None:
       ("topology_version", 17),
    ],
 )
-def test_relay_rejects_wrong_cancellation_identity_without_release(
+def test_relay_does_not_release_for_wrong_cancellation_identity(
    field: str,
    replacement: object,
 ) -> None:
@@ -109,7 +125,8 @@ def test_relay_rejects_wrong_cancellation_identity_without_release(
    before = list(case.runtimes["node-c"].cancel_calls)
    forged = replace(case.cancellation, **{field: replacement})
 
-   assert not target.receive_path_cancellation(forged, source_node_id="node-a")
+   accepted = target.receive_path_cancellation(forged, source_node_id="node-a")
+   assert accepted is (field == "path_id")
    assert case.record.manifest.path_id in target.relay._paths
    assert case.runtimes["node-c"].cancel_calls == before
 
@@ -119,7 +136,7 @@ def test_unknown_and_already_released_paths_fail_closed() -> None:
    target = case.routers["node-c"]
    unknown = replace(case.cancellation, path_id="path-never-registered")
 
-   assert not target.receive_path_cancellation(unknown, source_node_id="node-a")
+   assert target.receive_path_cancellation(unknown, source_node_id="node-a")
    assert target.receive_path_cancellation(
       case.cancellation,
       source_node_id="node-a",
@@ -129,6 +146,65 @@ def test_unknown_and_already_released_paths_fail_closed() -> None:
       source_node_id="node-a",
    )
    assert case.runtimes["node-c"].cancel_calls == [case.cancellation.path_id]
+
+
+def test_authenticated_cancellation_before_path_arrival_blocks_late_registration() -> None:
+   case = build_mesh_case(request_id="request-cancel-before-arrival")
+   target = _unregistered_router_for_case(case)
+
+   assert target.receive_path_cancellation(
+      case.cancellation,
+      source_node_id="node-a",
+   )
+   assert target.relay._register_provisional_path(
+      request_id=case.request.request_id,
+      path_id=case.record.manifest.path_id,
+      path_attempt=case.record.manifest.path_attempt,
+      topology_version=case.record.graph.topology_version,
+      entry_node_id="node-a",
+   ) is None
+   assert not target.relay.register_path(
+      case.request,
+      case.record.manifest,
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+   assert case.record.manifest.path_id not in target.relay._paths
+   assert target.relay.runtime.executed == []
+
+
+def test_unverified_pending_cancellation_cannot_block_different_entry() -> None:
+   case = build_mesh_case(request_id="request-forged-cancel-before-arrival")
+   target = _unregistered_router_for_case(case)
+
+   assert target.receive_path_cancellation(
+      case.cancellation,
+      source_node_id="node-forged",
+   )
+   assert target.relay.register_path(
+      case.request,
+      case.record.manifest,
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+
+
+def test_pending_cancellations_are_bounded() -> None:
+   case = build_mesh_case(request_id="request-pending-cancellation-bound")
+   target = _unregistered_router_for_case(case)
+
+   for index in range(4_200):
+      cancellation = replace(
+         case.cancellation,
+         request_id=f"request-pending-{index}",
+         path_id=f"path-pending-{index}",
+      )
+      assert target.receive_path_cancellation(
+         cancellation,
+         source_node_id="node-a",
+      )
+
+   assert len(target.relay._pending_path_cancellations) <= 4_096
 
 
 def test_cancelled_attempt_cannot_re_register_but_newer_attempt_can() -> None:

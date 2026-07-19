@@ -42,6 +42,7 @@ from mycelium_router.validation import validate_manifest
 
 
 _MAX_TERMINAL_PATH_METADATA = 4096
+_MAX_PENDING_PATH_CANCELLATIONS = 4096
 _CANCELLED_PATH_FILTER_BYTES = 1 << 20
 _CANCELLED_PATH_FILTER_HASHES = 5
 _CANCELLED_PATH_FILTER_ROTATION_CAPACITY = 100_000
@@ -147,6 +148,10 @@ class RelayEngine:
          hashes=_CANCELLED_PATH_FILTER_HASHES,
          rotation_capacity=_CANCELLED_PATH_FILTER_ROTATION_CAPACITY,
       )
+      self._pending_path_cancellations: OrderedDict[
+         tuple[str, str, int, int, str],
+         None,
+      ] = OrderedDict()
       self._provisional_paths: dict[
          str,
          tuple[str, int, int, str | None],
@@ -189,6 +194,77 @@ class RelayEngine:
 
    def _was_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> bool:
       return self._cancelled_path_filter.contains(path_id, path_attempt)
+
+   @staticmethod
+   def _pending_cancellation_key(
+      *,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+      topology_version: int,
+      entry_node_id: str,
+   ) -> tuple[str, str, int, int, str]:
+      return (
+         path_id,
+         request_id,
+         path_attempt,
+         topology_version,
+         entry_node_id,
+      )
+
+   def _remember_pending_cancellation_locked(
+      self,
+      cancellation: PathCancellation,
+      source_node_id: str,
+   ) -> None:
+      key = self._pending_cancellation_key(
+         request_id=cancellation.request_id,
+         path_id=cancellation.path_id,
+         path_attempt=cancellation.path_attempt,
+         topology_version=cancellation.topology_version,
+         entry_node_id=source_node_id,
+      )
+      self._pending_path_cancellations[key] = None
+      self._pending_path_cancellations.move_to_end(key)
+      while len(self._pending_path_cancellations) > _MAX_PENDING_PATH_CANCELLATIONS:
+         self._pending_path_cancellations.popitem(last=False)
+
+   def _consume_pending_cancellation_locked(
+      self,
+      *,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+      topology_version: int,
+      entry_node_id: str | None,
+   ) -> bool:
+      if entry_node_id is None:
+         return False
+      expected = self._pending_cancellation_key(
+         request_id=request_id,
+         path_id=path_id,
+         path_attempt=path_attempt,
+         topology_version=topology_version,
+         entry_node_id=entry_node_id,
+      )
+      path_keys = tuple(
+         key for key in self._pending_path_cancellations if key[0] == path_id
+      )
+      matched = expected in self._pending_path_cancellations
+      for key in path_keys:
+         self._pending_path_cancellations.pop(key, None)
+      if not matched:
+         return False
+      self._mark_cancelled_attempt_locked(path_id, path_attempt)
+      self._cancelled_path_attempts[path_id] = max(
+         path_attempt,
+         self._cancelled_path_attempts.get(path_id, path_attempt),
+      )
+      self._cancelled_path_attempts.move_to_end(path_id)
+      self._path_generations[path_id] = self._path_generations.get(path_id, 0) + 1
+      self._path_generations.move_to_end(path_id)
+      self._prune_terminal_path_metadata_locked()
+      return True
 
    def _path_is_current_locked(
       self,
@@ -239,23 +315,6 @@ class RelayEngine:
          generation,
          sender,
       )
-
-   def _send_token_if_path_current(
-      self,
-      path_id: str,
-      path_attempt: int,
-      generation: int,
-      sender,
-   ) -> bool:
-      with self._path_lock:
-         if not self._path_is_current_locked(
-            path_id,
-            path_attempt,
-            generation,
-         ):
-            return False
-      sender()
-      return True
 
    @staticmethod
    def _path_cancelled_outcome(
@@ -354,6 +413,14 @@ class RelayEngine:
             if not entry_node_id:
                return None
          with self._path_lock:
+            if self._consume_pending_cancellation_locked(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               topology_version=graph.topology_version,
+               entry_node_id=entry_node_id,
+            ):
+               return None
             if self._was_cancelled_attempt_locked(
                manifest.path_id,
                manifest.path_attempt,
@@ -448,6 +515,14 @@ class RelayEngine:
       )
       with self._path_operation_lock(path_id):
          with self._path_lock:
+            if self._consume_pending_cancellation_locked(
+               request_id=request_id,
+               path_id=path_id,
+               path_attempt=path_attempt,
+               topology_version=topology_version,
+               entry_node_id=entry_node_id,
+            ):
+               return None
             if self._was_cancelled_attempt_locked(path_id, path_attempt):
                return None
             cancelled_attempt = self._cancelled_path_attempts.get(path_id)
@@ -1111,7 +1186,7 @@ class RelayEngine:
          token_id=runtime_result.token_id,
          sampling_counter=header.token_index + 1,
       )
-      if not self._send_token_if_path_current(
+      if not self._send_if_path_current(
          header.path_id,
          header.path_attempt,
          generation,
@@ -1510,7 +1585,7 @@ class RelayEngine:
          token_id=runtime_result.token_id,
          sampling_counter=header.token_index + 1,
       )
-      if not self._send_token_if_path_current(
+      if not self._send_if_path_current(
          header.path_id,
          header.path_attempt,
          generation,
@@ -1803,7 +1878,7 @@ class RelayEngine:
             token_id=final_result.token_id,
             sampling_counter=1 if phase == "PREFILL" else token_index + 1,
          )
-         if not self._send_token_if_path_current(
+         if not self._send_if_path_current(
             manifest.path_id,
             manifest.path_attempt,
             generation,
@@ -1886,7 +1961,7 @@ class RelayEngine:
          ),
       )
 
-      if not self._send_token_if_path_current(
+      if not self._send_if_path_current(
          manifest.path_id,
          manifest.path_attempt,
          generation,
@@ -1916,12 +1991,41 @@ class RelayEngine:
       *,
       source_node_id: str | None,
    ) -> bool:
+      if (
+         type(cancellation.request_id) is not str
+         or not cancellation.request_id
+         or type(cancellation.path_id) is not str
+         or not cancellation.path_id
+         or type(cancellation.path_attempt) is not int
+         or type(cancellation.topology_version) is not int
+         or type(source_node_id) is not str
+         or not source_node_id
+      ):
+         return False
       with self._path_operation_lock(cancellation.path_id):
          with self._path_lock:
             registered = self._paths.get(cancellation.path_id)
             provisional = self._provisional_paths.get(cancellation.path_id)
             if registered is None and provisional is None:
-               return False
+               cancelled_attempt = self._cancelled_path_attempts.get(
+                  cancellation.path_id
+               )
+               if (
+                  self._was_cancelled_attempt_locked(
+                     cancellation.path_id,
+                     cancellation.path_attempt,
+                  )
+                  or (
+                     cancelled_attempt is not None
+                     and cancellation.path_attempt <= cancelled_attempt
+                  )
+               ):
+                  return False
+               self._remember_pending_cancellation_locked(
+                  cancellation,
+                  source_node_id,
+               )
+               return True
             if registered is not None:
                graph, manifest, request = registered
                expected = (

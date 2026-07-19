@@ -18,7 +18,13 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def canonical_json(document: Any) -> str:
-   return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+   return json.dumps(
+      document,
+      sort_keys=True,
+      separators=(",", ":"),
+      ensure_ascii=False,
+      allow_nan=False,
+   )
 
 
 def _digest_document(document: dict[str, Any]) -> dict[str, str]:

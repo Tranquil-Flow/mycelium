@@ -254,17 +254,12 @@ class EntryCoordinator:
       pending = self._pending_prefills.get(locked.request_id)
       if pending is None or pending.state_machine.state != "PREFILL":
          return False
-      if source_node_id is not None:
-         if not source_node_id or not locked.manifest.ordered_hops:
-            return False
-         final_placement_id = locked.manifest.ordered_hops[-1].placement_id
-         if not any(
-            placement.placement_id == final_placement_id
-            and placement.node_id == source_node_id
-            for stage in pending.graph.stages
-            for placement in stage.placements
-         ):
-            return False
+      if source_node_id is not None and not self._final_hop_origin_matches(
+         pending.graph,
+         locked.manifest,
+         source_node_id,
+      ):
+         return False
       if (
          locked.path_id != pending.build.path_id
          or locked.path_attempt != pending.build.path_attempt
@@ -631,18 +626,31 @@ class EntryCoordinator:
       return True
 
    @staticmethod
-   def _final_hop_origin_matches_locked_path(
-      record: RequestRecord,
+   def _final_hop_origin_matches(
+      graph: ExecutionGraph,
+      manifest: PathManifest,
       source_node_id: str,
    ) -> bool:
-      if not source_node_id:
+      if not source_node_id or not manifest.ordered_hops:
          return False
-      final_placement_id = record.manifest.ordered_hops[-1].placement_id
+      final_placement_id = manifest.ordered_hops[-1].placement_id
       return any(
          placement.placement_id == final_placement_id
          and placement.node_id == source_node_id
-         for stage in record.graph.stages
+         for stage in graph.stages
          for placement in stage.placements
+      )
+
+   @classmethod
+   def _final_hop_origin_matches_locked_path(
+      cls,
+      record: RequestRecord,
+      source_node_id: str,
+   ) -> bool:
+      return cls._final_hop_origin_matches(
+         record.graph,
+         record.manifest,
+         source_node_id,
       )
 
    def receive_failure_report(

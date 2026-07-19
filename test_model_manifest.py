@@ -5,6 +5,10 @@ import model_manifest as mm
 
 
 class ModelManifestTests(unittest.TestCase):
+   def test_canonical_json_rejects_non_finite_numbers(self):
+      with self.assertRaises(ValueError):
+         mm.canonical_json({"unsafe": float("nan")})
+
    def config(self, model_type="gpt2"):
       return {
          "architectures": ["GPT2Model"],

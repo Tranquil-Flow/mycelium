@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -35,6 +36,11 @@ _UI_CLIENT_CALL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _UI_SUFFIXES = frozenset({".js", ".jsx", ".ts", ".tsx"})
+_PREFIXED_TOKEN_PATTERN = re.compile(
+    rb"(?:github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|"
+    rb"hf_[A-Za-z0-9]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{20,}|"
+    rb"xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16})"
+)
 
 
 def canonical_json(value: Any) -> str:
@@ -48,8 +54,21 @@ def canonical_json(value: Any) -> str:
     ) + "\n"
 
 
+def _redact_output(value: str) -> str:
+    encoded = value.encode("utf-8")
+    private_key = b"-----BEGIN " in encoded and b"PRIVATE KEY-----" in encoded
+    if private_key or _PREFIXED_TOKEN_PATTERN.search(encoded) is not None:
+        digest = hashlib.sha256(encoded).hexdigest()
+        return f"<redacted:sha256:{digest}>"
+    return value
+
+
 def _finding(code: str, path: str, **fields: object) -> dict[str, object]:
-    return {"code": code, "path": path, **fields}
+    safe_fields = {
+        key: _redact_output(value) if isinstance(value, str) else value
+        for key, value in fields.items()
+    }
+    return {"code": code, "path": _redact_output(path), **safe_fields}
 
 
 def _result(

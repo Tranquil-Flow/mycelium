@@ -10,7 +10,7 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 
 ## Corpus
 
-34 collected cases:
+39 collected cases:
 
 | Surface | Adversarial behavior | Evidence |
 |---|---|---|
@@ -18,7 +18,7 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 | Wire | bool substituted for `path_attempt` | pass: rejected, PC-BOOL-1 regression |
 | Wire | bool substituted for `topology_version` | pass: rejected, PC-BOOL-1 regression |
 | Relay | wrong `request_id` | pass, no release |
-| Relay | wrong `path_id` / unknown path | pass, no release |
+| Relay | wrong `path_id` / unknown path | pass: bounded pending candidate retained; active path untouched |
 | Relay | wrong `path_attempt` | pass, no release |
 | Relay | wrong `topology_version` | pass, no release |
 | Relay | already-released and duplicate cancellation | pass, one runtime cancel |
@@ -33,7 +33,10 @@ Source commit `120d6fff` was read-only with respect to production. Integration s
 | Entry/Relay | cancellation during local scheduler enqueue | pass: stale generation rejected before runtime start |
 | Relay | stale attempt-scoped release after newer registration | pass: newer attempt remains active and is not cancelled |
 | Relay | runtime cancellation concurrent with newer registration | pass: registration waits for old-attempt runtime cancellation |
-| Relay | cancelled-attempt replay after exact tombstone eviction | pass: bounded filter rejects replay |
+| Relay | cancellation arrives before provisional/full path registration | pass: matching later registration is rejected before runtime work |
+| Relay | forged pending cancellation precedes genuine registration | pass: source mismatch cannot block the genuine path |
+| Relay | pending-cancellation flood | pass: oldest candidates evicted at the 4,096-entry bound |
+| Relay | cancelled-attempt replay after exact tombstone eviction | pass: filter rejects replay while identity remains in its active two-window retention period |
 | Relay | scheduler/runtime cleanup callbacks re-enter path-state reads | pass: callbacks run outside the path-state lock |
 | Entry/Relay | registration followed by generation capture | pass: one operation returns the exact generation permit |
 | Relay | cancelled-attempt filter saturation | pass: two bounded windows rotate instead of accumulating bits forever |
