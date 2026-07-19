@@ -9,14 +9,22 @@ from .contracts import (
     synthetic_route_qualification_fixture,
 )
 from .qualifier import QualificationError, qualify_route
+from .signing import (
+    EvidenceSigningError,
+    build_ed25519_verifier,
+    generate_ed25519_signer,
+)
 
 __all__ = (
     "ROUTE_QUALIFICATION_PROTOCOL",
     "QualificationAuthority",
     "QualificationAuthorityError",
     "QualificationError",
+    "EvidenceSigningError",
     "RouteQualificationV1",
     "StageQualificationBinding",
+    "build_ed25519_verifier",
+    "generate_ed25519_signer",
     "qualify_route",
     "route_qualification_from_dict",
     "route_qualification_to_dict",
