@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { createProductFeatureRegistry } from './navigation';
@@ -15,6 +15,7 @@ describe('product shell feature slots', () => {
     const navigation = screen.getByRole('navigation', { name: /product sections/i });
     for (const name of [
       'Inference',
+      'Device Lab',
       'Network',
       'Nodes',
       'Plans',
@@ -22,7 +23,8 @@ describe('product shell feature slots', () => {
       'Incidents',
       'Settings',
     ]) {
-      expect(navigation.querySelector(`a[href="#${name.toLowerCase()}"]`)).not.toBeNull();
+      const hash = name === 'Device Lab' ? 'lab' : name.toLowerCase();
+      expect(navigation.querySelector(`a[href="#${hash}"]`)).not.toBeNull();
     }
     expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
@@ -84,6 +86,32 @@ describe('product shell feature slots', () => {
     expect(inferenceLoader).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: /unsafe inference/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
+  });
+
+  it('keeps Device Lab separate from disabled production Inference', () => {
+    window.history.replaceState(null, '', '#lab');
+    render(<App />);
+
+    expect(screen.getByRole('heading', { name: /device lab/i })).toBeInTheDocument();
+    expect(screen.getByText(/operator capability missing/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: /^inference/i }));
+    expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
+    expect(screen.getAllByText(/route readiness unknown/i)).not.toHaveLength(0);
+  });
+
+  it('allows a directly mounted App to receive an in-memory Device Lab capability', async () => {
+    window.history.replaceState(null, '', '#lab');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('lab offline'));
+    const storageSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    render(<App deviceLabOperatorToken="direct-memory-token" />);
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(new Headers(fetchSpy.mock.calls[0][1]?.headers).get('authorization')).toBe(
+      'Bearer direct-memory-token',
+    );
+    expect(window.location.href).not.toContain('direct-memory-token');
+    expect(JSON.stringify(storageSpy.mock.calls)).not.toContain('direct-memory-token');
   });
 
   it('normalizes the legacy evidence hash to the readiness route', () => {

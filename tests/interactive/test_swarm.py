@@ -86,6 +86,21 @@ def valid_result(work: dict[str, Any], output: list[list[float]]) -> dict[str, A
     }
 
 
+def start_work(
+    swarm: SwarmCoordinator,
+    peer_id: str,
+    token: str,
+    work: dict[str, Any],
+) -> bool:
+    return swarm.start_work(
+        peer_id=peer_id,
+        session_token=token,
+        job_id=work["job_id"],
+        request_id=work["request_id"],
+        input_digest=work["input_digest"],
+    )
+
+
 def test_invite_is_fragment_only_single_use_and_server_stores_no_raw_token() -> None:
     swarm = coordinator()
     invitation = swarm.create_invite(public_origin="https://swarm.example.test")
@@ -207,6 +222,7 @@ def test_two_waiting_peers_are_reported_and_receive_balanced_jobs() -> None:
                 if work is None:
                     continue
                 received.append(peer_id)
+                assert start_work(swarm, peer_id, token, work) is True
                 assert swarm.submit_result(
                     peer_id=peer_id,
                     session_token=token,
@@ -253,6 +269,7 @@ def test_dispatch_long_poll_result_and_duplicate_idempotence() -> None:
         work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=2)
         assert work is not None
         received.append(work)
+        assert start_work(swarm, peer_id, token, work) is True
         result = valid_result(work, [[3.0, 4.0]])
         assert swarm.submit_result(peer_id=peer_id, session_token=token, document=result) == "accepted"
         assert swarm.submit_result(peer_id=peer_id, session_token=token, document=result) == "duplicate"
@@ -288,6 +305,7 @@ def test_dispatch_honors_peer_exclusions_over_lifetime_balance() -> None:
             if work is None:
                 continue
             received.append(peer_id)
+            assert start_work(swarm, peer_id, token, work) is True
             swarm.submit_result(
                 peer_id=peer_id,
                 session_token=token,
@@ -330,6 +348,7 @@ def test_poll_retries_same_outstanding_work_until_result() -> None:
         assert first == second
         assert first is not None
         observed.append(first)
+        assert start_work(swarm, peer_id, token, first) is True
         swarm.submit_result(
             peer_id=peer_id,
             session_token=token,
@@ -373,6 +392,7 @@ def test_result_validation_is_fail_closed(mutation: Any, code: str) -> None:
     thread.start()
     work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=1)
     assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
     document = valid_result(work, [[1.0, 2.0]])
     mutation(document)
     with pytest.raises(SwarmError, match=code):
@@ -389,6 +409,7 @@ def test_conflicting_duplicate_result_rejected() -> None:
     def worker() -> None:
         work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=2)
         assert work is not None
+        assert start_work(swarm, peer_id, token, work) is True
         first = valid_result(work, [[1.0, 2.0]])
         assert swarm.submit_result(peer_id=peer_id, session_token=token, document=first) == "accepted"
         accepted.set()
@@ -431,6 +452,77 @@ def test_cancel_and_revoke_wake_dispatcher() -> None:
     swarm.revoke_peer(peer_id)
     thread.join(timeout=1)
     assert errors == ["peer_unavailable"]
+
+
+def test_cancelled_assignment_cannot_obtain_late_compute_permit() -> None:
+    swarm = coordinator()
+    peer_id, token = join(swarm)
+    outcome: list[str] = []
+
+    def dispatch() -> None:
+        try:
+            swarm.dispatch(
+                request_id="request-late-start",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+            )
+        except SwarmError as exc:
+            outcome.append(exc.code)
+
+    thread = threading.Thread(target=dispatch)
+    thread.start()
+    work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=1)
+    assert work is not None
+    assert swarm.cancel_request("request-late-start") is True
+    assert start_work(swarm, peer_id, token, work) is False
+    with pytest.raises(SwarmError, match="result_job_not_active"):
+        swarm.submit_result(
+            peer_id=peer_id,
+            session_token=token,
+            document=valid_result(work, [[1.0, 2.0]]),
+        )
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert outcome == ["request_cancelled"]
+
+
+def test_parent_cancel_event_prevents_result_acceptance_after_compute_permit() -> None:
+    swarm = coordinator()
+    peer_id, token = join(swarm)
+    cancel_event = threading.Event()
+    outcome: list[str] = []
+
+    def dispatch() -> None:
+        try:
+            swarm.dispatch(
+                request_id="request-result-race",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+                cancel_event=cancel_event,
+            )
+        except SwarmError as exc:
+            outcome.append(exc.code)
+
+    thread = threading.Thread(target=dispatch)
+    thread.start()
+    work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=1)
+    assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
+    assert swarm.cancel_request("request-result-race", cancel_event=cancel_event) is True
+    with pytest.raises(SwarmError, match="result_job_not_active"):
+        swarm.submit_result(
+            peer_id=peer_id,
+            session_token=token,
+            document=valid_result(work, [[1.0, 2.0]]),
+        )
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert outcome == ["request_cancelled"]
+    with swarm._condition:  # noqa: SLF001 - terminal-state regression oracle
+        job = swarm._jobs[work["job_id"]]  # noqa: SLF001
+        assert job.state == "cancelled"
+        assert job.result is None
+        assert job.result_document_digest is None
 
 
 def test_status_is_sanitized_and_claim_bounded() -> None:
@@ -497,6 +589,7 @@ def test_terminal_job_history_is_bounded() -> None:
         thread.start()
         work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=1)
         assert work is not None
+        assert start_work(swarm, peer_id, token, work) is True
         swarm.submit_result(
             peer_id=peer_id,
             session_token=token,

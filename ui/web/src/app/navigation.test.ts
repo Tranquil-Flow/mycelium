@@ -8,9 +8,10 @@ import {
 } from './navigation';
 
 describe('product feature registry and navigation', () => {
-  it('exposes all seven product workspaces in stable order', () => {
+  it('exposes all eight product workspaces in stable order', () => {
     expect(PRODUCT_ROUTES.map(({ id, label }) => ({ id, label }))).toEqual([
       { id: 'inference', label: 'Inference' },
+      { id: 'lab', label: 'Device Lab' },
       { id: 'network', label: 'Network' },
       { id: 'nodes', label: 'Nodes' },
       { id: 'plans', label: 'Plans' },
@@ -18,12 +19,13 @@ describe('product feature registry and navigation', () => {
       { id: 'incidents', label: 'Incidents' },
       { id: 'settings', label: 'Settings' },
     ]);
-    expect(new Set(PRODUCT_ROUTES.map((route) => route.id)).size).toBe(7);
+    expect(new Set(PRODUCT_ROUTES.map((route) => route.id)).size).toBe(8);
     expect(Object.isFrozen(PRODUCT_ROUTES)).toBe(true);
   });
 
   it('parses product hashes and keeps the former evidence deep link as readiness', () => {
     expect(parseProductRoute('#inference')).toBe('inference');
+    expect(parseProductRoute('#lab')).toBe('lab');
     expect(parseProductRoute('#readiness')).toBe('readiness');
     expect(parseProductRoute('#evidence')).toBe('readiness');
     expect(parseProductRoute('#unknown')).toBeNull();

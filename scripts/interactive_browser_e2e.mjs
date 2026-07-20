@@ -381,7 +381,7 @@ async function main() {
       fail('browser_parity_tolerance_exceeded');
     }
     await waitFor('host_evidence_render', async () => (await host.cdp.evaluate(
-      "document.body.innerText.includes('Inference completed with 2/2 distinct peer sessions contributing.')",
+      "document.body.innerText.includes('Local matrix exercise completed with 2/2 distinct peer sessions contributing.')",
     )) === true);
     const evidenceSurface = await host.cdp.evaluate(`({
       downloadButton: !!document.querySelector('#download-evidence'),
@@ -477,7 +477,7 @@ async function main() {
         : null;
     }, 5_000);
     await waitFor('host_cancelled_render', async () => (await host.cdp.evaluate(
-      "document.body.innerText.includes('Inference cancelled safely; joined workers remain available.') && !document.querySelector('[role=alert]')",
+      "document.body.innerText.includes('Local matrix exercise cancelled safely; joined workers remain available.') && !document.querySelector('[role=alert]')",
     )) === true, 5_000);
     await waitFor('cancelled_worker_recovered', async () => {
       const views = await Promise.all(peers.map((peer) => peer.cdp.evaluate(`({

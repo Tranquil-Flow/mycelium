@@ -22,6 +22,7 @@ import type {
   LiveObservatoryEventState,
 } from './data/observatoryEventSource';
 import { EvidenceView } from './views/EvidenceView';
+import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { SettingsProvider } from './features/settings/SettingsContext';
 import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
@@ -46,6 +47,8 @@ export interface AppProps {
   readonly source?: AppSource;
   readonly featureRegistry?: ProductFeatureRegistry;
   readonly productState?: ProductState;
+  /** Memory-only capability consumed from the Device Lab URL fragment. */
+  readonly deviceLabOperatorToken?: string | null;
 }
 
 const defaultSource = createObservatorySource({ source_mode: 'fixture' });
@@ -157,6 +160,7 @@ export default function App({
   source = defaultSource,
   featureRegistry = emptyFeatureRegistry,
   productState,
+  deviceLabOperatorToken = null,
 }: AppProps) {
   const effectiveProductState =
     productState !== undefined && productState.source_mode === source.source_mode
@@ -251,7 +255,9 @@ export default function App({
     sourceResult.source === source ? sourceResult : { source, state: 'loading' };
 
   let content;
-  if (activeView === 'settings') {
+  if (activeView === 'lab') {
+    content = <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />;
+  } else if (activeView === 'settings') {
     content = <SettingsWorkspace />;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
@@ -323,6 +329,7 @@ export default function App({
       }
     : effectiveProductState;
   const scopeLabel = (() => {
+    if (activeView === 'lab') return 'local browser-stage swarm';
     if (sourceState === null) {
       if (source.source_mode === 'fixture') return 'offline fixture';
       if (source.source_mode === 'replay') return 'replay evidence';

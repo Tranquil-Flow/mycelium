@@ -148,6 +148,7 @@ class InteractiveRuntime:
         self._active_requests: dict[str, str | None] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._cancelled_requests: set[str] = set()
+        self._terminal_requests: set[str] = set()
         self._tempdir: tempfile.TemporaryDirectory[str] | None = None
         if (
             not isinstance(self.run_id, str)
@@ -236,7 +237,11 @@ class InteractiveRuntime:
                     "run_id": self.run_id,
                     "stage_pack_digest": self.stage_pack["pack_digest"],
                     "vocabulary": list(VOCABULARY),
-                    "active_request_count": len(self._active_requests),
+                    "active_request_count": sum(
+                        request_id not in self._terminal_requests
+                        and request_id not in self._cancelled_requests
+                        for request_id in self._active_requests
+                    ),
                     "completed_request_count": len(self.records),
                     "recent_requests": [
                         self.records[request_id].public_document()
@@ -253,15 +258,22 @@ class InteractiveRuntime:
 
     def cancel_request(self, request_id: str) -> bool:
         with self._lock:
-            if request_id not in self._active_requests:
+            if (
+                request_id not in self._active_requests
+                or request_id in self._terminal_requests
+            ):
+                return False
+            cancel_event = self._cancel_events[request_id]
+            active_stage_request = self._active_requests[request_id]
+            if active_stage_request is None:
+                cancel_event.set()
+            elif not self.swarm.cancel_request(
+                active_stage_request,
+                cancel_event=cancel_event,
+            ):
                 return False
             self._cancelled_requests.add(request_id)
-            cancel_event = self._cancel_events[request_id]
-            cancel_event.set()
-            active_stage_request = self._active_requests[request_id]
-        if active_stage_request is not None:
-            self.swarm.cancel_request(active_stage_request)
-        return True
+            return True
 
     def infer(
         self,
@@ -303,6 +315,7 @@ class InteractiveRuntime:
             self._active_requests[request_id] = None
             self._cancel_events[request_id] = cancel_event
             self._cancelled_requests.discard(request_id)
+            self._terminal_requests.discard(request_id)
         try:
             with _cancellable_lock(self._infer_lock, cancel_event):
                 for token_index in range(max_new_tokens):
@@ -338,9 +351,14 @@ class InteractiveRuntime:
                             cancel_event=cancel_event,
                         )
                     except SwarmError as exc:
-                        if cancel_event.is_set():
-                            _reject("request_cancelled")
-                        raise InteractiveRuntimeError(exc.code) from exc
+                        with self._lock:
+                            cancelled = request_id in self._cancelled_requests
+                            if cancelled:
+                                error_code = "request_cancelled"
+                            else:
+                                error_code = exc.code
+                                self._terminal_requests.add(request_id)
+                        raise InteractiveRuntimeError(error_code) from exc
                     finally:
                         with self._lock:
                             if self._active_requests.get(request_id) == stage_request_id:
@@ -425,3 +443,4 @@ class InteractiveRuntime:
                 self._active_requests.pop(request_id, None)
                 self._cancel_events.pop(request_id, None)
                 self._cancelled_requests.discard(request_id)
+                self._terminal_requests.discard(request_id)

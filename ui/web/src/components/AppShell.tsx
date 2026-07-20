@@ -42,6 +42,14 @@ function NavIcon({ name }: { readonly name: ProductRouteId }) {
       </svg>
     );
   }
+  if (name === 'lab') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3.5" y="5" width="12" height="9" rx="1.5" />
+        <path d="M7 18h5M9.5 14v4M17 8h3.5v9H17zM18.5 14.5h.01" />
+      </svg>
+    );
+  }
   if (name === 'inference') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -82,14 +90,17 @@ export function AppShell({
     }
   }, [activeView]);
   const activeLabel = PRODUCT_ROUTES.find((route) => route.id === activeView)?.label ?? activeView;
+  const isDeviceLab = activeView === 'lab';
   const isFixture = sourceMode === 'fixture';
   const isReplay = sourceMode === 'replay';
   const isLiveCurrent =
     sourceState?.source_mode === 'live' &&
     sourceState.status === 'connected' &&
     sourceState.freshness === 'current';
-  const currentLabel = isFixture
-    ? 'Fixture data · not current'
+  const currentLabel = isDeviceLab
+    ? 'Live local device status'
+    : isFixture
+      ? 'Fixture data · not current'
     : isReplay
       ? sourceState === null
         ? 'Replay evidence · loading'
@@ -124,21 +135,25 @@ export function AppShell({
         <div
           className="fixture-badge"
           aria-label={
-            isFixture
-              ? 'Fixture data, not live'
-              : isReplay
-                ? 'Replay evidence, not live'
-                : 'Live semantic evidence state'
+            isDeviceLab
+              ? 'Live local Device Lab evidence'
+              : isFixture
+                ? 'Fixture data, not live'
+                : isReplay
+                  ? 'Replay evidence, not live'
+                  : 'Live semantic evidence state'
           }
         >
           <span className="fixture-dot" aria-hidden="true" />
-          {isFixture
-            ? 'FIXTURE DATA · NOT LIVE'
-            : isReplay
-              ? 'REPLAY EVIDENCE · NOT LIVE'
-            : isLiveCurrent
-              ? 'LIVE EVIDENCE · CURRENT'
-              : 'LIVE EVIDENCE · NOT CURRENT'}
+          {isDeviceLab
+            ? 'LIVE DEVICE LAB · LOCAL EVIDENCE'
+            : isFixture
+              ? 'FIXTURE DATA · NOT LIVE'
+              : isReplay
+                ? 'REPLAY EVIDENCE · NOT LIVE'
+                : isLiveCurrent
+                  ? 'LIVE EVIDENCE · CURRENT'
+                  : 'LIVE EVIDENCE · NOT CURRENT'}
         </div>
 
         <nav className="primary-nav" aria-label="Product sections">
@@ -166,16 +181,20 @@ export function AppShell({
             <span className="source-glyph" aria-hidden="true">◇</span>
             <div>
               <strong>
-                {isFixture
-                  ? 'Local evidence bundle'
-                  : isReplay
-                    ? 'Local evidence replay'
-                    : 'Same-origin product gateway'}
+                {isDeviceLab
+                  ? 'Bounded Device Lab'
+                  : isFixture
+                    ? 'Local evidence bundle'
+                    : isReplay
+                      ? 'Local evidence replay'
+                      : 'Same-origin product gateway'}
               </strong>
               <span>
-                {isFixture || isReplay
-                  ? 'No network dependency'
-                  : 'Browser credentials stay same-origin'}
+                {isDeviceLab
+                  ? 'Same-origin operator API'
+                  : isFixture || isReplay
+                    ? 'No network dependency'
+                    : 'Browser credentials stay same-origin'}
               </span>
             </div>
           </div>
@@ -192,11 +211,13 @@ export function AppShell({
             <strong>{scopeLabel}</strong>
             <span className="separator" aria-hidden="true">/</span>
             <span>
-              {isFixture
-                ? 'fixture evidence'
-                : isReplay
-                  ? 'replay evidence'
-                  : 'semantic gateway projection'}
+              {isDeviceLab
+                ? 'live local synthetic evidence'
+                : isFixture
+                  ? 'fixture evidence'
+                  : isReplay
+                    ? 'replay evidence'
+                    : 'semantic gateway projection'}
             </span>
           </div>
           <button type="button" className="current-control" disabled>

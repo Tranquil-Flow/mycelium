@@ -63,9 +63,10 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
   await expect(page.getByText(/no model request was made/i)).toBeVisible();
 
   const navigation = page.getByRole('navigation', { name: 'Product sections' });
-  await expect(navigation.getByRole('link')).toHaveCount(7);
+  await expect(navigation.getByRole('link')).toHaveCount(8);
 
   const routeChecks = [
+    ['Device Lab', 'lab', /^device lab$/i],
     ['Network', 'network', /network topology/i],
     ['Plans', 'plans', /strategy comparison/i],
     ['Incidents', 'incidents', /failover replay/i],

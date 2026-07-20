@@ -277,6 +277,7 @@ class _Job:
     created_at: float
     excluded_peer_ids: frozenset[str] = frozenset()
     allowed_peer_ids: frozenset[str] | None = None
+    cancel_event: threading.Event | None = None
     state: str = "pending"
     peer_id: str | None = None
     result: BrowserStageResult | None = None
@@ -411,7 +412,7 @@ class SwarmCoordinator:
         for job_id, job in tuple(self._jobs.items()):
             if len(self._jobs) < self._max_job_history:
                 return
-            if job.state not in {"pending", "assigned"}:
+            if job.state not in {"pending", "assigned", "running"}:
                 self._jobs.pop(job_id, None)
 
     def create_invite(
@@ -534,7 +535,7 @@ class SwarmCoordinator:
                     )
                     if peer.outstanding_job_id is not None:
                         existing = self._jobs.get(peer.outstanding_job_id)
-                        if existing is not None and existing.state == "assigned":
+                        if existing is not None and existing.state in {"assigned", "running"}:
                             return self._work_document(existing)
                         peer.outstanding_job_id = None
                     pending = next(
@@ -591,6 +592,44 @@ class SwarmCoordinator:
             "route_ready": False,
         }
 
+    def start_work(
+        self,
+        *,
+        peer_id: str,
+        session_token: str,
+        job_id: str,
+        request_id: str,
+        input_digest: str,
+    ) -> bool:
+        """Atomically permit browser compute only while its assignment remains active."""
+
+        job_id = _identifier(job_id, "work_start_job_invalid")
+        request_id = _identifier(request_id, "work_start_binding_invalid")
+        input_digest = _identifier(input_digest, "work_start_binding_invalid")
+        with self._condition:
+            now = self._now()
+            self._expire_locked(now)
+            peer = self._authenticate_peer_locked(
+                peer_id=peer_id,
+                session_token=session_token,
+                now=now,
+            )
+            job = self._jobs.get(job_id)
+            if job is None or job.peer_id != peer.peer_id:
+                _reject("work_start_job_mismatch")
+            if job.request_id != request_id or job.input_digest != input_digest:
+                _reject("work_start_binding_invalid")
+            if job.cancel_event is not None and job.cancel_event.is_set():
+                self._cancel_job_locked(job, "cancelled")
+                return False
+            if job.state == "running" and peer.outstanding_job_id == job.job_id:
+                return True
+            if job.state != "assigned" or peer.outstanding_job_id != job.job_id:
+                return False
+            job.state = "running"
+            self._condition.notify_all()
+            return True
+
     def dispatch(
         self,
         *,
@@ -635,12 +674,16 @@ class SwarmCoordinator:
                 _reject("request_cancelled")
             now = self._now()
             self._expire_locked(now)
-            active_jobs = sum(job.state in {"pending", "assigned"} for job in self._jobs.values())
+            active_jobs = sum(
+                job.state in {"pending", "assigned", "running"}
+                for job in self._jobs.values()
+            )
             if active_jobs >= self._max_pending_jobs:
                 _reject("job_capacity_exhausted")
             self._prune_job_history_locked()
             if any(
-                job.request_id == request_id and job.state in {"pending", "assigned"}
+                job.request_id == request_id
+                and job.state in {"pending", "assigned", "running"}
                 for job in self._jobs.values()
             ):
                 _reject("request_already_active")
@@ -655,6 +698,7 @@ class SwarmCoordinator:
                 created_at=now,
                 excluded_peer_ids=excluded,
                 allowed_peer_ids=allowed,
+                cancel_event=cancel_event,
             )
             self._jobs[job_id] = job
             if cancel_event is not None and cancel_event.is_set():
@@ -663,15 +707,15 @@ class SwarmCoordinator:
             self._condition.notify_all()
             deadline = now + timeout
             while True:
-                if cancel_event is not None and cancel_event.is_set():
-                    self._cancel_job_locked(job, "cancelled")
-                    _reject("request_cancelled")
                 if job.state == "completed" and job.result is not None:
                     return job.result
                 if job.state == "cancelled":
                     _reject("request_cancelled")
                 if job.state == "peer_unavailable":
                     _reject("peer_unavailable")
+                if cancel_event is not None and cancel_event.is_set():
+                    self._cancel_job_locked(job, "cancelled")
+                    _reject("request_cancelled")
                 remaining = deadline - self._now()
                 if cancel_event is not None and cancel_event.is_set():
                     self._cancel_job_locked(job, "cancelled")
@@ -730,7 +774,10 @@ class SwarmCoordinator:
                 if job.result_document_digest == document_digest:
                     return "duplicate"
                 _reject("result_replay_conflict")
-            if job.state != "assigned" or peer.outstanding_job_id != job.job_id:
+            if job.cancel_event is not None and job.cancel_event.is_set():
+                self._cancel_job_locked(job, "cancelled")
+                _reject("result_job_not_active")
+            if job.state != "running" or peer.outstanding_job_id != job.job_id:
                 _reject("result_job_not_active")
             result = BrowserStageResult(
                 peer_id=peer.peer_id,
@@ -747,17 +794,40 @@ class SwarmCoordinator:
             self._condition.notify_all()
             return "accepted"
 
-    def cancel_request(self, request_id: str) -> bool:
+    def cancel_request(
+        self,
+        request_id: str,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> bool:
         request_id = _identifier(request_id, "request_id_invalid")
         with self._condition:
             for job in reversed(tuple(self._jobs.values())):
-                if job.request_id == request_id and job.state in {"pending", "assigned"}:
+                if (
+                    job.request_id == request_id
+                    and job.state in {"pending", "assigned", "running"}
+                ):
+                    if cancel_event is not None:
+                        cancel_event.set()
                     self._cancel_job_locked(job, "cancelled")
                     return True
+            if cancel_event is not None and not any(
+                job.request_id == request_id for job in self._jobs.values()
+            ):
+                # Runtime published this stage id before coordinator job creation.
+                # Reserve cancellation under the same coordinator lock so dispatch
+                # observes the event before it can enqueue browser work.
+                cancel_event.set()
+                self._condition.notify_all()
+                return True
             return False
 
     def _cancel_job_locked(self, job: _Job, state: str) -> None:
+        if job.state not in {"pending", "assigned", "running"}:
+            return
         job.state = state
+        job.result = None
+        job.result_document_digest = None
         if job.peer_id is not None:
             peer = self._peers.get(job.peer_id)
             if peer is not None and peer.outstanding_job_id == job.job_id:
@@ -768,7 +838,7 @@ class SwarmCoordinator:
         if peer.outstanding_job_id is None:
             return
         job = self._jobs.get(peer.outstanding_job_id)
-        if job is not None and job.state == "assigned":
+        if job is not None and job.state in {"assigned", "running"}:
             job.state = state
         peer.outstanding_job_id = None
         self._condition.notify_all()
@@ -837,7 +907,8 @@ class SwarmCoordinator:
                     for peer in self._peers.values()
                 ),
                 "pending_job_count": sum(
-                    job.state in {"pending", "assigned"} for job in self._jobs.values()
+                    job.state in {"pending", "assigned", "running"}
+                    for job in self._jobs.values()
                 ),
                 "peers": peers,
             }

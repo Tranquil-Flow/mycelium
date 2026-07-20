@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from mycelium_interactive.runtime import InteractiveRuntime
+from mycelium_interactive.runtime import InteractiveRuntime, InteractiveRuntimeError
 import mycelium_interactive.server as interactive_server
 from mycelium_interactive.server import create_server
 from mycelium_interactive.swarm import matrix_digest
@@ -79,6 +79,18 @@ def _http_worker(origin: str, grant: dict[str, Any], stop: threading.Event, erro
                 work = response["work"]
                 if work is None:
                     continue
+                permit = _post(
+                    origin,
+                    "/api/interactive/start",
+                    {
+                        "peer_id": grant["peer_id"],
+                        "session_token": grant["session_token"],
+                        "job_id": work["job_id"],
+                        "request_id": work["request_id"],
+                        "input_digest": work["input_digest"],
+                    },
+                )
+                assert permit == {"ok": True, "started": True, "route_ready": False}
                 output = stage.execute(
                     request_id=work["request_id"],
                     assignment_id=work["assignment_id"],
@@ -226,7 +238,7 @@ def test_static_console_has_fail_closed_browser_security_headers(tmp_path: Path)
             assert response.status == 200
             assert response.headers["cache-control"] == "no-store"
             assert response.headers["content-security-policy"] == (
-                "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; "
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
                 "connect-src 'self'; img-src 'self'; base-uri 'none'; "
                 "frame-ancestors 'none'; form-action 'self'"
             )
@@ -251,6 +263,242 @@ def test_static_console_has_fail_closed_browser_security_headers(tmp_path: Path)
         server.server_close()
         thread.join(timeout=2)
         runtime.close()
+
+
+def test_split_static_roots_serve_operator_spa_and_worker_without_cross_root_leaks(
+    tmp_path: Path,
+) -> None:
+    runtime = InteractiveRuntime(root=tmp_path / "runtime")
+    operator_root = tmp_path / "operator"
+    worker_root = tmp_path / "worker"
+    (operator_root / "assets").mkdir(parents=True)
+    operator_root.joinpath("index.html").write_text(
+        "<html>operator-root-marker</html>", encoding="utf-8"
+    )
+    operator_root.joinpath("assets", "operator.js").write_text(
+        "operator-asset-marker", encoding="utf-8"
+    )
+    operator_root.joinpath("shared.txt").write_text("operator-shared", encoding="utf-8")
+    worker_root.mkdir()
+    worker_root.joinpath("index.html").write_text(
+        "<html>worker-root-marker</html>", encoding="utf-8"
+    )
+    worker_root.joinpath("interactive.js").write_text(
+        "import './pixelStage.js'; // worker-script-marker", encoding="utf-8"
+    )
+    worker_root.joinpath("pixelStage.js").write_text(
+        "// worker-stage-marker", encoding="utf-8"
+    )
+    worker_root.joinpath("shared.txt").write_text("worker-shared", encoding="utf-8")
+    outside_secret = tmp_path / "outside-secret.txt"
+    outside_secret.write_text("must-not-leak", encoding="utf-8")
+    operator_root.joinpath("operator-link.txt").symlink_to(outside_secret)
+    worker_root.joinpath("worker-link.txt").symlink_to(outside_secret)
+
+    server = create_server(
+        runtime=runtime,
+        operator_token=OPERATOR_TOKEN,
+        host="127.0.0.1",
+        port=0,
+        static_root=operator_root,
+        worker_static_root=worker_root,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        origin = f"http://127.0.0.1:{server.server_address[1]}"
+
+        def get_text(path: str) -> str:
+            with _get_response(origin, path) as response:
+                assert response.status == 200
+                return response.read().decode("utf-8")
+
+        assert "operator-root-marker" in get_text("/")
+        assert get_text("/assets/operator.js") == "operator-asset-marker"
+        assert get_text("/shared.txt") == "operator-shared"
+        assert "operator-root-marker" in get_text("/requests/current")
+        assert "operator-root-marker" in get_text("/nested/operator/route?view=graph")
+
+        assert "worker-root-marker" in get_text("/device")
+        assert "worker-root-marker" in get_text("/device/")
+        assert "worker-script-marker" in get_text("/device/interactive.js")
+        assert get_text("/device/pixelStage.js") == "// worker-stage-marker"
+        assert get_text("/device/shared.txt") == "worker-shared"
+
+        invite = _post(origin, "/api/interactive/invite", {}, operator=True)["invite"]
+        parsed_invite = urlsplit(invite["url"])
+        assert parsed_invite.path == "/device"
+        assert parsed_invite.fragment.startswith("join/")
+        assert invite["route_ready"] is False
+
+        rejected_paths = (
+            "/missing.js",
+            "/worker-stage-marker.js",
+            "/device/missing.js",
+            "/device/assets/operator.js",
+            "/..%2Foutside-secret.txt",
+            "/device/%2e%2e/outside-secret.txt",
+            "/operator-link.txt",
+            "/device/worker-link.txt",
+        )
+        for path in rejected_paths:
+            with pytest.raises(HTTPError) as captured:
+                _get_response(origin, path)
+            assert captured.value.code == 404
+            body = captured.value.read().decode("utf-8")
+            assert "must-not-leak" not in body
+            assert json.loads(body)["error"] == "not_found"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        runtime.close()
+
+
+def test_worker_root_can_be_mounted_while_operator_root_remains_api_only(tmp_path: Path) -> None:
+    runtime = InteractiveRuntime(root=tmp_path / "runtime")
+    worker_root = tmp_path / "worker"
+    worker_root.mkdir()
+    worker_root.joinpath("index.html").write_text("worker-only-marker", encoding="utf-8")
+    server = create_server(
+        runtime=runtime,
+        operator_token=OPERATOR_TOKEN,
+        host="127.0.0.1",
+        port=0,
+        static_root=None,
+        worker_static_root=worker_root,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        origin = f"http://127.0.0.1:{server.server_address[1]}"
+        with _get_response(origin, "/") as response:
+            document = json.loads(response.read().decode("utf-8"))
+        assert document["route_ready"] is False
+        assert document["local_evidence_only"] is True
+        with _get_response(origin, "/device") as response:
+            assert response.read().decode("utf-8") == "worker-only-marker"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        runtime.close()
+
+
+def test_accepted_http_cancel_denies_late_browser_compute_permit(tmp_path: Path) -> None:
+    runtime = InteractiveRuntime(root=tmp_path / "runtime")
+    server = create_server(
+        runtime=runtime,
+        operator_token=OPERATOR_TOKEN,
+        host="127.0.0.1",
+        port=0,
+    )
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    poll_result: list[dict[str, Any]] = []
+    infer_outcome: list[str] = []
+    try:
+        origin = f"http://127.0.0.1:{server.server_address[1]}"
+        invite = _post(origin, "/api/interactive/invite", {}, operator=True)["invite"]
+        token = urlsplit(invite["url"]).fragment.removeprefix("join/")
+        grant = _post(origin, "/api/interactive/join", {"token": token})["grant"]
+
+        def poll() -> None:
+            poll_result.append(
+                _post(
+                    origin,
+                    "/api/interactive/poll",
+                    {
+                        "peer_id": grant["peer_id"],
+                        "session_token": grant["session_token"],
+                        "timeout_seconds": 5,
+                    },
+                )
+            )
+
+        poll_thread = threading.Thread(target=poll)
+        poll_thread.start()
+        for _ in range(100):
+            if runtime.status()["ready_peer_count"] == 1:
+                break
+            threading.Event().wait(0.01)
+        assert runtime.status()["ready_peer_count"] == 1
+
+        def infer() -> None:
+            try:
+                runtime.infer(
+                    prompt="cancel before browser compute",
+                    max_new_tokens=1,
+                    required_distinct_peers=1,
+                    request_id="request-http-late-start",
+                    timeout_seconds=5,
+                )
+            except InteractiveRuntimeError as exc:
+                infer_outcome.append(exc.code)
+
+        infer_thread = threading.Thread(target=infer)
+        infer_thread.start()
+        poll_thread.join(timeout=2)
+        assert not poll_thread.is_alive()
+        work = poll_result[0]["work"]
+        assert work is not None
+
+        cancelled = _post(
+            origin,
+            "/api/interactive/cancel",
+            {"request_id": "request-http-late-start"},
+            operator=True,
+        )
+        assert cancelled == {"ok": True, "cancelled": True, "route_ready": False}
+        permit = _post(
+            origin,
+            "/api/interactive/start",
+            {
+                "peer_id": grant["peer_id"],
+                "session_token": grant["session_token"],
+                "job_id": work["job_id"],
+                "request_id": work["request_id"],
+                "input_digest": work["input_digest"],
+            },
+        )
+        assert permit == {"ok": True, "started": False, "route_ready": False}
+
+        infer_thread.join(timeout=2)
+        assert not infer_thread.is_alive()
+        assert infer_outcome == ["request_cancelled"]
+        assert runtime.status()["completed_request_count"] == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=2)
+        runtime.close()
+
+
+def test_packaged_worker_html_loads_script_from_device_mount() -> None:
+    worker_html = (
+        Path(__file__).parents[2] / "mycelium_interactive" / "static" / "index.html"
+    ).read_text(encoding="utf-8")
+    assert 'src="/interactive.js"' not in worker_html
+    assert (
+        'src="/device/interactive.js"' in worker_html
+        or 'src="./interactive.js"' in worker_html
+    )
+    worker_script = (
+        Path(__file__).parents[2] / "mycelium_interactive" / "static" / "interactive.js"
+    ).read_text(encoding="utf-8")
+    assert "from './operatorContract.js'" in worker_script
+    operator_contract = (
+        Path(__file__).parents[2]
+        / "mycelium_interactive"
+        / "static"
+        / "operatorContract.js"
+    ).read_text(encoding="utf-8")
+    assert "decodeEvidenceRecord" in operator_contract
+    assert "decodeOperatorStatus" in operator_contract
+    permit_request = worker_script.index("await post('/api/interactive/start'")
+    permit_rejection = worker_script.index("if (permit.started !== true)")
+    stage_execute = worker_script.index("state.peer.stage.execute")
+    assert permit_request < permit_rejection < stage_execute
 
 
 def test_api_only_root_does_not_publish_operator_status(tmp_path: Path) -> None:
@@ -404,12 +652,27 @@ def test_main_generates_operator_capability_and_passes_it_to_server(
     monkeypatch.setattr(interactive_server, "serve_forever", fake_serve_forever)
 
     state_root = tmp_path / "state"
-    assert interactive_server.main(["--state-root", str(state_root), "--port", "0"]) == 0
+    operator_root = tmp_path / "operator"
+    worker_root = tmp_path / "worker"
+    assert interactive_server.main(
+        [
+            "--state-root",
+            str(state_root),
+            "--port",
+            "0",
+            "--static-root",
+            str(operator_root),
+            "--worker-static-root",
+            str(worker_root),
+        ]
+    ) == 0
     token = observed["operator_token"]
     assert isinstance(token, str)
     assert len(token) >= 32
     assert interactive_server._operator_token_digest(token)
     assert observed["root"] == state_root
+    assert observed["static_root"] == operator_root
+    assert observed["worker_static_root"] == worker_root
     assert observed["closed"] is True
 
 

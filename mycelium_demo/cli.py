@@ -62,6 +62,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path.home() / ".mycelium" / "device-lab",
     )
+    device_lab.add_argument(
+        "--static-root",
+        type=Path,
+        help="product operator SPA root; use with --worker-static-root for split rich UI",
+    )
+    device_lab.add_argument(
+        "--worker-static-root",
+        type=Path,
+        help="browser-worker static root mounted at /device",
+    )
 
     serve = commands.add_parser(
         "serve",
@@ -82,6 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--operator-token-file", type=Path)
     serve.add_argument("--public-origin")
     serve.add_argument("--static-root", type=Path)
+    serve.add_argument("--worker-static-root", type=Path)
     serve.add_argument("--tls-cert", type=Path)
     serve.add_argument("--tls-key", type=Path)
     return parser
@@ -98,6 +109,7 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         ("--state-root", args.state_root),
         ("--operator-token-file", args.operator_token_file),
         ("--static-root", args.static_root),
+        ("--worker-static-root", args.worker_static_root),
         ("--tls-cert", args.tls_cert),
         ("--tls-key", args.tls_key),
     )
@@ -117,6 +129,7 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.operator_token_file,
             args.public_origin,
             args.static_root,
+            args.worker_static_root,
             args.tls_cert,
             args.tls_key,
         )
@@ -185,24 +198,31 @@ def main(
         if live_server_main is None:
             from mycelium_interactive.server import main as live_server_main
 
-        return int(
-            live_server_main(
-                [
-                    "--host",
-                    args.bind_host,
-                    "--port",
-                    str(bundle.port),
-                    "--state-root",
-                    str(bundle.runtime_root),
-                    "--public-origin",
-                    bundle.public_origin,
-                    "--tls-cert",
-                    str(bundle.tls_cert),
-                    "--tls-key",
-                    str(bundle.tls_key),
-                ]
-            )
+        live_arguments = [
+            "--host",
+            args.bind_host,
+            "--port",
+            str(bundle.port),
+            "--state-root",
+            str(bundle.runtime_root),
+        ]
+        for flag, value in (
+            ("--static-root", args.static_root),
+            ("--worker-static-root", args.worker_static_root),
+        ):
+            if value is not None:
+                live_arguments.extend((flag, str(value)))
+        live_arguments.extend(
+            [
+                "--public-origin",
+                bundle.public_origin,
+                "--tls-cert",
+                str(bundle.tls_cert),
+                "--tls-key",
+                str(bundle.tls_key),
+            ]
         )
+        return int(live_server_main(live_arguments))
 
     if args.action != "serve":
         raise AssertionError(f"unsupported action: {args.action}")

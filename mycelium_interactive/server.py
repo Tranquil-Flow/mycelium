@@ -7,19 +7,20 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
+import mimetypes
 from pathlib import Path
 import secrets
 import ssl
 import threading
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from .runtime import InteractiveRuntime, InteractiveRuntimeError
 from .swarm import SwarmError, normalize_public_origin
 
 MAX_JSON_BYTES = 2 * 1024 * 1024
 CONTENT_SECURITY_POLICY = (
-    "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; "
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
     "connect-src 'self'; img-src 'self'; base-uri 'none'; "
     "frame-ancestors 'none'; form-action 'self'"
 )
@@ -162,6 +163,7 @@ class InteractiveHTTPServer(ThreadingHTTPServer):
     runtime: InteractiveRuntime
     public_origin: str | None
     static_root: Path | None
+    worker_static_root: Path | None
     operator_token_digest: bytes
 
 
@@ -268,11 +270,14 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
                         public_origin=origin,
                         ttl_seconds=ttl,
                     )
+                    invite_url = invite.url
+                    if getattr(self.server, "worker_static_root", None) is not None:
+                        invite_url = f"{origin}/device#join/{invite.token}"
                     self._send_json(
                         {
                             "ok": True,
                             "invite": {
-                                "url": invite.url,
+                                "url": invite_url,
                                 "expires_at": invite.expires_at,
                                 "route_ready": False,
                             },
@@ -305,6 +310,26 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
                         timeout_seconds=timeout,
                     )
                     self._send_json({"ok": True, "work": work, "route_ready": False})
+                    return
+                if self.path == "/api/interactive/start":
+                    peer_id = _string_field(document, "peer_id", "peer_unauthorized")
+                    session_token = _string_field(document, "session_token", "peer_unauthorized")
+                    started = self.server.runtime.swarm.start_work(
+                        peer_id=peer_id,
+                        session_token=session_token,
+                        job_id=_string_field(document, "job_id", "work_start_job_invalid"),
+                        request_id=_string_field(
+                            document,
+                            "request_id",
+                            "work_start_binding_invalid",
+                        ),
+                        input_digest=_string_field(
+                            document,
+                            "input_digest",
+                            "work_start_binding_invalid",
+                        ),
+                    )
+                    self._send_json({"ok": True, "started": started, "route_ready": False})
                     return
                 if self.path == "/api/interactive/result":
                     peer_id = _string_field(document, "peer_id", "peer_unauthorized")
@@ -367,8 +392,92 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
             except Exception:
                 self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, "interactive_server_failed")
 
+        def _request_path(self) -> str:
+            try:
+                encoded = urlsplit(self.path).path
+                index = 0
+                while index < len(encoded):
+                    if encoded[index] == "%":
+                        if (
+                            index + 2 >= len(encoded)
+                            or encoded[index + 1] not in "0123456789abcdefABCDEF"
+                            or encoded[index + 2] not in "0123456789abcdefABCDEF"
+                        ):
+                            raise ValueError("malformed percent escape")
+                        index += 3
+                        continue
+                    index += 1
+                requested = unquote(encoded, encoding="utf-8", errors="strict")
+            except (UnicodeError, ValueError) as exc:
+                raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found") from exc
+            if (
+                not requested.startswith("/")
+                or "\\" in requested
+                or any(ord(character) < 0x20 or ord(character) == 0x7F for character in requested)
+                or any(part in {".", ".."} for part in requested.split("/"))
+            ):
+                raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found")
+            return requested
+
+        def _static_candidate(self, root: Path, relative: str) -> Path:
+            root_resolved = root.resolve()
+            candidate = (root_resolved / relative).resolve()
+            if root_resolved not in candidate.parents and candidate != root_resolved:
+                raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found")
+            return candidate
+
+        def _send_static_file(self, candidate: Path) -> None:
+            try:
+                body = candidate.read_bytes()
+            except OSError as exc:
+                raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found") from exc
+            content_type, _encoding = mimetypes.guess_type(candidate.name)
+            if candidate.suffix == ".js":
+                content_type = "text/javascript"
+            if content_type is None:
+                content_type = "application/octet-stream"
+            if content_type.startswith("text/") or content_type in {
+                "application/javascript",
+                "application/json",
+                "image/svg+xml",
+            }:
+                content_type += "; charset=utf-8"
+            self.send_response(HTTPStatus.OK)
+            self.send_header("content-type", content_type)
+            self._send_browser_security_headers()
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _serve_static_root(
+            self,
+            root: Path,
+            relative: str,
+            *,
+            spa_fallback: bool,
+        ) -> None:
+            relative = relative or "index.html"
+            candidate = self._static_candidate(root, relative)
+            if not candidate.is_file():
+                leaf = Path(relative).name
+                if not spa_fallback or "." in leaf:
+                    raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found")
+                candidate = self._static_candidate(root, "index.html")
+            if not candidate.is_file():
+                raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found")
+            self._send_static_file(candidate)
+
         def _serve_static(self) -> None:
-            root = self.server.static_root
+            requested = self._request_path()
+            worker_root = getattr(self.server, "worker_static_root", None)
+            if worker_root is not None and (
+                requested == "/device" or requested.startswith("/device/")
+            ):
+                relative = requested.removeprefix("/device").lstrip("/")
+                self._serve_static_root(worker_root, relative, spa_fallback=False)
+                return
+
+            root = getattr(self.server, "static_root", None)
             if root is None:
                 self._send_json(
                     {
@@ -379,28 +488,14 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
                     }
                 )
                 return
-            requested = self.path.split("?", 1)[0].split("#", 1)[0]
-            relative = requested.lstrip("/") or "index.html"
-            candidate = (root / relative).resolve()
-            root_resolved = root.resolve()
-            if root_resolved not in candidate.parents and candidate != root_resolved:
-                raise InteractiveHTTPError(HTTPStatus.NOT_FOUND, "not_found")
-            if not candidate.is_file():
-                candidate = root_resolved / "index.html"
-            body = candidate.read_bytes()
-            content_type = "text/html; charset=utf-8"
-            if candidate.suffix == ".js":
-                content_type = "text/javascript; charset=utf-8"
-            elif candidate.suffix == ".css":
-                content_type = "text/css; charset=utf-8"
-            elif candidate.suffix == ".svg":
-                content_type = "image/svg+xml"
-            self.send_response(HTTPStatus.OK)
-            self.send_header("content-type", content_type)
-            self._send_browser_security_headers()
-            self.send_header("content-length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+
+            # Keep the packaged single-root worker functional after its script
+            # URL moved to /device, while split mode always uses the worker root.
+            if worker_root is None and requested.startswith("/device/"):
+                relative = requested.removeprefix("/device/")
+            else:
+                relative = requested.lstrip("/")
+            self._serve_static_root(root, relative, spa_fallback=True)
 
     return Handler
 
@@ -413,6 +508,7 @@ def create_server(
     port: int = 8787,
     public_origin: str | None = None,
     static_root: Path | None = None,
+    worker_static_root: Path | None = None,
 ) -> InteractiveHTTPServer:
     try:
         configured_public_origin = (
@@ -426,7 +522,10 @@ def create_server(
     server.runtime = runtime
     server.operator_token_digest = _operator_token_digest(operator_token)
     server.public_origin = configured_public_origin
-    server.static_root = static_root
+    server.static_root = None if static_root is None else Path(static_root)
+    server.worker_static_root = (
+        None if worker_static_root is None else Path(worker_static_root)
+    )
     return server
 
 
@@ -438,6 +537,7 @@ def serve_forever(
     port: int,
     public_origin: str | None,
     static_root: Path | None,
+    worker_static_root: Path | None = None,
     tls_cert: Path | None = None,
     tls_key: Path | None = None,
 ) -> None:
@@ -450,6 +550,7 @@ def serve_forever(
         port=port,
         public_origin=public_origin,
         static_root=static_root,
+        worker_static_root=worker_static_root,
     )
     try:
         if tls_cert is not None:
@@ -475,8 +576,15 @@ def serve_forever(
                     "host": actual_host,
                     "port": actual_port,
                     "public_origin": server.public_origin,
-                    "operator_url": f"{display_origin.rstrip('/')}/#operator/{operator_token}",
+                    "operator_url": (
+                        f"{display_origin.rstrip('/')}/#lab/operator/{operator_token}"
+                        if worker_static_root is not None
+                        else f"{display_origin.rstrip('/')}/#operator/{operator_token}"
+                    ),
                     "static_root": str(static_root) if static_root else None,
+                    "worker_static_root": (
+                        str(worker_static_root) if worker_static_root else None
+                    ),
                     "route_ready": False,
                     "local_evidence_only": True,
                 },
@@ -505,6 +613,11 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="Static console root (defaults to mycelium_interactive/static).",
     )
+    parser.add_argument(
+        "--worker-static-root",
+        type=Path,
+        help="Optional browser-worker static root mounted at /device.",
+    )
     parser.add_argument("--tls-cert", type=Path)
     parser.add_argument("--tls-key", type=Path)
     args = parser.parse_args(argv)
@@ -523,6 +636,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             public_origin=args.public_origin,
             static_root=static_root,
+            worker_static_root=args.worker_static_root,
             tls_cert=args.tls_cert,
             tls_key=args.tls_key,
         )

@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 
 export type ProductRouteId =
   | 'inference'
+  | 'lab'
   | 'network'
   | 'nodes'
   | 'plans'
@@ -17,6 +18,7 @@ export interface ProductRouteDescriptor {
 
 export const PRODUCT_ROUTES: readonly ProductRouteDescriptor[] = Object.freeze([
   Object.freeze({ id: 'inference', label: 'Inference', detail: 'Qualified requests' }),
+  Object.freeze({ id: 'lab', label: 'Device Lab', detail: 'Real browser testing' }),
   Object.freeze({ id: 'network', label: 'Network', detail: 'Route topology' }),
   Object.freeze({ id: 'nodes', label: 'Nodes', detail: 'Native and browser peers' }),
   Object.freeze({ id: 'plans', label: 'Plans', detail: 'Modeled strategies' }),

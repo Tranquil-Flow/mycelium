@@ -12,7 +12,7 @@ from mycelium_interactive.runtime import (
     InteractiveRuntime,
     InteractiveRuntimeError,
 )
-from mycelium_interactive.swarm import matrix_digest
+from mycelium_interactive.swarm import SwarmError, matrix_digest
 from mycelium_mobile.pixel_stage import PixelStage
 
 
@@ -31,6 +31,13 @@ def _worker(runtime: InteractiveRuntime, stop: threading.Event, errors: list[Bas
                 )
                 if work is None:
                     continue
+                assert runtime.swarm.start_work(
+                    peer_id=grant.peer_id,
+                    session_token=grant.session_token,
+                    job_id=work["job_id"],
+                    request_id=work["request_id"],
+                    input_digest=work["input_digest"],
+                ) is True
                 output = stage.execute(
                     request_id=work["request_id"],
                     assignment_id=work["assignment_id"],
@@ -204,6 +211,7 @@ def test_runtime_parent_request_cancel_reaches_active_token_stage_and_status_sta
         assert status_result[0]["active_request_count"] == 1
 
         assert runtime.cancel_request("operator-request") is True
+        assert runtime.status()["active_request_count"] == 0
         inference.join(timeout=2)
         status_reader.join(timeout=1)
         assert not inference.is_alive()
@@ -291,7 +299,7 @@ def test_cancel_before_dispatch_creation_stops_stage_work(tmp_path: Path, monkey
     assert outcome == ["request_cancelled"]
 
 
-def test_cancellation_wins_timeout_edge_after_acceptance(tmp_path: Path) -> None:
+def test_timeout_wins_when_cancellation_waits_behind_timeout_decision(tmp_path: Path) -> None:
     runtime = InteractiveRuntime(root=tmp_path / "runtime")
     entered = threading.Event()
     release = threading.Event()
@@ -326,16 +334,73 @@ def test_cancellation_wins_timeout_edge_after_acceptance(tmp_path: Path) -> None
         daemon=True,
     )
     cancel_thread.start()
-    deadline = time.monotonic() + 2
-    while not runtime._cancel_events["timeout-edge"].is_set():  # noqa: SLF001
-        assert time.monotonic() < deadline
-        time.sleep(0.001)
-    release.set()
-    infer_thread.join(timeout=2)
-    cancel_thread.join(timeout=2)
-    runtime.close()
-    assert cancel_result == [True]
-    assert outcome == ["request_cancelled"]
+    try:
+        time.sleep(0.02)
+        assert cancel_thread.is_alive(), "cancellation must wait for the stage terminal choice"
+    finally:
+        release.set()
+        infer_thread.join(timeout=2)
+        cancel_thread.join(timeout=2)
+        runtime.close()
+    assert cancel_result == [False]
+    assert outcome == ["dispatch_timeout"]
+
+
+def test_timeout_terminal_choice_makes_late_cancellation_return_false(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = InteractiveRuntime(root=tmp_path / "runtime")
+    terminal_choice_entered = threading.Event()
+    release_terminal_choice = threading.Event()
+    outcome: list[str] = []
+    cancel_result: list[bool] = []
+
+    class BlockingTimeout(SwarmError):
+        def __init__(self) -> None:
+            ValueError.__init__(self, "dispatch_timeout")
+
+        @property
+        def code(self) -> str:
+            terminal_choice_entered.set()
+            assert release_terminal_choice.wait(2)
+            return "dispatch_timeout"
+
+    def dispatch(**_kwargs: Any) -> Any:
+        raise BlockingTimeout()
+
+    monkeypatch.setattr(runtime.swarm, "dispatch", dispatch)
+
+    def infer() -> None:
+        try:
+            runtime.infer(
+                prompt="timeout",
+                request_id="timeout-terminal-choice",
+                timeout_seconds=0.1,
+            )
+        except InteractiveRuntimeError as exc:
+            outcome.append(exc.code)
+
+    infer_thread = threading.Thread(target=infer, daemon=True)
+    infer_thread.start()
+    assert terminal_choice_entered.wait(2)
+    cancel_thread = threading.Thread(
+        target=lambda: cancel_result.append(runtime.cancel_request("timeout-terminal-choice")),
+        daemon=True,
+    )
+    cancel_thread.start()
+    try:
+        time.sleep(0.02)
+        assert cancel_thread.is_alive(), "late cancel must wait for atomic terminal choice"
+    finally:
+        release_terminal_choice.set()
+        infer_thread.join(timeout=2)
+        cancel_thread.join(timeout=2)
+        runtime.close()
+    assert not infer_thread.is_alive()
+    assert not cancel_thread.is_alive()
+    assert outcome == ["dispatch_timeout"]
+    assert cancel_result == [False]
 
 
 def test_queued_inference_cancellation_settles_without_lock_release(tmp_path: Path) -> None:
@@ -358,6 +423,7 @@ def test_queued_inference_cancellation_settles_without_lock_release(tmp_path: Pa
             assert time.monotonic() < deadline
             time.sleep(0.005)
         assert runtime.cancel_request("queued-request") is True
+        assert runtime.status()["active_request_count"] == 0
         thread.join(timeout=0.5)
         settled_while_locked = not thread.is_alive()
     finally:

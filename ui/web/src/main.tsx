@@ -7,6 +7,9 @@ import {
   resolveProductObservatorySourceMode,
 } from './features/observatory/live/ObservatoryController';
 import { bootstrapProductGatewaySession } from './features/observatory/live/productGatewaySession';
+import { consumeDeviceLabOperatorCapability } from './features/deviceLab/deviceLabCapability';
+
+const deviceLabOperatorToken = consumeDeviceLabOperatorCapability();
 
 const rootElement = document.getElementById('root');
 if (rootElement === null) throw new Error('Network Observatory root element is missing');
@@ -16,7 +19,7 @@ const sourceMode = resolveProductObservatorySourceMode(import.meta.env.VITE_OBSE
 function renderProduct(source: Parameters<typeof App>[0]['source']): void {
   root.render(
     <StrictMode>
-      <App source={source} />
+      <App source={source} deviceLabOperatorToken={deviceLabOperatorToken} />
     </StrictMode>,
   );
 }

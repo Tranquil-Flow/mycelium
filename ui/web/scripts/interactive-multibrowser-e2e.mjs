@@ -152,6 +152,8 @@ async function main() {
       '--advertise-host', deviceLabHost,
       '--port', String(serverPort),
       '--state-root', stateRoot,
+      '--static-root', path.join(ROOT, 'ui', 'web', 'dist'),
+      '--worker-static-root', path.join(ROOT, 'mycelium_interactive', 'static'),
     ]
     : [
       '-m', 'mycelium_demo',
@@ -160,6 +162,8 @@ async function main() {
       '--host', '127.0.0.1',
       '--port', String(serverPort),
       '--state-root', stateRoot,
+      '--static-root', path.join(ROOT, 'ui', 'web', 'dist'),
+      '--worker-static-root', path.join(ROOT, 'mycelium_interactive', 'static'),
     ];
   const server = spawn('python3.14', serverArguments, {
     cwd: ROOT,
@@ -178,7 +182,10 @@ async function main() {
       fail('server_claim_boundary_invalid');
     }
     const operatorUrl = new URL(started.operator_url);
-    const operatorToken = operatorUrl.hash.slice('#operator/'.length);
+    const operatorPrefix = '#lab/operator/';
+    const operatorToken = operatorUrl.hash.startsWith(operatorPrefix)
+      ? operatorUrl.hash.slice(operatorPrefix.length)
+      : '';
     if (operatorUrl.origin !== origin || !operatorToken) fail('operator_capability_invalid');
     const operatorOptions = { headers: { authorization: `Bearer ${operatorToken}` } };
 
@@ -204,19 +211,31 @@ async function main() {
 
     const operator = pages.operator;
     await operator.goto(operatorUrl.href, { waitUntil: 'domcontentloaded' });
-    await operator.waitForFunction(() => document.body.innerText.includes('Mycelium browser swarm'));
+    await operator.getByRole('heading', { name: 'Device Lab', exact: true }).waitFor();
     const operatorLocation = await operator.evaluate(() => ({ href: location.href, hash: location.hash }));
-    if (operatorLocation.href !== `${origin}/` || operatorLocation.hash !== '') {
+    if (
+      operatorLocation.href !== `${origin}/#lab`
+      || operatorLocation.hash !== '#lab'
+      || operatorLocation.href.includes(operatorToken)
+    ) {
       fail('operator_fragment_not_cleared');
     }
-
-    await operator.locator('#invite-count').selectOption('2');
-    await operator.locator('#create-invites').click();
-    await operator.locator('[data-invite-url]').nth(1).waitFor();
+    await operator.getByLabel('Invite count').fill('2');
+    await operator.getByRole('button', { name: 'Create 2 one-use links' }).click();
+    try {
+      await operator.locator('[data-invite-url]').nth(1).waitFor();
+    } catch (error) {
+      const diagnostic = (await operator.locator('body').innerText()).slice(-2_000);
+      fail(`invite_render_failed:${error instanceof Error ? error.message : String(error)}:${diagnostic}:browser_failures=${failures.join('|')}`);
+    }
     const inviteUrls = await operator.locator('[data-invite-url]').evaluateAll(
-      (elements) => elements.map((element) => element.value),
+      (elements) => elements.map((element) => element.getAttribute('data-invite-url')),
     );
-    if (inviteUrls.length !== 2 || new Set(inviteUrls).size !== 2) fail('invite_urls_invalid');
+    if (
+      inviteUrls.length !== 2
+      || inviteUrls.some((value) => typeof value !== 'string')
+      || new Set(inviteUrls).size !== 2
+    ) fail('invite_urls_invalid');
 
     await Promise.all([
       pages['peer-1'].goto(inviteUrls[0], { waitUntil: 'domcontentloaded' }),
@@ -232,7 +251,7 @@ async function main() {
         hash: window.location.hash,
         preflightPassCount: document.querySelectorAll('[data-device-check][data-check-state=pass]').length,
       }));
-      if (location.href !== `${origin}/` || location.hash !== '') fail(`${role}_fragment_not_cleared`);
+      if (location.href !== `${origin}/device` || location.hash !== '') fail(`${role}_fragment_not_cleared`);
       if (location.preflightPassCount !== 5) fail(`${role}_device_preflight_incomplete`);
     }
 
@@ -240,12 +259,16 @@ async function main() {
       const document = await readApiJson(`${origin}/api/interactive/status`, operatorOptions);
       return document.status.ready_peer_count === 2 ? document.status : null;
     });
+    await operator.getByText('Minimum 2 distinct peer sessions met', { exact: true }).waitFor({ timeout: 30_000 });
     await operator.waitForFunction(
-      () => document.querySelector('#request-form button[type=submit]')?.disabled === false,
+      () => Array.from(document.querySelectorAll('button')).some((button) => (
+        button.textContent?.trim() === 'Run local evidence request' && !button.disabled
+      )),
     );
-    await operator.locator('#prompt').fill('cross engine moon swarm');
-    await operator.locator('#max-new').fill('2');
-    await operator.locator('#request-form button[type=submit]').click();
+    await operator.getByLabel('Prompt seed').fill('cross engine moon swarm');
+    await operator.getByLabel('Maximum fixture tokens').fill('2');
+    await operator.getByLabel('Minimum distinct peer sessions').fill('2');
+    await operator.getByRole('button', { name: 'Run local evidence request' }).click();
     await operator.waitForFunction(
       () => document.querySelectorAll('[data-token-evidence]').length === 2,
       null,
@@ -258,8 +281,8 @@ async function main() {
     });
     const record = status.recent_requests.at(-1);
     if (!record) fail('inference_record_missing');
-    const evidenceText = await operator.locator('.evidence-facts').innerText();
-    if (!evidenceText.includes('Peer sessions proven\n2 / 2')) fail('rendered_peer_session_proof_missing');
+    const evidenceText = await operator.locator('body').innerText();
+    if (!evidenceText.includes('2 / 2 exact peer sessions')) fail('rendered_peer_session_proof_missing');
     const completedJobs = status.peers.map((peer) => peer.completed_jobs).sort((left, right) => left - right);
     if (
       record.route_ready !== false
@@ -279,7 +302,7 @@ async function main() {
     }
 
     const downloadPromise = operator.waitForEvent('download');
-    await operator.locator('#download-evidence').click();
+    await operator.getByRole('button', { name: 'Download local evidence JSON' }).click();
     const download = await downloadPromise;
     const evidencePath = path.join(downloadRoot, download.suggestedFilename());
     await download.saveAs(evidencePath);

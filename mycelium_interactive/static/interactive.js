@@ -1,4 +1,5 @@
 import { BrowserPixelStage, matrixDigest } from './pixelStage.js';
+import { decodeEvidenceRecord, decodeOperatorStatus } from './operatorContract.js';
 
 const app = document.querySelector('#app');
 const state = {
@@ -11,6 +12,7 @@ const state = {
   busy: false,
   activeRequestId: null,
   cancellationRequested: false,
+  cancelledRequestIds: new Set(),
   statusRefreshing: false,
   draft: {
     prompt: 'moonlit swarm',
@@ -106,7 +108,7 @@ async function refreshStatus() {
   const previousRecordId = state.record?.request_id ?? null;
   const previousError = state.error;
   try {
-    state.status = (await operatorGet('/api/interactive/status')).status;
+    state.status = decodeOperatorStatus((await operatorGet('/api/interactive/status')).status);
     if (!state.record && state.status.recent_requests?.length) {
       state.record = state.status.recent_requests.at(-1);
     }
@@ -177,30 +179,37 @@ async function runInference(event) {
   state.activeRequestId = requestId;
   state.cancellationRequested = false;
   state.busy = true;
-  state.message = 'Inference running through joined browser workers…';
+  state.message = 'Bounded synthetic matrix exercise running through joined browser workers…';
   state.error = '';
   render();
   try {
-    state.record = (await operatorPost('/api/interactive/infer', {
+    const record = decodeEvidenceRecord((await operatorPost('/api/interactive/infer', {
       prompt: state.draft.prompt,
       max_new_tokens: Number(state.draft.maxNewTokens),
       required_distinct_peers: requiredDistinctPeers,
       request_id: requestId,
-    })).record;
-    state.message = `Inference completed with ${state.record.observed_distinct_peers}/${state.record.required_distinct_peers} distinct peer sessions contributing.`;
+    })).record);
+    if (state.activeRequestId === requestId) {
+      state.record = record;
+      state.message = `Local matrix exercise completed with ${record.observed_distinct_peers}/${record.required_distinct_peers} distinct peer sessions contributing.`;
+    }
   } catch (error) {
     const code = error instanceof Error ? error.message : 'inference_failed';
-    if (state.cancellationRequested || code === 'request_cancelled') {
-      state.message = 'Inference cancelled safely; joined workers remain available.';
+    const wasCancelled = state.cancelledRequestIds.has(requestId) || code === 'request_cancelled';
+    if (wasCancelled && (state.activeRequestId === requestId || state.activeRequestId === null)) {
+      state.message = 'Local matrix exercise cancelled safely; joined workers remain available.';
       state.error = '';
-    } else {
+    } else if (state.activeRequestId === requestId) {
       state.error = code;
       state.message = '';
     }
   } finally {
-    state.busy = false;
-    state.activeRequestId = null;
-    state.cancellationRequested = false;
+    state.cancelledRequestIds.delete(requestId);
+    if (state.activeRequestId === requestId) {
+      state.busy = false;
+      state.activeRequestId = null;
+      state.cancellationRequested = false;
+    }
   }
   render();
   await refreshStatus();
@@ -215,8 +224,16 @@ async function cancelInference() {
   render();
   try {
     const response = await operatorPost('/api/interactive/cancel', { request_id: requestId });
-    if (!response.cancelled) {
-      state.message = 'Inference finished before cancellation reached active work.';
+    if (response.cancelled) {
+      state.cancelledRequestIds.add(requestId);
+      if (state.activeRequestId === requestId) {
+        state.busy = false;
+        state.activeRequestId = null;
+        state.cancellationRequested = false;
+      }
+      state.message = 'Cancellation accepted; no new browser-stage compute can start for this request.';
+    } else {
+      state.message = 'Local matrix exercise finished before cancellation reached active work.';
     }
   } catch (error) {
     state.cancellationRequested = false;
@@ -325,6 +342,19 @@ async function peerLoop() {
       continue;
     }
     if (work.route_ready !== false) throw new Error('work_route_ready_invalid');
+    const permit = await post('/api/interactive/start', {
+      peer_id: state.peer.peerId,
+      session_token: state.peer.sessionToken,
+      job_id: work.job_id,
+      request_id: work.request_id,
+      input_digest: work.input_digest,
+    });
+    if (permit.route_ready !== false) throw new Error('work_start_route_ready_invalid');
+    if (permit.started !== true) {
+      state.peer.lastJob = `${work.job_id} (cancelled before compute)`;
+      render();
+      continue;
+    }
     const output = state.peer.stage.execute(work.hidden);
     try {
       await post('/api/interactive/result', {
@@ -364,7 +394,7 @@ function hostHtml() {
   const peerCount = status?.peer_count ?? 0;
   const readyPeerCount = status?.ready_peer_count ?? 0;
   const targetCount = selectedDeviceTarget();
-  const targetReady = readyPeerCount >= targetCount;
+  const minimumReady = readyPeerCount >= targetCount;
   const deviceCountOptions = [1, 2, 3, 4, 5, 6]
     .map((count) => `<option value="${count}" ${count === targetCount ? 'selected' : ''}>${count}</option>`)
     .join('');
@@ -387,27 +417,27 @@ function hostHtml() {
     </div>`).join('');
   return `
     <section class="hero">
-      <p class="eyebrow">Interactive distributed inference test</p>
+      <p class="eyebrow">Interactive browser-session matrix exercise</p>
       <h1>Mycelium browser swarm</h1>
-      <p>Create one unique link per browser/device, wait for them to join, then route bounded decoder-stage jobs across the swarm. Observatory remains read-only; this is a separate local test console.</p>
-      <div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>same-origin API</span><span>trusted HTTPS required off-host</span><span>${targetReady ? `${targetCount}-peer-session target ready` : `${readyPeerCount}/${targetCount} workers ready`}</span></div>
+      <p>Create one unique link per browser session, wait for them to join, then route bounded synthetic matrix jobs across the swarm. This is never model inference. Observatory remains read-only; this is a separate local test console.</p>
+      <div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>same-origin API</span><span>trusted HTTPS required off-host</span><span>${minimumReady ? `minimum ${targetCount} distinct peer sessions ready` : `${readyPeerCount}/${targetCount} minimum ready`}</span></div>
     </section>
     <section class="grid">
-      <div id="live-console-guide" class="card wide"><p class="eyebrow">Physical-device test path</p><ol class="steps"><li><strong>Trust</strong><span>install the local CA on the operator host and every worker device</span></li><li><strong>Create</strong><span>choose a target and generate one unique link per device</span></li><li><strong>Join</strong><span>open each link once and wait for the full target to become ready</span></li><li><strong>Run</strong><span>send a bounded request through genuine browser-stage compute</span></li><li><strong>Save</strong><span>inspect parity rows and download an unsigned local JSON summary</span></li></ol><p class="boundary">Keep every device on a network that can reach this host. The local CA enables Web Crypto over LAN HTTPS. This proves distinct authenticated peer sessions, not physical-device identity. This remains bounded-model evidence, not production readiness.</p></div>
+      <div id="live-console-guide" class="card wide"><p class="eyebrow">Optional physical-device observation path</p><ol class="steps"><li><strong>Trust</strong><span>install the local CA on the operator host and every worker device</span></li><li><strong>Create</strong><span>choose a minimum and generate one unique link per device</span></li><li><strong>Join</strong><span>open each link once and wait for the minimum cohort to become ready</span></li><li><strong>Run</strong><span>send a bounded request through the synthetic browser matrix exercise</span></li><li><strong>Save</strong><span>inspect the completed request's exact session cohort, parity rows, and unsigned local JSON summary</span></li></ol><p class="boundary">Keep every device on a network that can reach this host. The local CA enables Web Crypto over LAN HTTPS. This proves distinct authenticated peer sessions, not physical-device identity. This is bounded matrix-fixture evidence, never model inference or production readiness.</p></div>
       <div class="card"><p class="eyebrow">Swarm status</p><dl class="facts">
         <div><dt>Peer sessions joined</dt><dd>${h(peerCount || (status ? 0 : '—'))}</dd></div>
         <div><dt>Workers ready</dt><dd>${h(status ? readyPeerCount : '—')}</dd></div>
-        <div><dt>Peer-session target</dt><dd>${targetReady ? `READY · ${h(readyPeerCount)}/${h(targetCount)}` : `WAITING · ${h(readyPeerCount)}/${h(targetCount)}`}</dd></div>
+        <div><dt>Distinct-peer minimum</dt><dd>${minimumReady ? `READY · ${h(readyPeerCount)} ready, minimum ${h(targetCount)}` : `WAITING · ${h(readyPeerCount)} ready, minimum ${h(targetCount)}`}</dd></div>
         <div><dt>Active requests</dt><dd>${h(status?.active_request_count ?? '—')}</dd></div>
         <div><dt>Pending jobs</dt><dd>${h(status?.pending_job_count ?? '—')}</dd></div>
         <div><dt>Completed requests</dt><dd>${h(status?.completed_request_count ?? '—')}</dd></div>
         <div><dt>Stage pack</dt><dd>${h(short(status?.stage_pack_digest))}</dd></div>
         <div><dt>Route ready</dt><dd>${h(String(status?.route_ready ?? false))}</dd></div>
       </dl></div>
-      <div class="card stack"><p class="eyebrow">Join browser peers</p><p>First trust the CA certificate printed by <code>device-lab</code> on this operator host and every worker device. Then create one unique capability link per browser peer.</p><label for="invite-count">Peer-session target</label><select id="invite-count" ${state.busy ? 'disabled' : ''}>${deviceCountOptions}</select><button id="create-invites" class="primary" ${state.busy ? 'disabled' : ''}>Create ${h(targetCount)} unique worker link${targetCount === 1 ? '' : 's'}</button><small>Links expire after five minutes. Never reuse or share one link across peer sessions.</small>
+      <div class="card stack"><p class="eyebrow">Join browser peers</p><p>First trust the CA certificate printed by <code>device-lab</code> on this operator host and every worker device. Then create one unique capability link per browser peer.</p><label for="invite-count">Minimum distinct peer sessions</label><select id="invite-count" ${state.busy ? 'disabled' : ''}>${deviceCountOptions}</select><button id="create-invites" class="primary" ${state.busy ? 'disabled' : ''}>Create ${h(targetCount)} unique worker link${targetCount === 1 ? '' : 's'}</button><small>Links expire after five minutes. Never reuse or share one link across peer sessions.</small>
         <div class="invite-list">${inviteRows || '<small>No device links created yet.</small>'}</div>
       </div>
-      <form id="request-form" class="card stack" aria-busy="${state.busy}"><p class="eyebrow">Request</p><label for="prompt">Prompt seed</label><textarea id="prompt" name="prompt" maxlength="512">${h(state.draft.prompt)}</textarea><label for="max-new">Max new tokens</label><input id="max-new" name="max_new_tokens" type="number" min="${h(targetCount)}" max="8" value="${h(state.draft.maxNewTokens)}"><div class="request-actions"><button class="primary" type="submit" ${state.busy || !targetReady ? 'disabled' : ''}>${state.busy ? 'Inference running…' : 'Run through browser swarm'}</button>${state.busy ? `<button id="cancel-request" class="danger" type="button" ${state.cancellationRequested ? 'disabled' : ''}>${state.cancellationRequested ? 'Cancelling…' : 'Cancel request'}</button>` : ''}</div>${state.busy ? `<small role="status">Active ${h(short(state.activeRequestId))}; status remains live while work runs.</small>` : `<small>Use at least ${h(targetCount)} token${targetCount === 1 ? '' : 's'} so every target peer session receives a genuine stage job. Maximum 8; local evidence only.</small>`}</form>
+      <form id="request-form" class="card stack" aria-busy="${state.busy}"><p class="eyebrow">Request</p><label for="prompt">Prompt seed</label><textarea id="prompt" name="prompt" maxlength="512">${h(state.draft.prompt)}</textarea><label for="max-new">Max fixture tokens</label><input id="max-new" name="max_new_tokens" type="number" min="${h(targetCount)}" max="8" value="${h(state.draft.maxNewTokens)}"><div class="request-actions"><button class="primary" type="submit" ${state.busy || !minimumReady ? 'disabled' : ''}>${state.busy ? 'Matrix exercise running…' : 'Run browser matrix exercise'}</button>${state.busy ? `<button id="cancel-request" class="danger" type="button" ${state.cancellationRequested ? 'disabled' : ''}>${state.cancellationRequested ? 'Cancelling…' : 'Cancel request'}</button>` : ''}</div>${state.busy ? `<small role="status">Active ${h(short(state.activeRequestId))}; status remains live while work runs.</small>` : `<small>Use at least ${h(targetCount)} fixture token${targetCount === 1 ? '' : 's'} so the completed request can freeze an exact ${h(targetCount)}-peer cohort. Maximum 8; local evidence only; never model inference.</small>`}</form>
       <div class="card"><p class="eyebrow">Connected peers</p><dl class="facts">${peers.map((peer) => `<div><dt>${h(peer.peer_id)}</dt><dd>${h(peer.state)} · jobs ${h(peer.completed_jobs)}</dd></div>`).join('') || '<div><dt>none</dt><dd>create device links</dd></div>'}</dl></div>
       ${state.message ? `<div class="card wide message" role="status">${h(state.message)}</div>` : ''}
       ${state.error ? `<div class="card wide error" role="alert">${h(state.error)}</div>` : ''}
@@ -430,8 +460,8 @@ function peerHtml() {
       <dt>${h(label)}</dt><dd>${passed ? 'PASS' : 'WAIT'}</dd>
     </div>`).join('');
   return `
-    <section class="hero"><p class="eyebrow">Browser worker · one-link join</p><h1>Joined swarm worker</h1><p>Keep this page open and the device awake. This browser computes only assigned bounded decoder substages; its session capability stays in memory.</p><div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>exact stage JS</span><span>${environment.polling ? 'device ready' : 'device preparing'}</span></div></section>
-    <section class="grid"><div class="card"><p class="eyebrow">Device preflight</p><dl class="facts check-list">${checks}</dl><p class="boundary">Origin: ${h(window.location.origin)}. If secure context or Web Crypto does not pass, trust the device-lab CA and reopen the original unconsumed link.</p></div><div class="card"><p class="eyebrow">Peer state</p><dl class="facts"><div><dt>State</dt><dd>${h(peer.state)}</dd></div><div><dt>Peer</dt><dd>${h(peer.peerId ?? 'joining…')}</dd></div><div><dt>Completed jobs</dt><dd>${h(peer.completed)}</dd></div><div><dt>Last job</dt><dd>${h(peer.lastJob ?? 'none')}</dd></div><div><dt>Route ready</dt><dd>false</dd></div></dl><br>${canStop ? `<button id="stop-peer" ${peer.state === 'stopping' ? 'disabled' : ''}>${peer.state === 'stopping' ? 'Stopping…' : 'Stop peer worker'}</button>` : '<p class="message">Worker stopped. This one-use link cannot be reused.</p>'}${peer.error ? `<p class="error" role="alert">${h(peer.error)}</p>` : ''}</div></section>`;
+    <section class="hero"><p class="eyebrow">Browser worker · one-link join</p><h1>Joined swarm worker</h1><p>Keep this page open and the browser awake. This session computes only an assigned bounded synthetic matrix fixture—never model inference. Authenticated session distinctness does not prove physical-device identity.</p><div class="claim"><span>route_ready=false</span><span>local evidence only</span><span>synthetic fixture</span><span>not model inference</span><span>identity unproven</span><span>${environment.polling ? 'session ready' : 'session preparing'}</span></div></section>
+    <section class="grid"><div class="card"><p class="eyebrow">Browser-session preflight</p><dl class="facts check-list">${checks}</dl><p class="boundary">Origin: ${h(window.location.origin)}. If secure context or Web Crypto does not pass, trust the device-lab CA and reopen the original unconsumed link.</p></div><div class="card"><p class="eyebrow">Peer state</p><dl class="facts"><div><dt>State</dt><dd>${h(peer.state)}</dd></div><div><dt>Peer session</dt><dd>${h(peer.peerId ?? 'joining…')}</dd></div><div><dt>Completed jobs</dt><dd>${h(peer.completed)}</dd></div><div><dt>Last job</dt><dd>${h(peer.lastJob ?? 'none')}</dd></div><div><dt>Route ready</dt><dd>false</dd></div></dl><br>${canStop ? `<button id="stop-peer" ${peer.state === 'stopping' ? 'disabled' : ''}>${peer.state === 'stopping' ? 'Stopping…' : 'Stop peer worker'}</button>` : '<p class="message">Worker stopped. This one-use link cannot be reused.</p>'}${peer.error ? `<p class="error" role="alert">${h(peer.error)}</p>` : ''}</div></section>`;
 }
 
 function render() {
