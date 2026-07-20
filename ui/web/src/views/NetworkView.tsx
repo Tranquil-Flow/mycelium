@@ -55,7 +55,7 @@ export function NetworkView({ snapshot }: NetworkViewProps) {
       <header className="view-heading">
         <div>
           <p className="eyebrow lime">Offline route projection</p>
-          <h2>Network topology</h2>
+          <h1>Network topology</h1>
           <p className="view-description">
             Read-only stage placement from bundled simulator evidence. Selection changes inspection only.
           </p>

@@ -144,12 +144,26 @@ describe('SwarmWorkspace', () => {
     expect(await screen.findByText(/native-relay left its device session/i)).toBeInTheDocument();
   });
 
+  it('disables all mutating actions in offline evidence mode', () => {
+    const client = fakeClient();
+    render(<SwarmWorkspace client={client} initialStatus={status} now={() => NOW} readOnly />);
+
+    expect(screen.getByRole('button', { name: /create native-node invite/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /create browser-probe invite/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /leave native-relay/i })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: /invite code/i })).toBeDisabled();
+    expect(screen.getByText(/changes are unavailable in offline evidence mode/i)).toBeInTheDocument();
+    expect(client.createInvite).not.toHaveBeenCalled();
+    expect(client.join).not.toHaveBeenCalled();
+    expect(client.leave).not.toHaveBeenCalled();
+  });
+
   it('fails closed with an accessible error and does not invent inventory data', async () => {
     const client = fakeClient({ status: vi.fn(async () => { throw new Error('status_unavailable'); }) });
     render(<SwarmWorkspace client={client} now={() => NOW} />);
 
     expect(await screen.findByRole('alert')).toHaveTextContent('status_unavailable');
-    expect(screen.getByText(/no device status is shown/i)).toBeInTheDocument();
+    expect(screen.getByText(/no unverified device status is introduced/i)).toBeInTheDocument();
     expect(screen.queryByText('native-private')).not.toBeInTheDocument();
   });
 });

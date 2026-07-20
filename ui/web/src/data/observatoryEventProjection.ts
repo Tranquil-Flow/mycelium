@@ -44,7 +44,7 @@ export interface ObservatoryAdapterQualification {
   readonly qualification_id: string;
   readonly issued_at_unix_ms: number;
   readonly evidence_class: 'physical_qualification' | 'synthetic_test_fixture';
-  readonly route_ready: false;
+  readonly route_ready: boolean;
   readonly reason_codes: readonly string[];
   readonly binding: ObservatoryAdapterBinding;
 }
@@ -81,7 +81,7 @@ export interface ObservatoryAdapterIncident {
 
 export interface ObservatoryAdapterStatus {
   readonly protocol: typeof OBSERVATORY_EVENT_STATUS_PROTOCOL;
-  readonly route_ready: false;
+  readonly route_ready: boolean;
   readonly source_cursor: number;
   readonly buffered_sessions: number;
   readonly quarantine_capacity: number;
@@ -362,7 +362,7 @@ function decodeQualification(value: unknown): ObservatoryAdapterQualification | 
     'qualification',
   );
   protocol(item.protocol, ROUTE_QUALIFICATION_PROTOCOL, 'qualification.protocol');
-  if (item.route_ready !== false) return invalid('qualification.route_ready must remain false');
+  if (typeof item.route_ready !== 'boolean') return invalid('qualification.route_ready must be boolean');
   if (
     item.evidence_class !== 'physical_qualification' &&
     item.evidence_class !== 'synthetic_test_fixture'
@@ -375,12 +375,21 @@ function decodeQualification(value: unknown): ObservatoryAdapterQualification | 
     'qualification.reason_codes',
     MAX_REASON_CODES,
   ).map((candidate, index) => safeCode(candidate, `qualification.reason_codes[${index}]`));
-  if (reasonCodes.length === 0 || new Set(reasonCodes).size !== reasonCodes.length) {
-    return invalid('qualification.reason_codes must be non-empty and unique');
+  if (new Set(reasonCodes).size !== reasonCodes.length) {
+    return invalid('qualification.reason_codes must be unique');
+  }
+  if (
+    (item.route_ready && (item.evidence_class !== 'physical_qualification' || reasonCodes.length !== 0)) ||
+    (!item.route_ready && reasonCodes.length === 0)
+  ) {
+    return invalid('qualification readiness does not match accepted physical evidence');
   }
   const binding = decodeBinding(item.binding);
   if (binding.qualification_id !== qualificationId) {
     return invalid('qualification identifier does not match binding');
+  }
+  if (item.route_ready && binding.stage_load_proof_digests.length === 0) {
+    return invalid('qualification readiness requires stage load proof digests');
   }
   return {
     protocol: ROUTE_QUALIFICATION_PROTOCOL,
@@ -390,7 +399,7 @@ function decodeQualification(value: unknown): ObservatoryAdapterQualification | 
       'qualification.issued_at_unix_ms',
     ),
     evidence_class: item.evidence_class,
-    route_ready: false,
+    route_ready: item.route_ready,
     reason_codes: reasonCodes,
     binding,
   };
@@ -568,8 +577,11 @@ export function decodeObservatoryAdapterEvent(value: unknown): ObservatoryAdapte
     OBSERVATORY_EVENT_STATUS_PROTOCOL,
     'provisioning.protocol',
   );
-  if (statusCandidate.route_ready !== false) {
-    return invalid('provisioning.route_ready must remain false');
+  if (typeof statusCandidate.route_ready !== 'boolean') {
+    return invalid('provisioning.route_ready must be boolean');
+  }
+  if (statusCandidate.route_ready !== (qualification?.route_ready ?? false)) {
+    return invalid('provisioning.route_ready does not match qualifier-owned evidence');
   }
   const statusCursor = safeInteger(statusCandidate.source_cursor, 'provisioning.source_cursor', -1);
   const bufferedSessions = safeInteger(
@@ -607,7 +619,7 @@ export function decodeObservatoryAdapterEvent(value: unknown): ObservatoryAdapte
       incidents,
       provisioning: {
         protocol: OBSERVATORY_EVENT_STATUS_PROTOCOL,
-        route_ready: false,
+        route_ready: statusCandidate.route_ready,
         source_cursor: statusCursor,
         buffered_sessions: bufferedSessions,
         quarantine_capacity: quarantineCapacity,

@@ -66,7 +66,7 @@ describe('Network Observatory', () => {
   it('makes fixture mode and disabled live integration unmistakable', () => {
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: 'Mycelium' })).toBeInTheDocument();
+    expect(screen.getByText('Mycelium')).toBeInTheDocument();
     expect(screen.getByText(/^MVP$/)).toBeInTheDocument();
     expect(screen.getByText(/fixture data · not live/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /fixture data · not current/i })).toBeInTheDocument();
@@ -238,5 +238,23 @@ describe('Network Observatory', () => {
     expect(screen.getByRole('button', { name: /current evidence · g12/i })).toBeDisabled();
     expect(screen.getByText(/^live evidence · current$/i)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /network topology/i })).not.toBeInTheDocument();
+  });
+
+  it('shows live source loading before exposing inference controls', () => {
+    window.history.replaceState(null, '', '#inference');
+    const pending = new Promise<ObservatorySourceState>(() => undefined);
+    const source: ObservatoryDataSource = {
+      source_mode: 'live',
+      kind: 'live',
+      getState: () => null,
+      loadInitial: () => pending,
+    };
+
+    render(<App source={source} />);
+
+    expect(
+      screen.getByRole('heading', { name: /loading semantic observatory snapshot/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /^inference$/i })).not.toBeInTheDocument();
   });
 });

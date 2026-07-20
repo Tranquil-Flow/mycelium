@@ -24,6 +24,7 @@ export function inventoryRows(
   query: string,
   sort: InventorySort,
   nowUnixMs: number,
+  concealNetworkIdentity = false,
 ): readonly InventoryRow[] {
   const nativeRows: InventoryRow[] = status.native_nodes.map((node) => ({
     id: node.member_id,
@@ -31,7 +32,9 @@ export function inventoryRows(
     capabilityLabel: 'Native model-stage node',
     state: node.membership_state,
     connectivity: node.connectivity,
-    endpointLabel: displayEndpointIdentity(node.endpoint_id),
+    endpointLabel: concealNetworkIdentity
+      ? 'Network identity concealed'
+      : displayEndpointIdentity(node.endpoint_id),
     expiresAtUnixMs: null,
     expiryLabel: 'Session managed',
     routeReady: false,

@@ -37,6 +37,16 @@ export interface FixtureObservatorySourceState {
   readonly freshness: 'fixture';
 }
 
+export interface ReplayObservatorySourceState {
+  readonly source_mode: 'replay';
+  readonly status: 'connected';
+  readonly generation: 0;
+  readonly bundle: ObservatoryBundle;
+  readonly live_qualified: false;
+  readonly qualification_reasons: readonly ['replay_source'];
+  readonly freshness: 'replay';
+}
+
 export interface LiveObservatorySourceState {
   readonly source_mode: 'live';
   readonly status: 'connecting' | 'connected' | 'disconnected';
@@ -48,9 +58,9 @@ export interface LiveObservatorySourceState {
   readonly reason?: string;
 }
 
-export type ObservatorySourceState = FixtureObservatorySourceState | LiveObservatorySourceState;
+export type ObservatorySourceState = FixtureObservatorySourceState | ReplayObservatorySourceState | LiveObservatorySourceState;
 export type ObservatorySourceListener = (state: ObservatorySourceState) => void;
-export type ObservatorySourceMode = 'fixture' | 'live';
+export type ObservatorySourceMode = 'fixture' | 'replay' | 'live';
 export type ObservatorySourceKind = 'static' | 'live';
 
 export interface ObservatoryDataSource {
@@ -103,6 +113,33 @@ export class StaticObservatorySource implements ObservatoryDataSource {
   }
 
   getState(): FixtureObservatorySourceState | null {
+    return this.state;
+  }
+}
+
+export class ReplayObservatorySource implements ObservatoryDataSource {
+  readonly source_mode = 'replay' as const;
+  readonly kind = 'static' as const;
+  readonly subscribe = undefined;
+  private readonly state: ReplayObservatorySourceState;
+
+  constructor(loadBundle: () => ObservatoryBundle = loadStaticObservatoryBundle) {
+    this.state = deepFreeze({
+      source_mode: 'replay',
+      status: 'connected',
+      generation: 0,
+      bundle: loadBundle(),
+      live_qualified: false,
+      qualification_reasons: ['replay_source'] as const,
+      freshness: 'replay',
+    });
+  }
+
+  loadInitial(): ReplayObservatorySourceState {
+    return this.state;
+  }
+
+  getState(): ReplayObservatorySourceState {
     return this.state;
   }
 }
@@ -444,10 +481,12 @@ export class LiveObservatorySource implements ObservatoryDataSource {
 
 export type ObservatorySourceConfig =
   | { readonly source_mode: 'fixture' }
+  | { readonly source_mode: 'replay' }
   | { readonly source_mode: 'live'; readonly options?: LiveObservatorySourceOptions };
 
 export function createObservatorySource(): StaticObservatorySource;
 export function createObservatorySource(config: { readonly source_mode: 'fixture' }): StaticObservatorySource;
+export function createObservatorySource(config: { readonly source_mode: 'replay' }): ReplayObservatorySource;
 export function createObservatorySource(config: {
   readonly source_mode: 'live';
   readonly options?: LiveObservatorySourceOptions;
@@ -456,6 +495,7 @@ export function createObservatorySource(
   config: ObservatorySourceConfig = { source_mode: 'fixture' },
 ): ObservatoryDataSource {
   if (config.source_mode === 'fixture') return new StaticObservatorySource();
+  if (config.source_mode === 'replay') return new ReplayObservatorySource();
   if (config.source_mode === 'live') return new LiveObservatorySource(config.options);
   throw new TypeError('Unknown Observatory source_mode');
 }

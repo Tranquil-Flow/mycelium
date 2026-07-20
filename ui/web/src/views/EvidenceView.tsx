@@ -106,7 +106,7 @@ export function EvidenceView({ snapshot, incidents, provisioning }: EvidenceView
       <header className="view-heading">
         <div>
           <p className="eyebrow cyan">Independent evidence readout</p>
-          <h2>Proof Matrix</h2>
+          <h1>Proof Matrix</h1>
           <p className="view-description">
             Artifact facts, simulator claims, and executable-route readiness remain separate.
           </p>

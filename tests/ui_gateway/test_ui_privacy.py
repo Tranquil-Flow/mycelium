@@ -4,16 +4,108 @@ import inspect
 import json
 from pathlib import Path
 
+import pytest
+
 from conftest import (
     ERROR_CANARY,
     REQUEST_TOKEN,
     FakeUpstream,
     json_body,
+    observatory_snapshot,
     request,
     session_headers,
 )
 
 from mycelium_ui_gateway import GatewayConfig, create_product_gateway_application
+from mycelium_ui_gateway.validation import (
+    GatewayValidationError,
+    validate_observatory_envelope,
+    validate_swarm_status,
+)
+
+
+def _ready_observatory() -> dict:
+    payload = observatory_snapshot()
+    binding = {
+        "qualification_id": "qualification-1",
+        "qualification_digest": "sha256:" + "a" * 64,
+        "deployment_id": "deployment-1",
+        "deployment_epoch": 1,
+        "topology_version": 2,
+        "model_id": "model-1",
+        "resolved_commit": "revision-1",
+        "manifest_digest": "sha256:" + "b" * 64,
+        "path_manifest_digest": "sha256:" + "c" * 64,
+        "stage_load_proof_digests": ["sha256:" + "d" * 64],
+    }
+    payload["bundle"]["snapshot"]["qualification"] = {
+        "protocol": "mycelium.route_qualification.v1",
+        "qualification_id": "qualification-1",
+        "issued_at_unix_ms": 1_000,
+        "evidence_class": "physical_qualification",
+        "route_ready": True,
+        "reason_codes": [],
+        "binding": binding,
+    }
+    payload["bundle"]["provisioning"]["route_ready"] = True
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    (("snapshot", "user_prompt"), ("provisioning", "private_endpoint")),
+)
+def test_observatory_projection_rejects_unmodelled_nested_private_fields(
+    section: str, field: str
+) -> None:
+    payload = observatory_snapshot()
+    payload["bundle"][section][field] = "must-never-cross-product-gateway"
+
+    with pytest.raises(GatewayValidationError) as raised:
+        validate_observatory_envelope(payload)
+    assert raised.value.code == "invalid_observatory_response"
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda payload: payload["bundle"]["snapshot"]["qualification"]["binding"].update(
+            stage_load_proof_digests=[]
+        ),
+        lambda payload: payload["bundle"]["snapshot"].update(
+            protocol="mycelium.observatory.request_projection.v2"
+        ),
+        lambda payload: payload["bundle"]["provisioning"].update(buffered_sessions="0"),
+        lambda payload: payload["bundle"]["snapshot"]["qualification"]["binding"].update(
+            deployment_id="10.0.0.1"
+        ),
+    ),
+)
+def test_observatory_projection_rejects_unbacked_mistyped_or_private_state(mutate) -> None:
+    payload = _ready_observatory()
+    mutate(payload)
+
+    with pytest.raises(GatewayValidationError) as raised:
+        validate_observatory_envelope(payload)
+    assert raised.value.code == "invalid_observatory_response"
+
+
+def test_swarm_projection_rejects_private_network_identifiers() -> None:
+    payload = {
+        "protocol": "mycelium.product_ui.swarm.v1",
+        "native_nodes": [
+            {
+                "member_id": "10.0.0.1",
+                "capability": "native_inference_node",
+                "membership_state": "trusted",
+                "connectivity": "local",
+                "endpoint_id": None,
+            }
+        ],
+        "browser_workers": [],
+    }
+    with pytest.raises(GatewayValidationError):
+        validate_swarm_status(payload)
 
 
 def test_upstream_exception_and_error_bodies_never_echo_private_material(

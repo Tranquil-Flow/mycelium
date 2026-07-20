@@ -11,6 +11,8 @@ export interface SwarmWorkspaceProps {
   readonly client?: SwarmClient;
   readonly initialStatus?: ProductSwarmStatus;
   readonly now?: () => number;
+  readonly concealNetworkIdentity?: boolean;
+  readonly readOnly?: boolean;
 }
 
 function errorMessage(error: unknown): string {
@@ -42,7 +44,13 @@ function InviteCard({ invite, now }: { invite: SwarmInviteResponse; now: number 
   );
 }
 
-export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmWorkspaceProps) {
+export function SwarmWorkspace({
+  client,
+  initialStatus,
+  now = Date.now,
+  concealNetworkIdentity = false,
+  readOnly = false,
+}: SwarmWorkspaceProps) {
   const defaultClient = useMemo(() => new HttpSwarmClient({ now }), [now]);
   const swarmClient = client ?? defaultClient;
   const [status, setStatus] = useState<ProductSwarmStatus | null>(initialStatus ?? null);
@@ -77,8 +85,8 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
   }, []);
 
   const rows = useMemo(
-    () => status === null ? [] : inventoryRows(status, search, sort, now()),
-    [now, search, sort, status],
+    () => status === null ? [] : inventoryRows(status, search, sort, now(), concealNetworkIdentity),
+    [concealNetworkIdentity, now, search, sort, status],
   );
 
   const createInvite = async (capability: 'native_inference_node' | 'synthetic_browser_probe') => {
@@ -136,7 +144,7 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
       <header className={styles.hero}>
         <div>
           <p className={styles.eyebrow}>Device sessions and bounded enrollment</p>
-          <h1 id="swarm-title">Nodes and swarm</h1>
+          <h2 id="swarm-title">Nodes and swarm</h2>
           <p>Native model-stage nodes remain distinct from synthetic browser probes.</p>
         </div>
         <div className={styles.truth}>
@@ -148,7 +156,7 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
       {error !== null ? (
         <div className={styles.error} role="alert">
           <strong>{error}</strong>
-          <span>No device status is shown when the product contract cannot be verified.</span>
+          <span>No unverified device status is introduced; the last verified projection may remain visible.</span>
         </div>
       ) : null}
       {notice !== null ? <p className={styles.notice} role="status">{notice}</p> : null}
@@ -202,7 +210,7 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
                       <td>{row.expiryLabel}</td>
                       <td>
                         {row.kind === 'native_node' ? (
-                          <button type="button" onClick={() => setConfirmLeave(row.id)}>
+                          <button type="button" onClick={() => setConfirmLeave(row.id)} disabled={readOnly}>
                             Leave {row.id}
                           </button>
                         ) : 'Probe only'}
@@ -218,7 +226,7 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
           {confirmLeave !== null ? (
             <div className={styles.confirm} role="group" aria-label={`Confirm leave ${confirmLeave}`}>
               <p>Leaving closes only this product device session. It does not mutate Router state.</p>
-              <button type="button" onClick={() => void leave(confirmLeave)} disabled={busy}>Confirm leave</button>
+              <button type="button" onClick={() => void leave(confirmLeave)} disabled={busy || readOnly}>Confirm leave</button>
               <button type="button" onClick={() => setConfirmLeave(null)} disabled={busy}>Keep session</button>
             </div>
           ) : null}
@@ -228,7 +236,8 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
           <p className={styles.eyebrow}>Coordinator enrollment</p>
           <h2 id="enroll-title">Invite or join</h2>
           <p>Invites are bounded, single-use enrollment material. They are never stored by this page.</p>
-          <button type="button" onClick={() => void createInvite('native_inference_node')} disabled={busy}>
+          {readOnly ? <p role="status">Enrollment and membership changes are unavailable in offline evidence mode.</p> : null}
+          <button type="button" onClick={() => void createInvite('native_inference_node')} disabled={busy || readOnly}>
             Create native-node invite
           </button>
           <form className={styles.join} onSubmit={(event) => void join(event)}>
@@ -241,6 +250,7 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
                 value={inviteCode}
                 onChange={(event) => setInviteCode(event.currentTarget.value)}
                 maxLength={2_048}
+                disabled={readOnly}
               />
             </label>
             <label>
@@ -250,9 +260,10 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
                 value={deviceName}
                 onChange={(event) => setDeviceName(event.currentTarget.value)}
                 maxLength={128}
+                disabled={readOnly}
               />
             </label>
-            <button type="submit" disabled={busy || inviteCode.length < 16}>Join swarm</button>
+            <button type="submit" disabled={busy || readOnly || inviteCode.length < 16}>Join swarm</button>
           </form>
         </aside>
       </div>
@@ -264,7 +275,7 @@ export function SwarmWorkspace({ client, initialStatus, now = Date.now }: SwarmW
         <div>
           <p>Synthetic matrix probe only. Browser work cannot set model, stage, inference, or route readiness.</p>
           <p><code>route_ready=false</code> remains literal for every browser worker.</p>
-          <button type="button" onClick={() => void createInvite('synthetic_browser_probe')} disabled={busy}>
+          <button type="button" onClick={() => void createInvite('synthetic_browser_probe')} disabled={busy || readOnly}>
             Create browser-probe invite
           </button>
         </div>

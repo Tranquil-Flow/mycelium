@@ -132,6 +132,8 @@ describe('live read-only Observatory event source', () => {
     expect(JSON.stringify(source.getState())).not.toContain(CANARY);
     expect(states.length).toBeGreaterThan(0);
     unsubscribe();
+    expect(source.getState()!.status).toBe('disconnected');
+    expect(source.getState()!.route_ready).toBe(false);
   });
 
   it('bounds the initial GET body before decoding or retaining private data', async () => {
@@ -219,6 +221,23 @@ describe('live read-only Observatory event source', () => {
     stream.emit(validObservatoryAdapterEvent(2, 4), '2');
     expect(source.getState()!.status).toBe('connected');
     expect(source.getState()!.generation).toBe(2);
+  });
+
+  it('promotes only current accepted physical evidence and revokes readiness on disconnect', async () => {
+    const { source, stream } = harness({ now: () => 1_000 });
+    await source.loadInitial();
+    source.subscribe(() => undefined);
+    stream.open();
+    const accepted = validObservatoryAdapterEvent(2, 4);
+    accepted.bundle.snapshot.qualification!.evidence_class = 'physical_qualification';
+    accepted.bundle.snapshot.qualification!.route_ready = true;
+    accepted.bundle.snapshot.qualification!.reason_codes = [];
+    accepted.bundle.provisioning.route_ready = true;
+
+    stream.emit(accepted, '2');
+    expect(source.getState()!.route_ready).toBe(true);
+    stream.fail();
+    expect(source.getState()!.route_ready).toBe(false);
   });
 
   it('marks projection stale on a bounded timer while route_ready remains false', async () => {

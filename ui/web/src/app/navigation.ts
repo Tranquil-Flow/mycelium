@@ -22,7 +22,7 @@ export const PRODUCT_ROUTES: readonly ProductRouteDescriptor[] = Object.freeze([
   Object.freeze({ id: 'plans', label: 'Plans', detail: 'Modeled strategies' }),
   Object.freeze({ id: 'readiness', label: 'Readiness', detail: 'Evidence and authority' }),
   Object.freeze({ id: 'incidents', label: 'Incidents', detail: 'Failure history' }),
-  Object.freeze({ id: 'settings', label: 'Settings', detail: 'Local diagnostics' }),
+  Object.freeze({ id: 'settings', label: 'Settings', detail: 'Local preferences' }),
 ]);
 
 const PRODUCT_ROUTE_IDS = new Set<ProductRouteId>(PRODUCT_ROUTES.map((route) => route.id));

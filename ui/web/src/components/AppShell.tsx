@@ -1,17 +1,18 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { PRODUCT_ROUTES, productRouteHref, type ProductRouteId } from '../app/navigation';
 import type { RouteReadinessState } from '../app/ProductState';
 import type { ProductSourceMode } from '../app/contracts';
 import type {
   ObservatorySourceState,
 } from '../data/observatorySource';
+import type { LiveObservatoryEventState } from '../data/observatoryEventSource';
 
 interface AppShellProps {
   readonly activeView: ProductRouteId;
   readonly onViewChange: (view: ProductRouteId) => void;
   readonly scopeLabel: string;
   readonly sourceMode: ProductSourceMode;
-  readonly sourceState: ObservatorySourceState | null;
+  readonly sourceState: ObservatorySourceState | LiveObservatoryEventState | null;
   readonly routeReadiness: RouteReadinessState;
   readonly children: ReactNode;
 }
@@ -72,6 +73,15 @@ export function AppShell({
   routeReadiness,
   children,
 }: AppShellProps) {
+  const mainRef = useRef<HTMLElement>(null);
+  const previousView = useRef(activeView);
+  useEffect(() => {
+    if (previousView.current !== activeView) {
+      mainRef.current?.focus();
+      previousView.current = activeView;
+    }
+  }, [activeView]);
+  const activeLabel = PRODUCT_ROUTES.find((route) => route.id === activeView)?.label ?? activeView;
   const isFixture = sourceMode === 'fixture';
   const isReplay = sourceMode === 'replay';
   const isLiveCurrent =
@@ -94,6 +104,7 @@ export function AppShell({
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <div className="brand-block">
           <div className="brand-mark" aria-hidden="true">
@@ -106,7 +117,7 @@ export function AppShell({
               <p className="eyebrow">Private distributed inference</p>
               <span className="maturity-badge" aria-label="Product lifecycle: MVP">MVP</span>
             </div>
-            <h1>Mycelium</h1>
+            <strong className="brand-title">Mycelium</strong>
           </div>
         </div>
 
@@ -193,7 +204,7 @@ export function AppShell({
             {currentLabel}
           </button>
         </header>
-        <main className="main-content" id="main-content" tabIndex={-1}>
+        <main ref={mainRef} className="main-content" id="main-content" tabIndex={-1} aria-label={`${activeLabel} workspace`}>
           {children}
         </main>
       </div>

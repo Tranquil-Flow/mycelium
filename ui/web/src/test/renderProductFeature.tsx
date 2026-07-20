@@ -9,6 +9,7 @@ import {
   type ProductState,
 } from '../app/ProductState';
 import {
+  ReplayObservatorySource,
   StaticObservatorySource,
   type ObservatoryDataSource,
   type ObservatorySourceState,
@@ -67,7 +68,9 @@ export interface RenderProductResult extends RenderResult {
 }
 
 function sourceForMode(mode: ProductSourceMode): ObservatoryDataSource {
-  return mode === 'live' ? new SemanticHarnessSource() : new StaticObservatorySource();
+  if (mode === 'live') return new SemanticHarnessSource();
+  if (mode === 'replay') return new ReplayObservatorySource();
+  return new StaticObservatorySource();
 }
 
 export function renderProductFeature(
@@ -75,7 +78,7 @@ export function renderProductFeature(
 ): RenderProductResult {
   const sourceMode = options.source_mode ?? options.source?.source_mode ?? 'fixture';
   const source = options.source ?? sourceForMode(sourceMode);
-  if (sourceMode !== 'replay' && source.source_mode !== sourceMode) {
+  if (source.source_mode !== sourceMode) {
     throw new TypeError('renderProductFeature source_mode/source mismatch');
   }
   const route = options.route ?? 'inference';

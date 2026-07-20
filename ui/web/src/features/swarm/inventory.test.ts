@@ -47,6 +47,13 @@ describe('device inventory projection', () => {
     );
   });
 
+  it('conceals opaque network identities when the local privacy setting is enabled', () => {
+    const rows = inventoryRows(fixture, '', 'identity', 1_900_000_000_000, true);
+    expect(rows.find((row) => row.id === 'native-relay')?.endpointLabel).toBe(
+      'Network identity concealed',
+    );
+  });
+
   it.each<InventorySort>(['identity', 'capability', 'state', 'connectivity', 'expiry'])(
     'sorts deterministically by %s',
     (sort) => {

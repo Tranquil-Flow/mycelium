@@ -64,7 +64,25 @@ describe('read-only Observatory event projection', () => {
     },
   );
 
-  it('rejects route promotion, cursor mismatch, endpoint identifiers, and unordered sessions', () => {
+  it('accepts positive readiness only when backed by accepted physical qualification', () => {
+    const accepted = validObservatoryAdapterEvent();
+    accepted.bundle.snapshot.qualification!.evidence_class = 'physical_qualification';
+    accepted.bundle.snapshot.qualification!.route_ready = true;
+    accepted.bundle.snapshot.qualification!.reason_codes = [];
+    accepted.bundle.provisioning.route_ready = true;
+
+    expect(decodeObservatoryAdapterEvent(accepted).bundle.provisioning.route_ready).toBe(true);
+
+    const unbacked = validObservatoryAdapterEvent();
+    unbacked.bundle.snapshot.qualification!.evidence_class = 'physical_qualification';
+    unbacked.bundle.snapshot.qualification!.route_ready = true;
+    unbacked.bundle.snapshot.qualification!.reason_codes = [];
+    unbacked.bundle.snapshot.qualification!.binding.stage_load_proof_digests = [];
+    unbacked.bundle.provisioning.route_ready = true;
+    expect(() => decodeObservatoryAdapterEvent(unbacked)).toThrow(/proof|digest|evidence/i);
+  });
+
+  it('rejects unbacked route promotion, cursor mismatch, endpoint identifiers, and unordered sessions', () => {
     const promoted = validObservatoryAdapterEvent();
     promoted.bundle.provisioning.route_ready = true;
     expect(() => decodeObservatoryAdapterEvent(promoted)).toThrow(/route_ready|false/i);

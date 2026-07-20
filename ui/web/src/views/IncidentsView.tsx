@@ -51,7 +51,7 @@ export function IncidentsView({ incidents }: IncidentsViewProps) {
       <header className="view-heading incident-heading">
         <div>
           <p className="eyebrow caution">Synthetic incident laboratory</p>
-          <h2>Failover replay</h2>
+          <h1>Failover replay</h1>
           <p className="view-description">
             {incidents.length} offline {incidents.length === 1 ? 'scenario exposes' : 'scenarios expose'}
             {' '}distinct drain, replacement, and abort semantics.

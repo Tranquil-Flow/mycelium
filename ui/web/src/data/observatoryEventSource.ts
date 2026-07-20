@@ -24,7 +24,7 @@ export interface LiveObservatoryEventState {
   readonly generation: number;
   readonly source_cursor: number;
   readonly projection: ObservatoryAdapterBundle;
-  readonly route_ready: false;
+  readonly route_ready: boolean;
   readonly freshness: 'current' | 'stale';
   readonly reason?: string;
 }
@@ -249,7 +249,10 @@ export class LiveObservatoryEventSource {
     if (this.stream === null) this.openEventStream();
     return () => {
       this.listeners.delete(listener);
-      if (this.listeners.size === 0) this.closeEventStream();
+      if (this.listeners.size === 0) {
+        this.closeEventStream();
+        this.markDisconnected('Observatory event stream closed', this.highestSeenGeneration);
+      }
     };
   }
 
@@ -388,7 +391,7 @@ export class LiveObservatoryEventSource {
       generation,
       source_cursor: sourceCursor,
       projection,
-      route_ready: false as const,
+      route_ready: status === 'connected' && !stale && projection.provisioning.route_ready,
       freshness: stale ? ('stale' as const) : ('current' as const),
       ...(reason === undefined ? {} : { reason }),
     });

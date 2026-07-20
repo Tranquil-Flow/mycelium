@@ -15,7 +15,7 @@
   --border-bright: #4b3d61;
   --text: #f6f3fb;
   --muted: #a99fb8;
-  --muted-2: #7f748f;
+  --muted-2: #aaa0b9;
   --lime: #a8ef63;
   --lime-soft: #c4f59a;
   --lime-dark: #1c351d;
@@ -173,11 +173,29 @@ p {
 .eyebrow.cyan { color: var(--cyan); }
 .eyebrow.caution { color: var(--amber); }
 
-.brand-block h1 {
+.brand-title {
+  display: block;
   margin: 0;
   font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.015em;
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 1000;
+  padding: 10px 14px;
+  color: #09120d;
+  border-radius: 7px;
+  background: var(--lime);
+  font-weight: 750;
+  transform: translateY(-160%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
 }
 
 .brand-block .eyebrow {
@@ -455,6 +473,7 @@ p {
   gap: 28px;
 }
 
+.view-heading h1,
 .view-heading h2 {
   margin: 0;
   color: var(--text);
@@ -2251,4 +2270,98 @@ p {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Browser-local accessibility preferences deliberately affect presentation only. */
+html[data-reduced-motion="true"] *,
+html[data-reduced-motion="true"] *::before,
+html[data-reduced-motion="true"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-high-contrast="true"] {
+  --border: #8e82a0;
+  --border-bright: #c8bdd7;
+  --muted: #ded7e7;
+  --muted-2: #ded7e7;
+  --lime: #c8ff91;
+  --cyan: #93fff7;
+  --amber: #ffd18f;
+}
+
+html[data-density="compact"] .main-content {
+  padding: 18px 20px 28px;
+}
+
+html[data-density="compact"] .product-stack,
+html[data-density="compact"] .view {
+  gap: 12px;
+}
+
+html[data-density="compact"] .panel {
+  padding: 12px;
+}
+
+html[data-density="compact"] .primary-nav {
+  gap: 2px;
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-theme="system"] {
+    color-scheme: dark;
+    --bg: #17131d;
+    --bg-deep: #100d16;
+    --sidebar: #1b1623;
+    --surface: #211a2a;
+    --surface-raised: #2a2134;
+    --surface-soft: #30263a;
+    --border: #8f839e;
+    --border-bright: #b8acc7;
+    --text: #fffaff;
+    --muted: #ded7e7;
+    --muted-2: #c2b8cd;
+  }
+
+  html[data-theme="system"],
+  html[data-theme="system"] body {
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  html[data-theme="system"][data-high-contrast="true"] {
+    --border: #b8acc7;
+    --border-bright: #e4daee;
+    --muted: #fffaff;
+    --muted-2: #fffaff;
+  }
+}
+
+/* Essential topology and evidence text must remain readable at normal zoom. */
+.network-view .segmented-control button span,
+.network-view .segmented-control button small,
+.network-view .route-provenance strong,
+.network-view .metric-strip span em,
+.network-view .metric-strip strong small,
+.network-view .read-only-state,
+.network-view .canvas-state p,
+.network-view .unknown-location-notice,
+.network-view .edge-legend,
+.network-view .stage-index,
+.network-view .node-health,
+.network-view .device-location,
+.network-view .device-node-metrics span,
+.network-view .react-flow__edge-text {
+  font-size: 11px !important;
+}
+
+.network-view .device-name {
+  font-size: 12px;
+}
+
+.network-view .metric-strip span em,
+.network-view .node-health {
+  color: var(--muted);
 }

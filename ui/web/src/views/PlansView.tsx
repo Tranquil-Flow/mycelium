@@ -40,7 +40,7 @@ export function PlansView({ snapshot }: PlansViewProps) {
       <header className="view-heading">
         <div>
           <p className="eyebrow lime">Simulator plan space</p>
-          <h2>Strategy comparison</h2>
+          <h1>Strategy comparison</h1>
           <p className="view-description">
             Relative estimates from one bundled workload. Values are modeled, not measured performance.
           </p>

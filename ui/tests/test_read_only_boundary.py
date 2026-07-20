@@ -65,6 +65,7 @@ def test_browser_network_is_confined_to_read_only_source_and_typed_action_client
         (UI_ROOT / "web" / "src" / "data" / "observatorySource.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
     }
     forbidden_browser_writes = ("WebSocket", "XMLHttpRequest", "sendBeacon", "WebTransport")

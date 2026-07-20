@@ -55,7 +55,7 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
 
   await page.goto('/#inference');
 
-  await expect(page.getByRole('heading', { name: 'Mycelium' })).toBeVisible();
+  await expect(page.getByText('Mycelium', { exact: true })).toBeVisible();
   await expect(page.getByText('FIXTURE DATA · NOT LIVE')).toBeVisible();
   await expect(page.getByText(/route readiness unknown/i).first()).toBeVisible();
   await expect(page.getByRole('textbox', { name: /prompt/i })).toBeDisabled();
@@ -78,7 +78,7 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
   for (const [label, hash, heading] of routeChecks) {
     await navigation.getByRole('link', { name: new RegExp(`^${label}`) }).click();
     await expect(page).toHaveURL(new RegExp(`#${hash}$`));
-    await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
   }
 
   const hasHorizontalOverflow = await page.evaluate(

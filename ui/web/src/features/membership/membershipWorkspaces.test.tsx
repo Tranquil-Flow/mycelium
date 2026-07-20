@@ -23,6 +23,18 @@ describe('membership UI', () => {
     expect(screen.getByText(/invite is not route readiness/i)).toBeInTheDocument();
   });
 
+  it('disables an already-open join flow when source becomes read-only', () => {
+    const api = client();
+    const { rerender } = render(<OnboardingWizard client={api} />);
+    fireEvent.click(screen.getByRole('button', { name: /join with invite code/i }));
+
+    rerender(<OnboardingWizard client={api} readOnly />);
+
+    expect(screen.getByLabelText(/invite code/i)).toBeDisabled();
+    expect(screen.getByLabelText(/endpoint identity/i)).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^join swarm$/i })).toBeDisabled();
+  });
+
   it('shows explicit states and requires revocation confirmation', async () => {
     const api = client();
     render(<AdminWorkspace client={api} />);

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { createProductFeatureRegistry } from './navigation';
@@ -11,7 +11,7 @@ describe('product shell feature slots', () => {
   it('renders all stable product routes and the integrated inference workspace', () => {
     render(<App />);
 
-    expect(screen.getByRole('heading', { name: 'Mycelium' })).toBeInTheDocument();
+    expect(screen.getByText('Mycelium')).toBeInTheDocument();
     const navigation = screen.getByRole('navigation', { name: /product sections/i });
     for (const name of [
       'Inference',
@@ -25,8 +25,28 @@ describe('product shell feature slots', () => {
       expect(navigation.querySelector(`a[href="#${name.toLowerCase()}"]`)).not.toBeNull();
     }
     expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByText(/session memory only/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
+  });
+
+  it('focuses the page region and disables fixture mutation affordances', async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole('link', { name: /^nodes/i }));
+
+    expect(document.getElementById('main-content')).toHaveFocus();
+    expect(screen.getByRole('heading', { level: 1, name: 'Nodes' })).toBeInTheDocument();
+    for (const name of [
+      /create native-node invite/i,
+      /create browser-probe invite/i,
+      /create single-use invite/i,
+      /join with invite code/i,
+      /leave fixture-native-node/i,
+    ]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+    expect(await screen.findByRole('button', { name: /revoke fixture-native-node/i })).toBeDisabled();
+    expect(screen.getAllByText(/unavailable in offline evidence mode/i).length).toBeGreaterThan(0);
   });
 
   it('lazy-loads only the active registered feature module', async () => {
