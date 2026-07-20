@@ -333,12 +333,21 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
                         minimum=1,
                         maximum=8,
                     )
+                    required_distinct_peers = _int_field(
+                        document,
+                        "required_distinct_peers",
+                        "required_distinct_peers_invalid",
+                        default=1,
+                        minimum=1,
+                        maximum=6,
+                    )
                     request_id = document.get("request_id")
                     if request_id is not None and (not isinstance(request_id, str) or not request_id):
                         raise InteractiveHTTPError(HTTPStatus.BAD_REQUEST, "request_id_invalid")
                     record = self.server.runtime.infer(
                         prompt=prompt,
                         max_new_tokens=max_new_tokens,
+                        required_distinct_peers=required_distinct_peers,
                         request_id=request_id,
                     )
                     self._send_json({"ok": True, "record": record})

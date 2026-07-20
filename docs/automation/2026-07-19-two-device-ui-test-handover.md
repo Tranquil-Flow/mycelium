@@ -1,5 +1,7 @@
 # Two-device interactive UI-test handover — 2026-07-19
 
+Historical snapshot. Current labels and acceptance rules live in `docs/interactive-browser-swarm.md`; distinct peer sessions do not prove physical-device identity.
+
 ## Integration state
 
 - Worktree: `/Users/evinova-self/Projects/mycelium-wt-interactive-ui`
@@ -15,11 +17,11 @@
 
 The operator UI keeps two distinct one-use links visible at once. It reports:
 
-- **Devices joined**: sessions accepted by the server
+- **Peer sessions joined**: authenticated browser sessions accepted by the server
 - **Workers ready**: joined browsers currently long-polling and eligible for work
-- **Two-device UI test**: `READY` only when at least two workers are actually eligible
+- **Peer-session target**: `READY` only when the selected number of workers is actually eligible
 
-The inference button stays disabled until at least one worker is ready. Two ready workers receive sequential stage jobs by lowest completed-job count, then stable peer ID; assignment no longer depends on poll-thread wake order.
+The current inference button stays disabled until the selected peer-session target is ready. A request acquires N distinct peers, freezes that exact cohort, then balances later jobs within the cohort; assignment does not depend on poll-thread wake order.
 
 Each peer UI:
 
@@ -35,11 +37,11 @@ Physical devices require an externally reachable HTTPS origin. Do not expose thi
 
 1. Start the server with either direct TLS or a trusted HTTPS reverse proxy, an exact `--public-origin`, and a private-network/firewall boundary. See `docs/interactive-browser-swarm.md`.
 2. Open the emitted operator URL only on the host.
-3. Select **Create link for next device** twice.
+3. Use the generated batch of two unique worker links; do not reuse a link across devices.
 4. Send the Device 1 link to the first standby device and the distinct Device 2 link to the second. Each link is one-use and expires after at most five minutes.
 5. Confirm both device address bars clear the `#join/...` fragment and both peer pages show **State: running**.
-6. Wait for **Devices joined: 2**, **Workers ready: 2**, and **Two-device UI test: READY**.
-7. Request at least two new tokens. Confirm Latest evidence contains two peer IDs and each connected-peer row reports at least one completed job.
+6. Wait for **Peer sessions joined: 2**, **Workers ready: 2**, and **Peer-session target: READY**.
+7. Request at least two new tokens. Confirm **Peer sessions proven: 2 / 2** and `required_distinct_peers == observed_distinct_peers == 2` in downloaded local JSON. Manually record which physical device hosted each peer.
 8. Select **Stop peer worker** on each device. Confirm both show **State: stopped** without an alert.
 
 Do not share the operator URL with peers. Send only one peer join link to each device.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -183,13 +183,16 @@ async function main() {
   const hostProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-host-'));
   const peerOneProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-peer-one-'));
   const peerTwoProfile = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-peer-two-'));
+  const downloadRoot = await mkdtemp(path.join(os.tmpdir(), 'mycelium-browser-e2e-download-'));
   const origin = `http://127.0.0.1:${serverPort}`;
   const children = [];
   let host = null;
   const peers = [];
 
   const server = spawn('python3.14', [
-    'scripts/interactive_swarm_server.py',
+    '-m', 'mycelium_demo',
+    'serve',
+    '--mode', 'live',
     '--host', '127.0.0.1',
     '--port', String(serverPort),
     '--state-root', stateRoot,
@@ -237,17 +240,27 @@ async function main() {
     await waitFor('host_console', async () => (await host.cdp.evaluate(
       "document.body.innerText.includes('Mycelium browser swarm')",
     )) === true);
+    const operatorGuideReady = await host.cdp.evaluate(`({
+      guide: !!document.querySelector('#live-console-guide'),
+      requestForm: !!document.querySelector('#request-form'),
+      routeBoundary: document.body.innerText.includes('route_ready=false'),
+    })`);
+    if (!operatorGuideReady.guide || !operatorGuideReady.requestForm || !operatorGuideReady.routeBoundary) {
+      fail(`operator_guide_missing:${JSON.stringify(operatorGuideReady)}`);
+    }
     const hostLocation = await host.cdp.evaluate("({href: location.href, hash: location.hash})");
     if (hostLocation.hash !== '' || hostLocation.href !== `${origin}/`) {
       fail('consumed_operator_fragment_not_cleared');
     }
 
-    await host.cdp.evaluate("document.querySelector('#create-invite').click(); true");
-    await waitFor('first_invite_url', async () => host.cdp.evaluate(
-      "document.querySelectorAll('[data-invite-url]').length === 1",
-    ), 5_000);
-    await host.cdp.evaluate("document.querySelector('#create-invite').click(); true");
-    const inviteUrls = await waitFor('second_invite_url', async () => {
+    await host.cdp.evaluate(`(() => {
+      const count = document.querySelector('#invite-count');
+      count.value = '2';
+      count.dispatchEvent(new Event('change', { bubbles: true }));
+      document.querySelector('#create-invites').click();
+      return true;
+    })()`);
+    const inviteUrls = await waitFor('two_invite_urls', async () => {
       const values = await host.cdp.evaluate(
         "Array.from(document.querySelectorAll('[data-invite-url]'), (element) => element.value)",
       );
@@ -267,7 +280,7 @@ async function main() {
       innerWidth: window.innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
       inviteCount: document.querySelectorAll('[data-invite-url]').length,
-      createVisible: !!document.querySelector('#create-invite')?.offsetParent,
+      createVisible: !!document.querySelector('#create-invites')?.offsetParent,
     })`);
     if (
       hostMobileLayout.innerWidth !== 390
@@ -305,12 +318,15 @@ async function main() {
         "document.body.innerText.includes('State\\nrunning')",
       )) === true);
       const peerLocation = await peer.cdp.evaluate(
-        "({href: location.href, hash: location.hash, subtle: !!crypto.subtle})",
+        "({href: location.href, hash: location.hash, subtle: !!crypto.subtle, preflightPassCount: document.querySelectorAll('[data-device-check][data-check-state=pass]').length})",
       );
       if (peerLocation.hash !== '' || peerLocation.href !== `${origin}/`) {
         fail(`peer_${index + 1}_consumed_invite_fragment_not_cleared`);
       }
       if (peerLocation.subtle !== true) fail(`peer_${index + 1}_browser_crypto_unavailable`);
+      if (peerLocation.preflightPassCount !== 5) {
+        fail(`peer_${index + 1}_device_preflight_incomplete:${peerLocation.preflightPassCount}`);
+      }
       await peer.cdp.send('Emulation.setDeviceMetricsOverride', {
         width: 390,
         height: 844,
@@ -352,6 +368,8 @@ async function main() {
     const peerJobCounts = status.peers.map((item) => item.completed_jobs).sort((a, b) => a - b);
     if (
       record.generated_tokens.length !== 2
+      || record.required_distinct_peers !== 2
+      || record.observed_distinct_peers !== 2
       || new Set(record.peer_ids).size !== 2
       || peerJobCounts.length !== 2
       || peerJobCounts[0] !== 1
@@ -363,8 +381,120 @@ async function main() {
       fail('browser_parity_tolerance_exceeded');
     }
     await waitFor('host_evidence_render', async () => (await host.cdp.evaluate(
-      "document.body.innerText.includes('Inference completed with local browser-stage evidence.')",
+      "document.body.innerText.includes('Inference completed with 2/2 distinct peer sessions contributing.')",
     )) === true);
+    const evidenceSurface = await host.cdp.evaluate(`({
+      downloadButton: !!document.querySelector('#download-evidence'),
+      tokenRows: document.querySelectorAll('[data-token-evidence]').length,
+      localOnly: document.body.innerText.includes('Summary scope\\nunsigned local JSON'),
+      devicesProven: document.body.innerText.includes('Peer sessions proven\\n2 / 2'),
+      routeFalse: document.body.innerText.includes('Route ready\\nfalse'),
+    })`);
+    if (
+      evidenceSurface.downloadButton !== true
+      || evidenceSurface.tokenRows !== 2
+      || evidenceSurface.localOnly !== true
+      || evidenceSurface.devicesProven !== true
+      || evidenceSurface.routeFalse !== true
+    ) {
+      fail(`evidence_surface_invalid:${JSON.stringify(evidenceSurface)}`);
+    }
+    await host.cdp.send('Browser.setDownloadBehavior', {
+      behavior: 'allow',
+      downloadPath: downloadRoot,
+    });
+    await host.cdp.evaluate("document.querySelector('#download-evidence').click(); true");
+    const evidenceFile = await waitFor('evidence_download', async () => {
+      const names = await readdir(downloadRoot);
+      return names.find((name) => name.endsWith('.json')) ?? null;
+    }, 5_000);
+    const downloadedEvidence = JSON.parse(await readFile(path.join(downloadRoot, evidenceFile), 'utf8'));
+    if (
+      downloadedEvidence.request_id !== record.request_id
+      || downloadedEvidence.route_ready !== false
+      || downloadedEvidence.local_evidence_only !== true
+      || downloadedEvidence.required_distinct_peers !== 2
+      || downloadedEvidence.observed_distinct_peers !== 2
+      || downloadedEvidence.token_records.length !== 2
+    ) {
+      fail('downloaded_evidence_invalid');
+    }
+
+    await host.cdp.send('Page.navigate', { url: 'about:blank' });
+    await waitFor('host_blank_before_operator_reload', async () => (await host.cdp.evaluate(
+      "location.href === 'about:blank'",
+    )) === true, 5_000);
+    await host.cdp.send('Page.navigate', { url: operatorUrl.href });
+    await waitFor('recovered_evidence_after_operator_reload', async () => (await host.cdp.evaluate(
+      `location.href === '${origin}/' && location.hash === '' && document.querySelectorAll('[data-token-evidence]').length === 2 && !!document.querySelector('#download-evidence')`,
+    )) === true, 5_000);
+    const recoveredLocation = await host.cdp.evaluate("({href: location.href, hash: location.hash})");
+    if (recoveredLocation.href !== `${origin}/` || recoveredLocation.hash !== '') {
+      fail('recovered_operator_fragment_not_cleared');
+    }
+
+    for (const peer of peers) {
+      await peer.cdp.evaluate(`(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (...args) => {
+          if (String(args[0]) === '/api/interactive/result') {
+            return new Promise((resolve, reject) => window.setTimeout(
+              () => originalFetch(...args).then(resolve, reject),
+              750,
+            ));
+          }
+          return originalFetch(...args);
+        };
+        return true;
+      })()`);
+    }
+    await host.cdp.evaluate(`(() => {
+      const prompt = document.querySelector('#prompt');
+      const tokens = document.querySelector('#max-new');
+      prompt.value = 'cancel this browser swarm request';
+      prompt.dispatchEvent(new Event('input', { bubbles: true }));
+      tokens.value = '8';
+      tokens.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#request-form button[type=submit]').click();
+      return true;
+    })()`);
+    await waitFor('assigned_request_visible', async () => {
+      const value = await readJson(`${origin}/api/interactive/status`, operatorOptions);
+      return (
+        value.status.active_request_count === 1
+        && value.status.pending_job_count === 1
+        && value.status.ready_peer_count === 1
+      ) ? value.status : null;
+    }, 5_000);
+    await waitFor('cancel_control_visible', async () => (await host.cdp.evaluate(
+      "!!document.querySelector('#cancel-request') && document.querySelector('#request-form')?.getAttribute('aria-busy') === 'true'",
+    )) === true, 5_000);
+    await host.cdp.evaluate("document.querySelector('#cancel-request').click(); true");
+    const cancellationStatus = await waitFor('cancelled_request_settled', async () => {
+      const value = await readJson(`${origin}/api/interactive/status`, operatorOptions);
+      return value.status.active_request_count === 0 && value.status.completed_request_count === 1
+        ? value.status
+        : null;
+    }, 5_000);
+    await waitFor('host_cancelled_render', async () => (await host.cdp.evaluate(
+      "document.body.innerText.includes('Inference cancelled safely; joined workers remain available.') && !document.querySelector('[role=alert]')",
+    )) === true, 5_000);
+    await waitFor('cancelled_worker_recovered', async () => {
+      const views = await Promise.all(peers.map((peer) => peer.cdp.evaluate(`({
+        running: document.body.innerText.includes('State\\nrunning'),
+        cancelledJob: document.body.innerText.includes('(cancelled)'),
+        alert: !!document.querySelector('[role=alert]'),
+      })`)));
+      return views.every((view) => view.running && !view.alert)
+        && views.filter((view) => view.cancelledJob).length === 1;
+    }, 5_000);
+    const recoveredWorkerStatus = await waitFor('workers_ready_after_cancel', async () => {
+      const value = await readJson(`${origin}/api/interactive/status`, operatorOptions);
+      return value.status.active_request_count === 0 && value.status.ready_peer_count === 2
+        ? value.status
+        : null;
+    }, 5_000);
+
     for (const [index, peer] of peers.entries()) {
       await waitFor(`peer_${index + 1}_job_render`, async () => (await peer.cdp.evaluate(
         "document.body.innerText.includes('Completed jobs\\n1')",
@@ -397,7 +527,7 @@ async function main() {
     }
 
     console.log(JSON.stringify({
-      protocol: 'mycelium.interactive_browser_e2e.v2',
+      protocol: 'mycelium.interactive_browser_e2e.v3',
       host_browser_process: true,
       peer_browser_processes: peers.length,
       independent_browser_profiles: 1 + peers.length,
@@ -407,6 +537,11 @@ async function main() {
       consumed_peer_fragments_cleared: true,
       mobile_viewport_checks: { host: true, peers: peers.length },
       draft_survived_status_refresh: true,
+      evidence_rows_rendered: evidenceSurface.tokenRows,
+      evidence_json_downloaded_and_parsed: true,
+      evidence_recovered_after_operator_reload: true,
+      active_request_cancelled: true,
+      workers_ready_after_cancel: recoveredWorkerStatus.ready_peer_count,
       peer_completed_jobs: peerJobCounts,
       clean_peer_stops: peers.length,
       consumed_invite_reuse_rejected: true,
@@ -417,6 +552,7 @@ async function main() {
       browser_console_errors: 0,
       route_ready: false,
       local_evidence_only: true,
+      evidence: downloadedEvidence,
     }, null, 2));
   } finally {
     host?.cdp.close();
@@ -427,6 +563,7 @@ async function main() {
       rm(hostProfile, { recursive: true, force: true }),
       rm(peerOneProfile, { recursive: true, force: true }),
       rm(peerTwoProfile, { recursive: true, force: true }),
+      rm(downloadRoot, { recursive: true, force: true }),
     ]);
   }
 }

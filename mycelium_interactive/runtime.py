@@ -6,6 +6,7 @@ never becomes true.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
 import tempfile
@@ -40,6 +41,21 @@ class InteractiveRuntimeError(RuntimeError):
 
 def _reject(code: str) -> None:
     raise InteractiveRuntimeError(code)
+
+
+@contextmanager
+def _cancellable_lock(lock: Any, cancel_event: threading.Event) -> Any:
+    while True:
+        if cancel_event.is_set():
+            _reject("request_cancelled")
+        if lock.acquire(timeout=0.05):
+            break
+    try:
+        if cancel_event.is_set():
+            _reject("request_cancelled")
+        yield
+    finally:
+        lock.release()
 
 
 def _digest(value: Any) -> str:
@@ -88,6 +104,8 @@ class InferenceRecord:
     max_intermediate_error: float
     max_logit_error: float
     peer_ids: tuple[str, ...]
+    required_distinct_peers: int
+    observed_distinct_peers: int
     stage_pack_digest: str
     token_records: tuple[dict[str, Any], ...]
     created_at: float
@@ -107,6 +125,8 @@ class InferenceRecord:
             "max_intermediate_error": self.max_intermediate_error,
             "max_logit_error": self.max_logit_error,
             "peer_ids": list(self.peer_ids),
+            "required_distinct_peers": self.required_distinct_peers,
+            "observed_distinct_peers": self.observed_distinct_peers,
             "stage_pack_digest": self.stage_pack_digest,
             "token_records": list(self.token_records),
             "created_at": self.created_at,
@@ -124,6 +144,10 @@ class InteractiveRuntime:
 
     def __post_init__(self) -> None:
         self._lock = threading.RLock()
+        self._infer_lock = threading.Lock()
+        self._active_requests: dict[str, str | None] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._cancelled_requests: set[str] = set()
         self._tempdir: tempfile.TemporaryDirectory[str] | None = None
         if (
             not isinstance(self.run_id, str)
@@ -212,6 +236,7 @@ class InteractiveRuntime:
                     "run_id": self.run_id,
                     "stage_pack_digest": self.stage_pack["pack_digest"],
                     "vocabulary": list(VOCABULARY),
+                    "active_request_count": len(self._active_requests),
                     "completed_request_count": len(self.records),
                     "recent_requests": [
                         self.records[request_id].public_document()
@@ -227,18 +252,33 @@ class InteractiveRuntime:
             return None if record is None else record.public_document()
 
     def cancel_request(self, request_id: str) -> bool:
-        return self.swarm.cancel_request(request_id)
+        with self._lock:
+            if request_id not in self._active_requests:
+                return False
+            self._cancelled_requests.add(request_id)
+            cancel_event = self._cancel_events[request_id]
+            cancel_event.set()
+            active_stage_request = self._active_requests[request_id]
+        if active_stage_request is not None:
+            self.swarm.cancel_request(active_stage_request)
+        return True
 
     def infer(
         self,
         *,
         prompt: str,
         max_new_tokens: int = 1,
+        required_distinct_peers: int = 1,
         timeout_seconds: float = 25.0,
         request_id: str | None = None,
     ) -> dict[str, Any]:
         if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= 8:
             _reject("max_new_tokens_invalid")
+        if (
+            type(required_distinct_peers) is not int
+            or not 1 <= required_distinct_peers <= max_new_tokens
+        ):
+            _reject("required_distinct_peers_invalid")
         if not isinstance(timeout_seconds, (int, float)) or not 0 < float(timeout_seconds) <= 120:
             _reject("timeout_invalid")
         created_at = time.time()
@@ -256,86 +296,132 @@ class InteractiveRuntime:
         max_intermediate_error = 0.0
         max_logit_error = 0.0
         peer_ids: list[str] = []
+        cancel_event = threading.Event()
         with self._lock:
-            if request_id in self.records:
+            if request_id in self.records or request_id in self._active_requests:
                 _reject("request_id_duplicate")
-            for token_index in range(max_new_tokens):
-                entry = execute_loaded_stage(
-                    self.loaded[0],
-                    token_ids=mx.array((tuple(context),), dtype=mx.uint32),
-                )
-                mx.eval(entry)
-                entry_hidden = entry.tolist()[0]
-                stage_request_id = f"{request_id}:token-{token_index}"
-                try:
-                    browser_result = self.swarm.dispatch(
-                        request_id=stage_request_id,
-                        hidden=entry_hidden,
-                        timeout_seconds=float(timeout_seconds),
+            self._active_requests[request_id] = None
+            self._cancel_events[request_id] = cancel_event
+            self._cancelled_requests.discard(request_id)
+        try:
+            with _cancellable_lock(self._infer_lock, cancel_event):
+                for token_index in range(max_new_tokens):
+                    with self._lock:
+                        if request_id in self._cancelled_requests:
+                            _reject("request_cancelled")
+                    entry = execute_loaded_stage(
+                        self.loaded[0],
+                        token_ids=mx.array((tuple(context),), dtype=mx.uint32),
                     )
-                except SwarmError as exc:
-                    raise InteractiveRuntimeError(exc.code) from exc
-                browser_output = [list(row) for row in browser_result.output]
-                local_output = self.pixel_stage.execute(
-                    request_id=f"{stage_request_id}:local-reference",
-                    assignment_id=self.stage_pack["assignment_id"],
-                    stage_id=self.stage_pack["stage_id"],
-                    hidden=entry_hidden,
-                )
-                intermediate_error = _max_error(browser_output, local_output)
-                max_intermediate_error = max(max_intermediate_error, intermediate_error)
-                if intermediate_error > INTERMEDIATE_TOLERANCE:
-                    _reject("browser_stage_parity_failed")
+                    mx.eval(entry)
+                    entry_hidden = entry.tolist()[0]
+                    stage_request_id = f"{request_id}:token-{token_index}"
+                    with self._lock:
+                        if request_id in self._cancelled_requests:
+                            _reject("request_cancelled")
+                        self._active_requests[request_id] = stage_request_id
+                    try:
+                        browser_result = self.swarm.dispatch(
+                            request_id=stage_request_id,
+                            hidden=entry_hidden,
+                            timeout_seconds=float(timeout_seconds),
+                            excluded_peer_ids=(
+                                set(peer_ids)
+                                if len(set(peer_ids)) < required_distinct_peers
+                                else None
+                            ),
+                            allowed_peer_ids=(
+                                set(peer_ids)
+                                if len(set(peer_ids)) >= required_distinct_peers
+                                else None
+                            ),
+                            cancel_event=cancel_event,
+                        )
+                    except SwarmError as exc:
+                        if cancel_event.is_set():
+                            _reject("request_cancelled")
+                        raise InteractiveRuntimeError(exc.code) from exc
+                    finally:
+                        with self._lock:
+                            if self._active_requests.get(request_id) == stage_request_id:
+                                self._active_requests[request_id] = None
+                    with self._lock:
+                        if request_id in self._cancelled_requests:
+                            _reject("request_cancelled")
+                    browser_output = [list(row) for row in browser_result.output]
+                    local_output = self.pixel_stage.execute(
+                        request_id=f"{stage_request_id}:local-reference",
+                        assignment_id=self.stage_pack["assignment_id"],
+                        stage_id=self.stage_pack["stage_id"],
+                        hidden=entry_hidden,
+                    )
+                    intermediate_error = _max_error(browser_output, local_output)
+                    max_intermediate_error = max(max_intermediate_error, intermediate_error)
+                    if intermediate_error > INTERMEDIATE_TOLERANCE:
+                        _reject("browser_stage_parity_failed")
 
-                final_logits = _final_logits(self.loaded[1], browser_output).tolist()[0]
-                expected = execute_loaded_stage(
-                    self.reference,
-                    token_ids=mx.array((tuple(context),), dtype=mx.uint32),
+                    final_logits = _final_logits(self.loaded[1], browser_output).tolist()[0]
+                    expected = execute_loaded_stage(
+                        self.reference,
+                        token_ids=mx.array((tuple(context),), dtype=mx.uint32),
+                    )
+                    mx.eval(expected)
+                    expected_logits = expected.tolist()[0]
+                    logit_error = _max_error(final_logits, expected_logits)
+                    max_logit_error = max(max_logit_error, logit_error)
+                    if logit_error > LOGIT_TOLERANCE:
+                        _reject("monolithic_reference_mismatch")
+                    selected = _quantized_argmax(final_logits[-1])
+                    generated.append(selected)
+                    context.append(selected)
+                    peer_ids.append(browser_result.peer_id)
+                    token_records.append(
+                        {
+                            "token_index": token_index,
+                            "stage_request_id": stage_request_id,
+                            "browser_peer_id": browser_result.peer_id,
+                            "browser_job_id": browser_result.job_id,
+                            "browser_output_digest": browser_result.output_digest,
+                            "selected_token": selected,
+                            "selected_label": VOCABULARY[selected],
+                            "context_length": len(context),
+                            "intermediate_error": intermediate_error,
+                            "logit_error": logit_error,
+                            "route_ready": False,
+                        }
+                    )
+                record = InferenceRecord(
+                    protocol="mycelium.interactive_inference_record.v1",
+                    request_id=request_id,
+                    prompt_digest=prompt_digest,
+                    prompt_bytes=len(prompt.encode("utf-8")),
+                    initial_tokens=initial_tokens,
+                    generated_tokens=tuple(generated),
+                    generated_labels=tuple(VOCABULARY[token] for token in generated),
+                    max_intermediate_error=max_intermediate_error,
+                    max_logit_error=max_logit_error,
+                    peer_ids=tuple(dict.fromkeys(peer_ids)),
+                    required_distinct_peers=required_distinct_peers,
+                    observed_distinct_peers=len(set(peer_ids)),
+                    stage_pack_digest=self.stage_pack["pack_digest"],
+                    token_records=tuple(token_records),
+                    created_at=created_at,
+                    completed_at=time.time(),
                 )
-                mx.eval(expected)
-                expected_logits = expected.tolist()[0]
-                logit_error = _max_error(final_logits, expected_logits)
-                max_logit_error = max(max_logit_error, logit_error)
-                if logit_error > LOGIT_TOLERANCE:
-                    _reject("monolithic_reference_mismatch")
-                selected = _quantized_argmax(final_logits[-1])
-                generated.append(selected)
-                context.append(selected)
-                peer_ids.append(browser_result.peer_id)
-                token_records.append(
-                    {
-                        "token_index": token_index,
-                        "stage_request_id": stage_request_id,
-                        "browser_peer_id": browser_result.peer_id,
-                        "browser_job_id": browser_result.job_id,
-                        "browser_output_digest": browser_result.output_digest,
-                        "selected_token": selected,
-                        "selected_label": VOCABULARY[selected],
-                        "context_length": len(context),
-                        "intermediate_error": intermediate_error,
-                        "logit_error": logit_error,
-                        "route_ready": False,
-                    }
-                )
-            record = InferenceRecord(
-                protocol="mycelium.interactive_inference_record.v1",
-                request_id=request_id,
-                prompt_digest=prompt_digest,
-                prompt_bytes=len(prompt.encode("utf-8")),
-                initial_tokens=initial_tokens,
-                generated_tokens=tuple(generated),
-                generated_labels=tuple(VOCABULARY[token] for token in generated),
-                max_intermediate_error=max_intermediate_error,
-                max_logit_error=max_logit_error,
-                peer_ids=tuple(dict.fromkeys(peer_ids)),
-                stage_pack_digest=self.stage_pack["pack_digest"],
-                token_records=tuple(token_records),
-                created_at=created_at,
-                completed_at=time.time(),
-            )
-            self.records[request_id] = record
-            self._record_order.append(request_id)
-            while len(self._record_order) > self.max_records:
-                removed = self._record_order.pop(0)
-                self.records.pop(removed, None)
-            return record.public_document()
+                with self._lock:
+                    if request_id in self._cancelled_requests:
+                        _reject("request_cancelled")
+                    self.records[request_id] = record
+                    self._record_order.append(request_id)
+                    while len(self._record_order) > self.max_records:
+                        removed = self._record_order.pop(0)
+                        self.records.pop(removed, None)
+                    self._active_requests.pop(request_id, None)
+                    self._cancel_events.pop(request_id, None)
+                    self._cancelled_requests.discard(request_id)
+                return record.public_document()
+        finally:
+            with self._lock:
+                self._active_requests.pop(request_id, None)
+                self._cancel_events.pop(request_id, None)
+                self._cancelled_requests.discard(request_id)

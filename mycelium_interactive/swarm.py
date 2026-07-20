@@ -275,6 +275,8 @@ class _Job:
     hidden: list[list[float]]
     input_digest: str
     created_at: float
+    excluded_peer_ids: frozenset[str] = frozenset()
+    allowed_peer_ids: frozenset[str] | None = None
     state: str = "pending"
     peer_id: str | None = None
     result: BrowserStageResult | None = None
@@ -544,6 +546,11 @@ class SwarmCoordinator:
                             candidate
                             for candidate in self._peers.values()
                             if candidate.state == "connected"
+                            and candidate.peer_id not in pending.excluded_peer_ids
+                            and (
+                                pending.allowed_peer_ids is None
+                                or candidate.peer_id in pending.allowed_peer_ids
+                            )
                             and candidate.outstanding_job_id is None
                             and self._poll_waiters.get(candidate.peer_id, 0) > 0
                         ]
@@ -590,13 +597,42 @@ class SwarmCoordinator:
         request_id: str,
         hidden: Any,
         timeout_seconds: float,
+        excluded_peer_ids: set[str] | frozenset[str] | None = None,
+        allowed_peer_ids: set[str] | frozenset[str] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> BrowserStageResult:
         request_id = _identifier(request_id, "request_id_invalid")
         rows = _validate_hidden(hidden, self._hidden_size)
         timeout = _positive_finite(timeout_seconds, "dispatch_timeout_invalid", allow_zero=True)
+        if excluded_peer_ids is None:
+            excluded = frozenset()
+        elif not isinstance(excluded_peer_ids, (set, frozenset)):
+            _reject("excluded_peer_ids_invalid")
+        else:
+            excluded = frozenset(
+                _identifier(peer_id, "excluded_peer_ids_invalid")
+                for peer_id in excluded_peer_ids
+            )
+            if len(excluded) > self._max_peers:
+                _reject("excluded_peer_ids_invalid")
+        if allowed_peer_ids is None:
+            allowed = None
+        elif not isinstance(allowed_peer_ids, (set, frozenset)):
+            _reject("allowed_peer_ids_invalid")
+        else:
+            allowed = frozenset(
+                _identifier(peer_id, "allowed_peer_ids_invalid")
+                for peer_id in allowed_peer_ids
+            )
+            if not allowed or len(allowed) > self._max_peers:
+                _reject("allowed_peer_ids_invalid")
+        if allowed is not None and allowed.intersection(excluded):
+            _reject("peer_eligibility_invalid")
         if timeout > 300.0:
             _reject("dispatch_timeout_invalid")
         with self._condition:
+            if cancel_event is not None and cancel_event.is_set():
+                _reject("request_cancelled")
             now = self._now()
             self._expire_locked(now)
             active_jobs = sum(job.state in {"pending", "assigned"} for job in self._jobs.values())
@@ -617,11 +653,19 @@ class SwarmCoordinator:
                 hidden=rows,
                 input_digest=matrix_digest(rows),
                 created_at=now,
+                excluded_peer_ids=excluded,
+                allowed_peer_ids=allowed,
             )
             self._jobs[job_id] = job
+            if cancel_event is not None and cancel_event.is_set():
+                self._cancel_job_locked(job, "cancelled")
+                _reject("request_cancelled")
             self._condition.notify_all()
             deadline = now + timeout
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    self._cancel_job_locked(job, "cancelled")
+                    _reject("request_cancelled")
                 if job.state == "completed" and job.result is not None:
                     return job.result
                 if job.state == "cancelled":
@@ -629,6 +673,9 @@ class SwarmCoordinator:
                 if job.state == "peer_unavailable":
                     _reject("peer_unavailable")
                 remaining = deadline - self._now()
+                if cancel_event is not None and cancel_event.is_set():
+                    self._cancel_job_locked(job, "cancelled")
+                    _reject("request_cancelled")
                 if remaining <= 0.0:
                     self._cancel_job_locked(job, "cancelled")
                     _reject("dispatch_timeout")

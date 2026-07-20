@@ -273,6 +273,52 @@ def test_dispatch_long_poll_result_and_duplicate_idempotence() -> None:
     assert "prompt" not in str(received[0]).lower()
 
 
+def test_dispatch_honors_peer_exclusions_over_lifetime_balance() -> None:
+    swarm = coordinator()
+    selected_peer, selected_token = join(swarm)
+    excluded_peer, excluded_token = join(swarm)
+    with swarm._condition:  # noqa: SLF001 - scheduler regression oracle
+        swarm._peers[selected_peer].completed_jobs = 10  # noqa: SLF001
+    received: list[str] = []
+    stop = threading.Event()
+
+    def worker(peer_id: str, token: str) -> None:
+        while not stop.is_set():
+            work = swarm.poll_work(peer_id=peer_id, session_token=token, timeout_seconds=0.05)
+            if work is None:
+                continue
+            received.append(peer_id)
+            swarm.submit_result(
+                peer_id=peer_id,
+                session_token=token,
+                document=valid_result(work, work["hidden"]),
+            )
+
+    threads = [
+        threading.Thread(target=worker, args=credential)
+        for credential in ((selected_peer, selected_token), (excluded_peer, excluded_token))
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        deadline = time.monotonic() + 2.0
+        while swarm.status()["ready_peer_count"] != 2:
+            assert time.monotonic() < deadline
+            time.sleep(0.005)
+        result = swarm.dispatch(
+            request_id="request-excluded",
+            hidden=[[1.0, 2.0]],
+            timeout_seconds=2,
+            excluded_peer_ids={excluded_peer},
+        )
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=2)
+    assert result.peer_id == selected_peer
+    assert received == [selected_peer]
+
+
 def test_poll_retries_same_outstanding_work_until_result() -> None:
     swarm = coordinator()
     peer_id, token = join(swarm)
