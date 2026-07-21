@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -9,12 +10,22 @@ import mlx.core as mx
 
 import model_manifest
 from mycelium_qualification.physical_deployment import (
+    LocalModelSource,
     PhysicalDeploymentError,
     build_execution_graph,
     build_physical_device_states,
     prepare_physical_deployment,
 )
 from runtime_loader import execute_loaded_stage, load_assignment_stage
+from two_process_runtime_qualification import (
+    SHARD_NAMES,
+    _build_local_model,
+    _canonical_json,
+    _layer_tensors,
+    _model_config,
+    _values,
+)
+from weight_provisioning import sha256_file
 import weight_provisioning
 
 
@@ -22,6 +33,45 @@ EXPECTED_RANGES = (
     {"start_layer": 0, "end_layer_exclusive": 1, "layer_count": 1},
     {"start_layer": 1, "end_layer_exclusive": 2, "layer_count": 1},
 )
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(_canonical_json(payload) + "\n", encoding="utf-8")
+
+
+def _write_dialogpt_style_monolithic_source(
+    root: Path, *, n_layer: int = 5
+) -> None:
+    root.mkdir()
+    config = _model_config(n_positions=16)
+    config["n_layer"] = n_layer
+    config["tie_word_embeddings"] = True
+    tensors = {
+        "transformer.wte.weight": _values((7, 4), offset=1, scale=0.01),
+        "transformer.wpe.weight": _values((16, 4), offset=2, scale=0.005),
+        **{
+            key: value
+            for layer in range(n_layer)
+            for key, value in _layer_tensors(layer).items()
+        },
+        "transformer.ln_f.weight": mx.ones((4,), dtype=mx.float32),
+        "transformer.ln_f.bias": mx.zeros((4,), dtype=mx.float32),
+    }
+    _write_json(root / "config.json", config)
+    mx.save_safetensors(str(root / "model.safetensors"), tensors)
+    (root / "vocab.json").write_text(
+        _canonical_json({"<|endoftext|>": 0, "hello": 1}) + "\n",
+        encoding="utf-8",
+    )
+    (root / "merges.txt").write_text("#version: 0.2\nh e\n", encoding="utf-8")
+
+
+def _assert_private_regular_file(path: Path) -> None:
+    metadata = path.lstat()
+    assert stat.S_ISREG(metadata.st_mode)
+    assert not path.is_symlink()
+    assert metadata.st_nlink == 1
+    assert metadata.st_mode & 0o077 == 0
 
 
 def test_prepare_physical_deployment_is_offline_deterministic_and_exact(
@@ -128,3 +178,142 @@ def test_prepare_physical_deployment_rejects_reuse_and_bad_nodes(
     with pytest.raises(PhysicalDeploymentError, match="invalid_physical_nodes"):
         prepare_physical_deployment(tmp_path / "bad-nodes", node_ids=("same", "same"))
     assert not (tmp_path / "bad-nodes").exists()
+
+
+def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "dialogpt-source"
+    _write_dialogpt_style_monolithic_source(source_root, n_layer=5)
+    source_digest = sha256_file(source_root / "model.safetensors")
+
+    deployment = prepare_physical_deployment(
+        tmp_path / "deployment",
+        node_ids=("mac-a", "mac-b"),
+        model_source=LocalModelSource(
+            root=source_root,
+            model_id="microsoft/DialoGPT-small",
+            requested_revision="local-main",
+            resolved_commit="f" * 40,
+        ),
+        runtime_dtype="float16",
+    )
+
+    assert deployment.manifest["model_id"] == "microsoft/DialoGPT-small"
+    assert deployment.manifest["requested_revision"] == "local-main"
+    assert deployment.manifest["resolved_commit"] == "f" * 40
+    assert deployment.manifest["num_layers"] == 5
+    assert deployment.manifest["component_aliases"] == {
+        "lm_head": "input_embedding"
+    }
+    assert deployment.model_source is not None
+    assert deployment.model_source["format"] == "safetensors_monolithic"
+    assert [item["path"] for item in deployment.manifest["files"]] == [
+        "model.safetensors"
+    ]
+    assert deployment.manifest["files"][0]["content_digest"]["value"] == source_digest
+    assert sorted(item["path"] for item in deployment.tokenizer_assets) == [
+        "merges.txt",
+        "vocab.json",
+    ]
+    assert "tokenizer.json" not in {
+        item["path"] for item in deployment.tokenizer_assets
+    }
+    assert all(
+        item["path"] not in {"merges.txt", "vocab.json"}
+        for item in deployment.manifest["files"]
+    )
+    for name in (
+        "config.json",
+        "model.safetensors",
+        "model.safetensors.index.json",
+        "vocab.json",
+        "merges.txt",
+    ):
+        _assert_private_regular_file(deployment.root / name)
+
+    assert tuple(item["range"] for item in deployment.assignments) == (
+        {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
+        {"start_layer": 2, "end_layer_exclusive": 5, "layer_count": 3},
+    )
+    assert all(
+        assignment["runtime"]["dtype"] == "float16"
+        for assignment in (*deployment.assignments, deployment.reference_assignment)
+    )
+
+    loaded_stages = [
+        load_assignment_stage(assignment, report, load_generation=17)
+        for assignment, report in zip(
+            deployment.assignments,
+            deployment.artifact_reports,
+        )
+    ]
+    loaded_reference = load_assignment_stage(
+        deployment.reference_assignment,
+        deployment.reference_report,
+        load_generation=17,
+    )
+    token_ids = mx.array(((1, 2, 3),), dtype=mx.uint32)
+    split_hidden = execute_loaded_stage(loaded_stages[0], token_ids=token_ids)
+    split_logits = execute_loaded_stage(loaded_stages[1], hidden_states=split_hidden)
+    reference_logits = execute_loaded_stage(loaded_reference, token_ids=token_ids)
+    mx.eval(split_logits, reference_logits)
+    assert tuple(split_logits.shape) == (1, 3, 7)
+    assert str(split_logits.dtype) == "mlx.core.float16"
+    assert bool(mx.allclose(split_logits, reference_logits, rtol=1e-3, atol=1e-3).item())
+
+    graph = build_execution_graph(
+        deployment.assignments,
+        [stage.proof for stage in loaded_stages],
+    )
+    assert graph.activation_bytes == 2
+    assert graph.hidden_size == 4
+    json.dumps(deployment.evidence_document(), sort_keys=True, allow_nan=False)
+
+
+def test_prepare_physical_deployment_accepts_local_sharded_gpt2_source(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "sharded-source"
+    source_root.mkdir()
+    _build_local_model(source_root, n_positions=16)
+
+    deployment = prepare_physical_deployment(
+        tmp_path / "deployment",
+        model_source=LocalModelSource(
+            root=source_root,
+            model_id="local/copied-gpt2-qualification",
+            requested_revision="snapshot",
+            resolved_commit="1" * 40,
+        ),
+    )
+
+    assert deployment.manifest["model_id"] == "local/copied-gpt2-qualification"
+    assert deployment.manifest["resolved_commit"] == "1" * 40
+    assert deployment.model_source is not None
+    assert deployment.model_source["format"] == "safetensors_sharded"
+    assert tuple(item["range"] for item in deployment.assignments) == EXPECTED_RANGES
+    assert [item["path"] for item in deployment.manifest["files"]] == list(
+        SHARD_NAMES
+    )
+    for shard_name in SHARD_NAMES:
+        copied = deployment.root / shard_name
+        _assert_private_regular_file(copied)
+        assert sha256_file(copied) == sha256_file(source_root / shard_name)
+
+
+def test_local_model_source_validation_rejects_unpinned_identity(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    _write_dialogpt_style_monolithic_source(source_root, n_layer=2)
+
+    with pytest.raises(PhysicalDeploymentError, match="invalid_local_model_source"):
+        prepare_physical_deployment(
+            tmp_path / "deployment",
+            model_source=LocalModelSource(
+                root=source_root,
+                model_id="local/dialogpt",
+                resolved_commit="not-a-commit",
+            ),
+        )
