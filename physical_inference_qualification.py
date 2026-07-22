@@ -12,14 +12,17 @@ import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
+import io
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import stat
 import subprocess
 import sys
+import tarfile
 from typing import Any, NoReturn, Protocol
 
 from mycelium_membership.contracts import (
@@ -49,6 +52,64 @@ _FORBIDDEN_NAME_RE = re.compile(
 )
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_TRANSFER_BYTES = 256 * 1024 * 1024
+_MAX_RUNNER_OUTPUT_BYTES = 1_048_576
+_STAGE_ACK_PROTOCOL = "mycelium.controller_remote_stage_ack.v1"
+_CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
+_REMOTE_STAGE_SCRIPT = r'''import hashlib,io,json,os,shutil,sys,tarfile
+from pathlib import Path,PurePosixPath
+root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);created=False
+try:
+    if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or root.exists():raise ValueError("root")
+    current=Path(root.anchor)
+    for part in root.parts[1:-1]:
+        current=current/part
+        if current.exists() and current.is_symlink():raise ValueError("symlink")
+    root.mkdir(parents=True,mode=0o700,exist_ok=False);created=True
+    raw=sys.stdin.buffer.read(expected_size+1)
+    if len(raw)!=expected_size:raise ValueError("size")
+    actual="sha256:"+hashlib.sha256(raw).hexdigest()
+    if actual!=expected_digest:raise ValueError("digest")
+    with tarfile.open(fileobj=io.BytesIO(raw),mode="r:") as archive:
+        members=archive.getmembers();names=[member.name for member in members]
+        if not members or len(members)>256 or names!=sorted(names) or len(names)!=len(set(names)):raise ValueError("members")
+        for member in members:
+            relative=PurePosixPath(member.name)
+            if not member.isfile() or relative.is_absolute() or str(relative)!=member.name or any(part in ("",".","..") for part in relative.parts):raise ValueError("member")
+            source=archive.extractfile(member)
+            if source is None:raise ValueError("content")
+            content=source.read()
+            if len(content)!=member.size:raise ValueError("content")
+            destination=root.joinpath(*relative.parts);destination.parent.mkdir(parents=True,mode=0o700,exist_ok=True)
+            with destination.open("xb") as output:output.write(content)
+            destination.chmod(0o600)
+    marker={"archive_digest":actual,"node_id":node_id};marker_path=root/".mycelium-stage.json"
+    with marker_path.open("x",encoding="utf-8") as output:output.write(json.dumps(marker,sort_keys=True,separators=(",",":"))+"\n")
+    marker_path.chmod(0o600)
+    ack={"archive_digest":actual,"archive_size_bytes":len(raw),"node_id":node_id,"protocol":"mycelium.controller_remote_stage_ack.v1","staging_root":str(root)}
+    sys.stdout.write(json.dumps(ack,sort_keys=True,separators=(",",":"))+"\n");sys.stdout.flush()
+except BaseException:
+    if created:shutil.rmtree(root,ignore_errors=True)
+    sys.stderr.write("remote_stage_rejected\n");raise SystemExit(2)
+'''
+_REMOTE_CLEANUP_SCRIPT = r'''import json,shutil,stat,sys
+from pathlib import Path
+root=Path(sys.argv[1]);node_id=sys.argv[2];archive_digest=sys.argv[3]
+try:
+    if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or not any(part.startswith("mycelium") for part in root.parts):raise ValueError("root")
+    removed=False
+    if root.exists():
+        metadata=root.lstat()
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):raise ValueError("root")
+        marker_path=root/".mycelium-stage.json";marker_metadata=marker_path.lstat()
+        if not stat.S_ISREG(marker_metadata.st_mode) or marker_metadata.st_nlink!=1 or marker_metadata.st_size>1024:raise ValueError("marker")
+        marker=json.loads(marker_path.read_text(encoding="utf-8"))
+        if marker!={"archive_digest":archive_digest,"node_id":node_id}:raise ValueError("marker")
+        shutil.rmtree(root);removed=True
+    ack={"node_id":node_id,"protocol":"mycelium.controller_remote_cleanup_ack.v1","removed":removed,"staging_root":str(root)}
+    sys.stdout.write(json.dumps(ack,sort_keys=True,separators=(",",":"))+"\n");sys.stdout.flush()
+except BaseException:
+    sys.stderr.write("remote_cleanup_rejected\n");raise SystemExit(2)
+'''
 
 
 class ControllerError(ValueError):
@@ -172,6 +233,7 @@ class PeerIdentity:
             or str(path) != self.staging_root
             or any(part in {"", ".", ".."} for part in path.parts)
             or len(path.parts) < 4
+            or not any(part.startswith("mycelium") for part in path.parts)
         ):
             _reject("peer_staging_root_invalid")
 
@@ -190,17 +252,19 @@ class CommandRunner(Protocol):
         argv: tuple[str, ...],
         *,
         timeout_seconds: float,
+        stdin_bytes: bytes | None = None,
     ) -> CommandCapture: ...
 
 
 class SubprocessRunner:
-    """Bounded argv-only runner reserved for later physical execution tranches."""
+    """Bounded argv-only runner; local shell expansion is never used."""
 
     def run(
         self,
         argv: tuple[str, ...],
         *,
         timeout_seconds: float,
+        stdin_bytes: bytes | None = None,
     ) -> CommandCapture:
         if (
             not isinstance(argv, tuple)
@@ -210,17 +274,26 @@ class SubprocessRunner:
             or isinstance(timeout_seconds, bool)
             or not math.isfinite(float(timeout_seconds))
             or not 0.0 < float(timeout_seconds) <= 300.0
+            or (stdin_bytes is not None and not isinstance(stdin_bytes, bytes))
         ):
             _reject("runner_arguments_invalid")
-        completed = subprocess.run(
-            list(argv),
-            check=False,
-            shell=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=float(timeout_seconds),
-        )
+        try:
+            completed = subprocess.run(
+                list(argv),
+                check=False,
+                shell=False,
+                input=stdin_bytes,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=float(timeout_seconds),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ControllerError("command_timeout") from exc
+        if (
+            len(completed.stdout) > _MAX_RUNNER_OUTPUT_BYTES
+            or len(completed.stderr) > _MAX_RUNNER_OUTPUT_BYTES
+        ):
+            _reject("command_output_too_large")
         return CommandCapture(
             argv=argv,
             returncode=completed.returncode,
@@ -257,10 +330,10 @@ def _artifact_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
     )
 
 
-def _verify_transfer_file(
+def _read_verified_transfer_file(
     source_root: Path,
     record: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bytes]:
     if set(record) != {"path", "size_bytes", "content_digest"}:
         _reject("transfer_record_fields_invalid")
     relative = _safe_transfer_path(record.get("path"))
@@ -294,6 +367,7 @@ def _verify_transfer_file(
         fd = os.open(candidate, flags)
     except OSError as exc:
         raise ControllerError("transfer_file_open_failed") from exc
+    chunks: list[bytes] = []
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
@@ -310,6 +384,7 @@ def _verify_transfer_file(
             if total > _MAX_TRANSFER_BYTES:
                 _reject("transfer_size_invalid")
             digest.update(chunk)
+            chunks.append(chunk)
         after = os.fstat(fd)
     finally:
         os.close(fd)
@@ -318,11 +393,70 @@ def _verify_transfer_file(
     actual_digest = "sha256:" + digest.hexdigest()
     if actual_digest != expected_digest:
         _reject("transfer_digest_mismatch")
-    return {
-        "path": str(relative),
-        "size_bytes": expected_size,
-        "content_digest": expected_digest,
-    }
+    return (
+        {
+            "path": str(relative),
+            "size_bytes": expected_size,
+            "content_digest": expected_digest,
+        },
+        b"".join(chunks),
+    )
+
+
+def _verify_transfer_file(
+    source_root: Path,
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    verified, _content = _read_verified_transfer_file(source_root, record)
+    return verified
+
+
+def build_transfer_archive(
+    source_root: Path,
+    transfer_manifest: Mapping[str, Any],
+) -> bytes:
+    """Build a deterministic tar containing exactly the verified manifest files."""
+
+    if (
+        not isinstance(transfer_manifest, Mapping)
+        or set(transfer_manifest) != {"protocol", "files"}
+        or transfer_manifest.get("protocol") != _TRANSFER_PROTOCOL
+    ):
+        _reject("transfer_manifest_invalid")
+    records = transfer_manifest.get("files")
+    if (
+        not isinstance(records, list)
+        or not records
+        or len(records) > 256
+        or not all(isinstance(record, Mapping) for record in records)
+    ):
+        _reject("transfer_manifest_invalid")
+    paths = [record.get("path") for record in records]
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        _reject("transfer_manifest_order_invalid")
+    try:
+        root_metadata = source_root.lstat()
+        resolved_root = source_root.resolve(strict=True)
+    except OSError as exc:
+        raise ControllerError("source_root_unavailable") from exc
+    if stat.S_ISLNK(root_metadata.st_mode) or not stat.S_ISDIR(root_metadata.st_mode):
+        _reject("source_root_invalid")
+    verified = [
+        _read_verified_transfer_file(resolved_root, record) for record in records
+    ]
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for record, content in verified:
+            member = tarfile.TarInfo(record["path"])
+            member.size = len(content)
+            member.mode = 0o600
+            member.uid = 0
+            member.gid = 0
+            member.mtime = 0
+            member.uname = ""
+            member.gname = ""
+            archive.addfile(member, io.BytesIO(content))
+    return stream.getvalue()
 
 
 class QualificationController:
@@ -484,6 +618,177 @@ class QualificationController:
         ):
             _reject("physical_host_identity_not_distinct")
 
+    def _parse_stage_ack(
+        self,
+        capture: CommandCapture,
+        *,
+        peer: PeerIdentity,
+        archive_digest: str,
+        archive_size: int,
+    ) -> dict[str, Any]:
+        if capture.returncode != 0:
+            _reject("remote_stage_failed")
+        if capture.stderr or not capture.stdout or len(capture.stdout) > _MAX_DOCUMENT_BYTES:
+            _reject("remote_stage_ack_invalid")
+        try:
+            ack = json.loads(
+                capture.stdout.decode("utf-8"),
+                object_pairs_hook=_reject_duplicates,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ControllerError) as exc:
+            raise ControllerError("remote_stage_ack_invalid") from exc
+        expected = {
+            "protocol": _STAGE_ACK_PROTOCOL,
+            "node_id": peer.node_id,
+            "staging_root": peer.staging_root,
+            "archive_digest": archive_digest,
+            "archive_size_bytes": archive_size,
+        }
+        if ack != expected or capture.stdout != _canonical_bytes(expected):
+            _reject("remote_stage_ack_mismatch")
+        return expected
+
+    def _cleanup_peer(
+        self,
+        peer: PeerIdentity,
+        *,
+        archive_digest: str,
+    ) -> dict[str, Any]:
+        remote_command = shlex.join(
+            (
+                "python3.14",
+                "-c",
+                _REMOTE_CLEANUP_SCRIPT,
+                peer.staging_root,
+                peer.node_id,
+                archive_digest,
+            )
+        )
+        capture = self._runner.run(
+            (
+                "ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=15",
+                "--",
+                peer.ssh_target,
+                remote_command,
+            ),
+            timeout_seconds=30.0,
+        )
+        if capture.returncode != 0 or capture.stderr or not capture.stdout:
+            _reject("remote_cleanup_failed")
+        try:
+            ack = json.loads(
+                capture.stdout.decode("utf-8"),
+                object_pairs_hook=_reject_duplicates,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ControllerError) as exc:
+            raise ControllerError("remote_cleanup_failed") from exc
+        if (
+            not isinstance(ack, dict)
+            or set(ack) != {"protocol", "node_id", "staging_root", "removed"}
+            or ack.get("protocol") != _CLEANUP_ACK_PROTOCOL
+            or ack.get("node_id") != peer.node_id
+            or ack.get("staging_root") != peer.staging_root
+            or not isinstance(ack.get("removed"), bool)
+            or capture.stdout != _canonical_bytes(ack)
+        ):
+            _reject("remote_cleanup_failed")
+        return ack
+
+    def _prepare_physical(
+        self,
+        transfers: tuple[dict[str, Any], ...],
+        endpoints: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        del transfers
+        archive = build_transfer_archive(self.source_root, self._transfer_manifest)
+        archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+        actions: list[dict[str, Any]] = []
+        attempted: list[PeerIdentity] = []
+        try:
+            for peer in self.peers:
+                attempted.append(peer)
+                remote_command = shlex.join(
+                    (
+                        "python3.14",
+                        "-c",
+                        _REMOTE_STAGE_SCRIPT,
+                        peer.staging_root,
+                        peer.node_id,
+                        archive_digest,
+                        str(len(archive)),
+                    )
+                )
+                argv = (
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=15",
+                    "--",
+                    peer.ssh_target,
+                    remote_command,
+                )
+                capture = self._runner.run(
+                    argv,
+                    timeout_seconds=120.0,
+                    stdin_bytes=archive,
+                )
+                ack = self._parse_stage_ack(
+                    capture,
+                    peer=peer,
+                    archive_digest=archive_digest,
+                    archive_size=len(archive),
+                )
+                actions.append(
+                    {
+                        "node_id": peer.node_id,
+                        "command": "prepare",
+                        "status": "staged",
+                        "archive_digest": archive_digest,
+                        "archive_size_bytes": len(archive),
+                        "staging_root": peer.staging_root,
+                        "acknowledgement": ack,
+                    }
+                )
+        except ControllerError as stage_error:
+            cleanup_failed = False
+            for peer in attempted:
+                try:
+                    self._cleanup_peer(peer, archive_digest=archive_digest)
+                except ControllerError:
+                    cleanup_failed = True
+            if cleanup_failed:
+                raise ControllerError("remote_cleanup_failed") from stage_error
+            raise
+        peers = [
+            {
+                "node_id": peer.node_id,
+                "host_id": peer.host_id,
+                "boot_id": peer.boot_id,
+                "signed_endpoint": endpoints.get(peer.node_id),
+            }
+            for peer in self.peers
+        ]
+        return {
+            "protocol": _RESULT_PROTOCOL,
+            "command": "prepare",
+            "mode": self.mode,
+            "peer_count": len(self.peers),
+            "peers": peers,
+            "actions": actions,
+            "route_ready": False,
+            "release_ready": False,
+            "physical_execution": True,
+            "claim_boundary": (
+                "verified archive staged on distinct physical peers; no node launch, "
+                "inference route, qualification evidence, or readiness claim"
+            ),
+        }
+
     def execute(self, command: str) -> dict[str, Any]:
         if command not in COMMANDS:
             _reject("controller_command_invalid")
@@ -491,7 +796,9 @@ class QualificationController:
         endpoints = self._validate_membership()
         if self.mode == "physical":
             self._validate_physical_distinctness()
-            if command in {"prepare", "run", "recover", "seal"}:
+            if command == "prepare":
+                return self._prepare_physical(transfers, endpoints)
+            if command in {"run", "recover", "seal"}:
                 _reject("physical_execution_not_implemented")
         peers = [
             {

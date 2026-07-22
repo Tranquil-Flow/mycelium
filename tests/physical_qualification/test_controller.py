@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
+import tarfile
 from typing import Any
 
 import pytest
@@ -15,10 +17,14 @@ from mycelium_membership.contracts import (
 from mycelium_qualification.signing import generate_ed25519_signer
 from physical_inference_qualification import (
     COMMANDS,
+    CommandCapture,
     ControllerError,
     PeerIdentity,
     QualificationController,
     SubprocessRunner,
+    _REMOTE_CLEANUP_SCRIPT,
+    _REMOTE_STAGE_SCRIPT,
+    build_transfer_archive,
     main,
 )
 
@@ -34,6 +40,28 @@ class RecordingRunner:
     def run(self, argv: tuple[str, ...], *, timeout_seconds: float) -> object:
         self.calls.append((argv, timeout_seconds))
         raise AssertionError("dry/fake/local controller must not launch commands")
+
+
+class StagingRunner:
+    def __init__(self, responses: list[CommandCapture]) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[tuple[str, ...], float, bytes | None]] = []
+
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        timeout_seconds: float,
+        stdin_bytes: bytes | None = None,
+    ) -> CommandCapture:
+        self.calls.append((argv, timeout_seconds, stdin_bytes))
+        response = self.responses.pop(0)
+        return CommandCapture(
+            argv=argv,
+            returncode=response.returncode,
+            stdout=response.stdout,
+            stderr=response.stderr,
+        )
 
 
 def _peers(count: int, *, same_host: bool = False) -> tuple[PeerIdentity, ...]:
@@ -186,6 +214,32 @@ def test_transfer_manifest_is_explicit_digest_bound_and_tamper_detected(
     assert runner.calls == []
 
 
+def test_transfer_archive_contains_only_declared_files_and_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path)
+    (source_root / "unlisted-secret.txt").write_text("must not cross boundary\n")
+
+    first = build_transfer_archive(source_root, transfers)
+    second = build_transfer_archive(source_root, transfers)
+
+    assert first == second
+    with tarfile.open(fileobj=io.BytesIO(first), mode="r:") as archive:
+        members = archive.getmembers()
+        assert [member.name for member in members] == [
+            "physical_inference_node.py",
+            "runtime_contracts.py",
+        ]
+        assert all(member.isfile() for member in members)
+        assert all(member.mode == 0o600 for member in members)
+        assert all(member.uid == member.gid == member.mtime == 0 for member in members)
+        assert all(member.uname == member.gname == "" for member in members)
+        first_stream = archive.extractfile(members[0])
+        second_stream = archive.extractfile(members[1])
+        assert first_stream is not None and first_stream.read() == b"print('node')\n"
+        assert second_stream is not None and second_stream.read() == b"RUNTIME = 'v1'\n"
+
+
 @pytest.mark.parametrize(
     "path",
     ["../escape.py", ".git/config", ".env", ".cache/model.bin", "models/weights.bin", "private-key.pem"],
@@ -254,6 +308,194 @@ def test_physical_mode_requires_distinct_host_and_boot_then_stays_blocked(
     with pytest.raises(ControllerError, match="physical_execution_not_implemented"):
         distinct.execute("run")
     assert runner.calls == []
+
+
+def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    responses = [
+        CommandCapture(
+            argv=(),
+            returncode=0,
+            stdout=(
+                json.dumps(
+                    {
+                        "protocol": "mycelium.controller_remote_stage_ack.v1",
+                        "node_id": peer.node_id,
+                        "staging_root": peer.staging_root,
+                        "archive_digest": archive_digest,
+                        "archive_size_bytes": len(archive),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("ascii"),
+            stderr=b"",
+        )
+        for peer in peers
+    ]
+    runner = StagingRunner(responses)
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("prepare")
+
+    assert len(runner.calls) == len(peers)
+    for peer, (argv, timeout_seconds, stdin_bytes) in zip(
+        peers, runner.calls, strict=True
+    ):
+        assert argv[0] == "ssh"
+        assert peer.ssh_target in argv
+        assert peer.staging_root in argv[-1]
+        assert archive_digest in argv[-1]
+        assert timeout_seconds == 120.0
+        assert stdin_bytes == archive
+    assert result["physical_execution"] is True
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert [action["status"] for action in result["actions"]] == [
+        "staged",
+        "staged",
+    ]
+    assert all(action["archive_digest"] == archive_digest for action in result["actions"])
+
+
+def test_physical_prepare_cleans_attempted_peers_when_staging_fails(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    first_ack = {
+        "protocol": "mycelium.controller_remote_stage_ack.v1",
+        "node_id": peers[0].node_id,
+        "staging_root": peers[0].staging_root,
+        "archive_digest": archive_digest,
+        "archive_size_bytes": len(archive),
+    }
+    cleanup_acks = [
+        {
+            "protocol": "mycelium.controller_remote_cleanup_ack.v1",
+            "node_id": peer.node_id,
+            "staging_root": peer.staging_root,
+            "removed": removed,
+        }
+        for peer, removed in zip(peers, (True, False), strict=True)
+    ]
+    runner = StagingRunner(
+        [
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=(json.dumps(first_ack, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                stderr=b"",
+            ),
+            CommandCapture(argv=(), returncode=2, stdout=b"", stderr=b"remote_stage_rejected\n"),
+            *[
+                CommandCapture(
+                    argv=(),
+                    returncode=0,
+                    stdout=(json.dumps(ack, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                    stderr=b"",
+                )
+                for ack in cleanup_acks
+            ],
+        ]
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    with pytest.raises(ControllerError, match="remote_stage_failed"):
+        controller.execute("prepare")
+
+    assert len(runner.calls) == 4
+    for peer, (cleanup_argv, cleanup_timeout, cleanup_stdin) in zip(
+        peers, runner.calls[2:], strict=True
+    ):
+        assert cleanup_argv[0] == "ssh"
+        assert peer.ssh_target in cleanup_argv
+        assert peer.staging_root in cleanup_argv[-1]
+        assert cleanup_timeout == 30.0
+        assert cleanup_stdin is None
+
+
+def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path / "source")
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    staging_root = tmp_path / "remote" / "mycelium-run" / "node-1"
+
+    capture = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_STAGE_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+            str(len(archive)),
+        ),
+        timeout_seconds=10.0,
+        stdin_bytes=archive,
+    )
+
+    assert capture.returncode == 0
+    assert capture.stderr == b""
+    assert json.loads(capture.stdout) == {
+        "protocol": "mycelium.controller_remote_stage_ack.v1",
+        "node_id": "node-1",
+        "staging_root": str(staging_root),
+        "archive_digest": archive_digest,
+        "archive_size_bytes": len(archive),
+    }
+    for record in transfers["files"]:
+        staged = staging_root / record["path"]
+        assert staged.read_bytes() == (source_root / record["path"]).read_bytes()
+        assert staged.stat().st_mode & 0o777 == 0o600
+
+    cleanup_argv = (
+        sys.executable,
+        "-c",
+        _REMOTE_CLEANUP_SCRIPT,
+        str(staging_root),
+        "node-1",
+        archive_digest,
+    )
+    first_cleanup = SubprocessRunner().run(
+        cleanup_argv,
+        timeout_seconds=10.0,
+    )
+    assert first_cleanup.returncode == 0
+    assert json.loads(first_cleanup.stdout)["removed"] is True
+    assert not staging_root.exists()
+    second_cleanup = SubprocessRunner().run(
+        cleanup_argv,
+        timeout_seconds=10.0,
+    )
+    assert second_cleanup.returncode == 0
+    assert json.loads(second_cleanup.stdout)["removed"] is False
 
 
 def test_cli_rejects_operator_supplied_endpoint_identity(capsys: Any) -> None:
