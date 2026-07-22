@@ -6,8 +6,8 @@
 
 | Value | Authority | When valid |
 |---|---|---|
-| `offline_capacity_planner` | The offline capacity planner operating on its bound membership/capability snapshot | Initial placement and any operator-requested offline replan |
-| `seed_emergency_replacement` | The seed coordinator | Replacement only after an existing placement is invalidated by expiry, liveness loss, or revocation |
+| `frozen_fixture` | Checked-in, digest-bound demo assignment | Phase-3 proof path only; immutable after the first physical run is sealed |
+| `planner_v2` | Capacity-aware placement planner | Product placement compiled from its bound membership and evidence snapshot |
 
 No other value is accepted. An operator, node agent, browser peer, or transport adapter cannot relabel a placement.
 
@@ -30,4 +30,4 @@ Changing provenance after sealing changes the route-challenge digest and causes 
 
 ## Authority boundary
 
-The seed may broker, sign, persist, and revoke membership and assignment records. It does not become a general route planner. `seed_emergency_replacement` is limited to replacing an invalidated placement; normal placement continues to come from the offline planner.
+The seed brokers, signs, persists, and revokes membership and assignment records; it does not become a route planner. `frozen_fixture` identifies the precommitted proof assignment. `planner_v2` is emitted only by the planner-backed placement source introduced after the seam exists.

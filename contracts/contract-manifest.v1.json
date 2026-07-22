@@ -309,14 +309,14 @@
     {
       "fixture": {
         "path": "contracts/compatibility-fixtures/route-qualification-v1.json",
-        "sha256": "b1a26efcd3858580be1d9f89529f0c048e587933aa160d8afb8d31eeec9e1dc8",
-        "size_bytes": 3692
+        "sha256": "1adf6b3fcb0231851e11379a30c66ef58918fdb4b6646dea58eacf70048ae916",
+        "size_bytes": 3682
       },
       "owner_sources": [
         {
           "path": "mycelium_qualification/contracts.py",
-          "sha256": "cffd3fe7a75c01603150234fc720e1cec461de31c0e7043cf145efdc83987d35",
-          "size_bytes": 19622
+          "sha256": "4aa68321b49750a852531c278cbeba45c7df50905b8bac18c0b5d8e49bf14af9",
+          "size_bytes": 19586
         },
         {
           "path": "mycelium_qualification/evidence.py",
@@ -325,8 +325,8 @@
         },
         {
           "path": "mycelium_qualification/qualifier.py",
-          "sha256": "fe11ec226cc04639bcfce5841d78d4aa6554c6680f2aae5a34b829c87b2a3219",
-          "size_bytes": 59953
+          "sha256": "b4ce9eaccdd5e79842041cb3f5c0b0e26aca695757bbd40a9bc00350dea8e6ab",
+          "size_bytes": 59927
         },
         {
           "path": "mycelium_qualification/authority.py",

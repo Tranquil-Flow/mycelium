@@ -1282,7 +1282,7 @@ def qualify_route(
     _require(
         isinstance(placement_provenance, str)
         and placement_provenance
-        in {"offline_capacity_planner", "seed_emergency_replacement"},
+        in {"frozen_fixture", "planner_v2"},
         "placement_provenance_invalid",
     )
     run_id_value = challenge.get("run_id")

@@ -9,7 +9,7 @@ from .evidence import canonical_json_bytes, is_sha256_ref
 ROUTE_QUALIFICATION_PROTOCOL = "mycelium.route_qualification.v1"
 QUALIFIER_AUTHORITY = "mycelium_qualification.qualifier:RouteQualificationV1"
 _PLACEMENT_PROVENANCES = frozenset(
-    {"offline_capacity_planner", "seed_emergency_replacement"}
+    {"frozen_fixture", "planner_v2"}
 )
 _CONTRACT_FIELDS = frozenset(
     {
@@ -449,7 +449,7 @@ def synthetic_route_qualification_fixture() -> RouteQualificationV1:
         deployment_id="synthetic-test-fixture-no-deployment",
         deployment_epoch=0,
         topology_version=0,
-        placement_provenance="offline_capacity_planner",
+        placement_provenance="frozen_fixture",
         model_id="synthetic-test-fixture-no-model",
         resolved_commit="synthetic-test-fixture-no-revision",
         manifest_digest=zero,

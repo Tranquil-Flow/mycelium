@@ -94,7 +94,7 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
             "stage_pack_digest": "sha256:" + "b" * 64,
             "graph_digest": "sha256:" + "c" * 64,
             "load_generation": 9,
-            "placement_provenance": "offline_capacity_planner",
+            "placement_provenance": "frozen_fixture",
             "peer_endpoint_records": [
                 {
                     "node_id": "node-b",

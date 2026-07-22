@@ -28,7 +28,7 @@ MAX_MESSAGE_TTL_SECONDS = 3_600.0
 MAX_CLOCK_SKEW_SECONDS = 30.0
 ROUTER_ACTIVATION_PROTOCOL = "mycelium.router_wire.v1"
 PLACEMENT_PROVENANCES = frozenset(
-    {"offline_capacity_planner", "seed_emergency_replacement"}
+    {"frozen_fixture", "planner_v2"}
 )
 _RUNTIME_CAPABILITY_FIELDS = frozenset(
     {"runtime_backend", "transport", "activation_protocol"}

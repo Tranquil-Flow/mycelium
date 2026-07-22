@@ -74,7 +74,7 @@ def _resign_load_statement(case: Any, index: int) -> None:
 
 def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case: Any) -> None:
     qualification_case.documents["run/route-challenge.json"]["placement_provenance"] = (
-        "offline_capacity_planner"
+        "frozen_fixture"
     )
     files, manifest = qualification_case.render()
     record = _qualify(qualification_case)
@@ -84,7 +84,7 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
     assert document["route_ready"] is True
     assert document["reason_codes"] == []
     assert document["evidence_class"] == "physical_qualification"
-    assert document["placement_provenance"] == "offline_capacity_planner"
+    assert document["placement_provenance"] == "frozen_fixture"
     assert document["qualified_by"] == "mycelium_qualification.qualifier:RouteQualificationV1"
     assert document["evidence_manifest_digest"] == evidence_manifest_digest(manifest)
     assert document["source_provenance_digest"] == sha256_document(
@@ -141,7 +141,7 @@ def test_qualification_rejects_missing_placement_provenance(
 
 @pytest.mark.parametrize(
     "value",
-    ["", "heuristic", None, ["offline_capacity_planner"]],
+    ["", "heuristic", None, ["frozen_fixture"]],
 )
 def test_qualification_rejects_invalid_placement_provenance(
     qualification_case: Any,
@@ -233,7 +233,7 @@ def test_post_seal_placement_provenance_mutation_breaks_manifest_binding(
 ) -> None:
     files, manifest = qualification_case.render()
     challenge = qualification_case.documents["run/route-challenge.json"]
-    challenge["placement_provenance"] = "offline_capacity_plannez"
+    challenge["placement_provenance"] = "frozen_fixturz"
     files["run/route-challenge.json"] = canonical_json_bytes(challenge)
 
     with pytest.raises(QualificationError) as captured:

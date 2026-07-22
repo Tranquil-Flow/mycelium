@@ -164,7 +164,7 @@ def test_acceptance_and_assignment_offer_replays_fail_closed(tmp_path: Path) -> 
         "stage_pack_digest": "sha256:" + "2" * 64,
         "graph_digest": "sha256:" + "3" * 64,
         "load_generation": 1,
-        "placement_provenance": "offline_capacity_planner",
+        "placement_provenance": "frozen_fixture",
         "peer_endpoint_records": [],
     }
     offer = sign_membership_message(signer=seed, message=offer_message)
@@ -205,7 +205,7 @@ def test_unexpired_replay_ids_fail_closed_at_capacity(
         "stage_pack_digest": "sha256:" + "2" * 64,
         "graph_digest": "sha256:" + "3" * 64,
         "load_generation": 1,
-        "placement_provenance": "offline_capacity_planner",
+        "placement_provenance": "frozen_fixture",
         "peer_endpoint_records": [],
     }
     first = sign_membership_message(
@@ -258,7 +258,7 @@ def test_assignment_result_is_signed_and_bound_to_verified_offer(tmp_path: Path)
             "stage_pack_digest": "sha256:" + "2" * 64,
             "graph_digest": "sha256:" + "3" * 64,
             "load_generation": 4,
-            "placement_provenance": "offline_capacity_planner",
+            "placement_provenance": "frozen_fixture",
             "peer_endpoint_records": [],
         },
     )
@@ -400,7 +400,7 @@ def test_signed_peer_endpoint_records_are_the_only_transport_authority(
         "stage_pack_digest": "sha256:" + "2" * 64,
         "graph_digest": "sha256:" + "3" * 64,
         "load_generation": 1,
-        "placement_provenance": "offline_capacity_planner",
+        "placement_provenance": "frozen_fixture",
     }
     first = sign_membership_message(
         signer=seed,

@@ -314,7 +314,7 @@ def test_assignment_offer_and_result_are_bound_end_to_end(tmp_path: Path) -> Non
         graph_digest="sha256:" + "3" * 64,
         load_generation=4,
         peer_node_ids=[],
-        placement_provenance="offline_capacity_planner",
+        placement_provenance="frozen_fixture",
     )
     assert node.accept_assignment_offer(offer)["assignment_id"] == "assignment-1"
     result = node.assignment_result(
@@ -441,7 +441,7 @@ def test_member_generation_heartbeat_replay_and_assignments_survive_restart(
         graph_digest="sha256:" + "c" * 64,
         load_generation=2,
         peer_node_ids=[],
-        placement_provenance="offline_capacity_planner",
+        placement_provenance="frozen_fixture",
     )
 
     restarted_seed = _coordinator(
@@ -541,7 +541,7 @@ def test_stale_seed_rejects_old_generation_messages_and_assignments(
             graph_digest="sha256:" + "3" * 64,
             load_generation=1,
             peer_node_ids=[],
-            placement_provenance="offline_capacity_planner",
+            placement_provenance="frozen_fixture",
         )
     assert stale_assignment.value.code == "seed_state_member_stale"
 
@@ -633,10 +633,10 @@ def test_assignment_offer_binds_eligible_peer_endpoints_and_provenance(
         graph_digest="sha256:" + "3" * 64,
         load_generation=1,
         peer_node_ids=["node-b"],
-        placement_provenance="offline_capacity_planner",
+        placement_provenance="frozen_fixture",
     )
     message = offer["message"]
-    assert message["placement_provenance"] == "offline_capacity_planner"
+    assert message["placement_provenance"] == "frozen_fixture"
     assert message["peer_endpoint_records"] == [
         {
             "node_id": "node-b",
@@ -659,7 +659,7 @@ def test_assignment_offer_binds_eligible_peer_endpoints_and_provenance(
             graph_digest="sha256:" + "3" * 64,
             load_generation=1,
             peer_node_ids=[],
-            placement_provenance="offline_capacity_planner",
+            placement_provenance="frozen_fixture",
         )
     with pytest.raises(SeedCoordinatorError, match="seed_peer_activation_ineligible"):
         coordinator.assignment_offer(
@@ -672,5 +672,5 @@ def test_assignment_offer_binds_eligible_peer_endpoints_and_provenance(
             graph_digest="sha256:" + "3" * 64,
             load_generation=1,
             peer_node_ids=["node-browser"],
-            placement_provenance="offline_capacity_planner",
+            placement_provenance="frozen_fixture",
         )
