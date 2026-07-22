@@ -289,16 +289,27 @@ def artifact_report_errors(
          errors.append(f"invalid report field type: {field}")
    if report.get("protocol") != "mycelium.artifact_verification_report.v1":
       errors.append("wrong report protocol")
-   stage_digest_fields = ("stage_pack_digest", "stage_pack_verification_digest")
-   present_stage_digest_fields = [
-      field for field in stage_digest_fields if field in report
+   stage_evidence_fields = (
+      "stage_pack",
+      "stage_pack_manifest",
+      "stage_pack_verification",
+      "stage_pack_digest",
+      "stage_pack_verification_digest",
+   )
+   present_stage_evidence_fields = [
+      field for field in stage_evidence_fields if field in report
    ]
-   if present_stage_digest_fields and len(present_stage_digest_fields) != len(
-      stage_digest_fields
+   if present_stage_evidence_fields and len(present_stage_evidence_fields) != len(
+      stage_evidence_fields
    ):
-      errors.append("stage-pack digest evidence must be complete")
-   for field in present_stage_digest_fields:
-      if not _SHA256_REF_RE.fullmatch(str(report.get(field, ""))):
+      errors.append("stage-pack evidence must be complete")
+   for field in ("stage_pack", "stage_pack_manifest", "stage_pack_verification"):
+      if field in report and not isinstance(report.get(field), dict):
+         errors.append(f"invalid report field type: {field}")
+   for field in ("stage_pack_digest", "stage_pack_verification_digest"):
+      if field in report and not _SHA256_REF_RE.fullmatch(
+         str(report.get(field, ""))
+      ):
          errors.append(f"invalid report field: {field}")
    for field in (
       "deployment_id",

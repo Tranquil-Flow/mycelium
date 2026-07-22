@@ -511,9 +511,21 @@ def _open_beneath(root: Path, relative: PurePosixPath) -> BinaryIO:
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     cloexec = getattr(os, "O_CLOEXEC", 0)
     directory = getattr(os, "O_DIRECTORY", 0)
-    root_fd = os.open(root, os.O_RDONLY | directory | nofollow | cloexec)
-    current_fd = root_fd
     try:
+        root_before = os.stat(root, follow_symlinks=False)
+        root_fd = os.open(root, os.O_RDONLY | directory | nofollow | cloexec)
+    except OSError as exc:
+        raise ValueError("unable to pin stage pack artifact root") from exc
+    current_fd = root_fd
+    file_fd: int | None = None
+    try:
+        opened_root = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root_before.st_mode)
+            or not stat.S_ISDIR(opened_root.st_mode)
+            or _file_fingerprint(root_before) != _file_fingerprint(opened_root)
+        ):
+            raise ValueError("stage pack artifact root changed before open")
         for part in relative.parts[:-1]:
             child_fd = os.open(
                 part,
@@ -528,12 +540,19 @@ def _open_beneath(root: Path, relative: PurePosixPath) -> BinaryIO:
             os.O_RDONLY | nofollow | cloexec,
             dir_fd=current_fd,
         )
-        return os.fdopen(file_fd, "rb")
+        root_after = os.stat(root, follow_symlinks=False)
+        if _file_fingerprint(root_after) != _file_fingerprint(opened_root):
+            raise ValueError("stage pack artifact root changed during open")
+        handle = os.fdopen(file_fd, "rb")
+        file_fd = None
+        return handle
     except OSError as exc:
         raise ValueError(
             f"unable to open verified artifact (symlink forbidden): {relative}"
         ) from exc
     finally:
+        if file_fd is not None:
+            os.close(file_fd)
         if current_fd != root_fd:
             os.close(current_fd)
         os.close(root_fd)
@@ -665,13 +684,19 @@ def _file_fingerprint(metadata: os.stat_result) -> tuple[int, int, int, int, int
 
 
 def verify_stage_pack(
-    pack: dict[str, Any], *, assignment: dict[str, Any]
+    pack: dict[str, Any],
+    *,
+    assignment: dict[str, Any],
+    manifest: dict[str, Any],
 ) -> dict[str, Any]:
-    """Reverify local files and tensor coverage against one immutable assignment."""
+    """Verify pack identity, authoritative ownership, files, and tensor coverage."""
     if not isinstance(pack, dict):
         raise ValueError("stage pack must be an object")
     if not isinstance(assignment, dict):
         raise ValueError("assignment must be an object")
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest must be an object")
+    _validate_authoritative_assignment(assignment, manifest)
     _validate_pack_shape(pack)
     _validate_against_assignment(pack, assignment)
 
@@ -753,6 +778,11 @@ def verify_stage_pack(
             if actual_digest != digest:
                 raise ValueError(f"stage pack artifact digest mismatch: {upstream_path}")
             names = _read_safetensors_header(handle, upstream_path)
+            stable_digest = _hash_handle(handle)
+            if stable_digest != actual_digest:
+                raise ValueError(
+                    f"stage pack artifact changed during verification: {upstream_path}"
+                )
             if _file_fingerprint(os.fstat(handle.fileno())) != before:
                 raise ValueError(
                     f"stage pack artifact changed during verification: {upstream_path}"
@@ -914,14 +944,37 @@ def _validate_verification_evidence(
         raise ValueError("stage pack verification tensor evidence is invalid")
 
 
+def validate_stage_pack_evidence(
+    pack: dict[str, Any],
+    verification: dict[str, Any],
+    *,
+    assignment: dict[str, Any],
+    manifest: dict[str, Any],
+) -> tuple[str, str]:
+    """Validate canonical pack evidence without rereading already verified files."""
+
+    _validate_authoritative_assignment(assignment, manifest)
+    _validate_verification_evidence(pack, verification, assignment)
+    return (
+        pack["stage_pack_digest"],
+        verification["stage_pack_verification_digest"],
+    )
+
+
 def artifact_report_for_loader(
     pack: dict[str, Any],
     verification: dict[str, Any],
     *,
     assignment: dict[str, Any],
+    manifest: dict[str, Any],
 ) -> dict[str, Any]:
     """Adapt verified pack evidence to the existing offline runtime-loader input."""
-    _validate_verification_evidence(pack, verification, assignment)
+    validate_stage_pack_evidence(
+        pack,
+        verification,
+        assignment=assignment,
+        manifest=manifest,
+    )
     root = Path(pack["artifact_root"])
     by_path = {record["path"]: record for record in verification["verified_files"]}
     verified_files = []
@@ -959,6 +1012,9 @@ def artifact_report_for_loader(
         "cache_hit_bytes": expected_bytes,
         "ready_for_load": True,
         "route_ready": False,
+        "stage_pack": copy.deepcopy(pack),
+        "stage_pack_manifest": copy.deepcopy(manifest),
+        "stage_pack_verification": copy.deepcopy(verification),
         "stage_pack_digest": pack["stage_pack_digest"],
         "stage_pack_verification_digest": verification[
             "stage_pack_verification_digest"

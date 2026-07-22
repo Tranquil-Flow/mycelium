@@ -417,6 +417,50 @@ def _validate_artifact_report(
     return indexed
 
 
+def _validated_stage_pack_binding(
+    assignment: dict[str, Any], report: dict[str, Any]
+) -> tuple[str, str] | None:
+    """Authenticate embedded stage-pack evidence before load-proof propagation."""
+
+    fields = {
+        "stage_pack",
+        "stage_pack_manifest",
+        "stage_pack_verification",
+        "stage_pack_digest",
+        "stage_pack_verification_digest",
+    }
+    present = fields & set(report)
+    if not present:
+        return None
+    if present != fields:
+        raise _fail("stage-pack evidence must be complete")
+    pack = report.get("stage_pack")
+    manifest = report.get("stage_pack_manifest")
+    verification = report.get("stage_pack_verification")
+    if not all(
+        isinstance(document, dict)
+        for document in (pack, manifest, verification)
+    ):
+        raise _fail("stage-pack evidence documents must be objects")
+    try:
+        from stage_pack import validate_stage_pack_evidence
+
+        binding = validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _fail(f"stage-pack evidence rejected: {exc}") from exc
+    if binding != (
+        report.get("stage_pack_digest"),
+        report.get("stage_pack_verification_digest"),
+    ):
+        raise _fail("stage-pack evidence digest mismatch")
+    return binding
+
+
 def _safe_relative_artifact_path(value: Any) -> PurePosixPath:
     if (
         not isinstance(value, str)
@@ -435,41 +479,84 @@ def _safe_relative_artifact_path(value: Any) -> PurePosixPath:
     return path
 
 
+def _artifact_fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
+    return (
+        metadata.st_mode,
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        metadata.st_nlink,
+    )
+
+
 def _open_verified_artifact(
     assignment: dict[str, Any],
     report: dict[str, Any],
     assigned_record: dict[str, Any],
     verified_record: dict[str, Any],
-) -> tuple[BinaryIO, tuple[int, int]]:
+) -> tuple[BinaryIO, tuple[int, ...]]:
     relative = _safe_relative_artifact_path(assigned_record.get("path"))
     cache_root_raw = assignment.get("artifact_cache_root")
     if not isinstance(cache_root_raw, str) or not Path(cache_root_raw).is_absolute():
         raise _fail("assignment artifact_cache_root must be absolute")
+    cache_root_path = Path(cache_root_raw)
     try:
-        cache_root = Path(cache_root_raw).resolve(strict=True)
+        cache_root = cache_root_path.resolve(strict=True)
     except OSError as exc:
         raise _fail("assignment artifact_cache_root is unavailable") from exc
     if report.get("resolved_artifact_cache_root") != str(cache_root):
         raise _fail("artifact report resolved cache root mismatch")
     reported_path = Path(verified_record["local_path"])
-    try:
-        resolved_path = reported_path.resolve(strict=True)
-        resolved_path.relative_to(cache_root)
-    except (OSError, ValueError) as exc:
+    expected_paths = {
+        str(cache_root_path.joinpath(*relative.parts)),
+        str(cache_root.joinpath(*relative.parts)),
+    }
+    if str(reported_path) not in expected_paths:
         raise _fail(
-            f"verified local path escapes artifact cache root: {relative}"
-        ) from exc
-    if reported_path.name != relative.name:
-        raise _fail(f"verified local path basename mismatch: {relative}")
+            f"verified local path escapes artifact cache root or mismatches assignment: {relative}"
+        )
 
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    root_fd: int | None = None
+    current_fd: int | None = None
+    file_fd: int | None = None
+    handle: BinaryIO | None = None
     try:
-        descriptor = os.open(resolved_path, flags)
-    except OSError as exc:
-        raise _fail(f"unable to open verified artifact: {relative}") from exc
-    handle = os.fdopen(descriptor, "rb")
-    try:
+        root_before = os.stat(cache_root, follow_symlinks=False)
+        root_fd = os.open(cache_root, os.O_RDONLY | directory | nofollow | cloexec)
+        current_fd = root_fd
+        opened_root = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(opened_root.st_mode)
+            or _artifact_fingerprint(root_before)
+            != _artifact_fingerprint(opened_root)
+        ):
+            raise _fail("artifact cache root changed before open")
+        for part in relative.parts[:-1]:
+            child_fd = os.open(
+                part,
+                os.O_RDONLY | directory | nofollow | cloexec,
+                dir_fd=current_fd,
+            )
+            if current_fd != root_fd:
+                os.close(current_fd)
+            current_fd = child_fd
+        file_fd = os.open(
+            relative.parts[-1],
+            os.O_RDONLY | nofollow | cloexec,
+            dir_fd=current_fd,
+        )
+        root_after = os.stat(cache_root, follow_symlinks=False)
+        if _artifact_fingerprint(root_after) != _artifact_fingerprint(opened_root):
+            raise _fail("artifact cache root changed during open")
+        handle = os.fdopen(file_fd, "rb")
+        file_fd = None
         metadata = os.fstat(handle.fileno())
+        fingerprint = _artifact_fingerprint(metadata)
         if not stat.S_ISREG(metadata.st_mode):
             raise _fail(f"verified artifact is not a regular file: {relative}")
         if metadata.st_nlink != 1:
@@ -482,14 +569,28 @@ def _open_verified_artifact(
             if not chunk:
                 break
             digest.update(chunk)
+        if _artifact_fingerprint(os.fstat(handle.fileno())) != fingerprint:
+            raise _fail(f"verified artifact changed during hashing: {relative}")
         actual_digest = "sha256:" + digest.hexdigest()
         if actual_digest != assigned_record.get("content_digest"):
             raise _fail(f"verified artifact digest mismatch: {relative}")
         handle.seek(0)
-        return handle, (metadata.st_dev, metadata.st_ino)
-    except BaseException:
-        handle.close()
+        return handle, fingerprint
+    except RuntimeLoadError:
+        if handle is not None:
+            handle.close()
         raise
+    except OSError as exc:
+        if handle is not None:
+            handle.close()
+        raise _fail(f"unable to open verified artifact: {relative}") from exc
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        if current_fd is not None and current_fd != root_fd:
+            os.close(current_fd)
+        if root_fd is not None:
+            os.close(root_fd)
 
 
 def _validate_safetensors_header(handle: BinaryIO, path: str) -> set[str]:
@@ -624,10 +725,11 @@ def _load_exact_tensors(
         verified_record = verified_by_path.get(path)
         if verified_record is None:
             raise _fail(f"assigned artifact is not verified: {path}")
-        handle, inode = _open_verified_artifact(
+        handle, fingerprint = _open_verified_artifact(
             assignment, report, assigned_record, verified_record
         )
         try:
+            inode = (fingerprint[1], fingerprint[2])
             if inode in seen_inodes:
                 raise _fail(f"duplicate verified artifact inode: {path}")
             seen_inodes.add(inode)
@@ -657,6 +759,8 @@ def _load_exact_tensors(
             # MLX loads lazily. Evaluate only the selected assignment-owned mapping while
             # this verified descriptor remains open; unassigned shard overfetch is discarded.
             mx.eval({key: loaded[key] for key in selected})
+            if _artifact_fingerprint(os.fstat(handle.fileno())) != fingerprint:
+                raise _fail(f"verified artifact changed during load: {path}")
         finally:
             handle.close()
     missing = sorted(expected_set - set(loaded))
@@ -1097,6 +1201,10 @@ def load_assignment_stage(
             binding,
         ) = _validate_assignment(assignment, load_generation)
         verified_by_path = _validate_artifact_report(assignment, artifact_report)
+        stage_pack_binding = _validated_stage_pack_binding(
+            assignment,
+            artifact_report,
+        )
         tensors = _load_exact_tensors(
             assignment,
             artifact_report,
@@ -1148,11 +1256,9 @@ def load_assignment_stage(
                 "no route challenge or distributed inference claim"
             ),
         }
-        if "stage_pack_digest" in artifact_report:
-            proof["stage_pack_digest"] = artifact_report["stage_pack_digest"]
-            proof["stage_pack_verification_digest"] = artifact_report[
-                "stage_pack_verification_digest"
-            ]
+        if stage_pack_binding is not None:
+            proof["stage_pack_digest"] = stage_pack_binding[0]
+            proof["stage_pack_verification_digest"] = stage_pack_binding[1]
         frozen_proof = _deep_freeze(proof)
         frozen_aliases = _deep_freeze(aliases)
         # Force canonical serialization of the immutable evidence before returning it.

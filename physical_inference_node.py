@@ -13,10 +13,11 @@ from contextlib import contextmanager
 from dataclasses import fields, is_dataclass, replace
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import select
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -410,19 +411,96 @@ class PhysicalNodeService:
         self._sinks: dict[str, _CaptureSink] = {}
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
-        _require(isinstance(relative_path, str) and bool(relative_path), code)
-        candidate = Path(relative_path)
-        _require(not candidate.is_absolute() and ".." not in candidate.parts, code)
-        joined = self.artifact_root / candidate
-        _require(not joined.is_symlink(), code)
+        _require(
+            isinstance(relative_path, str)
+            and bool(relative_path)
+            and len(relative_path) <= 1024,
+            code,
+        )
+        relative = PurePosixPath(relative_path)
+        _require(
+            not relative.is_absolute()
+            and str(relative) == relative_path
+            and 0 < len(relative.parts) <= 16
+            and all(part not in {"", ".", ".."} for part in relative.parts),
+            code,
+        )
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        cloexec = getattr(os, "O_CLOEXEC", 0)
+        directory = getattr(os, "O_DIRECTORY", 0)
+        root_fd: int | None = None
+        current_fd: int | None = None
+        document_fd: int | None = None
+
+        def fingerprint(metadata: os.stat_result) -> tuple[int, ...]:
+            return (
+                metadata.st_mode,
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_size,
+                metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
+                metadata.st_nlink,
+            )
+
         try:
-            resolved = joined.resolve(strict=True)
-            resolved.relative_to(self.artifact_root)
+            root_before = os.stat(self.artifact_root, follow_symlinks=False)
+            root_fd = os.open(
+                self.artifact_root,
+                os.O_RDONLY | directory | nofollow | cloexec,
+            )
+            current_fd = root_fd
+            opened_root = os.fstat(root_fd)
+            _require(
+                stat.S_ISDIR(opened_root.st_mode)
+                and fingerprint(root_before) == fingerprint(opened_root),
+                code,
+            )
+            for part in relative.parts[:-1]:
+                child_fd = os.open(
+                    part,
+                    os.O_RDONLY | directory | nofollow | cloexec,
+                    dir_fd=current_fd,
+                )
+                if current_fd != root_fd:
+                    os.close(current_fd)
+                current_fd = child_fd
+            document_fd = os.open(
+                relative.parts[-1],
+                os.O_RDONLY | nofollow | cloexec,
+                dir_fd=current_fd,
+            )
+            before = os.fstat(document_fd)
+            _require(
+                stat.S_ISREG(before.st_mode)
+                and before.st_nlink == 1
+                and 0 < before.st_size <= MAX_COMMAND_BYTES,
+                code,
+            )
+            chunks: list[bytes] = []
+            remaining = before.st_size
+            while remaining:
+                chunk = os.read(document_fd, min(remaining, 1024 * 1024))
+                _require(bool(chunk), code)
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            _require(fingerprint(os.fstat(document_fd)) == fingerprint(before), code)
+            root_after = os.stat(self.artifact_root, follow_symlinks=False)
+            _require(fingerprint(root_after) == fingerprint(opened_root), code)
+            raw = b"".join(chunks)
+        except NodeCommandError:
+            raise
         except (OSError, ValueError) as exc:
             raise NodeCommandError(code) from exc
-        _require(resolved.is_file() and resolved.stat().st_size <= MAX_COMMAND_BYTES, code)
+        finally:
+            if document_fd is not None:
+                os.close(document_fd)
+            if current_fd is not None and current_fd != root_fd:
+                os.close(current_fd)
+            if root_fd is not None:
+                os.close(root_fd)
         try:
-            document = canonical_json_loads(resolved.read_bytes(), path=relative_path)
+            document = canonical_json_loads(raw, path=relative_path)
         except Exception as exc:
             raise NodeCommandError(code) from exc
         _require(isinstance(document, dict), code)
@@ -467,6 +545,7 @@ class PhysicalNodeService:
         }
         stage_pack_fields = {
             "assignment_file",
+            "manifest_file",
             "stage_pack_file",
             "graph",
             "device_states",
@@ -493,13 +572,22 @@ class PhysicalNodeService:
         _require(assignment.get("node_id") == self.node_id, "assignment_node_id_mismatch")
         stage_pack_digest: str | None = None
         if "stage_pack_file" in data:
+            manifest = self._safe_document(
+                data["manifest_file"],
+                "invalid_manifest_file",
+            )
             pack = self._safe_document(data["stage_pack_file"], "invalid_stage_pack_file")
             try:
-                verification = verify_stage_pack(pack, assignment=assignment)
+                verification = verify_stage_pack(
+                    pack,
+                    assignment=assignment,
+                    manifest=manifest,
+                )
                 report = artifact_report_for_loader(
                     pack,
                     verification,
                     assignment=assignment,
+                    manifest=manifest,
                 )
             except (TypeError, ValueError) as exc:
                 raise NodeCommandError("invalid_stage_pack_file") from exc

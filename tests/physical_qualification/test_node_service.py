@@ -23,6 +23,7 @@ from mycelium_qualification.physical_deployment import (
 from physical_inference_node import (
     NODE_CONTROL_PROTOCOL,
     NodeCommandError,
+    PhysicalNodeService,
     execution_graph_from_document,
 )
 from runtime_loader import execute_loaded_stage, load_assignment_stage
@@ -176,6 +177,7 @@ def _configure_and_start_pair(
             "configure",
             {
                 "assignment_file": f"{client.node_id}-assignment.json",
+                "manifest_file": "model-manifest.json",
                 "stage_pack_file": f"{client.node_id}-stage-pack.json",
                 "graph": graph_document,
                 "device_states": state_document,
@@ -222,6 +224,35 @@ def test_execution_graph_document_round_trip_is_strict(tmp_path: Path) -> None:
     document["unexpected"] = True
     with pytest.raises(NodeCommandError, match="invalid_execution_graph_fields"):
         execution_graph_from_document(document)
+
+
+def test_safe_document_rejects_nested_symlinks_and_hardlinks(tmp_path: Path) -> None:
+    service = PhysicalNodeService(
+        run_id=str(uuid.uuid4()),
+        deployment_id=str(uuid.uuid4()),
+        node_id="node-a",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+    real = tmp_path / "real"
+    real.mkdir()
+    document = real / "assignment.json"
+    document.write_bytes(canonical_json_bytes({"safe": True}))
+    assert service._safe_document("real/assignment.json", "invalid_document") == {
+        "safe": True
+    }
+
+    (tmp_path / "nested").symlink_to(real.name, target_is_directory=True)
+    with pytest.raises(NodeCommandError, match="invalid_document"):
+        service._safe_document("nested/assignment.json", "invalid_document")
+
+    hardlink = tmp_path / "hardlink.json"
+    os.link(document, hardlink)
+    with pytest.raises(NodeCommandError, match="invalid_document"):
+        service._safe_document("hardlink.json", "invalid_document")
 
 
 def test_node_subprocess_binds_every_command_and_never_serializes_secrets(
@@ -352,6 +383,9 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
                 for node_id, state in build_physical_device_states(graph).items()
             }
         )
+    )
+    (tmp_path / "model-manifest.json").write_bytes(
+        canonical_json_bytes(deployment.manifest)
     )
     for index, node_id in enumerate(("node-a", "node-b")):
         (tmp_path / f"{node_id}-assignment.json").write_bytes(

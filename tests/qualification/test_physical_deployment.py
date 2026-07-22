@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import stat
 from pathlib import Path
@@ -16,7 +17,7 @@ from mycelium_qualification.physical_deployment import (
     build_physical_device_states,
     prepare_physical_deployment,
 )
-from runtime_loader import execute_loaded_stage, load_assignment_stage
+from runtime_loader import RuntimeLoadError, execute_loaded_stage, load_assignment_stage
 from two_process_runtime_qualification import (
     SHARD_NAMES,
     _build_local_model,
@@ -130,6 +131,19 @@ def test_prepare_physical_deployment_is_offline_deterministic_and_exact(
     assert first.local_fetch_requests
     assert all(not Path(item).is_absolute() for item in first.local_fetch_requests)
     json.dumps(first.evidence_document(), sort_keys=True, allow_nan=False)
+
+
+def test_loader_rejects_tampered_embedded_stage_pack_evidence(tmp_path: Path) -> None:
+    deployment = prepare_physical_deployment(tmp_path / "deployment")
+    report = copy.deepcopy(deployment.artifact_reports[0])
+    report["stage_pack"]["node_id"] = "forged-node"
+
+    with pytest.raises(RuntimeLoadError, match="stage-pack evidence rejected"):
+        load_assignment_stage(
+            deployment.assignments[0],
+            report,
+            load_generation=17,
+        )
 
 
 def test_prepared_assignments_and_independent_reference_load_and_execute(

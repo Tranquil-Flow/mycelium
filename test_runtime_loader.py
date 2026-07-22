@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import struct
 from pathlib import Path
 from typing import Any
@@ -336,17 +337,13 @@ def test_loads_exact_assignment_owned_gpt2_stage_and_emits_canonical_proof(
     assert canonical_json(json.loads(serialized)) == serialized
 
 
-def test_stage_pack_evidence_is_bound_into_runtime_load_proof(tmp_path: Path) -> None:
+def test_loader_rejects_unauthenticated_stage_pack_digest_claims(tmp_path: Path) -> None:
     assignment, report, _ = _case(tmp_path)
     report["stage_pack_digest"] = "sha256:" + "1" * 64
     report["stage_pack_verification_digest"] = "sha256:" + "2" * 64
 
-    loaded = load_assignment_stage(assignment, report, load_generation=12)
-
-    assert loaded.proof["stage_pack_digest"] == report["stage_pack_digest"]
-    assert loaded.proof["stage_pack_verification_digest"] == report[
-        "stage_pack_verification_digest"
-    ]
+    with pytest.raises(RuntimeLoadError, match="stage-pack evidence must be complete"):
+        load_assignment_stage(assignment, report, load_generation=12)
 
 
 def test_emitted_proof_and_alias_evidence_are_deeply_immutable(tmp_path: Path) -> None:
@@ -720,6 +717,23 @@ def test_rejects_verified_local_path_outside_cache_root(tmp_path: Path) -> None:
         load_assignment_stage(assignment, report, load_generation=1)
 
 
+def test_rejects_nested_symlink_in_verified_artifact_path(tmp_path: Path) -> None:
+    assignment, report, artifact = _case(tmp_path)
+    real = tmp_path / "real"
+    real.mkdir()
+    moved = real / artifact.name
+    artifact.rename(moved)
+    (tmp_path / "nested").symlink_to(real.name, target_is_directory=True)
+    relative = f"nested/{artifact.name}"
+    assignment["files"][0]["path"] = relative
+    report["verified_files"][0]["path"] = relative
+    report["verified_files"][0]["local_path"] = str(tmp_path / relative)
+    _rebind(assignment, report)
+
+    with pytest.raises(RuntimeLoadError, match="unable to open verified artifact"):
+        load_assignment_stage(assignment, report, load_generation=1)
+
+
 def test_rejects_multiply_linked_artifact(tmp_path: Path) -> None:
     assignment, report, artifact = _case(tmp_path)
     (tmp_path / "artifact-alias.safetensors").hardlink_to(artifact)
@@ -746,6 +760,30 @@ def test_rejects_file_tampering_after_artifact_report(tmp_path: Path) -> None:
     artifact.write_bytes(content)
 
     with pytest.raises(RuntimeLoadError, match="digest mismatch"):
+        load_assignment_stage(assignment, report, load_generation=1)
+
+
+def test_rejects_artifact_mutation_during_lazy_mlx_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assignment, report, artifact = _case(tmp_path)
+    original_eval = mx.eval
+    mutated = False
+
+    def eval_then_mutate(value: Any) -> None:
+        nonlocal mutated
+        original_eval(value)
+        if not mutated:
+            mutated = True
+            with artifact.open("r+b") as handle:
+                handle.seek(-1, os.SEEK_END)
+                byte = handle.read(1)
+                handle.seek(-1, os.SEEK_END)
+                handle.write(bytes([byte[0] ^ 1]))
+
+    monkeypatch.setattr(mx, "eval", eval_then_mutate)
+    with pytest.raises(RuntimeLoadError, match="changed during load"):
         load_assignment_stage(assignment, report, load_generation=1)
 
 

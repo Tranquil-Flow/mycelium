@@ -197,7 +197,7 @@ def test_compiles_deterministic_assignment_local_packs_and_verifies_warm_artifac
     assert packs[1]["runtime"] == assignments[1]["runtime"]
     assert packs[1]["route_ready"] is False
 
-    verification = verify_stage_pack(packs[1], assignment=assignments[1])
+    verification = verify_stage_pack(packs[1], assignment=assignments[1], manifest=manifest)
     assert verification["protocol"] == STAGE_PACK_VERIFICATION_PROTOCOL
     assert verification["stage_pack_digest"] == packs[1]["stage_pack_digest"]
     assert verification["assignment_id"] == assignments[1]["assignment_id"]
@@ -210,7 +210,7 @@ def test_compiles_deterministic_assignment_local_packs_and_verifies_warm_artifac
     assert verification["route_ready"] is False
     assert verification["stage_pack_verification_digest"].startswith("sha256:")
 
-    second = verify_stage_pack(packs[1], assignment=assignments[1])
+    second = verify_stage_pack(packs[1], assignment=assignments[1], manifest=manifest)
     assert second == verification
 
 
@@ -226,7 +226,7 @@ def test_layer_spanning_files_and_file_spanning_layers_are_preserved(tmp_path: P
         "a.safetensors",
         "b.safetensors",
     ]
-    verified = verify_stage_pack(middle, assignment=assignments[1])
+    verified = verify_stage_pack(middle, assignment=assignments[1], manifest=manifest)
     mapping = verified["tensor_file_map"]
     assert mapping["bert.encoder.layer.1.attention.self.query.weight"] == "a.safetensors"
     assert mapping["bert.encoder.layer.1.attention.self.key.weight"] == "b.safetensors"
@@ -338,7 +338,7 @@ def test_tied_alias_pack_includes_embedding_source_for_final_stage(tmp_path: Pat
     assert pack["component_aliases"] == {"lm_head": "input_embedding"}
     assert pack["component_tensor_keys"]["lm_head"] == ["transformer.wte.weight"]
     assert "embed.safetensors" in [item["upstream_path"] for item in pack["artifacts"]]
-    assert verify_stage_pack(pack, assignment=final)["ready_for_load"] is True
+    assert verify_stage_pack(pack, assignment=final, manifest=manifest)["ready_for_load"] is True
 
 
 @pytest.mark.parametrize(
@@ -359,7 +359,20 @@ def test_verifier_rejects_identity_range_role_and_runtime_drift(
     mutation(pack)
     _refresh_digest(pack)
     with pytest.raises(ValueError, match=error):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+
+
+def test_verifier_rejects_reidentified_assignment_that_diverges_from_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    pack = compile_stage_pack(assignments[1], manifest, reports[1])
+    forged = copy.deepcopy(assignments[1])
+    forged["components"] = ["decoder", "final_norm"]
+    forged["assignment_id"] = la.assignment_id_for(forged)
+
+    with pytest.raises(ValueError, match="components do not match manifest ownership"):
+        verify_stage_pack(pack, assignment=forged, manifest=manifest)
 
 
 def test_compile_rejects_manifest_digest_and_minimal_file_drift(tmp_path: Path) -> None:
@@ -387,14 +400,14 @@ def test_verifier_rejects_corruption_traversal_and_symlink(tmp_path: Path) -> No
     artifact = Path(pack["artifact_root"]) / pack["artifacts"][0]["relative_path"]
     artifact.write_bytes(artifact.read_bytes() + b"corrupt")
     with pytest.raises(ValueError, match="size mismatch"):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
 
     manifest, assignments, reports, _ = _case(tmp_path / "traversal")
     pack = compile_stage_pack(assignments[1], manifest, reports[1])
     pack["artifacts"][0]["relative_path"] = "../escape.safetensors"
     _refresh_digest(pack)
     with pytest.raises(ValueError, match="unsafe artifact path"):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
 
     manifest, assignments, reports, _ = _case(tmp_path / "symlink")
     pack = compile_stage_pack(assignments[1], manifest, reports[1])
@@ -403,7 +416,50 @@ def test_verifier_rejects_corruption_traversal_and_symlink(tmp_path: Path) -> No
     artifact.rename(target)
     artifact.symlink_to(target.name)
     with pytest.raises(ValueError, match="symlink|open verified"):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+
+
+def test_verifier_rejects_same_size_corruption_and_hardlinks(tmp_path: Path) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path / "same-size")
+    pack = compile_stage_pack(assignments[1], manifest, reports[1])
+    artifact = Path(pack["artifact_root"]) / pack["artifacts"][0]["relative_path"]
+    with artifact.open("r+b") as handle:
+        handle.seek(-1, os.SEEK_END)
+        value = handle.read(1)
+        handle.seek(-1, os.SEEK_END)
+        handle.write(bytes([value[0] ^ 1]))
+    with pytest.raises(ValueError, match="digest mismatch"):
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+
+    manifest, assignments, reports, _ = _case(tmp_path / "hardlink")
+    pack = compile_stage_pack(assignments[1], manifest, reports[1])
+    artifact = Path(pack["artifact_root"]) / pack["artifacts"][0]["relative_path"]
+    original = artifact.with_name("original.safetensors")
+    artifact.rename(original)
+    os.link(original, artifact)
+    with pytest.raises(ValueError, match="one hard link"):
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+
+
+def test_verifier_rejects_nested_and_root_symlinks(tmp_path: Path) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path / "nested")
+    pack = compile_stage_pack(assignments[1], manifest, reports[1])
+    root = Path(pack["artifact_root"])
+    nested = root / "snapshot"
+    real_nested = root / "real-snapshot"
+    nested.rename(real_nested)
+    nested.symlink_to(real_nested.name, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink|open verified"):
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+
+    manifest, assignments, reports, _ = _case(tmp_path / "root-link")
+    pack = compile_stage_pack(assignments[1], manifest, reports[1])
+    root = Path(pack["artifact_root"])
+    real_root = root.with_name(root.name + "-real")
+    root.rename(real_root)
+    root.symlink_to(real_root.name, target_is_directory=True)
+    with pytest.raises(ValueError, match="root.*symlink"):
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
 
 
 def test_verifier_rejects_missing_assigned_tensor_even_with_matching_file_digest(
@@ -417,16 +473,33 @@ def test_verifier_rejects_missing_assigned_tensor_even_with_matching_file_digest
     _write_safetensors(artifact, ["bert.encoder.layer.2.attention.self.query.weight"])
     artifact_record["size_bytes"] = artifact.stat().st_size
     artifact_record["content_digest"] = "sha256:" + _sha(artifact)
+    for manifest_file in manifest["files"]:
+        if manifest_file["path"] == artifact_record["upstream_path"]:
+            manifest_file["size_bytes"] = artifact_record["size_bytes"]
+            manifest_file["content_digest"] = {
+                "algorithm": "sha256",
+                "value": _sha(artifact),
+            }
+    unsigned_manifest = copy.deepcopy(manifest)
+    unsigned_manifest.pop("manifest_digest")
+    manifest["manifest_digest"] = {
+        "algorithm": "sha256",
+        "value": hashlib.sha256(
+            mm.canonical_json(unsigned_manifest).encode("utf-8")
+        ).hexdigest(),
+    }
+    assignment["manifest_digest"] = mm.manifest_digest_ref(manifest)
     for upstream in assignment["files"]:
         if upstream["path"] == artifact_record["upstream_path"]:
             upstream["size_bytes"] = artifact_record["size_bytes"]
             upstream["content_digest"] = artifact_record["content_digest"]
     assignment["assignment_id"] = la.assignment_id_for(assignment)
     pack["assignment_id"] = assignment["assignment_id"]
+    pack["manifest_digest"] = assignment["manifest_digest"]
     pack["upstream_files"] = copy.deepcopy(assignment["files"])
     _refresh_digest(pack)
     with pytest.raises(ValueError, match="missing assigned tensors"):
-        verify_stage_pack(pack, assignment=assignment)
+        verify_stage_pack(pack, assignment=assignment, manifest=manifest)
 
 
 def test_verifier_rejects_concurrent_artifact_mutation(
@@ -450,14 +523,19 @@ def test_verifier_rejects_concurrent_artifact_mutation(
 
     monkeypatch.setattr(sp, "_hash_handle", hash_then_mutate)
     with pytest.raises(ValueError, match="changed during verification"):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
 
 
 def test_loader_report_is_bound_to_pack_and_assignment(tmp_path: Path) -> None:
     manifest, assignments, reports, _ = _case(tmp_path)
     pack = compile_stage_pack(assignments[1], manifest, reports[1])
-    verification = verify_stage_pack(pack, assignment=assignments[1])
-    report = artifact_report_for_loader(pack, verification, assignment=assignments[1])
+    verification = verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+    report = artifact_report_for_loader(
+        pack,
+        verification,
+        assignment=assignments[1],
+        manifest=manifest,
+    )
 
     assert report["protocol"] == "mycelium.artifact_verification_report.v1"
     assert report["stage_pack_digest"] == pack["stage_pack_digest"]
@@ -476,14 +554,19 @@ def test_loader_report_is_bound_to_pack_and_assignment(tmp_path: Path) -> None:
     incomplete = copy.deepcopy(report)
     incomplete.pop("stage_pack_verification_digest")
     assert any(
-        "digest evidence must be complete" in error
+        "stage-pack evidence must be complete" in error
         for error in wp.artifact_report_errors(assignments[1], incomplete)
     )
 
     forged = copy.deepcopy(verification)
     forged["assignment_id"] = assignments[0]["assignment_id"]
     with pytest.raises(ValueError, match="verification digest|assignment"):
-        artifact_report_for_loader(pack, forged, assignment=assignments[1])
+        artifact_report_for_loader(
+            pack,
+            forged,
+            assignment=assignments[1],
+            manifest=manifest,
+        )
 
 
 def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_records(
@@ -494,7 +577,7 @@ def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_record
     pack["unexpected"] = True
     _refresh_digest(pack)
     with pytest.raises(ValueError, match="fields"):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
 
     pack = compile_stage_pack(assignments[1], manifest, reports[1])
     pack["runtime"]["temperature"] = float("nan")
@@ -505,4 +588,4 @@ def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_record
     pack["artifacts"].append(copy.deepcopy(pack["artifacts"][0]))
     _refresh_digest(pack)
     with pytest.raises(ValueError, match="duplicate artifact"):
-        verify_stage_pack(pack, assignment=assignments[1])
+        verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)

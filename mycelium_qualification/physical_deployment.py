@@ -1135,11 +1135,20 @@ def prepare_assignment_artifacts(
             )
         ]
         stage_pack_verifications = [
-            verify_stage_pack(pack, assignment=assignment)
+            verify_stage_pack(
+                pack,
+                assignment=assignment,
+                manifest=manifest,
+            )
             for assignment, pack in zip(assignments, stage_packs, strict=True)
         ]
         reports = [
-            artifact_report_for_loader(pack, verification, assignment=assignment)
+            artifact_report_for_loader(
+                pack,
+                verification,
+                assignment=assignment,
+                manifest=manifest,
+            )
             for assignment, pack, verification in zip(
                 assignments,
                 stage_packs,

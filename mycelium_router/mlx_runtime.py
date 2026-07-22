@@ -56,7 +56,7 @@ _MLX_DTYPES = {
 }
 _SUPPORTED_COMPONENTS = {"input_embedding", "decoder", "final_norm", "lm_head"}
 _MAX_RETAINED_OPERATIONS = 4096
-_LOAD_PROOF_FIELDS = frozenset({
+_BASE_LOAD_PROOF_FIELDS = frozenset({
    "protocol",
    "deployment_id",
    "deployment_epoch",
@@ -76,11 +76,12 @@ _LOAD_PROOF_FIELDS = frozenset({
    "probe_digest",
    "load_generation",
    "control_plane_binding",
-   "stage_pack_digest",
-   "stage_pack_verification_digest",
    "route_ready",
    "claim_boundary",
 })
+_STAGE_PACK_PROOF_FIELDS = frozenset(
+   {"stage_pack_digest", "stage_pack_verification_digest"}
+)
 
 
 class MLXRuntimeError(ValueError):
@@ -367,8 +368,18 @@ class MLXRuntimePort:
       if not isinstance(proof, Mapping):
          _reject("invalid_load_proof", placement.placement_id)
       plain_proof = _plain_json(proof)
-      if not isinstance(plain_proof, dict) or set(plain_proof) != _LOAD_PROOF_FIELDS:
+      proof_fields = (
+         frozenset(plain_proof) if isinstance(plain_proof, dict) else frozenset()
+      )
+      if proof_fields not in {
+         _BASE_LOAD_PROOF_FIELDS,
+         _BASE_LOAD_PROOF_FIELDS | _STAGE_PACK_PROOF_FIELDS,
+      }:
          _reject("invalid_load_proof_fields", placement.placement_id)
+      if proof_fields & _STAGE_PACK_PROOF_FIELDS:
+         for field in _STAGE_PACK_PROOF_FIELDS:
+            if not _SHA256_REF_RE.fullmatch(str(proof.get(field, ""))):
+               _reject(f"invalid_{field}", placement.placement_id)
       if proof.get("protocol") != "mycelium.layer_load_proof.v1":
          _reject("unsupported_load_proof_protocol", placement.placement_id)
 
