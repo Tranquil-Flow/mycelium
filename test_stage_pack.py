@@ -16,10 +16,12 @@ import model_manifest as mm
 import stage_pack as sp
 import weight_provisioning as wp
 from stage_pack import (
+    FP16_TOLERANCE_PROTOCOL,
     STAGE_PACK_PROTOCOL,
     STAGE_PACK_VERIFICATION_PROTOCOL,
     artifact_report_for_loader,
     compile_stage_pack,
+    load_fp16_tolerances,
     stage_pack_digest_for,
     verify_stage_pack,
 )
@@ -589,3 +591,206 @@ def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_record
     _refresh_digest(pack)
     with pytest.raises(ValueError, match="duplicate artifact"):
         verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
+
+
+def _twelve_layer_case(
+    tmp_path: Path,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    source = tmp_path / "source-12"
+    source.mkdir()
+    tensors = {
+        "shard-a.safetensors": [
+            "bert.embeddings.word_embeddings.weight",
+            *(f"bert.encoder.layer.{layer}.attention.self.query.weight" for layer in range(4)),
+        ],
+        "shard-b.safetensors": [
+            "bert.encoder.layer.3.attention.self.key.weight",
+            *(f"bert.encoder.layer.{layer}.attention.self.query.weight" for layer in range(4, 7)),
+        ],
+        "shard-c.safetensors": [
+            "bert.encoder.layer.6.attention.self.key.weight",
+            *(f"bert.encoder.layer.{layer}.attention.self.query.weight" for layer in range(7, 10)),
+        ],
+        "shard-d.safetensors": [
+            "bert.encoder.layer.9.attention.self.key.weight",
+            *(f"bert.encoder.layer.{layer}.attention.self.query.weight" for layer in range(10, 12)),
+            "bert.pooler.dense.weight",
+            "classifier.weight",
+        ],
+    }
+    for name, names in tensors.items():
+        _write_safetensors(source / name, names)
+    manifest = mm.compile_model_manifest(
+        model_id="org/bert-12-way",
+        requested_revision="main",
+        resolved_commit="d" * 40,
+        config={
+            "model_type": "bert",
+            "num_hidden_layers": 12,
+            "architectures": ["BertForSequenceClassification"],
+        },
+        checkpoint_index={
+            "weight_map": {
+                tensor: filename
+                for filename, names in tensors.items()
+                for tensor in names
+            }
+        },
+        file_metadata={
+            name: {
+                "size_bytes": (source / name).stat().st_size,
+                "sha256": _sha(source / name),
+            }
+            for name in tensors
+        },
+    )
+    boundaries = ((0, 3), (3, 6), (6, 8), (8, 10), (10, 12))
+    route = {
+        "ok": True,
+        "protocol": "mycelium.manual_provisioning_route.v1",
+        "claim_boundary": "five-way test allocation only",
+        "model": {
+            "model_id": manifest["model_id"],
+            "num_layers": manifest["num_layers"],
+            "manifest_digest": mm.manifest_digest_ref(manifest),
+            "resolved_commit": manifest["resolved_commit"],
+        },
+        "route": [
+            {
+                "node_id": f"node-{index}",
+                "range": {
+                    "start_layer": start,
+                    "end_layer_exclusive": end,
+                    "layer_count": end - start,
+                },
+            }
+            for index, (start, end) in enumerate(boundaries)
+        ],
+        "node_order": [f"node-{index}" for index in range(5)],
+    }
+    cache_roots = {
+        f"node-{index}": str((tmp_path / f"cache-12-{index}").resolve())
+        for index in range(5)
+    }
+    assignments = la.compile_layer_assignments(
+        route_plan=route,
+        manifest=manifest,
+        deployment_id=DEPLOYMENT_ID,
+        deployment_epoch=12,
+        cache_roots=cache_roots,
+        runtime_by_node={
+            node: {
+                "backend": "artifact_verifier",
+                "dtype": "source",
+                "quantization": "none",
+            }
+            for node in cache_roots
+        },
+    )
+    reports: list[dict[str, Any]] = []
+    for assignment in assignments:
+        def fetch(
+            model_id: str,
+            revision: str,
+            filename: str,
+            cache_root: str | Path,
+            local_files_only: bool = False,
+        ) -> tuple[Path, bool]:
+            assert model_id == manifest["model_id"]
+            assert revision == manifest["resolved_commit"]
+            target = Path(cache_root) / "snapshot" / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / filename, target)
+            return target, False
+
+        reports.append(wp.provision_assignment(assignment, fetch_file=fetch))
+    return manifest, assignments, reports
+
+
+def test_five_way_packs_cover_uneven_ranges_and_shared_boundary_shards(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports = _twelve_layer_case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+
+    expected_ranges = [(0, 3), (3, 6), (6, 8), (8, 10), (10, 12)]
+    assert [
+        (pack["range"]["start_layer"], pack["range"]["end_layer_exclusive"])
+        for pack in packs
+    ] == expected_ranges
+    assert packs[0]["range"]["start_layer"] == 0
+    assert packs[-1]["range"]["end_layer_exclusive"] == 12
+    assert all(
+        left["range"]["end_layer_exclusive"]
+        == right["range"]["start_layer"]
+        for left, right in zip(packs, packs[1:])
+    )
+    artifact_sets = [
+        {record["upstream_path"] for record in pack["artifacts"]}
+        for pack in packs
+    ]
+    for index, shared in enumerate(
+        (
+            "shard-a.safetensors",
+            "shard-b.safetensors",
+            "shard-c.safetensors",
+            "shard-d.safetensors",
+        )
+    ):
+        assert shared in artifact_sets[index] & artifact_sets[index + 1]
+    for pack, assignment in zip(packs, assignments, strict=True):
+        assert pack["expected_tensor_keys"] == assignment["expected_tensor_keys"]
+        assert pack["route_ready"] is False
+        verification = verify_stage_pack(pack, assignment=assignment, manifest=manifest)
+        assert verification["ready_for_load"] is True
+        assert verification["route_ready"] is False
+
+
+def test_frozen_dialogpt_fp16_tolerances_are_source_bound_and_digest_pinned(
+    tmp_path: Path,
+) -> None:
+    path = Path("tolerances/dialogpt-small-fp16.json")
+    expected_artifact_digest = (
+        "sha256:ea50e39b0e9368b9110cc5ab48012ddbc7bd90f2b17410aed643a7404acac567"
+    )
+    policy = load_fp16_tolerances(
+        path,
+        expected_model_id="microsoft/DialoGPT-small",
+        expected_resolved_commit="49c537161a457d5256512f9d2d38a87d81ae0f0e",
+        expected_model_artifact_digest=expected_artifact_digest,
+    )
+
+    assert policy["protocol"] == FP16_TOLERANCE_PROTOCOL
+    assert policy["runtime"] == {
+        "backend": "mlx",
+        "dtype": "float16",
+        "quantization": "none",
+    }
+    assert policy["checks"]["token_ids"] == {"exact": True}
+    assert policy["route_ready"] is False
+    assert policy["freeze"]["post_hoc_fitted"] is False
+
+    mutated = copy.deepcopy(policy)
+    mutated["checks"]["logits"]["absolute_tolerance"] *= 2
+    tampered_path = tmp_path / "tampered.json"
+    tampered_path.write_text(
+        json.dumps(mutated, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="digest"):
+        load_fp16_tolerances(
+            tampered_path,
+            expected_model_id="microsoft/DialoGPT-small",
+            expected_resolved_commit="49c537161a457d5256512f9d2d38a87d81ae0f0e",
+            expected_model_artifact_digest=expected_artifact_digest,
+        )
+    with pytest.raises(ValueError, match="source identity"):
+        load_fp16_tolerances(
+            path,
+            expected_model_id="microsoft/DialoGPT-small",
+            expected_resolved_commit="0" * 40,
+            expected_model_artifact_digest=expected_artifact_digest,
+        )
