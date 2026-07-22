@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -25,7 +26,9 @@ from weight_provisioning import artifact_report_errors
 
 STAGE_PACK_PROTOCOL = "mycelium.assignment_stage_pack.v1"
 STAGE_PACK_VERIFICATION_PROTOCOL = "mycelium.stage_pack_verification.v1"
+FP16_TOLERANCE_PROTOCOL = "mycelium.fp16_tolerance.v1"
 _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
 _DTYPE_BYTES = {
@@ -116,6 +119,22 @@ _ASSIGNMENT_PACK_FIELDS = (
     "runtime",
     "control_plane_binding",
 )
+_TOLERANCE_FIELDS = frozenset(
+    {
+        "protocol",
+        "model_id",
+        "resolved_commit",
+        "model_artifact",
+        "runtime",
+        "checks",
+        "freeze",
+        "route_ready",
+        "claim_boundary",
+        "tolerance_digest",
+    }
+)
+_TOLERANCE_CHECKS = frozenset({"activations", "logits", "token_ids"})
+_MAX_TOLERANCE_BYTES = 64 * 1024
 
 
 def _canonical_json(document: Any) -> str:
@@ -142,6 +161,166 @@ def stage_pack_digest_for(pack: dict[str, Any]) -> str:
     unsigned = copy.deepcopy(pack)
     unsigned.pop("stage_pack_digest", None)
     return _digest(unsigned)
+
+
+def tolerance_digest_for(policy: dict[str, Any]) -> str:
+    """Return the canonical digest of a frozen tolerance policy."""
+    if not isinstance(policy, dict):
+        raise ValueError("FP16 tolerance policy must be an object")
+    unsigned = copy.deepcopy(policy)
+    unsigned.pop("tolerance_digest", None)
+    return _digest(unsigned)
+
+
+def _json_without_duplicate_keys(raw: bytes) -> Any:
+    def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("FP16 tolerance policy has duplicate fields")
+            result[key] = value
+        return result
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"FP16 tolerance policy contains non-finite value: {value}")
+
+    try:
+        return json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=object_pairs,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("FP16 tolerance policy is invalid JSON") from exc
+
+
+def _read_tolerance_file(path: Path) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("FP16 tolerance policy cannot be opened safely") from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_size <= 0
+            or before.st_size > _MAX_TOLERANCE_BYTES
+        ):
+            raise ValueError("FP16 tolerance policy file is invalid")
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 16 * 1024))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if (
+        len(raw) != before.st_size
+        or (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    ):
+        raise ValueError("FP16 tolerance policy changed during read")
+    return raw
+
+
+def load_fp16_tolerances(
+    path: str | Path,
+    *,
+    expected_model_id: str,
+    expected_resolved_commit: str,
+    expected_model_artifact_digest: str,
+) -> dict[str, Any]:
+    """Load one immutable source-bound FP16 parity policy, fail closed."""
+    raw = _read_tolerance_file(Path(path))
+    policy = _json_without_duplicate_keys(raw)
+    if not isinstance(policy, dict) or set(policy) != _TOLERANCE_FIELDS:
+        raise ValueError("FP16 tolerance policy fields are invalid")
+    if _canonical_json(policy).encode("utf-8") != raw:
+        raise ValueError("FP16 tolerance policy must use canonical JSON")
+    if policy.get("protocol") != FP16_TOLERANCE_PROTOCOL:
+        raise ValueError("FP16 tolerance policy protocol is invalid")
+    if policy.get("route_ready") is not False:
+        raise ValueError("FP16 tolerance policy cannot claim route readiness")
+    if not isinstance(policy.get("claim_boundary"), str) or not policy["claim_boundary"]:
+        raise ValueError("FP16 tolerance policy claim boundary is invalid")
+    supplied_digest = policy.get("tolerance_digest")
+    if (
+        not isinstance(supplied_digest, str)
+        or not _SHA256_REF_RE.fullmatch(supplied_digest)
+        or supplied_digest != tolerance_digest_for(policy)
+    ):
+        raise ValueError("FP16 tolerance policy digest mismatch")
+
+    artifact = policy.get("model_artifact")
+    if (
+        not isinstance(artifact, dict)
+        or set(artifact) != {"path", "size_bytes", "content_digest"}
+        or artifact.get("path") != "model.safetensors"
+        or not isinstance(artifact.get("size_bytes"), int)
+        or isinstance(artifact.get("size_bytes"), bool)
+        or artifact["size_bytes"] <= 0
+        or not isinstance(artifact.get("content_digest"), str)
+        or not _SHA256_REF_RE.fullmatch(artifact["content_digest"])
+    ):
+        raise ValueError("FP16 tolerance policy model artifact is invalid")
+    if (
+        policy.get("model_id") != expected_model_id
+        or policy.get("resolved_commit") != expected_resolved_commit
+        or artifact["content_digest"] != expected_model_artifact_digest
+        or not isinstance(expected_model_id, str)
+        or not expected_model_id
+        or not isinstance(expected_resolved_commit, str)
+        or not _COMMIT_RE.fullmatch(expected_resolved_commit)
+        or not isinstance(expected_model_artifact_digest, str)
+        or not _SHA256_REF_RE.fullmatch(expected_model_artifact_digest)
+    ):
+        raise ValueError("FP16 tolerance policy source identity mismatch")
+    if policy.get("runtime") != {
+        "backend": "mlx",
+        "dtype": "float16",
+        "quantization": "none",
+    }:
+        raise ValueError("FP16 tolerance policy runtime is invalid")
+    freeze = policy.get("freeze")
+    if freeze != {
+        "basis": "precommitted_policy_before_matrix",
+        "measurement_status": "unmeasured",
+        "post_hoc_fitted": False,
+    }:
+        raise ValueError("FP16 tolerance policy freeze metadata is invalid")
+    checks = policy.get("checks")
+    if not isinstance(checks, dict) or set(checks) != _TOLERANCE_CHECKS:
+        raise ValueError("FP16 tolerance checks are invalid")
+    if checks.get("token_ids") != {"exact": True}:
+        raise ValueError("FP16 token parity must be exact")
+    for name in ("activations", "logits"):
+        check = checks.get(name)
+        if not isinstance(check, dict) or set(check) != {
+            "absolute_tolerance",
+            "relative_tolerance",
+        }:
+            raise ValueError(f"FP16 {name} tolerance is invalid")
+        for value in check.values():
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or value <= 0
+                or value > 1
+            ):
+                raise ValueError(f"FP16 {name} tolerance is invalid")
+    return copy.deepcopy(policy)
 
 
 def _verification_digest_for(verification: dict[str, Any]) -> str:
