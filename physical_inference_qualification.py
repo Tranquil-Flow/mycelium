@@ -18,11 +18,14 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import select
 import shlex
 import stat
 import subprocess
 import sys
 import tarfile
+import threading
+import time
 from typing import Any, NoReturn, Protocol
 
 from mycelium_membership.contracts import (
@@ -55,6 +58,7 @@ _MAX_TRANSFER_BYTES = 256 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
 _STAGE_ACK_PROTOCOL = "mycelium.controller_remote_stage_ack.v1"
 _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
+_NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 _REMOTE_STAGE_SCRIPT = r'''import hashlib,io,json,os,shutil,sys,tarfile
 from pathlib import Path,PurePosixPath
 root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);created=False
@@ -300,6 +304,213 @@ class SubprocessRunner:
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
+
+
+class NodeProcessSession:
+    """Bounded canonical JSON-lines session for one physical node process."""
+
+    def __init__(
+        self,
+        *,
+        argv: tuple[str, ...],
+        node_id: str,
+        run_id: str,
+        deployment_id: str,
+        timeout_seconds: float,
+    ) -> None:
+        if (
+            not isinstance(argv, tuple)
+            or not argv
+            or not all(isinstance(value, str) and value for value in argv)
+            or not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not math.isfinite(float(timeout_seconds))
+            or not 0.0 < float(timeout_seconds) <= 300.0
+        ):
+            _reject("node_process_arguments_invalid")
+        _segment(node_id, "peer_node_id_invalid")
+        _segment(run_id, "run_id_invalid")
+        _segment(deployment_id, "deployment_id_invalid")
+        self.argv = argv
+        self.node_id = node_id
+        self.run_id = run_id
+        self.deployment_id = deployment_id
+        self.timeout_seconds = float(timeout_seconds)
+        self._stdout_buffer = bytearray()
+        self._stderr_buffer = bytearray()
+        self._stderr_overflow = False
+        self._stderr_lock = threading.Lock()
+        self._request_lock = threading.Lock()
+        try:
+            self._process = subprocess.Popen(
+                list(argv),
+                shell=False,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
+            )
+        except OSError as exc:
+            raise ControllerError("node_process_launch_failed") from exc
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr,
+            name=f"node-stderr-{node_id}",
+            daemon=True,
+        )
+        self._stderr_thread.start()
+
+    @property
+    def returncode(self) -> int | None:
+        return self._process.poll()
+
+    @property
+    def stderr(self) -> bytes:
+        with self._stderr_lock:
+            return bytes(self._stderr_buffer)
+
+    def _drain_stderr(self) -> None:
+        stream = self._process.stderr
+        if stream is None:
+            return
+        while True:
+            chunk = stream.read(65_536)
+            if not chunk:
+                return
+            terminate = False
+            with self._stderr_lock:
+                remaining = _MAX_RUNNER_OUTPUT_BYTES - len(self._stderr_buffer)
+                if remaining > 0:
+                    self._stderr_buffer.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    self._stderr_overflow = True
+                    terminate = True
+            if terminate:
+                try:
+                    self._process.terminate()
+                except OSError:
+                    pass
+                return
+
+    def _read_line(self) -> bytes:
+        assert self._process.stdout is not None
+        deadline = time.monotonic() + self.timeout_seconds
+        while b"\n" not in self._stdout_buffer:
+            if len(self._stdout_buffer) > _MAX_DOCUMENT_BYTES:
+                _reject("node_response_too_large")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _reject("node_response_timeout")
+            readable, _, _ = select.select(
+                [self._process.stdout.fileno()],
+                [],
+                [],
+                remaining,
+            )
+            if not readable:
+                _reject("node_response_timeout")
+            chunk = os.read(self._process.stdout.fileno(), 65_536)
+            if not chunk:
+                _reject("node_process_exited")
+            self._stdout_buffer.extend(chunk)
+        boundary = self._stdout_buffer.index(b"\n") + 1
+        line = bytes(self._stdout_buffer[:boundary])
+        del self._stdout_buffer[:boundary]
+        if len(line) > _MAX_DOCUMENT_BYTES:
+            _reject("node_response_too_large")
+        return line
+
+    def send(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        _segment(command_id, "command_id_invalid")
+        _segment(command, "node_command_invalid")
+        if not isinstance(payload, Mapping):
+            _reject("node_command_payload_invalid")
+        envelope = {
+            "protocol": _NODE_CONTROL_PROTOCOL,
+            "command_id": command_id,
+            "run_id": self.run_id,
+            "deployment_id": self.deployment_id,
+            "command": command,
+            "payload": dict(payload),
+        }
+        encoded = _canonical_bytes(envelope)
+        with self._request_lock:
+            with self._stderr_lock:
+                stderr_overflow = self._stderr_overflow
+            if stderr_overflow:
+                _reject("node_stderr_too_large")
+            if self._process.poll() is not None:
+                _reject("node_process_exited")
+            stdin = self._process.stdin
+            if stdin is None or stdin.closed:
+                _reject("node_process_exited")
+            try:
+                stdin.write(encoded)
+                stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                raise ControllerError("node_process_exited") from exc
+            line = self._read_line()
+        try:
+            response = json.loads(
+                line.decode("utf-8"),
+                object_pairs_hook=_reject_duplicates,
+                parse_constant=lambda _value: _reject("node_response_invalid"),
+            )
+        except ControllerError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ControllerError("node_response_invalid") from exc
+        if not isinstance(response, dict) or line != _canonical_bytes(response):
+            _reject("node_response_noncanonical")
+        common_fields = {
+            "protocol",
+            "command_id",
+            "node_id",
+            "ok",
+            "route_ready",
+        }
+        if set(response) not in (common_fields | {"result"}, common_fields | {"error"}):
+            _reject("node_response_fields_invalid")
+        if (
+            response.get("protocol") != _NODE_CONTROL_PROTOCOL
+            or response.get("command_id") != command_id
+            or response.get("node_id") != self.node_id
+        ):
+            _reject("node_response_correlation_invalid")
+        if response.get("route_ready") is not False:
+            _reject("node_response_readiness_invalid")
+        if not isinstance(response.get("ok"), bool):
+            _reject("node_response_fields_invalid")
+        if response["ok"] != ("result" in response):
+            _reject("node_response_fields_invalid")
+        return response
+
+    def close(self) -> None:
+        stdin = self._process.stdin
+        if stdin is not None and not stdin.closed:
+            try:
+                stdin.close()
+            except OSError:
+                pass
+        if self._process.poll() is None:
+            try:
+                self._process.wait(timeout=1.0)
+            except subprocess.TimeoutExpired:
+                self._process.terminate()
+                try:
+                    self._process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.wait(timeout=2.0)
+        for stream in (self._process.stdout, self._process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+        self._stderr_thread.join(timeout=2.0)
 
 
 def _safe_transfer_path(value: Any) -> PurePosixPath:
