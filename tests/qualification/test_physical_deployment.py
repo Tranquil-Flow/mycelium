@@ -101,6 +101,23 @@ def test_prepare_physical_deployment_is_offline_deterministic_and_exact(
         "node-b",
     )
     assert len({item["assignment_id"] for item in first.assignments}) == 2
+    assert len(first.stage_packs) == len(first.assignments) == 2
+    assert len(first.stage_pack_verifications) == 2
+    for assignment, report, pack, verification in zip(
+        first.assignments,
+        first.artifact_reports,
+        first.stage_packs,
+        first.stage_pack_verifications,
+        strict=True,
+    ):
+        assert pack["assignment_id"] == assignment["assignment_id"]
+        assert verification["stage_pack_digest"] == pack["stage_pack_digest"]
+        assert report["stage_pack_digest"] == pack["stage_pack_digest"]
+        assert report["stage_pack_verification_digest"] == verification[
+            "stage_pack_verification_digest"
+        ]
+        assert verification["ready_for_load"] is True
+        assert verification["route_ready"] is False
     assert first.reference_assignment["range"] == {
         "start_layer": 0,
         "end_layer_exclusive": 2,
@@ -136,6 +153,16 @@ def test_prepared_assignments_and_independent_reference_load_and_execute(
     assert [stage.proof["loaded_range"] for stage in loaded_stages] == list(
         EXPECTED_RANGES
     )
+    for stage, pack, verification in zip(
+        loaded_stages,
+        deployment.stage_packs,
+        deployment.stage_pack_verifications,
+        strict=True,
+    ):
+        assert stage.proof["stage_pack_digest"] == pack["stage_pack_digest"]
+        assert stage.proof["stage_pack_verification_digest"] == verification[
+            "stage_pack_verification_digest"
+        ]
     assert loaded_reference.proof["loaded_range"] == {
         "start_layer": 0,
         "end_layer_exclusive": 2,

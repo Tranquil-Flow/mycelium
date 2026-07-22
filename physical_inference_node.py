@@ -42,12 +42,14 @@ from mycelium_router.live_ports import (
     PublishedDeviceStateProvider,
     PublishedTopologyProvider,
 )
+from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.mlx_runtime import MLXRuntimePort
 from mycelium_router.router import Router
 from mycelium_router.transports.iroh import IrohTransport, PeerBinding
 from mycelium_router.validation import validate_execution_graph
 from physical_sqlite_capacity import SQLiteQualificationCapacityPort
-from runtime_loader import load_assignment_stage
+from runtime_loader import canonical_json, load_assignment_stage
+from stage_pack import artifact_report_for_loader, verify_stage_pack
 
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
@@ -456,11 +458,26 @@ class PhysicalNodeService:
 
     def _configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "NEW", "invalid_state_for_configure")
-        data = _exact_fields(
-            payload,
-            {"assignment_file", "artifact_report_file", "graph", "device_states", "load_generation"},
+        legacy_fields = {
+            "assignment_file",
+            "artifact_report_file",
+            "graph",
+            "device_states",
+            "load_generation",
+        }
+        stage_pack_fields = {
+            "assignment_file",
+            "stage_pack_file",
+            "graph",
+            "device_states",
+            "load_generation",
+        }
+        _require(
+            isinstance(payload, dict)
+            and set(payload) in (legacy_fields, stage_pack_fields),
             "invalid_configure_fields",
         )
+        data = payload
         _require(
             isinstance(data["load_generation"], int)
             and not isinstance(data["load_generation"], bool)
@@ -472,9 +489,26 @@ class PhysicalNodeService:
         states = device_states_from_document(data["device_states"])
         _require(set(states) == {placement.node_id for stage in graph.stages for placement in stage.placements}, "device_state_node_mismatch")
         assignment = self._safe_document(data["assignment_file"], "invalid_assignment_file")
-        report = self._safe_document(data["artifact_report_file"], "invalid_artifact_report_file")
         _require(assignment.get("deployment_id") == self.deployment_id, "assignment_deployment_id_mismatch")
         _require(assignment.get("node_id") == self.node_id, "assignment_node_id_mismatch")
+        stage_pack_digest: str | None = None
+        if "stage_pack_file" in data:
+            pack = self._safe_document(data["stage_pack_file"], "invalid_stage_pack_file")
+            try:
+                verification = verify_stage_pack(pack, assignment=assignment)
+                report = artifact_report_for_loader(
+                    pack,
+                    verification,
+                    assignment=assignment,
+                )
+            except (TypeError, ValueError) as exc:
+                raise NodeCommandError("invalid_stage_pack_file") from exc
+            stage_pack_digest = pack["stage_pack_digest"]
+        else:
+            report = self._safe_document(
+                data["artifact_report_file"],
+                "invalid_artifact_report_file",
+            )
         local_placements = [
             placement
             for stage in graph.stages
@@ -485,6 +519,12 @@ class PhysicalNodeService:
         placement = local_placements[0]
         _require(placement.assignment_id == assignment.get("assignment_id"), "placement_assignment_mismatch")
         loaded = load_assignment_stage(assignment, report, load_generation=data["load_generation"])
+        load_proof_document = json.loads(canonical_json(loaded.proof))
+        _require(
+            layer_load_proof_digest(load_proof_document)
+            == placement.load_proof_digest,
+            "placement_load_proof_mismatch",
+        )
         topology = PublishedTopologyProvider(graph)
         device_provider = PublishedDeviceStateProvider(topology, states)
         capacity = SQLiteQualificationCapacityPort(
@@ -522,16 +562,19 @@ class PhysicalNodeService:
         self.endpoint_addr = ready["endpoint_addr"]
         self.signer = generate_ed25519_signer(endpoint_id=self.endpoint_id)
         self.state = "CONFIGURED"
-        return self._signed_result(
-            "configured",
-            {
-                "assignment_id": assignment["assignment_id"],
-                "placement_id": placement.placement_id,
-                "manifest_digest": graph.manifest_digest,
-                "endpoint_addr": self.endpoint_addr,
-                "runtime_mode": runtime.decode_mode,
-            },
-        )
+        configured_details = {
+            "assignment_id": assignment["assignment_id"],
+            "placement_id": placement.placement_id,
+            "manifest_digest": graph.manifest_digest,
+            "endpoint_addr": self.endpoint_addr,
+            "runtime_mode": runtime.decode_mode,
+        }
+        if stage_pack_digest is not None:
+            configured_details["stage_pack_digest"] = stage_pack_digest
+            configured_details["stage_pack_verification_digest"] = report[
+                "stage_pack_verification_digest"
+            ]
+        return self._signed_result("configured", configured_details)
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "CONFIGURED", "invalid_state_for_start")

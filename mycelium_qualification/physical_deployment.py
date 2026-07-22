@@ -25,6 +25,11 @@ from mycelium_router.contracts import (
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.mlx_runtime import _stage_signature
 from runtime_loader import canonical_json
+from stage_pack import (
+    artifact_report_for_loader,
+    compile_stage_pack,
+    verify_stage_pack,
+)
 from two_process_runtime_qualification import (
     DEPLOYMENT_EPOCH,
     DEPLOYMENT_ID,
@@ -122,6 +127,8 @@ class _PreparedAssignments:
     route: dict[str, Any]
     assignments: list[dict[str, Any]]
     reports: list[dict[str, Any]]
+    stage_packs: list[dict[str, Any]]
+    stage_pack_verifications: list[dict[str, Any]]
     fetcher: Any
     source_metadata: dict[str, Any] | None = None
     tokenizer_assets: tuple[dict[str, Any], ...] = ()
@@ -283,6 +290,8 @@ class PhysicalDeployment:
     route_plan: dict[str, Any]
     assignments: tuple[dict[str, Any], ...]
     artifact_reports: tuple[dict[str, Any], ...]
+    stage_packs: tuple[dict[str, Any], ...]
+    stage_pack_verifications: tuple[dict[str, Any], ...]
     reference_assignment: dict[str, Any]
     reference_report: dict[str, Any]
     local_fetch_requests: tuple[str, ...]
@@ -318,6 +327,22 @@ class PhysicalDeployment:
             ],
             "assignments": [
                 assignment_evidence(assignment) for assignment in self.assignments
+            ],
+            "stage_packs": [
+                {
+                    "assignment_id": pack["assignment_id"],
+                    "node_id": pack["node_id"],
+                    "stage_pack_digest": pack["stage_pack_digest"],
+                    "stage_pack_verification_digest": verification[
+                        "stage_pack_verification_digest"
+                    ],
+                    "route_ready": False,
+                }
+                for pack, verification in zip(
+                    self.stage_packs,
+                    self.stage_pack_verifications,
+                    strict=True,
+                )
             ],
             "reference_assignment": assignment_evidence(
                 self.reference_assignment
@@ -1087,7 +1112,7 @@ def prepare_assignment_artifacts(
             raise PhysicalDeploymentError(
                 "compiled route does not contain one assignment per node"
             )
-        reports = [
+        provisioning_reports = [
             provision_assignment(
                 assignment,
                 fetch_file=fetcher,
@@ -1095,12 +1120,33 @@ def prepare_assignment_artifacts(
             )
             for assignment in assignments
         ]
-        for assignment, report in zip(assignments, reports):
+        for assignment, report in zip(assignments, provisioning_reports, strict=True):
             errors = artifact_report_errors(assignment, report)
             if errors:
                 raise PhysicalDeploymentError(
                     "artifact verification report failed: " + "; ".join(errors)
                 )
+        stage_packs = [
+            compile_stage_pack(assignment, manifest, report)
+            for assignment, report in zip(
+                assignments,
+                provisioning_reports,
+                strict=True,
+            )
+        ]
+        stage_pack_verifications = [
+            verify_stage_pack(pack, assignment=assignment)
+            for assignment, pack in zip(assignments, stage_packs, strict=True)
+        ]
+        reports = [
+            artifact_report_for_loader(pack, verification, assignment=assignment)
+            for assignment, pack, verification in zip(
+                assignments,
+                stage_packs,
+                stage_pack_verifications,
+                strict=True,
+            )
+        ]
     except PhysicalDeploymentError:
         raise
     except BaseException as exc:
@@ -1112,6 +1158,8 @@ def prepare_assignment_artifacts(
         route=route,
         assignments=assignments,
         reports=reports,
+        stage_packs=stage_packs,
+        stage_pack_verifications=stage_pack_verifications,
         fetcher=fetcher,
         source_metadata=source_metadata,
         tokenizer_assets=tokenizer_assets,
@@ -1217,6 +1265,8 @@ def prepare_physical_deployment(
         route_plan=prepared.route,
         assignments=tuple(prepared.assignments),
         artifact_reports=tuple(prepared.reports),
+        stage_packs=tuple(prepared.stage_packs),
+        stage_pack_verifications=tuple(prepared.stage_pack_verifications),
         reference_assignment=reference_assignment,
         reference_report=reference_report,
         local_fetch_requests=tuple(prepared.fetcher.requests),

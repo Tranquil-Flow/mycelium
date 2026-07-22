@@ -336,6 +336,19 @@ def test_loads_exact_assignment_owned_gpt2_stage_and_emits_canonical_proof(
     assert canonical_json(json.loads(serialized)) == serialized
 
 
+def test_stage_pack_evidence_is_bound_into_runtime_load_proof(tmp_path: Path) -> None:
+    assignment, report, _ = _case(tmp_path)
+    report["stage_pack_digest"] = "sha256:" + "1" * 64
+    report["stage_pack_verification_digest"] = "sha256:" + "2" * 64
+
+    loaded = load_assignment_stage(assignment, report, load_generation=12)
+
+    assert loaded.proof["stage_pack_digest"] == report["stage_pack_digest"]
+    assert loaded.proof["stage_pack_verification_digest"] == report[
+        "stage_pack_verification_digest"
+    ]
+
+
 def test_emitted_proof_and_alias_evidence_are_deeply_immutable(tmp_path: Path) -> None:
     assignment, report, _ = _case(tmp_path)
     loaded = load_assignment_stage(assignment, report, load_generation=11)

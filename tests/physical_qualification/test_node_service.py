@@ -176,7 +176,7 @@ def _configure_and_start_pair(
             "configure",
             {
                 "assignment_file": f"{client.node_id}-assignment.json",
-                "artifact_report_file": f"{client.node_id}-report.json",
+                "stage_pack_file": f"{client.node_id}-stage-pack.json",
                 "graph": graph_document,
                 "device_states": state_document,
                 "load_generation": 7,
@@ -357,8 +357,8 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
         (tmp_path / f"{node_id}-assignment.json").write_bytes(
             canonical_json_bytes(deployment.assignments[index])
         )
-        (tmp_path / f"{node_id}-report.json").write_bytes(
-            canonical_json_bytes(deployment.artifact_reports[index])
+        (tmp_path / f"{node_id}-stage-pack.json").write_bytes(
+            canonical_json_bytes(deployment.stage_packs[index])
         )
 
     run_id = str(uuid.uuid4())
@@ -383,6 +383,15 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
             graph_document=graph_document,
             state_document=state_document,
         )
+        for index, node_id in enumerate(("node-a", "node-b")):
+            assert configured[node_id]["stage_pack_digest"] == deployment.stage_packs[
+                index
+            ]["stage_pack_digest"]
+            assert configured[node_id]["stage_pack_verification_digest"] == (
+                deployment.stage_pack_verifications[index][
+                    "stage_pack_verification_digest"
+                ]
+            )
         assert first.process.pid != second.process.pid
         assert configured["node-a"]["endpoint_addr"]["id"] != configured["node-b"][
             "endpoint_addr"

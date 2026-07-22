@@ -56,7 +56,7 @@ _MLX_DTYPES = {
 }
 _SUPPORTED_COMPONENTS = {"input_embedding", "decoder", "final_norm", "lm_head"}
 _MAX_RETAINED_OPERATIONS = 4096
-_LOAD_PROOF_FIELDS = {
+_LOAD_PROOF_FIELDS = frozenset({
    "protocol",
    "deployment_id",
    "deployment_epoch",
@@ -76,9 +76,11 @@ _LOAD_PROOF_FIELDS = {
    "probe_digest",
    "load_generation",
    "control_plane_binding",
+   "stage_pack_digest",
+   "stage_pack_verification_digest",
    "route_ready",
    "claim_boundary",
-}
+})
 
 
 class MLXRuntimeError(ValueError):

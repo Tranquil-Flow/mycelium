@@ -1148,6 +1148,11 @@ def load_assignment_stage(
                 "no route challenge or distributed inference claim"
             ),
         }
+        if "stage_pack_digest" in artifact_report:
+            proof["stage_pack_digest"] = artifact_report["stage_pack_digest"]
+            proof["stage_pack_verification_digest"] = artifact_report[
+                "stage_pack_verification_digest"
+            ]
         frozen_proof = _deep_freeze(proof)
         frozen_aliases = _deep_freeze(aliases)
         # Force canonical serialization of the immutable evidence before returning it.
