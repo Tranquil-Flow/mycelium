@@ -1,18 +1,37 @@
 # Mycelium
 
-Mycelium is a privacy-first distributed-inference system for assigning model stages to heterogeneous peers, provisioning assignment-specific artifacts, routing activations, and qualifying physical execution with explicit evidence.
+Mycelium is a privacy-first distributed-inference system: it assigns model layers
+to heterogeneous peer devices by capacity, provisions each device only the weights
+it needs, routes activations device-to-device, and streams tokens back.
 
-## Current claim boundary
+## Current state
 
-The repository contains working Planner, provisioning, Gossip, Router, batching, transport-spike integration surfaces, tests, and a read-only Network Observatory UI.
+Working today:
 
-The strongest production-path inference claim remains the same-host native-iroh harness: two independent Python Router processes and two independent native iroh sidecars load disjoint, assignment-bound MLX stages, exchange canonical Router frames over authenticated iroh, and match a single-process reference. The harness additionally verifies distributed cancellation cleanup, fail-closed peer loss, and successful inference after full process and endpoint restart.
+- Capacity-aware layer planning across arbitrary device topologies
+- Request and inter-layer routing with attempt fencing and recovery
+- Peer discovery and evidence gossip
+- Native iroh transport between independent processes
+- Sharded MLX inference matching a single-process reference (same host)
 
-A separate live physical harness now runs a three-stage tiny-GPT-2-shaped split across two independent local MLX subprocesses and a Pixel 8 Pro Termux process. The phone executes a decoder substage derived from a deterministic, locally generated fixture; its dependency-free worker binds the exact tensor subset and supported attention/activation configuration to parent-assignment, parent-load-proof, pack, and worker-source digests. Across two four-token lifecycles, every phone hidden-state element and final logit matches the separate MLX reference within `1e-6`; round-to-even `1e-5`-quantized token selection also matches. The harness rejects bad authentication and a mismatched request assignment, proves the old phone PID exited and its endpoint became unreachable, then passes after worker restart. This proves physical Mac -> Pixel -> Mac stage execution, not production Router routing: transport is `stdin/http/stdin`, the Mac derives and provisions the phone subpack, the generic bootstrap bridge credential is RCE-equivalent, live ADB identity was unavailable for the final run, device authority evidence has not passed the production qualifier, and `route_ready` remains `false`.
+Not working yet:
 
-An interactive browser-swarm console now lets an operator enroll a browser worker with a single-use fragment link and run the same exact decoder stage through JavaScript. The host verifies every browser output against the local Python stage and monolithic MLX reference. Current browser evidence uses two independent local Chrome processes with isolated profiles; it is not physical cross-device, HTTPS-path, production-Router, or device-authority qualification. See [`docs/interactive-browser-swarm.md`](docs/interactive-browser-swarm.md).
+- Inference across two physically separate machines
+- Devices that are not Apple Silicon holding real layers
+- Peers on different networks
+- A coherent pretrained model end-to-end (currently a tiny local fixture)
 
-All claims remain bounded. The production Router proof shares one host and a local SQLite lease coordinator. Generation/topology rotation, multi-host native-iroh routing, token-continuity recovery, and production authority qualification remain open.
+Component designs are authoritative in [`ALLOCATOR.md`](ALLOCATOR.md),
+[`GOSSIP_PROTOCOL.md`](GOSSIP_PROTOCOL.md),
+[`BROADCAST_PROTOCOL.md`](BROADCAST_PROTOCOL.md),
+[`REQUEST_AND_INTER_LAYER_ROUTER_DESIGN.md`](REQUEST_AND_INTER_LAYER_ROUTER_DESIGN.md),
+[`FAULT_TOLERANT_LAYER_REPLANNER.md`](FAULT_TOLERANT_LAYER_REPLANNER.md), and
+[`LAYER_PLANNER_PRODUCT_V1.md`](LAYER_PLANNER_PRODUCT_V1.md).
+
+`route_ready` is `false`. Nothing in this repository claims qualified physical
+execution.
+
+Active development plan (local, not tracked): `~/Desktop/mycelium-demo-plan.md`
 
 ## Architecture direction
 
