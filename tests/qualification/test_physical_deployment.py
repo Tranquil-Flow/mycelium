@@ -233,8 +233,8 @@ def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
         _assert_private_regular_file(deployment.root / name)
 
     assert tuple(item["range"] for item in deployment.assignments) == (
-        {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
-        {"start_layer": 2, "end_layer_exclusive": 5, "layer_count": 3},
+        {"start_layer": 0, "end_layer_exclusive": 3, "layer_count": 3},
+        {"start_layer": 3, "end_layer_exclusive": 5, "layer_count": 2},
     )
     assert all(
         assignment["runtime"]["dtype"] == "float16"
@@ -316,4 +316,48 @@ def test_local_model_source_validation_rejects_unpinned_identity(
                 model_id="local/dialogpt",
                 resolved_commit="not-a-commit",
             ),
+        )
+
+
+def test_prepare_physical_deployment_splits_across_five_nodes(tmp_path: Path) -> None:
+    source_root = tmp_path / "dialogpt-source"
+    _write_dialogpt_style_monolithic_source(source_root, n_layer=12)
+
+    deployment = prepare_physical_deployment(
+        tmp_path / "deployment",
+        node_ids=("mac-a", "mac-b", "linux-a", "linux-b", "pixel"),
+        model_source=LocalModelSource(
+            root=source_root,
+            model_id="microsoft/DialoGPT-small",
+            requested_revision="local-main",
+            resolved_commit="f" * 40,
+        ),
+        runtime_dtype="float16",
+    )
+
+    ranges = [entry["range"] for entry in deployment.route_plan["route"]]
+    assert [item["layer_count"] for item in ranges] == [3, 3, 2, 2, 2]
+    assert [item["start_layer"] for item in ranges] == [0, 3, 6, 8, 10]
+    assert [item["end_layer_exclusive"] for item in ranges] == [3, 6, 8, 10, 12]
+    assert sum(item["layer_count"] for item in ranges) == 12
+    assert len(deployment.assignments) == 5
+
+
+def test_prepare_physical_deployment_rejects_more_nodes_than_layers(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "dialogpt-source"
+    _write_dialogpt_style_monolithic_source(source_root, n_layer=2)
+
+    with pytest.raises(PhysicalDeploymentError, match="invalid_physical_layer_split"):
+        prepare_physical_deployment(
+            tmp_path / "deployment",
+            node_ids=("a", "b", "c"),
+            model_source=LocalModelSource(
+                root=source_root,
+                model_id="microsoft/DialoGPT-small",
+                requested_revision="local-main",
+                resolved_commit="f" * 40,
+            ),
+            runtime_dtype="float16",
         )

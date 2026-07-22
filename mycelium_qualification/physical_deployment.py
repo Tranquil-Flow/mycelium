@@ -331,9 +331,9 @@ class PhysicalDeployment:
 
 def _validate_nodes(node_ids: tuple[str, ...]) -> None:
     if (
-        len(node_ids) != 2
+        len(node_ids) < 2
         or any(not isinstance(node, str) or not node.strip() for node in node_ids)
-        or len(set(node_ids)) != 2
+        or len(set(node_ids)) != len(node_ids)
         or "reference-node" in node_ids
     ):
         raise PhysicalDeploymentError("invalid_physical_nodes")
@@ -947,25 +947,33 @@ class _IdentityAwareLocalFetcher:
         return resolved, True
 
 
+def _balanced_layer_ranges(
+    num_layers: int, node_count: int
+) -> tuple[dict[str, int], ...]:
+    """Split layers into node_count contiguous half-open ranges, largest first."""
+
+    if node_count < 2 or num_layers < node_count:
+        raise PhysicalDeploymentError("invalid_physical_layer_split")
+    base, remainder = divmod(num_layers, node_count)
+    ranges: list[dict[str, int]] = []
+    start = 0
+    for index in range(node_count):
+        size = base + (1 if index < remainder else 0)
+        ranges.append(
+            {
+                "start_layer": start,
+                "end_layer_exclusive": start + size,
+                "layer_count": size,
+            }
+        )
+        start += size
+    return tuple(ranges)
+
+
 def _route_with_nodes(
     manifest: dict[str, Any], node_ids: tuple[str, ...]
 ) -> dict[str, Any]:
-    num_layers = manifest["num_layers"]
-    split = num_layers // 2
-    if split <= 0 or split >= num_layers:
-        raise PhysicalDeploymentError("invalid_physical_layer_split")
-    ranges = (
-        {
-            "start_layer": 0,
-            "end_layer_exclusive": split,
-            "layer_count": split,
-        },
-        {
-            "start_layer": split,
-            "end_layer_exclusive": num_layers,
-            "layer_count": num_layers - split,
-        },
-    )
+    ranges = _balanced_layer_ranges(manifest["num_layers"], len(node_ids))
     route = _route_for_manifest(manifest)
     route["route"] = [
         {"node_id": node_id, "range": copy.deepcopy(layer_range)}
@@ -982,7 +990,7 @@ def prepare_assignment_artifacts(
     model_source: LocalModelSource | None = None,
     runtime_dtype: str = "float32",
 ) -> _PreparedAssignments:
-    """Build, compile, provision, and verify two exact offline assignments."""
+    """Build, compile, provision, and verify exact offline assignments."""
 
     _validate_nodes(node_ids)
     runtime_dtype = _validate_runtime_dtype(runtime_dtype)
