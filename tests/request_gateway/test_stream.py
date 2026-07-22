@@ -71,6 +71,7 @@ class BurstBackend:
 
 class SlowCancelBackend:
     def __init__(self, *, release_worker_before_return: bool = False) -> None:
+        self.run_entered = threading.Event()
         self.cancel_entered = threading.Event()
         self.allow_cancel_return = threading.Event()
         self.worker_release = threading.Event()
@@ -78,6 +79,7 @@ class SlowCancelBackend:
         self.cancelled: list[str] = []
 
     def run(self, request_id, submission, emit_token, is_cancelled):
+        self.run_entered.set()
         self.worker_release.wait(timeout=2)
         return "completed"
 
@@ -442,6 +444,7 @@ def test_only_one_concurrent_cancellation_is_accepted():
     results: list[bool] = []
     try:
         request_id = service.submit(_submission(qualification))
+        assert backend.run_entered.wait(timeout=2)
         first = threading.Thread(target=lambda: results.append(service.cancel(request_id)))
         first.start()
         assert backend.cancel_entered.wait(timeout=1)
@@ -471,6 +474,7 @@ def test_accepted_cancellation_wins_completion_race():
     result: list[bool] = []
     try:
         request_id = service.submit(_submission(qualification))
+        assert backend.run_entered.wait(timeout=2)
         cancellation = threading.Thread(target=lambda: result.append(service.cancel(request_id)))
         cancellation.start()
         assert backend.cancel_entered.wait(timeout=1)
