@@ -37,6 +37,7 @@ from mycelium_membership import (
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 
+from .placement import MemberRecord, PlacementDecision, PlacementError, PlacementSource
 from .state import SeedStateError, SqliteSeedState
 
 
@@ -136,6 +137,7 @@ class SeedCoordinator:
         signer: Ed25519EvidenceSigner,
         invite_registry: SqliteInviteRegistry,
         incarnation: str,
+        placement_source: PlacementSource | None = None,
         state: SqliteSeedState | None = None,
         clock: Callable[[], float] = time.time,
         id_source: Callable[[], str] = lambda: str(uuid.uuid4()),
@@ -159,6 +161,10 @@ class SeedCoordinator:
             raise ValueError("invite_registry is invalid")
         if state is not None and not isinstance(state, SqliteSeedState):
             raise ValueError("state is invalid")
+        if placement_source is not None and not callable(
+            getattr(placement_source, "compile", None)
+        ):
+            raise ValueError("placement_source is invalid")
         if state is None:
             state = SqliteSeedState(invite_registry.database)
         if state.database.resolve() != invite_registry.database.resolve():
@@ -204,6 +210,7 @@ class SeedCoordinator:
         self._members: dict[str, _Member] = {}
         self._emitted_ids: set[str] = set()
         self._assignments: dict[str, dict[str, Any]] = {}
+        self._placement_source = placement_source
         self._state = state
         if state is not None:
             try:
@@ -518,6 +525,39 @@ class SeedCoordinator:
             projection = member.projection()
             projection.update(self._liveness_projection(member, now=self._now()))
             return projection
+
+    def compile_placement(self) -> PlacementDecision:
+        """Compile placement intent from a stable public membership snapshot."""
+
+        source = self._placement_source
+        if source is None:
+            raise SeedCoordinatorError("seed_placement_source_unconfigured")
+        with self._lock:
+            members = tuple(
+                MemberRecord(
+                    node_id=member.node_id,
+                    endpoint_id=member.endpoint_id,
+                    peer_class=member.peer_class,
+                    runtime_capability=member.runtime_capability,
+                    generation=member.generation,
+                    lease_expires_at=member.lease_expires_at,
+                    activation_eligible=peer_runtime_is_activation_eligible(
+                        member.peer_class,
+                        member.runtime_capability,
+                    ),
+                )
+                for member in sorted(
+                    self._members.values(),
+                    key=lambda item: item.node_id,
+                )
+            )
+        try:
+            decision = source.compile(members)
+        except PlacementError as exc:
+            raise SeedCoordinatorError(exc.code) from exc
+        if not isinstance(decision, PlacementDecision):
+            raise SeedCoordinatorError("seed_placement_decision_invalid")
+        return decision
 
     def _ensure_current_member(self, member: _Member) -> None:
         if self._state is None:
