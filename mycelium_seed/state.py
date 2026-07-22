@@ -13,7 +13,7 @@ from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 
 class SeedStateError(RuntimeError):
@@ -68,7 +68,12 @@ class SqliteSeedState:
                     generation INTEGER NOT NULL CHECK (generation >= 1),
                     lease_expires_at REAL NOT NULL,
                     last_heartbeat_sequence INTEGER NOT NULL
-                        CHECK (last_heartbeat_sequence >= 0)
+                        CHECK (last_heartbeat_sequence >= 0),
+                    last_liveness_at REAL NOT NULL,
+                    next_heartbeat_due_at REAL NOT NULL,
+                    last_activity_receipt_at REAL,
+                    active_requests INTEGER NOT NULL CHECK (active_requests >= 0),
+                    lifecycle_state TEXT NOT NULL
                 ) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS seed_replay (
                     node_id TEXT NOT NULL,
@@ -119,7 +124,7 @@ class SqliteSeedState:
                     "INSERT INTO seed_metadata (key, value) VALUES ('schema_version', ?)",
                     (str(_SCHEMA_VERSION),),
                 )
-            elif row["value"] in {"1", "2"}:
+            elif row["value"] in {"1", "2", "3"}:
                 columns = {
                     item["name"]
                     for item in connection.execute("PRAGMA table_info(seed_members)")
@@ -139,6 +144,30 @@ class SqliteSeedState:
                         "ALTER TABLE seed_members ADD COLUMN runtime_capability_json TEXT "
                         "NOT NULL DEFAULT '{\"activation_protocol\":null,"
                         "\"runtime_backend\":\"tbd\",\"transport\":\"none\"}'"
+                    )
+                if "last_liveness_at" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN "
+                        "last_liveness_at REAL NOT NULL DEFAULT 0"
+                    )
+                if "next_heartbeat_due_at" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN "
+                        "next_heartbeat_due_at REAL NOT NULL DEFAULT 0"
+                    )
+                if "last_activity_receipt_at" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN last_activity_receipt_at REAL"
+                    )
+                if "active_requests" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN "
+                        "active_requests INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "lifecycle_state" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN "
+                        "lifecycle_state TEXT NOT NULL DEFAULT 'NEW'"
                     )
                 connection.execute(
                     "UPDATE seed_metadata SET value = ? WHERE key = 'schema_version'",
@@ -201,7 +230,9 @@ class SqliteSeedState:
                 SELECT node_id, endpoint_id, endpoint_addrs_json,
                        peer_class, runtime_capability_json,
                        verification_key_digest, incarnation, generation,
-                       lease_expires_at, last_heartbeat_sequence
+                       lease_expires_at, last_heartbeat_sequence,
+                       last_liveness_at, next_heartbeat_due_at,
+                       last_activity_receipt_at, active_requests, lifecycle_state
                 FROM seed_members
                 """
             ).fetchall()
@@ -234,6 +265,17 @@ class SqliteSeedState:
                         "last_heartbeat_sequence": int(
                             row["last_heartbeat_sequence"]
                         ),
+                        "last_liveness_at": float(row["last_liveness_at"]),
+                        "next_heartbeat_due_at": float(
+                            row["next_heartbeat_due_at"]
+                        ),
+                        "last_activity_receipt_at": (
+                            None
+                            if row["last_activity_receipt_at"] is None
+                            else float(row["last_activity_receipt_at"])
+                        ),
+                        "active_requests": int(row["active_requests"]),
+                        "lifecycle_state": row["lifecycle_state"],
                     }
                 )
             return members
@@ -383,8 +425,10 @@ class SqliteSeedState:
                     node_id, endpoint_id, endpoint_addrs_json,
                     peer_class, runtime_capability_json,
                     verification_key_digest, incarnation, generation,
-                    lease_expires_at, last_heartbeat_sequence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    lease_expires_at, last_heartbeat_sequence,
+                    last_liveness_at, next_heartbeat_due_at,
+                    last_activity_receipt_at, active_requests, lifecycle_state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     endpoint_id = excluded.endpoint_id,
                     endpoint_addrs_json = excluded.endpoint_addrs_json,
@@ -394,7 +438,12 @@ class SqliteSeedState:
                     incarnation = excluded.incarnation,
                     generation = excluded.generation,
                     lease_expires_at = excluded.lease_expires_at,
-                    last_heartbeat_sequence = excluded.last_heartbeat_sequence
+                    last_heartbeat_sequence = excluded.last_heartbeat_sequence,
+                    last_liveness_at = excluded.last_liveness_at,
+                    next_heartbeat_due_at = excluded.next_heartbeat_due_at,
+                    last_activity_receipt_at = excluded.last_activity_receipt_at,
+                    active_requests = excluded.active_requests,
+                    lifecycle_state = excluded.lifecycle_state
                 WHERE
                     seed_members.verification_key_digest =
                         excluded.verification_key_digest
@@ -412,6 +461,11 @@ class SqliteSeedState:
                     member["generation"],
                     member["lease_expires_at"],
                     member["last_heartbeat_sequence"],
+                    member["last_liveness_at"],
+                    member["next_heartbeat_due_at"],
+                    member["last_activity_receipt_at"],
+                    member["active_requests"],
+                    member["lifecycle_state"],
                 ),
             )
             if cursor.rowcount != 1:
@@ -470,8 +524,10 @@ class SqliteSeedState:
                     node_id, endpoint_id, endpoint_addrs_json,
                     peer_class, runtime_capability_json,
                     verification_key_digest, incarnation, generation,
-                    lease_expires_at, last_heartbeat_sequence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    lease_expires_at, last_heartbeat_sequence,
+                    last_liveness_at, next_heartbeat_due_at,
+                    last_activity_receipt_at, active_requests, lifecycle_state
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     endpoint_id = excluded.endpoint_id,
                     endpoint_addrs_json = excluded.endpoint_addrs_json,
@@ -481,7 +537,12 @@ class SqliteSeedState:
                     incarnation = excluded.incarnation,
                     generation = excluded.generation,
                     lease_expires_at = excluded.lease_expires_at,
-                    last_heartbeat_sequence = excluded.last_heartbeat_sequence
+                    last_heartbeat_sequence = excluded.last_heartbeat_sequence,
+                    last_liveness_at = excluded.last_liveness_at,
+                    next_heartbeat_due_at = excluded.next_heartbeat_due_at,
+                    last_activity_receipt_at = excluded.last_activity_receipt_at,
+                    active_requests = excluded.active_requests,
+                    lifecycle_state = excluded.lifecycle_state
                 WHERE
                     seed_members.verification_key_digest =
                         excluded.verification_key_digest
@@ -507,6 +568,11 @@ class SqliteSeedState:
                     member["generation"],
                     member["lease_expires_at"],
                     member["last_heartbeat_sequence"],
+                    member["last_liveness_at"],
+                    member["next_heartbeat_due_at"],
+                    member["last_activity_receipt_at"],
+                    member["active_requests"],
+                    member["lifecycle_state"],
                 ),
             )
             if cursor.rowcount != 1:

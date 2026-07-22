@@ -85,6 +85,9 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
             "lifecycle_state": "RUNNING",
             "route_ready": False,
             "active_requests": 0,
+            "liveness_source": "scheduled_heartbeat",
+            "activity_receipt_digest": None,
+            "activity_peer_node_id": None,
         },
         ASSIGNMENT_OFFER_PROTOCOL: {
             "deployment_id": "deployment-001",
@@ -366,6 +369,34 @@ def test_join_request_requires_signed_peer_runtime_declaration(field: str) -> No
         validate_membership_message(message)
 
     assert excinfo.value.code == "membership_fields_invalid"
+
+
+def test_heartbeat_liveness_source_requires_bound_receipt_shape() -> None:
+    heartbeat = _message(HEARTBEAT_PROTOCOL)
+    validate_membership_message(heartbeat)
+
+    receipt = {
+        **heartbeat,
+        "liveness_source": "activation_receipt",
+        "activity_receipt_digest": "sha256:" + "7" * 64,
+        "activity_peer_node_id": "node-b",
+    }
+    validate_membership_message(receipt)
+
+    for field, value in (
+        ("activity_receipt_digest", None),
+        ("activity_peer_node_id", None),
+    ):
+        invalid = {**receipt, field: value}
+        with pytest.raises(MembershipContractError, match="membership_liveness_shape_invalid"):
+            validate_membership_message(invalid)
+
+    invalid_heartbeat = {
+        **heartbeat,
+        "activity_receipt_digest": "sha256:" + "8" * 64,
+    }
+    with pytest.raises(MembershipContractError, match="membership_liveness_shape_invalid"):
+        validate_membership_message(invalid_heartbeat)
 
 
 @pytest.mark.parametrize("field", ["placement_provenance", "peer_endpoint_records"])
