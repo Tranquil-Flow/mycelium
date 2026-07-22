@@ -10,8 +10,8 @@
       "owner_sources": [
         {
           "path": "weight_provisioning.py",
-          "sha256": "eaa651bdb0a102a47a1863777b728aded850f62d2d499ef41d637095eb0da850",
-          "size_bytes": 20327
+          "sha256": "839630da2ce48c81acabe4b8f796994af6de211afd955f6947aba328e5c62ba7",
+          "size_bytes": 21243
         },
         {
           "path": "layer_assignment.py",
@@ -170,8 +170,8 @@
       "owner_sources": [
         {
           "path": "runtime_loader.py",
-          "sha256": "3cd97f9aa9e804e02eadb9b5f61a533643114b212fcb08501280d7b032a261a5",
-          "size_bytes": 44645
+          "sha256": "24637aea72b1b55bcffe54dc95eb17ac345b441dde3c204297009194f675e2c7",
+          "size_bytes": 48637
         },
         {
           "path": "runtime_contracts.py",
@@ -235,8 +235,8 @@
       "owner_sources": [
         {
           "path": "weight_provisioning.py",
-          "sha256": "eaa651bdb0a102a47a1863777b728aded850f62d2d499ef41d637095eb0da850",
-          "size_bytes": 20327
+          "sha256": "839630da2ce48c81acabe4b8f796994af6de211afd955f6947aba328e5c62ba7",
+          "size_bytes": 21243
         },
         {
           "path": "layer_assignment.py",
