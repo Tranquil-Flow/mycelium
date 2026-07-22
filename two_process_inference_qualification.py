@@ -887,10 +887,15 @@ def _prepare_assignments(
     root: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], _LocalOnlyFetcher]:
     try:
-        manifest, _, assignments, reports, fetcher = prepare_assignment_artifacts(root)
+        prepared = prepare_assignment_artifacts(root)
     except PhysicalDeploymentError as exc:
         raise QualificationError(str(exc)) from exc
-    return manifest, assignments, reports, fetcher
+    return (
+        prepared.manifest,
+        prepared.assignments,
+        prepared.reports,
+        prepared.fetcher,
+    )
 
 
 def _prepare_monolithic_reference(

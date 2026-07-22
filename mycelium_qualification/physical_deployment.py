@@ -329,7 +329,7 @@ class PhysicalDeployment:
         return document
 
 
-def _validate_nodes(node_ids: tuple[str, str]) -> None:
+def _validate_nodes(node_ids: tuple[str, ...]) -> None:
     if (
         len(node_ids) != 2
         or any(not isinstance(node, str) or not node.strip() for node in node_ids)
@@ -948,7 +948,7 @@ class _IdentityAwareLocalFetcher:
 
 
 def _route_with_nodes(
-    manifest: dict[str, Any], node_ids: tuple[str, str]
+    manifest: dict[str, Any], node_ids: tuple[str, ...]
 ) -> dict[str, Any]:
     num_layers = manifest["num_layers"]
     split = num_layers // 2
@@ -978,20 +978,35 @@ def _route_with_nodes(
 def prepare_assignment_artifacts(
     root: Path,
     *,
-    node_ids: tuple[str, str] = ("node-a", "node-b"),
-) -> tuple[
-    dict[str, Any],
-    dict[str, Any],
-    list[dict[str, Any]],
-    list[dict[str, Any]],
-    _LocalOnlyFetcher,
-]:
+    node_ids: tuple[str, ...] = ("node-a", "node-b"),
+    model_source: LocalModelSource | None = None,
+    runtime_dtype: str = "float32",
+) -> _PreparedAssignments:
     """Build, compile, provision, and verify two exact offline assignments."""
 
     _validate_nodes(node_ids)
+    runtime_dtype = _validate_runtime_dtype(runtime_dtype)
     prepared_root = _prepare_root(Path(root))
     try:
-        manifest, _ = _build_local_model(prepared_root, n_positions=16)
+        source_metadata: dict[str, Any] | None = None
+        tokenizer_assets: tuple[dict[str, Any], ...] = ()
+        if model_source is None:
+            manifest, _ = _build_local_model(prepared_root, n_positions=16)
+            fetcher: Any = _LocalOnlyFetcher(prepared_root)
+        else:
+            resolved_source = _resolve_local_model_source(model_source)
+            prepared_source = _materialize_local_model_source(
+                resolved_source,
+                prepared_root,
+            )
+            manifest = prepared_source.manifest
+            source_metadata = prepared_source.source_metadata
+            tokenizer_assets = prepared_source.tokenizer_assets
+            fetcher = _IdentityAwareLocalFetcher(
+                prepared_root,
+                model_id=manifest["model_id"],
+                resolved_commit=manifest["resolved_commit"],
+            )
         route = _route_with_nodes(manifest, node_ids)
         assignments = compile_layer_assignments(
             route_plan=route,
@@ -1002,18 +1017,17 @@ def prepare_assignment_artifacts(
             runtime_by_node={
                 node: {
                     "backend": "mlx",
-                    "dtype": "float32",
+                    "dtype": runtime_dtype,
                     "quantization": "none",
                 }
                 for node in route["node_order"]
             },
             control_plane_binding=_control_plane_binding(),
         )
-        if len(assignments) != 2:
+        if len(assignments) != len(node_ids):
             raise PhysicalDeploymentError(
-                "compiled route does not contain exactly two assignments"
+                "compiled route does not contain one assignment per node"
             )
-        fetcher = _LocalOnlyFetcher(prepared_root)
         reports = [
             provision_assignment(
                 assignment,
@@ -1034,16 +1048,27 @@ def prepare_assignment_artifacts(
         raise PhysicalDeploymentError(
             f"physical_deployment_prepare_failed:{type(exc).__name__}:{exc}"
         ) from exc
-    return manifest, route, assignments, reports, fetcher
+    return _PreparedAssignments(
+        manifest=manifest,
+        route=route,
+        assignments=assignments,
+        reports=reports,
+        fetcher=fetcher,
+        source_metadata=source_metadata,
+        tokenizer_assets=tokenizer_assets,
+    )
 
 
 def prepare_monolithic_reference(
     root: Path,
     manifest: dict[str, Any],
-    fetcher: _LocalOnlyFetcher,
+    fetcher: Any,
+    *,
+    runtime_dtype: str = "float32",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Compile and provision an independent full-model MLX reference stage."""
 
+    runtime_dtype = _validate_runtime_dtype(runtime_dtype)
     reference_node = "reference-node"
     route = {
         **_route_for_manifest(manifest),
@@ -1068,7 +1093,7 @@ def prepare_monolithic_reference(
         runtime_by_node={
             reference_node: {
                 "backend": "mlx",
-                "dtype": "float32",
+                "dtype": runtime_dtype,
                 "quantization": "none",
             }
         },
@@ -1095,19 +1120,24 @@ def prepare_monolithic_reference(
 def prepare_physical_deployment(
     root: Path,
     *,
-    node_ids: tuple[str, str] = ("node-a", "node-b"),
+    node_ids: tuple[str, ...] = ("node-a", "node-b"),
+    model_source: LocalModelSource | None = None,
+    runtime_dtype: str = "float32",
 ) -> PhysicalDeployment:
     """Prepare exact stage assignments plus an independent reference stage."""
 
-    manifest, route, assignments, reports, fetcher = prepare_assignment_artifacts(
+    prepared = prepare_assignment_artifacts(
         root,
         node_ids=node_ids,
+        model_source=model_source,
+        runtime_dtype=runtime_dtype,
     )
     try:
         reference_assignment, reference_report = prepare_monolithic_reference(
             root,
-            manifest,
-            fetcher,
+            prepared.manifest,
+            prepared.fetcher,
+            runtime_dtype=runtime_dtype,
         )
     except PhysicalDeploymentError:
         raise
@@ -1120,16 +1150,18 @@ def prepare_physical_deployment(
             item["path"],
             f"{item['content_digest']['algorithm']}:{item['content_digest']['value']}",
         )
-        for item in manifest["files"]
+        for item in prepared.manifest["files"]
     )
     return PhysicalDeployment(
         root=Path(root).resolve(strict=True),
-        manifest=manifest,
-        route_plan=route,
-        assignments=tuple(assignments),
-        artifact_reports=tuple(reports),
+        manifest=prepared.manifest,
+        route_plan=prepared.route,
+        assignments=tuple(prepared.assignments),
+        artifact_reports=tuple(prepared.reports),
         reference_assignment=reference_assignment,
         reference_report=reference_report,
-        local_fetch_requests=tuple(fetcher.requests),
+        local_fetch_requests=tuple(prepared.fetcher.requests),
         model_artifact_digests=artifact_digests,
+        model_source=prepared.source_metadata,
+        tokenizer_assets=prepared.tokenizer_assets,
     )
