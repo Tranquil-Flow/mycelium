@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from mycelium_invite import InviteError, SqliteInviteRegistry, verify_invite_bundle
+from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
 from mycelium_membership import (
     ASSIGNMENT_RESULT_PROTOCOL,
     CAPABILITY_REPORT_PROTOCOL,
@@ -121,6 +121,144 @@ def test_invite_join_and_signed_telemetry_roundtrip(tmp_path: Path) -> None:
     assert coordinator.member("node-a")["last_heartbeat_sequence"] == 1
 
 
+def test_join_retry_returns_exact_committed_acceptance(tmp_path: Path) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(tmp_path)
+    bundle = coordinator.mint_invite(nonce="invite-idempotent", ttl_seconds=120)
+    verified = verify_invite_bundle(bundle, now=NOW)
+    request = node.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://100.117.33.124:9443/control"],
+    )
+
+    first = coordinator.accept_join(
+        invite_token=bundle["token"],
+        join_envelope=request,
+    )
+    second = coordinator.accept_join(
+        invite_token=bundle["token"],
+        join_envelope=request,
+    )
+
+    assert second == first
+    assert coordinator.member("node-a")["generation"] == 1
+
+    restored = _coordinator(
+        tmp_path,
+        signer=coordinator.signer,
+        id_prefix="restored-idempotent",
+    )
+    after_restart = restored.accept_join(
+        invite_token=bundle["token"],
+        join_envelope=request,
+    )
+    assert after_restart == first
+    assert restored.member("node-a")["generation"] == 1
+
+
+def test_join_precommit_failure_does_not_consume_invite(tmp_path: Path) -> None:
+    database = tmp_path / "seed-state" / "state.sqlite3"
+    signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+
+    def fail_id() -> str:
+        raise RuntimeError("simulated id-source failure")
+
+    broken = SeedCoordinator(
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:8788",
+        signer=signer,
+        invite_registry=SqliteInviteRegistry(database),
+        state=SqliteSeedState(database),
+        incarnation="seed-incarnation",
+        clock=lambda: NOW,
+        id_source=fail_id,
+    )
+    node = _node(tmp_path)
+    bundle = broken.mint_invite(nonce="invite-retryable", ttl_seconds=120)
+    verified = verify_invite_bundle(bundle, now=NOW)
+    request = node.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://100.117.33.124:9443/control"],
+    )
+
+    with pytest.raises(RuntimeError, match="simulated id-source failure"):
+        broken.accept_join(invite_token=bundle["token"], join_envelope=request)
+
+    recovered = _coordinator(tmp_path, signer=signer, id_prefix="recovered")
+    acceptance = recovered.accept_join(
+        invite_token=bundle["token"],
+        join_envelope=request,
+    )
+    assert acceptance["message"]["membership_generation"] == 1
+
+
+def test_heartbeat_renews_durable_member_lease(tmp_path: Path) -> None:
+    clock = [NOW]
+    database = tmp_path / "seed-state" / "state.sqlite3"
+    signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:8788",
+        signer=signer,
+        invite_registry=SqliteInviteRegistry(database),
+        state=SqliteSeedState(database),
+        incarnation="seed-incarnation",
+        clock=lambda: clock[0],
+        id_source=_ids("seed-renew"),
+        lease_seconds=5.0,
+    )
+    node = NodeMembershipSession(
+        node_id="node-a",
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        signer=load_or_create_node_signer(tmp_path / "nodes" / "renew.key"),
+        incarnation="incarnation-a",
+        software_version="mycelium-test",
+        clock=lambda: clock[0],
+        id_source=_ids("node-renew"),
+    )
+    bundle = coordinator.mint_invite(nonce="invite-renew", ttl_seconds=120)
+    verified = verify_invite_bundle(bundle, now=clock[0])
+    request = node.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://100.117.33.124:9443/control"],
+    )
+    acceptance = coordinator.accept_join(
+        invite_token=bundle["token"],
+        join_envelope=request,
+    )
+    node.accept_join(acceptance, seed_key_digest=verified["seed_key_digest"])
+
+    clock[0] = NOW + 4.0
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    coordinator.receive_member_message(heartbeat, expected_protocol=HEARTBEAT_PROTOCOL)
+    renewal = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=heartbeat["message"]["message_id"],
+    )
+    node.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=heartbeat["message"]["message_id"],
+    )
+    assert coordinator.member("node-a")["lease_expires_at"] == NOW + 9.0
+
+    clock[0] = NOW + 6.0
+    capability = node.capability_report(
+        platform="macOS-15",
+        architecture="arm64",
+        memory_bytes=8 * 1024**3,
+        available_storage_bytes=100 * 1024**3,
+        backends=["mlx"],
+        precisions=["float16"],
+    )
+    coordinator.receive_member_message(
+        capability,
+        expected_protocol=CAPABILITY_REPORT_PROTOCOL,
+    )
+
+
 def test_assignment_offer_and_result_are_bound_end_to_end(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path)
     node = _node(tmp_path)
@@ -167,7 +305,7 @@ def test_assignment_offer_and_result_are_bound_end_to_end(tmp_path: Path) -> Non
     assert coordinator.assignment_status("assignment-1")["result_code"] == "loaded"
 
 
-def test_invite_is_consumed_exactly_once_under_concurrency(tmp_path: Path) -> None:
+def test_invite_join_is_idempotent_under_concurrency(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path)
     node = _node(tmp_path)
     bundle = coordinator.mint_invite(nonce="invite-race", ttl_seconds=120)
@@ -179,22 +317,34 @@ def test_invite_is_consumed_exactly_once_under_concurrency(tmp_path: Path) -> No
     workers = 8
     barrier = threading.Barrier(workers)
 
-    def attempt() -> str:
+    def attempt() -> dict:
         barrier.wait(timeout=5)
-        try:
-            coordinator.accept_join(
-                invite_token=bundle["token"],
-                join_envelope=request,
-            )
-        except InviteError as exc:
-            return exc.code
-        return "accepted"
+        return coordinator.accept_join(
+            invite_token=bundle["token"],
+            join_envelope=request,
+        )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         outcomes = list(executor.map(lambda _index: attempt(), range(workers)))
 
-    assert outcomes.count("accepted") == 1
-    assert outcomes.count("invite_replayed") == workers - 1
+    assert all(outcome == outcomes[0] for outcome in outcomes)
+    assert coordinator.member("node-a")["generation"] == 1
+
+    intruder = _node(
+        tmp_path,
+        node_id="node-other",
+        key_name="node-other.key",
+        incarnation="incarnation-other",
+    )
+    conflicting_request = intruder.join_request(
+        invite_nonce=verified_bundle["payload"]["nonce"],
+        endpoint_addrs=["https://node-other/control"],
+    )
+    with pytest.raises(SeedCoordinatorError, match="seed_join_retry_mismatch"):
+        coordinator.accept_join(
+            invite_token=bundle["token"],
+            join_envelope=conflicting_request,
+        )
 
 
 def test_same_node_rejoin_requires_pinned_key_and_increments_generation(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+import hashlib
 import math
 import re
 import threading
@@ -13,6 +14,7 @@ from typing import Any
 import uuid
 
 from mycelium_invite import (
+    InviteError,
     SqliteInviteRegistry,
     mint_invite_bundle,
     verify_invite,
@@ -24,11 +26,14 @@ from mycelium_membership import (
     DRAIN_ACK_PROTOCOL,
     HEARTBEAT_PROTOCOL,
     JOIN_ACCEPTANCE_PROTOCOL,
+    LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
+    MAX_MESSAGE_TTL_SECONDS,
     sign_membership_message,
     verify_join_request,
     verify_membership_message,
 )
+from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 
 from .state import SeedStateError, SqliteSeedState
@@ -133,10 +138,9 @@ class SeedCoordinator:
             raise ValueError("invite_registry is invalid")
         if state is not None and not isinstance(state, SqliteSeedState):
             raise ValueError("state is invalid")
-        if (
-            state is not None
-            and state.database.resolve() != invite_registry.database.resolve()
-        ):
+        if state is None:
+            state = SqliteSeedState(invite_registry.database)
+        if state.database.resolve() != invite_registry.database.resolve():
             raise ValueError("state and invite_registry must share one database")
         if not callable(clock) or not callable(id_source):
             raise ValueError("clock and id_source must be callable")
@@ -151,6 +155,8 @@ class SeedCoordinator:
                 or value <= 0
             ):
                 raise ValueError(f"{name} is invalid")
+        if float(lease_seconds) > MAX_MESSAGE_TTL_SECONDS:
+            raise ValueError("lease_seconds is invalid")
         self.seed_url = seed_url
         self.signer = signer
         self._invite_registry = invite_registry
@@ -279,6 +285,40 @@ class SeedCoordinator:
         join_envelope: Mapping[str, Any],
     ) -> dict[str, Any]:
         with self._lock:
+            invite_token_digest: str | None = None
+            request_envelope_digest: str | None = None
+            retry_nonce: str | None = None
+            if isinstance(invite_token, str) and isinstance(join_envelope, Mapping):
+                try:
+                    candidate = join_envelope.get("message")
+                    if isinstance(candidate, Mapping):
+                        nonce = candidate.get("invite_nonce")
+                        if isinstance(nonce, str):
+                            retry_nonce = nonce
+                    invite_token_digest = hashlib.sha256(
+                        invite_token.encode("utf-8")
+                    ).hexdigest()
+                    request_envelope_digest = hashlib.sha256(
+                        canonical_json_bytes(dict(join_envelope))
+                    ).hexdigest()
+                except (TypeError, ValueError, UnicodeError):
+                    pass
+            if (
+                retry_nonce is not None
+                and invite_token_digest is not None
+                and request_envelope_digest is not None
+            ):
+                try:
+                    committed = self._state.load_join_acceptance(
+                        nonce=retry_nonce,
+                        invite_token_digest=invite_token_digest,
+                        request_envelope_digest=request_envelope_digest,
+                    )
+                except SeedStateError as exc:
+                    raise SeedCoordinatorError(exc.code) from exc
+                if committed is not None:
+                    return committed
+
             now = self._now()
             seed_url = self._require_seed_url()
             invite = verify_invite(
@@ -311,11 +351,6 @@ class SeedCoordinator:
             ):
                 raise SeedCoordinatorError("seed_node_endpoint_conflict")
 
-            self._invite_registry.consume(
-                invite["nonce"],
-                now=now,
-                expires_at=float(invite["expires_at"]),
-            )
             generation = 1 if previous is None else previous.generation + 1
             lease_expires_at = now + self._lease_seconds
             endpoint = request["endpoint_addr"]
@@ -328,9 +363,12 @@ class SeedCoordinator:
                 generation=generation,
                 lease_expires_at=lease_expires_at,
             )
+            message_id = _segment(self._id_source(), "message_id")
+            if message_id in self._emitted_ids:
+                raise SeedCoordinatorError("seed_message_id_reused")
             message = {
                 "protocol": JOIN_ACCEPTANCE_PROTOCOL,
-                "message_id": self._new_message_id(),
+                "message_id": message_id,
                 "swarm_id": self.swarm_id,
                 "sender_node_id": self.seed_node_id,
                 "sender_endpoint_id": self.signer.endpoint_id,
@@ -346,9 +384,27 @@ class SeedCoordinator:
                 "lease_expires_at": lease_expires_at,
             }
             acceptance = sign_membership_message(signer=self.signer, message=message)
-            self._persist("save_member", member.projection())
+            assert invite_token_digest is not None
+            assert request_envelope_digest is not None
+            try:
+                committed = self._state.commit_join(
+                    nonce=invite["nonce"],
+                    consumed_at=now,
+                    invite_expires_at=float(invite["expires_at"]),
+                    invite_token_digest=invite_token_digest,
+                    request_envelope_digest=request_envelope_digest,
+                    request_message_id=request["message_id"],
+                    message_id=message_id,
+                    member=member.projection(),
+                    acceptance=acceptance,
+                )
+            except SeedStateError as exc:
+                if exc.code == "seed_join_invite_replayed":
+                    raise InviteError("invite_replayed") from exc
+                raise SeedCoordinatorError(exc.code) from exc
+            self._emitted_ids.add(message_id)
             self._members[node_id] = member
-            return acceptance
+            return committed
 
     def member(self, node_id: str) -> dict[str, Any]:
         node_id = _segment(node_id, "node_id")
@@ -464,8 +520,33 @@ class SeedCoordinator:
                 sequence = int(message["heartbeat_sequence"])
                 if sequence <= member.last_heartbeat_sequence:
                     raise SeedCoordinatorError("seed_heartbeat_sequence_stale")
+                renewed_until = now + self._lease_seconds
+                renewal_message = {
+                    "protocol": LEASE_RENEWAL_PROTOCOL,
+                    "message_id": self._new_message_id(),
+                    "swarm_id": self.swarm_id,
+                    "sender_node_id": self.seed_node_id,
+                    "sender_endpoint_id": self.signer.endpoint_id,
+                    "recipient_node_id": member.node_id,
+                    "incarnation": self.incarnation,
+                    "generation": member.generation,
+                    "issued_at": now,
+                    "expires_at": min(
+                        now + self._message_ttl_seconds,
+                        member.lease_expires_at,
+                    ),
+                    "heartbeat_message_id": message["message_id"],
+                    "member_incarnation": member.incarnation,
+                    "membership_generation": member.generation,
+                    "lease_expires_at": renewed_until,
+                }
+                renewal = sign_membership_message(
+                    signer=self.signer,
+                    message=renewal_message,
+                )
                 persisted_member = member.projection()
                 persisted_member["last_heartbeat_sequence"] = sequence
+                persisted_member["lease_expires_at"] = renewed_until
                 self._persist("save_member", persisted_member)
             elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
                 assignment = self._assignments.get(message["assignment_id"])
@@ -492,10 +573,36 @@ class SeedCoordinator:
             self._remember(member, message, now)
             if expected_protocol == HEARTBEAT_PROTOCOL:
                 member.last_heartbeat_sequence = sequence
+                member.lease_expires_at = renewed_until
+                member.latest_messages[LEASE_RENEWAL_PROTOCOL] = renewal
             elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
                 assignment.update(updated_assignment)
             member.latest_messages[expected_protocol] = dict(message)
             return message
+
+    def lease_renewal(
+        self,
+        *,
+        node_id: str,
+        heartbeat_message_id: str,
+    ) -> dict[str, Any]:
+        node_id = _segment(node_id, "node_id")
+        heartbeat_message_id = _segment(
+            heartbeat_message_id,
+            "heartbeat_message_id",
+        )
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            envelope = member.latest_messages.get(LEASE_RENEWAL_PROTOCOL)
+            if (
+                envelope is None
+                or envelope.get("message", {}).get("heartbeat_message_id")
+                != heartbeat_message_id
+            ):
+                raise SeedCoordinatorError("seed_lease_renewal_unknown")
+            return dict(envelope)
 
     def assignment_offer(
         self,

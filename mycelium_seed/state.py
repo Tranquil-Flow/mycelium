@@ -13,7 +13,7 @@ from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 class SeedStateError(RuntimeError):
@@ -80,6 +80,20 @@ class SqliteSeedState:
                 CREATE TABLE IF NOT EXISTS seed_emitted_messages (
                     message_id TEXT PRIMARY KEY NOT NULL
                 ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS seed_join_acceptances (
+                    nonce TEXT PRIMARY KEY NOT NULL,
+                    invite_token_digest TEXT NOT NULL,
+                    request_envelope_digest TEXT NOT NULL,
+                    request_message_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    endpoint_id TEXT NOT NULL,
+                    verification_key_digest TEXT NOT NULL,
+                    incarnation TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation >= 1),
+                    acceptance_json TEXT NOT NULL,
+                    FOREIGN KEY (nonce) REFERENCES consumed_invites(nonce),
+                    FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
+                ) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS seed_assignments (
                     assignment_id TEXT PRIMARY KEY NOT NULL,
                     node_id TEXT NOT NULL,
@@ -101,6 +115,11 @@ class SqliteSeedState:
             if row is None:
                 connection.execute(
                     "INSERT INTO seed_metadata (key, value) VALUES ('schema_version', ?)",
+                    (str(_SCHEMA_VERSION),),
+                )
+            elif row["value"] == "1":
+                connection.execute(
+                    "UPDATE seed_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(_SCHEMA_VERSION),),
                 )
             elif row["value"] != str(_SCHEMA_VERSION):
@@ -225,6 +244,178 @@ class SqliteSeedState:
             ]
         except (sqlite3.Error, TypeError, ValueError) as exc:
             raise SeedStateError("seed_state_corrupt") from exc
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _decode_acceptance(raw_text: str) -> dict[str, Any]:
+        try:
+            raw = raw_text.encode("utf-8")
+            value = json.loads(raw)
+            if not isinstance(value, dict) or canonical_json_bytes(value) != raw:
+                raise SeedStateError("seed_state_corrupt")
+            return value
+        except SeedStateError:
+            raise
+        except (TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+
+    def load_join_acceptance(
+        self,
+        *,
+        nonce: str,
+        invite_token_digest: str,
+        request_envelope_digest: str,
+    ) -> dict[str, Any] | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT invite_token_digest, request_envelope_digest,
+                       acceptance_json
+                FROM seed_join_acceptances WHERE nonce = ?
+                """,
+                (nonce,),
+            ).fetchone()
+            if row is None:
+                return None
+            if (
+                row["invite_token_digest"] != invite_token_digest
+                or row["request_envelope_digest"] != request_envelope_digest
+            ):
+                raise SeedStateError("seed_join_retry_mismatch")
+            return self._decode_acceptance(row["acceptance_json"])
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def commit_join(
+        self,
+        *,
+        nonce: str,
+        consumed_at: float,
+        invite_expires_at: float,
+        invite_token_digest: str,
+        request_envelope_digest: str,
+        request_message_id: str,
+        message_id: str,
+        member: Mapping[str, Any],
+        acceptance: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Atomically consume invite, persist member, and store exact acceptance."""
+
+        addresses = canonical_json_bytes(list(member["endpoint_addrs"])).decode("utf-8")
+        acceptance_json = canonical_json_bytes(dict(acceptance)).decode("utf-8")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT invite_token_digest, request_envelope_digest,
+                       acceptance_json
+                FROM seed_join_acceptances WHERE nonce = ?
+                """,
+                (nonce,),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["invite_token_digest"] != invite_token_digest
+                    or existing["request_envelope_digest"] != request_envelope_digest
+                ):
+                    raise SeedStateError("seed_join_retry_mismatch")
+                connection.commit()
+                return self._decode_acceptance(existing["acceptance_json"])
+            if connection.execute(
+                "SELECT 1 FROM consumed_invites WHERE nonce = ?", (nonce,)
+            ).fetchone() is not None:
+                raise SeedStateError("seed_join_invite_replayed")
+            if connection.execute(
+                "SELECT 1 FROM seed_emitted_messages WHERE message_id = ?",
+                (message_id,),
+            ).fetchone() is not None:
+                raise SeedStateError("seed_message_id_reused")
+
+            connection.execute(
+                """
+                INSERT INTO consumed_invites (nonce, consumed_at, expires_at)
+                VALUES (?, ?, ?)
+                """,
+                (nonce, consumed_at, invite_expires_at),
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO seed_members (
+                    node_id, endpoint_id, endpoint_addrs_json,
+                    verification_key_digest, incarnation, generation,
+                    lease_expires_at, last_heartbeat_sequence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                    endpoint_id = excluded.endpoint_id,
+                    endpoint_addrs_json = excluded.endpoint_addrs_json,
+                    verification_key_digest = excluded.verification_key_digest,
+                    incarnation = excluded.incarnation,
+                    generation = excluded.generation,
+                    lease_expires_at = excluded.lease_expires_at,
+                    last_heartbeat_sequence = excluded.last_heartbeat_sequence
+                WHERE
+                    seed_members.verification_key_digest =
+                        excluded.verification_key_digest
+                    AND seed_members.endpoint_id = excluded.endpoint_id
+                    AND excluded.generation > seed_members.generation
+                """,
+                (
+                    member["node_id"],
+                    member["endpoint_id"],
+                    addresses,
+                    member["verification_key_digest"],
+                    member["incarnation"],
+                    member["generation"],
+                    member["lease_expires_at"],
+                    member["last_heartbeat_sequence"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise SeedStateError("seed_state_member_conflict")
+            connection.execute(
+                "INSERT INTO seed_emitted_messages (message_id) VALUES (?)",
+                (message_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO seed_join_acceptances (
+                    nonce, invite_token_digest, request_envelope_digest,
+                    request_message_id, node_id, endpoint_id,
+                    verification_key_digest, incarnation, generation,
+                    acceptance_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    nonce,
+                    invite_token_digest,
+                    request_envelope_digest,
+                    request_message_id,
+                    member["node_id"],
+                    member["endpoint_id"],
+                    member["verification_key_digest"],
+                    member["incarnation"],
+                    member["generation"],
+                    acceptance_json,
+                ),
+            )
+            connection.commit()
+            return dict(acceptance)
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError as exc:
+            connection.rollback()
+            raise SeedStateError("seed_join_conflict") from exc
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise SeedStateError("seed_state_unavailable") from exc
         finally:
             connection.close()
 

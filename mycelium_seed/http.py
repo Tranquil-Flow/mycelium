@@ -15,7 +15,12 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from mycelium_invite import InviteError, verify_invite_bundle
-from mycelium_membership import MembershipContractError
+from mycelium_membership import (
+    HEARTBEAT_PROTOCOL,
+    LEASE_RENEWAL_PROTOCOL,
+    MembershipContractError,
+    verify_membership_message,
+)
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import build_ed25519_verifier
 
@@ -211,10 +216,16 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                     envelope,
                     expected_protocol=expected_protocol,
                 )
-                self._send(
-                    HTTPStatus.OK,
-                    self.coordinator.receipt_envelope(message["message_id"]),
-                )
+                if expected_protocol == HEARTBEAT_PROTOCOL:
+                    response = self.coordinator.lease_renewal(
+                        node_id=message["sender_node_id"],
+                        heartbeat_message_id=message["message_id"],
+                    )
+                else:
+                    response = self.coordinator.receipt_envelope(
+                        message["message_id"]
+                    )
+                self._send(HTTPStatus.OK, response)
                 return
             raise SeedHTTPError("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
         except (SeedHTTPError, InviteError, MembershipContractError, SeedCoordinatorError, ValueError) as exc:
@@ -458,6 +469,26 @@ class SeedHTTPClient:
                 "envelope": dict(envelope),
             },
         )
+        if message.get("protocol") == HEARTBEAT_PROTOCOL:
+            try:
+                renewal = verify_membership_message(
+                    response,
+                    now=now,
+                    expected_key_digest=self.seed_key_digest,
+                    expected_protocol=LEASE_RENEWAL_PROTOCOL,
+                    expected_swarm_id=self.swarm_id,
+                    expected_sender_node_id=message.get("recipient_node_id"),
+                    expected_recipient_node_id=message.get("sender_node_id"),
+                )
+            except MembershipContractError as exc:
+                raise SeedHTTPError(exc.code) from exc
+            if (
+                renewal["heartbeat_message_id"] != expected_message_id
+                or renewal["member_incarnation"] != message.get("incarnation")
+                or renewal["membership_generation"] != message.get("generation")
+            ):
+                raise SeedHTTPError("seed_http_lease_renewal_mismatch")
+            return dict(response)
         receipt = self._verify_seed_envelope(
             response,
             expected_protocol=SEED_RECEIPT_PROTOCOL,

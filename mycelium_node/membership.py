@@ -19,6 +19,7 @@ from mycelium_membership import (
     HEARTBEAT_PROTOCOL,
     JOIN_ACCEPTANCE_PROTOCOL,
     JOIN_REQUEST_PROTOCOL,
+    LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MAX_MESSAGE_TTL_SECONDS,
     sign_membership_message,
@@ -298,6 +299,37 @@ class NodeMembershipSession:
             now=now,
         )
         return message
+
+    def accept_lease_renewal(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        heartbeat_message_id: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            heartbeat_message_id = _segment(
+                heartbeat_message_id,
+                "heartbeat_message_id",
+            )
+            message = self._verify_seed_message(
+                envelope,
+                expected_protocol=LEASE_RENEWAL_PROTOCOL,
+            )
+            if (
+                message["heartbeat_message_id"] != heartbeat_message_id
+                or message["member_incarnation"] != self.incarnation
+                or message["membership_generation"] != self._generation
+            ):
+                raise NodeMembershipError("membership_lease_renewal_mismatch")
+            renewed_until = float(message["lease_expires_at"])
+            if (
+                self._lease_expires_at is None
+                or renewed_until <= self._lease_expires_at
+                or renewed_until <= self._now()
+            ):
+                raise NodeMembershipError("membership_lease_renewal_stale")
+            self._lease_expires_at = renewed_until
+            return message
 
     def accept_assignment_offer(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         with self._lock:

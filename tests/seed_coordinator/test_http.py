@@ -80,10 +80,11 @@ def test_real_http_join_and_member_message_roundtrip(tmp_path: Path) -> None:
         assert receipt["accepted_message_id"] == capability["message"]["message_id"]
         assert coordinator.member("node-http")["generation"] == 1
 
-        with pytest.raises(SeedHTTPError) as replay:
-            client.join(invite_token=bundle["token"], join_envelope=request)
-        assert replay.value.code == "invite_replayed"
-        assert replay.value.status == 409
+        retry_acceptance = client.join(
+            invite_token=bundle["token"],
+            join_envelope=request,
+        )
+        assert retry_acceptance == acceptance
 
 
 def test_http_server_rejects_noncanonical_or_oversized_json(tmp_path: Path) -> None:

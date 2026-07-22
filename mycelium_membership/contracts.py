@@ -18,6 +18,7 @@ JOIN_ACCEPTANCE_PROTOCOL = "mycelium.membership.join_acceptance.v1"
 CAPABILITY_REPORT_PROTOCOL = "mycelium.membership.capability_report.v1"
 LINK_PROBE_REPORT_PROTOCOL = "mycelium.membership.link_probe_report.v1"
 HEARTBEAT_PROTOCOL = "mycelium.membership.heartbeat.v1"
+LEASE_RENEWAL_PROTOCOL = "mycelium.membership.lease_renewal.v1"
 ASSIGNMENT_OFFER_PROTOCOL = "mycelium.membership.assignment_offer.v1"
 ASSIGNMENT_RESULT_PROTOCOL = "mycelium.membership.assignment_result.v1"
 DRAIN_ACK_PROTOCOL = "mycelium.membership.drain_ack.v1"
@@ -75,6 +76,14 @@ _SPECIFIC_FIELDS = {
     ),
     HEARTBEAT_PROTOCOL: frozenset(
         {"heartbeat_sequence", "lifecycle_state", "route_ready", "active_requests"}
+    ),
+    LEASE_RENEWAL_PROTOCOL: frozenset(
+        {
+            "heartbeat_message_id",
+            "member_incarnation",
+            "membership_generation",
+            "lease_expires_at",
+        }
     ),
     ASSIGNMENT_OFFER_PROTOCOL: frozenset(
         {
@@ -303,6 +312,25 @@ def _validate_heartbeat(message: Mapping[str, Any]) -> None:
         raise MembershipContractError("membership_route_ready_invalid")
 
 
+def _validate_lease_renewal(message: Mapping[str, Any]) -> None:
+    _require(_segment(message["heartbeat_message_id"]), "membership_identifier_invalid")
+    _require(_segment(message["member_incarnation"]), "membership_identifier_invalid")
+    _require(
+        _integer(message["membership_generation"], minimum=1)
+        and message["membership_generation"] == message["generation"],
+        "membership_generation_invalid",
+    )
+    lease = _number(message["lease_expires_at"])
+    issued = _number(message["issued_at"])
+    _require(
+        lease is not None
+        and issued is not None
+        and lease > issued
+        and lease - issued <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_lease_ttl_invalid",
+    )
+
+
 def _validate_assignment_identity(message: Mapping[str, Any]) -> None:
     for field in ("deployment_id", "assignment_id"):
         _require(_segment(message[field]), "membership_identifier_invalid")
@@ -357,6 +385,7 @@ _VALIDATORS = {
     CAPABILITY_REPORT_PROTOCOL: _validate_capability,
     LINK_PROBE_REPORT_PROTOCOL: _validate_link_probe,
     HEARTBEAT_PROTOCOL: _validate_heartbeat,
+    LEASE_RENEWAL_PROTOCOL: _validate_lease_renewal,
     ASSIGNMENT_OFFER_PROTOCOL: _validate_assignment_offer,
     ASSIGNMENT_RESULT_PROTOCOL: _validate_assignment_result,
     DRAIN_ACK_PROTOCOL: _validate_drain_ack,
