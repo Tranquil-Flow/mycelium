@@ -92,6 +92,11 @@ class _Member:
     generation: int
     lease_expires_at: float
     last_heartbeat_sequence: int = 0
+    last_liveness_at: float = 0.0
+    next_heartbeat_due_at: float = 0.0
+    last_activity_receipt_at: float | None = None
+    active_requests: int = 0
+    lifecycle_state: str = "NEW"
     seen_ids: dict[str, float] = field(default_factory=dict)
     latest_messages: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -111,6 +116,11 @@ class _Member:
             "generation": self.generation,
             "lease_expires_at": self.lease_expires_at,
             "last_heartbeat_sequence": self.last_heartbeat_sequence,
+            "last_liveness_at": self.last_liveness_at,
+            "next_heartbeat_due_at": self.next_heartbeat_due_at,
+            "last_activity_receipt_at": self.last_activity_receipt_at,
+            "active_requests": self.active_requests,
+            "lifecycle_state": self.lifecycle_state,
         }
 
 
@@ -131,6 +141,8 @@ class SeedCoordinator:
         id_source: Callable[[], str] = lambda: str(uuid.uuid4()),
         lease_seconds: float = 300.0,
         message_ttl_seconds: float = 60.0,
+        keepalive_interval_seconds: float = 30.0,
+        evidence_freshness_seconds: float = 90.0,
     ) -> None:
         self.swarm_id = _segment(swarm_id, "swarm_id")
         self.seed_node_id = _segment(seed_node_id, "seed_node_id")
@@ -173,6 +185,21 @@ class SeedCoordinator:
         self._id_source = id_source
         self._lease_seconds = float(lease_seconds)
         self._message_ttl_seconds = float(message_ttl_seconds)
+        for name, value in (
+            ("keepalive_interval_seconds", keepalive_interval_seconds),
+            ("evidence_freshness_seconds", evidence_freshness_seconds),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) <= 0.0
+            ):
+                raise ValueError(f"{name} is invalid")
+        if float(evidence_freshness_seconds) <= float(keepalive_interval_seconds):
+            raise ValueError("evidence_freshness_seconds is invalid")
+        self._keepalive_interval_seconds = float(keepalive_interval_seconds)
+        self._evidence_freshness_seconds = float(evidence_freshness_seconds)
         self._lock = threading.RLock()
         self._members: dict[str, _Member] = {}
         self._emitted_ids: set[str] = set()
@@ -199,6 +226,15 @@ class SeedCoordinator:
                         last_heartbeat_sequence=int(
                             record["last_heartbeat_sequence"]
                         ),
+                        last_liveness_at=float(record["last_liveness_at"]),
+                        next_heartbeat_due_at=float(record["next_heartbeat_due_at"]),
+                        last_activity_receipt_at=(
+                            None
+                            if record["last_activity_receipt_at"] is None
+                            else float(record["last_activity_receipt_at"])
+                        ),
+                        active_requests=int(record["active_requests"]),
+                        lifecycle_state=record["lifecycle_state"],
                     )
                     self._members[member.node_id] = member
                 self._assignments = {
@@ -384,6 +420,10 @@ class SeedCoordinator:
                 incarnation=request["incarnation"],
                 generation=generation,
                 lease_expires_at=lease_expires_at,
+                last_liveness_at=now,
+                next_heartbeat_due_at=now + self._keepalive_interval_seconds,
+                active_requests=0,
+                lifecycle_state="NEW",
             )
             message_id = _segment(self._id_source(), "message_id")
             if message_id in self._emitted_ids:
@@ -428,13 +468,56 @@ class SeedCoordinator:
             self._members[node_id] = member
             return committed
 
+    def _liveness_projection(
+        self,
+        member: _Member,
+        *,
+        now: float,
+    ) -> dict[str, Any]:
+        age = max(0.0, now - member.last_liveness_at)
+        overdue_age = max(0.0, now - member.next_heartbeat_due_at)
+        stale = now > member.next_heartbeat_due_at
+        missed_keepalives = (
+            0
+            if not stale
+            else 1 + int(overdue_age // self._keepalive_interval_seconds)
+        )
+        evidence_expired = age > self._evidence_freshness_seconds
+        if not stale:
+            status = "active_fresh" if member.active_requests > 0 else "idle_fresh"
+            dead = False
+            reason = None
+        elif member.active_requests > 0:
+            status = "active_decode_transport_failure"
+            dead = False
+            reason = "in_flight_liveness_lost"
+        else:
+            dead = missed_keepalives >= 2 and evidence_expired
+            status = "dead" if dead else "liveness_stale"
+            reason = (
+                "idle_keepalive_and_evidence_expired"
+                if dead
+                else "idle_keepalive_missed"
+            )
+        return {
+            "liveness_status": status,
+            "liveness_dead": dead,
+            "liveness_reason": reason,
+            "liveness_age_seconds": age,
+            "heartbeat_overdue_seconds": overdue_age,
+            "missed_keepalives": missed_keepalives,
+            "evidence_freshness_expired": evidence_expired,
+        }
+
     def member(self, node_id: str) -> dict[str, Any]:
         node_id = _segment(node_id, "node_id")
         with self._lock:
             member = self._members.get(node_id)
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
-            return member.projection()
+            projection = member.projection()
+            projection.update(self._liveness_projection(member, now=self._now()))
+            return projection
 
     def _ensure_current_member(self, member: _Member) -> None:
         if self._state is None:
@@ -542,7 +625,10 @@ class SeedCoordinator:
                 sequence = int(message["heartbeat_sequence"])
                 if sequence <= member.last_heartbeat_sequence:
                     raise SeedCoordinatorError("seed_heartbeat_sequence_stale")
-                renewed_until = now + self._lease_seconds
+                renewed_until = max(
+                    member.lease_expires_at,
+                    now + self._lease_seconds,
+                )
                 renewal_message = {
                     "protocol": LEASE_RENEWAL_PROTOCOL,
                     "message_id": self._new_message_id(),
@@ -569,6 +655,20 @@ class SeedCoordinator:
                 persisted_member = member.projection()
                 persisted_member["last_heartbeat_sequence"] = sequence
                 persisted_member["lease_expires_at"] = renewed_until
+                persisted_member["last_liveness_at"] = now
+                heartbeat_intervals = (
+                    2
+                    if message["liveness_source"] == "activation_receipt"
+                    else 1
+                )
+                next_heartbeat_due_at = (
+                    now + heartbeat_intervals * self._keepalive_interval_seconds
+                )
+                persisted_member["next_heartbeat_due_at"] = next_heartbeat_due_at
+                persisted_member["active_requests"] = message["active_requests"]
+                persisted_member["lifecycle_state"] = message["lifecycle_state"]
+                if message["liveness_source"] == "activation_receipt":
+                    persisted_member["last_activity_receipt_at"] = now
                 self._persist("save_member", persisted_member)
             elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
                 assignment = self._assignments.get(message["assignment_id"])
@@ -596,6 +696,12 @@ class SeedCoordinator:
             if expected_protocol == HEARTBEAT_PROTOCOL:
                 member.last_heartbeat_sequence = sequence
                 member.lease_expires_at = renewed_until
+                member.last_liveness_at = now
+                member.next_heartbeat_due_at = next_heartbeat_due_at
+                member.active_requests = int(message["active_requests"])
+                member.lifecycle_state = message["lifecycle_state"]
+                if message["liveness_source"] == "activation_receipt":
+                    member.last_activity_receipt_at = now
                 member.latest_messages[LEASE_RENEWAL_PROTOCOL] = renewal
             elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
                 assignment.update(updated_assignment)
@@ -650,6 +756,11 @@ class SeedCoordinator:
             if now >= member.lease_expires_at:
                 raise SeedCoordinatorError("seed_member_lease_expired")
             self._ensure_current_member(member)
+            liveness = self._liveness_projection(member, now=now)
+            if liveness["liveness_dead"]:
+                raise SeedCoordinatorError("seed_member_liveness_dead")
+            if liveness["liveness_status"] not in {"idle_fresh", "active_fresh"}:
+                raise SeedCoordinatorError("seed_member_liveness_stale")
             if not peer_runtime_is_activation_eligible(
                 member.peer_class,
                 member.runtime_capability,
@@ -678,6 +789,14 @@ class SeedCoordinator:
                 if now >= peer.lease_expires_at:
                     raise SeedCoordinatorError("seed_peer_lease_expired")
                 self._ensure_current_member(peer)
+                peer_liveness = self._liveness_projection(peer, now=now)
+                if peer_liveness["liveness_dead"]:
+                    raise SeedCoordinatorError("seed_peer_liveness_dead")
+                if peer_liveness["liveness_status"] not in {
+                    "idle_fresh",
+                    "active_fresh",
+                }:
+                    raise SeedCoordinatorError("seed_peer_liveness_stale")
                 if not peer_runtime_is_activation_eligible(
                     peer.peer_class,
                     peer.runtime_capability,

@@ -15,6 +15,7 @@ from mycelium_membership import (
 )
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_router.transports.iroh import DeliveryReceipt
 from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
 
 
@@ -672,5 +673,205 @@ def test_assignment_offer_binds_eligible_peer_endpoints_and_provenance(
             graph_digest="sha256:" + "3" * 64,
             load_generation=1,
             peer_node_ids=["node-browser"],
+            placement_provenance="frozen_fixture",
+        )
+
+
+
+def test_idle_staleness_and_active_decode_failure_are_distinct_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    database = tmp_path / "liveness" / "state.sqlite3"
+    seed_signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:8788",
+        signer=seed_signer,
+        invite_registry=SqliteInviteRegistry(database),
+        state=SqliteSeedState(database),
+        incarnation="seed-incarnation",
+        clock=lambda: clock[0],
+        id_source=_ids("seed-liveness"),
+        lease_seconds=120.0,
+        keepalive_interval_seconds=10.0,
+        evidence_freshness_seconds=25.0,
+    )
+    node = NodeMembershipSession(
+        node_id="node-a",
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        signer=load_or_create_node_signer(tmp_path / "liveness" / "node.key"),
+        incarnation="incarnation-a",
+        software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability=MAC_RUNTIME_CAPABILITY,
+        clock=lambda: clock[0],
+        id_source=_ids("node-liveness"),
+    )
+    bundle = coordinator.mint_invite(nonce="invite-liveness", ttl_seconds=120)
+    verified = verify_invite_bundle(bundle, now=clock[0])
+    request = node.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://node-a/control"],
+    )
+    acceptance = coordinator.accept_join(
+        invite_token=bundle["token"],
+        join_envelope=request,
+    )
+    node.accept_join(acceptance, seed_key_digest=verified["seed_key_digest"])
+
+    clock[0] = NOW + 11.0
+    one_miss = coordinator.member("node-a")
+    assert one_miss["liveness_status"] == "liveness_stale"
+    assert one_miss["liveness_dead"] is False
+
+    clock[0] = NOW + 26.0
+    corroborated = coordinator.member("node-a")
+    assert corroborated["liveness_status"] == "dead"
+    assert corroborated["liveness_dead"] is True
+    assert corroborated["liveness_reason"] == "idle_keepalive_and_evidence_expired"
+    with pytest.raises(SeedCoordinatorError, match="seed_member_liveness_dead"):
+        coordinator.assignment_offer(
+            node_id="node-a",
+            deployment_id="deployment-dead",
+            deployment_epoch=1,
+            assignment_id="assignment-dead",
+            assignment_digest="sha256:" + "1" * 64,
+            stage_pack_digest="sha256:" + "2" * 64,
+            graph_digest="sha256:" + "3" * 64,
+            load_generation=1,
+            peer_node_ids=[],
+            placement_provenance="frozen_fixture",
+        )
+
+    active = node.heartbeat(
+        lifecycle_state="RUNNING",
+        active_requests=1,
+        force=True,
+    )
+    assert active is not None
+    coordinator.receive_member_message(active, expected_protocol=HEARTBEAT_PROTOCOL)
+    clock[0] = NOW + 37.0
+    in_flight = coordinator.member("node-a")
+    assert in_flight["liveness_status"] == "active_decode_transport_failure"
+    assert in_flight["liveness_dead"] is False
+    assert in_flight["active_requests"] == 1
+    with pytest.raises(SeedCoordinatorError, match="seed_member_liveness_stale"):
+        coordinator.assignment_offer(
+            node_id="node-a",
+            deployment_id="deployment-in-flight",
+            deployment_epoch=1,
+            assignment_id="assignment-in-flight",
+            assignment_digest="sha256:" + "1" * 64,
+            stage_pack_digest="sha256:" + "2" * 64,
+            graph_digest="sha256:" + "3" * 64,
+            load_generation=1,
+            peer_node_ids=[],
+            placement_provenance="frozen_fixture",
+        )
+
+    restarted = SeedCoordinator(
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:8788",
+        signer=seed_signer,
+        invite_registry=SqliteInviteRegistry(database),
+        state=SqliteSeedState(database),
+        incarnation="seed-incarnation",
+        clock=lambda: clock[0],
+        id_source=_ids("seed-liveness-restart"),
+        lease_seconds=120.0,
+        keepalive_interval_seconds=10.0,
+        evidence_freshness_seconds=25.0,
+    )
+    restored = restarted.member("node-a")
+    assert restored["liveness_status"] == "active_decode_transport_failure"
+    assert restored["active_requests"] == 1
+    assert restored["last_liveness_at"] == NOW + 26.0
+
+
+
+def test_activation_receipt_renews_liveness_and_stale_peer_is_not_routed(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path, id_prefix="seed-receipt")
+    node_a = _node(tmp_path, node_id="node-a", key_name="node-a-receipt.key")
+    node_b = _node(
+        tmp_path,
+        node_id="node-b",
+        key_name="node-b-receipt.key",
+        incarnation="incarnation-b",
+    )
+    _join(coordinator, node_a, nonce="invite-receipt-a")
+    _join(coordinator, node_b, nonce="invite-receipt-b")
+    offer = coordinator.assignment_offer(
+        node_id="node-a",
+        deployment_id="deployment-receipt",
+        deployment_epoch=1,
+        assignment_id="assignment-receipt",
+        assignment_digest="sha256:" + "1" * 64,
+        stage_pack_digest="sha256:" + "2" * 64,
+        graph_digest="sha256:" + "3" * 64,
+        load_generation=1,
+        peer_node_ids=["node-b"],
+        placement_provenance="frozen_fixture",
+    )
+    node_a.accept_assignment_offer(offer)
+    receipt = DeliveryReceipt(
+        message_id=b"a" * 32,
+        peer_endpoint_id=node_b.signer.endpoint_id,
+        peer_generation=1,
+    )
+    activity = node_a.activation_receipt(
+        assignment_id="assignment-receipt",
+        peer_node_id="node-b",
+        receipt=receipt,
+        lifecycle_state="RUNNING",
+        active_requests=1,
+    )
+    activity_message = activity["message"]
+    accepted = coordinator.receive_member_message(
+        activity,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    renewal = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=activity_message["message_id"],
+    )
+    assert accepted["liveness_source"] == "activation_receipt"
+    assert coordinator.member("node-a")["last_activity_receipt_at"] == NOW
+    node_a.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=activity_message["message_id"],
+    )
+    assert node_a.heartbeat(lifecycle_state="RUNNING", active_requests=0) is None
+
+    coordinator._clock = lambda: NOW + 31.0
+    suppressed_grace = coordinator.member("node-a")
+    assert suppressed_grace["liveness_status"] == "active_fresh"
+    assert suppressed_grace["missed_keepalives"] == 0
+    target_heartbeat = node_a.heartbeat(
+        lifecycle_state="RUNNING",
+        active_requests=0,
+        force=True,
+    )
+    assert target_heartbeat is not None
+    coordinator.receive_member_message(
+        target_heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    with pytest.raises(SeedCoordinatorError, match="seed_peer_liveness_stale"):
+        coordinator.assignment_offer(
+            node_id="node-a",
+            deployment_id="deployment-stale-peer",
+            deployment_epoch=2,
+            assignment_id="assignment-stale-peer",
+            assignment_digest="sha256:" + "4" * 64,
+            stage_pack_digest="sha256:" + "5" * 64,
+            graph_digest="sha256:" + "6" * 64,
+            load_generation=2,
+            peer_node_ids=["node-b"],
             placement_provenance="frozen_fixture",
         )

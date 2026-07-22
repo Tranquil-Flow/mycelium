@@ -111,7 +111,15 @@ _SPECIFIC_FIELDS = {
         }
     ),
     HEARTBEAT_PROTOCOL: frozenset(
-        {"heartbeat_sequence", "lifecycle_state", "route_ready", "active_requests"}
+        {
+            "heartbeat_sequence",
+            "lifecycle_state",
+            "route_ready",
+            "active_requests",
+            "liveness_source",
+            "activity_receipt_digest",
+            "activity_peer_node_id",
+        }
     ),
     LEASE_RENEWAL_PROTOCOL: frozenset(
         {
@@ -385,6 +393,24 @@ def _validate_heartbeat(message: Mapping[str, Any]) -> None:
     _require(_integer(message["active_requests"]), "membership_integer_invalid")
     if message["route_ready"] is True:
         raise MembershipContractError("membership_route_ready_invalid")
+    source = message["liveness_source"]
+    receipt_digest = message["activity_receipt_digest"]
+    peer_node_id = message["activity_peer_node_id"]
+    _safe_in(
+        source,
+        {"scheduled_heartbeat", "activation_receipt"},
+        "membership_liveness_source_invalid",
+    )
+    if source == "scheduled_heartbeat":
+        _require(
+            receipt_digest is None and peer_node_id is None,
+            "membership_liveness_shape_invalid",
+        )
+    else:
+        _require(
+            _digest(receipt_digest) and _segment(peer_node_id),
+            "membership_liveness_shape_invalid",
+        )
 
 
 def _validate_lease_renewal(message: Mapping[str, Any]) -> None:

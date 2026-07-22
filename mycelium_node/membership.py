@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import hashlib
 import math
 import re
 import threading
@@ -27,7 +28,13 @@ from mycelium_membership import (
     validate_peer_runtime_capability,
     verify_membership_message,
 )
+from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import Ed25519EvidenceSigner
+from mycelium_router.transports.iroh import (
+    DELIVERY_SEMANTICS,
+    DeliveryReceipt,
+)
+from mycelium_router.wire import ROUTER_WIRE_PROTOCOL
 
 
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -122,6 +129,9 @@ class NodeMembershipSession:
         self._peer_generations: dict[str, int] = {}
         self._peer_endpoints: dict[str, str] = {}
         self._probe_sequences: dict[tuple[str, str], int] = {}
+        self._pending_liveness: dict[str, tuple[str, float]] = {}
+        self._activity_receipts: dict[str, float] = {}
+        self._suppress_next_heartbeat = False
 
     @property
     def joined(self) -> bool:
@@ -338,14 +348,20 @@ class NodeMembershipSession:
                 or message["membership_generation"] != self._generation
             ):
                 raise NodeMembershipError("membership_lease_renewal_mismatch")
+            pending_liveness = self._pending_liveness.get(heartbeat_message_id)
+            if pending_liveness is None:
+                raise NodeMembershipError("membership_lease_renewal_unknown")
             renewed_until = float(message["lease_expires_at"])
             if (
                 self._lease_expires_at is None
-                or renewed_until <= self._lease_expires_at
+                or renewed_until < self._lease_expires_at
                 or renewed_until <= self._now()
             ):
                 raise NodeMembershipError("membership_lease_renewal_stale")
             self._lease_expires_at = renewed_until
+            source, _expires_at = self._pending_liveness.pop(heartbeat_message_id)
+            if source == "activation_receipt":
+                self._suppress_next_heartbeat = True
             return message
 
     def accept_assignment_offer(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -531,23 +547,119 @@ class NodeMembershipSession:
             }
             return sign_membership_message(signer=self.signer, message=message)
 
+    def _emit_liveness(
+        self,
+        *,
+        lifecycle_state: str,
+        active_requests: int,
+        liveness_source: str,
+        activity_receipt_digest: str | None,
+        activity_peer_node_id: str | None,
+    ) -> dict[str, Any]:
+        now = self._now()
+        self._pending_liveness = {
+            message_id: pending
+            for message_id, pending in self._pending_liveness.items()
+            if pending[1] > now
+        }
+        self._activity_receipts = {
+            digest: expires_at
+            for digest, expires_at in self._activity_receipts.items()
+            if expires_at > now
+        }
+        self._heartbeat_sequence += 1
+        try:
+            message = {
+                **self._post_join_common(HEARTBEAT_PROTOCOL),
+                "heartbeat_sequence": self._heartbeat_sequence,
+                "lifecycle_state": lifecycle_state,
+                "route_ready": False,
+                "active_requests": active_requests,
+                "liveness_source": liveness_source,
+                "activity_receipt_digest": activity_receipt_digest,
+                "activity_peer_node_id": activity_peer_node_id,
+            }
+            envelope = sign_membership_message(signer=self.signer, message=message)
+            self._pending_liveness[message["message_id"]] = (
+                liveness_source,
+                float(message["expires_at"]),
+            )
+            return envelope
+        except BaseException:
+            self._heartbeat_sequence -= 1
+            raise
+
     def heartbeat(
         self,
         *,
         lifecycle_state: str,
         active_requests: int,
+        force: bool = False,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            if not isinstance(force, bool):
+                raise ValueError("force is invalid")
+            if self._suppress_next_heartbeat and not force:
+                self._suppress_next_heartbeat = False
+                return None
+            return self._emit_liveness(
+                lifecycle_state=lifecycle_state,
+                active_requests=active_requests,
+                liveness_source="scheduled_heartbeat",
+                activity_receipt_digest=None,
+                activity_peer_node_id=None,
+            )
+
+    def activation_receipt(
+        self,
+        *,
+        assignment_id: str,
+        peer_node_id: str,
+        receipt: DeliveryReceipt,
+        lifecycle_state: str,
+        active_requests: int,
     ) -> dict[str, Any]:
         with self._lock:
-            self._heartbeat_sequence += 1
-            try:
-                message = {
-                    **self._post_join_common(HEARTBEAT_PROTOCOL),
-                    "heartbeat_sequence": self._heartbeat_sequence,
-                    "lifecycle_state": lifecycle_state,
-                    "route_ready": False,
-                    "active_requests": active_requests,
-                }
-                return sign_membership_message(signer=self.signer, message=message)
-            except BaseException:
-                self._heartbeat_sequence -= 1
-                raise
+            assignment_id = _segment(assignment_id, "assignment_id")
+            peer_node_id = _segment(peer_node_id, "peer_node_id")
+            if not isinstance(receipt, DeliveryReceipt):
+                raise NodeMembershipError("assignment_receipt_type_invalid")
+            expected_endpoint_id = self.resolve_peer_endpoint(
+                assignment_id=assignment_id,
+                peer_node_id=peer_node_id,
+            )
+            offer = self._assignment_offers[assignment_id]
+            record = offer["peer_endpoint_records"][peer_node_id]
+            if (
+                receipt.peer_endpoint_id != expected_endpoint_id
+                or receipt.peer_generation != record["membership_generation"]
+                or receipt.semantics != DELIVERY_SEMANTICS
+                or receipt.router_protocol != ROUTER_WIRE_PROTOCOL
+                or not isinstance(receipt.message_id, bytes)
+                or len(receipt.message_id) != 32
+            ):
+                raise NodeMembershipError("assignment_receipt_peer_mismatch")
+            receipt_document = {
+                "message_id": receipt.message_id.hex(),
+                "peer_endpoint_id": receipt.peer_endpoint_id,
+                "peer_generation": receipt.peer_generation,
+                "semantics": receipt.semantics,
+                "router_protocol": receipt.router_protocol,
+            }
+            digest = "sha256:" + hashlib.sha256(
+                canonical_json_bytes(receipt_document)
+            ).hexdigest()
+            now = self._now()
+            if self._activity_receipts.get(digest, 0.0) > now:
+                raise NodeMembershipError("assignment_receipt_replayed")
+            envelope = self._emit_liveness(
+                lifecycle_state=lifecycle_state,
+                active_requests=active_requests,
+                liveness_source="activation_receipt",
+                activity_receipt_digest=digest,
+                activity_peer_node_id=peer_node_id,
+            )
+            self._activity_receipts[digest] = float(
+                envelope["message"]["expires_at"]
+            )
+            return envelope

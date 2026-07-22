@@ -11,6 +11,7 @@ from mycelium_membership import (
     CAPABILITY_REPORT_PROTOCOL,
     DRAIN_ACK_PROTOCOL,
     HEARTBEAT_PROTOCOL,
+    LEASE_RENEWAL_PROTOCOL,
     JOIN_ACCEPTANCE_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MembershipContractError,
@@ -22,6 +23,7 @@ from mycelium_node.identity import load_or_create_node_signer
 from mycelium_node import membership as node_membership_module
 from mycelium_node.membership import NodeMembershipError, NodeMembershipSession
 from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_router.transports.iroh import DeliveryReceipt
 
 
 NOW = 1_000.0
@@ -509,3 +511,122 @@ def test_signed_peer_endpoint_records_are_the_only_transport_authority(
     )
     with pytest.raises(NodeMembershipError, match="assignment_peer_generation_stale"):
         session.accept_assignment_offer(stale_generation)
+
+
+
+def test_valid_activation_receipt_suppresses_exactly_one_scheduled_heartbeat(
+    tmp_path: Path,
+) -> None:
+    session, seed, _request = _joined(tmp_path)
+    offer = sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": ASSIGNMENT_OFFER_PROTOCOL,
+            "message_id": "offer-liveness-1",
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": NOW,
+            "expires_at": NOW + 60.0,
+            "deployment_id": "deployment-liveness",
+            "deployment_epoch": 1,
+            "assignment_id": "assignment-liveness",
+            "assignment_digest": "sha256:" + "1" * 64,
+            "stage_pack_digest": "sha256:" + "2" * 64,
+            "graph_digest": "sha256:" + "3" * 64,
+            "load_generation": 1,
+            "placement_provenance": "frozen_fixture",
+            "peer_endpoint_records": [
+                {
+                    "node_id": "node-b",
+                    "endpoint_id": "endpoint-node-b",
+                    "deployment_epoch": 1,
+                    "membership_generation": 2,
+                    "valid_from": NOW,
+                    "valid_until": NOW + 60.0,
+                }
+            ],
+        },
+    )
+    session.accept_assignment_offer(offer)
+    receipt = DeliveryReceipt(
+        message_id=b"r" * 32,
+        peer_endpoint_id="endpoint-node-b",
+        peer_generation=2,
+    )
+
+    activity = session.activation_receipt(
+        assignment_id="assignment-liveness",
+        peer_node_id="node-b",
+        receipt=receipt,
+        lifecycle_state="RUNNING",
+        active_requests=1,
+    )
+    activity_message = verify_membership_message(
+        activity,
+        now=NOW,
+        expected_key_digest=session.signer.verification_key_digest,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    assert activity_message["liveness_source"] == "activation_receipt"
+    assert activity_message["activity_peer_node_id"] == "node-b"
+    with pytest.raises(NodeMembershipError, match="assignment_receipt_replayed"):
+        session.activation_receipt(
+            assignment_id="assignment-liveness",
+            peer_node_id="node-b",
+            receipt=receipt,
+            lifecycle_state="RUNNING",
+            active_requests=1,
+        )
+
+    renewal = sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": LEASE_RENEWAL_PROTOCOL,
+            "message_id": "renew-activity-1",
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": NOW,
+            "expires_at": NOW + 60.0,
+            "heartbeat_message_id": activity_message["message_id"],
+            "member_incarnation": "incarnation-a",
+            "membership_generation": 1,
+            "lease_expires_at": NOW + 400.0,
+        },
+    )
+    session.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=activity_message["message_id"],
+    )
+
+    assert session.heartbeat(lifecycle_state="RUNNING", active_requests=0) is None
+    resumed = session.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert resumed is not None
+    resumed_message = verify_membership_message(
+        resumed,
+        now=NOW,
+        expected_key_digest=session.signer.verification_key_digest,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    assert resumed_message["liveness_source"] == "scheduled_heartbeat"
+
+    wrong_peer = DeliveryReceipt(
+        message_id=b"x" * 32,
+        peer_endpoint_id="endpoint-wrong",
+        peer_generation=2,
+    )
+    with pytest.raises(NodeMembershipError, match="assignment_receipt_peer_mismatch"):
+        session.activation_receipt(
+            assignment_id="assignment-liveness",
+            peer_node_id="node-b",
+            receipt=wrong_peer,
+            lifecycle_state="RUNNING",
+            active_requests=1,
+        )
