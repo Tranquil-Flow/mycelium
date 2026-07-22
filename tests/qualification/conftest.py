@@ -437,6 +437,7 @@ def make_case() -> QualificationCase:
         "deployment_id": graph["deployment_id"],
         "deployment_epoch": graph["deployment_epoch"],
         "topology_version": graph["topology_version"],
+        "placement_provenance": "offline_capacity_planner",
         "model_id": graph["model_id"],
         "resolved_commit": graph["resolved_commit"],
         "manifest_digest": graph["manifest_digest"],

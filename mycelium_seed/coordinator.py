@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import hashlib
 import math
@@ -29,6 +29,7 @@ from mycelium_membership import (
     LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MAX_MESSAGE_TTL_SECONDS,
+    peer_runtime_is_activation_eligible,
     sign_membership_message,
     verify_join_request,
     verify_membership_message,
@@ -84,6 +85,8 @@ class _Member:
     node_id: str
     endpoint_id: str
     endpoint_addrs: tuple[str, ...]
+    peer_class: str
+    runtime_capability: dict[str, Any]
     verification_key_digest: str
     incarnation: str
     generation: int
@@ -97,6 +100,12 @@ class _Member:
             "node_id": self.node_id,
             "endpoint_id": self.endpoint_id,
             "endpoint_addrs": list(self.endpoint_addrs),
+            "peer_class": self.peer_class,
+            "runtime_capability": dict(self.runtime_capability),
+            "activation_eligible": peer_runtime_is_activation_eligible(
+                self.peer_class,
+                self.runtime_capability,
+            ),
             "verification_key_digest": self.verification_key_digest,
             "incarnation": self.incarnation,
             "generation": self.generation,
@@ -181,6 +190,8 @@ class SeedCoordinator:
                         node_id=_segment(record["node_id"], "node_id"),
                         endpoint_id=_segment(record["endpoint_id"], "endpoint_id"),
                         endpoint_addrs=tuple(record["endpoint_addrs"]),
+                        peer_class=record["peer_class"],
+                        runtime_capability=dict(record["runtime_capability"]),
                         verification_key_digest=record["verification_key_digest"],
                         incarnation=_segment(record["incarnation"], "incarnation"),
                         generation=int(record["generation"]),
@@ -343,6 +354,15 @@ class SeedCoordinator:
                 raise SeedCoordinatorError("seed_join_key_invalid")
             node_id = request["sender_node_id"]
             previous = self._members.get(node_id)
+            if any(
+                other.node_id != node_id
+                and (
+                    other.endpoint_id == request["sender_endpoint_id"]
+                    or other.verification_key_digest == key_digest
+                )
+                for other in self._members.values()
+            ):
+                raise SeedCoordinatorError("seed_member_identity_reused")
             if previous is not None and previous.verification_key_digest != key_digest:
                 raise SeedCoordinatorError("seed_node_key_conflict")
             if (
@@ -358,6 +378,8 @@ class SeedCoordinator:
                 node_id=node_id,
                 endpoint_id=request["sender_endpoint_id"],
                 endpoint_addrs=tuple(endpoint["addrs"]),
+                peer_class=request["peer_class"],
+                runtime_capability=dict(request["runtime_capability"]),
                 verification_key_digest=key_digest,
                 incarnation=request["incarnation"],
                 generation=generation,
@@ -615,6 +637,8 @@ class SeedCoordinator:
         stage_pack_digest: str,
         graph_digest: str,
         load_generation: int,
+        peer_node_ids: Sequence[str],
+        placement_provenance: str,
     ) -> dict[str, Any]:
         node_id = _segment(node_id, "node_id")
         assignment_id = _segment(assignment_id, "assignment_id")
@@ -626,8 +650,47 @@ class SeedCoordinator:
             if now >= member.lease_expires_at:
                 raise SeedCoordinatorError("seed_member_lease_expired")
             self._ensure_current_member(member)
+            if not peer_runtime_is_activation_eligible(
+                member.peer_class,
+                member.runtime_capability,
+            ):
+                raise SeedCoordinatorError("seed_member_activation_ineligible")
+            if (
+                isinstance(peer_node_ids, (str, bytes))
+                or not isinstance(peer_node_ids, Sequence)
+                or len(peer_node_ids) > 256
+            ):
+                raise ValueError("peer_node_ids is invalid")
+            normalized_peer_ids = [
+                _segment(peer_node_id, "peer_node_id")
+                for peer_node_id in peer_node_ids
+            ]
+            if (
+                len(set(normalized_peer_ids)) != len(normalized_peer_ids)
+                or node_id in normalized_peer_ids
+            ):
+                raise ValueError("peer_node_ids is invalid")
+            peers: list[_Member] = []
+            for peer_node_id in sorted(normalized_peer_ids):
+                peer = self._members.get(peer_node_id)
+                if peer is None:
+                    raise SeedCoordinatorError("seed_peer_unknown")
+                if now >= peer.lease_expires_at:
+                    raise SeedCoordinatorError("seed_peer_lease_expired")
+                self._ensure_current_member(peer)
+                if not peer_runtime_is_activation_eligible(
+                    peer.peer_class,
+                    peer.runtime_capability,
+                ):
+                    raise SeedCoordinatorError("seed_peer_activation_ineligible")
+                peers.append(peer)
             if assignment_id in self._assignments:
                 raise SeedCoordinatorError("seed_assignment_exists")
+            expires_at = min(
+                now + self._message_ttl_seconds,
+                member.lease_expires_at,
+                *(peer.lease_expires_at for peer in peers),
+            )
             message = {
                 "protocol": ASSIGNMENT_OFFER_PROTOCOL,
                 "message_id": self._new_message_id(),
@@ -638,10 +701,7 @@ class SeedCoordinator:
                 "incarnation": self.incarnation,
                 "generation": member.generation,
                 "issued_at": now,
-                "expires_at": min(
-                    now + self._message_ttl_seconds,
-                    member.lease_expires_at,
-                ),
+                "expires_at": expires_at,
                 "deployment_id": deployment_id,
                 "deployment_epoch": deployment_epoch,
                 "assignment_id": assignment_id,
@@ -649,6 +709,18 @@ class SeedCoordinator:
                 "stage_pack_digest": stage_pack_digest,
                 "graph_digest": graph_digest,
                 "load_generation": load_generation,
+                "placement_provenance": placement_provenance,
+                "peer_endpoint_records": [
+                    {
+                        "node_id": peer.node_id,
+                        "endpoint_id": peer.endpoint_id,
+                        "deployment_epoch": deployment_epoch,
+                        "membership_generation": peer.generation,
+                        "valid_from": now,
+                        "valid_until": expires_at,
+                    }
+                    for peer in peers
+                ],
             }
             envelope = sign_membership_message(signer=self.signer, message=message)
             assignment = {

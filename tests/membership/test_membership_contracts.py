@@ -50,6 +50,12 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
                 "addrs": ["iroh-relay://relay.example/node-a"],
             },
             "software_version": "0.1.0",
+            "peer_class": "mac_mlx_iroh",
+            "runtime_capability": {
+                "runtime_backend": "mlx",
+                "transport": "iroh",
+                "activation_protocol": "mycelium.router_wire.v1",
+            },
         },
         JOIN_ACCEPTANCE_PROTOCOL: {
             "request_message_id": "join-request-001",
@@ -88,6 +94,17 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
             "stage_pack_digest": "sha256:" + "b" * 64,
             "graph_digest": "sha256:" + "c" * 64,
             "load_generation": 9,
+            "placement_provenance": "offline_capacity_planner",
+            "peer_endpoint_records": [
+                {
+                    "node_id": "node-b",
+                    "endpoint_id": "endpoint-node-b",
+                    "deployment_epoch": 4,
+                    "membership_generation": 2,
+                    "valid_from": 1_000.0,
+                    "valid_until": 1_300.0,
+                }
+            ],
         },
         ASSIGNMENT_RESULT_PROTOCOL: {
             "deployment_id": "deployment-001",
@@ -338,3 +355,35 @@ def test_hostile_json_values_fail_with_stable_contract_error(
 
     with pytest.raises(MembershipContractError):
         validate_membership_message(message)
+
+
+@pytest.mark.parametrize("field", ["peer_class", "runtime_capability"])
+def test_join_request_requires_signed_peer_runtime_declaration(field: str) -> None:
+    message = _message(JOIN_REQUEST_PROTOCOL)
+    message.pop(field)
+
+    with pytest.raises(MembershipContractError) as excinfo:
+        validate_membership_message(message)
+
+    assert excinfo.value.code == "membership_fields_invalid"
+
+
+@pytest.mark.parametrize("field", ["placement_provenance", "peer_endpoint_records"])
+def test_assignment_offer_requires_signed_provenance_and_peer_records(field: str) -> None:
+    message = _message(ASSIGNMENT_OFFER_PROTOCOL)
+    message.pop(field)
+
+    with pytest.raises(MembershipContractError) as excinfo:
+        validate_membership_message(message)
+
+    assert excinfo.value.code == "membership_fields_invalid"
+
+
+def test_assignment_offer_rejects_endpoint_record_outside_signed_validity() -> None:
+    message = _message(ASSIGNMENT_OFFER_PROTOCOL)
+    message["peer_endpoint_records"][0]["valid_until"] = message["expires_at"] + 1.0
+
+    with pytest.raises(MembershipContractError) as excinfo:
+        validate_membership_message(message)
+
+    assert excinfo.value.code == "membership_peer_endpoint_validity_invalid"

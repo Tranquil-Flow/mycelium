@@ -8,6 +8,9 @@ from .evidence import canonical_json_bytes, is_sha256_ref
 
 ROUTE_QUALIFICATION_PROTOCOL = "mycelium.route_qualification.v1"
 QUALIFIER_AUTHORITY = "mycelium_qualification.qualifier:RouteQualificationV1"
+_PLACEMENT_PROVENANCES = frozenset(
+    {"offline_capacity_planner", "seed_emergency_replacement"}
+)
 _CONTRACT_FIELDS = frozenset(
     {
         "protocol",
@@ -19,6 +22,7 @@ _CONTRACT_FIELDS = frozenset(
         "deployment_id",
         "deployment_epoch",
         "topology_version",
+        "placement_provenance",
         "model_id",
         "resolved_commit",
         "manifest_digest",
@@ -144,6 +148,7 @@ class RouteQualificationV1:
     deployment_id: str
     deployment_epoch: int
     topology_version: int
+    placement_provenance: str
     model_id: str
     resolved_commit: str
     manifest_digest: str
@@ -225,6 +230,7 @@ def route_qualification_to_dict(record: RouteQualificationV1) -> dict[str, Any]:
         "deployment_id": record.deployment_id,
         "deployment_epoch": record.deployment_epoch,
         "topology_version": record.topology_version,
+        "placement_provenance": record.placement_provenance,
         "model_id": record.model_id,
         "resolved_commit": record.resolved_commit,
         "manifest_digest": record.manifest_digest,
@@ -293,6 +299,7 @@ def _record_from_dict(document: dict[str, Any]) -> RouteQualificationV1:
             deployment_id=document["deployment_id"],
             deployment_epoch=document["deployment_epoch"],
             topology_version=document["topology_version"],
+            placement_provenance=document["placement_provenance"],
             model_id=document["model_id"],
             resolved_commit=document["resolved_commit"],
             manifest_digest=document["manifest_digest"],
@@ -360,6 +367,10 @@ def _validate_record(record: RouteQualificationV1) -> None:
             f"invalid_{field}",
         )
     _require(type(record.route_ready) is bool, "invalid_route_ready")
+    _require(
+        record.placement_provenance in _PLACEMENT_PROVENANCES,
+        "invalid_placement_provenance",
+    )
     _require(
         record.evidence_class in {"physical_qualification", "synthetic_test_fixture"},
         "invalid_evidence_class",
@@ -438,6 +449,7 @@ def synthetic_route_qualification_fixture() -> RouteQualificationV1:
         deployment_id="synthetic-test-fixture-no-deployment",
         deployment_epoch=0,
         topology_version=0,
+        placement_provenance="offline_capacity_planner",
         model_id="synthetic-test-fixture-no-model",
         resolved_commit="synthetic-test-fixture-no-revision",
         manifest_digest=zero,

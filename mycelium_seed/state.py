@@ -13,7 +13,7 @@ from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 class SeedStateError(RuntimeError):
@@ -61,6 +61,8 @@ class SqliteSeedState:
                     node_id TEXT PRIMARY KEY NOT NULL,
                     endpoint_id TEXT NOT NULL,
                     endpoint_addrs_json TEXT NOT NULL,
+                    peer_class TEXT NOT NULL,
+                    runtime_capability_json TEXT NOT NULL,
                     verification_key_digest TEXT NOT NULL,
                     incarnation TEXT NOT NULL,
                     generation INTEGER NOT NULL CHECK (generation >= 1),
@@ -117,7 +119,27 @@ class SqliteSeedState:
                     "INSERT INTO seed_metadata (key, value) VALUES ('schema_version', ?)",
                     (str(_SCHEMA_VERSION),),
                 )
-            elif row["value"] == "1":
+            elif row["value"] in {"1", "2"}:
+                columns = {
+                    item["name"]
+                    for item in connection.execute("PRAGMA table_info(seed_members)")
+                }
+                if "last_heartbeat_sequence" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN "
+                        "last_heartbeat_sequence INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "peer_class" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN peer_class TEXT "
+                        "NOT NULL DEFAULT 'linux_tbd'"
+                    )
+                if "runtime_capability_json" not in columns:
+                    connection.execute(
+                        "ALTER TABLE seed_members ADD COLUMN runtime_capability_json TEXT "
+                        "NOT NULL DEFAULT '{\"activation_protocol\":null,"
+                        "\"runtime_backend\":\"tbd\",\"transport\":\"none\"}'"
+                    )
                 connection.execute(
                     "UPDATE seed_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(_SCHEMA_VERSION),),
@@ -177,6 +199,7 @@ class SqliteSeedState:
             rows = connection.execute(
                 """
                 SELECT node_id, endpoint_id, endpoint_addrs_json,
+                       peer_class, runtime_capability_json,
                        verification_key_digest, incarnation, generation,
                        lease_expires_at, last_heartbeat_sequence
                 FROM seed_members
@@ -186,11 +209,15 @@ class SqliteSeedState:
             for row in rows:
                 raw = row["endpoint_addrs_json"].encode("utf-8")
                 addresses = json.loads(raw)
+                runtime_raw = row["runtime_capability_json"].encode("utf-8")
+                runtime_capability = json.loads(runtime_raw)
                 if (
                     not isinstance(addresses, list)
                     or not addresses
                     or not all(isinstance(value, str) and value for value in addresses)
                     or canonical_json_bytes(addresses) != raw
+                    or not isinstance(runtime_capability, dict)
+                    or canonical_json_bytes(runtime_capability) != runtime_raw
                 ):
                     raise SeedStateError("seed_state_corrupt")
                 members.append(
@@ -198,6 +225,8 @@ class SqliteSeedState:
                         "node_id": row["node_id"],
                         "endpoint_id": row["endpoint_id"],
                         "endpoint_addrs": addresses,
+                        "peer_class": row["peer_class"],
+                        "runtime_capability": runtime_capability,
                         "verification_key_digest": row["verification_key_digest"],
                         "incarnation": row["incarnation"],
                         "generation": int(row["generation"]),
@@ -308,6 +337,9 @@ class SqliteSeedState:
         """Atomically consume invite, persist member, and store exact acceptance."""
 
         addresses = canonical_json_bytes(list(member["endpoint_addrs"])).decode("utf-8")
+        runtime_capability = canonical_json_bytes(
+            dict(member["runtime_capability"])
+        ).decode("utf-8")
         acceptance_json = canonical_json_bytes(dict(acceptance)).decode("utf-8")
         connection = self._connect()
         try:
@@ -349,12 +381,15 @@ class SqliteSeedState:
                 """
                 INSERT INTO seed_members (
                     node_id, endpoint_id, endpoint_addrs_json,
+                    peer_class, runtime_capability_json,
                     verification_key_digest, incarnation, generation,
                     lease_expires_at, last_heartbeat_sequence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     endpoint_id = excluded.endpoint_id,
                     endpoint_addrs_json = excluded.endpoint_addrs_json,
+                    peer_class = excluded.peer_class,
+                    runtime_capability_json = excluded.runtime_capability_json,
                     verification_key_digest = excluded.verification_key_digest,
                     incarnation = excluded.incarnation,
                     generation = excluded.generation,
@@ -370,6 +405,8 @@ class SqliteSeedState:
                     member["node_id"],
                     member["endpoint_id"],
                     addresses,
+                    member["peer_class"],
+                    runtime_capability,
                     member["verification_key_digest"],
                     member["incarnation"],
                     member["generation"],
@@ -421,6 +458,9 @@ class SqliteSeedState:
 
     def save_member(self, member: Mapping[str, Any]) -> None:
         addresses = canonical_json_bytes(list(member["endpoint_addrs"])).decode("utf-8")
+        runtime_capability = canonical_json_bytes(
+            dict(member["runtime_capability"])
+        ).decode("utf-8")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -428,12 +468,15 @@ class SqliteSeedState:
                 """
                 INSERT INTO seed_members (
                     node_id, endpoint_id, endpoint_addrs_json,
+                    peer_class, runtime_capability_json,
                     verification_key_digest, incarnation, generation,
                     lease_expires_at, last_heartbeat_sequence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     endpoint_id = excluded.endpoint_id,
                     endpoint_addrs_json = excluded.endpoint_addrs_json,
+                    peer_class = excluded.peer_class,
+                    runtime_capability_json = excluded.runtime_capability_json,
                     verification_key_digest = excluded.verification_key_digest,
                     incarnation = excluded.incarnation,
                     generation = excluded.generation,
@@ -457,6 +500,8 @@ class SqliteSeedState:
                     member["node_id"],
                     member["endpoint_id"],
                     addresses,
+                    member["peer_class"],
+                    runtime_capability,
                     member["verification_key_digest"],
                     member["incarnation"],
                     member["generation"],

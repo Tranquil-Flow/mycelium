@@ -19,6 +19,28 @@ from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
 
 
 NOW = 2_000.0
+MAC_RUNTIME_CAPABILITY = {
+    "runtime_backend": "mlx",
+    "transport": "iroh",
+    "activation_protocol": "mycelium.router_wire.v1",
+}
+NON_ACTIVATION_RUNTIME_CAPABILITIES = {
+    "browser_http": {
+        "runtime_backend": "browser",
+        "transport": "http",
+        "activation_protocol": None,
+    },
+    "pixel_http": {
+        "runtime_backend": "android",
+        "transport": "http",
+        "activation_protocol": None,
+    },
+    "linux_tbd": {
+        "runtime_backend": "tbd",
+        "transport": "none",
+        "activation_protocol": None,
+    },
+}
 
 
 def _ids(prefix: str):
@@ -51,7 +73,15 @@ def _coordinator(
     )
 
 
-def _node(tmp_path: Path, *, node_id: str = "node-a", key_name: str = "node-a.key", incarnation: str = "incarnation-a") -> NodeMembershipSession:
+def _node(
+    tmp_path: Path,
+    *,
+    node_id: str = "node-a",
+    key_name: str = "node-a.key",
+    incarnation: str = "incarnation-a",
+    peer_class: str = "mac_mlx_iroh",
+    runtime_capability=None,
+) -> NodeMembershipSession:
     return NodeMembershipSession(
         node_id=node_id,
         swarm_id="swarm-a",
@@ -59,6 +89,10 @@ def _node(tmp_path: Path, *, node_id: str = "node-a", key_name: str = "node-a.ke
         signer=load_or_create_node_signer(tmp_path / "nodes" / key_name),
         incarnation=incarnation,
         software_version="mycelium-test",
+        peer_class=peer_class,
+        runtime_capability=(
+            MAC_RUNTIME_CAPABILITY if runtime_capability is None else runtime_capability
+        ),
         clock=lambda: NOW,
         id_source=_ids(f"{node_id}-message"),
     )
@@ -216,6 +250,12 @@ def test_heartbeat_renews_durable_member_lease(tmp_path: Path) -> None:
         signer=load_or_create_node_signer(tmp_path / "nodes" / "renew.key"),
         incarnation="incarnation-a",
         software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
         clock=lambda: clock[0],
         id_source=_ids("node-renew"),
     )
@@ -273,6 +313,8 @@ def test_assignment_offer_and_result_are_bound_end_to_end(tmp_path: Path) -> Non
         stage_pack_digest="sha256:" + "2" * 64,
         graph_digest="sha256:" + "3" * 64,
         load_generation=4,
+        peer_node_ids=[],
+        placement_provenance="offline_capacity_planner",
     )
     assert node.accept_assignment_offer(offer)["assignment_id"] == "assignment-1"
     result = node.assignment_result(
@@ -398,6 +440,8 @@ def test_member_generation_heartbeat_replay_and_assignments_survive_restart(
         stage_pack_digest="sha256:" + "b" * 64,
         graph_digest="sha256:" + "c" * 64,
         load_generation=2,
+        peer_node_ids=[],
+        placement_provenance="offline_capacity_planner",
     )
 
     restarted_seed = _coordinator(
@@ -496,5 +540,137 @@ def test_stale_seed_rejects_old_generation_messages_and_assignments(
             stage_pack_digest="sha256:" + "2" * 64,
             graph_digest="sha256:" + "3" * 64,
             load_generation=1,
+            peer_node_ids=[],
+            placement_provenance="offline_capacity_planner",
         )
     assert stale_assignment.value.code == "seed_state_member_stale"
+
+
+def test_join_rejects_one_endpoint_identity_under_multiple_node_ids(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node_a = _node(tmp_path)
+    _join(coordinator, node_a, nonce="invite-identity-a")
+    node_b = NodeMembershipSession(
+        node_id="node-b",
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        signer=node_a.signer,
+        incarnation="incarnation-b",
+        software_version="0.1.0",
+        peer_class="mac_mlx_iroh",
+        runtime_capability=MAC_RUNTIME_CAPABILITY,
+        clock=lambda: NOW,
+        id_source=_ids("node-b-message"),
+    )
+
+    with pytest.raises(SeedCoordinatorError, match="seed_member_identity_reused"):
+        _join(coordinator, node_b, nonce="invite-identity-b")
+
+
+@pytest.mark.parametrize(
+    ("peer_class", "runtime_capability", "activation_eligible"),
+    [
+        ("mac_mlx_iroh", MAC_RUNTIME_CAPABILITY, True),
+        *[
+            (peer_class, capability, False)
+            for peer_class, capability in NON_ACTIVATION_RUNTIME_CAPABILITIES.items()
+        ],
+    ],
+)
+def test_join_persists_peer_class_and_runtime_capability_across_restart(
+    tmp_path: Path,
+    peer_class: str,
+    runtime_capability: dict,
+    activation_eligible: bool,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(
+        tmp_path,
+        peer_class=peer_class,
+        runtime_capability=runtime_capability,
+    )
+    _join(coordinator, node, nonce=f"invite-{peer_class}")
+
+    restored = _coordinator(tmp_path, signer=coordinator.signer, id_prefix="restored-class")
+    member = restored.member("node-a")
+    assert member["peer_class"] == peer_class
+    assert member["runtime_capability"] == runtime_capability
+    assert member["activation_eligible"] is activation_eligible
+
+
+def test_assignment_offer_binds_eligible_peer_endpoints_and_provenance(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node_a = _node(tmp_path)
+    node_b = _node(
+        tmp_path,
+        node_id="node-b",
+        key_name="node-b.key",
+        incarnation="incarnation-b",
+    )
+    browser = _node(
+        tmp_path,
+        node_id="node-browser",
+        key_name="node-browser.key",
+        incarnation="incarnation-browser",
+        peer_class="browser_http",
+        runtime_capability=NON_ACTIVATION_RUNTIME_CAPABILITIES["browser_http"],
+    )
+    _join(coordinator, node_a, nonce="invite-node-a")
+    _join(coordinator, node_b, nonce="invite-node-b")
+    _join(coordinator, browser, nonce="invite-browser")
+
+    offer = coordinator.assignment_offer(
+        node_id="node-a",
+        deployment_id="deployment-contract",
+        deployment_epoch=7,
+        assignment_id="assignment-contract",
+        assignment_digest="sha256:" + "1" * 64,
+        stage_pack_digest="sha256:" + "2" * 64,
+        graph_digest="sha256:" + "3" * 64,
+        load_generation=1,
+        peer_node_ids=["node-b"],
+        placement_provenance="offline_capacity_planner",
+    )
+    message = offer["message"]
+    assert message["placement_provenance"] == "offline_capacity_planner"
+    assert message["peer_endpoint_records"] == [
+        {
+            "node_id": "node-b",
+            "endpoint_id": node_b.signer.endpoint_id,
+            "deployment_epoch": 7,
+            "membership_generation": 1,
+            "valid_from": NOW,
+            "valid_until": NOW + 60.0,
+        }
+    ]
+
+    with pytest.raises(SeedCoordinatorError, match="seed_member_activation_ineligible"):
+        coordinator.assignment_offer(
+            node_id="node-browser",
+            deployment_id="deployment-browser",
+            deployment_epoch=1,
+            assignment_id="assignment-browser",
+            assignment_digest="sha256:" + "1" * 64,
+            stage_pack_digest="sha256:" + "2" * 64,
+            graph_digest="sha256:" + "3" * 64,
+            load_generation=1,
+            peer_node_ids=[],
+            placement_provenance="offline_capacity_planner",
+        )
+    with pytest.raises(SeedCoordinatorError, match="seed_peer_activation_ineligible"):
+        coordinator.assignment_offer(
+            node_id="node-a",
+            deployment_id="deployment-browser-peer",
+            deployment_epoch=1,
+            assignment_id="assignment-browser-peer",
+            assignment_digest="sha256:" + "1" * 64,
+            stage_pack_digest="sha256:" + "2" * 64,
+            graph_digest="sha256:" + "3" * 64,
+            load_generation=1,
+            peer_node_ids=["node-browser"],
+            placement_provenance="offline_capacity_planner",
+        )

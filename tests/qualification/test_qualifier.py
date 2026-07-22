@@ -73,6 +73,9 @@ def _resign_load_statement(case: Any, index: int) -> None:
 
 
 def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case: Any) -> None:
+    qualification_case.documents["run/route-challenge.json"]["placement_provenance"] = (
+        "offline_capacity_planner"
+    )
     files, manifest = qualification_case.render()
     record = _qualify(qualification_case)
     document = route_qualification_to_dict(record)
@@ -81,6 +84,7 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
     assert document["route_ready"] is True
     assert document["reason_codes"] == []
     assert document["evidence_class"] == "physical_qualification"
+    assert document["placement_provenance"] == "offline_capacity_planner"
     assert document["qualified_by"] == "mycelium_qualification.qualifier:RouteQualificationV1"
     assert document["evidence_manifest_digest"] == evidence_manifest_digest(manifest)
     assert document["source_provenance_digest"] == sha256_document(
@@ -124,6 +128,27 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
         for binding in document["stage_bindings"]
     )
     assert set(files) == {entry["path"] for entry in manifest["files"]}
+
+
+def test_qualification_rejects_missing_placement_provenance(
+    qualification_case: Any,
+) -> None:
+    qualification_case.documents["run/route-challenge.json"].pop(
+        "placement_provenance"
+    )
+    _assert_rejected(qualification_case, "placement_provenance_missing")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "heuristic", None, ["offline_capacity_planner"]],
+)
+def test_qualification_rejects_invalid_placement_provenance(
+    qualification_case: Any,
+    value: object,
+) -> None:
+    qualification_case.documents["run/route-challenge.json"]["placement_provenance"] = value
+    _assert_rejected(qualification_case, "placement_provenance_invalid")
 
 
 def test_qualification_snapshots_manifest_before_verifier_callbacks(
@@ -201,6 +226,26 @@ def test_evidence_manifest_binding_rejects_mutated_or_missing_files(qualificatio
             verify_load_proof_signature=lambda _statement, _signature: True,
         )
     assert missing.value.code == "evidence_manifest_file_set_mismatch"
+
+
+def test_post_seal_placement_provenance_mutation_breaks_manifest_binding(
+    qualification_case: Any,
+) -> None:
+    files, manifest = qualification_case.render()
+    challenge = qualification_case.documents["run/route-challenge.json"]
+    challenge["placement_provenance"] = "offline_capacity_plannez"
+    files["run/route-challenge.json"] = canonical_json_bytes(challenge)
+
+    with pytest.raises(QualificationError) as captured:
+        qualify_route(
+            evidence_files=files,
+            evidence_manifest=manifest,
+            now_unix_ms=qualification_case.now_unix_ms,
+            verify_gossip_signature=_verify_synthetic_signature,
+            verify_load_proof_signature=_verify_synthetic_signature,
+        )
+
+    assert captured.value.code == "evidence_file_digest_mismatch"
 
 
 def test_missing_required_evidence_document_is_rejected(qualification_case: Any) -> None:

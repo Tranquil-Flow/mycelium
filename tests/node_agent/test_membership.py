@@ -25,6 +25,11 @@ from mycelium_qualification.signing import generate_ed25519_signer
 
 
 NOW = 1_000.0
+MAC_RUNTIME_CAPABILITY = {
+    "runtime_backend": "mlx",
+    "transport": "iroh",
+    "activation_protocol": "mycelium.router_wire.v1",
+}
 
 
 def _ids(prefix: str):
@@ -40,6 +45,8 @@ def _session(tmp_path: Path) -> NodeMembershipSession:
         signer=load_or_create_node_signer(tmp_path / "private" / "node.key"),
         incarnation="incarnation-a",
         software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability=MAC_RUNTIME_CAPABILITY,
         clock=lambda: NOW,
         id_source=_ids("node-message"),
     )
@@ -157,6 +164,8 @@ def test_acceptance_and_assignment_offer_replays_fail_closed(tmp_path: Path) -> 
         "stage_pack_digest": "sha256:" + "2" * 64,
         "graph_digest": "sha256:" + "3" * 64,
         "load_generation": 1,
+        "placement_provenance": "offline_capacity_planner",
+        "peer_endpoint_records": [],
     }
     offer = sign_membership_message(signer=seed, message=offer_message)
     assert session.accept_assignment_offer(offer)["assignment_id"] == "assignment-1"
@@ -196,6 +205,8 @@ def test_unexpired_replay_ids_fail_closed_at_capacity(
         "stage_pack_digest": "sha256:" + "2" * 64,
         "graph_digest": "sha256:" + "3" * 64,
         "load_generation": 1,
+        "placement_provenance": "offline_capacity_planner",
+        "peer_endpoint_records": [],
     }
     first = sign_membership_message(
         signer=seed,
@@ -247,6 +258,8 @@ def test_assignment_result_is_signed_and_bound_to_verified_offer(tmp_path: Path)
             "stage_pack_digest": "sha256:" + "2" * 64,
             "graph_digest": "sha256:" + "3" * 64,
             "load_generation": 4,
+            "placement_provenance": "offline_capacity_planner",
+            "peer_endpoint_records": [],
         },
     )
     session.accept_assignment_offer(offer)
@@ -366,3 +379,133 @@ def test_capability_and_heartbeat_are_signed_generation_bound_and_never_ready(
     assert (first_message["heartbeat_sequence"], second_message["heartbeat_sequence"]) == (1, 2)
     assert first_message["route_ready"] is False
     assert second_message["route_ready"] is False
+
+
+def test_signed_peer_endpoint_records_are_the_only_transport_authority(
+    tmp_path: Path,
+) -> None:
+    session, seed, _request = _joined(tmp_path)
+    base = {
+        "protocol": ASSIGNMENT_OFFER_PROTOCOL,
+        "swarm_id": "swarm-a",
+        "sender_node_id": "seed-node",
+        "sender_endpoint_id": seed.endpoint_id,
+        "recipient_node_id": "node-a",
+        "incarnation": "seed-incarnation",
+        "generation": 1,
+        "issued_at": NOW,
+        "expires_at": NOW + 60.0,
+        "deployment_id": "deployment-peer-bindings",
+        "assignment_digest": "sha256:" + "1" * 64,
+        "stage_pack_digest": "sha256:" + "2" * 64,
+        "graph_digest": "sha256:" + "3" * 64,
+        "load_generation": 1,
+        "placement_provenance": "offline_capacity_planner",
+    }
+    first = sign_membership_message(
+        signer=seed,
+        message={
+            **base,
+            "message_id": "offer-peer-1",
+            "deployment_epoch": 1,
+            "assignment_id": "assignment-peer-1",
+            "peer_endpoint_records": [
+                {
+                    "node_id": "node-b",
+                    "endpoint_id": "endpoint-node-b-v1",
+                    "deployment_epoch": 1,
+                    "membership_generation": 1,
+                    "valid_from": NOW,
+                    "valid_until": NOW + 60.0,
+                }
+            ],
+        },
+    )
+    session.accept_assignment_offer(first)
+
+    assert session.resolve_peer_endpoint(
+        assignment_id="assignment-peer-1",
+        peer_node_id="node-b",
+    ) == "endpoint-node-b-v1"
+    with pytest.raises(NodeMembershipError, match="assignment_operator_endpoint_forbidden"):
+        session.resolve_peer_endpoint(
+            assignment_id="assignment-peer-1",
+            peer_node_id="node-b",
+            operator_expected_endpoint_id="endpoint-node-b-v1",
+        )
+    with pytest.raises(NodeMembershipError, match="assignment_peer_unauthorized"):
+        session.resolve_peer_endpoint(
+            assignment_id="assignment-peer-1",
+            peer_node_id="node-c",
+        )
+    with pytest.raises(NodeMembershipError, match="assignment_peer_record_expired"):
+        session.resolve_peer_endpoint(
+            assignment_id="assignment-peer-1",
+            peer_node_id="node-b",
+            now=NOW + 60.0,
+        )
+
+    revocation = sign_membership_message(
+        signer=seed,
+        message={
+            **base,
+            "message_id": "offer-peer-revocation",
+            "deployment_epoch": 2,
+            "assignment_id": "assignment-peer-revocation",
+            "peer_endpoint_records": [],
+        },
+    )
+    session.accept_assignment_offer(revocation)
+    with pytest.raises(NodeMembershipError, match="assignment_offer_superseded"):
+        session.resolve_peer_endpoint(
+            assignment_id="assignment-peer-1",
+            peer_node_id="node-b",
+        )
+
+    replacement = sign_membership_message(
+        signer=seed,
+        message={
+            **base,
+            "message_id": "offer-peer-2",
+            "deployment_epoch": 3,
+            "assignment_id": "assignment-peer-2",
+            "peer_endpoint_records": [
+                {
+                    "node_id": "node-b",
+                    "endpoint_id": "endpoint-node-b-v2",
+                    "deployment_epoch": 3,
+                    "membership_generation": 2,
+                    "valid_from": NOW,
+                    "valid_until": NOW + 60.0,
+                }
+            ],
+        },
+    )
+    session.accept_assignment_offer(replacement)
+    assert session.resolve_peer_endpoint(
+        assignment_id="assignment-peer-2",
+        peer_node_id="node-b",
+    ) == "endpoint-node-b-v2"
+
+    stale_generation = sign_membership_message(
+        signer=seed,
+        message={
+            **base,
+            "message_id": "offer-peer-stale-generation",
+            "deployment_id": "deployment-other",
+            "deployment_epoch": 1,
+            "assignment_id": "assignment-peer-stale-generation",
+            "peer_endpoint_records": [
+                {
+                    "node_id": "node-b",
+                    "endpoint_id": "endpoint-node-b-v1",
+                    "deployment_epoch": 1,
+                    "membership_generation": 1,
+                    "valid_from": NOW,
+                    "valid_until": NOW + 60.0,
+                }
+            ],
+        },
+    )
+    with pytest.raises(NodeMembershipError, match="assignment_peer_generation_stale"):
+        session.accept_assignment_offer(stale_generation)

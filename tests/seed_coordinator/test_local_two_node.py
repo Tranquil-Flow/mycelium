@@ -91,6 +91,12 @@ def test_seed_and_two_real_node_processes_join_over_tcp(
                 ),
                 incarnation=f"incarnation-{ordinal}",
                 software_version="mycelium-local-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
                 clock=lambda: NOW,
                 id_source=_ids(f"{node_id}-message"),
             )

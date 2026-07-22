@@ -22,7 +22,9 @@ from mycelium_membership import (
     LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MAX_MESSAGE_TTL_SECONDS,
+    MembershipContractError,
     sign_membership_message,
+    validate_peer_runtime_capability,
     verify_membership_message,
 )
 from mycelium_qualification.signing import Ed25519EvidenceSigner
@@ -68,6 +70,8 @@ class NodeMembershipSession:
         signer: Ed25519EvidenceSigner,
         incarnation: str,
         software_version: str,
+        peer_class: str,
+        runtime_capability: Mapping[str, Any],
         clock: Callable[[], float] = time.time,
         id_source: Callable[[], str] = lambda: str(uuid.uuid4()),
         message_ttl_seconds: float = 60.0,
@@ -90,8 +94,17 @@ class NodeMembershipSession:
             or message_ttl_seconds > MAX_MESSAGE_TTL_SECONDS
         ):
             raise ValueError("message_ttl_seconds is invalid")
+        try:
+            validated_runtime = validate_peer_runtime_capability(
+                peer_class,
+                runtime_capability,
+            )
+        except MembershipContractError as exc:
+            raise ValueError(exc.code) from exc
         self.signer = signer
         self.software_version = software_version.strip()
+        self.peer_class = peer_class
+        self.runtime_capability = validated_runtime
         self._clock = clock
         self._id_source = id_source
         self._ttl = float(message_ttl_seconds)
@@ -105,7 +118,9 @@ class NodeMembershipSession:
         self._seen_ids: dict[str, float] = {}
         self._emitted_ids: set[str] = set()
         self._deployment_epochs: dict[str, int] = {}
-        self._assignment_offers: dict[str, tuple[str, int]] = {}
+        self._assignment_offers: dict[str, dict[str, Any]] = {}
+        self._peer_generations: dict[str, int] = {}
+        self._peer_endpoints: dict[str, str] = {}
         self._probe_sequences: dict[tuple[str, str], int] = {}
 
     @property
@@ -212,6 +227,8 @@ class NodeMembershipSession:
                 "expires_at": now + self._ttl,
                 "invite_nonce": invite_nonce,
                 "software_version": self.software_version,
+                "peer_class": self.peer_class,
+                "runtime_capability": dict(self.runtime_capability),
                 "endpoint_addr": {
                     "id": self.signer.endpoint_id,
                     "addrs": list(endpoint_addrs),
@@ -343,13 +360,76 @@ class NodeMembershipSession:
             if previous is not None and epoch <= previous:
                 raise NodeMembershipError("assignment_epoch_stale")
             assignment_id = message["assignment_id"]
-            identity = (deployment_id, epoch)
-            previous_identity = self._assignment_offers.get(assignment_id)
-            if previous_identity is not None and previous_identity != identity:
+            previous_offer = self._assignment_offers.get(assignment_id)
+            if previous_offer is not None and (
+                previous_offer["deployment_id"] != deployment_id
+                or previous_offer["deployment_epoch"] != epoch
+            ):
                 raise NodeMembershipError("assignment_id_conflict")
+            peer_records = {
+                record["node_id"]: dict(record)
+                for record in message["peer_endpoint_records"]
+            }
+            for peer_node_id, record in peer_records.items():
+                generation = int(record["membership_generation"])
+                known_generation = self._peer_generations.get(peer_node_id)
+                if known_generation is not None and generation < known_generation:
+                    raise NodeMembershipError("assignment_peer_generation_stale")
+                if (
+                    known_generation == generation
+                    and self._peer_endpoints.get(peer_node_id) != record["endpoint_id"]
+                ):
+                    raise NodeMembershipError("assignment_peer_endpoint_conflict")
             self._deployment_epochs[deployment_id] = epoch
-            self._assignment_offers[assignment_id] = identity
+            self._assignment_offers[assignment_id] = {
+                "deployment_id": deployment_id,
+                "deployment_epoch": epoch,
+                "placement_provenance": message["placement_provenance"],
+                "peer_endpoint_records": peer_records,
+            }
+            for peer_node_id, record in peer_records.items():
+                self._peer_generations[peer_node_id] = int(
+                    record["membership_generation"]
+                )
+                self._peer_endpoints[peer_node_id] = record["endpoint_id"]
             return message
+
+    def resolve_peer_endpoint(
+        self,
+        *,
+        assignment_id: str,
+        peer_node_id: str,
+        operator_expected_endpoint_id: str | None = None,
+        now: float | None = None,
+    ) -> str:
+        """Resolve transport identity only from a current seed-signed assignment record."""
+
+        with self._lock:
+            assignment_id = _segment(assignment_id, "assignment_id")
+            peer_node_id = _segment(peer_node_id, "peer_node_id")
+            if operator_expected_endpoint_id is not None:
+                raise NodeMembershipError("assignment_operator_endpoint_forbidden")
+            offer = self._assignment_offers.get(assignment_id)
+            if offer is None:
+                raise NodeMembershipError("assignment_offer_unknown")
+            if (
+                self._deployment_epochs.get(offer["deployment_id"])
+                != offer["deployment_epoch"]
+            ):
+                raise NodeMembershipError("assignment_offer_superseded")
+            record = offer["peer_endpoint_records"].get(peer_node_id)
+            if record is None:
+                raise NodeMembershipError("assignment_peer_unauthorized")
+            current = self._now() if now is None else _finite_now(now)
+            if not float(record["valid_from"]) <= current < float(record["valid_until"]):
+                raise NodeMembershipError("assignment_peer_record_expired")
+            if self._peer_generations.get(peer_node_id) != int(
+                record["membership_generation"]
+            ):
+                raise NodeMembershipError("assignment_peer_generation_revoked")
+            if self._peer_endpoints.get(peer_node_id) != record["endpoint_id"]:
+                raise NodeMembershipError("assignment_peer_endpoint_revoked")
+            return str(record["endpoint_id"])
 
     def assignment_result(
         self,
@@ -365,7 +445,8 @@ class NodeMembershipSession:
             identity = self._assignment_offers.get(assignment_id)
             if identity is None:
                 raise NodeMembershipError("assignment_offer_unknown")
-            deployment_id, deployment_epoch = identity
+            deployment_id = identity["deployment_id"]
+            deployment_epoch = identity["deployment_epoch"]
             message = {
                 **self._post_join_common(ASSIGNMENT_RESULT_PROTOCOL),
                 "deployment_id": deployment_id,

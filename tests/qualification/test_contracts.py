@@ -29,6 +29,7 @@ EXPECTED_FIELDS = {
     "deployment_id",
     "deployment_epoch",
     "topology_version",
+    "placement_provenance",
     "model_id",
     "resolved_commit",
     "manifest_digest",
@@ -139,6 +140,11 @@ def test_contract_parser_rejects_unknown_missing_and_noncanonical_fields() -> No
     invalid_digest = dict(fixture, manifest_digest="sha256:" + "A" * 64)
     with pytest.raises(QualificationContractError, match="invalid_manifest_digest"):
         route_qualification_from_dict(invalid_digest)
+
+    missing_provenance = dict(fixture)
+    missing_provenance.pop("placement_provenance")
+    with pytest.raises(QualificationContractError, match="missing_contract_field"):
+        route_qualification_from_dict(missing_provenance)
 
 
 @pytest.mark.parametrize(

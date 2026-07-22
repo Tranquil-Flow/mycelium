@@ -43,6 +43,12 @@ def test_real_http_join_and_member_message_roundtrip(tmp_path: Path) -> None:
         signer=load_or_create_node_signer(tmp_path / "node" / "identity.key"),
         incarnation="node-incarnation",
         software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
         clock=lambda: NOW,
         id_source=_ids("node-message"),
     )

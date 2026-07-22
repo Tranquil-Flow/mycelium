@@ -1259,12 +1259,16 @@ def qualify_route(
     documents = _load_documents(evidence_files)
     challenge = _as_mapping(documents["route_challenge"], "route_challenge_invalid")
     _require(
+        "placement_provenance" in challenge,
+        "placement_provenance_missing",
+    )
+    _require(
         set(challenge)
         == {
             "kind", "run_id", "evidence_class", "generated_at_unix_ms",
             "valid_until_unix_ms", "max_load_proof_age_ms", "deployment_id",
-            "deployment_epoch", "topology_version", "model_id", "resolved_commit",
-            "manifest_digest", "path_manifest", "stage_evidence", "transport",
+            "deployment_epoch", "topology_version", "placement_provenance", "model_id",
+            "resolved_commit", "manifest_digest", "path_manifest", "stage_evidence", "transport",
             "token_parity", "numeric_parity", "execution_trace", "kv_ownership",
             "lifecycle_evidence",
         },
@@ -1273,6 +1277,13 @@ def qualify_route(
     _require(
         challenge.get("kind") == "route_challenge_evidence_v1",
         "route_challenge_invalid",
+    )
+    placement_provenance = challenge.get("placement_provenance")
+    _require(
+        isinstance(placement_provenance, str)
+        and placement_provenance
+        in {"offline_capacity_planner", "seed_emergency_replacement"},
+        "placement_provenance_invalid",
     )
     run_id_value = challenge.get("run_id")
     _require(_nonempty_string(run_id_value), "route_challenge_invalid")
@@ -1391,6 +1402,7 @@ def qualify_route(
         deployment_id=graph["deployment_id"],
         deployment_epoch=graph["deployment_epoch"],
         topology_version=graph["topology_version"],
+        placement_provenance=challenge["placement_provenance"],
         model_id=graph["model_id"],
         resolved_commit=graph["resolved_commit"],
         manifest_digest=graph["manifest_digest"],

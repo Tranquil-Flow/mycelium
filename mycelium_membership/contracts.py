@@ -1,7 +1,7 @@
 """Strict signed control-plane contracts for swarm membership."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 import json
 import math
 import re
@@ -26,6 +26,36 @@ SIGNED_MESSAGE_PROTOCOL = "mycelium.membership.signed_message.v1"
 
 MAX_MESSAGE_TTL_SECONDS = 3_600.0
 MAX_CLOCK_SKEW_SECONDS = 30.0
+ROUTER_ACTIVATION_PROTOCOL = "mycelium.router_wire.v1"
+PLACEMENT_PROVENANCES = frozenset(
+    {"offline_capacity_planner", "seed_emergency_replacement"}
+)
+_RUNTIME_CAPABILITY_FIELDS = frozenset(
+    {"runtime_backend", "transport", "activation_protocol"}
+)
+_PEER_RUNTIME_CAPABILITIES = {
+    "mac_mlx_iroh": {
+        "runtime_backend": "mlx",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    "browser_http": {
+        "runtime_backend": "browser",
+        "transport": "http",
+        "activation_protocol": None,
+    },
+    "pixel_http": {
+        "runtime_backend": "android",
+        "transport": "http",
+        "activation_protocol": None,
+    },
+    "linux_tbd": {
+        "runtime_backend": "tbd",
+        "transport": "none",
+        "activation_protocol": None,
+    },
+}
+PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
 
 _COMMON_FIELDS = frozenset(
     {
@@ -43,7 +73,13 @@ _COMMON_FIELDS = frozenset(
 )
 _SPECIFIC_FIELDS = {
     JOIN_REQUEST_PROTOCOL: frozenset(
-        {"invite_nonce", "endpoint_addr", "software_version"}
+        {
+            "invite_nonce",
+            "endpoint_addr",
+            "software_version",
+            "peer_class",
+            "runtime_capability",
+        }
     ),
     JOIN_ACCEPTANCE_PROTOCOL: frozenset(
         {
@@ -94,6 +130,8 @@ _SPECIFIC_FIELDS = {
             "stage_pack_digest",
             "graph_digest",
             "load_generation",
+            "placement_provenance",
+            "peer_endpoint_records",
         }
     ),
     ASSIGNMENT_RESULT_PROTOCOL: frozenset(
@@ -204,6 +242,39 @@ def _string_array(value: Any) -> bool:
     )
 
 
+def validate_peer_runtime_capability(
+    peer_class: Any,
+    runtime_capability: Any,
+) -> dict[str, Any]:
+    """Validate one exact peer-class runtime declaration and return a detached copy."""
+
+    _safe_in(peer_class, PEER_CLASSES, "membership_peer_class_invalid")
+    _require(
+        isinstance(runtime_capability, Mapping)
+        and set(runtime_capability) == _RUNTIME_CAPABILITY_FIELDS,
+        "membership_runtime_capability_invalid",
+    )
+    expected = _PEER_RUNTIME_CAPABILITIES[peer_class]
+    _require(
+        dict(runtime_capability) == expected,
+        "membership_runtime_capability_mismatch",
+    )
+    return json.loads(canonical_json_bytes(dict(runtime_capability)))
+
+
+def peer_runtime_is_activation_eligible(
+    peer_class: Any,
+    runtime_capability: Any,
+) -> bool:
+    """Return seed-computed eligibility after exact class/capability validation."""
+
+    validated = validate_peer_runtime_capability(peer_class, runtime_capability)
+    return (
+        validated["transport"] == "iroh"
+        and validated["activation_protocol"] == ROUTER_ACTIVATION_PROTOCOL
+    )
+
+
 def _validate_common(message: Mapping[str, Any], protocol: str) -> None:
     expected = _COMMON_FIELDS | _SPECIFIC_FIELDS[protocol]
     _require(set(message) == expected, "membership_fields_invalid")
@@ -234,6 +305,10 @@ def _validate_common(message: Mapping[str, Any], protocol: str) -> None:
 def _validate_join_request(message: Mapping[str, Any]) -> None:
     _require(_segment(message["invite_nonce"]), "membership_identifier_invalid")
     _require(_text(message["software_version"], maximum=128), "membership_text_invalid")
+    validate_peer_runtime_capability(
+        message["peer_class"],
+        message["runtime_capability"],
+    )
     endpoint = message["endpoint_addr"]
     _require(
         isinstance(endpoint, Mapping) and set(endpoint) == {"id", "addrs"},
@@ -342,6 +417,63 @@ def _validate_assignment_offer(message: Mapping[str, Any]) -> None:
     for field in ("assignment_digest", "stage_pack_digest", "graph_digest"):
         _require(_digest(message[field]), "membership_digest_invalid")
     _require(_integer(message["load_generation"], minimum=1), "membership_integer_invalid")
+    _safe_in(
+        message["placement_provenance"],
+        PLACEMENT_PROVENANCES,
+        "membership_placement_provenance_invalid",
+    )
+    records = message["peer_endpoint_records"]
+    _require(
+        isinstance(records, list) and len(records) <= 256,
+        "membership_peer_endpoint_records_invalid",
+    )
+    seen_nodes: set[str] = set()
+    expected_fields = {
+        "node_id",
+        "endpoint_id",
+        "deployment_epoch",
+        "membership_generation",
+        "valid_from",
+        "valid_until",
+    }
+    issued_at = _number(message["issued_at"])
+    expires_at = _number(message["expires_at"])
+    assert issued_at is not None and expires_at is not None
+    for record in records:
+        _require(
+            isinstance(record, Mapping) and set(record) == expected_fields,
+            "membership_peer_endpoint_record_invalid",
+        )
+        _require(
+            _segment(record["node_id"])
+            and _segment(record["endpoint_id"])
+            and record["node_id"] != message["recipient_node_id"],
+            "membership_peer_endpoint_identity_invalid",
+        )
+        _require(
+            record["node_id"] not in seen_nodes,
+            "membership_peer_endpoint_duplicate",
+        )
+        seen_nodes.add(record["node_id"])
+        _require(
+            _integer(record["deployment_epoch"], minimum=1)
+            and record["deployment_epoch"] == message["deployment_epoch"]
+            and _integer(record["membership_generation"], minimum=1),
+            "membership_peer_endpoint_generation_invalid",
+        )
+        valid_from = _number(record["valid_from"])
+        valid_until = _number(record["valid_until"])
+        _require(
+            valid_from is not None
+            and valid_until is not None
+            and issued_at <= valid_from < valid_until <= expires_at,
+            "membership_peer_endpoint_validity_invalid",
+        )
+    _require(
+        [record["node_id"] for record in records]
+        == sorted(record["node_id"] for record in records),
+        "membership_peer_endpoint_order_invalid",
+    )
 
 
 def _validate_assignment_result(message: Mapping[str, Any]) -> None:
@@ -528,6 +660,12 @@ def verify_join_request(
 ) -> dict[str, Any]:
     """Verify an untrusted join request using the envelope's own public key."""
 
+    if (
+        not isinstance(envelope, Mapping)
+        or not isinstance(envelope.get("message"), Mapping)
+        or envelope["message"].get("protocol") != JOIN_REQUEST_PROTOCOL
+    ):
+        raise MembershipContractError("join_request_protocol_required")
     return _verify_envelope(
         envelope,
         now=now,
@@ -564,56 +702,4 @@ def verify_membership_message(
         expected_sender_node_id=expected_sender_node_id,
         expected_sender_endpoint_id=expected_sender_endpoint_id,
         expected_recipient_node_id=expected_recipient_node_id,
-    )
-
-
-def verify_membership_message(
-    envelope: Mapping[str, Any],
-    *,
-    now: float,
-    expected_key_digest: str,
-    expected_protocol: str,
-    expected_swarm_id: str | None = None,
-    expected_sender_node_id: str | None = None,
-    expected_sender_endpoint_id: str | None = None,
-    expected_recipient_node_id: str | None = None,
-) -> dict[str, Any]:
-    """Verify a post-join message against an already pinned public-key digest."""
-
-    _require(_text(expected_key_digest, maximum=128), "membership_key_pin_invalid")
-    _require(expected_protocol in _SPECIFIC_FIELDS, "membership_protocol_invalid")
-    return _verify_envelope(
-        envelope,
-        now=now,
-        expected_key_digest=expected_key_digest,
-        expected_protocol=expected_protocol,
-        expected_swarm_id=expected_swarm_id,
-        expected_sender_node_id=expected_sender_node_id,
-        expected_sender_endpoint_id=expected_sender_endpoint_id,
-        expected_recipient_node_id=expected_recipient_node_id,
-    )
-
-
-def verify_join_request(
-    envelope: Mapping[str, Any],
-    *,
-    now: float,
-) -> dict[str, Any]:
-    """Verify a self-presented join key; caller must separately consume its invite."""
-
-    if (
-        not isinstance(envelope, Mapping)
-        or not isinstance(envelope.get("message"), Mapping)
-        or envelope["message"].get("protocol") != JOIN_REQUEST_PROTOCOL
-    ):
-        raise MembershipContractError("join_request_protocol_required")
-    return _verify_envelope(
-        envelope,
-        now=now,
-        expected_key_digest=None,
-        expected_protocol=JOIN_REQUEST_PROTOCOL,
-        expected_swarm_id=None,
-        expected_sender_node_id=None,
-        expected_sender_endpoint_id=None,
-        expected_recipient_node_id=None,
     )
