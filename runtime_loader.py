@@ -1130,6 +1130,26 @@ def execute_loaded_stage(
     return hidden
 
 
+@dataclass(frozen=True)
+class MLXStageBackend:
+    """Protocol adapter preserving the existing assignment-bound MLX executor."""
+
+    backend: str = "mlx"
+
+    def execute_loaded_stage(
+        self,
+        loaded_stage: Any,
+        *,
+        token_ids: Any | None = None,
+        hidden_states: Any | None = None,
+    ) -> mx.array:
+        return execute_loaded_stage(
+            loaded_stage,
+            token_ids=token_ids,
+            hidden_states=hidden_states,
+        )
+
+
 def _digest_arrays(tensors: Mapping[str, mx.array]) -> str:
     digest = hashlib.sha256()
     for key in sorted(tensors):
