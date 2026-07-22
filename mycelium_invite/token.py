@@ -45,6 +45,31 @@ def _b64decode(value: str) -> bytes:
         raise InviteError("invite_malformed") from exc
 
 
+def _strict_json_object(raw: bytes) -> dict[str, Any]:
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        document: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in document:
+                raise ValueError("duplicate JSON key")
+            document[key] = value
+        return document
+
+    def reject_constant(_value: str) -> None:
+        raise ValueError("non-finite JSON value")
+
+    try:
+        document = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=reject_constant,
+        )
+        if not isinstance(document, dict) or canonical_json_bytes(document) != raw:
+            raise ValueError("non-canonical JSON object")
+    except Exception as exc:
+        raise InviteError("invite_malformed") from exc
+    return document
+
+
 def mint_invite(
     *,
     signer: Ed25519EvidenceSigner,
@@ -111,16 +136,31 @@ def verify_invite(
     if not encoded_body or not encoded_signature:
         raise InviteError("invite_malformed")
     body = _b64decode(encoded_body)
-    try:
-        payload = json.loads(body.decode("utf-8"))
-        signature = json.loads(_b64decode(encoded_signature).decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        raise InviteError("invite_malformed") from exc
-    if not isinstance(payload, dict) or payload.get("protocol") != _INVITE_PROTOCOL:
+    payload = _strict_json_object(body)
+    signature = _strict_json_object(_b64decode(encoded_signature))
+    if payload.get("protocol") != _INVITE_PROTOCOL:
         raise InviteError("invite_protocol_invalid")
-    for field in _PAYLOAD_FIELDS:
-        if field not in payload:
-            raise InviteError("invite_malformed")
+    if set(payload) != set(_PAYLOAD_FIELDS):
+        raise InviteError("invite_malformed")
+    if not all(
+        isinstance(payload[field], str)
+        and bool(payload[field])
+        and payload[field] == payload[field].strip()
+        for field in ("swarm_id", "seed_url", "nonce")
+    ):
+        raise InviteError("invite_malformed")
+    issued_at = payload["issued_at"]
+    expires_at = payload["expires_at"]
+    if (
+        isinstance(issued_at, bool)
+        or not isinstance(issued_at, (int, float))
+        or not math.isfinite(float(issued_at))
+        or isinstance(expires_at, bool)
+        or not isinstance(expires_at, (int, float))
+        or not math.isfinite(float(expires_at))
+        or float(expires_at) <= float(issued_at)
+    ):
+        raise InviteError("invite_malformed")
 
     try:
         verify = build_ed25519_verifier(verifier_key_records)
@@ -130,7 +170,7 @@ def verify_invite(
     if not verify(canonical_json_bytes(payload), signature):
         raise InviteError("invite_signature_invalid")
 
-    if now > float(payload["expires_at"]):
+    if now > float(expires_at):
         raise InviteError("invite_expired")
     return payload
 

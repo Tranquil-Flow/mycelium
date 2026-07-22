@@ -117,6 +117,19 @@ def test_sqlite_registry_rejects_group_accessible_state_directory(tmp_path: Path
     assert excinfo.value.code == "invite_registry_permissions_invalid"
 
 
+def test_sqlite_registry_rejects_nonexact_database_mode(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    database = state / "invites.sqlite3"
+    database.write_bytes(b"")
+    database.chmod(0o700)
+
+    with pytest.raises(InviteError) as excinfo:
+        SqliteInviteRegistry(database)
+
+    assert excinfo.value.code == "invite_registry_permissions_invalid"
+
+
 def test_sqlite_registry_rejects_symlinked_ancestor(tmp_path: Path) -> None:
     external = tmp_path / "external"
     external.mkdir(mode=0o700)

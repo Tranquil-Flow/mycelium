@@ -125,6 +125,30 @@ def _require(condition: bool, code: str) -> None:
         raise MembershipContractError(code)
 
 
+def _safe_check(condition: bool, code: str) -> None:
+    try:
+        if not condition:
+            raise MembershipContractError(code)
+    except MembershipContractError:
+        raise
+    except Exception:
+        raise MembershipContractError("membership_field_unusable")
+
+
+def _safe_in(
+    needle: Any,
+    haystack: Iterable[Any],
+    code: str,
+) -> None:
+    try:
+        if needle not in haystack:
+            raise MembershipContractError(code)
+    except MembershipContractError:
+        raise
+    except Exception:
+        raise MembershipContractError("membership_field_unusable")
+
+
 def _segment(value: Any) -> bool:
     return isinstance(value, str) and _SEGMENT_RE.fullmatch(value) is not None
 
@@ -132,7 +156,10 @@ def _segment(value: Any) -> bool:
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    result = float(value)
+    try:
+        result = float(value)
+    except (OverflowError, ValueError):
+        return None
     return result if math.isfinite(result) else None
 
 
@@ -145,12 +172,13 @@ def _integer(value: Any, *, minimum: int = 0) -> bool:
 
 
 def _text(value: Any, *, maximum: int = 512) -> bool:
-    return (
-        isinstance(value, str)
-        and bool(value)
-        and value == value.strip()
-        and len(value.encode("utf-8")) <= maximum
-    )
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return len(encoded) <= maximum
 
 
 def _digest(value: Any) -> bool:
@@ -228,12 +256,19 @@ def _validate_join_acceptance(message: Mapping[str, Any]) -> None:
         "membership_recipient_mismatch",
     )
     _require(
-        message["membership_generation"] == message["generation"],
+        isinstance(message["membership_generation"], int)
+        and not isinstance(message["membership_generation"], bool)
+        and message["membership_generation"] >= 1
+        and message["membership_generation"] == message["generation"],
         "membership_generation_invalid",
     )
     lease = _number(message["lease_expires_at"])
     issued = _number(message["issued_at"])
     _require(lease is not None and issued is not None and lease > issued, "membership_time_invalid")
+    _require(
+        lease - issued <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_lease_ttl_invalid",
+    )
 
 
 def _validate_capability(message: Mapping[str, Any]) -> None:
@@ -252,7 +287,7 @@ def _validate_link_probe(message: Mapping[str, Any]) -> None:
         message["target_node_id"] == message["recipient_node_id"],
         "membership_recipient_mismatch",
     )
-    _require(isinstance(message["reachable"], bool), "membership_boolean_invalid")
+    _safe_check(isinstance(message["reachable"], bool), "membership_boolean_invalid")
     for field in ("rtt_ms", "goodput_bytes_per_second"):
         value = _number(message[field])
         _require(value is not None and value >= 0.0, "membership_number_invalid")
@@ -261,9 +296,11 @@ def _validate_link_probe(message: Mapping[str, Any]) -> None:
 
 def _validate_heartbeat(message: Mapping[str, Any]) -> None:
     _require(_integer(message["heartbeat_sequence"]), "membership_integer_invalid")
-    _require(message["lifecycle_state"] in _LIFECYCLE_STATES, "membership_lifecycle_invalid")
-    _require(message["route_ready"] is False, "membership_route_ready_invalid")
+    _safe_in(message["lifecycle_state"], _LIFECYCLE_STATES, "membership_lifecycle_invalid")
+    _safe_check(isinstance(message["route_ready"], bool), "membership_route_ready_invalid")
     _require(_integer(message["active_requests"]), "membership_integer_invalid")
+    if message["route_ready"] is True:
+        raise MembershipContractError("membership_route_ready_invalid")
 
 
 def _validate_assignment_identity(message: Mapping[str, Any]) -> None:
@@ -281,7 +318,7 @@ def _validate_assignment_offer(message: Mapping[str, Any]) -> None:
 
 def _validate_assignment_result(message: Mapping[str, Any]) -> None:
     _validate_assignment_identity(message)
-    _require(isinstance(message["accepted"], bool), "membership_boolean_invalid")
+    _safe_check(isinstance(message["accepted"], bool), "membership_boolean_invalid")
     _require(_segment(message["result_code"]), "membership_identifier_invalid")
     proof = message["load_proof_digest"]
     endpoint = message["runtime_endpoint"]
@@ -294,7 +331,12 @@ def _validate_assignment_result(message: Mapping[str, Any]) -> None:
 
 def _validate_drain_ack(message: Mapping[str, Any]) -> None:
     _require(_segment(message["drain_id"]), "membership_identifier_invalid")
-    _require(message["active_requests"] == 0, "membership_active_requests_invalid")
+    _require(
+        isinstance(message["active_requests"], int)
+        and not isinstance(message["active_requests"], bool)
+        and message["active_requests"] == 0,
+        "membership_active_requests_invalid",
+    )
     last = message["last_request_id"]
     _require(last is None or _segment(last), "membership_identifier_invalid")
     completed = _number(message["completed_at"])
@@ -324,13 +366,17 @@ _VALIDATORS = {
 def validate_membership_message(message: Mapping[str, Any]) -> dict[str, Any]:
     """Validate exact schema and return a detached JSON-compatible copy."""
 
-    _require(isinstance(message, Mapping), "membership_message_invalid")
-    protocol = message.get("protocol")
-    _require(protocol in _SPECIFIC_FIELDS, "membership_protocol_invalid")
-    _validate_common(message, protocol)
-    _VALIDATORS[protocol](message)
     try:
+        _require(isinstance(message, Mapping), "membership_message_invalid")
+        protocol = message.get("protocol")
+        if not isinstance(protocol, str):
+            raise MembershipContractError("membership_protocol_invalid")
+        _safe_check(protocol in _SPECIFIC_FIELDS, "membership_protocol_invalid")
+        _validate_common(message, protocol)
+        _VALIDATORS[protocol](message)
         return json.loads(canonical_json_bytes(dict(message)))
+    except MembershipContractError:
+        raise
     except Exception as exc:
         raise MembershipContractError("membership_message_invalid") from exc
 
@@ -361,44 +407,108 @@ def _verify_envelope(
     now: float,
     expected_key_digest: str | None,
     expected_protocol: str,
+    expected_swarm_id: str | None,
+    expected_sender_node_id: str | None,
+    expected_sender_endpoint_id: str | None,
+    expected_recipient_node_id: str | None,
 ) -> dict[str, Any]:
-    current = _number(now)
-    _require(current is not None, "membership_time_invalid")
+    _require(isinstance(envelope, Mapping), "membership_envelope_invalid")
+    envelope_keys = set(envelope)
     _require(
-        isinstance(envelope, Mapping)
-        and set(envelope) == _ENVELOPE_FIELDS
-        and envelope.get("protocol") == SIGNED_MESSAGE_PROTOCOL,
+        envelope_keys
+        == {
+            "protocol",
+            "message",
+            "signature",
+            "verification_key",
+        },
         "membership_envelope_invalid",
     )
-    message = validate_membership_message(envelope["message"])
-    _require(message["protocol"] == expected_protocol, "membership_protocol_mismatch")
-    record = envelope["verification_key"]
+    _require(
+        envelope["protocol"] == SIGNED_MESSAGE_PROTOCOL,
+        "membership_envelope_invalid",
+    )
+    message = envelope["message"]
     signature = envelope["signature"]
-    _require(isinstance(record, Mapping), "membership_verification_key_invalid")
-    record_digest = record.get("verification_key_digest")
-    if expected_key_digest is not None:
-        _require(_digest(expected_key_digest), "membership_key_pin_invalid")
+    record = envelope["verification_key"]
+    _require(
+        isinstance(message, Mapping)
+        and isinstance(signature, Mapping)
+        and isinstance(record, Mapping),
+        "membership_envelope_invalid",
+    )
+    validated = validate_membership_message(message)
+    _require(
+        validated["protocol"] == expected_protocol,
+        "membership_protocol_invalid",
+    )
+    if expected_key_digest is None:
         _require(
-            record_digest == expected_key_digest,
+            isinstance(record.get("verification_key_digest"), str)
+            and bool(record.get("verification_key_digest")),
+            "membership_key_pin_invalid",
+        )
+    else:
+        _require(
+            record.get("verification_key_digest") == expected_key_digest,
             "membership_key_pin_mismatch",
         )
-    _require(
-        isinstance(signature, Mapping)
-        and signature.get("signer_endpoint_id") == message["sender_endpoint_id"],
-        "membership_signer_endpoint_mismatch",
-    )
+    if expected_swarm_id is not None:
+        _require(
+            validated["swarm_id"] == expected_swarm_id,
+            "membership_swarm_mismatch",
+        )
+    if expected_sender_node_id is not None:
+        _require(
+            validated["sender_node_id"] == expected_sender_node_id,
+            "membership_sender_node_mismatch",
+        )
+    if expected_sender_endpoint_id is not None:
+        _require(
+            validated["sender_endpoint_id"] == expected_sender_endpoint_id,
+            "membership_sender_endpoint_mismatch",
+        )
+    if expected_recipient_node_id is not None:
+        _require(
+            validated["recipient_node_id"] == expected_recipient_node_id,
+            "membership_recipient_mismatch",
+        )
     try:
-        verifier = build_ed25519_verifier([record])
-        valid = verifier(canonical_json_bytes(message), dict(signature))
+        verify = build_ed25519_verifier([dict(record)])
     except Exception as exc:
-        raise MembershipContractError("membership_verification_key_invalid") from exc
-    _require(valid, "membership_signature_invalid")
-    _require(current <= float(message["expires_at"]), "membership_message_expired")
-    _require(
-        current + MAX_CLOCK_SKEW_SECONDS >= float(message["issued_at"]),
-        "membership_message_from_future",
+        raise MembershipContractError("membership_verifier_invalid") from exc
+    issued_at = _number(validated["issued_at"])
+    expires_at = _number(validated["expires_at"])
+    current = _number(now)
+    _require(current is not None, "membership_time_invalid")
+    if current > expires_at:
+        raise MembershipContractError("membership_message_expired")
+    if current + MAX_CLOCK_SKEW_SECONDS < issued_at:
+        raise MembershipContractError("membership_message_from_future")
+    _safe_check(
+        verify(canonical_json_bytes(validated), dict(signature)),
+        "membership_signature_invalid",
     )
-    return message
+    return validated
+
+
+def verify_join_request(
+    envelope: Mapping[str, Any],
+    *,
+    now: float,
+) -> dict[str, Any]:
+    """Verify an untrusted join request using the envelope's own public key."""
+
+    return _verify_envelope(
+        envelope,
+        now=now,
+        expected_key_digest=None,
+        expected_protocol=JOIN_REQUEST_PROTOCOL,
+        expected_swarm_id=None,
+        expected_sender_node_id=None,
+        expected_sender_endpoint_id=None,
+        expected_recipient_node_id=None,
+    )
 
 
 def verify_membership_message(
@@ -407,6 +517,37 @@ def verify_membership_message(
     now: float,
     expected_key_digest: str,
     expected_protocol: str,
+    expected_swarm_id: str | None = None,
+    expected_sender_node_id: str | None = None,
+    expected_sender_endpoint_id: str | None = None,
+    expected_recipient_node_id: str | None = None,
+) -> dict[str, Any]:
+    """Verify a pinned-key membership envelope with optional identity binding."""
+
+    if not isinstance(expected_key_digest, str) or not _digest(expected_key_digest):
+        raise MembershipContractError("membership_key_pin_invalid")
+    return _verify_envelope(
+        envelope,
+        now=now,
+        expected_key_digest=expected_key_digest,
+        expected_protocol=expected_protocol,
+        expected_swarm_id=expected_swarm_id,
+        expected_sender_node_id=expected_sender_node_id,
+        expected_sender_endpoint_id=expected_sender_endpoint_id,
+        expected_recipient_node_id=expected_recipient_node_id,
+    )
+
+
+def verify_membership_message(
+    envelope: Mapping[str, Any],
+    *,
+    now: float,
+    expected_key_digest: str,
+    expected_protocol: str,
+    expected_swarm_id: str | None = None,
+    expected_sender_node_id: str | None = None,
+    expected_sender_endpoint_id: str | None = None,
+    expected_recipient_node_id: str | None = None,
 ) -> dict[str, Any]:
     """Verify a post-join message against an already pinned public-key digest."""
 
@@ -417,6 +558,10 @@ def verify_membership_message(
         now=now,
         expected_key_digest=expected_key_digest,
         expected_protocol=expected_protocol,
+        expected_swarm_id=expected_swarm_id,
+        expected_sender_node_id=expected_sender_node_id,
+        expected_sender_endpoint_id=expected_sender_endpoint_id,
+        expected_recipient_node_id=expected_recipient_node_id,
     )
 
 
@@ -438,4 +583,8 @@ def verify_join_request(
         now=now,
         expected_key_digest=None,
         expected_protocol=JOIN_REQUEST_PROTOCOL,
+        expected_swarm_id=None,
+        expected_sender_node_id=None,
+        expected_sender_endpoint_id=None,
+        expected_recipient_node_id=None,
     )

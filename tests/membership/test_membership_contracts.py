@@ -305,3 +305,36 @@ def test_directed_subject_must_match_recipient(protocol: str, field: str) -> Non
         validate_membership_message(message)
 
     assert excinfo.value.code == "membership_recipient_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("protocol", "field", "value"),
+    [
+        (HEARTBEAT_PROTOCOL, "protocol", []),
+        (HEARTBEAT_PROTOCOL, "lifecycle_state", {}),
+        (HEARTBEAT_PROTOCOL, "issued_at", 10**10_000),
+        (CAPABILITY_REPORT_PROTOCOL, "platform", "\ud800"),
+        (JOIN_ACCEPTANCE_PROTOCOL, "membership_generation", True),
+        (JOIN_ACCEPTANCE_PROTOCOL, "membership_generation", 1.0),
+        (DRAIN_ACK_PROTOCOL, "active_requests", False),
+    ],
+    ids=[
+        "unhashable-protocol",
+        "unhashable-lifecycle",
+        "huge-time-integer",
+        "invalid-unicode",
+        "bool-generation",
+        "float-generation",
+        "bool-active-requests",
+    ],
+)
+def test_hostile_json_values_fail_with_stable_contract_error(
+    protocol: str,
+    field: str,
+    value: object,
+) -> None:
+    message = _message(protocol)
+    message[field] = value
+
+    with pytest.raises(MembershipContractError):
+        validate_membership_message(message)

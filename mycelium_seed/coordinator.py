@@ -1,0 +1,568 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+"""Seed coordinator for signed membership, leases, and assignment control."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+import math
+import re
+import threading
+import time
+from typing import Any
+import uuid
+
+from mycelium_invite import (
+    SqliteInviteRegistry,
+    mint_invite_bundle,
+    verify_invite,
+)
+from mycelium_membership import (
+    ASSIGNMENT_OFFER_PROTOCOL,
+    ASSIGNMENT_RESULT_PROTOCOL,
+    CAPABILITY_REPORT_PROTOCOL,
+    DRAIN_ACK_PROTOCOL,
+    HEARTBEAT_PROTOCOL,
+    JOIN_ACCEPTANCE_PROTOCOL,
+    LINK_PROBE_REPORT_PROTOCOL,
+    sign_membership_message,
+    verify_join_request,
+    verify_membership_message,
+)
+from mycelium_qualification.signing import Ed25519EvidenceSigner
+
+from .state import SeedStateError, SqliteSeedState
+
+
+_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_MAX_REPLAY_IDS = 4096
+SEED_SIGNED_ENVELOPE_PROTOCOL = "mycelium.seed.signed_envelope.v1"
+SEED_IDENTITY_PROTOCOL = "mycelium.seed.identity.v1"
+SEED_RECEIPT_PROTOCOL = "mycelium.seed.receipt.v1"
+_MEMBER_PROTOCOLS = frozenset(
+    {
+        CAPABILITY_REPORT_PROTOCOL,
+        LINK_PROBE_REPORT_PROTOCOL,
+        HEARTBEAT_PROTOCOL,
+        ASSIGNMENT_RESULT_PROTOCOL,
+        DRAIN_ACK_PROTOCOL,
+    }
+)
+
+
+class SeedCoordinatorError(RuntimeError):
+    """Stable seed-side relational or lifecycle error."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def _segment(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or _SEGMENT_RE.fullmatch(value) is None:
+        raise ValueError(f"{field_name} is invalid")
+    return value
+
+
+def _now(value: Any) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise SeedCoordinatorError("seed_clock_invalid")
+    return float(value)
+
+
+@dataclass
+class _Member:
+    node_id: str
+    endpoint_id: str
+    endpoint_addrs: tuple[str, ...]
+    verification_key_digest: str
+    incarnation: str
+    generation: int
+    lease_expires_at: float
+    last_heartbeat_sequence: int = 0
+    seen_ids: dict[str, float] = field(default_factory=dict)
+    latest_messages: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def projection(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "endpoint_id": self.endpoint_id,
+            "endpoint_addrs": list(self.endpoint_addrs),
+            "verification_key_digest": self.verification_key_digest,
+            "incarnation": self.incarnation,
+            "generation": self.generation,
+            "lease_expires_at": self.lease_expires_at,
+            "last_heartbeat_sequence": self.last_heartbeat_sequence,
+        }
+
+
+class SeedCoordinator:
+    """Authorize joins and broker signed control messages without route authority."""
+
+    def __init__(
+        self,
+        *,
+        swarm_id: str,
+        seed_node_id: str,
+        seed_url: str | None,
+        signer: Ed25519EvidenceSigner,
+        invite_registry: SqliteInviteRegistry,
+        incarnation: str,
+        state: SqliteSeedState | None = None,
+        clock: Callable[[], float] = time.time,
+        id_source: Callable[[], str] = lambda: str(uuid.uuid4()),
+        lease_seconds: float = 300.0,
+        message_ttl_seconds: float = 60.0,
+    ) -> None:
+        self.swarm_id = _segment(swarm_id, "swarm_id")
+        self.seed_node_id = _segment(seed_node_id, "seed_node_id")
+        self.incarnation = _segment(incarnation, "incarnation")
+        if seed_url is not None and (
+            not isinstance(seed_url, str)
+            or not seed_url
+            or seed_url != seed_url.strip()
+        ):
+            raise ValueError("seed_url is invalid")
+        if not isinstance(signer, Ed25519EvidenceSigner):
+            raise ValueError("signer is invalid")
+        if not isinstance(invite_registry, SqliteInviteRegistry):
+            raise ValueError("invite_registry is invalid")
+        if state is not None and not isinstance(state, SqliteSeedState):
+            raise ValueError("state is invalid")
+        if (
+            state is not None
+            and state.database.resolve() != invite_registry.database.resolve()
+        ):
+            raise ValueError("state and invite_registry must share one database")
+        if not callable(clock) or not callable(id_source):
+            raise ValueError("clock and id_source must be callable")
+        for value, name in (
+            (lease_seconds, "lease_seconds"),
+            (message_ttl_seconds, "message_ttl_seconds"),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or value <= 0
+            ):
+                raise ValueError(f"{name} is invalid")
+        self.seed_url = seed_url
+        self.signer = signer
+        self._invite_registry = invite_registry
+        self._clock = clock
+        self._id_source = id_source
+        self._lease_seconds = float(lease_seconds)
+        self._message_ttl_seconds = float(message_ttl_seconds)
+        self._lock = threading.RLock()
+        self._members: dict[str, _Member] = {}
+        self._emitted_ids: set[str] = set()
+        self._assignments: dict[str, dict[str, Any]] = {}
+        self._state = state
+        if state is not None:
+            try:
+                state.bind_identity(
+                    swarm_id=self.swarm_id,
+                    seed_node_id=self.seed_node_id,
+                    seed_key_digest=self.signer.verification_key_digest,
+                )
+                for record in state.load_members():
+                    member = _Member(
+                        node_id=_segment(record["node_id"], "node_id"),
+                        endpoint_id=_segment(record["endpoint_id"], "endpoint_id"),
+                        endpoint_addrs=tuple(record["endpoint_addrs"]),
+                        verification_key_digest=record["verification_key_digest"],
+                        incarnation=_segment(record["incarnation"], "incarnation"),
+                        generation=int(record["generation"]),
+                        lease_expires_at=float(record["lease_expires_at"]),
+                        last_heartbeat_sequence=int(
+                            record["last_heartbeat_sequence"]
+                        ),
+                    )
+                    self._members[member.node_id] = member
+                self._assignments = {
+                    record["assignment_id"]: record
+                    for record in state.load_assignments()
+                }
+            except (SeedStateError, TypeError, ValueError) as exc:
+                code = getattr(exc, "code", "seed_state_corrupt")
+                raise SeedCoordinatorError(code) from exc
+
+    def _persist(self, method: str, *args: Any, **kwargs: Any) -> None:
+        if self._state is None:
+            return
+        try:
+            getattr(self._state, method)(*args, **kwargs)
+        except SeedStateError as exc:
+            raise SeedCoordinatorError(exc.code) from exc
+
+    def bind_seed_url(self, seed_url: str) -> str:
+        if not isinstance(seed_url, str) or not seed_url or seed_url != seed_url.strip():
+            raise ValueError("seed_url is invalid")
+        with self._lock:
+            if self.seed_url is not None and self.seed_url != seed_url:
+                raise SeedCoordinatorError("seed_url_already_bound")
+            self.seed_url = seed_url
+            return seed_url
+
+    def _require_seed_url(self) -> str:
+        if self.seed_url is None:
+            raise SeedCoordinatorError("seed_url_unbound")
+        return self.seed_url
+
+    def _now(self) -> float:
+        return _now(self._clock())
+
+    def _new_message_id(self) -> str:
+        message_id = _segment(self._id_source(), "message_id")
+        if message_id in self._emitted_ids:
+            raise SeedCoordinatorError("seed_message_id_reused")
+        self._persist("reserve_seed_message", message_id)
+        self._emitted_ids.add(message_id)
+        return message_id
+
+    def mint_invite(self, *, nonce: str, ttl_seconds: int) -> dict[str, Any]:
+        with self._lock:
+            seed_url = self._require_seed_url()
+            return mint_invite_bundle(
+                signer=self.signer,
+                swarm_id=self.swarm_id,
+                seed_url=seed_url,
+                ttl_seconds=ttl_seconds,
+                nonce=nonce,
+                issued_at=self._now(),
+            )
+
+    def _signed_seed_statement(
+        self,
+        protocol: str,
+        fields: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        now = self._now()
+        statement = {
+            "protocol": protocol,
+            "swarm_id": self.swarm_id,
+            "seed_node_id": self.seed_node_id,
+            "seed_endpoint_id": self.signer.endpoint_id,
+            "seed_url": self._require_seed_url(),
+            "issued_at": now,
+            "expires_at": now + self._message_ttl_seconds,
+            **dict(fields),
+        }
+        return {
+            "protocol": SEED_SIGNED_ENVELOPE_PROTOCOL,
+            "statement": statement,
+            "signature": self.signer.sign(statement),
+            "verification_key": self.signer.public_key_record(),
+        }
+
+    def identity_envelope(self) -> dict[str, Any]:
+        with self._lock:
+            return self._signed_seed_statement(SEED_IDENTITY_PROTOCOL, {})
+
+    def receipt_envelope(self, message_id: str) -> dict[str, Any]:
+        message_id = _segment(message_id, "message_id")
+        with self._lock:
+            return self._signed_seed_statement(
+                SEED_RECEIPT_PROTOCOL,
+                {"accepted_message_id": message_id},
+            )
+
+    def accept_join(
+        self,
+        *,
+        invite_token: str,
+        join_envelope: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            now = self._now()
+            seed_url = self._require_seed_url()
+            invite = verify_invite(
+                invite_token,
+                verifier_key_records=[self.signer.public_key_record()],
+                now=now,
+            )
+            request = verify_join_request(join_envelope, now=now)
+            if (
+                invite["swarm_id"] != self.swarm_id
+                or invite["seed_url"] != seed_url
+                or request["swarm_id"] != self.swarm_id
+                or request["recipient_node_id"] != self.seed_node_id
+                or request["invite_nonce"] != invite["nonce"]
+            ):
+                raise SeedCoordinatorError("seed_join_mismatch")
+            record = join_envelope.get("verification_key")
+            if not isinstance(record, Mapping):
+                raise SeedCoordinatorError("seed_join_key_invalid")
+            key_digest = record.get("verification_key_digest")
+            if not isinstance(key_digest, str) or not key_digest:
+                raise SeedCoordinatorError("seed_join_key_invalid")
+            node_id = request["sender_node_id"]
+            previous = self._members.get(node_id)
+            if previous is not None and previous.verification_key_digest != key_digest:
+                raise SeedCoordinatorError("seed_node_key_conflict")
+            if (
+                previous is not None
+                and previous.endpoint_id != request["sender_endpoint_id"]
+            ):
+                raise SeedCoordinatorError("seed_node_endpoint_conflict")
+
+            self._invite_registry.consume(
+                invite["nonce"],
+                now=now,
+                expires_at=float(invite["expires_at"]),
+            )
+            generation = 1 if previous is None else previous.generation + 1
+            lease_expires_at = now + self._lease_seconds
+            endpoint = request["endpoint_addr"]
+            member = _Member(
+                node_id=node_id,
+                endpoint_id=request["sender_endpoint_id"],
+                endpoint_addrs=tuple(endpoint["addrs"]),
+                verification_key_digest=key_digest,
+                incarnation=request["incarnation"],
+                generation=generation,
+                lease_expires_at=lease_expires_at,
+            )
+            message = {
+                "protocol": JOIN_ACCEPTANCE_PROTOCOL,
+                "message_id": self._new_message_id(),
+                "swarm_id": self.swarm_id,
+                "sender_node_id": self.seed_node_id,
+                "sender_endpoint_id": self.signer.endpoint_id,
+                "recipient_node_id": node_id,
+                "incarnation": self.incarnation,
+                "generation": generation,
+                "issued_at": now,
+                "expires_at": now + self._message_ttl_seconds,
+                "request_message_id": request["message_id"],
+                "accepted_node_id": node_id,
+                "accepted_incarnation": request["incarnation"],
+                "membership_generation": generation,
+                "lease_expires_at": lease_expires_at,
+            }
+            acceptance = sign_membership_message(signer=self.signer, message=message)
+            self._persist("save_member", member.projection())
+            self._members[node_id] = member
+            return acceptance
+
+    def member(self, node_id: str) -> dict[str, Any]:
+        node_id = _segment(node_id, "node_id")
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            return member.projection()
+
+    def _ensure_current_member(self, member: _Member) -> None:
+        if self._state is None:
+            return
+        try:
+            current = self._state.member_is_current(
+                node_id=member.node_id,
+                endpoint_id=member.endpoint_id,
+                verification_key_digest=member.verification_key_digest,
+                incarnation=member.incarnation,
+                generation=member.generation,
+            )
+        except SeedStateError as exc:
+            raise SeedCoordinatorError(exc.code) from exc
+        if not current:
+            raise SeedCoordinatorError("seed_state_member_stale")
+
+    def _ensure_not_replayed(
+        self,
+        member: _Member,
+        message_id: str,
+    ) -> None:
+        if self._state is not None:
+            try:
+                seen = self._state.member_message_seen(
+                    node_id=member.node_id,
+                    generation=member.generation,
+                    message_id=message_id,
+                )
+            except SeedStateError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
+            if seen:
+                raise SeedCoordinatorError("seed_message_replayed")
+            return
+        if message_id in member.seen_ids:
+            raise SeedCoordinatorError("seed_message_replayed")
+
+    def _remember(
+        self,
+        member: _Member,
+        message: Mapping[str, Any],
+        now: float,
+    ) -> None:
+        if self._state is not None:
+            self._persist(
+                "remember_member_message",
+                node_id=member.node_id,
+                generation=member.generation,
+                message_id=message["message_id"],
+                expires_at=float(message["expires_at"]),
+                now=now,
+                capacity=_MAX_REPLAY_IDS,
+            )
+            return
+        for message_id, expires_at in tuple(member.seen_ids.items()):
+            if expires_at < now:
+                del member.seen_ids[message_id]
+        message_id = message["message_id"]
+        if message_id in member.seen_ids:
+            raise SeedCoordinatorError("seed_message_replayed")
+        if len(member.seen_ids) >= _MAX_REPLAY_IDS:
+            raise SeedCoordinatorError("seed_replay_window_full")
+        member.seen_ids[message_id] = float(message["expires_at"])
+
+    def receive_member_message(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        expected_protocol: str,
+    ) -> dict[str, Any]:
+        if expected_protocol not in _MEMBER_PROTOCOLS:
+            raise ValueError("expected_protocol is invalid")
+        try:
+            untrusted_message = envelope["message"]
+            node_id = untrusted_message["sender_node_id"]
+        except (KeyError, TypeError) as exc:
+            raise SeedCoordinatorError("seed_message_malformed") from exc
+        if not isinstance(node_id, str):
+            raise SeedCoordinatorError("seed_message_malformed")
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            now = self._now()
+            if now >= member.lease_expires_at:
+                raise SeedCoordinatorError("seed_member_lease_expired")
+            message = verify_membership_message(
+                envelope,
+                now=now,
+                expected_key_digest=member.verification_key_digest,
+                expected_protocol=expected_protocol,
+            )
+            if (
+                message["swarm_id"] != self.swarm_id
+                or message["sender_node_id"] != member.node_id
+                or message["sender_endpoint_id"] != member.endpoint_id
+                or message["incarnation"] != member.incarnation
+                or message["generation"] != member.generation
+                or message["recipient_node_id"] != self.seed_node_id
+            ):
+                raise SeedCoordinatorError("seed_message_mismatch")
+            self._ensure_current_member(member)
+            self._ensure_not_replayed(member, message["message_id"])
+            if expected_protocol == HEARTBEAT_PROTOCOL:
+                sequence = int(message["heartbeat_sequence"])
+                if sequence <= member.last_heartbeat_sequence:
+                    raise SeedCoordinatorError("seed_heartbeat_sequence_stale")
+                persisted_member = member.projection()
+                persisted_member["last_heartbeat_sequence"] = sequence
+                self._persist("save_member", persisted_member)
+            elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
+                assignment = self._assignments.get(message["assignment_id"])
+                if (
+                    assignment is None
+                    or assignment["node_id"] != node_id
+                    or assignment["deployment_id"] != message["deployment_id"]
+                    or assignment["deployment_epoch"] != message["deployment_epoch"]
+                    or assignment["membership_generation"] != member.generation
+                ):
+                    raise SeedCoordinatorError("seed_assignment_result_mismatch")
+                if assignment["accepted"] is not None:
+                    raise SeedCoordinatorError(
+                        "seed_assignment_result_already_recorded"
+                    )
+                updated_assignment = {
+                    **assignment,
+                    "accepted": message["accepted"],
+                    "result_code": message["result_code"],
+                    "load_proof_digest": message["load_proof_digest"],
+                    "runtime_endpoint": message["runtime_endpoint"],
+                }
+                self._persist("save_assignment_result", updated_assignment)
+            self._remember(member, message, now)
+            if expected_protocol == HEARTBEAT_PROTOCOL:
+                member.last_heartbeat_sequence = sequence
+            elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
+                assignment.update(updated_assignment)
+            member.latest_messages[expected_protocol] = dict(message)
+            return message
+
+    def assignment_offer(
+        self,
+        *,
+        node_id: str,
+        deployment_id: str,
+        deployment_epoch: int,
+        assignment_id: str,
+        assignment_digest: str,
+        stage_pack_digest: str,
+        graph_digest: str,
+        load_generation: int,
+    ) -> dict[str, Any]:
+        node_id = _segment(node_id, "node_id")
+        assignment_id = _segment(assignment_id, "assignment_id")
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            now = self._now()
+            if now >= member.lease_expires_at:
+                raise SeedCoordinatorError("seed_member_lease_expired")
+            self._ensure_current_member(member)
+            if assignment_id in self._assignments:
+                raise SeedCoordinatorError("seed_assignment_exists")
+            message = {
+                "protocol": ASSIGNMENT_OFFER_PROTOCOL,
+                "message_id": self._new_message_id(),
+                "swarm_id": self.swarm_id,
+                "sender_node_id": self.seed_node_id,
+                "sender_endpoint_id": self.signer.endpoint_id,
+                "recipient_node_id": node_id,
+                "incarnation": self.incarnation,
+                "generation": member.generation,
+                "issued_at": now,
+                "expires_at": min(
+                    now + self._message_ttl_seconds,
+                    member.lease_expires_at,
+                ),
+                "deployment_id": deployment_id,
+                "deployment_epoch": deployment_epoch,
+                "assignment_id": assignment_id,
+                "assignment_digest": assignment_digest,
+                "stage_pack_digest": stage_pack_digest,
+                "graph_digest": graph_digest,
+                "load_generation": load_generation,
+            }
+            envelope = sign_membership_message(signer=self.signer, message=message)
+            assignment = {
+                "node_id": node_id,
+                "deployment_id": deployment_id,
+                "deployment_epoch": deployment_epoch,
+                "membership_generation": member.generation,
+                "assignment_id": assignment_id,
+                "accepted": None,
+                "result_code": None,
+                "load_proof_digest": None,
+                "runtime_endpoint": None,
+            }
+            self._persist("save_assignment", assignment)
+            self._assignments[assignment_id] = assignment
+            return envelope
+
+    def assignment_status(self, assignment_id: str) -> dict[str, Any]:
+        assignment_id = _segment(assignment_id, "assignment_id")
+        with self._lock:
+            assignment = self._assignments.get(assignment_id)
+            if assignment is None:
+                raise SeedCoordinatorError("seed_assignment_unknown")
+            return dict(assignment)

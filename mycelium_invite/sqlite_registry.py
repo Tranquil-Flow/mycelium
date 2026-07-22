@@ -43,23 +43,38 @@ class SqliteInviteRegistry:
             metadata = parent.lstat()
             if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
                 raise InviteError("invite_registry_path_invalid")
-            if stat.S_IMODE(metadata.st_mode) & 0o077:
+            if (
+                stat.S_IMODE(metadata.st_mode) != 0o700
+                or metadata.st_uid != os.getuid()
+            ):
                 raise InviteError("invite_registry_permissions_invalid")
 
             if self.database.exists() or self.database.is_symlink():
                 metadata = self.database.lstat()
                 if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
                     raise InviteError("invite_registry_path_invalid")
-                if stat.S_IMODE(metadata.st_mode) & 0o077:
+                if (
+                    stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_uid != os.getuid()
+                    or metadata.st_nlink != 1
+                ):
                     raise InviteError("invite_registry_permissions_invalid")
             else:
-                descriptor = os.open(
-                    self.database,
-                    os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                    0o600,
-                )
-                os.close(descriptor)
-            self.database.chmod(0o600)
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                descriptor = os.open(self.database, flags, 0o600)
+                try:
+                    metadata = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISREG(metadata.st_mode)
+                        or stat.S_IMODE(metadata.st_mode) != 0o600
+                        or metadata.st_uid != os.getuid()
+                        or metadata.st_nlink != 1
+                    ):
+                        raise InviteError("invite_registry_permissions_invalid")
+                finally:
+                    os.close(descriptor)
         except InviteError:
             raise
         except OSError as exc:

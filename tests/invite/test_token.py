@@ -1,3 +1,5 @@
+import base64
+import json
 import time
 
 import pytest
@@ -9,6 +11,22 @@ from mycelium_invite.token import (
     verify_invite,
 )
 from mycelium_qualification.signing import generate_ed25519_signer
+
+
+def _encoded(value: object) -> str:
+    return base64.urlsafe_b64encode(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+
+
+def _signed_token(signer, payload: dict, *, pretty_body: bool = False) -> str:
+    body = (
+        json.dumps(payload, indent=2).encode()
+        if pretty_body
+        else json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    )
+    encoded_body = base64.urlsafe_b64encode(body).decode().rstrip("=")
+    return f"{encoded_body}.{_encoded(signer.sign(payload))}"
 
 
 @pytest.fixture
@@ -80,6 +98,50 @@ def test_wrong_key_is_rejected(signer) -> None:
     with pytest.raises(InviteError) as excinfo:
         verify_invite(token, verifier_key_records=other_records, now=time.time())
     assert excinfo.value.code == "invite_signature_invalid"
+
+
+def test_signed_non_numeric_expiry_is_rejected(signer, key_records) -> None:
+    payload = {
+        "protocol": "mycelium.invite.v1",
+        "swarm_id": "swarm-demo",
+        "seed_url": "http://seed:8788",
+        "nonce": "nonce-nonnumeric-expiry",
+        "issued_at": 1_000.0,
+        "expires_at": "NaN",
+    }
+    token = _signed_token(signer, payload)
+
+    with pytest.raises(InviteError) as excinfo:
+        verify_invite(token, verifier_key_records=key_records, now=1_001.0)
+
+    assert excinfo.value.code == "invite_malformed"
+
+
+def test_signed_noncanonical_or_extra_field_body_is_rejected(
+    signer, key_records
+) -> None:
+    payload = {
+        "protocol": "mycelium.invite.v1",
+        "swarm_id": "swarm-demo",
+        "seed_url": "http://seed:8788",
+        "nonce": "nonce-noncanonical",
+        "issued_at": 1_000.0,
+        "expires_at": 1_100.0,
+    }
+    with pytest.raises(InviteError, match="invite_malformed"):
+        verify_invite(
+            _signed_token(signer, payload, pretty_body=True),
+            verifier_key_records=key_records,
+            now=1_001.0,
+        )
+
+    payload["unexpected"] = "field"
+    with pytest.raises(InviteError, match="invite_malformed"):
+        verify_invite(
+            _signed_token(signer, payload),
+            verifier_key_records=key_records,
+            now=1_001.0,
+        )
 
 
 def test_registry_rejects_replay() -> None:
