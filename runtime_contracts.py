@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import math
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 MLX_RUNTIME_BASE_FIELDS = frozenset({"backend", "dtype", "quantization"})
 GPT2_DECODER_TENSOR_SUFFIXES = (
@@ -48,6 +48,33 @@ _SUPPORTED_GPT2_FLAGS = {
     "reorder_and_upcast_attn": False,
     "add_cross_attention": False,
 }
+
+
+@runtime_checkable
+class StageRuntimeBackend(Protocol):
+    """Minimal adapter for executing one already authenticated loaded stage."""
+
+    backend: str
+
+    def execute_loaded_stage(
+        self,
+        loaded_stage: Any,
+        *,
+        token_ids: Any | None = None,
+        hidden_states: Any | None = None,
+    ) -> Any: ...
+
+
+@runtime_checkable
+class MonolithicRuntimePort(Protocol):
+    """Backend-neutral monolithic parity surface used before stage integration."""
+
+    backend: str
+
+    @property
+    def runtime_identity(self) -> Mapping[str, Any]: ...
+
+    def forward_token_ids(self, token_ids: Any) -> Any: ...
 
 
 def _positive_int(value: Any, field: str) -> int:
@@ -149,3 +176,62 @@ def validate_normalized_mlx_runtime(runtime: Any) -> dict[str, Any]:
     if json.loads(json.dumps(runtime, allow_nan=False)) != normalized:
         raise ValueError("runtime identity is not in normalized canonical form")
     return copy.deepcopy(normalized)
+
+
+def validate_normalized_numpy_runtime(runtime: Any) -> dict[str, Any]:
+    """Validate the concrete CPU NumPy GPT-2 monolithic runtime contract."""
+
+    if not isinstance(runtime, Mapping):
+        raise ValueError("runtime identity must be an object")
+    if set(runtime) != NORMALIZED_MLX_RUNTIME_FIELDS:
+        raise ValueError(
+            "runtime identity fields do not match the normalized NumPy contract"
+        )
+    if runtime.get("backend") != "numpy":
+        raise ValueError("unsupported runtime backend; expected numpy")
+    if runtime.get("quantization") != "none":
+        raise ValueError("unsupported runtime quantization; only none is supported")
+    if runtime.get("dtype") not in {"float16", "float32"}:
+        raise ValueError("unsupported numpy runtime dtype; expected float16 or float32")
+    if runtime.get("architecture") != "gpt2":
+        raise ValueError("unsupported runtime architecture; only gpt2 is supported")
+    model_config = runtime.get("model_config")
+    if not isinstance(model_config, Mapping):
+        raise ValueError("gpt2 runtime requires model_config")
+    if set(model_config) != GPT2_MODEL_CONFIG_FIELDS:
+        raise ValueError(
+            "gpt2 model_config fields do not match the normalized runtime contract"
+        )
+    normalized_config = normalize_gpt2_model_config(
+        model_config,
+        expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+    )
+    normalized = {
+        "backend": "numpy",
+        "dtype": runtime["dtype"],
+        "quantization": "none",
+        "architecture": "gpt2",
+        "model_config": normalized_config,
+    }
+    if json.loads(json.dumps(runtime, allow_nan=False)) != normalized:
+        raise ValueError("runtime identity is not in normalized canonical form")
+    return copy.deepcopy(normalized)
+
+
+def validate_normalized_runtime(
+    runtime: Any,
+    *,
+    expected_backend: str | None = None,
+) -> dict[str, Any]:
+    """Dispatch strict validation without weakening backend-specific contracts."""
+
+    if not isinstance(runtime, Mapping):
+        raise ValueError("runtime identity must be an object")
+    backend = runtime.get("backend")
+    if expected_backend is not None and backend != expected_backend:
+        raise ValueError(f"runtime backend mismatch; expected {expected_backend}")
+    if backend == "mlx":
+        return validate_normalized_mlx_runtime(runtime)
+    if backend == "numpy":
+        return validate_normalized_numpy_runtime(runtime)
+    raise ValueError(f"unsupported runtime backend: {backend!r}")
