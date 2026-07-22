@@ -19,6 +19,8 @@ The audit inventories Git-tracked files with `GIT_OPTIONAL_LOCKS=0`. It does not
 
 Test files are excluded from production-claim scanning. The UI check targets non-test JavaScript and TypeScript beneath `ui/web/src/`. The backend check targets Python beneath `mycelium_gateway/`. The readiness check examines literal-true Python mappings, assignments, subscript assignments, and keyword arguments outside tests.
 
+The UI scanner exempts only four exact, reviewed product action clients: request inference, DeviceLab operator control, membership join, and swarm join. The exemption is path-exact; neighboring files and every Observatory source remain subject to the write-surface scan.
+
 ## Claim boundary
 
 Every result fixes these claims:

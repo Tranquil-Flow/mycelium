@@ -184,6 +184,8 @@ def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(t
             "ui/web/src/features/inference/requestClient.ts": "fetch('/api/v1/inference/requests', { method: 'POST' });\n",
             "ui/web/src/features/swarm/SwarmClient.ts": "fetch('/api/v1/swarm/join', { method: 'POST' });\n",
             "ui/web/src/features/membership/membershipClient.ts": "fetch('/api/v1/membership/join', { method: 'POST' });\n",
+            "ui/web/src/features/deviceLab/deviceLabClient.ts": "fetch('/api/interactive/infer', { method: 'POST' });\n",
+            "ui/web/src/features/deviceLab/arbitraryClient.ts": "fetch('/api/interactive/infer', { method: 'POST' });\n",
             "ui/web/src/data/observatorySource.ts": "fetch('/api/v1/observatory', { method: 'POST' });\n",
         },
     )
@@ -193,7 +195,8 @@ def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(t
     assert isinstance(findings, list)
 
     assert [item["path"] for item in findings] == [
-        "ui/web/src/data/observatorySource.ts"
+        "ui/web/src/data/observatorySource.ts",
+        "ui/web/src/features/deviceLab/arbitraryClient.ts",
     ]
 
 
