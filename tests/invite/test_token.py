@@ -90,6 +90,38 @@ def test_registry_rejects_replay() -> None:
     assert excinfo.value.code == "invite_replayed"
 
 
+@pytest.mark.parametrize(
+    ("overrides", "code"),
+    [
+        ({"swarm_id": 7}, "invite_field_invalid"),
+        ({"seed_url": " seed.example"}, "invite_field_invalid"),
+        ({"nonce": ""}, "invite_field_invalid"),
+        ({"ttl_seconds": True}, "invite_ttl_invalid"),
+        ({"ttl_seconds": 0}, "invite_ttl_invalid"),
+        ({"ttl_seconds": 1.5}, "invite_ttl_invalid"),
+        ({"issued_at": float("nan")}, "invite_time_invalid"),
+        ({"issued_at": float("inf")}, "invite_time_invalid"),
+        ({"issued_at": True}, "invite_time_invalid"),
+    ],
+)
+def test_mint_rejects_malformed_fields_with_stable_codes(overrides, code: str) -> None:
+    signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    arguments = {
+        "signer": signer,
+        "swarm_id": "swarm-demo",
+        "seed_url": "https://seed.example:8788",
+        "ttl_seconds": 300,
+        "nonce": "nonce-valid",
+        "issued_at": 1_784_000_000.0,
+    }
+    arguments.update(overrides)
+
+    with pytest.raises(InviteError) as excinfo:
+        mint_invite(**arguments)
+
+    assert excinfo.value.code == code
+
+
 def test_malformed_token_is_rejected(key_records) -> None:
     for bad in ("", "no-dot", "a.b.c", "!!!.???"):
         with pytest.raises(InviteError):

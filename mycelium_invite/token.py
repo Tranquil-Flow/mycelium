@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping, Sequence
 import json
+import math
 from typing import Any
 
 from mycelium_qualification.evidence import canonical_json_bytes
@@ -55,13 +56,27 @@ def mint_invite(
 ) -> str:
     """Mint a signed single-use invite token bound to the seed's signer."""
 
-    if ttl_seconds <= 0:
+    if (
+        isinstance(ttl_seconds, bool)
+        or not isinstance(ttl_seconds, int)
+        or ttl_seconds <= 0
+    ):
         raise InviteError("invite_ttl_invalid")
-    if not all(isinstance(value, str) and value for value in (swarm_id, seed_url, nonce)):
+    if not all(
+        isinstance(value, str) and bool(value) and value == value.strip()
+        for value in (swarm_id, seed_url, nonce)
+    ):
         raise InviteError("invite_field_invalid")
     import time
 
     issued = time.time() if issued_at is None else issued_at
+    if (
+        isinstance(issued, bool)
+        or not isinstance(issued, (int, float))
+        or not math.isfinite(float(issued))
+    ):
+        raise InviteError("invite_time_invalid")
+    issued = float(issued)
     payload = {
         "protocol": _INVITE_PROTOCOL,
         "swarm_id": swarm_id,
@@ -84,6 +99,12 @@ def verify_invite(
 ) -> dict[str, Any]:
     """Verify an invite against the seed's trusted public-key record(s)."""
 
+    if (
+        isinstance(now, bool)
+        or not isinstance(now, (int, float))
+        or not math.isfinite(float(now))
+    ):
+        raise InviteError("invite_time_invalid")
     if not isinstance(token, str) or token.count(".") != 1:
         raise InviteError("invite_malformed")
     encoded_body, _, encoded_signature = token.partition(".")
