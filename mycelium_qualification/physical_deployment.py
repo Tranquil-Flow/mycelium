@@ -41,6 +41,10 @@ class PhysicalDeploymentError(RuntimeError):
 
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+_HUGGINGFACE_BLOB_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+_NON_RUNTIME_GPT2_TENSOR_RE = re.compile(
+    r"^(?:transformer\.)?h\.\d+\.attn\.(?:bias|masked_bias)$"
+)
 _SAFE_LOCAL_RELATIVE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _MAX_SAFETENSORS_HEADER_BYTES = 100 * 1024 * 1024
 _MODEL_INDEX_FILE = "model.safetensors.index.json"
@@ -385,6 +389,41 @@ def _path_from_posix(root: Path, relative: PurePosixPath) -> Path:
     return root.joinpath(*relative.parts)
 
 
+def _resolve_huggingface_snapshot_link(source_root: Path, candidate: Path) -> Path:
+    """Resolve a final Hugging Face snapshot link within its sibling blob store."""
+
+    try:
+        link_target = candidate.readlink()
+    except OSError as exc:
+        raise _invalid_local_model_source('source_path_symlink') from exc
+    if (
+        source_root.parent.name != 'snapshots'
+        or not _COMMIT_RE.fullmatch(source_root.name)
+        or link_target.is_absolute()
+        or len(link_target.parts) != 4
+        or link_target.parts[:3] != ('..', '..', 'blobs')
+        or not _HUGGINGFACE_BLOB_RE.fullmatch(link_target.parts[3])
+    ):
+        raise _invalid_local_model_source('source_path_symlink')
+    blob_root = source_root.parent.parent / 'blobs'
+    if blob_root.is_symlink():
+        raise _invalid_local_model_source('source_path_symlink')
+    try:
+        resolved_blob_root = blob_root.resolve(strict=True)
+        resolved = (source_root / link_target).resolve(strict=True)
+        resolved.relative_to(resolved_blob_root)
+        metadata = resolved.lstat()
+    except (OSError, ValueError) as exc:
+        raise _invalid_local_model_source('source_path_escape') from exc
+    if (
+        resolved.parent != resolved_blob_root
+        or resolved.is_symlink()
+        or not stat.S_ISREG(metadata.st_mode)
+    ):
+        raise _invalid_local_model_source('source_path_symlink')
+    return resolved
+
+
 def _resolve_source_path(
     source_root: Path,
     relative: PurePosixPath,
@@ -393,10 +432,12 @@ def _resolve_source_path(
 ) -> Path | None:
     candidate = _path_from_posix(source_root, relative)
     current = source_root
-    for part in relative.parts:
+    for index, part in enumerate(relative.parts):
         current = current / part
         if current.is_symlink():
-            raise _invalid_local_model_source('source_path_symlink')
+            if index != len(relative.parts) - 1:
+                raise _invalid_local_model_source('source_path_symlink')
+            return _resolve_huggingface_snapshot_link(source_root, current)
         if not current.exists():
             if required:
                 raise _invalid_local_model_source('source_path_missing')
@@ -684,8 +725,8 @@ def _resolve_local_model_source(
     if not isinstance(config, dict):
         raise _invalid_local_model_source('config_not_object')
     checkpoint_index, source_format, synthesized_index = _load_checkpoint_index(source)
-    weight_map = checkpoint_index['weight_map']
-    referenced_files = tuple(sorted(set(weight_map.values())))
+    source_weight_map = checkpoint_index['weight_map']
+    referenced_files = tuple(sorted(set(source_weight_map.values())))
     if not referenced_files:
         raise _invalid_local_model_source('checkpoint_index_empty')
 
@@ -699,7 +740,7 @@ def _resolve_local_model_source(
         header = _read_safetensors_header(path, filename)
         mapped_tensors = sorted(
             tensor_name
-            for tensor_name, mapped_filename in weight_map.items()
+            for tensor_name, mapped_filename in source_weight_map.items()
             if mapped_filename == filename
         )
         if mapped_tensors != list(header.tensor_names):
@@ -708,6 +749,16 @@ def _resolve_local_model_source(
             'size_bytes': metadata.st_size,
             'sha256': sha256_file(path),
         }
+
+    runtime_weight_map = {
+        tensor_name: filename
+        for tensor_name, filename in source_weight_map.items()
+        if not _NON_RUNTIME_GPT2_TENSOR_RE.fullmatch(tensor_name)
+    }
+    if not runtime_weight_map:
+        raise _invalid_local_model_source('checkpoint_index_empty')
+    checkpoint_index = copy.deepcopy(checkpoint_index)
+    checkpoint_index['weight_map'] = runtime_weight_map
 
     try:
         manifest = compile_model_manifest(

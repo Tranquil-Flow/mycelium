@@ -90,9 +90,10 @@ def normalize_gpt2_model_config(
     if config.get("activation_function") != "gelu_new":
         raise ValueError("runtime model_config activation_function must be gelu_new")
     for field, expected in _SUPPORTED_GPT2_FLAGS.items():
-        if config.get(field) is not expected:
+        actual = config.get(field, expected)
+        if actual is not expected:
             raise ValueError(
-                f"unsupported runtime model_config {field}={config.get(field)!r}"
+                f"unsupported runtime model_config {field}={actual!r}"
             )
     normalized = {
         "n_layer": n_layer,
