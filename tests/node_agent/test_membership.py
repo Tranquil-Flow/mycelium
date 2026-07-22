@@ -12,6 +12,7 @@ from mycelium_membership import (
     DRAIN_ACK_PROTOCOL,
     HEARTBEAT_PROTOCOL,
     JOIN_ACCEPTANCE_PROTOCOL,
+    LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MembershipContractError,
     sign_membership_message,
@@ -278,6 +279,133 @@ def test_assignment_result_is_signed_and_bound_to_verified_offer(tmp_path: Path)
             runtime_endpoint=None,
         )
     assert unknown.value.code == "assignment_offer_unknown"
+
+
+def _joined_with_clock(tmp_path: Path, clock: list[float]):
+    session = NodeMembershipSession(
+        node_id="node-a",
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        signer=load_or_create_node_signer(tmp_path / "private" / "node.key"),
+        incarnation="incarnation-a",
+        software_version="mycelium-test",
+        clock=lambda: clock[0],
+        id_source=_ids("clocked-node-message"),
+    )
+    seed = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    request = session.join_request(
+        invite_nonce="invite-clocked",
+        endpoint_addrs=["https://node"],
+    )
+    session.accept_join(
+        _acceptance(session, request, seed),
+        seed_key_digest=seed.verification_key_digest,
+    )
+    return session, seed
+
+
+def _renewal(seed, *, message_id: str, issued_at: float) -> dict:
+    return sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": LEASE_RENEWAL_PROTOCOL,
+            "message_id": message_id,
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": issued_at,
+            "expires_at": NOW + 304.0,
+            "heartbeat_message_id": "heartbeat-delayed",
+            "member_incarnation": "incarnation-a",
+            "membership_generation": 1,
+            "lease_expires_at": NOW + 304.0,
+        },
+    )
+
+
+def test_delayed_renewal_is_accepted_after_old_lease_before_new_lease(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    session, seed = _joined_with_clock(tmp_path, clock)
+    renewal = _renewal(seed, message_id="renewal-delayed", issued_at=NOW + 299.0)
+
+    clock[0] = NOW + 301.0
+    accepted = session.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id="heartbeat-delayed",
+    )
+    assert accepted["lease_expires_at"] == NOW + 304.0
+
+
+def test_delayed_renewal_rejects_after_new_lease_or_without_old_lease_causality(
+    tmp_path: Path,
+) -> None:
+    expired_clock = [NOW]
+    expired, expired_seed = _joined_with_clock(tmp_path / "expired", expired_clock)
+    expired_renewal = _renewal(
+        expired_seed,
+        message_id="renewal-expired",
+        issued_at=NOW + 299.0,
+    )
+    expired_clock[0] = NOW + 304.0
+    with pytest.raises(NodeMembershipError) as stale:
+        expired.accept_lease_renewal(
+            expired_renewal,
+            heartbeat_message_id="heartbeat-delayed",
+        )
+    assert stale.value.code == "membership_lease_renewal_stale"
+
+    late_clock = [NOW]
+    late, late_seed = _joined_with_clock(tmp_path / "late", late_clock)
+    late_renewal = _renewal(
+        late_seed,
+        message_id="renewal-late-issued",
+        issued_at=NOW + 301.0,
+    )
+    late_clock[0] = NOW + 302.0
+    with pytest.raises(NodeMembershipError) as causal:
+        late.accept_lease_renewal(
+            late_renewal,
+            heartbeat_message_id="heartbeat-delayed",
+        )
+    assert causal.value.code == "membership_lease_renewal_causality"
+
+
+def test_nonrenewal_seed_message_still_rejects_after_old_local_lease(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    session, seed = _joined_with_clock(tmp_path, clock)
+    offer = sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": ASSIGNMENT_OFFER_PROTOCOL,
+            "message_id": "late-offer",
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": NOW + 299.0,
+            "expires_at": NOW + 304.0,
+            "deployment_id": "deployment-late",
+            "deployment_epoch": 1,
+            "assignment_id": "assignment-late",
+            "assignment_digest": "sha256:" + "1" * 64,
+            "stage_pack_digest": "sha256:" + "2" * 64,
+            "graph_digest": "sha256:" + "3" * 64,
+            "load_generation": 1,
+        },
+    )
+    clock[0] = NOW + 301.0
+    with pytest.raises(NodeMembershipError) as expired:
+        session.accept_assignment_offer(offer)
+    assert expired.value.code == "membership_lease_expired"
 
 
 def test_link_probe_and_drain_ack_roundtrip_with_strict_recipients(tmp_path: Path) -> None:
