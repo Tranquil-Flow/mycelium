@@ -13,7 +13,7 @@ from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 
 class SeedStateError(RuntimeError):
@@ -94,6 +94,21 @@ class SqliteSeedState:
                     FOREIGN KEY (nonce) REFERENCES consumed_invites(nonce),
                     FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
                 ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS seed_heartbeat_renewals (
+                    node_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation >= 1),
+                    heartbeat_message_id TEXT NOT NULL,
+                    request_envelope_digest TEXT NOT NULL,
+                    heartbeat_sequence INTEGER NOT NULL
+                        CHECK (heartbeat_sequence >= 1),
+                    renewal_message_id TEXT NOT NULL UNIQUE,
+                    renewal_json TEXT NOT NULL,
+                    PRIMARY KEY (node_id, generation, heartbeat_message_id),
+                    FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (renewal_message_id)
+                        REFERENCES seed_emitted_messages(message_id)
+                ) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS seed_assignments (
                     assignment_id TEXT PRIMARY KEY NOT NULL,
                     node_id TEXT NOT NULL,
@@ -117,7 +132,7 @@ class SqliteSeedState:
                     "INSERT INTO seed_metadata (key, value) VALUES ('schema_version', ?)",
                     (str(_SCHEMA_VERSION),),
                 )
-            elif row["value"] == "1":
+            elif row["value"] in {"1", "2"}:
                 connection.execute(
                     "UPDATE seed_metadata SET value = ? WHERE key = 'schema_version'",
                     (str(_SCHEMA_VERSION),),
@@ -288,6 +303,240 @@ class SqliteSeedState:
         except SeedStateError:
             raise
         except sqlite3.Error as exc:
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def load_heartbeat_renewal(
+        self,
+        *,
+        node_id: str,
+        endpoint_id: str,
+        verification_key_digest: str,
+        incarnation: str,
+        generation: int,
+        heartbeat_message_id: str,
+        request_envelope_digest: str,
+    ) -> dict[str, Any] | None:
+        """Return an exact committed renewal for the current bound member."""
+
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT renewal.request_envelope_digest, renewal.renewal_json
+                FROM seed_heartbeat_renewals AS renewal
+                JOIN seed_members AS member
+                  ON member.node_id = renewal.node_id
+                 AND member.generation = renewal.generation
+                WHERE renewal.node_id = ? AND renewal.generation = ?
+                  AND renewal.heartbeat_message_id = ?
+                  AND member.endpoint_id = ?
+                  AND member.verification_key_digest = ?
+                  AND member.incarnation = ?
+                """,
+                (
+                    node_id,
+                    generation,
+                    heartbeat_message_id,
+                    endpoint_id,
+                    verification_key_digest,
+                    incarnation,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["request_envelope_digest"] != request_envelope_digest:
+                raise SeedStateError("seed_heartbeat_retry_mismatch")
+            return self._decode_acceptance(row["renewal_json"])
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def find_heartbeat_renewal(
+        self,
+        *,
+        node_id: str,
+        generation: int,
+        heartbeat_message_id: str,
+    ) -> dict[str, Any] | None:
+        """Recover a committed renewal by its accepted heartbeat identity."""
+
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT renewal.renewal_json
+                FROM seed_heartbeat_renewals AS renewal
+                JOIN seed_members AS member
+                  ON member.node_id = renewal.node_id
+                 AND member.generation = renewal.generation
+                WHERE renewal.node_id = ? AND renewal.generation = ?
+                  AND renewal.heartbeat_message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone()
+            return (
+                None
+                if row is None
+                else self._decode_acceptance(row["renewal_json"])
+            )
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def commit_heartbeat_renewal(
+        self,
+        *,
+        request_envelope_digest: str,
+        heartbeat_message_id: str,
+        heartbeat_sequence: int,
+        heartbeat_expires_at: float,
+        renewal_message_id: str,
+        member: Mapping[str, Any],
+        renewal: Mapping[str, Any],
+        now: float,
+        capacity: int,
+    ) -> dict[str, Any]:
+        """Atomically accept one heartbeat and persist its exact signed response."""
+
+        renewal_json = canonical_json_bytes(dict(renewal)).decode("utf-8")
+        node_id = member["node_id"]
+        generation = int(member["generation"])
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """
+                SELECT endpoint_id, verification_key_digest, incarnation,
+                       generation, last_heartbeat_sequence
+                FROM seed_members WHERE node_id = ?
+                """,
+                (node_id,),
+            ).fetchone()
+            if (
+                current is None
+                or current["endpoint_id"] != member["endpoint_id"]
+                or current["verification_key_digest"]
+                != member["verification_key_digest"]
+                or current["incarnation"] != member["incarnation"]
+                or int(current["generation"]) != generation
+            ):
+                raise SeedStateError("seed_state_member_stale")
+
+            existing = connection.execute(
+                """
+                SELECT request_envelope_digest, renewal_json
+                FROM seed_heartbeat_renewals
+                WHERE node_id = ? AND generation = ?
+                  AND heartbeat_message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone()
+            if existing is not None:
+                if existing["request_envelope_digest"] != request_envelope_digest:
+                    raise SeedStateError("seed_heartbeat_retry_mismatch")
+                connection.commit()
+                return self._decode_acceptance(existing["renewal_json"])
+            if heartbeat_sequence <= int(current["last_heartbeat_sequence"]):
+                raise SeedStateError("seed_state_member_conflict")
+
+            connection.execute(
+                "DELETE FROM seed_replay WHERE expires_at < ?",
+                (now,),
+            )
+            if connection.execute(
+                """
+                SELECT 1 FROM seed_replay
+                WHERE node_id = ? AND generation = ? AND message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone() is not None:
+                raise SeedStateError("seed_message_replayed")
+            count = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM seed_replay
+                WHERE node_id = ? AND generation = ?
+                """,
+                (node_id, generation),
+            ).fetchone()["count"]
+            if int(count) >= capacity:
+                raise SeedStateError("seed_replay_window_full")
+            if connection.execute(
+                "SELECT 1 FROM seed_emitted_messages WHERE message_id = ?",
+                (renewal_message_id,),
+            ).fetchone() is not None:
+                raise SeedStateError("seed_message_id_reused")
+
+            connection.execute(
+                """
+                INSERT INTO seed_replay (
+                    node_id, generation, message_id, expires_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    node_id,
+                    generation,
+                    heartbeat_message_id,
+                    heartbeat_expires_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO seed_emitted_messages (message_id) VALUES (?)",
+                (renewal_message_id,),
+            )
+            cursor = connection.execute(
+                """
+                UPDATE seed_members SET
+                    lease_expires_at = ?, last_heartbeat_sequence = ?
+                WHERE node_id = ? AND endpoint_id = ?
+                  AND verification_key_digest = ? AND incarnation = ?
+                  AND generation = ? AND last_heartbeat_sequence < ?
+                """,
+                (
+                    member["lease_expires_at"],
+                    heartbeat_sequence,
+                    node_id,
+                    member["endpoint_id"],
+                    member["verification_key_digest"],
+                    member["incarnation"],
+                    generation,
+                    heartbeat_sequence,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise SeedStateError("seed_state_member_conflict")
+            connection.execute(
+                """
+                INSERT INTO seed_heartbeat_renewals (
+                    node_id, generation, heartbeat_message_id,
+                    request_envelope_digest, heartbeat_sequence,
+                    renewal_message_id, renewal_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    node_id,
+                    generation,
+                    heartbeat_message_id,
+                    request_envelope_digest,
+                    heartbeat_sequence,
+                    renewal_message_id,
+                    renewal_json,
+                ),
+            )
+            connection.commit()
+            return dict(renewal)
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except sqlite3.Error as exc:
+            connection.rollback()
             raise SeedStateError("seed_state_unavailable") from exc
         finally:
             connection.close()
