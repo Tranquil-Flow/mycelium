@@ -1,20 +1,20 @@
 from __future__ import annotations
 
 from builtins import BaseExceptionGroup, ExceptionGroup
-from contextlib import contextmanager
 from dataclasses import asdict
 import hashlib
 from itertools import count
 import json
 import os
 from pathlib import Path
-import shlex
-import shutil
 import signal
 import subprocess
+import sys
 import tempfile
+import threading
 import time
-from typing import Any, Iterator
+from typing import Any
+from unittest.mock import Mock
 import uuid
 
 import mlx.core as mx
@@ -42,10 +42,13 @@ from tests.physical_qualification.test_node_service import (
     SIDECAR_BINARY,
     _NodeClient,
 )
+from tests.seed_coordinator import native_process_harness as harness
 
 
 NOW = 7_000.0
 NODE_IDS = ("node-local-a", "node-local-b")
+WORKTREE_ROOT = Path(__file__).resolve().parents[2]
+NODE_SCRIPT = WORKTREE_ROOT / "physical_inference_node.py"
 MAC_RUNTIME_CAPABILITY = {
     "runtime_backend": "mlx",
     "transport": "iroh",
@@ -150,356 +153,335 @@ def _inference_request(request_id: str) -> dict[str, Any]:
     }
 
 
+class _IsolatedNodeClient(_NodeClient):
+    def __init__(
+        self,
+        *,
+        node_id: str,
+        run_id: str,
+        deployment_id: str,
+        artifact_root: Path,
+        socket_root: Path,
+        owned_groups: dict[str, harness.OwnedGroup],
+    ) -> None:
+        self.node_id = node_id
+        self.run_id = run_id
+        self.deployment_id = deployment_id
+        self.next_id = 1
+        executable = Path(sys.executable).resolve(strict=True)
+        self.process = subprocess.Popen(
+            [
+                str(executable),
+                str(NODE_SCRIPT),
+                "--run-id",
+                run_id,
+                "--deployment-id",
+                deployment_id,
+                "--node-id",
+                node_id,
+                "--artifact-root",
+                str(artifact_root),
+                "--socket-root",
+                str(socket_root),
+                "--sidecar-binary",
+                str(SIDECAR_BINARY),
+                "--sidecar-local-only",
+                "--command-timeout",
+                "30",
+            ],
+            cwd=WORKTREE_ROOT,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        pid = self.process.pid
+        owner = harness.OwnedGroup(
+            node_id,
+            self.process,
+            pid,
+            pid,
+            pid,
+            executable,
+            WORKTREE_ROOT,
+            None,
+        )
+        owned_groups[node_id] = owner
+        assert os.getpgid(pid) == pid and os.getsid(pid) == pid
+        leader = harness.process_inventory().get(pid)
+        assert leader is not None and leader.ppid == os.getpid() and leader.pgid == pid
+        owned_groups[node_id] = owner._replace(leader=leader)
+
+    def stop(self) -> None:
+        if self.process.poll() is None:
+            self.command("stop")
+            self.process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT)
+
+
 def _native_sidecar_pid(
-    service_pid: int,
+    owner: harness.OwnedGroup,
     *,
     discovered_pids: set[int],
     expected_binary: Path = SIDECAR_BINARY,
 ) -> int:
-    result = subprocess.run(
-        ["ps", "-axo", "pid=,ppid=,comm="],
-        check=True,
-        capture_output=True,
-        text=True,
+    children = [
+        process
+        for process in harness.process_inventory().values()
+        if process.ppid == owner.pid
+    ]
+    discovered_pids.update(process.pid for process in children)
+    assert len(children) == 1, (
+        f"service process {owner.pid} has unexpected children "
+        f"{sorted(process.pid for process in children)}"
     )
-    child_processes: dict[int, str] = {}
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=2)
-        if len(fields) == 3 and int(fields[1]) == service_pid:
-            child_processes[int(fields[0])] = fields[2]
-    discovered_pids.update(child_processes)
-    assert len(child_processes) == 1, (
-        f"service process {service_pid} has unexpected children "
-        f"{sorted(child_processes)}"
+    child = children[0]
+    assert type(child.pid) is int and child.pid > 1
+    assert child.pgid == os.getpgid(child.pid) == owner.pgid
+    assert os.getsid(child.pid) == owner.sid
+    assert harness.same_canonical_file(child.comm, expected_binary), (
+        f"service process {owner.pid} child {child.pid} has unexpected "
+        f"executable {child.comm}; expected {expected_binary.resolve(strict=True)}"
     )
-    sidecar_pid, executable = next(iter(child_processes.items()))
-    actual_binary = Path(executable).resolve(strict=True)
-    exact_binary = expected_binary.resolve(strict=True)
-    assert actual_binary == exact_binary and os.path.samefile(
-        actual_binary, exact_binary
-    ), (
-        f"service process {service_pid} child {sidecar_pid} has unexpected "
-        f"executable {actual_binary}; expected {exact_binary}"
-    )
-    return sidecar_pid
+    return child.pid
 
 
-def _pid_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    return True
-
-
-def _pids_still_running(pids: set[int], *, timeout: float) -> set[int]:
-    deadline = time.monotonic() + timeout
-    remaining = {pid for pid in pids if _pid_exists(pid)}
-    while remaining and time.monotonic() < deadline:
-        time.sleep(0.02)
-        remaining = {pid for pid in remaining if _pid_exists(pid)}
-    return remaining
-
-
-def _scoped_process_pids(
-    service_pids: set[int],
+def _fake_owner(
+    pid: int,
     *,
-    socket_root: Path,
-    expected_sidecar: Path = SIDECAR_BINARY,
-) -> set[int]:
-    result = subprocess.run(
-        ["ps", "-axo", "pid=,ppid=,args="],
-        check=True,
-        capture_output=True,
-        text=True,
+    process: Any | None = None,
+    worktree: Path = WORKTREE_ROOT,
+    started: str | None = "Thu Jul 23 21:00:00 2026",
+) -> harness.OwnedGroup:
+    executable = Path(sys.executable).resolve(strict=True)
+    if process is None:
+        process = Mock(pid=pid, stdin=None, stdout=None, stderr=None)
+        process.poll.return_value = None
+    leader = (
+        None
+        if started is None
+        else harness.ProcessRecord(pid, 2, pid, started, str(executable))
     )
-    processes: dict[int, tuple[int, str]] = {}
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=2)
-        if len(fields) != 3:
-            continue
-        try:
-            processes[int(fields[0])] = (int(fields[1]), fields[2])
-        except ValueError:
-            continue
-
-    scoped = set(service_pids)
-    while True:
-        descendants = {
-            pid for pid, (parent_pid, _) in processes.items() if parent_pid in scoped
-        }
-        expanded = scoped | descendants
-        if expanded == scoped:
-            break
-        scoped = expanded
-
-    resolved_socket_root = socket_root.resolve(strict=False)
-    resolved_sidecar = expected_sidecar.resolve(strict=True)
-    for pid, (_, command) in processes.items():
-        try:
-            arguments = shlex.split(command)
-        except ValueError:
-            continue
-        if not arguments or "--uds" not in arguments:
-            continue
-        try:
-            executable = Path(arguments[0]).resolve(strict=True)
-            socket_path = Path(arguments[arguments.index("--uds") + 1]).resolve(
-                strict=False
-            )
-            socket_path.relative_to(resolved_socket_root)
-        except (FileNotFoundError, IndexError, ValueError):
-            continue
-        if executable == resolved_sidecar and os.path.samefile(
-            executable, resolved_sidecar
-        ):
-            scoped.add(pid)
-    return scoped
+    return harness.OwnedGroup(
+        f"node-{pid}",
+        process,  # type: ignore[arg-type]
+        pid,
+        pid,
+        pid,
+        executable,
+        worktree,
+        leader,
+    )
 
 
-def _signal_processes(
-    pids: set[int], process_signal: signal.Signals
-) -> list[Exception]:
-    errors: list[Exception] = []
-    for pid in sorted(pids):
-        if pid == os.getpid():
-            errors.append(AssertionError("cleanup refused to signal its own process"))
-            continue
-        try:
-            os.kill(pid, process_signal)
-        except ProcessLookupError:
-            continue
-        except OSError as error:
-            errors.append(error)
-    return errors
+def _exception_leaves(error: BaseException) -> list[BaseException]:
+    if isinstance(error, BaseExceptionGroup):
+        return [
+            leaf for nested in error.exceptions for leaf in _exception_leaves(nested)
+        ]
+    return [error]
 
 
-def _cleanup_node_processes(
-    node_processes: dict[str, _NodeClient],
-    *,
-    discovered_child_pids: set[int],
-    socket_root: Path,
+def test_sidecar_observation_requires_exact_child_and_owned_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    cleanup_errors: list[BaseException] = []
-    service_pids = {
-        process.process.pid
-        for process in node_processes.values()
-        if process.process.pid is not None
-    }
-    tracked_pids = service_pids | set(discovered_child_pids)
-    try:
-        tracked_pids.update(_scoped_process_pids(service_pids, socket_root=socket_root))
-    except BaseException as error:
-        cleanup_errors.append(error)
-
-    for process in node_processes.values():
-        try:
-            process.stop()
-        except BaseException as error:
-            cleanup_errors.append(error)
-
-    try:
-        shutil.rmtree(socket_root)
-    except FileNotFoundError:
-        pass
-    except BaseException as error:
-        cleanup_errors.append(error)
-
-    try:
-        tracked_pids.update(_scoped_process_pids(service_pids, socket_root=socket_root))
-    except BaseException as error:
-        cleanup_errors.append(error)
-
-    remaining = _pids_still_running(tracked_pids, timeout=2.0)
-    if remaining:
-        cleanup_errors.extend(_signal_processes(remaining, signal.SIGTERM))
-        for process in node_processes.values():
-            if process.process.pid in remaining:
-                try:
-                    process.process.wait(timeout=2.0)
-                except (subprocess.TimeoutExpired, ChildProcessError):
-                    pass
-        remaining = _pids_still_running(remaining, timeout=2.0)
-    if remaining:
-        cleanup_errors.extend(_signal_processes(remaining, signal.SIGKILL))
-        for process in node_processes.values():
-            if process.process.pid in remaining:
-                try:
-                    process.process.wait(timeout=2.0)
-                except (subprocess.TimeoutExpired, ChildProcessError) as error:
-                    cleanup_errors.append(error)
-        remaining = _pids_still_running(remaining, timeout=2.0)
-
-    for process in node_processes.values():
-        for stream in (
-            getattr(process.process, "stdin", None),
-            getattr(process.process, "stdout", None),
-            getattr(process.process, "stderr", None),
-        ):
-            if stream is not None and not stream.closed:
-                try:
-                    stream.close()
-                except BaseException as error:
-                    cleanup_errors.append(error)
-
-    try:
-        final_scope = _scoped_process_pids(service_pids, socket_root=socket_root)
-    except BaseException as error:
-        cleanup_errors.append(error)
-        final_scope = set()
-    leaked_pids = _pids_still_running(
-        tracked_pids | final_scope | remaining,
-        timeout=1.0,
+    expected, spoof = (tmp_path / name / SIDECAR_BINARY.name for name in ("ok", "bad"))
+    for path in (expected, spoof):
+        path.parent.mkdir()
+        path.write_bytes(path.parent.name.encode())
+    owner, child_pid = _fake_owner(4_242, started=None), 9_001
+    records = iter(
+        harness.ProcessRecord(child_pid, owner.pid, owner.pgid, "start", str(path))
+        for path in (spoof, expected)
     )
-    if leaked_pids:
-        cleanup_errors.append(
-            AssertionError(f"scoped service/sidecar processes leaked: {leaked_pids}")
-        )
-    if cleanup_errors:
-        raise BaseExceptionGroup("native-Iroh process cleanup failed", cleanup_errors)
-
-
-@contextmanager
-def _node_process_cleanup(
-    node_processes: dict[str, _NodeClient],
-    *,
-    discovered_child_pids: set[int],
-    socket_root: Path,
-) -> Iterator[None]:
-    body_error: BaseException | None = None
-    body_traceback = None
-    try:
-        yield
-    except BaseException as error:
-        body_error = error
-        body_traceback = error.__traceback__
-
-    cleanup_error: BaseException | None = None
-    try:
-        _cleanup_node_processes(
-            node_processes,
-            discovered_child_pids=discovered_child_pids,
-            socket_root=socket_root,
-        )
-    except BaseException as error:
-        cleanup_error = error
-
-    if body_error is not None and cleanup_error is not None:
-        raise BaseExceptionGroup(
-            "test body and native-Iroh cleanup both failed",
-            [body_error, cleanup_error],
-        )
-    if body_error is not None:
-        raise body_error.with_traceback(body_traceback)
-    if cleanup_error is not None:
-        raise cleanup_error
-
-
-def test_native_sidecar_pid_rejects_same_basename_and_tracks_child(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    expected_binary = tmp_path / "built" / SIDECAR_BINARY.name
-    spoof_binary = tmp_path / "untrusted" / SIDECAR_BINARY.name
-    expected_binary.parent.mkdir()
-    spoof_binary.parent.mkdir()
-    expected_binary.write_bytes(b"expected")
-    spoof_binary.write_bytes(b"spoof")
-    discovered_pids: set[int] = set()
-    service_pid = 4_242
-    child_pid = 9_001
     monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=args,
-            returncode=0,
-            stdout=f"{child_pid} {service_pid} {spoof_binary}\n",
-        ),
+        harness,
+        "process_inventory",
+        lambda: {child_pid: next(records)},
     )
-
+    monkeypatch.setattr(os, "getpgid", lambda pid: owner.pgid)
+    monkeypatch.setattr(os, "getsid", lambda pid: owner.sid)
+    discovered: set[int] = set()
     with pytest.raises(AssertionError, match="unexpected executable"):
-        _native_sidecar_pid(
-            service_pid,
-            discovered_pids=discovered_pids,
-            expected_binary=expected_binary,
-        )
-    assert discovered_pids == {child_pid}
+        _native_sidecar_pid(owner, discovered_pids=discovered, expected_binary=expected)
+    assert (
+        _native_sidecar_pid(owner, discovered_pids=discovered, expected_binary=expected)
+        == child_pid
+    )
+    assert discovered == {child_pid}
 
 
-def test_cleanup_preserves_body_and_stop_failures_and_continues(
+@pytest.mark.parametrize("requested", [signal.SIGTERM, signal.SIGKILL])
+def test_group_signal_accepts_only_exact_immutable_ownership(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    requested: signal.Signals,
 ) -> None:
-    class BodyFailure(RuntimeError):
-        pass
-
-    class StopFailure(RuntimeError):
-        pass
-
-    class FakeProcess:
-        def __init__(self, pid: int) -> None:
-            self.pid = pid
-            self.returncode: int | None = None
-
-        def wait(self, timeout: float) -> int:
-            del timeout
-            self.returncode = 0
-            return 0
-
-    class FakeClient:
-        def __init__(self, node_id: str, pid: int) -> None:
-            self.node_id = node_id
-            self.process = FakeProcess(pid)
-
-        def stop(self) -> None:
-            stop_calls.append(self.node_id)
-            if self.node_id == NODE_IDS[0]:
-                raise StopFailure("injected first-stop failure")
-            self.process.returncode = 0
-
-    stop_calls: list[str] = []
-    leak_checks: list[set[int]] = []
-    node_processes = {
-        node_id: FakeClient(node_id, 8_100 + index)
-        for index, node_id in enumerate(NODE_IDS)
+    exact, reused = _fake_owner(9_101), _fake_owner(9_104)
+    exited_process = Mock(pid=9_105)
+    exited_process.poll.return_value = 0
+    exited = _fake_owner(9_105, process=exited_process)
+    descendant = harness.ProcessRecord(
+        9_106, exited.pid, exited.pgid, "child", "sidecar"
+    )
+    foreign_root = tmp_path / "foreign"
+    foreign_root.mkdir()
+    inventory = {
+        exact.pid: exact.leader,
+        reused.pid: harness.ProcessRecord(
+            reused.pid, 2, reused.pgid, "changed start", str(reused.executable)
+        ),
+        descendant.pid: descendant,
     }
-    socket_root = tmp_path / "socket-root"
-    socket_root.mkdir()
-    (socket_root / "i.sock").write_text("socket-placeholder")
-    expected_pids = {client.process.pid for client in node_processes.values()} | {8_200}
-
     monkeypatch.setattr(
-        __name__ + "._scoped_process_pids",
-        lambda service_pids, *, socket_root: set(service_pids) | {8_200},
+        harness,
+        "process_inventory",
+        lambda: {pid: item for pid, item in inventory.items() if item is not None},
     )
 
-    def no_leaks(pids: set[int], *, timeout: float) -> set[int]:
-        del timeout
-        leak_checks.append(set(pids))
-        return set()
+    def group_id(pid: int) -> int:
+        return exited.pgid if pid == descendant.pid else pid
 
-    monkeypatch.setattr(__name__ + "._pids_still_running", no_leaks)
+    monkeypatch.setattr(os, "getpgid", group_id)
+    monkeypatch.setattr(os, "getsid", group_id)
+    monkeypatch.setattr(
+        os, "kill", lambda *a: (_ for _ in ()).throw(AssertionError("raw PID"))
+    )
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    errors, uncertain = harness.signal_owned_groups(
+        [
+            _fake_owner(os.getpgrp()),
+            _fake_owner(1),
+            _fake_owner(9_103, worktree=foreign_root),
+            reused,
+            exited,
+            exact,
+        ],
+        requested,
+    )
+    assert not uncertain and len(errors) == 4
+    assert signals == [(exited.pgid, requested), (exact.pgid, requested)]
 
-    with pytest.raises(ExceptionGroup) as grouped:
-        with _node_process_cleanup(
-            node_processes,  # type: ignore[arg-type]
-            discovered_child_pids={8_200},
-            socket_root=socket_root,
+
+def test_ps_failure_falls_back_only_to_recorded_live_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _fake_owner(9_201, started=None)
+    monkeypatch.setattr(
+        harness,
+        "process_inventory",
+        lambda: (_ for _ in ()).throw(RuntimeError("ps failed")),
+    )
+    real_getpgid = os.getpgid
+    monkeypatch.setattr(
+        os,
+        "getpgid",
+        lambda pid: owner.pgid if pid == owner.pid else real_getpgid(pid),
+    )
+    monkeypatch.setattr(os, "getsid", lambda pid: owner.sid)
+    signals: list[int] = []
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append(pgid))
+    errors, uncertain = harness.signal_owned_groups([owner], signal.SIGTERM)
+    assert uncertain and signals == [owner.pgid]
+    assert [str(error) for error in errors] == ["ps failed"]
+
+
+def test_cleanup_reraises_lone_body_with_original_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failure = RuntimeError("lone body")
+    monkeypatch.setattr(harness, "cleanup_node_processes", lambda *a, **k: None)
+
+    def invoke() -> None:
+        with harness.node_process_cleanup(
+            {}, owned_groups={}, known_pids=set(), socket_root=tmp_path
         ):
-            raise BodyFailure("injected body failure")
+            raise failure
 
-    flattened = list(grouped.value.exceptions)
-    assert isinstance(flattened[0], BodyFailure)
-    assert any(
-        isinstance(error, StopFailure)
-        for group in flattened[1:]
-        for error in getattr(group, "exceptions", (group,))
+    with pytest.raises(RuntimeError) as raised:
+        invoke()
+    names, traceback = [], raised.value.__traceback__
+    while traceback is not None:
+        names.append(traceback.tb_frame.f_code.co_name)
+        traceback = traceback.tb_next
+    assert raised.value is failure and "invoke" in names
+
+
+def test_cleanup_accumulates_every_phase_failure_and_bounds_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger: list[str] = []
+
+    def fail(phase: str) -> None:
+        ledger.append(phase)
+        raise RuntimeError(phase)
+
+    processes = {node: Mock(pid=8_100 + index) for index, node in enumerate(NODE_IDS)}
+    clients = {node: Mock(node_id=node, process=processes[node]) for node in NODE_IDS}
+    clients[NODE_IDS[0]].stop.side_effect = threading.Event().wait
+    clients[NODE_IDS[1]].stop.side_effect = RuntimeError("stop")
+    for process in processes.values():
+        process.wait.side_effect = RuntimeError("wait")
+        for name in ("stdin", "stdout", "stderr"):
+            stream = Mock(closed=False)
+            stream.close.side_effect = RuntimeError("close")
+            setattr(process, name, stream)
+    owners = {
+        node: _fake_owner(process.pid, process=process, started=None)
+        for node, process in processes.items()
+    }
+    root = tmp_path / "myc-seed-e2e-faults"
+    root.mkdir()
+    for name in ("STOP_TIMEOUT", "STOP_REJOIN_TIMEOUT", "PROCESS_WAIT_TIMEOUT"):
+        monkeypatch.setattr(harness, name, 0.01)
+    monkeypatch.setattr(
+        harness,
+        "owned_inventory",
+        lambda groups, known_pids: fail("inventory"),
     )
-    assert stop_calls == list(NODE_IDS)
-    assert leak_checks
-    assert expected_pids <= set().union(*leak_checks)
-    assert not socket_root.exists()
+    monkeypatch.setattr(
+        harness,
+        "groups_still_present",
+        lambda groups, timeout: fail("poll"),
+    )
+    monkeypatch.setattr(
+        harness,
+        "signal_owned_groups",
+        lambda groups, sig: ([RuntimeError(f"signal:{sig.name}")], True),
+    )
+    monkeypatch.setattr(harness.shutil, "rmtree", lambda path: fail("remove"))
+    started = time.monotonic()
+    with pytest.raises(ExceptionGroup) as grouped:
+        with harness.node_process_cleanup(
+            clients,  # type: ignore[arg-type]
+            owned_groups=owners,
+            known_pids=set(),
+            socket_root=root,
+        ):
+            raise ValueError("body")
+    assert time.monotonic() - started < 0.5
+    leaves = _exception_leaves(grouped.value)
+    notes = {note for error in leaves for note in getattr(error, "__notes__", ())}
+    phases = (
+        "initial-inventory",
+        f"stop[{NODE_IDS[0]}]",
+        "signal[TERM]",
+        "wait[TERM]",
+        "poll[TERM]",
+        "signal[KILL]",
+        "wait[KILL]",
+        "poll[KILL]",
+        "close[",
+        "root-removal",
+        "final-inventory",
+        "stop-thread",
+        "inventory-proof",
+    )
+    assert isinstance(leaves[0], ValueError)
+    assert all(any(phase in note for note in notes) for phase in phases)
+    assert ledger.count("inventory") == ledger.count("poll") == 2
+    assert clients[NODE_IDS[1]].stop.called and root.exists()
 
 
 def test_seed_two_memberships_assign_and_run_native_iroh_inference(
@@ -557,7 +539,8 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     sessions: dict[str, NodeMembershipSession] = {}
     clients: dict[str, SeedHTTPClient] = {}
     invite_bundles: dict[str, dict[str, Any]] = {}
-    node_processes: dict[str, _NodeClient] = {}
+    node_processes: dict[str, _IsolatedNodeClient] = {}
+    owned_groups: dict[str, harness.OwnedGroup] = {}
     configured: dict[str, dict[str, Any]] = {}
     accepted_offers: dict[str, dict[str, Any]] = {}
     sidecar_pids: dict[str, int] = {}
@@ -566,21 +549,23 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     run_id = str(uuid.uuid4())
     seed_port: int | None = None
 
-    with _node_process_cleanup(
+    with harness.node_process_cleanup(
         node_processes,
-        discovered_child_pids=discovered_child_pids,
+        owned_groups=owned_groups,
+        known_pids=discovered_child_pids,
         socket_root=socket_root,
     ):
         for node_id, suffix in zip(NODE_IDS, ("a", "b"), strict=True):
-            node_processes[node_id] = _NodeClient(
+            node_processes[node_id] = _IsolatedNodeClient(
                 node_id=node_id,
                 run_id=run_id,
                 deployment_id=graph.deployment_id,
                 artifact_root=tmp_path,
                 socket_root=socket_root / suffix,
+                owned_groups=owned_groups,
             )
         for node_id, process in node_processes.items():
-            result = process.command(
+            response = process.raw_command(
                 "configure",
                 {
                     "assignment_file": f"{node_id}-assignment.json",
@@ -591,15 +576,25 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     "load_generation": 7,
                 },
             )
-            assert result["observation"]["event"] == "configured"
-            configured[node_id] = result["observation"]["details"]
             sidecar_pids[node_id] = _native_sidecar_pid(
-                process.process.pid,
+                owned_groups[node_id],
                 discovered_pids=discovered_child_pids,
             )
-        assert len(
-            {details["endpoint_addr"]["id"] for details in configured.values()}
-        ) == len(NODE_IDS)
+            assert response["ok"] is True
+            assert response["route_ready"] is False
+            result = response["result"]
+            assert result["observation"]["event"] == "configured"
+            configured[node_id] = result["observation"]["details"]
+        endpoint_ids = {
+            details["endpoint_addr"]["id"] for details in configured.values()
+        }
+        assert all(
+            isinstance(endpoint_id, str)
+            and endpoint_id
+            and endpoint_id == endpoint_id.strip()
+            for endpoint_id in endpoint_ids
+        )
+        assert len(endpoint_ids) == len(NODE_IDS)
 
         with SeedHTTPServer(coordinator, host="127.0.0.1", port=0) as seed_server:
             seed_port = int(seed_server.base_url.rsplit(":", 1)[1])
@@ -825,7 +820,16 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 process.process.pid for process in node_processes.values()
             }
             assert len(set(sidecar_pids.values())) == len(NODE_IDS)
-            service_pids = {process.process.pid for process in node_processes.values()}
+            service_pid_by_node = {
+                node_id: process.process.pid
+                for node_id, process in node_processes.items()
+            }
+            assert all(
+                type(service_pid) is int and service_pid > 1
+                for service_pid in service_pid_by_node.values()
+            )
+            service_pids = set(service_pid_by_node.values())
+            assert len(service_pids) == len(NODE_IDS)
             control_pid = os.getpid()
             assert len(
                 {
@@ -836,9 +840,14 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             ) == 1 + 2 * len(NODE_IDS)
             host_ids = {item["host_id"] for item in node_observations.values()}
             assert len(host_ids) == 1
+            shared_host_id = next(iter(host_ids))
+            assert (
+                isinstance(shared_host_id, str)
+                and shared_host_id
+                and shared_host_id == shared_host_id.strip()
+            )
 
             same_host_case = make_case()
-            shared_host_id = next(iter(host_ids))
             challenge = same_host_case.documents["run/route-challenge.json"]
             stages = challenge["stage_evidence"]
             signed_load_proofs = same_host_case.documents[
@@ -893,7 +902,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             gossip["signature"]["signed_statement_digest"] = sha256_bytes(
                 canonical_json_bytes(gossip["statement"])
             )
-            assert observed_qualifier_inputs == [
+            expected_qualifier_inputs = [
                 (
                     node_observations[node_id]["process_id"],
                     shared_host_id,
@@ -901,6 +910,14 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 )
                 for node_id in NODE_IDS
             ]
+            assert observed_qualifier_inputs == expected_qualifier_inputs
+            assert [
+                (
+                    signed["statement"]["process_host_id"],
+                    signed["statement"]["process_id"],
+                )
+                for signed in signed_load_proofs
+            ] == [(host, pid) for pid, host, _ in expected_qualifier_inputs]
             evidence_files, evidence_manifest = same_host_case.render()
             qualification_authority = QualificationAuthority(
                 clock_unix_ms=lambda: same_host_case.now_unix_ms
@@ -962,3 +979,43 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 join_envelope=replay_request,
             )
         assert replayed.value.code == "seed_join_retry_mismatch"
+
+    print(
+        json.dumps(
+            {
+                "authority_published": qualification_authority.current() is not None,
+                "boundaries": {
+                    "network": "localhost-only",
+                    "qualification_signatures": "synthetic",
+                    "route_ready": False,
+                    "sidecar_mode": "local-only",
+                },
+                "frame_deltas": {
+                    node_id: {"received": received, "sent": sent}
+                    for node_id, (sent, received) in request_frame_deltas.items()
+                },
+                "host_id": shared_host_id,
+                "nodes": {
+                    node_id: {
+                        "endpoint_id": configured[node_id]["endpoint_addr"]["id"],
+                        "service_pid": node_processes[node_id].process.pid,
+                        "sidecar_pid": sidecar_pids[node_id],
+                    }
+                    for node_id in NODE_IDS
+                },
+                "protocol": "mycelium.seed_native_iroh_e2e_evidence.v1",
+                "qualifier_error": unqualified.value.code,
+                "redacted": True,
+                "replay_error": replayed.value.code,
+                "request_id": request_id,
+                "sidecar_path": str(local_control_sidecar_binary.resolve(strict=True)),
+                "token_ids": {
+                    "distributed": decoded["output"]["token_ids"],
+                    "reference": expected_tokens,
+                },
+                "trace_deltas": request_trace_deltas,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
