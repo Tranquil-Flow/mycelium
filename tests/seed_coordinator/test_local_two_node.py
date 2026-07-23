@@ -1,8 +1,9 @@
 from __future__ import annotations
-
-from builtins import BaseExceptionGroup, ExceptionGroup
+import ast
+from builtins import BaseExceptionGroup
 from dataclasses import asdict
 import hashlib
+import inspect
 from itertools import count
 import json
 import os
@@ -12,14 +13,11 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from typing import Any
 from unittest.mock import Mock
 import uuid
-
 import mlx.core as mx
 import pytest
-
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.authority import QualificationAuthority
@@ -44,11 +42,11 @@ from tests.physical_qualification.test_node_service import (
 )
 from tests.seed_coordinator import native_process_harness as harness
 
-
 NOW = 7_000.0
 NODE_IDS = ("node-local-a", "node-local-b")
 WORKTREE_ROOT = Path(__file__).resolve().parents[2]
 NODE_SCRIPT = WORKTREE_ROOT / "physical_inference_node.py"
+SERVICE_EXECUTABLE = Path(sys.prefix, "Resources/Python.app/Contents/MacOS/Python")
 MAC_RUNTIME_CAPABILITY = {
     "runtime_backend": "mlx",
     "transport": "iroh",
@@ -63,6 +61,38 @@ def _ids(prefix: str):
 
 def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _redacted_evidence_json(
+    payload: dict[str, Any],
+    *,
+    raw_host_id: str,
+    sidecar_binary: Path,
+    raw_traces: dict[str, list[str]],
+) -> str:
+    repository = WORKTREE_ROOT.resolve(strict=True)
+    sidecar_path = sidecar_binary.resolve().relative_to(repository)
+    evidence = {
+        **payload,
+        "host_id_sha256": _digest(raw_host_id),
+        "sidecar_path": sidecar_path.as_posix(),
+        "trace_deltas": {
+            node_id: {
+                "entries": len(trace),
+                "remote_entries": sum(":remote" in entry for entry in trace),
+            }
+            for node_id, trace in raw_traces.items()
+        },
+    }
+    rendered = json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+    forbidden = {
+        raw_host_id,
+        str(sidecar_binary.resolve()),
+        str(repository),
+        str(Path.home()),
+    }
+    assert all(not value or value not in rendered for value in forbidden)
+    return rendered
 
 
 def _coordinator(
@@ -168,7 +198,7 @@ class _IsolatedNodeClient(_NodeClient):
         self.run_id = run_id
         self.deployment_id = deployment_id
         self.next_id = 1
-        executable = Path(sys.executable).resolve(strict=True)
+        executable = SERVICE_EXECUTABLE
         self.process = subprocess.Popen(
             [
                 str(executable),
@@ -196,22 +226,13 @@ class _IsolatedNodeClient(_NodeClient):
             text=True,
             start_new_session=True,
         )
-        pid = self.process.pid
-        owner = harness.OwnedGroup(
+        harness.register_owned_group(
+            owned_groups,
             node_id,
             self.process,
-            pid,
-            pid,
-            pid,
             executable,
-            WORKTREE_ROOT,
-            None,
+            worktree=WORKTREE_ROOT,
         )
-        owned_groups[node_id] = owner
-        assert os.getpgid(pid) == pid and os.getsid(pid) == pid
-        leader = harness.process_inventory().get(pid)
-        assert leader is not None and leader.ppid == os.getpid() and leader.pgid == pid
-        owned_groups[node_id] = owner._replace(leader=leader)
 
     def stop(self) -> None:
         if self.process.poll() is None:
@@ -253,24 +274,17 @@ def _fake_owner(
     worktree: Path = WORKTREE_ROOT,
     started: str | None = "Thu Jul 23 21:00:00 2026",
 ) -> harness.OwnedGroup:
-    executable = Path(sys.executable).resolve(strict=True)
+    executable = SERVICE_EXECUTABLE
     if process is None:
         process = Mock(pid=pid, stdin=None, stdout=None, stderr=None)
         process.poll.return_value = None
     leader = (
         None
         if started is None
-        else harness.ProcessRecord(pid, 2, pid, started, str(executable))
+        else harness.ProcessRecord(pid, os.getpid(), pid, started, str(executable))
     )
     return harness.OwnedGroup(
-        f"node-{pid}",
-        process,  # type: ignore[arg-type]
-        pid,
-        pid,
-        pid,
-        executable,
-        worktree,
-        leader,
+        f"node-{pid}", process, pid, pid, pid, executable, worktree, leader
     )
 
 
@@ -318,11 +332,13 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
     requested: signal.Signals,
 ) -> None:
     exact, reused = _fake_owner(9_101), _fake_owner(9_104)
-    exited_process = Mock(pid=9_105)
-    exited_process.poll.return_value = 0
-    exited = _fake_owner(9_105, process=exited_process)
+    exited_absent_process, exited_present_process = Mock(pid=9_105), Mock(pid=9_107)
+    exited_absent_process.poll.return_value = 0
+    exited_present_process.poll.return_value = 0
+    exited_absent = _fake_owner(9_105, process=exited_absent_process)
+    exited_present = _fake_owner(9_107, process=exited_present_process)
     descendant = harness.ProcessRecord(
-        9_106, exited.pid, exited.pgid, "child", "sidecar"
+        9_106, exited_absent.pid, exited_absent.pgid, "child", "sidecar"
     )
     foreign_root = tmp_path / "foreign"
     foreign_root.mkdir()
@@ -331,6 +347,7 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
         reused.pid: harness.ProcessRecord(
             reused.pid, 2, reused.pgid, "changed start", str(reused.executable)
         ),
+        exited_present.pid: exited_present.leader,
         descendant.pid: descendant,
     }
     monkeypatch.setattr(
@@ -340,7 +357,7 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
     )
 
     def group_id(pid: int) -> int:
-        return exited.pgid if pid == descendant.pid else pid
+        return exited_absent.pgid if pid == descendant.pid else pid
 
     monkeypatch.setattr(os, "getpgid", group_id)
     monkeypatch.setattr(os, "getsid", group_id)
@@ -355,152 +372,233 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
             _fake_owner(1),
             _fake_owner(9_103, worktree=foreign_root),
             reused,
-            exited,
+            exited_absent,
+            exited_present,
             exact,
         ],
         requested,
     )
-    assert not uncertain and len(errors) == 4
-    assert signals == [(exited.pgid, requested), (exact.pgid, requested)]
-
-
-def test_ps_failure_falls_back_only_to_recorded_live_group(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    owner = _fake_owner(9_201, started=None)
+    assert uncertain and len(errors) == 6
+    assert signals == [(exact.pgid, requested)]
     monkeypatch.setattr(
         harness,
         "process_inventory",
         lambda: (_ for _ in ()).throw(RuntimeError("ps failed")),
     )
-    real_getpgid = os.getpgid
-    monkeypatch.setattr(
-        os,
-        "getpgid",
-        lambda pid: owner.pgid if pid == owner.pid else real_getpgid(pid),
-    )
-    monkeypatch.setattr(os, "getsid", lambda pid: owner.sid)
-    signals: list[int] = []
-    monkeypatch.setattr(os, "killpg", lambda pgid, sig: signals.append(pgid))
-    errors, uncertain = harness.signal_owned_groups([owner], signal.SIGTERM)
-    assert uncertain and signals == [owner.pgid]
+    signals.clear()
+    errors, uncertain = harness.signal_owned_groups([exact], requested)
+    assert uncertain and signals == [(exact.pgid, requested)]
     assert [str(error) for error in errors] == ["ps failed"]
 
 
-def test_cleanup_reraises_lone_body_with_original_traceback(
+def test_owner_registration_requires_live_exact_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    failure = RuntimeError("lone body")
-    monkeypatch.setattr(harness, "cleanup_node_processes", lambda *a, **k: None)
+    pid = 9_151
+    process = Mock(pid=pid, **{"poll.return_value": None})
+    expected = SERVICE_EXECUTABLE
+    spoof = tmp_path / expected.name
+    spoof.write_bytes(b"spoof")
+    row = harness.ProcessRecord(pid, os.getpid(), pid, "start", str(spoof))
+    inventory = {pid: row}
+    monkeypatch.setattr(harness, "process_inventory", lambda: inventory)
+    real_getpgid = os.getpgid
 
-    def invoke() -> None:
-        with harness.node_process_cleanup(
-            {}, owned_groups={}, known_pids=set(), socket_root=tmp_path
-        ):
-            raise failure
+    def getpgid(candidate: int) -> int:
+        return pid if candidate == pid else real_getpgid(candidate)
 
-    with pytest.raises(RuntimeError) as raised:
-        invoke()
-    names, traceback = [], raised.value.__traceback__
-    while traceback is not None:
-        names.append(traceback.tb_frame.f_code.co_name)
-        traceback = traceback.tb_next
-    assert raised.value is failure and "invoke" in names
+    monkeypatch.setattr(os, "getpgid", getpgid)
+    monkeypatch.setattr(os, "getsid", lambda candidate: pid)
+    owners: dict[str, harness.OwnedGroup] = {}
+    with pytest.raises(AssertionError, match="executable"):
+        harness.register_owned_group(owners, "node", process, expected)
+    assert owners["node"].leader is None
+    inventory[pid] = row._replace(comm=str(expected))
+    process.poll.return_value = 0
+    with pytest.raises(AssertionError, match="live"):
+        harness.register_owned_group(owners, "node", process, expected)
+    process.poll.return_value = None
+    owner = harness.register_owned_group(owners, "node", process, expected)
+    assert owner.leader == inventory[pid] and owners == {"node": owner}
 
 
-def test_cleanup_accumulates_every_phase_failure_and_bounds_stop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_cleanup_guards_thread_baseexceptions_and_final_drains(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    real_thread = threading.Thread
+    constructed = count()
+
+    class FaultThread(real_thread):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.fault_index = next(constructed)
+            self.join_faulted = False
+
+        def start(self) -> None:
+            if self.fault_index == 0:
+                raise GeneratorExit("start fault")
+            super().start()
+
+        def join(self, timeout: float | None = None) -> None:
+            if not self.join_faulted:
+                self.join_faulted = True
+                raise GeneratorExit("join fault")
+            super().join(timeout)
+
+    monkeypatch.setattr(harness.threading, "Thread", FaultThread)
     ledger: list[str] = []
+    late_release = threading.Event()
+    before_threads = set(threading.enumerate())
+    processes = {node: Mock(pid=8_200 + index) for index, node in enumerate(NODE_IDS)}
+    clients = {node: Mock(process=processes[node]) for node in NODE_IDS}
 
-    def fail(phase: str) -> None:
-        ledger.append(phase)
-        raise RuntimeError(phase)
+    def late_stop() -> None:
+        late_release.wait()
+        raise RuntimeError("late stop")
 
-    processes = {node: Mock(pid=8_100 + index) for index, node in enumerate(NODE_IDS)}
-    clients = {node: Mock(node_id=node, process=processes[node]) for node in NODE_IDS}
-    clients[NODE_IDS[0]].stop.side_effect = threading.Event().wait
-    clients[NODE_IDS[1]].stop.side_effect = RuntimeError("stop")
-    for process in processes.values():
-        process.wait.side_effect = RuntimeError("wait")
-        for name in ("stdin", "stdout", "stderr"):
-            stream = Mock(closed=False)
-            stream.close.side_effect = RuntimeError("close")
-            setattr(process, name, stream)
+    clients[NODE_IDS[1]].stop.side_effect = late_stop
     owners = {
         node: _fake_owner(process.pid, process=process, started=None)
         for node, process in processes.items()
     }
-    root = tmp_path / "myc-seed-e2e-faults"
-    root.mkdir()
-    for name in ("STOP_TIMEOUT", "STOP_REJOIN_TIMEOUT", "PROCESS_WAIT_TIMEOUT"):
-        monkeypatch.setattr(harness, name, 0.01)
-    monkeypatch.setattr(
-        harness,
-        "owned_inventory",
-        lambda groups, known_pids: fail("inventory"),
-    )
+    for process in processes.values():
+        process.poll.return_value = None
+        process.wait.side_effect = lambda timeout: ledger.append("wait")
+        process.stdin = process.stdout = process.stderr = Mock(closed=False)
+
+    def inventory(groups: Any, known_pids: Any):
+        ledger.append("inventory")
+        if ledger.count("inventory") == 2:
+            late_release.set()
+            return {owners[NODE_IDS[1]].pgid: [processes[NODE_IDS[1]].pid]}, []
+        return {}, []
+
+    def signal_groups(groups: Any, requested: signal.Signals):
+        ledger.append(f"signal:{requested.name}")
+        return [], False
+
+    monkeypatch.setattr(harness, "owned_inventory", inventory)
+    monkeypatch.setattr(harness, "signal_owned_groups", signal_groups)
     monkeypatch.setattr(
         harness,
         "groups_still_present",
-        lambda groups, timeout: fail("poll"),
+        lambda groups, timeout: ledger.append("poll") or groups,
     )
-    monkeypatch.setattr(
-        harness,
-        "signal_owned_groups",
-        lambda groups, sig: ([RuntimeError(f"signal:{sig.name}")], True),
-    )
-    monkeypatch.setattr(harness.shutil, "rmtree", lambda path: fail("remove"))
-    started = time.monotonic()
-    with pytest.raises(ExceptionGroup) as grouped:
-        with harness.node_process_cleanup(
-            clients,  # type: ignore[arg-type]
-            owned_groups=owners,
-            known_pids=set(),
-            socket_root=root,
-        ):
-            raise ValueError("body")
-    assert time.monotonic() - started < 0.5
+    for name in ("STOP_TIMEOUT", "STOP_REJOIN_TIMEOUT", "PROCESS_WAIT_TIMEOUT"):
+        monkeypatch.setattr(harness, name, 0.01)
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    try:
+        with pytest.raises(BaseExceptionGroup) as grouped:
+            with harness.node_process_cleanup(
+                clients,
+                owned_groups=owners,
+                known_pids=set(),
+                socket_root=root,
+            ):
+                raise ValueError("body")
+        cleanup_removed_root = not root.exists()
+    finally:
+        late_release.set()
+        for thread in set(threading.enumerate()) - before_threads:
+            thread.join(0.2)
+        if root.exists():
+            harness.shutil.rmtree(root)
     leaves = _exception_leaves(grouped.value)
+    assert {"body", "start fault", "join fault", "late stop"} <= {
+        str(error) for error in leaves
+    }
+    assert [ledger.count(item) for item in ("inventory", "poll", "wait")] == [2, 2, 4]
+    assert ledger.count("signal:SIGTERM") == ledger.count("signal:SIGKILL") == 1
+    assert cleanup_removed_root
     notes = {note for error in leaves for note in getattr(error, "__notes__", ())}
-    phases = (
-        "initial-inventory",
-        f"stop[{NODE_IDS[0]}]",
-        "signal[TERM]",
-        "wait[TERM]",
-        "poll[TERM]",
-        "signal[KILL]",
-        "wait[KILL]",
-        "poll[KILL]",
-        "close[",
-        "root-removal",
-        "final-inventory",
-        "stop-thread",
-        "inventory-proof",
+    assert all(any(phase in note for note in notes) for phase in ("close-skip", "leak"))
+    assert all(
+        not getattr(process, name).close.called
+        for process in processes.values()
+        for name in ("stdin", "stdout", "stderr")
     )
-    assert isinstance(leaves[0], ValueError)
-    assert all(any(phase in note for note in notes) for phase in phases)
-    assert ledger.count("inventory") == ledger.count("poll") == 2
-    assert clients[NODE_IDS[1]].stop.called and root.exists()
+    assert not any(
+        thread.name.startswith("native-iroh-cleanup-")
+        for thread in threading.enumerate()
+    )
+
+
+def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> None:
+    valid = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    harness.remove_temp_root(harness.capture_temp_root(valid))
+    assert not valid.exists()
+    wrong_parent = tmp_path / f"{harness.TEMP_ROOT_PREFIX}wrong-parent"
+    wrong_parent.mkdir()
+    with pytest.raises(AssertionError):
+        harness.remove_temp_root(harness.capture_temp_root(wrong_parent))
+    assert wrong_parent.is_dir()
+    target = tmp_path / "symlink-target"
+    target.mkdir()
+    (target / "keep").write_text("safe")
+    link = Path(tempfile.gettempdir()) / f"{harness.TEMP_ROOT_PREFIX}{uuid.uuid4()}"
+    link.symlink_to(target, target_is_directory=True)
+    try:
+        with pytest.raises(AssertionError):
+            harness.remove_temp_root(harness.capture_temp_root(link))
+        assert (target / "keep").read_text() == "safe"
+    finally:
+        link.unlink(missing_ok=True)
+    replaced = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    backup = replaced.with_name(replaced.name + "-original")
+    guard = harness.capture_temp_root(replaced)
+    try:
+        with pytest.raises(AssertionError):
+            replaced.rename(backup)
+            replaced.mkdir()
+            (replaced / "keep").write_text("replacement")
+            harness.remove_temp_root(guard)
+        assert (replaced / "keep").read_text() == "replacement"
+        assert backup.is_dir()
+    finally:
+        if replaced.exists():
+            harness.shutil.rmtree(replaced)
+        if backup.exists():
+            harness.shutil.rmtree(backup)
+
+
+def test_redacted_evidence_shape_excludes_raw_values() -> None:
+    raw_host = "raw-hostname-must-not-escape"
+    raw_trace = "unsafe-trace-" + "x" * 4_096
+    sidecar = WORKTREE_ROOT / "native" / "target" / "sidecar"
+    rendered = _redacted_evidence_json(
+        {"redacted": True},
+        raw_host_id=raw_host,
+        sidecar_binary=sidecar,
+        raw_traces={"node": [raw_trace, "frame:remote"]},
+    )
+    evidence = json.loads(rendered)
+    assert evidence["host_id_sha256"].startswith("sha256:")
+    assert evidence["sidecar_path"] == "native/target/sidecar"
+    assert evidence["trace_deltas"] == {"node": {"entries": 2, "remote_entries": 1}}
+    assert all(
+        value not in rendered for value in (raw_host, raw_trace, str(Path.home()))
+    )
+    assert rendered == json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+    function_ast = ast.parse(inspect.getsource(_redacted_evidence_json))
+    constants = {
+        node.value for node in ast.walk(function_ast) if isinstance(node, ast.Constant)
+    }
+    assert "host_id" not in constants
+    assert {"host_id_sha256", "sidecar_path", "trace_deltas"} <= constants
 
 
 def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     tmp_path: Path,
     local_control_sidecar_binary: Path,  # noqa: F811
 ) -> None:
-    assert local_control_sidecar_binary == SIDECAR_BINARY
-    assert local_control_sidecar_binary.is_file()
-    deployment = prepare_physical_deployment(
-        tmp_path / "deployment",
-        node_ids=NODE_IDS,
+    assert local_control_sidecar_binary == SIDECAR_BINARY and SIDECAR_BINARY.is_file()
+    deployment = prepare_physical_deployment(tmp_path / "deployment", node_ids=NODE_IDS)
+    assignment_reports = zip(
+        deployment.assignments, deployment.artifact_reports, strict=True
     )
     loaded = [
         load_assignment_stage(assignment, report, load_generation=7)
-        for assignment, report in zip(
-            deployment.assignments,
-            deployment.artifact_reports,
-            strict=True,
-        )
+        for assignment, report in assignment_reports
     ]
     graph = build_execution_graph(
         deployment.assignments,
@@ -509,14 +607,10 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
         runtime_scheme="iroh",
     )
     graph_document = json.loads(json.dumps(asdict(graph)))
-    state_document = json.loads(
-        json.dumps(
-            {
-                node_id: asdict(state)
-                for node_id, state in build_physical_device_states(graph).items()
-            }
-        )
-    )
+    state_document = {
+        node_id: asdict(state)
+        for node_id, state in build_physical_device_states(graph).items()
+    }
     (tmp_path / "model-manifest.json").write_bytes(
         canonical_json_bytes(deployment.manifest)
     )
@@ -532,7 +626,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
         (tmp_path / f"{node_id}-stage-pack.json").write_bytes(
             canonical_json_bytes(pack)
         )
-
     database = tmp_path / "seed" / "state.sqlite3"
     seed_signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
     coordinator = _coordinator(database, signer=seed_signer, id_prefix="seed-message")
@@ -545,10 +638,9 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     accepted_offers: dict[str, dict[str, Any]] = {}
     sidecar_pids: dict[str, int] = {}
     discovered_child_pids: set[int] = set()
-    socket_root = Path(tempfile.mkdtemp(prefix="myc-seed-e2e-", dir="/tmp"))
+    socket_root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
     run_id = str(uuid.uuid4())
     seed_port: int | None = None
-
     with harness.node_process_cleanup(
         node_processes,
         owned_groups=owned_groups,
@@ -564,8 +656,9 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 socket_root=socket_root / suffix,
                 owned_groups=owned_groups,
             )
+        configuration_responses: dict[str, dict[str, Any]] = {}
         for node_id, process in node_processes.items():
-            response = process.raw_command(
+            configuration_responses[node_id] = process.raw_command(
                 "configure",
                 {
                     "assignment_file": f"{node_id}-assignment.json",
@@ -580,8 +673,16 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 owned_groups[node_id],
                 discovered_pids=discovered_child_pids,
             )
-            assert response["ok"] is True
-            assert response["route_ready"] is False
+        service_pid_by_node = {
+            node_id: process.process.pid for node_id, process in node_processes.items()
+        }
+        native_pid_union = [*service_pid_by_node.values(), *sidecar_pids.values()]
+        assert len(native_pid_union) == 2 * len(NODE_IDS)
+        assert all(type(pid) is int and pid > 1 for pid in native_pid_union)
+        assert len(set(native_pid_union)) == len(native_pid_union)
+        assert os.getpid() not in native_pid_union
+        for node_id, response in configuration_responses.items():
+            assert response["ok"] is True and response["route_ready"] is False
             result = response["result"]
             assert result["observation"]["event"] == "configured"
             configured[node_id] = result["observation"]["details"]
@@ -595,7 +696,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             for endpoint_id in endpoint_ids
         )
         assert len(endpoint_ids) == len(NODE_IDS)
-
         with SeedHTTPServer(coordinator, host="127.0.0.1", port=0) as seed_server:
             seed_port = int(seed_server.base_url.rsplit(":", 1)[1])
             for ordinal, node_id in enumerate(NODE_IDS, start=1):
@@ -617,7 +717,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                         "utf-8"
                     )
                 ]
-
             graph_digest = _digest(graph_document)
             placement_by_node = {
                 placement.node_id: placement
@@ -651,7 +750,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 ] == [peer for peer in NODE_IDS if peer != node_id]
                 assert accepted_offer["stage_pack_digest"] == pack["stage_pack_digest"]
                 assert accepted_offer["graph_digest"] == graph_digest
-
             for node_id, peer_node_id in zip(
                 NODE_IDS,
                 reversed(NODE_IDS),
@@ -661,9 +759,11 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 assert len(peer_records) == 1
                 peer_record = peer_records[0]
                 peer_member = coordinator.member(peer_node_id)
-                assert peer_record["node_id"] == peer_node_id
-                assert peer_record["endpoint_id"] == peer_member["endpoint_id"]
-                assert len(peer_member["endpoint_addrs"]) == 1
+                assert (
+                    peer_record["node_id"] == peer_node_id
+                    and peer_record["endpoint_id"] == peer_member["endpoint_id"]
+                    and len(peer_member["endpoint_addrs"]) == 1
+                )
                 peer_endpoint_addr = json.loads(peer_member["endpoint_addrs"][0])
                 assert peer_endpoint_addr["id"] == peer_record["endpoint_id"]
                 started = node_processes[node_id].command(
@@ -678,23 +778,20 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     },
                 )
                 assert started["observation"]["event"] == "started"
-
             first = node_processes[NODE_IDS[0]]
-
             for node_id in NODE_IDS:
                 details = configured[node_id]
                 assignment_index = NODE_IDS.index(node_id)
+                expected_pack = deployment.stage_packs[assignment_index]
+                expected_verification = deployment.stage_pack_verifications[
+                    assignment_index
+                ]
                 assert (
-                    details["stage_pack_digest"]
-                    == deployment.stage_packs[assignment_index]["stage_pack_digest"]
+                    details["stage_pack_digest"] == expected_pack["stage_pack_digest"]
                 )
                 assert (
                     details["stage_pack_verification_digest"]
-                    == (
-                        deployment.stage_pack_verifications[assignment_index][
-                            "stage_pack_verification_digest"
-                        ]
-                    )
+                    == expected_verification["stage_pack_verification_digest"]
                 )
                 result = sessions[node_id].assignment_result(
                     assignment_id=details["assignment_id"],
@@ -722,29 +819,28 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     == "iroh://" + details["endpoint_addr"]["id"]
                 )
                 assert coordinator.member(node_id)["last_heartbeat_sequence"] == 2
-
             before_request: dict[str, dict[str, Any]] = {}
             for node_id in NODE_IDS:
                 response = node_processes[node_id].raw_command("snapshot")
-                assert response["ok"] is True
-                assert response["route_ready"] is False
+                assert response["ok"] is True and response["route_ready"] is False
                 before_request[node_id] = response["result"]["observation"]["details"]
-
             request_id = str(uuid.uuid4())
             started = first.command("infer_start", _inference_request(request_id))[
                 "observation"
             ]["details"]
-            assert started["request_id"] == request_id
-            assert started["status"] == "DECODING"
+            assert (started["request_id"], started["status"]) == (
+                request_id,
+                "DECODING",
+            )
             decoded = first.command(
                 "infer_decode",
                 {"request_id": request_id, "count": 2},
             )["observation"]["details"]
-            assert decoded["request_id"] == request_id
-            assert decoded["status"] == "COMPLETED"
+            assert (decoded["request_id"], decoded["status"]) == (
+                request_id,
+                "COMPLETED",
+            )
             assert decoded["output"]["token_indexes"] == [0, 1, 2]
-            assert decoded["output"]["token_ids"] == [6, 6, 6]
-
             reference = load_assignment_stage(
                 deployment.reference_assignment,
                 deployment.reference_report,
@@ -761,17 +857,12 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 token = int(mx.argmax(logits[0, -1, :]).item())
                 expected_tokens.append(token)
                 context.append(token)
-            # Deterministic golden plus partition/routing parity. The reference
-            # assignment shares this repository's loader and executor, so it is
-            # not presented as an independent runtime oracle.
             assert expected_tokens == [6, 6, 6]
             assert decoded["output"]["token_ids"] == expected_tokens
-
             node_observations: dict[str, dict[str, Any]] = {}
             for node_id in NODE_IDS:
                 response = node_processes[node_id].raw_command("snapshot")
-                assert response["ok"] is True
-                assert response["route_ready"] is False
+                assert response["ok"] is True and response["route_ready"] is False
                 observation = response["result"]["observation"]
                 node_observations[node_id] = observation
                 snapshot = observation["details"]
@@ -785,28 +876,20 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     ),
                     now=NOW,
                 )
-
             request_frame_deltas: dict[str, tuple[int, int]] = {}
             request_trace_deltas: dict[str, list[str]] = {}
             for node_id in NODE_IDS:
                 before = before_request[node_id]
                 after = node_observations[node_id]["details"]
-                sent_delta = (
-                    after["transport"]["remote_frames_sent"]
-                    - before["transport"]["remote_frames_sent"]
+                sent_delta, received_delta = (
+                    after["transport"][key] - before["transport"][key]
+                    for key in ("remote_frames_sent", "remote_frames_received")
                 )
-                received_delta = (
-                    after["transport"]["remote_frames_received"]
-                    - before["transport"]["remote_frames_received"]
-                )
-                assert sent_delta >= 0
-                assert received_delta >= 0
                 request_frame_deltas[node_id] = (sent_delta, received_delta)
                 before_trace = before["transport_outbound_trace"]
                 after_trace = after["transport_outbound_trace"]
                 assert after_trace[: len(before_trace)] == before_trace
                 request_trace_deltas[node_id] = after_trace[len(before_trace) :]
-
             assert all(
                 sent > 0 and received > 0
                 for sent, received in request_frame_deltas.values()
@@ -815,48 +898,22 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 any(":remote" in entry for entry in trace)
                 for trace in request_trace_deltas.values()
             )
-            assert len({item["process_id"] for item in node_observations.values()}) == 2
             assert {item["process_id"] for item in node_observations.values()} == {
-                process.process.pid for process in node_processes.values()
+                *service_pid_by_node.values()
             }
-            assert len(set(sidecar_pids.values())) == len(NODE_IDS)
-            service_pid_by_node = {
-                node_id: process.process.pid
-                for node_id, process in node_processes.items()
-            }
-            assert all(
-                type(service_pid) is int and service_pid > 1
-                for service_pid in service_pid_by_node.values()
-            )
-            service_pids = set(service_pid_by_node.values())
-            assert len(service_pids) == len(NODE_IDS)
-            control_pid = os.getpid()
-            assert len(
-                {
-                    control_pid,
-                    *service_pids,
-                    *sidecar_pids.values(),
-                }
-            ) == 1 + 2 * len(NODE_IDS)
             host_ids = {item["host_id"] for item in node_observations.values()}
             assert len(host_ids) == 1
             shared_host_id = next(iter(host_ids))
-            assert (
-                isinstance(shared_host_id, str)
-                and shared_host_id
-                and shared_host_id == shared_host_id.strip()
-            )
-
+            assert isinstance(shared_host_id, str) and shared_host_id
+            assert shared_host_id == shared_host_id.strip()
             same_host_case = make_case()
-            challenge = same_host_case.documents["run/route-challenge.json"]
-            stages = challenge["stage_evidence"]
-            signed_load_proofs = same_host_case.documents[
-                "runtime/load-proof-signatures.json"
-            ]["signatures"]
-            graph_stages = same_host_case.documents["router/execution-graph.json"][
-                "stages"
+            documents = same_host_case.documents
+            stages = documents["run/route-challenge.json"]["stage_evidence"]
+            signed_load_proofs = documents["runtime/load-proof-signatures.json"][
+                "signatures"
             ]
-            gossip = same_host_case.documents["control/gossip-signature.json"]
+            graph_stages = documents["router/execution-graph.json"]["stages"]
+            gossip = documents["control/gossip-signature.json"]
             gossip_peers = gossip["statement"]["peers"]
             observed_qualifier_inputs: list[tuple[int, str, str]] = []
             for node_id, stage, signed, graph_stage, gossip_peer in zip(
@@ -902,7 +959,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             gossip["signature"]["signed_statement_digest"] = sha256_bytes(
                 canonical_json_bytes(gossip["statement"])
             )
-            expected_qualifier_inputs = [
+            assert observed_qualifier_inputs == [
                 (
                     node_observations[node_id]["process_id"],
                     shared_host_id,
@@ -910,14 +967,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 )
                 for node_id in NODE_IDS
             ]
-            assert observed_qualifier_inputs == expected_qualifier_inputs
-            assert [
-                (
-                    signed["statement"]["process_host_id"],
-                    signed["statement"]["process_id"],
-                )
-                for signed in signed_load_proofs
-            ] == [(host, pid) for pid, host, _ in expected_qualifier_inputs]
             evidence_files, evidence_manifest = same_host_case.render()
             qualification_authority = QualificationAuthority(
                 clock_unix_ms=lambda: same_host_case.now_unix_ms
@@ -930,13 +979,8 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     verify_load_proof_signature=synthetic_signature_verifier,
                 )
             assert unqualified.value.code == "process_identity_invalid"
-            # Service responses independently remain local route_ready=false
-            # evidence; the rejecting authority publishes no qualification.
             assert qualification_authority.current() is None
-
-    assert node_processes
     assert all(process.process.returncode == 0 for process in node_processes.values())
-
     restarted = _coordinator(
         database,
         signer=seed_signer,
@@ -945,9 +989,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     for node_id, assignment in zip(NODE_IDS, deployment.assignments, strict=True):
         assert restarted.member(node_id)["last_heartbeat_sequence"] == 2
         status = restarted.assignment_status(assignment["assignment_id"])
-        assert status["accepted"] is True
-        assert status["result_code"] == "loaded"
-
+        assert status["accepted"] is True and status["result_code"] == "loaded"
     assert seed_port is not None
     with SeedHTTPServer(restarted, host="127.0.0.1", port=seed_port):
         replay_session = NodeMembershipSession(
@@ -979,9 +1021,8 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 join_envelope=replay_request,
             )
         assert replayed.value.code == "seed_join_retry_mismatch"
-
     print(
-        json.dumps(
+        _redacted_evidence_json(
             {
                 "authority_published": qualification_authority.current() is not None,
                 "boundaries": {
@@ -994,7 +1035,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     node_id: {"received": received, "sent": sent}
                     for node_id, (sent, received) in request_frame_deltas.items()
                 },
-                "host_id": shared_host_id,
                 "nodes": {
                     node_id: {
                         "endpoint_id": configured[node_id]["endpoint_addr"]["id"],
@@ -1008,14 +1048,13 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 "redacted": True,
                 "replay_error": replayed.value.code,
                 "request_id": request_id,
-                "sidecar_path": str(local_control_sidecar_binary.resolve(strict=True)),
                 "token_ids": {
                     "distributed": decoded["output"]["token_ids"],
                     "reference": expected_tokens,
                 },
-                "trace_deltas": request_trace_deltas,
             },
-            sort_keys=True,
-            separators=(",", ":"),
+            raw_host_id=shared_host_id,
+            sidecar_binary=local_control_sidecar_binary,
+            raw_traces=request_trace_deltas,
         )
     )
