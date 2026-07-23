@@ -122,7 +122,7 @@ def _route(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _case(tmp_path: Path) -> tuple[
+def _case(tmp_path: Path, *, deployment_epoch: int = 7) -> tuple[
     dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], Path
 ]:
     source = tmp_path / "source"
@@ -136,7 +136,7 @@ def _case(tmp_path: Path) -> tuple[
         route_plan=_route(manifest),
         manifest=manifest,
         deployment_id=DEPLOYMENT_ID,
-        deployment_epoch=7,
+        deployment_epoch=deployment_epoch,
         cache_roots=cache_roots,
         runtime_by_node={
             f"node-{index}": {
@@ -195,7 +195,11 @@ def _mlx_runtime(dtype: str = "float32") -> dict[str, Any]:
     }
 
 
-def _control_plane_binding(snapshot_generation: int = 1) -> dict[str, Any]:
+def _control_plane_binding(
+    snapshot_generation: int = 1,
+    *,
+    deployment_epoch: int = 7,
+) -> dict[str, Any]:
     return {
         "protocol": "mycelium.control_plane_binding.v1",
         "evidence_bundle_digest": "sha256:" + "a" * 64,
@@ -203,7 +207,7 @@ def _control_plane_binding(snapshot_generation: int = 1) -> dict[str, Any]:
         "snapshot_generation": snapshot_generation,
         "swarm_id": "swarm-stage-pack-test",
         "deployment_id": DEPLOYMENT_ID,
-        "deployment_epoch": 7,
+        "deployment_epoch": deployment_epoch,
     }
 
 
@@ -288,6 +292,75 @@ def test_compiles_deterministic_assignment_local_packs_and_verifies_warm_artifac
 
     second = verify_stage_pack(packs[1], assignment=assignments[1], manifest=manifest)
     assert second == verification
+
+
+def test_zero_deployment_epoch_producer_output_compiles_and_verifies_direct_pack(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path, deployment_epoch=0)
+
+    pack = compile_stage_pack(assignments[1], manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignments[1],
+        manifest=manifest,
+    )
+
+    assert pack["deployment_epoch"] == 0
+    assert verification["deployment_epoch"] == 0
+    assert verification["ready_for_load"] is True
+    assert verification["route_ready"] is False
+
+
+def test_zero_deployment_epoch_legacy_collection_is_accepted(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path, deployment_epoch=0)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+
+    assert all("control_plane_binding" not in assignment for assignment in assignments)
+    assert all(pack["control_plane_binding"] is None for pack in packs)
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
+
+
+def test_zero_deployment_epoch_bound_collection_is_accepted(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path, deployment_epoch=0)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    binding = _control_plane_binding(deployment_epoch=0)
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            control_plane_binding=binding,
+        )
+
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+
+    assert all(
+        assignment["control_plane_binding"]["deployment_epoch"] == 0
+        for assignment in assignments
+    )
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
 
 
 def test_layer_spanning_files_and_file_spanning_layers_are_preserved(tmp_path: Path) -> None:
@@ -1211,8 +1284,8 @@ def test_collection_verifier_rejects_invalid_control_plane_bindings(
 
 @pytest.mark.parametrize(
     "deployment_epoch",
-    (True, 7.0, 0, -1, "7"),
-    ids=("bool", "float", "zero", "negative", "string"),
+    (True, 7.0, -1, "7"),
+    ids=("bool", "float", "negative", "string"),
 )
 def test_stage_pack_verifier_rejects_invalid_legacy_deployment_epoch(
     tmp_path: Path,
@@ -1223,8 +1296,7 @@ def test_stage_pack_verifier_rejects_invalid_legacy_deployment_epoch(
         compile_stage_pack(assignment, manifest, report)
         for assignment, report in zip(assignments, reports, strict=True)
     ]
-    packs[0]["deployment_epoch"] = deployment_epoch
-    _refresh_digest(packs[0])
+    _set_legacy_deployment_epoch(assignments, packs, deployment_epoch)
 
     with pytest.raises(
         ValueError,
@@ -1239,8 +1311,8 @@ def test_stage_pack_verifier_rejects_invalid_legacy_deployment_epoch(
 
 @pytest.mark.parametrize(
     "deployment_epoch",
-    (True, 7.0, 0, -1, "7"),
-    ids=("bool", "float", "zero", "negative", "string"),
+    (True, 7.0, -1, "7"),
+    ids=("bool", "float", "negative", "string"),
 )
 def test_collection_verifier_rejects_invalid_legacy_deployment_epoch(
     tmp_path: Path,

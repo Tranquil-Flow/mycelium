@@ -167,7 +167,7 @@ def _digest(document: Any) -> str:
 
 
 def _deployment_epoch_is_valid(value: Any) -> bool:
-    return type(value) is int and value > 0
+    return type(value) is int and value >= 0
 
 
 def _validate_deployment_epoch(value: Any) -> None:
