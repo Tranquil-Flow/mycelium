@@ -150,13 +150,6 @@ def _revalidate_owned_group(
     )
 
 
-def _fallback_live_leader(owner: OwnedGroup) -> bool:
-    _validate_owner(owner, None)
-    assert owner.leader is not None, f"cleanup cannot prove group {owner.pgid}"
-    assert owner.process.poll() is None, f"cleanup cannot prove leader {owner.pgid}"
-    return _kernel_identity(owner.pid, owner)
-
-
 def signal_owned_groups(
     owners: list[OwnedGroup], process_signal: signal.Signals
 ) -> tuple[list[BaseException], bool]:
@@ -170,11 +163,7 @@ def signal_owned_groups(
             note = f"native-Iroh cleanup context: ps-before-signal[{owner.pgid}]"
             error.add_note(note)
             errors.append(error)
-            try:
-                should_signal = _fallback_live_leader(owner)
-            except BaseException as fallback_error:
-                errors.append(fallback_error)
-                continue
+            continue
         else:
             try:
                 should_signal = _revalidate_owned_group(owner, inventory)
@@ -309,9 +298,11 @@ def cleanup_node_processes(
         if thread is not None:
             stop_threads[node_id] = thread
     started_threads: set[str] = set()
+    uncertain_threads: set[str] = set()
     for node_id, thread in stop_threads.items():
-        if attempt(f"stop-thread-start[{node_id}]", thread.start, False) is None:
-            started_threads.add(node_id)
+        started_threads.add(node_id)
+        if attempt(f"stop-thread-start[{node_id}]", thread.start, False) is False:
+            uncertain_threads.add(node_id)
 
     def drain_stop_errors() -> None:
         while True:
@@ -369,7 +360,12 @@ def cleanup_node_processes(
             is not None
         )
         stop_alive = owner.node_id in started_threads and thread_alive(owner.node_id)
-        if not process_exited or stop_alive or owner in remaining:
+        if (
+            not process_exited
+            or stop_alive
+            or owner.node_id in uncertain_threads
+            or owner in remaining
+        ):
             record(
                 AssertionError("unsafe stream close"), f"close-skip[{owner.node_id}]"
             )

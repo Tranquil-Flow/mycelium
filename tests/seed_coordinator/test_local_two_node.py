@@ -28,7 +28,7 @@ from mycelium_qualification.physical_deployment import (
     prepare_physical_deployment,
 )
 from mycelium_qualification.qualifier import QualificationError
-from mycelium_qualification.signing import generate_ed25519_signer
+import mycelium_qualification.signing as signing
 from mycelium_seed import SeedCoordinator
 from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, SeedHTTPServer
 from runtime_loader import execute_loaded_stage, load_assignment_stage
@@ -130,7 +130,7 @@ def _join_node(
         node_id=node_id,
         swarm_id="swarm-local-e2e",
         seed_node_id="seed-node",
-        signer=generate_ed25519_signer(endpoint_id=endpoint_addr["id"]),
+        signer=signing.generate_ed25519_signer(endpoint_id=endpoint_addr["id"]),
         incarnation=f"incarnation-{ordinal}",
         software_version="mycelium-local-e2e",
         peer_class="mac_mlx_iroh",
@@ -296,6 +296,14 @@ def _exception_leaves(error: BaseException) -> list[BaseException]:
     return [error]
 
 
+def _verified_observation(result: dict[str, Any]) -> dict[str, Any]:
+    observation = result["observation"]
+    verifier = signing.build_ed25519_verifier([result["verification_key"]])
+    assert verifier(canonical_json_bytes(observation), result["signature"])
+    assert result["signature"]["signer_endpoint_id"] == observation["endpoint_id"]
+    return observation
+
+
 def test_sidecar_observation_requires_exact_child_and_owned_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -387,7 +395,7 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
     )
     signals.clear()
     errors, uncertain = harness.signal_owned_groups([exact], requested)
-    assert uncertain and signals == [(exact.pgid, requested)]
+    assert uncertain and signals == []
     assert [str(error) for error in errors] == ["ps failed"]
 
 
@@ -422,55 +430,47 @@ def test_owner_registration_requires_live_exact_process(
     assert owner.leader == inventory[pid] and owners == {"node": owner}
 
 
-def test_cleanup_guards_thread_baseexceptions_and_final_drains(
+def test_cleanup_preserves_constructor_and_post_start_faults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     real_thread = threading.Thread
     constructed = count()
+    constructor_fault = GeneratorExit("constructor fault")
+    post_start_fault = GeneratorExit("post-start fault")
 
     class FaultThread(real_thread):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            fault_index = next(constructed)
+            if fault_index == 0:
+                raise constructor_fault
             super().__init__(*args, **kwargs)
-            self.fault_index = next(constructed)
-            self.join_faulted = False
+            self.fault_index = fault_index
 
         def start(self) -> None:
-            if self.fault_index == 0:
-                raise GeneratorExit("start fault")
             super().start()
-
-        def join(self, timeout: float | None = None) -> None:
-            if not self.join_faulted:
-                self.join_faulted = True
-                raise GeneratorExit("join fault")
-            super().join(timeout)
+            if self.fault_index == 1:
+                raise post_start_fault
 
     monkeypatch.setattr(harness.threading, "Thread", FaultThread)
     ledger: list[str] = []
-    late_release = threading.Event()
+    stop_release = threading.Event()
     before_threads = set(threading.enumerate())
     processes = {node: Mock(pid=8_200 + index) for index, node in enumerate(NODE_IDS)}
     clients = {node: Mock(process=processes[node]) for node in NODE_IDS}
-
-    def late_stop() -> None:
-        late_release.wait()
-        raise RuntimeError("late stop")
-
-    clients[NODE_IDS[1]].stop.side_effect = late_stop
+    clients[NODE_IDS[1]].stop.side_effect = stop_release.wait
     owners = {
-        node: _fake_owner(process.pid, process=process, started=None)
+        node: _fake_owner(process.pid, process=process, started=None)._replace(
+            node_id=node
+        )
         for node, process in processes.items()
     }
     for process in processes.values():
-        process.poll.return_value = None
+        process.poll.return_value = 0
         process.wait.side_effect = lambda timeout: ledger.append("wait")
         process.stdin = process.stdout = process.stderr = Mock(closed=False)
 
     def inventory(groups: Any, known_pids: Any):
         ledger.append("inventory")
-        if ledger.count("inventory") == 2:
-            late_release.set()
-            return {owners[NODE_IDS[1]].pgid: [processes[NODE_IDS[1]].pid]}, []
         return {}, []
 
     def signal_groups(groups: Any, requested: signal.Signals):
@@ -482,11 +482,12 @@ def test_cleanup_guards_thread_baseexceptions_and_final_drains(
     monkeypatch.setattr(
         harness,
         "groups_still_present",
-        lambda groups, timeout: ledger.append("poll") or groups,
+        lambda groups, timeout: ledger.append("poll") or [],
     )
     for name in ("STOP_TIMEOUT", "STOP_REJOIN_TIMEOUT", "PROCESS_WAIT_TIMEOUT"):
         monkeypatch.setattr(harness, name, 0.01)
     root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    body_fault = ValueError("body")
     try:
         with pytest.raises(BaseExceptionGroup) as grouped:
             with harness.node_process_cleanup(
@@ -495,26 +496,22 @@ def test_cleanup_guards_thread_baseexceptions_and_final_drains(
                 known_pids=set(),
                 socket_root=root,
             ):
-                raise ValueError("body")
+                raise body_fault
         cleanup_removed_root = not root.exists()
     finally:
-        late_release.set()
+        stop_release.set()
         for thread in set(threading.enumerate()) - before_threads:
             thread.join(0.2)
         if root.exists():
             harness.shutil.rmtree(root)
     leaves = _exception_leaves(grouped.value)
-    assert {"body", "start fault", "join fault", "late stop"} <= {
-        str(error) for error in leaves
-    }
+    for injected in (body_fault, constructor_fault, post_start_fault):
+        assert sum(error is injected for error in leaves) == 1
     assert [ledger.count(item) for item in ("inventory", "poll", "wait")] == [2, 2, 4]
     assert ledger.count("signal:SIGTERM") == ledger.count("signal:SIGKILL") == 1
     assert cleanup_removed_root
-    notes = {note for error in leaves for note in getattr(error, "__notes__", ())}
-    assert all(any(phase in note for note in notes) for phase in ("close-skip", "leak"))
     assert all(
-        not getattr(process, name).close.called
-        for process in processes.values()
+        not getattr(processes[NODE_IDS[1]], name).close.called
         for name in ("stdin", "stdout", "stderr")
     )
     assert not any(
@@ -627,7 +624,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             canonical_json_bytes(pack)
         )
     database = tmp_path / "seed" / "state.sqlite3"
-    seed_signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    seed_signer = signing.generate_ed25519_signer(endpoint_id="seed-endpoint")
     coordinator = _coordinator(database, signer=seed_signer, id_prefix="seed-message")
     sessions: dict[str, NodeMembershipSession] = {}
     clients: dict[str, SeedHTTPClient] = {}
@@ -820,10 +817,13 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 )
                 assert coordinator.member(node_id)["last_heartbeat_sequence"] == 2
             before_request: dict[str, dict[str, Any]] = {}
+            before_observations: dict[str, dict[str, Any]] = {}
             for node_id in NODE_IDS:
                 response = node_processes[node_id].raw_command("snapshot")
                 assert response["ok"] is True and response["route_ready"] is False
-                before_request[node_id] = response["result"]["observation"]["details"]
+                observation = _verified_observation(response["result"])
+                before_observations[node_id] = observation
+                before_request[node_id] = observation["details"]
             request_id = str(uuid.uuid4())
             started = first.command("infer_start", _inference_request(request_id))[
                 "observation"
@@ -863,8 +863,21 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             for node_id in NODE_IDS:
                 response = node_processes[node_id].raw_command("snapshot")
                 assert response["ok"] is True and response["route_ready"] is False
-                observation = response["result"]["observation"]
+                observation = _verified_observation(response["result"])
                 node_observations[node_id] = observation
+                before = before_observations[node_id]
+                assert observation["node_id"] == before["node_id"] == node_id
+                assert (
+                    observation["process_id"]
+                    == before["process_id"]
+                    == service_pid_by_node[node_id]
+                )
+                assert observation["host_id"] == before["host_id"]
+                assert (
+                    observation["endpoint_id"]
+                    == before["endpoint_id"]
+                    == configured[node_id]["endpoint_addr"]["id"]
+                )
                 snapshot = observation["details"]
                 assert snapshot["runtime"]["active_state_count"] == 0
                 assert snapshot["transport_fatal_error"] is None
@@ -898,9 +911,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 any(":remote" in entry for entry in trace)
                 for trace in request_trace_deltas.values()
             )
-            assert {item["process_id"] for item in node_observations.values()} == {
-                *service_pid_by_node.values()
-            }
             host_ids = {item["host_id"] for item in node_observations.values()}
             assert len(host_ids) == 1
             shared_host_id = next(iter(host_ids))
