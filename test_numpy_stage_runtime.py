@@ -694,6 +694,129 @@ def test_stage_execution_authenticates_loaded_tensor_digest_before_compute(
         )
 
 
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+@pytest.mark.parametrize(
+    "tamper_case",
+    [
+        "resolved_only",
+        "proof_only",
+        "resolved_and_proof",
+        "resolved_missing",
+        "proof_missing",
+        "authenticated_missing",
+        "resolved_malformed",
+        "proof_malformed",
+        "authenticated_malformed",
+        "resolved_serialization_failure",
+        "proof_serialization_failure",
+        "authenticated_serialization_failure",
+    ],
+)
+def test_stage_execution_authenticates_resolved_aliases_before_compute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    tamper_case: str,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend=backend)
+    alternate_aliases = {
+        "lm_head": {
+            "target_component": "input_embedding",
+            "tensor_keys": ["transformer.wpe.weight"],
+        }
+    }
+    tampered_proof = json.loads(canonical_json(loaded.proof))
+    replacements: dict[str, Any] = {"proof": tampered_proof}
+
+    if tamper_case in {"resolved_only", "resolved_and_proof"}:
+        replacements["resolved_aliases"] = alternate_aliases
+    if tamper_case in {"proof_only", "resolved_and_proof"}:
+        tampered_proof["resolved_component_aliases"] = alternate_aliases
+    if tamper_case == "resolved_missing":
+        replacements["resolved_aliases"] = None
+    elif tamper_case == "proof_missing":
+        del tampered_proof["resolved_component_aliases"]
+    elif tamper_case == "authenticated_missing":
+        replacements["authenticated_resolved_aliases"] = None
+    elif tamper_case == "resolved_malformed":
+        replacements["resolved_aliases"] = {"lm_head": "malformed"}
+    elif tamper_case == "proof_malformed":
+        tampered_proof["resolved_component_aliases"] = {"lm_head": "malformed"}
+    elif tamper_case == "authenticated_malformed":
+        replacements["authenticated_resolved_aliases"] = {
+            "lm_head": "malformed"
+        }
+    elif tamper_case == "resolved_serialization_failure":
+        replacements["resolved_aliases"] = {1: "non-string-key"}
+    elif tamper_case == "proof_serialization_failure":
+        tampered_proof["resolved_component_aliases"] = {
+            "lm_head": {"target_component": object()}
+        }
+    elif tamper_case == "authenticated_serialization_failure":
+        replacements["authenticated_resolved_aliases"] = {
+            1: "non-string-key"
+        }
+    tampered = replace(loaded, **replacements)
+
+    class BackendComputeReached(AssertionError):
+        pass
+
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise BackendComputeReached("backend_compute_reached")
+
+    if backend == "numpy":
+        monkeypatch.setattr(numpy_runtime, "_gpt2_block", reject_backend_compute)
+        execute = execute_loaded_numpy_stage
+        error = RuntimeLoadError
+    else:
+        monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+        execute = runtime_loader.execute_loaded_stage
+        error = RuntimeExecutionError
+
+    with pytest.raises(error, match=r"^resolved_aliases_mismatch$"):
+        execute(
+            tampered,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+
+
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_loaded_stage_executes_with_authenticated_tied_lm_head_alias(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend=backend)
+
+    assert loaded.resolved_aliases is not loaded.authenticated_resolved_aliases
+    assert (
+        loaded.resolved_aliases["lm_head"]
+        is not loaded.authenticated_resolved_aliases["lm_head"]
+    )
+    assert canonical_json(loaded.resolved_aliases) == canonical_json(
+        loaded.authenticated_resolved_aliases
+    )
+    assert canonical_json(loaded.proof["resolved_component_aliases"]) == canonical_json(
+        loaded.authenticated_resolved_aliases
+    )
+    with pytest.raises(TypeError):
+        loaded.authenticated_resolved_aliases["lm_head"]["target_component"] = (
+            "decoder"
+        )
+    logits = (
+        execute_loaded_numpy_stage(
+            loaded,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+        if backend == "numpy"
+        else runtime_loader.execute_loaded_stage(
+            loaded,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+    )
+    assert logits.shape == (1, 3, _numpy_runtime()["model_config"]["vocab_size"])
+    assert np.isfinite(np.asarray(logits)).all()
+
+
 @pytest.mark.parametrize(
     "authenticated_digest",
     [None, "not-a-digest", "sha256:" + "0" * 64],

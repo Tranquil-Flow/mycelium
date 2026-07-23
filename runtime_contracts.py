@@ -266,6 +266,8 @@ def validate_loaded_stage_authentication(
     authenticated_load_generation: Any,
     authenticated_loaded_components: Any,
     authenticated_loaded_range: Any,
+    resolved_aliases: Any,
+    authenticated_resolved_aliases: Any,
     authenticated_runtime: Any,
     authenticated_runtime_identity: Any,
     normalized_runtime: Mapping[str, Any],
@@ -333,6 +335,45 @@ def validate_loaded_stage_authentication(
         raise ValueError("loaded_range_mismatch") from exc
     if not isinstance(loaded_range, dict) or loaded_range != bound_loaded_range:
         raise ValueError("loaded_range_mismatch")
+
+    try:
+        alias_documents = (
+            _plain_json(proof.get("resolved_component_aliases")),
+            _plain_json(resolved_aliases),
+            _plain_json(authenticated_resolved_aliases),
+        )
+        canonical_aliases = []
+        for aliases in alias_documents:
+            if not isinstance(aliases, dict):
+                raise ValueError
+            for source, alias in aliases.items():
+                if (
+                    not source
+                    or not isinstance(alias, dict)
+                    or set(alias) != {"target_component", "tensor_keys"}
+                    or not isinstance(alias["target_component"], str)
+                    or not alias["target_component"]
+                    or not isinstance(alias["tensor_keys"], list)
+                    or not alias["tensor_keys"]
+                    or not all(
+                        isinstance(key, str) and key
+                        for key in alias["tensor_keys"]
+                    )
+                    or len(alias["tensor_keys"]) != len(set(alias["tensor_keys"]))
+                ):
+                    raise ValueError
+            canonical_aliases.append(
+                json.dumps(
+                    aliases,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            )
+    except (TypeError, ValueError):
+        raise ValueError("resolved_aliases_mismatch") from None
+    if len(set(canonical_aliases)) != 1:
+        raise ValueError("resolved_aliases_mismatch")
 
     try:
         runtime = _plain_json(normalized_runtime)

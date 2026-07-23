@@ -386,6 +386,10 @@ def _validated_stage(
             authenticated_loaded_range=getattr(
                 loaded_stage, "authenticated_loaded_range", None
             ),
+            resolved_aliases=aliases,
+            authenticated_resolved_aliases=getattr(
+                loaded_stage, "authenticated_resolved_aliases", None
+            ),
             authenticated_runtime=getattr(
                 loaded_stage, "authenticated_runtime", None
             ),
@@ -440,10 +444,6 @@ def _validated_stage(
         raise NumpyRuntimeError("invalid_loaded_stage_boundaries") from exc
     if not isinstance(tensors, Mapping):
         _reject("invalid_loaded_stage_tensors")
-    if not isinstance(aliases, Mapping):
-        _reject("invalid_loaded_stage_aliases")
-    if _plain(aliases) != _plain(proof.get("resolved_component_aliases")):
-        _reject("invalid_loaded_stage_aliases")
     namespace = _stage_namespace(tensors, start)
     shapes = _stage_shapes(
         config=config,

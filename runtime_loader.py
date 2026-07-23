@@ -138,6 +138,7 @@ class LoadedStage:
     proof: Mapping[str, Any]
     authenticated_assignment_id: str | None = None
     authenticated_tensor_digest: str | None = None
+    authenticated_resolved_aliases: Mapping[str, Any] | None = None
     authenticated_load_generation: int | None = None
     authenticated_loaded_components: tuple[str, ...] | None = None
     authenticated_loaded_range: Mapping[str, Any] | None = None
@@ -1159,6 +1160,10 @@ def execute_loaded_stage(
                 loaded_stage.authenticated_loaded_components
             ),
             authenticated_loaded_range=loaded_stage.authenticated_loaded_range,
+            resolved_aliases=loaded_stage.resolved_aliases,
+            authenticated_resolved_aliases=(
+                loaded_stage.authenticated_resolved_aliases
+            ),
             authenticated_runtime=loaded_stage.authenticated_runtime,
             authenticated_runtime_identity=(
                 loaded_stage.authenticated_runtime_identity
@@ -1442,13 +1447,16 @@ def _run_numpy_probe(
         "load_generation": load_generation,
         "route_ready": False,
     }
+    frozen_aliases = _deep_freeze(copy.deepcopy(aliases))
+    authenticated_aliases = _deep_freeze(copy.deepcopy(aliases))
     stage = LoadedStage(
         tensors=tensors,
-        resolved_aliases=aliases,
+        resolved_aliases=frozen_aliases,
         probe_output=np.empty((0,), dtype=np.dtype(runtime["dtype"])),
         proof=proof,
         authenticated_assignment_id=assignment["assignment_id"],
         authenticated_tensor_digest=tensor_digest,
+        authenticated_resolved_aliases=authenticated_aliases,
         authenticated_load_generation=load_generation,
         authenticated_loaded_components=tuple(assignment["components"]),
         authenticated_loaded_range=_deep_freeze(assignment["range"]),
@@ -1585,7 +1593,8 @@ def load_assignment_stage(
             proof["stage_pack_digest"] = stage_pack_binding[0]
             proof["stage_pack_verification_digest"] = stage_pack_binding[1]
         frozen_proof = _deep_freeze(proof)
-        frozen_aliases = _deep_freeze(aliases)
+        frozen_aliases = _deep_freeze(copy.deepcopy(aliases))
+        authenticated_aliases = _deep_freeze(copy.deepcopy(aliases))
         # Force canonical serialization of the immutable evidence before returning it.
         canonical_json(frozen_proof)
         return LoadedStage(
@@ -1595,6 +1604,7 @@ def load_assignment_stage(
             proof=frozen_proof,
             authenticated_assignment_id=assignment["assignment_id"],
             authenticated_tensor_digest=loaded_tensor_digest,
+            authenticated_resolved_aliases=authenticated_aliases,
             authenticated_load_generation=load_generation,
             authenticated_loaded_components=tuple(components),
             authenticated_loaded_range=_deep_freeze(assignment["range"]),
