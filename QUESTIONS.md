@@ -14,7 +14,11 @@ runtime path, one `SeedCoordinator` is rooted at the runtime state root with a
 durable signer plus one shared invite/member SQLite database. Current seed peer
 class, generation, live lease, eligible lifecycle, and durable member binding
 are authoritative at browser operations and at the atomic result-completion
-fence.
+fence. That fence is process-level: adapter condition → seed coordinator lock →
+dedicated SQLite `BEGIN IMMEDIATE` reservation, held from strict persisted-row
+comparison through accepted or identical-duplicate completion. A coordinator
+sharing the same protected database can advance generation only before guard
+acquisition (making the operation stale) or after guard release.
 
 Browser membership/evidence is admitted on the same plane as Mac membership,
 but browser peers remain activation-ineligible and all interactive claims remain

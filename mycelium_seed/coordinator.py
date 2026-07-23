@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 import hashlib
 import math
@@ -581,19 +581,59 @@ class SeedCoordinator:
             member = self._members.get(node_id)
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
-            if member.generation != expected_generation:
-                raise SeedCoordinatorError("seed_member_generation_stale")
-            if member.peer_class != expected_peer_class:
-                raise SeedCoordinatorError("seed_member_peer_class_mismatch")
-            now = self._now()
-            if now >= member.lease_expires_at:
-                raise SeedCoordinatorError("seed_member_lease_expired")
-            if member.lifecycle_state not in normalized_lifecycle_states:
-                raise SeedCoordinatorError("seed_member_lifecycle_ineligible")
-            self._ensure_current_member(member)
-            projection = member.projection()
-            projection.update(self._liveness_projection(member, now=now))
-            yield projection
+            durable_guard = (
+                nullcontext(member.projection())
+                if self._state is None
+                else self._state.member_authority_guard(node_id=node_id)
+            )
+            try:
+                # Lock order is adapter -> coordinator -> durable state. The
+                # transaction never calls back into either outer lock owner.
+                with durable_guard as persisted:
+                    identity_fields = (
+                        "node_id",
+                        "endpoint_id",
+                        "verification_key_digest",
+                        "incarnation",
+                    )
+                    if any(
+                        persisted[field] != getattr(member, field)
+                        for field in identity_fields
+                    ):
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["generation"] != member.generation:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["peer_class"] != member.peer_class:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["lease_expires_at"] != member.lease_expires_at:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["lifecycle_state"] != member.lifecycle_state:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if member.generation != expected_generation:
+                        raise SeedCoordinatorError(
+                            "seed_member_generation_stale"
+                        )
+                    if member.peer_class != expected_peer_class:
+                        raise SeedCoordinatorError(
+                            "seed_member_peer_class_mismatch"
+                        )
+                    now = self._now()
+                    if now >= member.lease_expires_at:
+                        raise SeedCoordinatorError("seed_member_lease_expired")
+                    if (
+                        member.lifecycle_state
+                        not in normalized_lifecycle_states
+                    ):
+                        raise SeedCoordinatorError(
+                            "seed_member_lifecycle_ineligible"
+                        )
+                    projection = member.projection()
+                    projection.update(
+                        self._liveness_projection(member, now=now)
+                    )
+                    yield projection
+            except SeedStateError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
 
     def advance_member_generation(
         self,

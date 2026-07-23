@@ -4,16 +4,28 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import contextmanager
 import json
+import math
 from pathlib import Path
 import sqlite3
-from typing import Any
+from typing import Any, Iterator
 
 from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
 _SCHEMA_VERSION = 4
+
+
+def _sqlite_state_error_code(exc: sqlite3.Error) -> str:
+    error_code = getattr(exc, "sqlite_errorcode", None)
+    if isinstance(error_code, int) and error_code & 0xFF in {
+        sqlite3.SQLITE_CORRUPT,
+        sqlite3.SQLITE_NOTADB,
+    }:
+        return "seed_state_corrupt"
+    return "seed_state_unavailable"
 
 
 class SeedStateError(RuntimeError):
@@ -236,55 +248,186 @@ class SqliteSeedState:
                 FROM seed_members
                 """
             ).fetchall()
-            members: list[dict[str, Any]] = []
-            for row in rows:
-                raw = row["endpoint_addrs_json"].encode("utf-8")
-                addresses = json.loads(raw)
-                runtime_raw = row["runtime_capability_json"].encode("utf-8")
-                runtime_capability = json.loads(runtime_raw)
-                if (
-                    not isinstance(addresses, list)
-                    or not addresses
-                    or not all(isinstance(value, str) and value for value in addresses)
-                    or canonical_json_bytes(addresses) != raw
-                    or not isinstance(runtime_capability, dict)
-                    or canonical_json_bytes(runtime_capability) != runtime_raw
-                ):
-                    raise SeedStateError("seed_state_corrupt")
-                members.append(
-                    {
-                        "node_id": row["node_id"],
-                        "endpoint_id": row["endpoint_id"],
-                        "endpoint_addrs": addresses,
-                        "peer_class": row["peer_class"],
-                        "runtime_capability": runtime_capability,
-                        "verification_key_digest": row["verification_key_digest"],
-                        "incarnation": row["incarnation"],
-                        "generation": int(row["generation"]),
-                        "lease_expires_at": float(row["lease_expires_at"]),
-                        "last_heartbeat_sequence": int(
-                            row["last_heartbeat_sequence"]
-                        ),
-                        "last_liveness_at": float(row["last_liveness_at"]),
-                        "next_heartbeat_due_at": float(
-                            row["next_heartbeat_due_at"]
-                        ),
-                        "last_activity_receipt_at": (
-                            None
-                            if row["last_activity_receipt_at"] is None
-                            else float(row["last_activity_receipt_at"])
-                        ),
-                        "active_requests": int(row["active_requests"]),
-                        "lifecycle_state": row["lifecycle_state"],
-                    }
-                )
-            return members
+            return [self._decode_member_row(row) for row in rows]
         except SeedStateError:
             raise
-        except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError) as exc:
+        except sqlite3.Error as exc:
             raise SeedStateError("seed_state_corrupt") from exc
         finally:
             connection.close()
+
+    @staticmethod
+    def _decode_member_row(row: sqlite3.Row) -> dict[str, Any]:
+        """Strictly decode one persisted member without SQLite coercion."""
+
+        try:
+            text_fields = (
+                "node_id",
+                "endpoint_id",
+                "peer_class",
+                "verification_key_digest",
+                "incarnation",
+                "lifecycle_state",
+            )
+            if any(
+                not isinstance(row[field], str) or not row[field]
+                for field in text_fields
+            ):
+                raise SeedStateError("seed_state_corrupt")
+
+            endpoint_raw_text = row["endpoint_addrs_json"]
+            runtime_raw_text = row["runtime_capability_json"]
+            if not isinstance(endpoint_raw_text, str) or not isinstance(
+                runtime_raw_text, str
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            endpoint_raw = endpoint_raw_text.encode("utf-8")
+            runtime_raw = runtime_raw_text.encode("utf-8")
+            addresses = json.loads(endpoint_raw)
+            runtime_capability = json.loads(runtime_raw)
+            if (
+                not isinstance(addresses, list)
+                or not addresses
+                or not all(
+                    isinstance(value, str) and value for value in addresses
+                )
+                or canonical_json_bytes(addresses) != endpoint_raw
+                or not isinstance(runtime_capability, dict)
+                or canonical_json_bytes(runtime_capability) != runtime_raw
+            ):
+                raise SeedStateError("seed_state_corrupt")
+
+            generation = row["generation"]
+            heartbeat_sequence = row["last_heartbeat_sequence"]
+            active_requests = row["active_requests"]
+            if (
+                isinstance(generation, bool)
+                or not isinstance(generation, int)
+                or generation < 1
+                or isinstance(heartbeat_sequence, bool)
+                or not isinstance(heartbeat_sequence, int)
+                or heartbeat_sequence < 0
+                or isinstance(active_requests, bool)
+                or not isinstance(active_requests, int)
+                or active_requests < 0
+            ):
+                raise SeedStateError("seed_state_corrupt")
+
+            numeric_fields = (
+                "lease_expires_at",
+                "last_liveness_at",
+                "next_heartbeat_due_at",
+            )
+            if any(
+                isinstance(row[field], bool)
+                or not isinstance(row[field], (int, float))
+                or not math.isfinite(float(row[field]))
+                for field in numeric_fields
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            activity_receipt = row["last_activity_receipt_at"]
+            if activity_receipt is not None and (
+                isinstance(activity_receipt, bool)
+                or not isinstance(activity_receipt, (int, float))
+                or not math.isfinite(float(activity_receipt))
+            ):
+                raise SeedStateError("seed_state_corrupt")
+
+            return {
+                "node_id": row["node_id"],
+                "endpoint_id": row["endpoint_id"],
+                "endpoint_addrs": addresses,
+                "peer_class": row["peer_class"],
+                "runtime_capability": runtime_capability,
+                "verification_key_digest": row["verification_key_digest"],
+                "incarnation": row["incarnation"],
+                "generation": generation,
+                "lease_expires_at": float(row["lease_expires_at"]),
+                "last_heartbeat_sequence": heartbeat_sequence,
+                "last_liveness_at": float(row["last_liveness_at"]),
+                "next_heartbeat_due_at": float(row["next_heartbeat_due_at"]),
+                "last_activity_receipt_at": (
+                    None
+                    if activity_receipt is None
+                    else float(activity_receipt)
+                ),
+                "active_requests": active_requests,
+                "lifecycle_state": row["lifecycle_state"],
+            }
+        except SeedStateError:
+            raise
+        except (
+            IndexError,
+            KeyError,
+            TypeError,
+            ValueError,
+            UnicodeError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+
+    @contextmanager
+    def member_authority_guard(
+        self,
+        *,
+        node_id: str,
+    ) -> Iterator[dict[str, Any]]:
+        """Hold a write reservation around one strict persisted-member check."""
+
+        if not isinstance(node_id, str) or not node_id:
+            raise ValueError("node_id is invalid")
+        connection: sqlite3.Connection | None = None
+        transaction_open = False
+        try:
+            connection = self._connect()
+            connection.execute("BEGIN IMMEDIATE")
+            transaction_open = True
+            row = connection.execute(
+                """
+                SELECT node_id, endpoint_id, endpoint_addrs_json,
+                       peer_class, runtime_capability_json,
+                       verification_key_digest, incarnation, generation,
+                       lease_expires_at, last_heartbeat_sequence,
+                       last_liveness_at, next_heartbeat_due_at,
+                       last_activity_receipt_at, active_requests, lifecycle_state
+                FROM seed_members
+                WHERE node_id = ?
+                """,
+                (node_id,),
+            ).fetchone()
+            if row is None:
+                raise SeedStateError("seed_state_member_stale")
+            member = self._decode_member_row(row)
+            yield member
+            connection.commit()
+            transaction_open = False
+        except SeedStateError:
+            if connection is not None and transaction_open:
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+            raise
+        except sqlite3.Error as exc:
+            if connection is not None and transaction_open:
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        except BaseException:
+            if connection is not None and transaction_open:
+                try:
+                    connection.rollback()
+                except sqlite3.Error:
+                    pass
+            raise
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except sqlite3.Error:
+                    pass
 
     def load_assignments(self) -> list[dict[str, Any]]:
         connection = self._connect()

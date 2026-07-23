@@ -960,9 +960,9 @@ class SwarmCoordinator:
                 _reject("result_output_digest_mismatch")
             document_digest = canonical_digest(dict(document))
             try:
-                # Global lock order is adapter condition -> seed authority.
-                # SeedCoordinator never acquires this condition or calls back
-                # into the adapter, so the completion fence cannot form a cycle.
+                # Global lock order is adapter condition -> seed authority ->
+                # durable state write reservation. Neither seed layer acquires
+                # this condition or calls back into the adapter.
                 with self._seed.member_authority_guard(
                     node_id=peer.peer_id,
                     expected_generation=peer.membership_generation,

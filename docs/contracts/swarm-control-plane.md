@@ -69,14 +69,25 @@ When work is assigned, the job snapshots that membership generation.
 member generation, even if the caller still presents the original valid bearer
 token. Result acceptance and identical-duplicate completion run inside a
 `SeedCoordinator` authority guard: the guard checks class, generation, lease,
-lifecycle, and durable current-member state, then retains the seed lock through
-the adapter's completion commit. Generation advancement therefore linearizes
-either before that guard and is rejected, or after the accepted completion;
-there is no acceptance gap between the final authority check and commit.
+lifecycle, and durable current-member state. While holding the coordinator lock,
+it opens a dedicated `SqliteSeedState` connection, takes `BEGIN IMMEDIATE`, and
+strictly decodes the persisted member. Exact identity, generation, peer class,
+lease, and lifecycle must match the in-memory member. The SQLite write
+reservation and coordinator lock remain held through the adapter's completion
+commit, then the transaction commits (or rolls back on failure) and the
+connection closes. This is a process-level durable fence, not only an
+instance-local mutex.
 
-The adapter always acquires its condition before seed authority. The seed guard
-does not acquire adapter locks or call into the adapter, and seed operations
-never invert that order, so concurrent revocation cannot form a lock cycle.
+Generation advancement therefore linearizes either before guard acquisition
+and is rejected as stale, or after an accepted/identical-duplicate completion.
+A second coordinator or process sharing the protected database cannot save an
+advanced generation during that critical section.
+
+The lock order is adapter condition, then seed coordinator, then SQLite write
+reservation. The seed and durable-state guards do not acquire adapter locks or
+call into the adapter. The guarded adapter completion performs no operation
+that needs the same SQLite write reservation, so a waiting cross-instance
+advance cannot form a lock cycle.
 `revoke_peer()` advances the durable generation and records `STOPPING`;
 `leave()` advances it and records `STOPPED`. The seed update occurs before the
 adapter changes local transport state or releases in-flight work.

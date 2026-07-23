@@ -547,6 +547,64 @@ def test_stale_seed_rejects_old_generation_messages_and_assignments(
     assert stale_assignment.value.code == "seed_state_member_stale"
 
 
+def test_member_authority_guard_blocks_cross_instance_generation_advance(
+    tmp_path: Path,
+) -> None:
+    signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    guarded_seed = _coordinator(tmp_path, signer=signer, id_prefix="seed-guarded")
+    node = _node(tmp_path)
+    _join(guarded_seed, node, nonce="invite-cross-instance-guard")
+    contender_seed = _coordinator(
+        tmp_path,
+        signer=signer,
+        id_prefix="seed-contender",
+    )
+    generation = guarded_seed.member("node-a")["generation"]
+    save_entered = threading.Event()
+    advance_finished = threading.Event()
+    errors: list[BaseException] = []
+    contender_state = contender_seed._state  # noqa: SLF001 - lock-order oracle
+    assert contender_state is not None
+    original_save = contender_state.save_member
+
+    def observed_save(member: dict) -> None:
+        save_entered.set()
+        original_save(member)
+
+    contender_state.save_member = observed_save  # type: ignore[method-assign]
+
+    def advance() -> None:
+        try:
+            contender_seed.advance_member_generation(
+                node_id="node-a",
+                expected_generation=generation,
+                lifecycle_state="STOPPING",
+            )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            advance_finished.set()
+
+    thread = threading.Thread(target=advance, daemon=True)
+    with guarded_seed.member_authority_guard(
+        node_id="node-a",
+        expected_generation=generation,
+        expected_peer_class="mac_mlx_iroh",
+        eligible_lifecycle_states=frozenset({"NEW"}),
+    ) as member:
+        assert member["generation"] == generation
+        thread.start()
+        assert save_entered.wait(timeout=1)
+        assert not advance_finished.wait(timeout=0.05)
+        assert contender_state.load_members()[0]["generation"] == generation
+
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert advance_finished.is_set()
+    assert errors == []
+    assert contender_state.load_members()[0]["generation"] == generation + 1
+
+
 def test_join_rejects_one_endpoint_identity_under_multiple_node_ids(
     tmp_path: Path,
 ) -> None:
