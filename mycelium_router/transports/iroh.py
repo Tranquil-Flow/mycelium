@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections import OrderedDict, deque
 from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
 from queue import Empty, Full, Queue
 import threading
@@ -55,6 +56,8 @@ PROCESS_LIFETIME_LIMITATION = (
    "simultaneous sidecar process loss"
 )
 _SEEN_LIMIT = 4096
+_TRACE_ID_BYTES = 128
+_TRACE_ENTRY_BYTES = 512
 
 
 class IrohTransportError(RuntimeError):
@@ -64,6 +67,29 @@ class IrohTransportError(RuntimeError):
       self.code = code
       self.detail = detail
       super().__init__(code if not detail else f"{code}:{detail}")
+
+
+def _bounded_trace_identity(message: object) -> str:
+   header = getattr(message, "header", None)
+   request_id = getattr(message, "request_id", None)
+   if request_id is None and header is not None:
+      request_id = getattr(header, "request_id", None)
+   identity: dict[str, Any] = {}
+   encoded_request = request_id.encode("utf-8") if isinstance(request_id, str) else b""
+   if encoded_request and len(encoded_request) <= _TRACE_ID_BYTES:
+      identity["request_id"] = request_id
+   elif encoded_request:
+      identity["request_id_sha256"] = hashlib.sha256(encoded_request).hexdigest()
+   source = header if header is not None else message
+   phase = getattr(source, "phase", None)
+   if isinstance(phase, str) and len(phase.encode("utf-8")) <= _TRACE_ID_BYTES:
+      identity["phase"] = phase
+   token_index = getattr(source, "token_index", None)
+   if type(token_index) is int:
+      identity["token_index"] = token_index
+   rendered = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+   assert len(rendered.encode("utf-8")) <= _TRACE_ENTRY_BYTES
+   return rendered
 
 
 @dataclass(frozen=True)
@@ -1097,17 +1123,16 @@ class IrohTransport:
 
    def _send_or_dispatch(self, destination: str, frame: bytes) -> None:
       decoded = decode_frame(frame)
-      detail = (
-         f":{decoded.message.reason}"
-         if isinstance(decoded.message, FailureReport)
-         else ""
+      remote = destination != self.node_id
+      trace = (
+         f"{type(decoded.message).__name__}->"
+         f"{'peer:remote' if remote else 'self:local'}:"
+         f"{_bounded_trace_identity(decoded.message)}"
       )
+      assert len(trace.encode("utf-8")) <= _TRACE_ENTRY_BYTES
       with self._state_lock:
          self._require_running()
-         self._outbound_trace.append(
-            f"{type(decoded.message).__name__}->{destination}:"
-            f"{'local' if destination == self.node_id else 'remote'}{detail}"
-         )
+         self._outbound_trace.append(trace)
       if destination == self.node_id:
          self._dispatch(decoded, source_node_id=self.node_id)
          return

@@ -261,6 +261,49 @@ def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() ->
     assert transport.route_ready is False
 
 
+def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    try:
+        transport.remember_entry("request-1", "local-node")
+        transport._entry_nodes["request-1"] = "peer-node"
+        transport.send_token_event(
+            TokenEvent(
+                request_id="request-1",
+                path_id="path-1",
+                path_attempt=0,
+                token_index=7,
+                token_id=987_654_321,
+                sampling_counter=8,
+            )
+        )
+        long_request = "public-" + "x" * 2_048
+        transport._entry_nodes[long_request] = "peer-node"
+        transport.send_token_event(
+            TokenEvent(
+                request_id=long_request,
+                path_id="path-long",
+                path_attempt=0,
+                token_index=8,
+                token_id=123_456_789,
+                sampling_counter=9,
+            )
+        )
+        trace = transport.outbound_trace
+    finally:
+        transport.close()
+
+    assert len(trace) == 2
+    assert "request-1" in trace[0]
+    assert "TokenEvent" in trace[0] and '"token_index":7' in trace[0]
+    assert "987654321" not in trace[0]
+    assert "request_id_sha256" in trace[1] and long_request not in trace[1]
+    assert "123456789" not in trace[1]
+    assert all(len(entry.encode()) <= 512 for entry in trace)
+
+
 def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_generation() -> None:
     hub = _Hub(endpoint_id="unexpected")
     transport = _transport(hub)

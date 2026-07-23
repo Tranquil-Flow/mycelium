@@ -6,10 +6,10 @@ from functools import partial
 import os
 from pathlib import Path
 import queue
-import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -30,6 +30,9 @@ class ProcessRecord(NamedTuple):
     comm: str
 
 
+PathIdentity = tuple[int, int, int, int, int, int, int, int, int | None]
+
+
 class OwnedGroup(NamedTuple):
     node_id: str
     process: subprocess.Popen[str]
@@ -38,6 +41,8 @@ class OwnedGroup(NamedTuple):
     sid: int
     executable: Path
     worktree: Path
+    executable_identity: PathIdentity
+    worktree_identity: PathIdentity
     leader: ProcessRecord | None
 
 
@@ -49,6 +54,38 @@ def same_canonical_file(actual: str | Path, expected: Path) -> bool:
         return Path(actual).resolve(strict=True).samefile(expected.resolve(strict=True))
     except (FileNotFoundError, OSError):
         return False
+
+
+def path_identity(path: str | Path) -> PathIdentity:
+    metadata = os.stat(Path(path).resolve(strict=True), follow_symlinks=False)
+    birthtime = getattr(metadata, "st_birthtime", None)
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+        metadata.st_gid,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        None if birthtime is None else int(birthtime * 1_000_000_000),
+    )
+
+
+def process_cwd(pid: int) -> Path:
+    if sys.platform != "darwin":
+        return Path(os.readlink(f"/proc/{pid}/cwd"))
+    result = subprocess.run(
+        ["/usr/sbin/lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=2.0,
+    )
+    lines = result.stdout.splitlines()
+    assert lines[:2] == [f"p{pid}", "fcwd"] and len(lines) == 3
+    assert lines[2].startswith("n/") and "\x00" not in lines[2]
+    return Path(lines[2][1:])
 
 
 def process_inventory() -> dict[int, ProcessRecord]:
@@ -80,8 +117,19 @@ def register_owned_group(
     worktree: Path = WORKTREE_ROOT,
 ) -> OwnedGroup:
     pid = process.pid
+    executable = expected_executable.resolve(strict=True)
+    worktree = worktree.resolve(strict=True)
     owner = OwnedGroup(
-        node_id, process, pid, pid, pid, expected_executable, worktree, None
+        node_id,
+        process,
+        pid,
+        pid,
+        pid,
+        executable,
+        worktree,
+        path_identity(executable),
+        path_identity(worktree),
+        None,
     )
     owners[node_id] = owner
     _validate_owner(owner, None)
@@ -91,9 +139,9 @@ def register_owned_group(
     leader = inventory.get(pid)
     assert leader is not None, f"registration missing process {pid}"
     assert leader.ppid == os.getpid() and leader.pgid == pid
-    assert same_canonical_file(leader.comm, expected_executable), (
-        "unexpected executable"
-    )
+    assert same_canonical_file(leader.comm, executable), "unexpected executable"
+    assert path_identity(leader.comm) == owner.executable_identity
+    assert path_identity(process_cwd(pid)) == owner.worktree_identity
     assert process.poll() is None, f"registration lost live process {pid}"
     owners[node_id] = owner._replace(leader=leader)
     return owners[node_id]
@@ -106,6 +154,8 @@ def _validate_owner(
     assert all(type(value) is int and value > 1 for value in identifiers)
     assert owner.pid == owner.pgid == owner.sid == owner.process.pid
     assert same_canonical_file(owner.worktree, WORKTREE_ROOT)
+    assert path_identity(owner.executable) == owner.executable_identity
+    assert path_identity(owner.worktree) == owner.worktree_identity
     protected_pids = {os.getpid(), os.getppid()}
     protected_groups = {os.getpgrp(), os.getpgid(os.getppid())}
     if inventory is not None:
@@ -139,6 +189,10 @@ def _revalidate_owned_group(
         assert owner.process.poll() is None, f"refused exited leader {owner.pid}"
         assert owner.leader is not None and owner.leader == leader
         assert same_canonical_file(leader.comm, owner.executable)
+        assert path_identity(leader.comm) == owner.executable_identity
+        cwd = process_cwd(owner.pid)
+        assert same_canonical_file(cwd, owner.worktree)
+        assert path_identity(cwd) == owner.worktree_identity
         return _kernel_identity(owner.pid, owner)
 
     members = [item for item in inventory.values() if item.pgid == owner.pgid]
@@ -221,27 +275,62 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
     assert parent == expected_parent, f"cleanup refused temporary parent {parent}"
     assert root.parent == parent and root.name.startswith(TEMP_ROOT_PREFIX)
     assert stat.S_ISDIR(original.st_mode)
-    parent_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    parent_fd = os.open(parent, directory_flags)
+    root_fd: int | None = None
+    quarantine = f"{root.name}.quarantine-{os.getpid()}-{time.monotonic_ns()}"
+
+    def inode(metadata: os.stat_result) -> tuple[int, int, int]:
+        return metadata.st_dev, metadata.st_ino, metadata.st_mode
+
+    def empty_open_directory(directory_fd: int) -> None:
+        for name in os.listdir(directory_fd):
+            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if stat.S_ISDIR(current.st_mode):
+                child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+                try:
+                    assert inode(os.fstat(child_fd)) == inode(current)
+                    empty_open_directory(child_fd)
+                    assert inode(os.fstat(child_fd)) == inode(
+                        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                    )
+                finally:
+                    os.close(child_fd)
+                os.rmdir(name, dir_fd=directory_fd)
+            else:
+                os.unlink(name, dir_fd=directory_fd)
+
     try:
         lstat_at = partial(os.stat, dir_fd=parent_fd, follow_symlinks=False)
         try:
             current = lstat_at(root.name)
         except FileNotFoundError:
             return
-        assert (current.st_dev, current.st_ino, current.st_mode) == (
-            original.st_dev,
-            original.st_ino,
-            original.st_mode,
-        ), f"cleanup refused replaced temporary root {root}"
+        assert inode(current) == inode(original), "cleanup refused replaced root"
         assert stat.S_ISDIR(current.st_mode)
-        shutil.rmtree(root.name, dir_fd=parent_fd)
-        try:
-            lstat_at(root.name)
-        except FileNotFoundError:
-            pass
-        else:
-            raise AssertionError(f"cleanup failed to remove {root}")
+        root_fd = os.open(root.name, directory_flags, dir_fd=parent_fd)
+        assert inode(os.fstat(root_fd)) == inode(original)
+        os.rename(
+            root.name,
+            quarantine,
+            src_dir_fd=parent_fd,
+            dst_dir_fd=parent_fd,
+        )
+        quarantined = lstat_at(quarantine)
+        assert inode(quarantined) == inode(os.fstat(root_fd)) == inode(original), (
+            "cleanup refused quarantined replacement; replacement preserved"
+        )
+        empty_open_directory(root_fd)
+        assert inode(lstat_at(quarantine)) == inode(os.fstat(root_fd))
+        os.rmdir(quarantine, dir_fd=parent_fd)
     finally:
+        if root_fd is not None:
+            os.close(root_fd)
         os.close(parent_fd)
 
 

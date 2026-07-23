@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -271,10 +272,10 @@ def _fake_owner(
     pid: int,
     *,
     process: Any | None = None,
+    executable: Path = SERVICE_EXECUTABLE,
     worktree: Path = WORKTREE_ROOT,
     started: str | None = "Thu Jul 23 21:00:00 2026",
 ) -> harness.OwnedGroup:
-    executable = SERVICE_EXECUTABLE
     if process is None:
         process = Mock(pid=pid, stdin=None, stdout=None, stderr=None)
         process.poll.return_value = None
@@ -284,7 +285,16 @@ def _fake_owner(
         else harness.ProcessRecord(pid, os.getpid(), pid, started, str(executable))
     )
     return harness.OwnedGroup(
-        f"node-{pid}", process, pid, pid, pid, executable, worktree, leader
+        f"node-{pid}",
+        process,
+        pid,
+        pid,
+        pid,
+        executable,
+        worktree,
+        harness.path_identity(executable),
+        harness.path_identity(worktree),
+        leader,
     )
 
 
@@ -296,12 +306,218 @@ def _exception_leaves(error: BaseException) -> list[BaseException]:
     return [error]
 
 
-def _verified_observation(result: dict[str, Any]) -> dict[str, Any]:
-    observation = result["observation"]
-    verifier = signing.build_ed25519_verifier([result["verification_key"]])
-    assert verifier(canonical_json_bytes(observation), result["signature"])
-    assert result["signature"]["signer_endpoint_id"] == observation["endpoint_id"]
+_ObservationTrust = tuple[bytes, str, dict[str, Any]]
+
+
+def _pin_configured_observation(
+    result: dict[str, Any],
+    *,
+    process: _IsolatedNodeClient,
+    expected_host_id: str,
+) -> tuple[dict[str, Any], _ObservationTrust]:
+    assert set(result) == {"observation", "signature", "verification_key"}
+    observation, key, signature = (
+        result["observation"],
+        result["verification_key"],
+        result["signature"],
+    )
+    endpoint_id = observation["endpoint_id"]
+    expected_identity = {
+        "protocol": "mycelium.physical_node_observation.v1",
+        "run_id": process.run_id,
+        "deployment_id": process.deployment_id,
+        "node_id": process.node_id,
+        "host_id": expected_host_id,
+        "process_id": process.process.pid,
+        "endpoint_id": endpoint_id,
+        "route_ready": False,
+    }
+    assert (
+        set(observation)
+        == {
+            *expected_identity,
+            "event",
+            "monotonic_ns",
+            "peer_generation",
+            "state",
+            "details",
+        }
+        and all(observation[key] == value for key, value in expected_identity.items())
+        and observation["event"] == "configured"
+        and type(observation["monotonic_ns"]) is int
+        and observation["monotonic_ns"] > 0
+        and isinstance(endpoint_id, str)
+        and endpoint_id
+        and observation["peer_generation"] == 0
+        and observation["state"] == "CONFIGURED"
+        and observation["details"]["endpoint_addr"]["id"] == endpoint_id
+    )
+    verifier = signing.build_ed25519_verifier([key])
+    assert verifier(canonical_json_bytes(observation), signature)
+    assert (
+        signature["signer_endpoint_id"] == endpoint_id
+        and signature["verification_key_digest"] == key["verification_key_digest"]
+    )
+    return observation, (
+        canonical_json_bytes(key),
+        key["verification_key_digest"],
+        expected_identity,
+    )
+
+
+def _verified_observation(
+    result: dict[str, Any],
+    *,
+    trust: _ObservationTrust,
+    expected_event: str,
+) -> dict[str, Any]:
+    assert set(result) == {"observation", "signature", "verification_key"}
+    key_record, trusted_digest, expected_identity = trust
+    key_bytes = canonical_json_bytes(result["verification_key"])
+    assert key_bytes == key_record
+    observation, signature = result["observation"], result["signature"]
+    assert set(observation) == {
+        *expected_identity,
+        "event",
+        "monotonic_ns",
+        "peer_generation",
+        "state",
+        "details",
+    }
+    verifier = signing.build_ed25519_verifier([json.loads(key_bytes)])
+    assert verifier(canonical_json_bytes(observation), signature)
+    assert (
+        signature["verification_key_digest"] == trusted_digest
+        and signature["signer_endpoint_id"] == expected_identity["endpoint_id"]
+        and observation["event"] == expected_event
+        and all(observation[key] == value for key, value in expected_identity.items())
+        and type(observation["monotonic_ns"]) is int
+        and observation["monotonic_ns"] > 0
+        and observation["peer_generation"] == 1
+        and observation["state"] == "RUNNING"
+    )
+    transport = observation["details"].get("transport")
+    if transport is not None:
+        assert transport["local_endpoint_id"] == expected_identity["endpoint_id"]
     return observation
+
+
+def _assert_request_route_evidence(
+    frame_deltas: dict[str, tuple[int, int]],
+    traces: dict[str, list[str]],
+    *,
+    request_id: str,
+    expected_types: dict[str, tuple[str, ...]],
+) -> None:
+    assert all(sent > 0 and received > 0 for sent, received in frame_deltas.values())
+    for node_id, expected in expected_types.items():
+        observed: list[str] = []
+        for entry in traces[node_id]:
+            assert len(entry.encode()) <= 512
+            prefix, marker, payload = entry.partition(":remote:")
+            if not marker:
+                continue
+            identity = json.loads(payload)
+            assert set(identity) <= {
+                "phase",
+                "request_id",
+                "request_id_sha256",
+                "token_index",
+            }
+            if identity.get("request_id") == request_id:
+                observed.append(prefix.split("->", 1)[0])
+        assert tuple(observed) == expected
+
+
+def _signed_observation(
+    signer: Any,
+    *,
+    event: str = "snapshot",
+    **changes: Any,
+) -> dict[str, Any]:
+    observation = {
+        "protocol": "mycelium.physical_node_observation.v1",
+        "event": event,
+        "monotonic_ns": 1,
+        "run_id": "run-trusted",
+        "deployment_id": "deployment-trusted",
+        "node_id": "node-trusted",
+        "host_id": "host-trusted",
+        "process_id": 4_242,
+        "endpoint_id": signer.endpoint_id,
+        "peer_generation": 1,
+        "state": "RUNNING",
+        "route_ready": False,
+        "details": {
+            "transport": {"local_endpoint_id": signer.endpoint_id},
+        },
+        **changes,
+    }
+    return {
+        "observation": observation,
+        "signature": signer.sign(observation),
+        "verification_key": signer.public_key_record(),
+    }
+
+
+def test_observation_rejects_untrusted_keys_and_identity_swaps() -> None:
+    trusted = signing.generate_ed25519_signer(endpoint_id="endpoint-trusted")
+    attacker = signing.generate_ed25519_signer(endpoint_id="endpoint-trusted")
+    configured = _signed_observation(
+        trusted,
+        event="configured",
+        peer_generation=0,
+        state="CONFIGURED",
+        details={"endpoint_addr": {"id": trusted.endpoint_id}},
+    )
+    channel = Mock(
+        node_id="node-trusted",
+        run_id="run-trusted",
+        deployment_id="deployment-trusted",
+        process=Mock(pid=4_242),
+    )
+    _, trust = _pin_configured_observation(
+        configured, process=channel, expected_host_id="host-trusted"
+    )
+    forged = [
+        _signed_observation(attacker, event="configured"),
+        _signed_observation(trusted, node_id="node-swapped"),
+        _signed_observation(trusted, process_id=9_999),
+        _signed_observation(trusted, host_id="host-swapped"),
+        _signed_observation(
+            signing.generate_ed25519_signer(endpoint_id="endpoint-swapped")
+        ),
+    ]
+    for result in forged:
+        with pytest.raises(AssertionError):
+            _verified_observation(
+                result,
+                trust=trust,
+                expected_event=result["observation"]["event"],
+            )
+
+
+def test_request_route_evidence_rejects_unrelated_remote_noise() -> None:
+    expected = {
+        NODE_IDS[0]: ("ProgressivePrefillMessage", "HopHeader", "HopHeader"),
+        NODE_IDS[1]: (
+            "ManifestLocked",
+            "TokenEvent",
+            "TokenEvent",
+            "TokenEvent",
+        ),
+    }
+    unrelated = {
+        node_id: [f"{frame}->peer:remote" for frame in frames]
+        for node_id, frames in expected.items()
+    }
+    with pytest.raises(AssertionError):
+        _assert_request_route_evidence(
+            {node_id: (3, 3) for node_id in NODE_IDS},
+            unrelated,
+            request_id="request-current",
+            expected_types=expected,
+        )
 
 
 def test_sidecar_observation_requires_exact_child_and_owned_group(
@@ -350,8 +566,16 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
     )
     foreign_root = tmp_path / "foreign"
     foreign_root.mkdir()
+    registered_executable = tmp_path / "registered-service"
+    registered_executable.write_bytes(b"registered")
+    replaced_path = _fake_owner(9_108, executable=registered_executable)
+    registered_executable.rename(tmp_path / "original-service")
+    registered_executable.write_bytes(b"replacement")
+    cwd_drifted = _fake_owner(9_109)
     inventory = {
         exact.pid: exact.leader,
+        replaced_path.pid: replaced_path.leader,
+        cwd_drifted.pid: cwd_drifted.leader,
         reused.pid: harness.ProcessRecord(
             reused.pid, 2, reused.pgid, "changed start", str(reused.executable)
         ),
@@ -370,6 +594,11 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
     monkeypatch.setattr(os, "getpgid", group_id)
     monkeypatch.setattr(os, "getsid", group_id)
     monkeypatch.setattr(
+        harness,
+        "process_cwd",
+        lambda pid: foreign_root if pid == cwd_drifted.pid else WORKTREE_ROOT,
+    )
+    monkeypatch.setattr(
         os, "kill", lambda *a: (_ for _ in ()).throw(AssertionError("raw PID"))
     )
     signals: list[tuple[int, int]] = []
@@ -382,11 +611,13 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
             reused,
             exited_absent,
             exited_present,
+            replaced_path,
+            cwd_drifted,
             exact,
         ],
         requested,
     )
-    assert uncertain and len(errors) == 6
+    assert uncertain and len(errors) == 8
     assert signals == [(exact.pgid, requested)]
     monkeypatch.setattr(
         harness,
@@ -417,6 +648,7 @@ def test_owner_registration_requires_live_exact_process(
 
     monkeypatch.setattr(os, "getpgid", getpgid)
     monkeypatch.setattr(os, "getsid", lambda candidate: pid)
+    monkeypatch.setattr(harness, "process_cwd", lambda candidate: WORKTREE_ROOT)
     owners: dict[str, harness.OwnedGroup] = {}
     with pytest.raises(AssertionError, match="executable"):
         harness.register_owned_group(owners, "node", process, expected)
@@ -503,7 +735,7 @@ def test_cleanup_preserves_constructor_and_post_start_faults(
         for thread in set(threading.enumerate()) - before_threads:
             thread.join(0.2)
         if root.exists():
-            harness.shutil.rmtree(root)
+            shutil.rmtree(root)
     leaves = _exception_leaves(grouped.value)
     for injected in (body_fault, constructor_fault, post_start_fault):
         assert sum(error is injected for error in leaves) == 1
@@ -553,9 +785,49 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
         assert backup.is_dir()
     finally:
         if replaced.exists():
-            harness.shutil.rmtree(replaced)
+            shutil.rmtree(replaced)
         if backup.exists():
-            harness.shutil.rmtree(backup)
+            shutil.rmtree(backup)
+    raced = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    raced_backup = raced.with_name(raced.name + "-original")
+    raced_guard = harness.capture_temp_root(raced)
+    real_rename, real_rmtree = os.rename, shutil.rmtree
+    injected = False
+
+    def inject_replacement() -> None:
+        nonlocal injected
+        if injected:
+            return
+        injected = True
+        real_rename(raced, raced_backup)
+        raced.mkdir()
+        (raced / "keep").write_text("replacement")
+
+    def racing(action: Any) -> Any:
+        def run(*args: Any, **kwargs: Any) -> None:
+            inject_replacement()
+            action(*args, **kwargs)
+
+        return run
+
+    try:
+        with pytest.MonkeyPatch.context() as race:
+            race.setattr(harness.os, "rename", racing(real_rename))
+            race.setattr(shutil, "rmtree", racing(real_rmtree))
+            with pytest.raises(AssertionError, match="replaced|quarantined"):
+                harness.remove_temp_root(raced_guard)
+        survivors = [
+            candidate / "keep"
+            for candidate in raced.parent.glob(raced.name + "*")
+            if candidate.is_dir()
+        ]
+        assert any(
+            path.read_text() == "replacement" for path in survivors if path.exists()
+        )
+    finally:
+        for candidate in raced.parent.glob(raced.name + "*"):
+            if candidate.is_dir():
+                real_rmtree(candidate)
 
 
 def test_redacted_evidence_shape_excludes_raw_values() -> None:
@@ -632,6 +904,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     node_processes: dict[str, _IsolatedNodeClient] = {}
     owned_groups: dict[str, harness.OwnedGroup] = {}
     configured: dict[str, dict[str, Any]] = {}
+    observation_trusts: dict[str, _ObservationTrust] = {}
     accepted_offers: dict[str, dict[str, Any]] = {}
     sidecar_pids: dict[str, int] = {}
     discovered_child_pids: set[int] = set()
@@ -653,9 +926,8 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 socket_root=socket_root / suffix,
                 owned_groups=owned_groups,
             )
-        configuration_responses: dict[str, dict[str, Any]] = {}
         for node_id, process in node_processes.items():
-            configuration_responses[node_id] = process.raw_command(
+            response = process.raw_command(
                 "configure",
                 {
                     "assignment_file": f"{node_id}-assignment.json",
@@ -666,6 +938,13 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     "load_generation": 7,
                 },
             )
+            assert response["ok"] is True and response["route_ready"] is False
+            observation, observation_trusts[node_id] = _pin_configured_observation(
+                response["result"],
+                process=process,
+                expected_host_id=os.uname().nodename,
+            )
+            configured[node_id] = observation["details"]
             sidecar_pids[node_id] = _native_sidecar_pid(
                 owned_groups[node_id],
                 discovered_pids=discovered_child_pids,
@@ -678,11 +957,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
         assert all(type(pid) is int and pid > 1 for pid in native_pid_union)
         assert len(set(native_pid_union)) == len(native_pid_union)
         assert os.getpid() not in native_pid_union
-        for node_id, response in configuration_responses.items():
-            assert response["ok"] is True and response["route_ready"] is False
-            result = response["result"]
-            assert result["observation"]["event"] == "configured"
-            configured[node_id] = result["observation"]["details"]
         endpoint_ids = {
             details["endpoint_addr"]["id"] for details in configured.values()
         }
@@ -763,7 +1037,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 )
                 peer_endpoint_addr = json.loads(peer_member["endpoint_addrs"][0])
                 assert peer_endpoint_addr["id"] == peer_record["endpoint_id"]
-                started = node_processes[node_id].command(
+                started_result = node_processes[node_id].command(
                     "start",
                     {
                         "peer": {
@@ -774,7 +1048,15 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                         }
                     },
                 )
-                assert started["observation"]["event"] == "started"
+                started = _verified_observation(
+                    started_result,
+                    trust=observation_trusts[node_id],
+                    expected_event="started",
+                )
+                assert (
+                    started["details"]["peer"]["endpoint_id"]
+                    == peer_record["endpoint_id"]
+                )
             first = node_processes[NODE_IDS[0]]
             for node_id in NODE_IDS:
                 details = configured[node_id]
@@ -821,21 +1103,31 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             for node_id in NODE_IDS:
                 response = node_processes[node_id].raw_command("snapshot")
                 assert response["ok"] is True and response["route_ready"] is False
-                observation = _verified_observation(response["result"])
+                observation = _verified_observation(
+                    response["result"],
+                    trust=observation_trusts[node_id],
+                    expected_event="snapshot",
+                )
                 before_observations[node_id] = observation
                 before_request[node_id] = observation["details"]
             request_id = str(uuid.uuid4())
-            started = first.command("infer_start", _inference_request(request_id))[
-                "observation"
-            ]["details"]
+            started = _verified_observation(
+                first.command("infer_start", _inference_request(request_id)),
+                trust=observation_trusts[NODE_IDS[0]],
+                expected_event="inference_started",
+            )["details"]
             assert (started["request_id"], started["status"]) == (
                 request_id,
                 "DECODING",
             )
-            decoded = first.command(
-                "infer_decode",
-                {"request_id": request_id, "count": 2},
-            )["observation"]["details"]
+            decoded = _verified_observation(
+                first.command(
+                    "infer_decode",
+                    {"request_id": request_id, "count": 2},
+                ),
+                trust=observation_trusts[NODE_IDS[0]],
+                expected_event="inference_decoded",
+            )["details"]
             assert (decoded["request_id"], decoded["status"]) == (
                 request_id,
                 "COMPLETED",
@@ -863,7 +1155,11 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             for node_id in NODE_IDS:
                 response = node_processes[node_id].raw_command("snapshot")
                 assert response["ok"] is True and response["route_ready"] is False
-                observation = _verified_observation(response["result"])
+                observation = _verified_observation(
+                    response["result"],
+                    trust=observation_trusts[node_id],
+                    expected_event="snapshot",
+                )
                 node_observations[node_id] = observation
                 before = before_observations[node_id]
                 assert observation["node_id"] == before["node_id"] == node_id
@@ -903,13 +1199,23 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                 after_trace = after["transport_outbound_trace"]
                 assert after_trace[: len(before_trace)] == before_trace
                 request_trace_deltas[node_id] = after_trace[len(before_trace) :]
-            assert all(
-                sent > 0 and received > 0
-                for sent, received in request_frame_deltas.values()
-            )
-            assert all(
-                any(":remote" in entry for entry in trace)
-                for trace in request_trace_deltas.values()
+            _assert_request_route_evidence(
+                request_frame_deltas,
+                request_trace_deltas,
+                request_id=request_id,
+                expected_types={
+                    NODE_IDS[0]: (
+                        "ProgressivePrefillMessage",
+                        "HopHeader",
+                        "HopHeader",
+                    ),
+                    NODE_IDS[1]: (
+                        "ManifestLocked",
+                        "TokenEvent",
+                        "TokenEvent",
+                        "TokenEvent",
+                    ),
+                },
             )
             host_ids = {item["host_id"] for item in node_observations.values()}
             assert len(host_ids) == 1
