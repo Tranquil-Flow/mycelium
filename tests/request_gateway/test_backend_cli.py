@@ -70,7 +70,12 @@ def test_cli_streams_through_production_service_and_router_session_interface():
     qualification = _synthetic_qualification()
     router, clock, capacity, runtime = _runtime_stack()
     codec = RecordingCodec()
-    backend = RouterSessionBackend(router=router, codec=codec, clock=clock.now)
+    backend = RouterSessionBackend(
+        router=router,
+        codec=codec,
+        clock=clock.now,
+        qualification_source=MutableQualificationSource(qualification),
+    )
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
@@ -105,7 +110,12 @@ def test_router_adapter_cancellation_releases_capacity_and_kv_once():
     class CancelAfterFirstCodec(RecordingCodec):
         pass
 
-    backend = RouterSessionBackend(router=router, codec=codec, clock=clock.now)
+    backend = RouterSessionBackend(
+        router=router,
+        codec=codec,
+        clock=clock.now,
+        qualification_source=MutableQualificationSource(qualification),
+    )
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
@@ -143,6 +153,15 @@ def test_router_adapter_cancellation_releases_capacity_and_kv_once():
         assert len(capacity.release_calls) == 1
         assert len(runtime.cancel_calls) == 1
         assert service.terminal_event_count(request_id) == 1
+        session = service._get_session(request_id)
+        with session.condition:
+            assert session.condition.wait_for(lambda: session.worker_done, timeout=1)
+        assert backend._active == set()
+        assert backend._cancelled == set()
+        assert backend._pending_cancelled == set()
+        assert backend._internally_cancelled == set()
+        assert backend._external_cancellation_observed == set()
+        assert backend._awaiting_cancel_ack == set()
     finally:
         service.close()
 

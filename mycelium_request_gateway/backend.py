@@ -6,9 +6,11 @@ import json
 import threading
 from typing import Callable, Protocol
 
-from mycelium_router.contracts import RequestContext
+from mycelium_qualification.contracts import RouteQualificationV1
+from mycelium_router.contracts import ExecutionGraph, RequestContext
 
-from .contracts import AdmissionError, InferenceSubmission
+from .contracts import AdmissionError, InferenceSubmission, qualification_binding
+from .qualification import QualificationSource
 
 
 class PromptCodec(Protocol):
@@ -57,6 +59,7 @@ class RouterSessionBackend:
         router: RouterPort,
         codec: PromptCodec,
         clock: Callable[[], float],
+        qualification_source: QualificationSource | None = None,
         excluded_placements: frozenset[str] = frozenset(),
         sampling_seed: int = 0,
     ) -> None:
@@ -69,10 +72,16 @@ class RouterSessionBackend:
         self._router = router
         self._codec = codec
         self._clock = clock
+        self._qualification_source = qualification_source
         self._excluded_placements = excluded_placements
         self._sampling_seed = sampling_seed
         self._lock = threading.RLock()
+        self._active: set[str] = set()
         self._cancelled: set[str] = set()
+        self._pending_cancelled: set[str] = set()
+        self._internally_cancelled: set[str] = set()
+        self._external_cancellation_observed: set[str] = set()
+        self._awaiting_cancel_ack: set[str] = set()
 
     def run(
         self,
@@ -81,11 +90,32 @@ class RouterSessionBackend:
         emit_token: Callable[[int, str], None],
         is_cancelled: Callable[[], bool],
     ) -> str:
+        with self._lock:
+            if request_id in self._active:
+                raise AdmissionError("duplicate_request_id")
+            self._awaiting_cancel_ack.discard(request_id)
+            self._external_cancellation_observed.discard(request_id)
+            self._active.add(request_id)
+            if request_id in self._pending_cancelled:
+                self._pending_cancelled.discard(request_id)
+                self._cancelled.add(request_id)
+        failed = True
         try:
-            return self._run(request_id, submission, emit_token, is_cancelled)
+            outcome = self._run(request_id, submission, emit_token, is_cancelled)
+            failed = False
+            return outcome
         finally:
             with self._lock:
+                needs_ack = failed or request_id in self._internally_cancelled
+                if (
+                    needs_ack
+                    and request_id not in self._external_cancellation_observed
+                ):
+                    self._awaiting_cancel_ack.add(request_id)
+                self._active.discard(request_id)
                 self._cancelled.discard(request_id)
+                self._internally_cancelled.discard(request_id)
+                self._external_cancellation_observed.discard(request_id)
 
     def _run(
         self,
@@ -96,6 +126,7 @@ class RouterSessionBackend:
     ) -> str:
         if is_cancelled() or self._is_cancelled(request_id):
             return "cancelled"
+        self._require_current_deployment(submission)
         prompt_token_ids = self._codec.encode(submission.prompt)
         if not isinstance(prompt_token_ids, tuple) or not prompt_token_ids or not all(
             isinstance(item, int) and not isinstance(item, bool) and item >= 0
@@ -163,14 +194,69 @@ class RouterSessionBackend:
                 self._cancel_once(request_id)
             raise
 
-    def cancel(self, request_id: str) -> None:
-        self._cancel_once(request_id)
+    def _require_current_deployment(self, submission: InferenceSubmission) -> None:
+        source = self._qualification_source
+        if source is None:
+            return
+        try:
+            current = source.current()
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if current is None:
+            raise AdmissionError("route_dropped")
+        if not isinstance(current, RouteQualificationV1):
+            raise AdmissionError("qualification_unavailable")
+        if current.route_ready is not True:
+            raise AdmissionError("readiness_revoked")
+        try:
+            current_binding = qualification_binding(current)
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if current_binding != submission.qualification:
+            raise AdmissionError("qualification_mismatch")
+        deployment_source = getattr(self._router, "current_deployment", None)
+        if deployment_source is None:
+            return
+        if not callable(deployment_source):
+            raise AdmissionError("qualification_unavailable")
+        try:
+            deployment = deployment_source()
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if not isinstance(deployment, ExecutionGraph):
+            raise AdmissionError("qualification_unavailable")
+        if (
+            deployment.deployment_id != current.deployment_id
+            or deployment.deployment_epoch != current.deployment_epoch
+            or deployment.topology_version != current.topology_version
+            or deployment.model_id != current.model_id
+            or deployment.resolved_commit != current.resolved_commit
+        ):
+            raise AdmissionError("qualification_mismatch")
 
-    def _cancel_once(self, request_id: str) -> None:
+    def cancel(self, request_id: str) -> None:
+        self._cancel_once(request_id, external=True)
+
+    def _cancel_once(self, request_id: str, *, external: bool = False) -> None:
         with self._lock:
-            if request_id in self._cancelled:
+            if external and request_id in self._awaiting_cancel_ack:
+                self._awaiting_cancel_ack.discard(request_id)
                 return
-            self._cancelled.add(request_id)
+            if request_id not in self._active:
+                if not external or request_id in self._pending_cancelled:
+                    return
+                self._pending_cancelled.add(request_id)
+            elif request_id in self._cancelled:
+                if external:
+                    self._external_cancellation_observed.add(request_id)
+                    self._internally_cancelled.discard(request_id)
+                return
+            else:
+                self._cancelled.add(request_id)
+                if external:
+                    self._external_cancellation_observed.add(request_id)
+                else:
+                    self._internally_cancelled.add(request_id)
         self._router.cancel(request_id)
 
     def _is_cancelled(self, request_id: str) -> bool:
