@@ -170,8 +170,8 @@
       "owner_sources": [
         {
           "path": "runtime_loader.py",
-          "sha256": "f79eba9e786ce65cea05460e7b3b1366e3e3dcd859a6345e0b8950afcf11ba4b",
-          "size_bytes": 61365
+          "sha256": "a0068a4e5216ed2bd7025fb2eb129eaecc18e65232b51b3b98355c16f68e8824",
+          "size_bytes": 62206
         },
         {
           "path": "runtime_contracts.py",

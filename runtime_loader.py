@@ -1224,6 +1224,26 @@ def execute_loaded_stage(
     mx = _mlx_module()
     expected_dtype = _runtime_dtypes()[runtime["dtype"]]
     expected_dtype_name = str(expected_dtype)
+    proof_digest = proof.get("loaded_tensor_digest")
+    authenticated_digest = loaded_stage.authenticated_tensor_digest
+    if (
+        not isinstance(proof_digest, str)
+        or _SHA256_REF_RE.fullmatch(proof_digest) is None
+        or not isinstance(authenticated_digest, str)
+        or _SHA256_REF_RE.fullmatch(authenticated_digest) is None
+    ):
+        reject("loaded_tensor_digest_mismatch")
+    try:
+        materialized_digest = _digest_arrays(tensors)
+    except Exception:
+        raise RuntimeExecutionError("loaded_tensor_digest_mismatch") from None
+    if (
+        not isinstance(materialized_digest, str)
+        or _SHA256_REF_RE.fullmatch(materialized_digest) is None
+        or proof_digest != authenticated_digest
+        or proof_digest != materialized_digest
+    ):
+        reject("loaded_tensor_digest_mismatch")
     has_embedding = "input_embedding" in components
     if has_embedding:
         if token_ids is None or hidden_states is not None:

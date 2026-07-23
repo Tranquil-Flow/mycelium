@@ -662,6 +662,143 @@ def test_stage_execution_rejects_proof_only_authentication_tampering(
 
 
 @pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_stage_execution_authenticates_loaded_tensor_digest_before_compute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend=backend)
+    tampered_proof = json.loads(canonical_json(loaded.proof))
+    tampered_proof["loaded_tensor_digest"] = "sha256:" + "0" * 64
+    tampered = replace(loaded, proof=tampered_proof)
+
+    class BackendComputeReached(AssertionError):
+        pass
+
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise BackendComputeReached("backend_compute_reached")
+
+    if backend == "numpy":
+        monkeypatch.setattr(numpy_runtime, "_gpt2_block", reject_backend_compute)
+        execute = execute_loaded_numpy_stage
+        error = RuntimeLoadError
+    else:
+        monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+        execute = runtime_loader.execute_loaded_stage
+        error = RuntimeExecutionError
+
+    with pytest.raises(error, match=r"^loaded_tensor_digest_mismatch$"):
+        execute(
+            tampered,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+
+
+@pytest.mark.parametrize(
+    "authenticated_digest",
+    [None, "not-a-digest", "sha256:" + "0" * 64],
+)
+def test_loaded_mlx_stage_authenticates_frozen_tensor_digest_before_compute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    authenticated_digest: str | None,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend="mlx")
+    tampered = replace(
+        loaded,
+        authenticated_tensor_digest=authenticated_digest,
+    )
+
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("backend_compute_reached")
+
+    monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+    with pytest.raises(
+        RuntimeExecutionError,
+        match=r"^loaded_tensor_digest_mismatch$",
+    ):
+        runtime_loader.execute_loaded_stage(
+            tampered,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+
+
+@pytest.mark.parametrize(
+    "proof_digest",
+    [None, "not-a-digest"],
+)
+def test_loaded_mlx_stage_rejects_missing_or_malformed_proof_tensor_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    proof_digest: str | None,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend="mlx")
+    tampered_proof = json.loads(canonical_json(loaded.proof))
+    if proof_digest is None:
+        del tampered_proof["loaded_tensor_digest"]
+    else:
+        tampered_proof["loaded_tensor_digest"] = proof_digest
+    tampered = replace(loaded, proof=tampered_proof)
+
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("backend_compute_reached")
+
+    monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+    with pytest.raises(
+        RuntimeExecutionError,
+        match=r"^loaded_tensor_digest_mismatch$",
+    ):
+        runtime_loader.execute_loaded_stage(
+            tampered,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+
+
+def test_loaded_mlx_stage_authenticates_materialized_tensors_before_compute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend="mlx")
+    tensors = dict(loaded.tensors)
+    tensor_key = "transformer.h.0.ln_1.weight"
+    tensors[tensor_key] = tensors[tensor_key] + mx.ones_like(tensors[tensor_key])
+    tampered = replace(loaded, tensors=MappingProxyType(tensors))
+
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("backend_compute_reached")
+
+    monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+    with pytest.raises(
+        RuntimeExecutionError,
+        match=r"^loaded_tensor_digest_mismatch$",
+    ):
+        runtime_loader.execute_loaded_stage(
+            tampered,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+
+
+def test_loaded_mlx_stage_maps_tensor_digest_recomputation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend="mlx")
+
+    def reject_digest_recomputation(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("raw_backend_digest_detail")
+
+    monkeypatch.setattr(runtime_loader, "_digest_arrays", reject_digest_recomputation)
+    with pytest.raises(
+        RuntimeExecutionError,
+        match=r"^loaded_tensor_digest_mismatch$",
+    ):
+        runtime_loader.execute_loaded_stage(
+            loaded,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
+
+
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
 @pytest.mark.parametrize(
     ("tamper_case", "expected_error"),
     [
