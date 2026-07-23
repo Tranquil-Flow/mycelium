@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from pathlib import Path
+import shlex
 import sys
+import tarfile
 from typing import Any
 
 import pytest
@@ -12,13 +15,23 @@ from mycelium_membership.contracts import (
     ASSIGNMENT_OFFER_PROTOCOL,
     sign_membership_message,
 )
+from mycelium_qualification.contracts import (
+    QUALIFIER_AUTHORITY,
+    ROUTE_QUALIFICATION_PROTOCOL,
+)
+from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
 from physical_inference_qualification import (
     COMMANDS,
+    CommandCapture,
     ControllerError,
     PeerIdentity,
     QualificationController,
     SubprocessRunner,
+    _REMOTE_CLEANUP_SCRIPT,
+    _REMOTE_STAGE_SCRIPT,
+    _parser,
+    build_transfer_archive,
     main,
 )
 
@@ -34,6 +47,245 @@ class RecordingRunner:
     def run(self, argv: tuple[str, ...], *, timeout_seconds: float) -> object:
         self.calls.append((argv, timeout_seconds))
         raise AssertionError("dry/fake/local controller must not launch commands")
+
+
+class StagingRunner:
+    def __init__(self, responses: list[CommandCapture]) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[tuple[str, ...], float, bytes | None]] = []
+
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        timeout_seconds: float,
+        stdin_bytes: bytes | None = None,
+    ) -> CommandCapture:
+        self.calls.append((argv, timeout_seconds, stdin_bytes))
+        response = self.responses.pop(0)
+        return CommandCapture(
+            argv=argv,
+            returncode=response.returncode,
+            stdout=response.stdout,
+            stderr=response.stderr,
+        )
+
+
+class FakeNodeSession:
+    def __init__(
+        self,
+        *,
+        argv: tuple[str, ...],
+        node_id: str,
+        run_id: str,
+        deployment_id: str,
+        timeout_seconds: float,
+    ) -> None:
+        del timeout_seconds
+        self.argv = argv
+        self.node_id = node_id
+        self.run_id = run_id
+        self.deployment_id = deployment_id
+        self.endpoint_id = f"iroh-{node_id}"
+        self.signer = generate_ed25519_signer(endpoint_id=self.endpoint_id)
+        self.host_id = f"host-{int(node_id.rsplit('-', 1)[1])}"
+        self.process_id = 10_000 + int(node_id.rsplit('-', 1)[1])
+        self.peer_generation = 0
+        self.state = "NEW"
+        self.commands: list[str] = []
+        self.sent: list[tuple[str, dict[str, Any]]] = []
+        self.closed = False
+        self.fail_snapshot = False
+        self.stale_rotate = False
+
+    def _signed(self, event: str, details: dict[str, Any]) -> dict[str, Any]:
+        observation = {
+            "protocol": "mycelium.physical_node_observation.v1",
+            "event": event,
+            "monotonic_ns": len(self.commands),
+            "run_id": self.run_id,
+            "deployment_id": self.deployment_id,
+            "node_id": self.node_id,
+            "host_id": self.host_id,
+            "process_id": self.process_id,
+            "endpoint_id": self.endpoint_id,
+            "peer_generation": self.peer_generation,
+            "state": self.state,
+            "route_ready": False,
+            "details": details,
+        }
+        return {
+            "observation": observation,
+            "signature": self.signer.sign(observation),
+            "verification_key": self.signer.public_key_record(),
+        }
+
+    def send(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.commands.append(command)
+        self.sent.append((command, dict(payload)))
+        if command == "snapshot" and self.fail_snapshot:
+            raise ControllerError("node_process_exited")
+        if command == "hello":
+            result: dict[str, Any] = {
+                "protocol": "mycelium.physical_node_control.v1",
+                "run_id": self.run_id,
+                "deployment_id": self.deployment_id,
+                "node_id": self.node_id,
+                "host_id": self.host_id,
+                "process_id": self.process_id,
+                "endpoint_id": None,
+                "peer_generation": 0,
+                "state": "NEW",
+                "route_ready": False,
+            }
+        elif command == "configure":
+            self.state = "CONFIGURED"
+            result = self._signed(
+                "configured",
+                {
+                    "assignment_id": f"assignment-{self.node_id}",
+                    "placement_id": f"placement-{self.node_id}",
+                    "manifest_digest": "sha256:" + "a" * 64,
+                    "endpoint_addr": {"id": self.endpoint_id, "addrs": []},
+                    "runtime_mode": "real",
+                },
+            )
+        elif command == "start":
+            self.peer_generation = payload["peer"]["generation"]
+            self.state = "RUNNING"
+            result = self._signed("started", {"peer": payload["peer"]})
+        elif command == "rotate":
+            generation = payload["peer"]["generation"]
+            self.peer_generation = generation - 1 if self.stale_rotate else generation
+            result = self._signed("peer_rotated", {"peer": payload["peer"]})
+        elif command == "infer_start":
+            result = self._signed(
+                "inference_started",
+                {
+                    "request_id": payload["request"]["request_id"],
+                    "status": "DECODING",
+                    "output": {"token_indexes": [0], "token_ids": [11]},
+                },
+            )
+        elif command == "infer_decode":
+            result = self._signed(
+                "inference_decoded",
+                {
+                    "request_id": payload["request_id"],
+                    "dispatched": payload["count"],
+                    "status": "COMPLETED",
+                    "output": {"token_indexes": [0, 1], "token_ids": [11, 12]},
+                },
+            )
+        elif command == "cancel":
+            result = self._signed(
+                "cancelled",
+                {"request_id": payload["request_id"], "result": {"cancelled": True}},
+            )
+        elif command == "snapshot":
+            result = self._signed(
+                "snapshot",
+                {"runtime": {"active_state_count": 0}, "capacity": {}, "transport": {}},
+            )
+        elif command == "stop":
+            self.state = "STOPPING"
+            final_observation = self._signed("stopping", {})
+            self.state = "STOPPED"
+            result = {"state": "STOPPED", "final_observation": final_observation}
+        else:
+            raise AssertionError(command)
+        return {
+            "protocol": "mycelium.physical_node_control.v1",
+            "command_id": command_id,
+            "node_id": self.node_id,
+            "ok": True,
+            "route_ready": False,
+            "result": result,
+        }
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeEvidenceSealer:
+    def __init__(
+        self,
+        root: Path,
+        attempts: dict[str, list[FakeNodeSession]],
+    ) -> None:
+        self.root = root
+        self.attempts = attempts
+        self.calls = 0
+        self.manifest_bytes = b""
+
+    def __call__(
+        self,
+        *,
+        run_id: str,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.calls += 1
+        assert evidence["command"] == "run"
+        assert all(
+            session.closed
+            for node_attempts in self.attempts.values()
+            for session in node_attempts
+        )
+        self.root.mkdir(mode=0o700)
+        manifest = {
+            "protocol": "mycelium.evidence_manifest.v1",
+            "run_id": run_id,
+            "evidence_class": "physical_qualification",
+            "file_count": 0,
+            "total_size_bytes": 0,
+            "files": [],
+        }
+        self.manifest_bytes = canonical_json_bytes(manifest)
+        manifest_path = self.root / "evidence-manifest.json"
+        manifest_path.write_bytes(self.manifest_bytes)
+        manifest_path.chmod(0o400)
+        self.root.chmod(0o500)
+        return {
+            "run_id": run_id,
+            "manifest_path": str(manifest_path),
+            "manifest_digest": "sha256:"
+            + hashlib.sha256(self.manifest_bytes).hexdigest(),
+        }
+
+
+class FakeEvidenceQualifier:
+    def __init__(
+        self,
+        *,
+        accepted: bool,
+        claim_route_ready: bool,
+        qualified_by: str | None = None,
+    ) -> None:
+        self.accepted = accepted
+        self.claim_route_ready = claim_route_ready
+        self.qualified_by = (
+            QUALIFIER_AUTHORITY if accepted and qualified_by is None else qualified_by
+        )
+        self.calls = 0
+
+    def __call__(self, sealed: dict[str, Any]) -> dict[str, Any]:
+        self.calls += 1
+        return {
+            "protocol": ROUTE_QUALIFICATION_PROTOCOL,
+            "run_id": sealed["run_id"],
+            "manifest_digest": sealed["manifest_digest"],
+            "evidence_class": "physical_qualification",
+            "accepted": self.accepted,
+            "route_ready": self.claim_route_ready,
+            "reason_codes": [] if self.accepted else ["qualification_rejected"],
+            "qualified_by": self.qualified_by,
+        }
 
 
 def _peers(count: int, *, same_host: bool = False) -> tuple[PeerIdentity, ...]:
@@ -99,6 +351,70 @@ def _snapshot(peers: tuple[PeerIdentity, ...]) -> dict[str, Any]:
         "deployment_epoch": EPOCH,
         "assignment_offers": offers,
     }
+
+
+def _physical_run_plan(
+    peers: tuple[PeerIdentity, ...],
+    *,
+    identity_root: str = "/var/lib/mycelium/identities",
+) -> dict[str, Any]:
+    return {
+        "protocol": "mycelium.controller_run_plan.v1",
+        "run_id": "run-1",
+        "deployment_id": "deployment-demo",
+        "entry_node_id": peers[0].node_id,
+        "nodes": [
+            {
+                "node_id": peer.node_id,
+                "socket_root": f"/tmp/mycelium-run/socket-{index}",
+                "sidecar_binary": "/opt/mycelium/bin/mycelium-iroh-sidecar",
+                "endpoint_secret_file": f"{identity_root}/{peer.node_id}.key",
+                "configure": {"node_payload": peer.node_id},
+            }
+            for index, peer in enumerate(peers)
+        ],
+        "request": {
+            "request_id": "request-1",
+            "prompt_token_ids": [1, 2, 3],
+            "max_new_tokens": 2,
+            "expected_new_tokens": 2,
+            "qos_class": "interactive",
+            "admitted_at": 0.0,
+            "target_ttft_ms": 1_000.0,
+            "target_tpot_ms": 1_000.0,
+            "target_tokens_per_second": 1.0,
+            "sampling_seed": 17,
+            "generation_config_digest": "sha256:" + "b" * 64,
+        },
+        "decode_count": 1,
+        "expected_token_ids": [11, 12],
+    }
+
+
+def _physical_cleanup_captures(
+    peers: tuple[PeerIdentity, ...],
+) -> list[CommandCapture]:
+    return [
+        CommandCapture(
+            argv=(),
+            returncode=0,
+            stdout=(
+                json.dumps(
+                    {
+                        "protocol": "mycelium.controller_remote_cleanup_ack.v1",
+                        "node_id": peer.node_id,
+                        "staging_root": peer.staging_root,
+                        "removed": True,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode(),
+            stderr=b"",
+        )
+        for peer in peers
+    ]
 
 
 def _transfers(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
@@ -186,6 +502,32 @@ def test_transfer_manifest_is_explicit_digest_bound_and_tamper_detected(
     assert runner.calls == []
 
 
+def test_transfer_archive_contains_only_declared_files_and_is_deterministic(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path)
+    (source_root / "unlisted-secret.txt").write_text("must not cross boundary\n")
+
+    first = build_transfer_archive(source_root, transfers)
+    second = build_transfer_archive(source_root, transfers)
+
+    assert first == second
+    with tarfile.open(fileobj=io.BytesIO(first), mode="r:") as archive:
+        members = archive.getmembers()
+        assert [member.name for member in members] == [
+            "physical_inference_node.py",
+            "runtime_contracts.py",
+        ]
+        assert all(member.isfile() for member in members)
+        assert all(member.mode == 0o600 for member in members)
+        assert all(member.uid == member.gid == member.mtime == 0 for member in members)
+        assert all(member.uname == member.gname == "" for member in members)
+        first_stream = archive.extractfile(members[0])
+        second_stream = archive.extractfile(members[1])
+        assert first_stream is not None and first_stream.read() == b"print('node')\n"
+        assert second_stream is not None and second_stream.read() == b"RUNTIME = 'v1'\n"
+
+
 @pytest.mark.parametrize(
     "path",
     ["../escape.py", ".git/config", ".env", ".cache/model.bin", "models/weights.bin", "private-key.pem"],
@@ -240,7 +582,7 @@ def test_fake_and_local_modes_never_claim_readiness(tmp_path: Path) -> None:
         assert runner.calls == []
 
 
-def test_physical_mode_requires_distinct_host_and_boot_then_stays_blocked(
+def test_physical_mode_requires_distinct_host_and_boot_then_requires_run_plan(
     tmp_path: Path,
 ) -> None:
     same_host, runner = _controller(
@@ -251,9 +593,792 @@ def test_physical_mode_requires_distinct_host_and_boot_then_stays_blocked(
     assert runner.calls == []
 
     distinct, runner = _controller(tmp_path / "distinct", mode="physical")
-    with pytest.raises(ControllerError, match="physical_execution_not_implemented"):
+    with pytest.raises(ControllerError, match="controller_run_plan_invalid"):
         distinct.execute("run")
     assert runner.calls == []
+
+
+def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    responses = [
+        CommandCapture(
+            argv=(),
+            returncode=0,
+            stdout=(
+                json.dumps(
+                    {
+                        "protocol": "mycelium.controller_remote_stage_ack.v1",
+                        "node_id": peer.node_id,
+                        "staging_root": peer.staging_root,
+                        "archive_digest": archive_digest,
+                        "archive_size_bytes": len(archive),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode("ascii"),
+            stderr=b"",
+        )
+        for peer in peers
+    ]
+    runner = StagingRunner(responses)
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("prepare")
+
+    assert len(runner.calls) == len(peers)
+    for peer, (argv, timeout_seconds, stdin_bytes) in zip(
+        peers, runner.calls, strict=True
+    ):
+        assert argv[0] == "ssh"
+        assert peer.ssh_target in argv
+        assert peer.staging_root in argv[-1]
+        assert archive_digest in argv[-1]
+        assert timeout_seconds == 120.0
+        assert stdin_bytes == archive
+    assert result["physical_execution"] is True
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert [action["status"] for action in result["actions"]] == [
+        "staged",
+        "staged",
+    ]
+    assert all(action["archive_digest"] == archive_digest for action in result["actions"])
+
+
+def test_physical_prepare_cleans_attempted_peers_when_staging_fails(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    first_ack = {
+        "protocol": "mycelium.controller_remote_stage_ack.v1",
+        "node_id": peers[0].node_id,
+        "staging_root": peers[0].staging_root,
+        "archive_digest": archive_digest,
+        "archive_size_bytes": len(archive),
+    }
+    cleanup_acks = [
+        {
+            "protocol": "mycelium.controller_remote_cleanup_ack.v1",
+            "node_id": peer.node_id,
+            "staging_root": peer.staging_root,
+            "removed": removed,
+        }
+        for peer, removed in zip(peers, (True, False), strict=True)
+    ]
+    runner = StagingRunner(
+        [
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=(json.dumps(first_ack, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                stderr=b"",
+            ),
+            CommandCapture(argv=(), returncode=2, stdout=b"", stderr=b"remote_stage_rejected\n"),
+            *[
+                CommandCapture(
+                    argv=(),
+                    returncode=0,
+                    stdout=(json.dumps(ack, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                    stderr=b"",
+                )
+                for ack in cleanup_acks
+            ],
+        ]
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    with pytest.raises(ControllerError, match="remote_stage_failed"):
+        controller.execute("prepare")
+
+    assert len(runner.calls) == 4
+    for peer, (cleanup_argv, cleanup_timeout, cleanup_stdin) in zip(
+        peers, runner.calls[2:], strict=True
+    ):
+        assert cleanup_argv[0] == "ssh"
+        assert peer.ssh_target in cleanup_argv
+        assert peer.staging_root in cleanup_argv[-1]
+        assert cleanup_timeout == 30.0
+        assert cleanup_stdin is None
+
+
+def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    cleanup_responses = [
+        CommandCapture(
+            argv=(),
+            returncode=0,
+            stdout=(
+                json.dumps(
+                    {
+                        "protocol": "mycelium.controller_remote_cleanup_ack.v1",
+                        "node_id": peer.node_id,
+                        "staging_root": peer.staging_root,
+                        "removed": True,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode(),
+            stderr=b"",
+        )
+        for peer in peers
+    ]
+    runner = StagingRunner(cleanup_responses)
+    sessions: dict[str, FakeNodeSession] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        sessions[session.node_id] = session
+        return session
+
+    run_plan = _physical_run_plan(peers)
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=run_plan,
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("run")
+
+    assert result["physical_execution"] is True
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert result["token_parity"] is True
+    assert result["output_token_ids"] == [11, 12]
+    assert set(sessions) == {peer.node_id for peer in peers}
+    for peer in peers:
+        remote_argv = shlex.split(sessions[peer.node_id].argv[-1])
+        key_flag = remote_argv.index("--endpoint-secret-file")
+        assert remote_argv[key_flag + 1] == (
+            f"/var/lib/mycelium/identities/{peer.node_id}.key"
+        )
+    assert sessions[peers[0].node_id].commands == [
+        "hello",
+        "configure",
+        "start",
+        "infer_start",
+        "infer_decode",
+        "snapshot",
+        "stop",
+    ]
+    assert sessions[peers[1].node_id].commands == [
+        "hello",
+        "configure",
+        "start",
+        "snapshot",
+        "stop",
+    ]
+    assert all(session.closed for session in sessions.values())
+    assert len(runner.calls) == len(peers)
+    assert all(call[2] is None for call in runner.calls)
+    assert all(archive_digest in call[0][-1] for call in runner.calls)
+
+
+@pytest.mark.parametrize("peer_count", [3, 5])
+def test_physical_run_orchestrates_every_declared_peer_in_n_way_cycle(
+    tmp_path: Path,
+    peer_count: int,
+) -> None:
+    peers = _peers(peer_count)
+    source_root, transfers = _transfers(tmp_path)
+    cleanup_responses = [
+        CommandCapture(
+            argv=(),
+            returncode=0,
+            stdout=(
+                json.dumps(
+                    {
+                        "protocol": "mycelium.controller_remote_cleanup_ack.v1",
+                        "node_id": peer.node_id,
+                        "staging_root": peer.staging_root,
+                        "removed": True,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode(),
+            stderr=b"",
+        )
+        for peer in peers
+    ]
+    runner = StagingRunner(cleanup_responses)
+    sessions: dict[str, FakeNodeSession] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        sessions[session.node_id] = session
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("run")
+
+    ordered_node_ids = sorted(peer.node_id for peer in peers)
+    expected_successors = {
+        node_id: ordered_node_ids[(index + 1) % peer_count]
+        for index, node_id in enumerate(ordered_node_ids)
+    }
+    actual_successors = {
+        node_id: next(
+            payload["peer"]["node_id"]
+            for command, payload in session.sent
+            if command == "start"
+        )
+        for node_id, session in sessions.items()
+    }
+    assert result["peer_count"] == peer_count
+    assert result["route_ready"] is False
+    assert set(sessions) == set(ordered_node_ids)
+    assert all("start" in session.commands for session in sessions.values())
+    assert actual_successors == expected_successors
+    assert set(actual_successors.values()) == set(ordered_node_ids)
+    assert all(session.closed for session in sessions.values())
+    assert len(runner.calls) == peer_count
+
+
+def test_physical_cancel_reaches_entry_node_then_stops_and_cleans_all_peers(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    sessions: dict[str, FakeNodeSession] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        sessions[session.node_id] = session
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("cancel")
+
+    entry_session = sessions[peers[0].node_id]
+    assert result["command"] == "cancel"
+    assert result["cancelled"] is True
+    assert result["route_ready"] is False
+    assert "infer_start" in entry_session.commands
+    assert "cancel" in entry_session.commands
+    assert "infer_decode" not in entry_session.commands
+    assert all(session.closed for session in sessions.values())
+    assert len(runner.calls) == len(peers)
+
+
+def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(5)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("cleanup")
+
+    assert result["command"] == "cleanup"
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert len(result["actions"]) == len(peers)
+    assert len(runner.calls) == len(peers)
+    assert {call[0][6] for call in runner.calls} == {peer.ssh_target for peer in peers}
+
+
+def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    snapshot = _snapshot(peers)
+    attempts: dict[str, list[FakeNodeSession]] = {}
+    failed_node_id = peers[1].node_id
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        node_attempts = attempts.setdefault(session.node_id, [])
+        if session.node_id == failed_node_id and not node_attempts:
+            session.fail_snapshot = True
+        node_attempts.append(session)
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=snapshot,
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("recover")
+
+    assert result["route_ready"] is False
+    assert result["recovered_nodes"] == [failed_node_id]
+    assert result["restart_attempts"] == {failed_node_id: 1}
+    assert len(attempts[failed_node_id]) == 2
+    predecessor = attempts[peers[0].node_id][0]
+    rotate_payload = next(
+        payload for command, payload in predecessor.sent if command == "rotate"
+    )
+    assert rotate_payload["peer"]["node_id"] == failed_node_id
+    expected_generation = next(
+        index + 1
+        for index, peer in enumerate(peers)
+        if peer.node_id == failed_node_id
+    ) + 1
+    assert rotate_payload["peer"]["generation"] == expected_generation
+    assert all(
+        session.closed
+        for node_attempts in attempts.values()
+        for session in node_attempts
+    )
+    assert len(runner.calls) == len(peers)
+
+
+def test_physical_recover_bounds_restart_and_cleans_every_session(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+    failed_node_id = peers[1].node_id
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        if session.node_id == failed_node_id:
+            session.fail_snapshot = True
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    with pytest.raises(ControllerError, match="physical_recovery_exhausted"):
+        controller.execute("recover")
+
+    assert len(attempts[failed_node_id]) == 2
+    assert all(
+        session.closed
+        for node_attempts in attempts.values()
+        for session in node_attempts
+    )
+    assert len(runner.calls) == len(peers)
+
+
+def test_physical_recover_rejects_stale_generation_and_cleans(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+    failed_node_id = peers[1].node_id
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        node_attempts = attempts.setdefault(session.node_id, [])
+        if session.node_id == failed_node_id and not node_attempts:
+            session.fail_snapshot = True
+        if session.node_id == peers[0].node_id:
+            session.stale_rotate = True
+        node_attempts.append(session)
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    with pytest.raises(ControllerError, match="recovery_generation_stale"):
+        controller.execute("recover")
+
+    assert len(attempts[failed_node_id]) == 2
+    assert all(
+        session.closed
+        for node_attempts in attempts.values()
+        for session in node_attempts
+    )
+    assert len(runner.calls) == len(peers)
+
+
+def test_physical_seal_without_adapters_rejects_before_orchestration(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    with pytest.raises(
+        ControllerError,
+        match="controller_evidence_adapter_missing",
+    ):
+        controller.execute("seal")
+
+    assert attempts == {}
+    assert runner.calls == []
+
+
+def test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path / "transfer")
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    sealer = FakeEvidenceSealer(tmp_path / "sealed", attempts)
+    qualifier = FakeEvidenceQualifier(accepted=True, claim_route_ready=True)
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+        seal_adapter=sealer,
+        qualifier_adapter=qualifier,
+    )
+
+    result = controller.execute("seal")
+
+    manifest_path = sealer.root / "evidence-manifest.json"
+    assert result["command"] == "seal"
+    assert result["route_ready"] is True
+    assert result["release_ready"] is False
+    assert result["qualifier_invocations"] == 1
+    assert sealer.calls == 1
+    assert qualifier.calls == 1
+    assert manifest_path.read_bytes() == sealer.manifest_bytes
+    assert manifest_path.stat().st_mode & 0o222 == 0
+    assert sealer.root.stat().st_mode & 0o222 == 0
+    assert all(
+        session.closed
+        for node_attempts in attempts.values()
+        for session in node_attempts
+    )
+
+
+def test_rejected_qualification_cannot_promote_controller_readiness(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path / "transfer")
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    sealer = FakeEvidenceSealer(tmp_path / "sealed", attempts)
+    qualifier = FakeEvidenceQualifier(accepted=False, claim_route_ready=True)
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+        seal_adapter=sealer,
+        qualifier_adapter=qualifier,
+    )
+
+    result = controller.execute("seal")
+
+    assert result["qualification"]["accepted"] is False
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert result["qualifier_invocations"] == 1
+    assert sealer.calls == 1
+    assert qualifier.calls == 1
+
+
+def test_qualification_from_non_authority_cannot_promote_controller_readiness(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3)
+    source_root, transfers = _transfers(tmp_path / "transfer")
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    sealer = FakeEvidenceSealer(tmp_path / "sealed", attempts)
+    qualifier = FakeEvidenceQualifier(
+        accepted=True,
+        claim_route_ready=True,
+        qualified_by="untrusted.qualifier",
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+        seal_adapter=sealer,
+        qualifier_adapter=qualifier,
+    )
+
+    with pytest.raises(ControllerError, match="qualification_result_invalid"):
+        controller.execute("seal")
+
+    assert sealer.calls == 1
+    assert qualifier.calls == 1
+
+
+def test_physical_run_rejects_endpoint_secret_outside_identity_root(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    runner = RecordingRunner()
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers, identity_root="/etc/ssh"),
+    )
+
+    with pytest.raises(
+        ControllerError,
+        match="run_plan_endpoint_secret_file_invalid",
+    ):
+        controller.execute("run")
+
+    assert runner.calls == []
+
+
+def test_node_observation_rejects_signer_rotation_after_configure(
+    tmp_path: Path,
+) -> None:
+    controller, _ = _controller(tmp_path, count=2)
+    peer = controller.peers[0]
+    session = FakeNodeSession(
+        argv=("ssh",),
+        node_id=peer.node_id,
+        run_id="run-1",
+        deployment_id="deployment-demo",
+        timeout_seconds=1.0,
+    )
+    configured = session.send(
+        command_id="configure-1",
+        command="configure",
+        payload={},
+    )
+    trusted_key = dict(configured["result"]["verification_key"])
+    session.signer = generate_ed25519_signer(endpoint_id=session.endpoint_id)
+    started = session.send(
+        command_id="start-1",
+        command="start",
+        payload={"peer": {"generation": 1}},
+    )
+
+    with pytest.raises(ControllerError, match="node_observation_invalid"):
+        controller._verified_observation(
+            started,
+            event="started",
+            peer=peer,
+            process_id=session.process_id,
+            run_id="run-1",
+            deployment_id="deployment-demo",
+            endpoint_id=session.endpoint_id,
+            expected_verification_key=trusted_key,
+        )
+
+
+def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path / "source")
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    staging_root = tmp_path / "remote" / "mycelium-run" / "node-1"
+
+    capture = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_STAGE_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+            str(len(archive)),
+        ),
+        timeout_seconds=10.0,
+        stdin_bytes=archive,
+    )
+
+    assert capture.returncode == 0
+    assert capture.stderr == b""
+    assert json.loads(capture.stdout) == {
+        "protocol": "mycelium.controller_remote_stage_ack.v1",
+        "node_id": "node-1",
+        "staging_root": str(staging_root),
+        "archive_digest": archive_digest,
+        "archive_size_bytes": len(archive),
+    }
+    for record in transfers["files"]:
+        staged = staging_root / record["path"]
+        assert staged.read_bytes() == (source_root / record["path"]).read_bytes()
+        assert staged.stat().st_mode & 0o777 == 0o600
+
+    cleanup_argv = (
+        sys.executable,
+        "-c",
+        _REMOTE_CLEANUP_SCRIPT,
+        str(staging_root),
+        "node-1",
+        archive_digest,
+    )
+    first_cleanup = SubprocessRunner().run(
+        cleanup_argv,
+        timeout_seconds=10.0,
+    )
+    assert first_cleanup.returncode == 0
+    assert json.loads(first_cleanup.stdout)["removed"] is True
+    assert not staging_root.exists()
+    second_cleanup = SubprocessRunner().run(
+        cleanup_argv,
+        timeout_seconds=10.0,
+    )
+    assert second_cleanup.returncode == 0
+    assert json.loads(second_cleanup.stdout)["removed"] is False
+
+
+def test_cli_accepts_explicit_run_plan_path() -> None:
+    args = _parser().parse_args(
+        ["run", "--run-plan", "/tmp/mycelium-controller/run-plan.json"]
+    )
+
+    assert args.command == "run"
+    assert args.run_plan == "/tmp/mycelium-controller/run-plan.json"
 
 
 def test_cli_bare_dry_run_preflight_is_inert_and_route_false(

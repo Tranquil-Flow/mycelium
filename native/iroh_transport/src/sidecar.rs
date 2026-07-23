@@ -9,14 +9,14 @@ use std::io::{self, Read};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroUsize;
 use std::os::fd::{FromRawFd, RawFd};
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use iroh::endpoint::{RecvStream, SendStream, VarInt, presets};
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, TransportAddr};
+use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -88,11 +88,11 @@ pub fn validate_router_ingress(frame: &[u8]) -> Result<(), IngressError> {
         .map_err(IngressError::InvalidFrame)
 }
 
-#[derive(Clone, Debug)]
 pub struct SidecarConfig {
     pub uds: PathBuf,
     pub queue_capacity: NonZeroUsize,
     pub local_only: bool,
+    pub endpoint_secret: Option<Zeroizing<[u8; 32]>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -104,6 +104,7 @@ pub enum SidecarError {
     SocketSecurity,
     SocketBind,
     EndpointBind,
+    EndpointSecretSecurity,
     ReadyOutput,
     Runtime,
 }
@@ -118,6 +119,7 @@ impl SidecarError {
             Self::SocketSecurity => "socket_security_error",
             Self::SocketBind => "socket_bind_error",
             Self::EndpointBind => "endpoint_bind_error",
+            Self::EndpointSecretSecurity => "endpoint_secret_security_error",
             Self::ReadyOutput => "ready_output_error",
             Self::Runtime => "runtime_error",
         }
@@ -164,6 +166,43 @@ pub fn read_bootstrap_secret(fd: RawFd) -> Result<Zeroizing<[u8; 32]>, SidecarEr
     Ok(secret)
 }
 
+/// Reads exactly 32 endpoint-secret bytes from an owned mode-0600 regular file.
+///
+/// O_NOFOLLOW prevents a symlink swap from redirecting the sidecar into reading
+/// unrelated host secrets before descriptor metadata is validated.
+pub fn read_endpoint_secret(path: &Path) -> Result<Zeroizing<[u8; 32]>, SidecarError> {
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| SidecarError::EndpointSecretSecurity)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| SidecarError::EndpointSecretSecurity)?;
+    // SAFETY: geteuid has no preconditions and dereferences no pointers.
+    let effective_uid = unsafe { libc::geteuid() };
+    if !metadata.file_type().is_file()
+        || metadata.uid() != effective_uid
+        || metadata.mode() & 0o7777 != 0o600
+        || metadata.len() != 32
+    {
+        return Err(SidecarError::EndpointSecretSecurity);
+    }
+    let mut bytes = Vec::with_capacity(33);
+    file.by_ref()
+        .take(33)
+        .read_to_end(&mut bytes)
+        .map_err(|_| SidecarError::EndpointSecretSecurity)?;
+    if bytes.len() != 32 {
+        bytes.zeroize();
+        return Err(SidecarError::EndpointSecretSecurity);
+    }
+    let mut secret = Zeroizing::new([0_u8; 32]);
+    secret.copy_from_slice(&bytes);
+    bytes.zeroize();
+    Ok(secret)
+}
+
 #[derive(Serialize)]
 struct ReadyEvent<'a> {
     event: &'static str,
@@ -179,7 +218,7 @@ pub async fn run_sidecar(
 ) -> Result<(), SidecarError> {
     let listener = bind_secure_uds(&config.uds)?;
     let _socket_cleanup = SocketCleanup(config.uds.clone());
-    let endpoint = bind_endpoint(config.local_only).await?;
+    let endpoint = bind_endpoint(config.local_only, config.endpoint_secret.as_deref()).await?;
     let endpoint_addr = endpoint.addr();
     let endpoint_id = endpoint.id().to_string();
 
@@ -259,8 +298,11 @@ pub async fn run_sidecar(
     listener_result
 }
 
-async fn bind_endpoint(local_only: bool) -> Result<Endpoint, SidecarError> {
-    let builder = if local_only {
+async fn bind_endpoint(
+    local_only: bool,
+    endpoint_secret: Option<&[u8; 32]>,
+) -> Result<Endpoint, SidecarError> {
+    let mut builder = if local_only {
         Endpoint::builder(presets::Minimal)
             .relay_mode(RelayMode::Disabled)
             .clear_ip_transports()
@@ -269,6 +311,9 @@ async fn bind_endpoint(local_only: bool) -> Result<Endpoint, SidecarError> {
     } else {
         Endpoint::builder(presets::N0)
     };
+    if let Some(secret) = endpoint_secret {
+        builder = builder.secret_key(SecretKey::from_bytes(secret));
+    }
     builder
         .alpns(vec![IROH_ALPN.to_vec()])
         .bind()
@@ -1474,6 +1519,69 @@ mod tests {
     use super::*;
     use crate::protocol::{MessageType, encode_frame};
     use serde_json::json;
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temporary_path(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "mycelium-sidecar-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn endpoint_secret_file_requires_owned_regular_mode_0600_bytes() {
+        let path = temporary_path("secret");
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        file.write_all(&[7_u8; 32]).unwrap();
+        drop(file);
+
+        let secret = read_endpoint_secret(&path).unwrap();
+        assert_eq!(&*secret, &[7_u8; 32]);
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            read_endpoint_secret(&path),
+            Err(SidecarError::EndpointSecretSecurity)
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o4600)).unwrap();
+        assert_eq!(
+            read_endpoint_secret(&path),
+            Err(SidecarError::EndpointSecretSecurity)
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let link = temporary_path("secret-link");
+        symlink(&path, &link).unwrap();
+        assert_eq!(
+            read_endpoint_secret(&link),
+            Err(SidecarError::EndpointSecretSecurity)
+        );
+        fs::remove_file(link).unwrap();
+        fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_endpoint_secret_stabilizes_endpoint_identity() {
+        let secret = Zeroizing::new([9_u8; 32]);
+        let first = bind_endpoint(true, Some(&*secret)).await.unwrap();
+        let first_id = first.id();
+        first.close().await;
+        let second = bind_endpoint(true, Some(&*secret)).await.unwrap();
+        assert_eq!(second.id(), first_id);
+        second.close().await;
+    }
 
     fn valid_frame() -> Vec<u8> {
         let body = json!({ "accepted": true });
