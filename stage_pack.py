@@ -17,7 +17,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import struct
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Sequence
 
 import model_manifest as mm
 from layer_assignment import validate_assignment_identity
@@ -1032,6 +1032,194 @@ def verify_stage_pack(
         verification
     )
     return verification
+
+
+def verify_stage_pack_collection(
+    packs: Sequence[dict[str, Any]],
+    *,
+    assignments: Sequence[dict[str, Any]],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify exact logical ownership across one ordered N-stage pack collection."""
+
+    if (
+        not isinstance(packs, (list, tuple))
+        or not isinstance(assignments, (list, tuple))
+        or not packs
+        or len(packs) != len(assignments)
+    ):
+        raise ValueError("stage pack collection must match a non-empty assignment set")
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest must be an object")
+
+    pack_verifications = [
+        verify_stage_pack(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+        for pack, assignment in zip(packs, assignments, strict=True)
+    ]
+    assignment_ids = [assignment["assignment_id"] for assignment in assignments]
+    node_ids = [assignment["node_id"] for assignment in assignments]
+    if len(assignment_ids) != len(set(assignment_ids)):
+        raise ValueError("stage pack collection has duplicate assignments")
+    if len(node_ids) != len(set(node_ids)):
+        raise ValueError("stage pack collection has duplicate nodes")
+
+    first = assignments[0]
+    for assignment in assignments[1:]:
+        for field in (
+            "deployment_id",
+            "deployment_epoch",
+            "model_id",
+            "resolved_commit",
+            "manifest_digest",
+        ):
+            if assignment[field] != first[field]:
+                raise ValueError(f"stage pack collection identity mismatch: {field}")
+
+    expected_start = 0
+    for assignment in assignments:
+        layer_range = assignment["range"]
+        if layer_range["start_layer"] != expected_start:
+            raise ValueError("stage pack collection ranges overlap or contain a gap")
+        expected_start = layer_range["end_layer_exclusive"]
+    if expected_start != manifest.get("num_layers"):
+        raise ValueError("stage pack collection does not cover every model layer")
+
+    layer_keys = manifest.get("tensor_keys_by_layer")
+    component_keys = manifest.get("component_tensor_keys")
+    aliases = manifest.get("component_aliases")
+    if (
+        not isinstance(layer_keys, dict)
+        or not isinstance(component_keys, dict)
+        or not isinstance(aliases, dict)
+    ):
+        raise ValueError("manifest ownership maps are invalid")
+    source_tensor_keys = {
+        key
+        for keys in (*layer_keys.values(), *component_keys.values())
+        if isinstance(keys, list)
+        for key in keys
+    }
+    if not source_tensor_keys:
+        raise ValueError("manifest logical tensor inventory is empty")
+
+    owned_sets = [set(pack["expected_tensor_keys"]) for pack in packs]
+    owned_union = set().union(*owned_sets)
+    missing = sorted(source_tensor_keys - owned_union)
+    extra = sorted(owned_union - source_tensor_keys)
+    if missing:
+        raise ValueError(
+            "stage pack collection omits logical tensor ownership: "
+            + ", ".join(missing[:5])
+        )
+    if extra:
+        raise ValueError(
+            "stage pack collection misassigns logical tensor ownership: "
+            + ", ".join(extra[:5])
+        )
+
+    component_owners = [
+        {
+            key: {
+                component
+                for component, keys in pack["component_tensor_keys"].items()
+                if key in keys
+            }
+            for key in pack["expected_tensor_keys"]
+        }
+        for pack in packs
+    ]
+    tied_aliases: list[dict[str, Any]] = []
+    for left_index, left_keys in enumerate(owned_sets):
+        for right_index in range(left_index + 1, len(owned_sets)):
+            for key in sorted(left_keys & owned_sets[right_index]):
+                alias_match: tuple[int, str, int, str] | None = None
+                for alias_component, target_component in aliases.items():
+                    if (
+                        alias_component in component_owners[left_index][key]
+                        and target_component in component_owners[right_index][key]
+                    ):
+                        alias_match = (
+                            left_index,
+                            alias_component,
+                            right_index,
+                            target_component,
+                        )
+                    elif (
+                        target_component in component_owners[left_index][key]
+                        and alias_component in component_owners[right_index][key]
+                    ):
+                        alias_match = (
+                            right_index,
+                            alias_component,
+                            left_index,
+                            target_component,
+                        )
+                if alias_match is None:
+                    raise ValueError(
+                        f"duplicate logical tensor ownership across stage packs: {key}"
+                    )
+                alias_index, alias_component, target_index, target_component = (
+                    alias_match
+                )
+                tied_aliases.append(
+                    {
+                        "tensor_key": key,
+                        "alias_component": alias_component,
+                        "alias_assignment_id": assignment_ids[alias_index],
+                        "alias_node_id": node_ids[alias_index],
+                        "target_component": target_component,
+                        "target_assignment_id": assignment_ids[target_index],
+                        "target_node_id": node_ids[target_index],
+                    }
+                )
+
+    artifact_owners: dict[str, list[int]] = {}
+    for index, pack in enumerate(packs):
+        for artifact in pack["artifacts"]:
+            artifact_owners.setdefault(artifact["upstream_path"], []).append(index)
+    shared_backing_artifacts = [
+        {
+            "upstream_path": path,
+            "assignment_ids": [assignment_ids[index] for index in owner_indexes],
+            "node_ids": [node_ids[index] for index in owner_indexes],
+        }
+        for path, owner_indexes in sorted(artifact_owners.items())
+        if len(owner_indexes) > 1
+    ]
+
+    return {
+        "protocol": "mycelium.stage_pack_collection_verification.v1",
+        "manifest_digest": first["manifest_digest"],
+        "pack_count": len(packs),
+        "logical_source_tensor_keys": sorted(source_tensor_keys),
+        "logical_owned_tensor_keys": [
+            {
+                "assignment_id": assignment_id,
+                "node_id": node_id,
+                "tensor_keys": list(pack["expected_tensor_keys"]),
+            }
+            for assignment_id, node_id, pack in zip(
+                assignment_ids,
+                node_ids,
+                packs,
+                strict=True,
+            )
+        ],
+        "tied_aliases": tied_aliases,
+        "shared_backing_artifacts": shared_backing_artifacts,
+        "pack_verifications": pack_verifications,
+        "exact_logical_coverage": True,
+        "route_ready": False,
+        "claim_boundary": (
+            "ordered assignment-bound stage packs have exact logical tensor "
+            "coverage; shared authenticated backing artifacts are not duplicate "
+            "logical ownership; layers are not loaded or physically qualified"
+        ),
+    }
 
 
 def _validate_verification_evidence(

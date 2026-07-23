@@ -335,12 +335,31 @@ def test_tied_alias_pack_includes_embedding_source_for_final_stage(tmp_path: Pat
         shutil.copyfile(source / filename, target)
         return target, False
 
-    report = wp.provision_assignment(final, fetch_file=fetch)
-    pack = compile_stage_pack(final, manifest, report)
+    reports = [
+        wp.provision_assignment(assignment, fetch_file=fetch)
+        for assignment in assignments
+    ]
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    pack = packs[1]
     assert pack["component_aliases"] == {"lm_head": "input_embedding"}
     assert pack["component_tensor_keys"]["lm_head"] == ["transformer.wte.weight"]
     assert "embed.safetensors" in [item["upstream_path"] for item in pack["artifacts"]]
     assert verify_stage_pack(pack, assignment=final, manifest=manifest)["ready_for_load"] is True
+    collection = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+    assert {
+        record["tensor_key"] for record in collection["tied_aliases"]
+    } == {"transformer.wte.weight"}
+    assert {
+        record["upstream_path"]
+        for record in collection["shared_backing_artifacts"]
+    } == {"blocks.safetensors", "embed.safetensors"}
 
 
 @pytest.mark.parametrize(
@@ -793,4 +812,153 @@ def test_frozen_dialogpt_fp16_tolerances_are_source_bound_and_digest_pinned(
             expected_model_id="microsoft/DialoGPT-small",
             expected_resolved_commit="0" * 40,
             expected_model_artifact_digest=expected_artifact_digest,
+        )
+
+
+def _three_way_source_tensor_keys() -> set[str]:
+    return {
+        "bert.embeddings.word_embeddings.weight",
+        "bert.encoder.layer.0.attention.self.query.weight",
+        "bert.encoder.layer.1.attention.self.key.weight",
+        "bert.encoder.layer.1.attention.self.query.weight",
+        "bert.encoder.layer.2.attention.self.query.weight",
+        "bert.pooler.dense.weight",
+        "classifier.weight",
+    }
+
+
+def _five_way_source_tensor_keys() -> set[str]:
+    return {
+        "bert.embeddings.word_embeddings.weight",
+        *(f"bert.encoder.layer.{layer}.attention.self.query.weight" for layer in range(12)),
+        "bert.encoder.layer.3.attention.self.key.weight",
+        "bert.encoder.layer.6.attention.self.key.weight",
+        "bert.encoder.layer.9.attention.self.key.weight",
+        "bert.pooler.dense.weight",
+        "classifier.weight",
+    }
+
+
+def _assert_exact_logical_ownership(
+    summary: dict[str, Any],
+    packs: list[dict[str, Any]],
+    *,
+    source_tensor_keys: set[str],
+) -> None:
+    owned_sets = [set(pack["expected_tensor_keys"]) for pack in packs]
+    tied_alias_keys = {
+        record["tensor_key"] for record in summary["tied_aliases"]
+    }
+
+    for index, left in enumerate(owned_sets):
+        for right in owned_sets[index + 1 :]:
+            assert left & right <= tied_alias_keys
+    assert set().union(*owned_sets) == source_tensor_keys
+    assert set(summary["logical_source_tensor_keys"]) == source_tensor_keys
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
+
+
+def test_three_way_collection_has_exact_logical_ownership_and_round_trips_middle(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+    _assert_exact_logical_ownership(
+        summary,
+        packs,
+        source_tensor_keys=_three_way_source_tensor_keys(),
+    )
+    assert summary["tied_aliases"] == []
+
+    middle = json.loads(
+        json.dumps(packs[1], sort_keys=True, separators=(",", ":"))
+    )
+    assert middle["components"] == ["decoder"]
+    assert middle["range"] == {
+        "start_layer": 1,
+        "end_layer_exclusive": 2,
+        "layer_count": 1,
+    }
+    assert verify_stage_pack(
+        middle,
+        assignment=assignments[1],
+        manifest=manifest,
+    )["verified_tensor_keys"] == assignments[1]["expected_tensor_keys"]
+
+
+def test_five_way_collection_has_exact_logical_ownership_with_shared_shards(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports = _twelve_layer_case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+    _assert_exact_logical_ownership(
+        summary,
+        packs,
+        source_tensor_keys=_five_way_source_tensor_keys(),
+    )
+    assert summary["tied_aliases"] == []
+    assert {
+        record["upstream_path"]
+        for record in summary["shared_backing_artifacts"]
+    } == {
+        "shard-a.safetensors",
+        "shard-b.safetensors",
+        "shard-c.safetensors",
+        "shard-d.safetensors",
+    }
+    assert any(
+        record["overfetched_tensor_count"] > 0
+        for record in summary["pack_verifications"]
+    )
+
+
+@pytest.mark.parametrize("mutation", ("omit", "duplicate", "misassign"))
+def test_collection_verifier_rejects_mutated_logical_tensor_ownership(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    mutated = copy.deepcopy(packs)
+    middle = mutated[1]
+    middle_keys = middle["component_tensor_keys"]["decoder"]
+
+    if mutation == "omit":
+        omitted = middle_keys.pop()
+        middle["expected_tensor_keys"].remove(omitted)
+    elif mutation == "duplicate":
+        middle["expected_tensor_keys"].append(middle["expected_tensor_keys"][0])
+    else:
+        middle_keys[0] = assignments[0]["expected_tensor_keys"][0]
+        middle_keys.sort()
+        middle["expected_tensor_keys"] = sorted(middle_keys)
+    _refresh_digest(middle)
+
+    with pytest.raises(ValueError, match="ownership|assignment"):
+        sp.verify_stage_pack_collection(
+            mutated,
+            assignments=assignments,
+            manifest=manifest,
         )
