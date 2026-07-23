@@ -16,6 +16,7 @@ from mycelium_request_gateway.contracts import (
     InferenceSubmission,
     qualification_binding,
 )
+from mycelium_router.live_ports import PublishedTopologyProvider
 from mycelium_router.router import Router
 from mycelium_router.serialization import execution_graph_to_dict
 from test_backend_cli import (
@@ -49,6 +50,16 @@ class RecordingRouter(Router):
     def cancel(self, request_id):
         self.cancel_calls += 1
         return super().cancel(request_id)
+
+
+class CountingPublishedTopologyProvider(PublishedTopologyProvider):
+    def __init__(self, graph):
+        super().__init__(graph)
+        self.snapshot_calls = 0
+
+    def snapshot(self):
+        self.snapshot_calls += 1
+        return super().snapshot()
 
 
 def submission(record, prompt="PROMPT-PRIVATE-3B4"):
@@ -455,6 +466,110 @@ def graph_with_unqualified_alternative(record):
     return expanded, alternative.placement_id
 
 
+def successor_with_unqualified_alternative(graph):
+    first_stage = graph.stages[0]
+    selected = first_stage.placements[0]
+    alternative = replace(
+        selected,
+        placement_id="000-unqualified-stage-000",
+        assignment_id="unqualified-assignment-stage-000",
+        load_proof_digest=sha256_bytes(b"successor-unqualified-load-proof"),
+    )
+    forward = graph.edges[0]
+    loopback = graph.loopback_edges[0]
+    successor = replace(
+        graph,
+        topology_version=graph.topology_version + 1,
+        stages=(
+            replace(
+                first_stage,
+                placements=(alternative, *first_stage.placements),
+            ),
+            *graph.stages[1:],
+        ),
+        edges=(
+            replace(
+                forward,
+                edge_id="successor-unqualified-forward-edge",
+                from_placement_id=alternative.placement_id,
+            ),
+            *graph.edges,
+        ),
+        loopback_edges=(
+            replace(
+                loopback,
+                edge_id="successor-unqualified-loopback-edge",
+                to_placement_id=alternative.placement_id,
+            ),
+            *graph.loopback_edges,
+        ),
+    )
+    return successor, alternative.placement_id
+
+
+def test_gateway_pins_the_single_validated_published_topology_snapshot():
+    record = _synthetic_qualification()
+    original = _synthetic_execution_graph()
+    successor, unqualified_id = successor_with_unqualified_alternative(original)
+    router, clock, capacity, runtime = _runtime_stack(
+        graph=original,
+        router_type=RecordingRouter,
+    )
+    topology = CountingPublishedTopologyProvider(original)
+    router.entry.topology = topology
+
+    class PublishDuringEncode(RecordingCodec):
+        def encode(self, prompt):
+            topology.publish(successor)
+            return super().encode(prompt)
+
+    codec = PublishDuringEncode()
+    backend = RouterSessionBackend(
+        router=router,
+        codec=codec,
+        clock=clock.now,
+        qualification_source=CurrentAuthority(record),
+    )
+
+    assert (
+        backend.run(
+            "physical-backend-published-topology-race",
+            submission(record),
+            lambda *_: None,
+            lambda: False,
+        )
+        == "completed"
+    )
+
+    qualified = tuple(
+        binding.placement_id for binding in record.stage_bindings
+    )
+    admitted = router.get_request(
+        "physical-backend-published-topology-race"
+    )
+    actual_route = tuple(
+        hop.placement_id for hop in admitted.manifest.ordered_hops
+    )
+    reserved = tuple(item.placement_id for item in capacity.requests)
+    executed = tuple(item.placement_id for item in runtime.executed)
+    encoded_path = tuple(
+        delta.hop.placement_id
+        for delta in router.entry.transport.manifest_deltas
+    )
+
+    assert topology.snapshot_calls == 1
+    assert admitted.graph == original
+    assert admitted.manifest.topology_version == original.topology_version
+    assert admitted.manifest.manifest_digest == original.manifest_digest
+    assert actual_route == qualified
+    assert reserved == qualified
+    assert set(executed) == set(qualified)
+    assert unqualified_id not in actual_route
+    assert unqualified_id not in reserved
+    assert unqualified_id not in executed
+    assert unqualified_id not in encoded_path
+
+
 def test_router_admission_is_constrained_to_qualified_stage_placements():
     record = _synthetic_qualification()
     graph, alternative_id = graph_with_unqualified_alternative(record)
@@ -626,6 +741,62 @@ class ReusableRouter:
         self.cancel_calls += 1
         self.status = "CANCELLED"
         return True
+
+
+class DefaultSnapshotRouter:
+    def __init__(self):
+        self.status = "UNKNOWN"
+        self.excluded_placements = None
+
+    def admit(self, request, client_sink, *, excluded_placements):
+        del client_sink
+        self.excluded_placements = excluded_placements
+        self.status = "DECODING"
+        return request.request_id
+
+    def decode_one(self, request_id):
+        del request_id
+        self.status = "COMPLETED"
+        return True
+
+    def request_status(self, request_id):
+        del request_id
+        return self.status
+
+    def cancel(self, request_id):
+        del request_id
+        self.status = "CANCELLED"
+        return True
+
+
+def test_ungated_compatibility_caller_retains_default_snapshot_admission():
+    graph = _synthetic_execution_graph()
+    _router, clock, _capacity, _runtime = _runtime_stack(graph=graph)
+    router = DefaultSnapshotRouter()
+    excluded = frozenset({"caller-excluded-placement"})
+    backend = RouterSessionBackend(
+        router=router,
+        codec=RecordingCodec(),
+        clock=clock.now,
+        excluded_placements=excluded,
+    )
+
+    assert (
+        backend.run(
+            "default-snapshot-compatibility",
+            InferenceSubmission(
+                prompt="default snapshot",
+                max_new_tokens=1,
+                qualification=qualification_binding(
+                    _synthetic_qualification()
+                ),
+            ),
+            lambda *_: None,
+            lambda: False,
+        )
+        == "completed"
+    )
+    assert router.excluded_placements == excluded
 
 
 def test_cancel_state_is_request_local_and_does_not_poison_reused_id():

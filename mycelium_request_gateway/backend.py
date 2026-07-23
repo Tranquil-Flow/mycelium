@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from dataclasses import dataclass
 from typing import Callable, Protocol
 
 from mycelium_qualification.contracts import RouteQualificationV1
@@ -24,13 +25,26 @@ class PromptCodec(Protocol):
 class RouterPort(Protocol):
     def current_deployment(self) -> ExecutionGraph: ...
 
-    def admit(self, request: RequestContext, client_sink: object, **kwargs: object) -> str: ...
+    def admit(
+        self,
+        request: RequestContext,
+        client_sink: object,
+        *,
+        pinned_deployment: ExecutionGraph | None = None,
+        **kwargs: object,
+    ) -> str: ...
 
     def decode_one(self, request_id: str) -> bool: ...
 
     def request_status(self, request_id: str) -> str: ...
 
     def cancel(self, request_id: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class _AdmissionDecision:
+    graph: ExecutionGraph | None
+    excluded_placements: frozenset[str]
 
 
 class _GatewayTokenSink:
@@ -130,7 +144,7 @@ class RouterSessionBackend:
     ) -> str:
         if is_cancelled() or self._is_cancelled(request_id):
             return "cancelled"
-        admission_exclusions = self._require_current_deployment(submission)
+        admission = self._require_current_deployment(submission)
         prompt_token_ids = self._codec.encode(submission.prompt)
         if not isinstance(prompt_token_ids, tuple) or not prompt_token_ids or not all(
             isinstance(item, int) and not isinstance(item, bool) and item >= 0
@@ -169,11 +183,19 @@ class RouterSessionBackend:
         try:
             if is_cancelled() or self._is_cancelled(request_id):
                 return "cancelled"
-            admitted_id = self._router.admit(
-                request,
-                sink,
-                excluded_placements=admission_exclusions,
-            )
+            if admission.graph is None:
+                admitted_id = self._router.admit(
+                    request,
+                    sink,
+                    excluded_placements=admission.excluded_placements,
+                )
+            else:
+                admitted_id = self._router.admit(
+                    request,
+                    sink,
+                    excluded_placements=admission.excluded_placements,
+                    pinned_deployment=admission.graph,
+                )
             if admitted_id != request_id:
                 raise AdmissionError("router_request_id_mismatch")
             admitted = True
@@ -201,10 +223,13 @@ class RouterSessionBackend:
     def _require_current_deployment(
         self,
         submission: InferenceSubmission,
-    ) -> frozenset[str]:
+    ) -> _AdmissionDecision:
         source = self._qualification_source
         if source is None:
-            return self._excluded_placements
+            return _AdmissionDecision(
+                graph=None,
+                excluded_placements=self._excluded_placements,
+            )
         try:
             current = source.current()
         except Exception as exc:
@@ -275,9 +300,9 @@ class RouterSessionBackend:
             for stage in deployment.stages
             for placement in stage.placements
         )
-        return (
-            self._excluded_placements
-            | (live_placements - selected_placements)
+        return _AdmissionDecision(
+            graph=deployment,
+            excluded_placements=live_placements - selected_placements,
         )
 
     @staticmethod

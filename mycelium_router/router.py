@@ -55,8 +55,20 @@ class Router:
    def current_deployment(self):
       return self.entry.topology.snapshot()
 
-   def admit(self, request, client_sink, **kwargs):
-      return self.entry.admit(request, client_sink, **kwargs)
+   def admit(
+      self,
+      request,
+      client_sink,
+      *,
+      pinned_deployment=None,
+      **kwargs,
+   ):
+      return self.entry.admit(
+         request,
+         client_sink,
+         pinned_deployment=pinned_deployment,
+         **kwargs,
+      )
 
    def start_distributed_prefill(self, request, client_sink, **kwargs):
       return self.entry.start_distributed_prefill(
