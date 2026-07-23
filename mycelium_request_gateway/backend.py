@@ -7,7 +7,9 @@ import threading
 from typing import Callable, Protocol
 
 from mycelium_qualification.contracts import RouteQualificationV1
+from mycelium_qualification.evidence import sha256_document
 from mycelium_router.contracts import ExecutionGraph, RequestContext
+from mycelium_router.serialization import execution_graph_to_dict
 
 from .contracts import AdmissionError, InferenceSubmission, qualification_binding
 from .qualification import QualificationSource
@@ -20,6 +22,8 @@ class PromptCodec(Protocol):
 
 
 class RouterPort(Protocol):
+    def current_deployment(self) -> ExecutionGraph: ...
+
     def admit(self, request: RequestContext, client_sink: object, **kwargs: object) -> str: ...
 
     def decode_one(self, request_id: str) -> bool: ...
@@ -126,7 +130,7 @@ class RouterSessionBackend:
     ) -> str:
         if is_cancelled() or self._is_cancelled(request_id):
             return "cancelled"
-        self._require_current_deployment(submission)
+        admission_exclusions = self._require_current_deployment(submission)
         prompt_token_ids = self._codec.encode(submission.prompt)
         if not isinstance(prompt_token_ids, tuple) or not prompt_token_ids or not all(
             isinstance(item, int) and not isinstance(item, bool) and item >= 0
@@ -168,7 +172,7 @@ class RouterSessionBackend:
             admitted_id = self._router.admit(
                 request,
                 sink,
-                excluded_placements=self._excluded_placements,
+                excluded_placements=admission_exclusions,
             )
             if admitted_id != request_id:
                 raise AdmissionError("router_request_id_mismatch")
@@ -194,10 +198,13 @@ class RouterSessionBackend:
                 self._cancel_once(request_id)
             raise
 
-    def _require_current_deployment(self, submission: InferenceSubmission) -> None:
+    def _require_current_deployment(
+        self,
+        submission: InferenceSubmission,
+    ) -> frozenset[str]:
         source = self._qualification_source
         if source is None:
-            return
+            return self._excluded_placements
         try:
             current = source.current()
         except Exception as exc:
@@ -214,9 +221,14 @@ class RouterSessionBackend:
             raise AdmissionError("qualification_unavailable") from exc
         if current_binding != submission.qualification:
             raise AdmissionError("qualification_mismatch")
-        deployment_source = getattr(self._router, "current_deployment", None)
-        if deployment_source is None:
-            return
+        try:
+            deployment_source = getattr(
+                self._router,
+                "current_deployment",
+                None,
+            )
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
         if not callable(deployment_source):
             raise AdmissionError("qualification_unavailable")
         try:
@@ -225,14 +237,109 @@ class RouterSessionBackend:
             raise AdmissionError("qualification_unavailable") from exc
         if not isinstance(deployment, ExecutionGraph):
             raise AdmissionError("qualification_unavailable")
+        try:
+            deployment_digest = sha256_document(
+                execution_graph_to_dict(deployment)
+            )
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        live_identity = (
+            deployment.deployment_id,
+            deployment.deployment_epoch,
+            deployment.topology_version,
+            deployment.model_id,
+            deployment.resolved_commit,
+            deployment.manifest_digest,
+        )
+        qualified_identity = (
+            current.deployment_id,
+            current.deployment_epoch,
+            current.topology_version,
+            current.model_id,
+            current.resolved_commit,
+            current.manifest_digest,
+        )
         if (
-            deployment.deployment_id != current.deployment_id
-            or deployment.deployment_epoch != current.deployment_epoch
-            or deployment.topology_version != current.topology_version
-            or deployment.model_id != current.model_id
-            or deployment.resolved_commit != current.resolved_commit
+            live_identity != qualified_identity
+            or deployment_digest != current.execution_graph_digest
         ):
             raise AdmissionError("qualification_mismatch")
+        selected_placements = self._qualified_placement_projection(
+            current,
+            deployment,
+        )
+        if selected_placements & self._excluded_placements:
+            raise AdmissionError("qualification_mismatch")
+        live_placements = frozenset(
+            placement.placement_id
+            for stage in deployment.stages
+            for placement in stage.placements
+        )
+        return (
+            self._excluded_placements
+            | (live_placements - selected_placements)
+        )
+
+    @staticmethod
+    def _qualified_placement_projection(
+        current: RouteQualificationV1,
+        deployment: ExecutionGraph,
+    ) -> frozenset[str]:
+        if len(current.stage_bindings) != len(deployment.stages):
+            raise AdmissionError("qualification_mismatch")
+        stages = {stage.stage_id: stage for stage in deployment.stages}
+        selected_by_stage: dict[str, str] = {}
+        selected_placements: set[str] = set()
+        for binding in current.stage_bindings:
+            if (
+                binding.stage_id in selected_by_stage
+                or binding.placement_id in selected_placements
+            ):
+                raise AdmissionError("qualification_mismatch")
+            stage = stages.get(binding.stage_id)
+            if stage is None:
+                raise AdmissionError("qualification_mismatch")
+            placement = next(
+                (
+                    candidate
+                    for candidate in stage.placements
+                    if candidate.placement_id == binding.placement_id
+                ),
+                None,
+            )
+            if (
+                placement is None
+                or placement.lifecycle_state != "ACTIVE"
+                or placement.node_id != binding.node_id
+                or placement.assignment_id != binding.assignment_id
+                or placement.stage_signature != binding.stage_signature
+                or placement.load_proof_digest != binding.load_proof_digest
+            ):
+                raise AdmissionError("qualification_mismatch")
+            selected_by_stage[binding.stage_id] = binding.placement_id
+            selected_placements.add(binding.placement_id)
+        if set(selected_by_stage) != set(stages):
+            raise AdmissionError("qualification_mismatch")
+        ordered = tuple(
+            selected_by_stage[stage.stage_id]
+            for stage in deployment.stages
+        )
+        legal_edges = {
+            (edge.from_placement_id, edge.to_placement_id)
+            for edge in deployment.edges
+        }
+        if any(
+            pair not in legal_edges
+            for pair in zip(ordered, ordered[1:])
+        ):
+            raise AdmissionError("qualification_mismatch")
+        legal_loopbacks = {
+            (edge.from_placement_id, edge.to_placement_id)
+            for edge in deployment.loopback_edges
+        }
+        if (ordered[-1], ordered[0]) not in legal_loopbacks:
+            raise AdmissionError("qualification_mismatch")
+        return frozenset(selected_placements)
 
     def cancel(self, request_id: str) -> None:
         self._cancel_once(request_id, external=True)

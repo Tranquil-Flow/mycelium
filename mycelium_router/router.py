@@ -52,6 +52,9 @@ class Router:
       )
       self.relay = relay
 
+   def current_deployment(self):
+      return self.entry.topology.snapshot()
+
    def admit(self, request, client_sink, **kwargs):
       return self.entry.admit(request, client_sink, **kwargs)
 
