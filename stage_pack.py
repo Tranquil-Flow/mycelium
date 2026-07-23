@@ -166,6 +166,15 @@ def _digest(document: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical_json(document).encode("utf-8")).hexdigest()
 
 
+def _deployment_epoch_is_valid(value: Any) -> bool:
+    return type(value) is int and value > 0
+
+
+def _validate_deployment_epoch(value: Any) -> None:
+    if not _deployment_epoch_is_valid(value):
+        raise ValueError("stage pack deployment epoch is invalid")
+
+
 def stage_pack_digest_for(pack: dict[str, Any]) -> str:
     """Return the canonical digest of every stage-pack field except the digest."""
     if not isinstance(pack, dict):
@@ -407,6 +416,7 @@ def _manifest_file_records(manifest: dict[str, Any]) -> dict[str, dict[str, Any]
 def _validate_authoritative_assignment(
     assignment: dict[str, Any], manifest: dict[str, Any]
 ) -> None:
+    _validate_deployment_epoch(assignment.get("deployment_epoch"))
     try:
         validate_assignment_identity(assignment)
     except (KeyError, TypeError, ValueError) as exc:
@@ -625,6 +635,7 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         raise ValueError("unsupported stage pack protocol")
     if pack.get("route_ready") is not False:
         raise ValueError("stage pack cannot claim route readiness")
+    _validate_deployment_epoch(pack.get("deployment_epoch"))
     supplied = pack.get("stage_pack_digest")
     if not _SHA256_REF_RE.fullmatch(str(supplied or "")):
         raise ValueError("stage pack digest is invalid")
@@ -1059,10 +1070,11 @@ def _canonical_control_plane_binding(assignment: dict[str, Any]) -> bytes:
         value = binding.get(field)
         if type(value) is not str or _SHA256_REF_RE.fullmatch(value) is None:
             raise ValueError("stage pack collection control-plane binding is invalid")
-    for field in ("snapshot_generation", "deployment_epoch"):
-        value = binding.get(field)
-        if type(value) is not int or value < 0:
-            raise ValueError("stage pack collection control-plane binding is invalid")
+    snapshot_generation = binding.get("snapshot_generation")
+    if type(snapshot_generation) is not int or snapshot_generation < 0:
+        raise ValueError("stage pack collection control-plane binding is invalid")
+    if not _deployment_epoch_is_valid(binding.get("deployment_epoch")):
+        raise ValueError("stage pack collection control-plane binding is invalid")
     for field in ("swarm_id", "deployment_id"):
         value = binding.get(field)
         if type(value) is not str or not value:
@@ -1074,8 +1086,7 @@ def _canonical_control_plane_binding(assignment: dict[str, Any]) -> bytes:
         type(assignment_deployment_id) is not str
         or not assignment_deployment_id
         or binding["deployment_id"] != assignment_deployment_id
-        or type(assignment_deployment_epoch) is not int
-        or assignment_deployment_epoch < 0
+        or not _deployment_epoch_is_valid(assignment_deployment_epoch)
         or binding["deployment_epoch"] != assignment_deployment_epoch
     ):
         raise ValueError("stage pack collection control-plane binding is invalid")

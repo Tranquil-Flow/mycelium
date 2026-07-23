@@ -230,6 +230,21 @@ def _rebind_assignment_pack(
     _refresh_digest(pack)
 
 
+def _set_legacy_deployment_epoch(
+    assignments: list[dict[str, Any]],
+    packs: list[dict[str, Any]],
+    deployment_epoch: Any,
+) -> None:
+    for assignment, pack in zip(assignments, packs, strict=True):
+        assignment.pop("control_plane_binding", None)
+        assignment["deployment_epoch"] = deployment_epoch
+        assignment["assignment_id"] = la.assignment_id_for(assignment)
+        pack["deployment_epoch"] = deployment_epoch
+        pack["assignment_id"] = assignment["assignment_id"]
+        pack["control_plane_binding"] = None
+        _refresh_digest(pack)
+
+
 def test_compiles_deterministic_assignment_local_packs_and_verifies_warm_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -1192,6 +1207,61 @@ def test_collection_verifier_rejects_invalid_control_plane_bindings(
                 assignments=assignments,
                 manifest=manifest,
             )
+
+
+@pytest.mark.parametrize(
+    "deployment_epoch",
+    (True, 7.0, 0, -1, "7"),
+    ids=("bool", "float", "zero", "negative", "string"),
+)
+def test_stage_pack_verifier_rejects_invalid_legacy_deployment_epoch(
+    tmp_path: Path,
+    deployment_epoch: Any,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    packs[0]["deployment_epoch"] = deployment_epoch
+    _refresh_digest(packs[0])
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack deployment epoch is invalid$",
+    ):
+        verify_stage_pack(
+            packs[0],
+            assignment=assignments[0],
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize(
+    "deployment_epoch",
+    (True, 7.0, 0, -1, "7"),
+    ids=("bool", "float", "zero", "negative", "string"),
+)
+def test_collection_verifier_rejects_invalid_legacy_deployment_epoch(
+    tmp_path: Path,
+    deployment_epoch: Any,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    _set_legacy_deployment_epoch(assignments, packs, deployment_epoch)
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack deployment epoch is invalid$",
+    ):
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
 
 
 def test_collection_verifier_accepts_reordered_control_plane_binding_keys(
