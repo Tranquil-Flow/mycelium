@@ -139,6 +139,8 @@ class LoadedStage:
     authenticated_assignment_id: str | None = None
     authenticated_tensor_digest: str | None = None
     authenticated_load_generation: int | None = None
+    authenticated_loaded_components: tuple[str, ...] | None = None
+    authenticated_loaded_range: Mapping[str, Any] | None = None
     authenticated_runtime: Mapping[str, Any] | None = None
     authenticated_runtime_identity: Mapping[str, Any] | None = None
 
@@ -1127,17 +1129,16 @@ def execute_loaded_stage(
 ) -> Any:
     """Execute exactly the GPT-2 components bound by one ``LoadedStage``.
 
-    Runtime identity, layer range, roles, and aliases come from the immutable
-    load proof rather than an unbound caller argument. Entry stages accept
-    rank-two integer token IDs; all other stages accept rank-three hidden
-    states. There is intentionally no KV-cache interface, so callers must pass
-    the complete sequence on every invocation.
+    Runtime identity, layer range, and component roles are authenticated against
+    immutable loader-held evidence rather than trusted from the proof alone.
+    Entry stages accept rank-two integer token IDs; all other stages accept
+    rank-three hidden states. There is intentionally no KV-cache interface, so
+    callers must pass the complete sequence on every invocation.
     """
 
     def reject(code: str) -> NoReturn:
         raise RuntimeExecutionError(code)
 
-    mx = _mlx_module()
     if not isinstance(loaded_stage, LoadedStage):
         reject("invalid_loaded_stage")
     proof = loaded_stage.proof
@@ -1154,6 +1155,10 @@ def execute_loaded_stage(
             proof,
             authenticated_assignment_id=loaded_stage.authenticated_assignment_id,
             authenticated_load_generation=loaded_stage.authenticated_load_generation,
+            authenticated_loaded_components=(
+                loaded_stage.authenticated_loaded_components
+            ),
+            authenticated_loaded_range=loaded_stage.authenticated_loaded_range,
             authenticated_runtime=loaded_stage.authenticated_runtime,
             authenticated_runtime_identity=(
                 loaded_stage.authenticated_runtime_identity
@@ -1216,6 +1221,7 @@ def execute_loaded_stage(
     else:
         reject("invalid_loaded_stage_namespace")
 
+    mx = _mlx_module()
     expected_dtype = _runtime_dtypes()[runtime["dtype"]]
     expected_dtype_name = str(expected_dtype)
     has_embedding = "input_embedding" in components
@@ -1424,6 +1430,8 @@ def _run_numpy_probe(
         authenticated_assignment_id=assignment["assignment_id"],
         authenticated_tensor_digest=tensor_digest,
         authenticated_load_generation=load_generation,
+        authenticated_loaded_components=tuple(assignment["components"]),
+        authenticated_loaded_range=_deep_freeze(assignment["range"]),
         authenticated_runtime=_deep_freeze(runtime),
         authenticated_runtime_identity=_deep_freeze(runtime_identity),
     )
@@ -1568,6 +1576,8 @@ def load_assignment_stage(
             authenticated_assignment_id=assignment["assignment_id"],
             authenticated_tensor_digest=loaded_tensor_digest,
             authenticated_load_generation=load_generation,
+            authenticated_loaded_components=tuple(components),
+            authenticated_loaded_range=_deep_freeze(assignment["range"]),
             authenticated_runtime=_deep_freeze(runtime),
             authenticated_runtime_identity=_deep_freeze(runtime_identity),
         )

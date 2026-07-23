@@ -264,6 +264,8 @@ def validate_loaded_stage_authentication(
     *,
     authenticated_assignment_id: Any,
     authenticated_load_generation: Any,
+    authenticated_loaded_components: Any,
+    authenticated_loaded_range: Any,
     authenticated_runtime: Any,
     authenticated_runtime_identity: Any,
     normalized_runtime: Mapping[str, Any],
@@ -299,6 +301,38 @@ def validate_loaded_stage_authentication(
         or proof_generation != authenticated_load_generation
     ):
         raise ValueError("load_generation_mismatch")
+
+    try:
+        loaded_components = _plain_json(proof.get("loaded_components"))
+        bound_loaded_components = _plain_json(authenticated_loaded_components)
+        json.dumps(
+            loaded_components,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("loaded_components_mismatch") from exc
+    if (
+        not isinstance(loaded_components, list)
+        or not all(isinstance(component, str) for component in loaded_components)
+        or loaded_components != bound_loaded_components
+    ):
+        raise ValueError("loaded_components_mismatch")
+
+    try:
+        loaded_range = _plain_json(proof.get("loaded_range"))
+        bound_loaded_range = _plain_json(authenticated_loaded_range)
+        json.dumps(
+            loaded_range,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("loaded_range_mismatch") from exc
+    if not isinstance(loaded_range, dict) or loaded_range != bound_loaded_range:
+        raise ValueError("loaded_range_mismatch")
 
     try:
         runtime = _plain_json(normalized_runtime)

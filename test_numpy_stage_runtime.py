@@ -25,12 +25,14 @@ import sys
 import textwrap
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import mlx.core as mx
 import numpy as np
 import pytest
 
+import numpy_runtime
 import runtime_loader
 from numpy_runtime import NumpyGPT2Runtime, NumpyStageBackend, tensor_digest
 from runtime_contracts import (
@@ -659,6 +661,115 @@ def test_stage_execution_rejects_proof_only_authentication_tampering(
         execute(tampered, token_ids=tokens)
 
 
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+@pytest.mark.parametrize(
+    ("tamper_case", "expected_error"),
+    [
+        ("terminal_to_entry", "loaded_components_mismatch"),
+        ("entry_to_intermediate", "loaded_components_mismatch"),
+        ("final_to_intermediate", "loaded_components_mismatch"),
+        ("tied_lm_head_removal", "loaded_components_mismatch"),
+        ("component_order_change", "loaded_components_mismatch"),
+        ("legal_loaded_range_change", "loaded_range_mismatch"),
+    ],
+)
+def test_stage_execution_authenticates_exact_loaded_role_evidence_before_compute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    tamper_case: str,
+    expected_error: str,
+) -> None:
+    assignment, report, _ = _case(tmp_path, backend=backend)
+    if tamper_case == "entry_to_intermediate":
+        _restrict(
+            assignment,
+            report,
+            start=0,
+            end=1,
+            components=["input_embedding", "decoder"],
+        )
+    elif tamper_case == "final_to_intermediate":
+        _restrict(
+            assignment,
+            report,
+            start=1,
+            end=2,
+            components=["decoder", "final_norm", "lm_head"],
+        )
+    elif tamper_case == "legal_loaded_range_change":
+        _restrict(
+            assignment,
+            report,
+            start=0,
+            end=2,
+            components=["decoder"],
+        )
+
+    loaded = load_assignment_stage(assignment, report, load_generation=12)
+    tampered_proof = json.loads(canonical_json(loaded.proof))
+    if tamper_case == "terminal_to_entry":
+        tampered_proof["loaded_components"] = ["input_embedding", "decoder"]
+    elif tamper_case in {"entry_to_intermediate", "final_to_intermediate"}:
+        tampered_proof["loaded_components"] = ["decoder"]
+    elif tamper_case == "tied_lm_head_removal":
+        tampered_proof["loaded_components"].remove("lm_head")
+    elif tamper_case == "component_order_change":
+        tampered_proof["loaded_components"].reverse()
+    else:
+        tampered_proof["loaded_range"] = {
+            "start_layer": 0,
+            "end_layer_exclusive": 1,
+            "layer_count": 1,
+        }
+    tampered = replace(loaded, proof=tampered_proof)
+
+    class BackendComputeReached(AssertionError):
+        pass
+
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise BackendComputeReached("backend_compute_reached")
+
+    execute: Any
+    error: type[Exception]
+    if backend == "numpy":
+        monkeypatch.setattr(numpy_runtime, "_gpt2_block", reject_backend_compute)
+        execute = execute_loaded_numpy_stage
+        error = RuntimeLoadError
+    else:
+        monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+        execute = runtime_loader.execute_loaded_stage
+        error = RuntimeExecutionError
+
+    if "input_embedding" in tampered_proof["loaded_components"]:
+        execution_input = {
+            "token_ids": mx.array([[1, 2, 3]], dtype=mx.int32),
+        }
+    else:
+        execution_input = {
+            "hidden_states": mx.ones(
+                (1, 3, _numpy_runtime()["model_config"]["n_embd"]),
+                dtype=mx.float32,
+            ),
+        }
+    with pytest.raises(error, match=expected_error):
+        execute(tampered, **execution_input)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_loaded_stage_freezes_exact_role_authentication_fields(
+    tmp_path: Path,
+    backend: str,
+) -> None:
+    assignment, report, _ = _case(tmp_path, backend=backend)
+    loaded = load_assignment_stage(assignment, report, load_generation=13)
+
+    assert loaded.authenticated_loaded_components == tuple(assignment["components"])
+    assert loaded.authenticated_loaded_range == assignment["range"]
+    with pytest.raises(TypeError):
+        loaded.authenticated_loaded_range["start_layer"] = 1
+
+
 def test_loaded_numpy_stage_revalidates_terminal_layer_boundary_at_execution(
     tmp_path: Path,
 ) -> None:
@@ -682,6 +793,9 @@ def test_loaded_numpy_stage_revalidates_terminal_layer_boundary_at_execution(
         tensors=tensors,
         proof=tampered_proof,
         authenticated_tensor_digest=digest,
+        authenticated_loaded_range=MappingProxyType(
+            dict(tampered_proof["loaded_range"])
+        ),
     )
 
     with pytest.raises(RuntimeLoadError, match="invalid_loaded_stage_boundaries"):

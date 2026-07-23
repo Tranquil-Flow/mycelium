@@ -40,8 +40,8 @@
         },
         {
           "path": "runtime_contracts.py",
-          "sha256": "34b701ab1fff3b8fe72c2d7d2cbe923da85c608291a75aeeaec1936c585c2630",
-          "size_bytes": 14500
+          "sha256": "53e30adad0deda4bc3e19a8bab9704c9661a45bc60ba0e9a1734b2e1d9dccf77",
+          "size_bytes": 15779
         },
         {
           "path": "mycelium_gossip/evidence_bundle.py",
@@ -155,8 +155,8 @@
         },
         {
           "path": "runtime_contracts.py",
-          "sha256": "34b701ab1fff3b8fe72c2d7d2cbe923da85c608291a75aeeaec1936c585c2630",
-          "size_bytes": 14500
+          "sha256": "53e30adad0deda4bc3e19a8bab9704c9661a45bc60ba0e9a1734b2e1d9dccf77",
+          "size_bytes": 15779
         }
       ],
       "protocol": "mycelium.layer_assignment.v2"
@@ -170,13 +170,13 @@
       "owner_sources": [
         {
           "path": "runtime_loader.py",
-          "sha256": "0e718562cfa4a02f31a4c461f8ac5dda8142f71374a6a3af98a1bdcb6acaa843",
-          "size_bytes": 60727
+          "sha256": "f79eba9e786ce65cea05460e7b3b1366e3e3dcd859a6345e0b8950afcf11ba4b",
+          "size_bytes": 61365
         },
         {
           "path": "runtime_contracts.py",
-          "sha256": "34b701ab1fff3b8fe72c2d7d2cbe923da85c608291a75aeeaec1936c585c2630",
-          "size_bytes": 14500
+          "sha256": "53e30adad0deda4bc3e19a8bab9704c9661a45bc60ba0e9a1734b2e1d9dccf77",
+          "size_bytes": 15779
         },
         {
           "path": "mycelium_router/layer_builder.py",

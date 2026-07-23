@@ -380,6 +380,12 @@ def _validated_stage(
             authenticated_load_generation=getattr(
                 loaded_stage, "authenticated_load_generation", None
             ),
+            authenticated_loaded_components=getattr(
+                loaded_stage, "authenticated_loaded_components", None
+            ),
+            authenticated_loaded_range=getattr(
+                loaded_stage, "authenticated_loaded_range", None
+            ),
             authenticated_runtime=getattr(
                 loaded_stage, "authenticated_runtime", None
             ),
