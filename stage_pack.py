@@ -175,12 +175,12 @@ def _validate_deployment_epoch(value: Any) -> None:
         raise ValueError("stage pack deployment epoch is invalid")
 
 
-def _canonical_optional_control_plane_binding(
-    assignment: dict[str, Any],
-) -> bytes | None:
-    if "control_plane_binding" not in assignment:
-        return None
-    binding = assignment["control_plane_binding"]
+def _canonical_control_plane_binding(
+    binding: Any,
+    *,
+    deployment_id: Any,
+    deployment_epoch: Any,
+) -> bytes:
     if (
         not isinstance(binding, dict)
         or set(binding) != _CONTROL_PLANE_BINDING_FIELDS
@@ -202,11 +202,23 @@ def _canonical_optional_control_plane_binding(
         if type(value) is not str or not value:
             raise ValueError("stage pack control-plane binding is invalid")
     if (
-        binding["deployment_id"] != assignment.get("deployment_id")
-        or binding["deployment_epoch"] != assignment.get("deployment_epoch")
+        binding["deployment_id"] != deployment_id
+        or binding["deployment_epoch"] != deployment_epoch
     ):
         raise ValueError("stage pack control-plane binding is invalid")
     return _canonical_json(binding).encode("utf-8")
+
+
+def _canonical_optional_control_plane_binding(
+    assignment: dict[str, Any],
+) -> bytes | None:
+    if "control_plane_binding" not in assignment:
+        return None
+    return _canonical_control_plane_binding(
+        assignment["control_plane_binding"],
+        deployment_id=assignment.get("deployment_id"),
+        deployment_epoch=assignment.get("deployment_epoch"),
+    )
 
 
 def stage_pack_digest_for(pack: dict[str, Any]) -> str:
@@ -683,6 +695,13 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         raise ValueError("stage pack digest is invalid")
     if supplied != stage_pack_digest_for(pack):
         raise ValueError("stage pack digest mismatch")
+    binding = pack.get("control_plane_binding")
+    if binding is not None:
+        _canonical_control_plane_binding(
+            binding,
+            deployment_id=pack.get("deployment_id"),
+            deployment_epoch=pack.get("deployment_epoch"),
+        )
     _normalize_runtime(pack.get("runtime"))
     layer_range = pack.get("range")
     if not isinstance(layer_range, dict):

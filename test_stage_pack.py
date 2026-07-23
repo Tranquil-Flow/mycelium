@@ -497,6 +497,193 @@ def test_per_pack_surfaces_accept_valid_control_plane_binding(
     assert verification["route_ready"] is False
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("snapshot_generation", True),
+        ("snapshot_generation", 1.0),
+        ("deployment_epoch", True),
+        ("deployment_epoch", 1.0),
+    ),
+    ids=(
+        "bool-generation",
+        "float-generation",
+        "bool-epoch",
+        "float-epoch",
+    ),
+)
+@pytest.mark.parametrize("surface", ("verify", "evidence", "collection"))
+def test_pack_only_numeric_binding_collisions_are_rejected(
+    tmp_path: Path,
+    field: str,
+    replacement: Any,
+    surface: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path, deployment_epoch=1)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    binding = _control_plane_binding(
+        snapshot_generation=1,
+        deployment_epoch=1,
+    )
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            control_plane_binding=binding,
+        )
+
+    pack = packs[1]
+    assignment = assignments[1]
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    assignment_bytes = json.dumps(
+        assignments,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    mutated_binding = copy.deepcopy(pack["control_plane_binding"])
+    mutated_binding[field] = replacement
+    pack["control_plane_binding"] = mutated_binding
+    _refresh_digest(pack)
+    verification["stage_pack_digest"] = pack["stage_pack_digest"]
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+    assert (
+        json.dumps(
+            assignments,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        == assignment_bytes
+    )
+    with pytest.raises(ValueError) as raised:
+        if surface == "verify":
+            verify_stage_pack(
+                pack,
+                assignment=assignment,
+                manifest=manifest,
+            )
+        elif surface == "evidence":
+            sp.validate_stage_pack_evidence(
+                pack,
+                verification,
+                assignment=assignment,
+                manifest=manifest,
+            )
+        else:
+            summary = sp.verify_stage_pack_collection(
+                packs,
+                assignments=assignments,
+                manifest=manifest,
+            )
+            assert summary["exact_logical_coverage"] is True
+
+    assert str(raised.value) == "stage pack control-plane binding is invalid"
+    _assert_collection_error_is_value_free(
+        raised.value,
+        assignments=assignments,
+        manifest=manifest,
+        extra_forbidden=(
+            json.dumps(mutated_binding, sort_keys=True, separators=(",", ":")),
+        ),
+    )
+
+
+@pytest.mark.parametrize("binding_value", (0, 1, 7))
+def test_pack_surfaces_accept_exact_integer_control_plane_bindings(
+    tmp_path: Path,
+    binding_value: int,
+) -> None:
+    manifest, assignments, reports, _ = _case(
+        tmp_path,
+        deployment_epoch=binding_value,
+    )
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    binding = _control_plane_binding(
+        snapshot_generation=binding_value,
+        deployment_epoch=binding_value,
+    )
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            control_plane_binding=binding,
+        )
+
+    verification = verify_stage_pack(
+        packs[1],
+        assignment=assignments[1],
+        manifest=manifest,
+    )
+    evidence_digests = sp.validate_stage_pack_evidence(
+        packs[1],
+        verification,
+        assignment=assignments[1],
+        manifest=manifest,
+    )
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+
+    assert type(packs[1]["control_plane_binding"]["snapshot_generation"]) is int
+    assert type(packs[1]["control_plane_binding"]["deployment_epoch"]) is int
+    assert evidence_digests == (
+        packs[1]["stage_pack_digest"],
+        verification["stage_pack_verification_digest"],
+    )
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
+
+
+def test_pack_surfaces_accept_legacy_none_for_missing_assignment_binding(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path, deployment_epoch=1)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+
+    verification = verify_stage_pack(
+        packs[1],
+        assignment=assignments[1],
+        manifest=manifest,
+    )
+    evidence_digests = sp.validate_stage_pack_evidence(
+        packs[1],
+        verification,
+        assignment=assignments[1],
+        manifest=manifest,
+    )
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+
+    assert "control_plane_binding" not in assignments[1]
+    assert packs[1]["control_plane_binding"] is None
+    assert evidence_digests == (
+        packs[1]["stage_pack_digest"],
+        verification["stage_pack_verification_digest"],
+    )
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
+
+
 def test_layer_spanning_files_and_file_spanning_layers_are_preserved(tmp_path: Path) -> None:
     manifest, assignments, reports, _ = _case(tmp_path)
     first = compile_stage_pack(assignments[0], manifest, reports[0])
