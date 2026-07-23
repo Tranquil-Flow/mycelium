@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 import hashlib
 import math
@@ -544,6 +545,55 @@ class SeedCoordinator:
                 projection.update(self._liveness_projection(member, now=now))
                 projections.append(projection)
             return tuple(projections)
+
+    @contextmanager
+    def member_authority_guard(
+        self,
+        *,
+        node_id: str,
+        expected_generation: int,
+        expected_peer_class: str,
+        eligible_lifecycle_states: frozenset[str],
+    ) -> Iterator[dict[str, Any]]:
+        """Hold seed authority stable while an adapter commits accepted work."""
+
+        node_id = _segment(node_id, "node_id")
+        expected_peer_class = _segment(expected_peer_class, "expected_peer_class")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+            or expected_generation < 1
+        ):
+            raise ValueError("expected_generation is invalid")
+        if (
+            not isinstance(eligible_lifecycle_states, frozenset)
+            or not eligible_lifecycle_states
+        ):
+            raise ValueError("eligible_lifecycle_states is invalid")
+        try:
+            normalized_lifecycle_states = frozenset(
+                _segment(state, "eligible_lifecycle_state")
+                for state in eligible_lifecycle_states
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("eligible_lifecycle_states is invalid") from exc
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            if member.generation != expected_generation:
+                raise SeedCoordinatorError("seed_member_generation_stale")
+            if member.peer_class != expected_peer_class:
+                raise SeedCoordinatorError("seed_member_peer_class_mismatch")
+            now = self._now()
+            if now >= member.lease_expires_at:
+                raise SeedCoordinatorError("seed_member_lease_expired")
+            if member.lifecycle_state not in normalized_lifecycle_states:
+                raise SeedCoordinatorError("seed_member_lifecycle_ineligible")
+            self._ensure_current_member(member)
+            projection = member.projection()
+            projection.update(self._liveness_projection(member, now=now))
+            yield projection
 
     def advance_member_generation(
         self,

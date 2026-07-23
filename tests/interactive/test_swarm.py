@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
+import mycelium_interactive.swarm as swarm_module
 from mycelium_interactive.swarm import (
     SwarmCoordinator,
     SwarmError,
@@ -77,6 +78,7 @@ def durable_seed(
     clock: ManualClock,
     signer: Any | None = None,
     id_prefix: str = "seed-message",
+    lease_seconds: float = 300.0,
 ) -> SeedCoordinator:
     database = tmp_path / "seed-state" / "state.sqlite3"
     message_ids = itertools.count()
@@ -90,7 +92,7 @@ def durable_seed(
         incarnation="seed-incarnation",
         clock=clock,
         id_source=lambda: f"{id_prefix}-{next(message_ids):04d}",
-        lease_seconds=300.0,
+        lease_seconds=lease_seconds,
     )
 
 
@@ -216,6 +218,71 @@ def test_browser_and_mac_members_cannot_collide_on_node_id(tmp_path: Any) -> Non
     assert seed.member(browser_id)["peer_class"] == "browser_http"
 
 
+def test_browser_cannot_collide_with_existing_mac_node_id(tmp_path: Any) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    mac = NodeMembershipSession(
+        node_id="peer-0000",
+        swarm_id=seed.swarm_id,
+        seed_node_id=seed.seed_node_id,
+        signer=generate_ed25519_signer(endpoint_id="mac-endpoint"),
+        incarnation="mac-incarnation",
+        software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
+        clock=clock,
+        id_source=lambda: "mac-join-message",
+    )
+    mac_bundle = seed.mint_invite(nonce="mac-first", ttl_seconds=120)
+    verified = verify_invite_bundle(mac_bundle, now=clock.value)
+    request = mac.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://mac.example.test/control"],
+    )
+    seed.accept_join(invite_token=mac_bundle["token"], join_envelope=request)
+
+    browser_invite = swarm.create_invite(
+        public_origin="https://swarm.example.test"
+    )
+    with pytest.raises(SwarmError, match="id_collision"):
+        swarm.exchange_invite(browser_invite.token)
+    assert seed.member("peer-0000")["peer_class"] == "mac_mlx_iroh"
+
+
+def test_expired_authoritative_lease_rejects_browser_poll(tmp_path: Any) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock, lease_seconds=10.0)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, token = join(swarm)
+
+    clock.value = 2_010.0
+    with pytest.raises(SwarmError, match="peer_expired"):
+        swarm.poll_work(
+            peer_id=peer_id,
+            session_token=token,
+            timeout_seconds=0,
+        )
+    peer = next(
+        item for item in swarm.status()["peers"] if item["peer_id"] == peer_id
+    )
+    assert peer["state"] == "expired"
+
+
 def test_revoked_in_flight_browser_is_fenced_by_membership_generation(
     tmp_path: Any,
 ) -> None:
@@ -266,6 +333,114 @@ def test_revoked_in_flight_browser_is_fenced_by_membership_generation(
     assert swarm.cancel_request("generation-fenced") is True
     thread.join(timeout=1)
     assert outcome == ["request_cancelled"]
+
+
+def test_generation_advance_during_result_validation_is_not_accepted(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, token = join(swarm)
+    outcome: list[str] = []
+
+    def dispatch() -> None:
+        try:
+            swarm.dispatch(
+                request_id="validation-race-fenced",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+            )
+        except SwarmError as exc:
+            outcome.append(exc.code)
+
+    thread = threading.Thread(target=dispatch, daemon=True)
+    thread.start()
+    work = swarm.poll_work(
+        peer_id=peer_id,
+        session_token=token,
+        timeout_seconds=1,
+    )
+    assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
+    generation = seed.member(peer_id)["generation"]
+    original_validate = swarm_module._validate_hidden
+    advanced = False
+
+    def advance_during_validation(value: Any, hidden_size: int) -> list[list[float]]:
+        nonlocal advanced
+        output = original_validate(value, hidden_size)
+        if not advanced:
+            advanced = True
+            seed.advance_member_generation(
+                node_id=peer_id,
+                expected_generation=generation,
+                lifecycle_state="STOPPING",
+            )
+        return output
+
+    monkeypatch.setattr(swarm_module, "_validate_hidden", advance_during_validation)
+    with pytest.raises(SwarmError, match="peer_membership_generation_revoked"):
+        swarm.submit_result(
+            peer_id=peer_id,
+            session_token=token,
+            document=valid_result(work, [[1.0, 2.0]]),
+        )
+    assert seed.member(peer_id)["generation"] == generation + 1
+    assert swarm.cancel_request("validation-race-fenced") is True
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert outcome == ["request_cancelled"]
+
+
+def test_seed_member_authority_guard_serializes_generation_advance(
+    tmp_path: Any,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, _token = join(swarm)
+    generation = seed.member(peer_id)["generation"]
+    advance_started = threading.Event()
+    advance_finished = threading.Event()
+
+    def advance() -> None:
+        advance_started.set()
+        seed.advance_member_generation(
+            node_id=peer_id,
+            expected_generation=generation,
+            lifecycle_state="STOPPING",
+        )
+        advance_finished.set()
+
+    thread = threading.Thread(target=advance, daemon=True)
+    with seed.member_authority_guard(
+        node_id=peer_id,
+        expected_generation=generation,
+        expected_peer_class="browser_http",
+        eligible_lifecycle_states=frozenset({"NEW", "CONFIGURED", "RUNNING"}),
+    ) as member:
+        assert member["generation"] == generation
+        thread.start()
+        assert advance_started.wait(timeout=1)
+        assert not advance_finished.wait(timeout=0.05)
+        assert seed.member(peer_id)["generation"] == generation
+
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert advance_finished.is_set()
+    assert seed.member(peer_id)["generation"] == generation + 1
 
 
 def test_browser_member_is_evidence_member_but_activation_ineligible(
@@ -342,7 +517,7 @@ def test_invite_expiry_and_origin_policy_fail_closed() -> None:
             swarm.create_invite(public_origin=origin)
 
 
-def test_invite_expiry_uses_wall_time_but_enforces_monotonic_deadline() -> None:
+def test_wall_time_authority_and_monotonic_session_deadlines_both_fail_closed() -> None:
     clock = ManualClock()
     wall_clock = ManualClock()
     wall_clock.value = 1_750_000_000.0
@@ -354,16 +529,22 @@ def test_invite_expiry_uses_wall_time_but_enforces_monotonic_deadline() -> None:
     assert grant.expires_at == 1_750_000_060.0
 
     wall_clock.value += 10_000.0
-    assert swarm.poll_work(
-        peer_id=grant.peer_id,
-        session_token=grant.session_token,
-        timeout_seconds=0,
-    ) is None
-    clock.value += 61.0
     with pytest.raises(SwarmError, match="peer_expired"):
         swarm.poll_work(
             peer_id=grant.peer_id,
             session_token=grant.session_token,
+            timeout_seconds=0,
+        )
+
+    next_invitation = swarm.create_invite(
+        public_origin="https://swarm.example.test"
+    )
+    next_grant = swarm.exchange_invite(next_invitation.token)
+    clock.value += 61.0
+    with pytest.raises(SwarmError, match="peer_expired"):
+        swarm.poll_work(
+            peer_id=next_grant.peer_id,
+            session_token=next_grant.session_token,
             timeout_seconds=0,
         )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 import threading
 import time
 from pathlib import Path
@@ -446,6 +448,52 @@ def test_runtime_can_restart_with_same_explicit_state_root(tmp_path: Path) -> No
         assert (root / "runs" / "first-run" / "deployment").is_dir()
         assert (root / "runs" / "second-run" / "deployment").is_dir()
         assert second.status()["route_ready"] is False
+    finally:
+        second.close()
+
+
+def test_runtime_restart_restores_seed_identity_and_browser_members(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "runtime"
+    first = InteractiveRuntime(root=root, run_id="first-authority-run")
+    invitation = first.swarm.create_invite(
+        public_origin="http://127.0.0.1:8787"
+    )
+    grant = first.swarm.exchange_invite(invitation.token)
+    first_seed_digest = first.seed_coordinator.signer.verification_key_digest
+    first.close()
+
+    key_file = root / "seed" / "identity" / "seed.key"
+    database = root / "seed" / "state.sqlite3"
+    assert key_file.is_file()
+    assert database.is_file()
+    assert stat.S_IMODE(key_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(database.stat().st_mode) == 0o600
+    assert key_file.stat().st_uid == os.getuid()
+    assert stat.S_IMODE(key_file.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(database.parent.stat().st_mode) == 0o700
+    durable_bytes = database.read_bytes()
+    assert invitation.token.encode("ascii") not in durable_bytes
+    assert grant.session_token.encode("ascii") not in durable_bytes
+
+    second = InteractiveRuntime(root=root, run_id="second-authority-run")
+    try:
+        assert second.seed_coordinator.signer.verification_key_digest == first_seed_digest
+        peer = next(
+            item
+            for item in second.status()["peers"]
+            if item["peer_id"] == grant.peer_id
+        )
+        assert peer["membership_generation"] == 1
+        assert peer["peer_class"] == "browser_http"
+        assert peer["activation_eligible"] is False
+        with pytest.raises(SwarmError, match="peer_unauthorized"):
+            second.swarm.poll_work(
+                peer_id=grant.peer_id,
+                session_token=grant.session_token,
+                timeout_seconds=0,
+            )
     finally:
         second.close()
 

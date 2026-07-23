@@ -41,6 +41,7 @@ _RESULT_FIELDS = frozenset(
 )
 _MAX_SEQUENCE_LENGTH = 256
 _MAX_LONG_POLL_SECONDS = 25.0
+_BROWSER_ELIGIBLE_LIFECYCLE_STATES = frozenset({"NEW", "CONFIGURED", "RUNNING"})
 
 
 class SwarmError(ValueError):
@@ -412,10 +413,10 @@ class SwarmCoordinator:
     @staticmethod
     def _browser_state(member: Mapping[str, Any], *, wall_now: float) -> str:
         lifecycle_state = member.get("lifecycle_state")
-        if lifecycle_state == "STOPPING":
-            return "revoked"
         if lifecycle_state == "STOPPED":
             return "left"
+        if lifecycle_state not in _BROWSER_ELIGIBLE_LIFECYCLE_STATES:
+            return "revoked"
         if wall_now >= float(member["lease_expires_at"]):
             return "expired"
         return "connected"
@@ -653,17 +654,38 @@ class SwarmCoordinator:
 
     def _require_current_membership_locked(self, peer: _Peer) -> dict[str, Any]:
         try:
-            member = self._seed.member(peer.peer_id)
+            with self._seed.member_authority_guard(
+                node_id=peer.peer_id,
+                expected_generation=peer.membership_generation,
+                expected_peer_class="browser_http",
+                eligible_lifecycle_states=_BROWSER_ELIGIBLE_LIFECYCLE_STATES,
+            ) as member:
+                return member
         except SeedCoordinatorError as exc:
-            if exc.code == "seed_member_unknown":
-                _reject("peer_membership_unknown")
-            _reject("membership_state_unavailable")
-        if (
-            member["peer_class"] != "browser_http"
-            or int(member["generation"]) != peer.membership_generation
-        ):
+            self._reject_authority_error_locked(peer, exc)
+
+    def _reject_authority_error_locked(
+        self,
+        peer: _Peer,
+        error: SeedCoordinatorError,
+    ) -> NoReturn:
+        if error.code == "seed_member_unknown":
+            _reject("peer_membership_unknown")
+        if error.code == "seed_member_lease_expired":
+            peer.state = "expired"
+            self._fail_peer_job_locked(peer, "peer_unavailable")
+            _reject("peer_expired")
+        if error.code == "seed_member_lifecycle_ineligible":
+            peer.state = "revoked"
+            self._fail_peer_job_locked(peer, "peer_unavailable")
+            _reject("peer_revoked")
+        if error.code in {
+            "seed_member_generation_stale",
+            "seed_member_peer_class_mismatch",
+            "seed_state_member_stale",
+        }:
             _reject("peer_membership_generation_revoked")
-        return member
+        _reject("membership_state_unavailable")
 
     def poll_work(
         self,
@@ -937,29 +959,44 @@ class SwarmCoordinator:
             if document.get("output_digest") != expected_digest:
                 _reject("result_output_digest_mismatch")
             document_digest = canonical_digest(dict(document))
-            if job.state == "completed":
-                if job.result_document_digest == document_digest:
-                    return "duplicate"
-                _reject("result_replay_conflict")
-            if job.cancel_event is not None and job.cancel_event.is_set():
-                self._cancel_job_locked(job, "cancelled")
-                _reject("result_job_not_active")
-            if job.state != "running" or peer.outstanding_job_id != job.job_id:
-                _reject("result_job_not_active")
-            result = BrowserStageResult(
-                peer_id=peer.peer_id,
-                job_id=job.job_id,
-                request_id=job.request_id,
-                output=tuple(tuple(row) for row in output),
-                output_digest=expected_digest,
-            )
-            job.result = result
-            job.result_document_digest = document_digest
-            job.state = "completed"
-            peer.outstanding_job_id = None
-            peer.completed_jobs += 1
-            self._condition.notify_all()
-            return "accepted"
+            try:
+                # Global lock order is adapter condition -> seed authority.
+                # SeedCoordinator never acquires this condition or calls back
+                # into the adapter, so the completion fence cannot form a cycle.
+                with self._seed.member_authority_guard(
+                    node_id=peer.peer_id,
+                    expected_generation=peer.membership_generation,
+                    expected_peer_class="browser_http",
+                    eligible_lifecycle_states=_BROWSER_ELIGIBLE_LIFECYCLE_STATES,
+                ):
+                    if job.state == "completed":
+                        if job.result_document_digest == document_digest:
+                            return "duplicate"
+                        _reject("result_replay_conflict")
+                    if job.cancel_event is not None and job.cancel_event.is_set():
+                        self._cancel_job_locked(job, "cancelled")
+                        _reject("result_job_not_active")
+                    if (
+                        job.state != "running"
+                        or peer.outstanding_job_id != job.job_id
+                    ):
+                        _reject("result_job_not_active")
+                    result = BrowserStageResult(
+                        peer_id=peer.peer_id,
+                        job_id=job.job_id,
+                        request_id=job.request_id,
+                        output=tuple(tuple(row) for row in output),
+                        output_digest=expected_digest,
+                    )
+                    job.result = result
+                    job.result_document_digest = document_digest
+                    job.state = "completed"
+                    peer.outstanding_job_id = None
+                    peer.completed_jobs += 1
+                    self._condition.notify_all()
+                    return "accepted"
+            except SeedCoordinatorError as exc:
+                self._reject_authority_error_locked(peer, exc)
 
     def cancel_request(
         self,
@@ -1061,6 +1098,7 @@ class SwarmCoordinator:
                 _reject("peer_revoked")
             if peer.state == "expired":
                 _reject("peer_expired")
+            self._require_current_membership_locked(peer)
             self._advance_membership_locked(peer, lifecycle_state="STOPPED")
             peer.state = "left"
             self._fail_peer_job_locked(peer, "peer_unavailable")

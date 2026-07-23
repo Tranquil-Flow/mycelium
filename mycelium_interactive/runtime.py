@@ -13,15 +13,16 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 import uuid
 
 import mlx.core as mx
 
+from mycelium_invite import SqliteInviteRegistry
 from mycelium_mobile.pixel_stage import PixelStage, build_stage_pack
-from mycelium_qualification.evidence import canonical_json_bytes
+from mycelium_node.identity import load_or_create_node_signer
 from mycelium_qualification.physical_deployment import prepare_physical_deployment
-from mycelium_router.mlx_runtime import _gpt2_block_with_kv
+from mycelium_seed import SeedCoordinator, SqliteSeedState
 from physical_pixel_host_stage import _final_logits
 from runtime_loader import canonical_json, execute_loaded_stage, load_assignment_stage
 
@@ -187,7 +188,26 @@ class InteractiveRuntime:
         self.reference = reference
         self.stage_pack = stage_pack
         self.pixel_stage = PixelStage.from_document(stage_pack)
-        self.swarm = SwarmCoordinator(stage_pack=stage_pack)
+        seed_root = self.root / "seed"
+        seed_signer = load_or_create_node_signer(
+            seed_root / "identity" / "seed.key"
+        )
+        seed_database = seed_root / "state.sqlite3"
+        self.seed_coordinator = SeedCoordinator(
+            swarm_id="interactive-swarm",
+            seed_node_id="interactive-seed",
+            seed_url="https://interactive.invalid",
+            signer=seed_signer,
+            invite_registry=SqliteInviteRegistry(seed_database),
+            state=SqliteSeedState(seed_database),
+            incarnation="interactive-seed-incarnation",
+            lease_seconds=3_600.0,
+            message_ttl_seconds=60.0,
+        )
+        self.swarm = SwarmCoordinator(
+            stage_pack=stage_pack,
+            seed_coordinator=self.seed_coordinator,
+        )
         self.records: dict[str, InferenceRecord] = {}
         self._record_order: list[str] = []
         self.config = loaded[1].proof["runtime"]["model_config"]

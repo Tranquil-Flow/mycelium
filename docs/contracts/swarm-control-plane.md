@@ -40,6 +40,16 @@ The adapter implements admission through the seed:
 4. A restarted adapter enumerates `browser_http` members from the restored seed
    store. Membership and its generation survive; bearer session tokens do not.
 
+`InteractiveRuntime` constructs that seed once from its state root. It uses
+`load_or_create_node_signer(<root>/seed/identity/seed.key)` and places both
+`SqliteInviteRegistry` and `SqliteSeedState` on
+`<root>/seed/state.sqlite3`; `SeedCoordinator` binds the database to the swarm,
+seed node, and signer identity. The established identity/storage helpers enforce
+mode `0600` for the key and database and mode `0700` for their private
+directories. Restart continuity therefore applies when the same explicit state
+root is reused. An implicit temporary runtime root remains intentionally
+ephemeral.
+
 The adapter-generated browser membership signer is process-local and has no
 serialization-facing private-key API. This refactor does not change browser
 page key storage or any signed membership wire schema.
@@ -49,12 +59,25 @@ page key storage or any signed membership wire schema.
 The browser session token is only an HTTP transport credential. Possessing it
 does not establish current membership. Every authenticated browser operation
 also resolves the seed member and requires the peer class and membership
-generation to match the adapter's admitted generation.
+generation to match the adapter's admitted generation, the authoritative lease
+to remain live, and lifecycle state to be one of `NEW`, `CONFIGURED`, or
+`RUNNING`. `DRAINING`, `STOPPING`, `STOPPED`, unknown lifecycle states, and
+expired leases fail closed.
 
 When work is assigned, the job snapshots that membership generation.
 `start_work()` and `submit_result()` reject a job after the seed advances the
 member generation, even if the caller still presents the original valid bearer
-token. `revoke_peer()` advances the durable generation and records `STOPPING`;
+token. Result acceptance and identical-duplicate completion run inside a
+`SeedCoordinator` authority guard: the guard checks class, generation, lease,
+lifecycle, and durable current-member state, then retains the seed lock through
+the adapter's completion commit. Generation advancement therefore linearizes
+either before that guard and is rejected, or after the accepted completion;
+there is no acceptance gap between the final authority check and commit.
+
+The adapter always acquires its condition before seed authority. The seed guard
+does not acquire adapter locks or call into the adapter, and seed operations
+never invert that order, so concurrent revocation cannot form a lock cycle.
+`revoke_peer()` advances the durable generation and records `STOPPING`;
 `leave()` advances it and records `STOPPED`. The seed update occurs before the
 adapter changes local transport state or releases in-flight work.
 
@@ -69,6 +92,7 @@ stage-matrix bindings. Assignment ID, stage ID, stage-pack digest, input digest,
 output digest, cancellation state, and request binding still fail closed.
 Status adds peer class, activation eligibility, and membership generation; it
 does not expose invite tokens, bearer tokens, stage tensors, or hidden matrices.
+Raw invite and bearer credentials are not added to durable seed state.
 
 ## Claim boundary
 
