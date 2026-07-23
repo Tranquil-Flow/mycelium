@@ -264,12 +264,14 @@ class NativeSidecarProcess:
         local_only: bool,
         queue_capacity: int,
         startup_timeout: float,
+        endpoint_secret_file: Path | None = None,
     ) -> None:
         self.binary = binary
         self.socket_root = socket_root
         self.local_only = local_only
         self.queue_capacity = queue_capacity
         self.startup_timeout = startup_timeout
+        self.endpoint_secret_file = endpoint_secret_file
         self.socket_path = socket_root / "i.sock"
         self._bootstrap_material: bytes | None = None
         self.process: subprocess.Popen[str] | None = None
@@ -300,6 +302,10 @@ class NativeSidecarProcess:
             "--queue-capacity",
             str(self.queue_capacity),
         ]
+        if self.endpoint_secret_file is not None:
+            command.extend(
+                ["--endpoint-secret-file", str(self.endpoint_secret_file)]
+            )
         if self.local_only:
             command.append("--local-only")
         try:
@@ -374,6 +380,7 @@ class PhysicalNodeService:
         sidecar_binary: Path,
         sidecar_local_only: bool,
         command_timeout: float,
+        endpoint_secret_file: Path | None = None,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -382,6 +389,17 @@ class PhysicalNodeService:
         ):
             _require(isinstance(value, str) and bool(value) and value == value.strip(), code)
         _require(command_timeout > 0, "invalid_command_timeout")
+        _require(
+            endpoint_secret_file is None
+            or (
+                endpoint_secret_file.is_absolute()
+                and not any(
+                    character in str(endpoint_secret_file)
+                    for character in "\n\r\t"
+                )
+            ),
+            "invalid_endpoint_secret_file",
+        )
         self.run_id = run_id
         self.deployment_id = deployment_id
         self.node_id = node_id
@@ -389,6 +407,7 @@ class PhysicalNodeService:
         self.socket_root = socket_root
         self.sidecar_binary = sidecar_binary.resolve(strict=False)
         self.sidecar_local_only = sidecar_local_only
+        self.endpoint_secret_file = endpoint_secret_file
         self.command_timeout = command_timeout
         self.host_id = platform.node()
         self.process_id = os.getpid()
@@ -634,6 +653,7 @@ class PhysicalNodeService:
             local_only=self.sidecar_local_only,
             queue_capacity=128,
             startup_timeout=min(self.command_timeout, 30.0),
+            endpoint_secret_file=self.endpoint_secret_file,
         )
         try:
             ready = sidecar.start()
@@ -959,6 +979,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--socket-root", type=Path, required=True)
     parser.add_argument("--sidecar-binary", type=Path, required=True)
+    parser.add_argument("--endpoint-secret-file", type=Path)
     parser.add_argument("--sidecar-local-only", action="store_true")
     parser.add_argument("--command-timeout", type=float, default=30.0)
     return parser.parse_args()
@@ -976,6 +997,7 @@ def main() -> int:
             sidecar_binary=args.sidecar_binary,
             sidecar_local_only=args.sidecar_local_only,
             command_timeout=args.command_timeout,
+            endpoint_secret_file=args.endpoint_secret_file,
         )
     except (NodeCommandError, OSError) as exc:
         print(f"physical-node startup rejected: {type(exc).__name__}", file=sys.stderr)

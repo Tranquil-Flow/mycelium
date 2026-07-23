@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Fail-closed physical qualification controller skeleton.
+"""Fail-closed physical qualification controller.
 
-This tranche validates exact transfer bytes and current seed-signed assignment
-offers, then emits inert plans. It intentionally performs no physical launch,
-SSH transfer, activation transport, evidence sealing, or readiness publication.
+The controller validates exact transfer bytes and current seed-signed assignment
+offers, stages explicit archives, and drives bounded node-control sessions. It
+never publishes route or release readiness; only the evidence qualifier may do
+that after complete physical evidence sealing.
 """
 
 from __future__ import annotations
@@ -26,12 +27,17 @@ import sys
 import tarfile
 import threading
 import time
-from typing import Any, NoReturn, Protocol
+from typing import Any, Callable, NoReturn, Protocol
 
 from mycelium_membership.contracts import (
     ASSIGNMENT_OFFER_PROTOCOL,
     MembershipContractError,
     verify_membership_message,
+)
+from mycelium_qualification.evidence import canonical_json_bytes
+from mycelium_qualification.signing import (
+    EvidenceSigningError,
+    build_ed25519_verifier,
 )
 
 COMMANDS = frozenset(
@@ -59,6 +65,8 @@ _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
 _STAGE_ACK_PROTOCOL = "mycelium.controller_remote_stage_ack.v1"
 _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
 _NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
+_NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
+_RUN_PLAN_PROTOCOL = "mycelium.controller_run_plan.v1"
 _REMOTE_STAGE_SCRIPT = r'''import hashlib,io,json,os,shutil,sys,tarfile
 from pathlib import Path,PurePosixPath
 root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);created=False
@@ -671,7 +679,7 @@ def build_transfer_archive(
 
 
 class QualificationController:
-    """Validate controller inputs and emit inert command plans."""
+    """Validate inputs, orchestrate bounded physical work, never self-promote."""
 
     def __init__(
         self,
@@ -683,6 +691,8 @@ class QualificationController:
         membership_snapshot: Mapping[str, Any],
         now: float,
         runner: CommandRunner | None = None,
+        run_plan: Mapping[str, Any] | None = None,
+        session_factory: Callable[..., Any] | None = None,
     ):
         if mode not in MODES:
             _reject("controller_mode_invalid")
@@ -716,13 +726,19 @@ class QualificationController:
             membership_snapshot, Mapping
         ):
             _reject("controller_document_invalid")
+        if run_plan is not None and not isinstance(run_plan, Mapping):
+            _reject("controller_run_plan_invalid")
+        if session_factory is not None and not callable(session_factory):
+            _reject("controller_session_factory_invalid")
         self.mode = mode
         self.peers = tuple(peers)
         self.source_root = resolved_root
         self._transfer_manifest = dict(transfer_manifest)
         self._membership_snapshot = dict(membership_snapshot)
+        self._run_plan = None if run_plan is None else dict(run_plan)
         self._now = float(now)
         self._runner = runner or SubprocessRunner()
+        self._session_factory = session_factory or NodeProcessSession
 
     def _validate_transfers(self) -> tuple[dict[str, Any], ...]:
         manifest = self._transfer_manifest
@@ -828,6 +844,535 @@ class QualificationController:
             or len(set(pairs)) != len(pairs)
         ):
             _reject("physical_host_identity_not_distinct")
+
+    def _validate_run_plan(self) -> dict[str, Any]:
+        plan = self._run_plan
+        expected_fields = {
+            "protocol",
+            "run_id",
+            "deployment_id",
+            "entry_node_id",
+            "nodes",
+            "request",
+            "decode_count",
+            "expected_token_ids",
+        }
+        if plan is None or set(plan) != expected_fields:
+            _reject("controller_run_plan_invalid")
+        if plan.get("protocol") != _RUN_PLAN_PROTOCOL:
+            _reject("controller_run_plan_invalid")
+        run_id = _segment(plan.get("run_id"), "run_id_invalid")
+        deployment_id = _segment(
+            plan.get("deployment_id"), "deployment_id_invalid"
+        )
+        if deployment_id != self._membership_snapshot.get("deployment_id"):
+            _reject("run_plan_deployment_mismatch")
+        node_ids = [peer.node_id for peer in self.peers]
+        if len(node_ids) != 2:
+            _reject("physical_run_peer_count_invalid")
+        entry_node_id = plan.get("entry_node_id")
+        if entry_node_id not in node_ids:
+            _reject("run_plan_entry_node_invalid")
+        records = plan.get("nodes")
+        if not isinstance(records, list) or len(records) != len(node_ids):
+            _reject("run_plan_nodes_invalid")
+        expected_node_fields = {
+            "node_id",
+            "socket_root",
+            "sidecar_binary",
+            "endpoint_secret_file",
+            "configure",
+        }
+        normalized_nodes: list[dict[str, Any]] = []
+        actual_node_ids: list[Any] = []
+        for record in records:
+            if not isinstance(record, Mapping) or set(record) != expected_node_fields:
+                _reject("run_plan_node_invalid")
+            node_id = record.get("node_id")
+            actual_node_ids.append(node_id)
+            socket_root = record.get("socket_root")
+            sidecar_binary = record.get("sidecar_binary")
+            for value, code, require_marker in (
+                (socket_root, "run_plan_socket_root_invalid", True),
+                (sidecar_binary, "run_plan_sidecar_binary_invalid", False),
+            ):
+                if not isinstance(value, str) or len(value) > 1024:
+                    _reject(code)
+                path = PurePosixPath(value)
+                if (
+                    not path.is_absolute()
+                    or str(path) != value
+                    or len(path.parts) < 3
+                    or any(part in {"", ".", ".."} for part in path.parts)
+                    or any(character in value for character in "\n\r\t")
+                    or (
+                        require_marker
+                        and not any(part.startswith("mycelium") for part in path.parts)
+                    )
+                ):
+                    _reject(code)
+            endpoint_secret_file = record.get("endpoint_secret_file")
+            if not isinstance(endpoint_secret_file, str) or len(endpoint_secret_file) > 1024:
+                _reject("run_plan_endpoint_secret_file_invalid")
+            endpoint_secret_path = PurePosixPath(endpoint_secret_file)
+            path_pairs = set(zip(endpoint_secret_path.parts, endpoint_secret_path.parts[1:]))
+            if (
+                not endpoint_secret_path.is_absolute()
+                or str(endpoint_secret_path) != endpoint_secret_file
+                or len(endpoint_secret_path.parts) < 5
+                or any(part in {"", ".", ".."} for part in endpoint_secret_path.parts)
+                or any(character in endpoint_secret_file for character in "\n\r\t")
+                or ("mycelium", "identities") not in path_pairs
+            ):
+                _reject("run_plan_endpoint_secret_file_invalid")
+            configure = record.get("configure")
+            if not isinstance(configure, Mapping):
+                _reject("run_plan_configure_invalid")
+            normalized_nodes.append(
+                {
+                    "node_id": node_id,
+                    "socket_root": socket_root,
+                    "sidecar_binary": sidecar_binary,
+                    "endpoint_secret_file": endpoint_secret_file,
+                    "configure": dict(configure),
+                }
+            )
+        if actual_node_ids != sorted(node_ids):
+            _reject("run_plan_nodes_invalid")
+        request = plan.get("request")
+        request_fields = {
+            "request_id",
+            "prompt_token_ids",
+            "max_new_tokens",
+            "expected_new_tokens",
+            "qos_class",
+            "admitted_at",
+            "target_ttft_ms",
+            "target_tpot_ms",
+            "target_tokens_per_second",
+            "sampling_seed",
+            "generation_config_digest",
+        }
+        if not isinstance(request, Mapping) or set(request) != request_fields:
+            _reject("run_plan_request_invalid")
+        _segment(request.get("request_id"), "run_plan_request_invalid")
+        decode_count = plan.get("decode_count")
+        expected_token_ids = plan.get("expected_token_ids")
+        if (
+            not isinstance(decode_count, int)
+            or isinstance(decode_count, bool)
+            or not 1 <= decode_count <= 127
+            or not isinstance(expected_token_ids, list)
+            or len(expected_token_ids) != decode_count + 1
+            or not all(
+                isinstance(token_id, int)
+                and not isinstance(token_id, bool)
+                and token_id >= 0
+                for token_id in expected_token_ids
+            )
+        ):
+            _reject("run_plan_expected_output_invalid")
+        transferred_paths = {
+            record.get("path")
+            for record in self._transfer_manifest.get("files", [])
+            if isinstance(record, Mapping)
+        }
+        if "physical_inference_node.py" not in transferred_paths:
+            _reject("run_plan_node_script_missing")
+        return {
+            "protocol": _RUN_PLAN_PROTOCOL,
+            "run_id": run_id,
+            "deployment_id": deployment_id,
+            "entry_node_id": entry_node_id,
+            "nodes": normalized_nodes,
+            "request": dict(request),
+            "decode_count": decode_count,
+            "expected_token_ids": list(expected_token_ids),
+        }
+
+    def _hello_identity(
+        self,
+        response: Mapping[str, Any],
+        *,
+        peer: PeerIdentity,
+        run_id: str,
+        deployment_id: str,
+    ) -> dict[str, Any]:
+        if response.get("ok") is not True or not isinstance(response.get("result"), Mapping):
+            _reject("node_hello_rejected")
+        identity = dict(response["result"])
+        expected_fields = {
+            "protocol",
+            "run_id",
+            "deployment_id",
+            "node_id",
+            "host_id",
+            "process_id",
+            "endpoint_id",
+            "peer_generation",
+            "state",
+            "route_ready",
+        }
+        if (
+            set(identity) != expected_fields
+            or identity.get("protocol") != _NODE_CONTROL_PROTOCOL
+            or identity.get("run_id") != run_id
+            or identity.get("deployment_id") != deployment_id
+            or identity.get("node_id") != peer.node_id
+            or identity.get("host_id") != peer.host_id
+            or not isinstance(identity.get("process_id"), int)
+            or isinstance(identity.get("process_id"), bool)
+            or identity["process_id"] <= 0
+            or identity.get("endpoint_id") is not None
+            or identity.get("peer_generation") != 0
+            or identity.get("state") != "NEW"
+            or identity.get("route_ready") is not False
+        ):
+            _reject("node_hello_identity_invalid")
+        return identity
+
+    def _verified_observation(
+        self,
+        response: Mapping[str, Any],
+        *,
+        event: str,
+        peer: PeerIdentity,
+        process_id: int,
+        run_id: str,
+        deployment_id: str,
+        endpoint_id: str,
+        expected_verification_key: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if response.get("ok") is not True or not isinstance(response.get("result"), Mapping):
+            _reject("node_command_rejected")
+        signed = response["result"]
+        if set(signed) != {"observation", "signature", "verification_key"}:
+            _reject("node_observation_invalid")
+        observation = signed.get("observation")
+        signature = signed.get("signature")
+        verification_key = signed.get("verification_key")
+        observation_fields = {
+            "protocol",
+            "event",
+            "monotonic_ns",
+            "run_id",
+            "deployment_id",
+            "node_id",
+            "host_id",
+            "process_id",
+            "endpoint_id",
+            "peer_generation",
+            "state",
+            "route_ready",
+            "details",
+        }
+        if (
+            not isinstance(observation, Mapping)
+            or set(observation) != observation_fields
+            or observation.get("protocol") != _NODE_OBSERVATION_PROTOCOL
+            or observation.get("event") != event
+            or not isinstance(observation.get("monotonic_ns"), int)
+            or isinstance(observation.get("monotonic_ns"), bool)
+            or observation["monotonic_ns"] < 0
+            or observation.get("run_id") != run_id
+            or observation.get("deployment_id") != deployment_id
+            or observation.get("node_id") != peer.node_id
+            or observation.get("host_id") != peer.host_id
+            or observation.get("process_id") != process_id
+            or observation.get("endpoint_id") != endpoint_id
+            or observation.get("route_ready") is not False
+            or not isinstance(observation.get("peer_generation"), int)
+            or isinstance(observation.get("peer_generation"), bool)
+            or not isinstance(observation.get("state"), str)
+            or not isinstance(observation.get("details"), Mapping)
+            or not isinstance(signature, Mapping)
+            or not isinstance(verification_key, Mapping)
+            or (
+                expected_verification_key is not None
+                and dict(verification_key) != dict(expected_verification_key)
+            )
+            or signature.get("signer_endpoint_id") != endpoint_id
+        ):
+            _reject("node_observation_invalid")
+        try:
+            verifier = build_ed25519_verifier([verification_key])
+            valid = verifier(canonical_json_bytes(dict(observation)), dict(signature))
+        except (EvidenceSigningError, TypeError, ValueError) as exc:
+            raise ControllerError("node_observation_signature_invalid") from exc
+        if valid is not True:
+            _reject("node_observation_signature_invalid")
+        return dict(observation)
+
+    def _run_physical(
+        self,
+        endpoints: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        plan = self._validate_run_plan()
+        archive = build_transfer_archive(self.source_root, self._transfer_manifest)
+        archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+        peers_by_node = {peer.node_id: peer for peer in self.peers}
+        plans_by_node = {record["node_id"]: record for record in plan["nodes"]}
+        sessions: dict[str, Any] = {}
+        identities: dict[str, dict[str, Any]] = {}
+        observations: dict[str, dict[str, Any]] = {
+            node_id: {} for node_id in peers_by_node
+        }
+        endpoint_addresses: dict[str, dict[str, Any]] = {}
+        verification_keys: dict[str, dict[str, Any]] = {}
+        stopped: set[str] = set()
+        primary_error: BaseException | None = None
+        output_token_ids: list[int] | None = None
+        try:
+            for node_id in sorted(peers_by_node):
+                peer = peers_by_node[node_id]
+                node_plan = plans_by_node[node_id]
+                node_script = f"{peer.staging_root}/physical_inference_node.py"
+                remote_command = shlex.join(
+                    (
+                        "python3.14",
+                        node_script,
+                        "--run-id",
+                        plan["run_id"],
+                        "--deployment-id",
+                        plan["deployment_id"],
+                        "--node-id",
+                        node_id,
+                        "--artifact-root",
+                        peer.staging_root,
+                        "--socket-root",
+                        node_plan["socket_root"],
+                        "--sidecar-binary",
+                        node_plan["sidecar_binary"],
+                        "--endpoint-secret-file",
+                        node_plan["endpoint_secret_file"],
+                        "--command-timeout",
+                        "30",
+                    )
+                )
+                session = self._session_factory(
+                    argv=(
+                        "ssh",
+                        "-o",
+                        "BatchMode=yes",
+                        "-o",
+                        "ConnectTimeout=15",
+                        "--",
+                        peer.ssh_target,
+                        remote_command,
+                    ),
+                    node_id=node_id,
+                    run_id=plan["run_id"],
+                    deployment_id=plan["deployment_id"],
+                    timeout_seconds=45.0,
+                )
+                sessions[node_id] = session
+                hello = session.send(
+                    command_id=f"{node_id}-hello-1",
+                    command="hello",
+                    payload={},
+                )
+                identities[node_id] = self._hello_identity(
+                    hello,
+                    peer=peer,
+                    run_id=plan["run_id"],
+                    deployment_id=plan["deployment_id"],
+                )
+            for node_id in sorted(sessions):
+                peer = peers_by_node[node_id]
+                configured = sessions[node_id].send(
+                    command_id=f"{node_id}-configure-1",
+                    command="configure",
+                    payload=plans_by_node[node_id]["configure"],
+                )
+                endpoint_id = endpoints[node_id]["endpoint_id"]
+                observation = self._verified_observation(
+                    configured,
+                    event="configured",
+                    peer=peer,
+                    process_id=identities[node_id]["process_id"],
+                    run_id=plan["run_id"],
+                    deployment_id=plan["deployment_id"],
+                    endpoint_id=endpoint_id,
+                )
+                endpoint_addr = observation["details"].get("endpoint_addr")
+                if (
+                    not isinstance(endpoint_addr, Mapping)
+                    or endpoint_addr.get("id") != endpoint_id
+                ):
+                    _reject("node_endpoint_address_invalid")
+                endpoint_addresses[node_id] = dict(endpoint_addr)
+                verification_keys[node_id] = dict(
+                    configured["result"]["verification_key"]
+                )
+                observations[node_id]["configured"] = observation
+            for node_id in sorted(sessions):
+                peer = peers_by_node[node_id]
+                remote_node_id = next(
+                    candidate for candidate in sorted(sessions) if candidate != node_id
+                )
+                remote_identity = endpoints[remote_node_id]
+                started = sessions[node_id].send(
+                    command_id=f"{node_id}-start-1",
+                    command="start",
+                    payload={
+                        "peer": {
+                            "node_id": remote_node_id,
+                            "endpoint_id": remote_identity["endpoint_id"],
+                            "endpoint_addr": endpoint_addresses[remote_node_id],
+                            "generation": remote_identity["membership_generation"],
+                        }
+                    },
+                )
+                observations[node_id]["started"] = self._verified_observation(
+                    started,
+                    event="started",
+                    peer=peer,
+                    process_id=identities[node_id]["process_id"],
+                    run_id=plan["run_id"],
+                    deployment_id=plan["deployment_id"],
+                    endpoint_id=endpoints[node_id]["endpoint_id"],
+                    expected_verification_key=verification_keys[node_id],
+                )
+            entry_node_id = plan["entry_node_id"]
+            entry_peer = peers_by_node[entry_node_id]
+            inference_started = sessions[entry_node_id].send(
+                command_id=f"{entry_node_id}-infer-start-1",
+                command="infer_start",
+                payload={"request": plan["request"]},
+            )
+            observations[entry_node_id]["inference_started"] = self._verified_observation(
+                inference_started,
+                event="inference_started",
+                peer=entry_peer,
+                process_id=identities[entry_node_id]["process_id"],
+                run_id=plan["run_id"],
+                deployment_id=plan["deployment_id"],
+                endpoint_id=endpoints[entry_node_id]["endpoint_id"],
+                expected_verification_key=verification_keys[entry_node_id],
+            )
+            inference_decoded = sessions[entry_node_id].send(
+                command_id=f"{entry_node_id}-infer-decode-1",
+                command="infer_decode",
+                payload={
+                    "request_id": plan["request"]["request_id"],
+                    "count": plan["decode_count"],
+                },
+            )
+            decoded_observation = self._verified_observation(
+                inference_decoded,
+                event="inference_decoded",
+                peer=entry_peer,
+                process_id=identities[entry_node_id]["process_id"],
+                run_id=plan["run_id"],
+                deployment_id=plan["deployment_id"],
+                endpoint_id=endpoints[entry_node_id]["endpoint_id"],
+                expected_verification_key=verification_keys[entry_node_id],
+            )
+            observations[entry_node_id]["inference_decoded"] = decoded_observation
+            output = decoded_observation["details"].get("output")
+            if not isinstance(output, Mapping) or not isinstance(
+                output.get("token_ids"), list
+            ):
+                _reject("node_inference_output_invalid")
+            output_token_ids = list(output["token_ids"])
+            if output_token_ids != plan["expected_token_ids"]:
+                _reject("node_inference_token_mismatch")
+            for node_id in sorted(sessions):
+                peer = peers_by_node[node_id]
+                snapshot = sessions[node_id].send(
+                    command_id=f"{node_id}-snapshot-1",
+                    command="snapshot",
+                    payload={},
+                )
+                observations[node_id]["snapshot"] = self._verified_observation(
+                    snapshot,
+                    event="snapshot",
+                    peer=peer,
+                    process_id=identities[node_id]["process_id"],
+                    run_id=plan["run_id"],
+                    deployment_id=plan["deployment_id"],
+                    endpoint_id=endpoints[node_id]["endpoint_id"],
+                    expected_verification_key=verification_keys[node_id],
+                )
+            for node_id in sorted(sessions):
+                stopped_response = sessions[node_id].send(
+                    command_id=f"{node_id}-stop-1",
+                    command="stop",
+                    payload={},
+                )
+                if (
+                    stopped_response.get("ok") is not True
+                    or not isinstance(stopped_response.get("result"), Mapping)
+                    or stopped_response["result"].get("state") != "STOPPED"
+                ):
+                    _reject("node_stop_invalid")
+                final_observation = stopped_response["result"].get("final_observation")
+                self._verified_observation(
+                    {
+                        "ok": True,
+                        "result": final_observation,
+                    },
+                    event="stopping",
+                    peer=peers_by_node[node_id],
+                    process_id=identities[node_id]["process_id"],
+                    run_id=plan["run_id"],
+                    deployment_id=plan["deployment_id"],
+                    endpoint_id=endpoints[node_id]["endpoint_id"],
+                    expected_verification_key=verification_keys[node_id],
+                )
+                stopped.add(node_id)
+        except BaseException as exc:
+            primary_error = exc
+
+        cleanup_failed = False
+        for node_id, session in sessions.items():
+            if node_id not in stopped:
+                try:
+                    session.send(
+                        command_id=f"{node_id}-stop-cleanup",
+                        command="stop",
+                        payload={},
+                    )
+                except BaseException:
+                    cleanup_failed = True
+            try:
+                session.close()
+            except BaseException:
+                cleanup_failed = True
+        cleanup_actions: list[dict[str, Any]] = []
+        for peer in self.peers:
+            try:
+                cleanup_actions.append(
+                    self._cleanup_peer(peer, archive_digest=archive_digest)
+                )
+            except ControllerError:
+                cleanup_failed = True
+        if cleanup_failed:
+            if primary_error is not None:
+                raise ControllerError("physical_run_cleanup_failed") from primary_error
+            _reject("physical_run_cleanup_failed")
+        if primary_error is not None:
+            raise primary_error
+        assert output_token_ids is not None
+        return {
+            "protocol": _RESULT_PROTOCOL,
+            "command": "run",
+            "mode": self.mode,
+            "peer_count": len(self.peers),
+            "physical_execution": True,
+            "route_ready": False,
+            "release_ready": False,
+            "token_parity": True,
+            "output_token_ids": output_token_ids,
+            "expected_token_ids": plan["expected_token_ids"],
+            "identities": identities,
+            "observations": observations,
+            "cleanup": cleanup_actions,
+            "claim_boundary": (
+                "physical node sessions executed and exact token output matched; "
+                "evidence is unsealed and no route or release readiness is claimed"
+            ),
+        }
 
     def _parse_stage_ack(
         self,
@@ -1009,7 +1554,9 @@ class QualificationController:
             self._validate_physical_distinctness()
             if command == "prepare":
                 return self._prepare_physical(transfers, endpoints)
-            if command in {"run", "recover", "seal"}:
+            if command == "run":
+                return self._run_physical(endpoints)
+            if command in {"recover", "seal"}:
                 _reject("physical_execution_not_implemented")
         peers = [
             {
@@ -1074,6 +1621,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-root")
     parser.add_argument("--transfer-manifest")
     parser.add_argument("--membership-snapshot")
+    parser.add_argument("--run-plan")
     parser.add_argument("--now", type=float)
     return parser
 
@@ -1098,6 +1646,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             transfer_manifest=_read_document(Path(args.transfer_manifest)),
             membership_snapshot=_read_document(Path(args.membership_snapshot)),
             now=args.now,
+            run_plan=(
+                None
+                if args.run_plan is None
+                else _read_document(Path(args.run_plan))
+            ),
         )
         result = controller.execute(args.command)
         sys.stdout.buffer.write(_canonical_bytes(result))
