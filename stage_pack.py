@@ -175,6 +175,40 @@ def _validate_deployment_epoch(value: Any) -> None:
         raise ValueError("stage pack deployment epoch is invalid")
 
 
+def _canonical_optional_control_plane_binding(
+    assignment: dict[str, Any],
+) -> bytes | None:
+    if "control_plane_binding" not in assignment:
+        return None
+    binding = assignment["control_plane_binding"]
+    if (
+        not isinstance(binding, dict)
+        or set(binding) != _CONTROL_PLANE_BINDING_FIELDS
+        or type(binding.get("protocol")) is not str
+        or binding["protocol"] != CONTROL_PLANE_BINDING_PROTOCOL
+    ):
+        raise ValueError("stage pack control-plane binding is invalid")
+    for field in ("evidence_bundle_digest", "planner_snapshot_digest"):
+        value = binding.get(field)
+        if type(value) is not str or _SHA256_REF_RE.fullmatch(value) is None:
+            raise ValueError("stage pack control-plane binding is invalid")
+    snapshot_generation = binding.get("snapshot_generation")
+    if type(snapshot_generation) is not int or snapshot_generation < 0:
+        raise ValueError("stage pack control-plane binding is invalid")
+    if not _deployment_epoch_is_valid(binding.get("deployment_epoch")):
+        raise ValueError("stage pack control-plane binding is invalid")
+    for field in ("swarm_id", "deployment_id"):
+        value = binding.get(field)
+        if type(value) is not str or not value:
+            raise ValueError("stage pack control-plane binding is invalid")
+    if (
+        binding["deployment_id"] != assignment.get("deployment_id")
+        or binding["deployment_epoch"] != assignment.get("deployment_epoch")
+    ):
+        raise ValueError("stage pack control-plane binding is invalid")
+    return _canonical_json(binding).encode("utf-8")
+
+
 def stage_pack_digest_for(pack: dict[str, Any]) -> str:
     """Return the canonical digest of every stage-pack field except the digest."""
     if not isinstance(pack, dict):
@@ -417,6 +451,7 @@ def _validate_authoritative_assignment(
     assignment: dict[str, Any], manifest: dict[str, Any]
 ) -> None:
     _validate_deployment_epoch(assignment.get("deployment_epoch"))
+    _canonical_optional_control_plane_binding(assignment)
     try:
         validate_assignment_identity(assignment)
     except (KeyError, TypeError, ValueError) as exc:
@@ -466,9 +501,16 @@ def _validate_authoritative_assignment(
     layer_keys = manifest.get("tensor_keys_by_layer")
     layer_files = manifest.get("layer_files")
     component_files = manifest.get("component_files")
+    aliases = manifest.get("component_aliases")
     if not all(
         isinstance(value, dict)
-        for value in (static_keys, layer_keys, layer_files, component_files)
+        for value in (
+            static_keys,
+            layer_keys,
+            layer_files,
+            component_files,
+            aliases,
+        )
     ):
         raise ValueError("manifest ownership maps are invalid")
     for layer in range(start, end):
@@ -502,7 +544,7 @@ def _validate_authoritative_assignment(
         raise ValueError("assignment component tensor keys do not match manifest")
     expected_aliases = {
         source: target
-        for source, target in manifest.get("component_aliases", {}).items()
+        for source, target in aliases.items()
         if source in components
     }
     if assignment.get("component_aliases") != expected_aliases:
@@ -1057,42 +1099,6 @@ def verify_stage_pack(
     return verification
 
 
-def _canonical_control_plane_binding(assignment: dict[str, Any]) -> bytes:
-    binding = assignment.get("control_plane_binding")
-    if (
-        not isinstance(binding, dict)
-        or set(binding) != _CONTROL_PLANE_BINDING_FIELDS
-        or type(binding.get("protocol")) is not str
-        or binding["protocol"] != CONTROL_PLANE_BINDING_PROTOCOL
-    ):
-        raise ValueError("stage pack collection control-plane binding is invalid")
-    for field in ("evidence_bundle_digest", "planner_snapshot_digest"):
-        value = binding.get(field)
-        if type(value) is not str or _SHA256_REF_RE.fullmatch(value) is None:
-            raise ValueError("stage pack collection control-plane binding is invalid")
-    snapshot_generation = binding.get("snapshot_generation")
-    if type(snapshot_generation) is not int or snapshot_generation < 0:
-        raise ValueError("stage pack collection control-plane binding is invalid")
-    if not _deployment_epoch_is_valid(binding.get("deployment_epoch")):
-        raise ValueError("stage pack collection control-plane binding is invalid")
-    for field in ("swarm_id", "deployment_id"):
-        value = binding.get(field)
-        if type(value) is not str or not value:
-            raise ValueError("stage pack collection control-plane binding is invalid")
-
-    assignment_deployment_id = assignment.get("deployment_id")
-    assignment_deployment_epoch = assignment.get("deployment_epoch")
-    if (
-        type(assignment_deployment_id) is not str
-        or not assignment_deployment_id
-        or binding["deployment_id"] != assignment_deployment_id
-        or not _deployment_epoch_is_valid(assignment_deployment_epoch)
-        or binding["deployment_epoch"] != assignment_deployment_epoch
-    ):
-        raise ValueError("stage pack collection control-plane binding is invalid")
-    return _canonical_json(binding).encode("utf-8")
-
-
 def verify_stage_pack_collection(
     packs: Sequence[dict[str, Any]],
     *,
@@ -1139,41 +1145,27 @@ def verify_stage_pack_collection(
 
     first = assignments[0]
     canonical_runtime = _normalize_runtime(first.get("runtime"))
-    binding_presence = [
-        "control_plane_binding" in assignment for assignment in assignments
-    ]
     canonical_control_plane_bindings = [
-        _canonical_control_plane_binding(assignment)
-        for assignment, present in zip(
-            assignments,
-            binding_presence,
-            strict=True,
-        )
-        if present
+        _canonical_optional_control_plane_binding(assignment)
+        for assignment in assignments
     ]
-    if canonical_control_plane_bindings:
-        if not all(binding_presence):
-            raise ValueError(
-                "stage pack collection control-plane binding identity mismatch"
-            )
-        canonical_control_plane_binding = canonical_control_plane_bindings[0]
-        if any(
-            binding != canonical_control_plane_binding
-            for binding in canonical_control_plane_bindings[1:]
-        ):
-            raise ValueError(
-                "stage pack collection control-plane binding identity mismatch"
-            )
+    canonical_control_plane_binding = canonical_control_plane_bindings[0]
+    if any(
+        binding != canonical_control_plane_binding
+        for binding in canonical_control_plane_bindings[1:]
+    ):
+        raise ValueError(
+            "stage pack collection control-plane binding identity mismatch"
+        )
     for assignment in assignments[1:]:
-        for field in (
-            "deployment_id",
-            "deployment_epoch",
-            "model_id",
-            "resolved_commit",
-            "manifest_digest",
+        if (
+            assignment["deployment_id"],
+            assignment["deployment_epoch"],
+        ) != (
+            first["deployment_id"],
+            first["deployment_epoch"],
         ):
-            if assignment[field] != first[field]:
-                raise ValueError(f"stage pack collection identity mismatch: {field}")
+            raise ValueError("stage pack collection identity mismatch")
         if _normalize_runtime(assignment.get("runtime")) != canonical_runtime:
             raise ValueError("stage pack collection runtime identity mismatch")
 
@@ -1186,49 +1178,41 @@ def verify_stage_pack_collection(
     if expected_start != manifest.get("num_layers"):
         raise ValueError("stage pack collection does not cover every model layer")
 
-    layer_keys = manifest.get("tensor_keys_by_layer")
-    component_keys = manifest.get("component_tensor_keys")
-    aliases = manifest.get("component_aliases")
-    if (
-        not isinstance(layer_keys, dict)
-        or not isinstance(component_keys, dict)
-        or not isinstance(aliases, dict)
-    ):
-        raise ValueError("manifest ownership maps are invalid")
+    layer_keys = manifest["tensor_keys_by_layer"]
+    component_keys = manifest["component_tensor_keys"]
+    aliases = manifest["component_aliases"]
     source_tensor_keys = {
         key
         for keys in (*layer_keys.values(), *component_keys.values())
-        if isinstance(keys, list)
         for key in keys
     }
-    if not source_tensor_keys:
-        raise ValueError("manifest logical tensor inventory is empty")
-
-    owned_sets = [set(pack["expected_tensor_keys"]) for pack in packs]
+    verified_tensor_keys = [
+        verification["verified_tensor_keys"]
+        for verification in pack_verifications
+    ]
+    owned_sets = [set(keys) for keys in verified_tensor_keys]
     owned_union = set().union(*owned_sets)
-    missing = sorted(source_tensor_keys - owned_union)
-    extra = sorted(owned_union - source_tensor_keys)
-    if missing:
+    if owned_union != source_tensor_keys:
         raise ValueError(
-            "stage pack collection omits logical tensor ownership: "
-            + ", ".join(missing[:5])
-        )
-    if extra:
-        raise ValueError(
-            "stage pack collection misassigns logical tensor ownership: "
-            + ", ".join(extra[:5])
+            "stage pack collection logical tensor ownership mismatch"
         )
 
     component_owners = [
         {
             key: {
                 component
-                for component, keys in pack["component_tensor_keys"].items()
+                for component, keys in assignment[
+                    "component_tensor_keys"
+                ].items()
                 if key in keys
             }
-            for key in pack["expected_tensor_keys"]
+            for key in keys
         }
-        for pack in packs
+        for assignment, keys in zip(
+            assignments,
+            verified_tensor_keys,
+            strict=True,
+        )
     ]
     tied_aliases: list[dict[str, Any]] = []
     for left_index, left_keys in enumerate(owned_sets):
@@ -1258,7 +1242,7 @@ def verify_stage_pack_collection(
                         )
                 if alias_match is None:
                     raise ValueError(
-                        f"duplicate logical tensor ownership across stage packs: {key}"
+                        "stage pack collection has duplicate logical tensor ownership"
                     )
                 alias_index, alias_component, target_index, target_component = (
                     alias_match
@@ -1298,12 +1282,12 @@ def verify_stage_pack_collection(
             {
                 "assignment_id": assignment_id,
                 "node_id": node_id,
-                "tensor_keys": list(pack["expected_tensor_keys"]),
+                "tensor_keys": list(keys),
             }
-            for assignment_id, node_id, pack in zip(
+            for assignment_id, node_id, keys in zip(
                 assignment_ids,
                 node_ids,
-                packs,
+                verified_tensor_keys,
                 strict=True,
             )
         ],

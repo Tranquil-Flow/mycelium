@@ -234,6 +234,55 @@ def _rebind_assignment_pack(
     _refresh_digest(pack)
 
 
+def _set_present_assignment_pack_binding(
+    assignment: dict[str, Any],
+    pack: dict[str, Any],
+    binding: Any,
+) -> None:
+    assignment["control_plane_binding"] = copy.deepcopy(binding)
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+    pack["assignment_id"] = assignment["assignment_id"]
+    pack["control_plane_binding"] = copy.deepcopy(binding)
+    _refresh_digest(pack)
+
+
+def _assert_collection_error_is_value_free(
+    error: ValueError,
+    *,
+    assignments: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    extra_forbidden: tuple[str, ...] = (),
+) -> None:
+    message = str(error)
+    tensor_keys = {
+        key
+        for ownership_map in (
+            manifest["tensor_keys_by_layer"],
+            manifest["component_tensor_keys"],
+        )
+        for keys in ownership_map.values()
+        for key in keys
+    }
+    forbidden = {
+        DEPLOYMENT_ID,
+        *(assignment["assignment_id"] for assignment in assignments),
+        *(assignment["node_id"] for assignment in assignments),
+        *(record["path"] for record in manifest["files"]),
+        *tensor_keys,
+        json.dumps(assignments, sort_keys=True, separators=(",", ":")),
+        *(
+            json.dumps(binding, sort_keys=True, separators=(",", ":"))
+            for assignment in assignments
+            if isinstance(
+                binding := assignment.get("control_plane_binding"),
+                dict,
+            )
+        ),
+        *extra_forbidden,
+    }
+    assert all(value not in message for value in forbidden)
+
+
 def _set_legacy_deployment_epoch(
     assignments: list[dict[str, Any]],
     packs: list[dict[str, Any]],
@@ -361,6 +410,91 @@ def test_zero_deployment_epoch_bound_collection_is_accepted(
     )
     assert summary["exact_logical_coverage"] is True
     assert summary["route_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "binding_kind",
+    ("present_none", "wrong_protocol"),
+)
+@pytest.mark.parametrize(
+    "surface",
+    ("compile", "verify", "evidence"),
+)
+def test_per_pack_surfaces_reject_present_invalid_control_plane_binding(
+    tmp_path: Path,
+    binding_kind: str,
+    surface: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    binding: Any = None
+    if binding_kind == "wrong_protocol":
+        binding = _control_plane_binding()
+        binding["protocol"] = "mycelium.control_plane_binding.v2"
+    _set_present_assignment_pack_binding(assignment, pack, binding)
+    reports[1]["assignment_id"] = assignment["assignment_id"]
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack control-plane binding is invalid$",
+    ):
+        if surface == "compile":
+            compile_stage_pack(assignment, manifest, reports[1])
+        elif surface == "verify":
+            verify_stage_pack(
+                pack,
+                assignment=assignment,
+                manifest=manifest,
+            )
+        else:
+            sp.validate_stage_pack_evidence(
+                pack,
+                verification,
+                assignment=assignment,
+                manifest=manifest,
+            )
+
+
+@pytest.mark.parametrize("deployment_epoch", (0, 7))
+def test_per_pack_surfaces_accept_valid_control_plane_binding(
+    tmp_path: Path,
+    deployment_epoch: int,
+) -> None:
+    manifest, assignments, reports, _ = _case(
+        tmp_path,
+        deployment_epoch=deployment_epoch,
+    )
+    assignment = assignments[1]
+    assignment["control_plane_binding"] = _control_plane_binding(
+        deployment_epoch=deployment_epoch,
+    )
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+    reports[1]["assignment_id"] = assignment["assignment_id"]
+
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    assert pack["control_plane_binding"] == assignment["control_plane_binding"]
+    assert sp.validate_stage_pack_evidence(
+        pack,
+        verification,
+        assignment=assignment,
+        manifest=manifest,
+    ) == (
+        pack["stage_pack_digest"],
+        verification["stage_pack_verification_digest"],
+    )
+    assert verification["route_ready"] is False
 
 
 def test_layer_spanning_files_and_file_spanning_layers_are_preserved(tmp_path: Path) -> None:
@@ -1216,8 +1350,12 @@ def test_collection_verifier_rejects_invalid_control_plane_bindings(
         assignments = copy.deepcopy(base_assignments)
         packs = copy.deepcopy(base_packs)
         if attack == "explicit_none":
-            for assignment in assignments:
-                assignment["control_plane_binding"] = None
+            for assignment, pack in zip(assignments, packs, strict=True):
+                _set_present_assignment_pack_binding(
+                    assignment,
+                    pack,
+                    None,
+                )
         else:
             binding: Any = _control_plane_binding()
             if attack == "not_object":
@@ -1271,15 +1409,19 @@ def test_collection_verifier_rejects_invalid_control_plane_bindings(
                 control_plane_binding=type_colliding,
             )
 
-        with pytest.raises(
-            ValueError,
-            match=r"^stage pack collection control-plane binding is invalid$",
-        ):
+        with pytest.raises(ValueError) as raised:
             sp.verify_stage_pack_collection(
                 packs,
                 assignments=assignments,
                 manifest=manifest,
             )
+        assert str(raised.value) == "stage pack control-plane binding is invalid"
+        _assert_collection_error_is_value_free(
+            raised.value,
+            assignments=assignments,
+            manifest=manifest,
+            extra_forbidden=("control_plane_binding",),
+        )
 
 
 @pytest.mark.parametrize(
@@ -1287,24 +1429,50 @@ def test_collection_verifier_rejects_invalid_control_plane_bindings(
     (True, 7.0, -1, "7"),
     ids=("bool", "float", "negative", "string"),
 )
-def test_stage_pack_verifier_rejects_invalid_legacy_deployment_epoch(
+def test_stage_pack_verifier_rejects_invalid_pack_deployment_epoch(
     tmp_path: Path,
     deployment_epoch: Any,
 ) -> None:
     manifest, assignments, reports, _ = _case(tmp_path)
-    packs = [
-        compile_stage_pack(assignment, manifest, report)
-        for assignment, report in zip(assignments, reports, strict=True)
-    ]
-    _set_legacy_deployment_epoch(assignments, packs, deployment_epoch)
+    pack = compile_stage_pack(assignments[0], manifest, reports[0])
+    pack["deployment_epoch"] = deployment_epoch
+    _refresh_digest(pack)
 
     with pytest.raises(
         ValueError,
         match=r"^stage pack deployment epoch is invalid$",
     ):
         verify_stage_pack(
-            packs[0],
+            pack,
             assignment=assignments[0],
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize(
+    "deployment_epoch",
+    (True, 7.0, -1, "7"),
+    ids=("bool", "float", "negative", "string"),
+)
+def test_stage_pack_verifier_rejects_invalid_assignment_deployment_epoch(
+    tmp_path: Path,
+    deployment_epoch: Any,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[0]
+    pack = compile_stage_pack(assignment, manifest, reports[0])
+    assignment["deployment_epoch"] = deployment_epoch
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+    pack["assignment_id"] = assignment["assignment_id"]
+    _refresh_digest(pack)
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack deployment epoch is invalid$",
+    ):
+        verify_stage_pack(
+            pack,
+            assignment=assignment,
             manifest=manifest,
         )
 
@@ -1426,6 +1594,8 @@ def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
             assignment=assignment,
             manifest=manifest,
         )
+        if assignment["node_id"] == "node-1":
+            pack["expected_tensor_keys"].reverse()
         verification_count += 1
         if verification_count == len(packs):
             packs[1]["expected_tensor_keys"].reverse()
@@ -1454,6 +1624,149 @@ def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
     assignments[0]["range"]["start_layer"] = 99
     manifest["tensor_keys_by_layer"].clear()
     assert summary == detached_summary
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("deployment_id", "87654321-4321-8765-9234-fedcbafedcba"),
+        ("deployment_epoch", 8),
+    ),
+)
+def test_collection_identity_errors_are_fixed_and_value_free(
+    tmp_path: Path,
+    field: str,
+    replacement: Any,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    assignments[1][field] = replacement
+    assignments[1]["assignment_id"] = la.assignment_id_for(assignments[1])
+    packs[1][field] = replacement
+    packs[1]["assignment_id"] = assignments[1]["assignment_id"]
+    _refresh_digest(packs[1])
+    assert verify_stage_pack(
+        packs[1],
+        assignment=assignments[1],
+        manifest=manifest,
+    )["ready_for_load"] is True
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+    assert str(raised.value) == "stage pack collection identity mismatch"
+    _assert_collection_error_is_value_free(
+        raised.value,
+        assignments=assignments,
+        manifest=manifest,
+        extra_forbidden=(field, str(replacement)),
+    )
+
+
+def test_collection_exact_union_error_is_fixed_and_uses_verification_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    actual_verify = sp.verify_stage_pack
+
+    def verify_with_omission(
+        pack: dict[str, Any],
+        *,
+        assignment: dict[str, Any],
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        verification = actual_verify(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+        if assignment["node_id"] == "node-1":
+            omitted = verification["verified_tensor_keys"].pop()
+            verification["tensor_file_map"].pop(omitted)
+            verification["verified_tensor_count"] -= 1
+        return verification
+
+    monkeypatch.setattr(sp, "verify_stage_pack", verify_with_omission)
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+    assert (
+        str(raised.value)
+        == "stage pack collection logical tensor ownership mismatch"
+    )
+    _assert_collection_error_is_value_free(
+        raised.value,
+        assignments=assignments,
+        manifest=manifest,
+        extra_forbidden=("verified_tensor_keys",),
+    )
+
+
+def test_collection_duplicate_ownership_error_is_fixed_and_value_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    duplicate_key = assignments[0]["expected_tensor_keys"][0]
+    actual_verify = sp.verify_stage_pack
+
+    def verify_with_duplicate(
+        pack: dict[str, Any],
+        *,
+        assignment: dict[str, Any],
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        verification = actual_verify(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+        if assignment["node_id"] == "node-1":
+            verification["verified_tensor_keys"].append(duplicate_key)
+            verification["verified_tensor_keys"].sort()
+            verification["verified_tensor_count"] += 1
+        return verification
+
+    monkeypatch.setattr(sp, "verify_stage_pack", verify_with_duplicate)
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+    assert (
+        str(raised.value)
+        == "stage pack collection has duplicate logical tensor ownership"
+    )
+    _assert_collection_error_is_value_free(
+        raised.value,
+        assignments=assignments,
+        manifest=manifest,
+        extra_forbidden=(duplicate_key,),
+    )
 
 
 @pytest.mark.parametrize("mutation", ("swap", "gap"))
