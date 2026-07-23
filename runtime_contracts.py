@@ -235,3 +235,42 @@ def validate_normalized_runtime(
     if backend == "numpy":
         return validate_normalized_numpy_runtime(runtime)
     raise ValueError(f"unsupported runtime backend: {backend!r}")
+
+
+_ASSIGNMENT_STAGE_COMPONENTS = frozenset(
+    {"input_embedding", "decoder", "final_norm", "lm_head"}
+)
+
+
+def assignment_stage_role(components: Any) -> str:
+    """Classify the assignment-bound role of a stage from its component set.
+
+    The role is determined by the inclusive endpoints of the stage range:
+
+    - "entry" when the stage owns input_embedding (regardless of other
+      components). It is the only role that may accept token_ids.
+    - "final" when the stage owns final_norm or lm_head (with or
+      without the decoder).
+    - "intermediate" for purely decoder-only stages that pass hidden
+      states between caller hops.
+
+    Raises ValueError when any component is unknown or the component set is
+    empty.
+    """
+    if not isinstance(components, (set, frozenset, list, tuple)):
+        raise ValueError(
+            "assignment components must be a set-like of component names"
+        )
+    tokens = set(components)
+    if not tokens:
+        raise ValueError("assignment components must not be empty")
+    unknown = tokens - _ASSIGNMENT_STAGE_COMPONENTS
+    if unknown:
+        raise ValueError(
+            f"unknown assignment component(s): {", ".join(sorted(unknown))}"
+        )
+    if "input_embedding" in tokens:
+        return "entry"
+    if "final_norm" in tokens or "lm_head" in tokens:
+        return "final"
+    return "intermediate"

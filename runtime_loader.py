@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
-"""Assignment-bound, local-only MLX stage loading and load-proof emission."""
+"""Assignment-bound, local-only stage loading and load-proof emission.
+
+The MLX and NumPy backends are lazily resolved so that this module imports
+even when ``mlx`` cannot be imported. The NumPy fallback is a fully
+self-contained, assignment-local executor; the MLX executor preserves the
+existing protocol. Backend selection, assignment-id integrity, and
+role-based dispatch are all fail-closed.
+"""
 
 from __future__ import annotations
 
 import copy
-import hashlib
+import importlib
 import importlib.metadata
+import importlib.util
+import hashlib
 import json
 import math
 import os
@@ -17,19 +26,29 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, BinaryIO, Mapping, NoReturn
 
-import mlx.core as mx
+import numpy as np
 
 from layer_assignment import validate_assignment_identity
 from model_adapters import ADAPTERS
+from numpy_runtime import (
+    NumpyRuntimeError,
+    NumpyStageBackend,
+    execute_loaded_stage as _execute_loaded_numpy_stage,
+    tensor_digest as _numpy_tensor_digest,
+)
 from runtime_contracts import (
     GPT2_DECODER_TENSOR_SUFFIXES,
     validate_normalized_mlx_runtime,
+    validate_normalized_numpy_runtime,
 )
 from weight_provisioning import artifact_report_errors
 
 
 LAYER_LOAD_PROOF_PROTOCOL = "mycelium.layer_load_proof.v1"
 _CONTROL_PLANE_BINDING_PROTOCOL = "mycelium.control_plane_binding.v1"
+_NUMPY_RUNTIME_BACKEND = "numpy"
+_MLX_RUNTIME_BACKEND = "mlx"
+_VALID_STAGE_PREFERS = frozenset({"auto", "mlx", "numpy"})
 _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_ARTIFACT_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -56,15 +75,50 @@ _SUPPORTED_SOURCE_DTYPES = {
     "mlx.core.float16",
     "mlx.core.float32",
 }
-_RUNTIME_DTYPES = {
-    "bfloat16": mx.bfloat16,
-    "float16": mx.float16,
-    "float32": mx.float32,
-}
 
 
 class RuntimeLoadError(ValueError):
     """Permanent, fail-closed assignment loading failure."""
+
+
+def _mlx_find_spec() -> Any | None:
+    """Return the import spec for ``mlx`` or ``None`` if unavailable."""
+
+    try:
+        return importlib.util.find_spec("mlx")
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return None
+
+
+def _mlx_module() -> Any:
+    """Return the ``mlx.core`` module, raising ``RuntimeLoadError`` when missing."""
+
+    spec = _mlx_find_spec()
+    if spec is None:
+        raise RuntimeLoadError("backend_unavailable: mlx is not importable")
+    try:
+        return importlib.import_module("mlx.core")
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeLoadError(
+            "backend_unavailable: mlx is not importable"
+        ) from exc
+
+
+def _runtime_dtypes() -> dict[str, Any]:
+    """Map canonical runtime dtype strings to MLX dtype objects (lazy)."""
+
+    mx = _mlx_module()
+    return {
+        "bfloat16": mx.bfloat16,
+        "float16": mx.float16,
+        "float32": mx.float32,
+    }
+
+
+def _numpy_runtime_dtypes() -> frozenset[str]:
+    """Return the canonical NumPy runtime dtype set (backend-neutral)."""
+
+    return frozenset({"float16", "float32"})
 
 
 class RuntimeExecutionError(ValueError):
@@ -73,12 +127,14 @@ class RuntimeExecutionError(ValueError):
 
 @dataclass(frozen=True)
 class LoadedStage:
-    """Materialized assignment tensors plus deterministic local proof evidence."""
+    """Materialized assignment tensors plus deterministic proof evidence."""
 
-    tensors: Mapping[str, mx.array]
+    tensors: Mapping[str, Any]
     resolved_aliases: Mapping[str, Any]
-    probe_output: mx.array
+    probe_output: Any
     proof: Mapping[str, Any]
+    authenticated_assignment_id: str | None = None
+    authenticated_tensor_digest: str | None = None
 
 
 def _json_compatible(value: Any) -> Any:
@@ -154,11 +210,19 @@ def _validate_control_plane_binding(assignment: dict[str, Any]) -> dict[str, Any
 
 
 def _validate_runtime(runtime: Any) -> tuple[dict[str, Any], Any]:
+    if not isinstance(runtime, Mapping):
+        raise _fail("runtime identity must be an object")
+    backend = runtime.get("backend")
     try:
-        normalized = validate_normalized_mlx_runtime(runtime)
+        if backend == _MLX_RUNTIME_BACKEND:
+            normalized = validate_normalized_mlx_runtime(runtime)
+            return normalized, _runtime_dtypes()[normalized["dtype"]]
+        if backend == _NUMPY_RUNTIME_BACKEND:
+            normalized = validate_normalized_numpy_runtime(runtime)
+            return normalized, np.dtype(normalized["dtype"])
     except (TypeError, ValueError) as exc:
         raise _fail(str(exc)) from exc
-    return normalized, _RUNTIME_DTYPES[normalized["dtype"]]
+    raise _fail(f"unsupported runtime backend: {backend!r}")
 
 
 def _validate_range_and_prefixes(
@@ -593,8 +657,10 @@ def _open_verified_artifact(
             os.close(root_fd)
 
 
-def _validate_safetensors_header(handle: BinaryIO, path: str) -> set[str]:
-    """Validate canonical, non-aliased Safetensors storage before MLX sees it."""
+def _validate_safetensors_header(
+    handle: BinaryIO, path: str
+) -> tuple[dict[str, dict[str, Any]], int]:
+    """Validate canonical, non-aliased Safetensors storage before loading it."""
     try:
         prefix = handle.read(8)
         if len(prefix) != 8:
@@ -643,7 +709,6 @@ def _validate_safetensors_header(handle: BinaryIO, path: str) -> set[str]:
 
         data_size = file_size - 8 - header_length
         intervals: list[tuple[int, int, str]] = []
-        tensor_names: set[str] = set()
         for name, entry in header.items():
             if not isinstance(name, str) or not name or not isinstance(entry, dict):
                 raise _fail(f"invalid Safetensors tensor entry: {path}")
@@ -678,7 +743,6 @@ def _validate_safetensors_header(handle: BinaryIO, path: str) -> set[str]:
                 element_count *= dimension
             if end - start != element_count * _SAFE_DTYPE_BYTES[dtype]:
                 raise _fail(f"Safetensors byte length does not match tensor {name}")
-            tensor_names.add(name)
             intervals.append((start, end, name))
 
         ordered_intervals = sorted(intervals)
@@ -694,7 +758,7 @@ def _validate_safetensors_header(handle: BinaryIO, path: str) -> set[str]:
             cursor = max(cursor, end)
         if cursor != data_size:
             raise _fail(f"unindexed trailing Safetensors data: {path}")
-        return tensor_names
+        return header, 8 + header_length
     except RuntimeLoadError:
         raise
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, struct.error) as exc:
@@ -703,18 +767,63 @@ def _validate_safetensors_header(handle: BinaryIO, path: str) -> set[str]:
         handle.seek(0)
 
 
+def _load_numpy_safetensors(
+    handle: BinaryIO,
+    header: Mapping[str, Mapping[str, Any]],
+    data_offset: int,
+    selected: set[str],
+    runtime_dtype: np.dtype[Any],
+) -> dict[str, np.ndarray]:
+    """Materialize only selected floating tensors without importing MLX."""
+
+    loaded: dict[str, np.ndarray] = {}
+    for key in sorted(selected):
+        entry = header[key]
+        source_dtype = entry["dtype"]
+        if source_dtype not in {"BF16", "F16", "F32"}:
+            raise _fail(
+                f"unverified or quantized source dtype for tensor {key}: "
+                f"{source_dtype}"
+            )
+        start, end = entry["data_offsets"]
+        handle.seek(data_offset + start)
+        payload = handle.read(end - start)
+        if len(payload) != end - start:
+            raise _fail(f"truncated Safetensors data for tensor {key}")
+        if source_dtype == "BF16":
+            words = np.frombuffer(payload, dtype="<u2")
+            source = (words.astype(np.uint32) << 16).view(np.float32)
+        else:
+            dtype = "<f2" if source_dtype == "F16" else "<f4"
+            source = np.frombuffer(payload, dtype=dtype)
+        shape = tuple(int(dimension) for dimension in entry["shape"])
+        value = np.array(
+            source.reshape(shape),
+            dtype=runtime_dtype,
+            order="C",
+            copy=True,
+        )
+        value.flags.writeable = False
+        loaded[key] = value
+    return loaded
+
+
 def _load_exact_tensors(
     assignment: dict[str, Any],
     report: dict[str, Any],
     verified_by_path: dict[str, dict[str, Any]],
     expected_keys: list[str],
     runtime_dtype: Any,
-) -> dict[str, mx.array]:
+    runtime_backend: str,
+) -> dict[str, Any]:
+    """Load exactly the assignment-owned tensors from verified safetensors shards."""
+
+    mx = _mlx_module() if runtime_backend == _MLX_RUNTIME_BACKEND else None
     files = assignment.get("files")
     if not isinstance(files, list) or not files:
         raise _fail("assignment requires verified artifact files")
     expected_set = set(expected_keys)
-    loaded: dict[str, mx.array] = {}
+    loaded: dict[str, Any] = {}
     seen_inodes: set[tuple[int, int]] = set()
     for assigned_record in files:
         if not isinstance(assigned_record, dict) or not isinstance(
@@ -733,32 +842,50 @@ def _load_exact_tensors(
             if inode in seen_inodes:
                 raise _fail(f"duplicate verified artifact inode: {path}")
             seen_inodes.add(inode)
-            header_tensor_names = _validate_safetensors_header(handle, path)
-            try:
-                source_tensors = mx.load(handle, format="safetensors")
-            except Exception as exc:
-                raise _fail(
-                    f"MLX could not load verified Safetensors artifact: {path}"
-                ) from exc
-            if not isinstance(source_tensors, dict):
-                raise _fail(f"MLX artifact did not contain named tensors: {path}")
-            if set(source_tensors) != header_tensor_names:
-                raise _fail(f"MLX tensor names do not match verified header: {path}")
-            selected = expected_set.intersection(source_tensors)
+            header, data_offset = _validate_safetensors_header(handle, path)
+            selected = expected_set.intersection(header)
+            if runtime_backend == _MLX_RUNTIME_BACKEND:
+                try:
+                    source_tensors = mx.load(handle, format="safetensors")
+                except Exception as exc:
+                    raise _fail(
+                        f"MLX could not load verified Safetensors artifact: {path}"
+                    ) from exc
+                if not isinstance(source_tensors, dict):
+                    raise _fail(f"MLX artifact did not contain named tensors: {path}")
+                if set(source_tensors) != set(header):
+                    raise _fail(
+                        f"MLX tensor names do not match verified header: {path}"
+                    )
+                selected_tensors = {
+                    key: source_tensors[key].astype(runtime_dtype)
+                    for key in selected
+                }
+            else:
+                selected_tensors = _load_numpy_safetensors(
+                    handle,
+                    header,
+                    data_offset,
+                    selected,
+                    runtime_dtype,
+                )
             for key in selected:
                 if key in loaded:
                     raise _fail(
                         f"duplicate assigned tensor across verified files: {key}"
                     )
-                source = source_tensors[key]
-                if str(source.dtype) not in _SUPPORTED_SOURCE_DTYPES:
-                    raise _fail(
-                        f"unverified or quantized source dtype for tensor {key}: {source.dtype}"
-                    )
-                loaded[key] = source.astype(runtime_dtype)
-            # MLX loads lazily. Evaluate only the selected assignment-owned mapping while
-            # this verified descriptor remains open; unassigned shard overfetch is discarded.
-            mx.eval({key: loaded[key] for key in selected})
+                if runtime_backend == _MLX_RUNTIME_BACKEND:
+                    source = source_tensors[key]
+                    if str(source.dtype) not in _SUPPORTED_SOURCE_DTYPES:
+                        raise _fail(
+                            "unverified or quantized source dtype for tensor "
+                            f"{key}: {source.dtype}"
+                        )
+                loaded[key] = selected_tensors[key]
+            if runtime_backend == _MLX_RUNTIME_BACKEND:
+                # MLX loads lazily. Evaluate only assignment-owned tensors while
+                # the verified descriptor remains open.
+                mx.eval({key: loaded[key] for key in selected})
             if _artifact_fingerprint(os.fstat(handle.fileno())) != fingerprint:
                 raise _fail(f"verified artifact changed during load: {path}")
         finally:
@@ -775,12 +902,12 @@ def _load_exact_tensors(
     return {key: loaded[key] for key in sorted(loaded)}
 
 
-def _shape(array: mx.array) -> tuple[int, ...]:
+def _shape(array: Any) -> tuple[int, ...]:
     return tuple(int(value) for value in array.shape)
 
 
 def _expect_shape(
-    tensors: Mapping[str, mx.array], key: str, expected: tuple[int, ...]
+    tensors: Mapping[str, Any], key: str, expected: tuple[int, ...]
 ) -> None:
     actual = _shape(tensors[key])
     if actual != expected:
@@ -790,7 +917,7 @@ def _expect_shape(
 
 
 def _validate_gpt2_shapes(
-    tensors: Mapping[str, mx.array],
+    tensors: Mapping[str, Any],
     runtime: dict[str, Any],
     start: int,
     end: int,
@@ -829,8 +956,14 @@ def _validate_gpt2_shapes(
 
 
 def _layer_norm(
-    hidden: mx.array, weight: mx.array, bias: mx.array, epsilon: float
-) -> mx.array:
+    hidden: Any,
+    weight: Any,
+    bias: Any,
+    epsilon: float,
+    mx: Any | None = None,
+) -> Any:
+    if mx is None:
+        mx = _mlx_module()
     compute = hidden.astype(mx.float32)
     mean = mx.mean(compute, axis=-1, keepdims=True)
     variance = mx.mean(mx.square(compute - mean), axis=-1, keepdims=True)
@@ -840,7 +973,9 @@ def _layer_norm(
     )
 
 
-def _gelu_new(value: mx.array) -> mx.array:
+def _gelu_new(value: Any, mx: Any | None = None) -> Any:
+    if mx is None:
+        mx = _mlx_module()
     compute = value.astype(mx.float32)
     result = (
         0.5
@@ -856,18 +991,22 @@ def _gelu_new(value: mx.array) -> mx.array:
 
 
 def _gpt2_block(
-    hidden: mx.array,
-    tensors: Mapping[str, mx.array],
+    hidden: Any,
+    tensors: Mapping[str, Any],
     prefix: str,
     n_head: int,
     epsilon: float,
-) -> mx.array:
+    mx: Any | None = None,
+) -> Any:
+    if mx is None:
+        mx = _mlx_module()
     residual = hidden
     normalized = _layer_norm(
         hidden,
         tensors[prefix + "ln_1.weight"],
         tensors[prefix + "ln_1.bias"],
         epsilon,
+        mx,
     )
     qkv = (
         mx.matmul(normalized, tensors[prefix + "attn.c_attn.weight"])
@@ -902,12 +1041,13 @@ def _gpt2_block(
         tensors[prefix + "ln_2.weight"],
         tensors[prefix + "ln_2.bias"],
         epsilon,
+        mx,
     )
     feed_forward = (
         mx.matmul(normalized, tensors[prefix + "mlp.c_fc.weight"])
         + tensors[prefix + "mlp.c_fc.bias"]
     )
-    feed_forward = _gelu_new(feed_forward)
+    feed_forward = _gelu_new(feed_forward, mx)
     feed_forward = (
         mx.matmul(feed_forward, tensors[prefix + "mlp.c_proj.weight"])
         + tensors[prefix + "mlp.c_proj.bias"]
@@ -916,14 +1056,15 @@ def _gpt2_block(
 
 
 def _run_gpt2_probe(
-    tensors: Mapping[str, mx.array],
+    tensors: Mapping[str, Any],
     runtime: dict[str, Any],
     start: int,
     end: int,
     namespace: str,
     components: list[str],
     aliases: Mapping[str, dict[str, Any]],
-) -> mx.array:
+) -> Any:
+    mx = _mlx_module()
     hidden_size = runtime["model_config"]["n_embd"]
     if "input_embedding" in components:
         token_embedding = tensors[f"{namespace}wte.weight"]
@@ -939,7 +1080,7 @@ def _run_gpt2_probe(
         hidden = (
             mx.sin(positions * channels)
             + positions * mx.square(channels) / max(hidden_size * hidden_size, 1)
-        ).astype(_RUNTIME_DTYPES[runtime["dtype"]])
+        ).astype(_runtime_dtypes()[runtime["dtype"]])
 
     config = runtime["model_config"]
     for layer in range(start, end):
@@ -949,6 +1090,7 @@ def _run_gpt2_probe(
             f"{namespace}h.{layer}.",
             config["n_head"],
             float(config["layer_norm_epsilon"]),
+            mx,
         )
     if "final_norm" in components:
         hidden = _layer_norm(
@@ -956,6 +1098,7 @@ def _run_gpt2_probe(
             tensors[f"{namespace}ln_f.weight"],
             tensors[f"{namespace}ln_f.bias"],
             float(config["layer_norm_epsilon"]),
+            mx,
         )
     if "lm_head" in components:
         head_key = aliases.get("lm_head", {}).get("tensor_keys", ["lm_head.weight"])[0]
@@ -969,9 +1112,9 @@ def _run_gpt2_probe(
 def execute_loaded_stage(
     loaded_stage: LoadedStage,
     *,
-    token_ids: mx.array | None = None,
-    hidden_states: mx.array | None = None,
-) -> mx.array:
+    token_ids: Any | None = None,
+    hidden_states: Any | None = None,
+) -> Any:
     """Execute exactly the GPT-2 components bound by one ``LoadedStage``.
 
     Runtime identity, layer range, roles, and aliases come from the immutable
@@ -984,6 +1127,7 @@ def execute_loaded_stage(
     def reject(code: str) -> NoReturn:
         raise RuntimeExecutionError(code)
 
+    mx = _mlx_module()
     if not isinstance(loaded_stage, LoadedStage):
         reject("invalid_loaded_stage")
     proof = loaded_stage.proof
@@ -1040,7 +1184,7 @@ def execute_loaded_stage(
     else:
         reject("invalid_loaded_stage_namespace")
 
-    expected_dtype = _RUNTIME_DTYPES[runtime["dtype"]]
+    expected_dtype = _runtime_dtypes()[runtime["dtype"]]
     expected_dtype_name = str(expected_dtype)
     has_embedding = "input_embedding" in components
     if has_embedding:
@@ -1101,6 +1245,7 @@ def execute_loaded_stage(
             f"{namespace}h.{layer}.",
             config["n_head"],
             epsilon,
+            mx,
         )
     if "final_norm" in components:
         hidden = _layer_norm(
@@ -1108,6 +1253,7 @@ def execute_loaded_stage(
             tensors[f"{namespace}ln_f.weight"],
             tensors[f"{namespace}ln_f.bias"],
             epsilon,
+            mx,
         )
     if "lm_head" in components:
         aliases = loaded_stage.resolved_aliases
@@ -1142,7 +1288,7 @@ class MLXStageBackend:
         *,
         token_ids: Any | None = None,
         hidden_states: Any | None = None,
-    ) -> mx.array:
+    ) -> Any:
         return execute_loaded_stage(
             loaded_stage,
             token_ids=token_ids,
@@ -1150,7 +1296,7 @@ class MLXStageBackend:
         )
 
 
-def _digest_arrays(tensors: Mapping[str, mx.array]) -> str:
+def _digest_arrays(tensors: Mapping[str, Any]) -> str:
     digest = hashlib.sha256()
     for key in sorted(tensors):
         array = tensors[key]
@@ -1169,7 +1315,7 @@ def _digest_arrays(tensors: Mapping[str, mx.array]) -> str:
     return "sha256:" + digest.hexdigest()
 
 
-def _digest_array(array: mx.array) -> str:
+def _digest_array(array: Any) -> str:
     metadata = canonical_json(
         {
             "dtype": str(array.dtype),
@@ -1184,6 +1330,21 @@ def _digest_array(array: mx.array) -> str:
 
 
 def _actual_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
+    backend = runtime["backend"]
+    if backend == _NUMPY_RUNTIME_BACKEND:
+        try:
+            version = importlib.metadata.version("numpy")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        return {
+            "backend": "numpy",
+            "backend_version": version,
+            "device": "cpu",
+            "dtype": runtime["dtype"],
+            "quantization": runtime["quantization"],
+            "architecture": runtime["architecture"],
+        }
+    mx = _mlx_module()
     try:
         version = importlib.metadata.version("mlx")
     except importlib.metadata.PackageNotFoundError:
@@ -1196,6 +1357,53 @@ def _actual_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
         "quantization": runtime["quantization"],
         "architecture": runtime["architecture"],
     }
+
+
+def _run_numpy_probe(
+    *,
+    tensors: Mapping[str, Any],
+    runtime: dict[str, Any],
+    assignment: Mapping[str, Any],
+    aliases: Mapping[str, Any],
+    tensor_digest: str,
+) -> np.ndarray:
+    """Run the same deterministic local probe through the NumPy stage adapter."""
+
+    proof = {
+        "protocol": LAYER_LOAD_PROOF_PROTOCOL,
+        "assignment_id": assignment["assignment_id"],
+        "loaded_range": copy.deepcopy(assignment["range"]),
+        "loaded_components": list(assignment["components"]),
+        "loaded_tensor_keys": sorted(tensors),
+        "loaded_tensor_digest": tensor_digest,
+        "resolved_component_aliases": copy.deepcopy(aliases),
+        "runtime": runtime,
+        "route_ready": False,
+    }
+    stage = LoadedStage(
+        tensors=tensors,
+        resolved_aliases=aliases,
+        probe_output=np.empty((0,), dtype=np.dtype(runtime["dtype"])),
+        proof=proof,
+        authenticated_assignment_id=assignment["assignment_id"],
+        authenticated_tensor_digest=tensor_digest,
+    )
+    components = assignment["components"]
+    if "input_embedding" in components:
+        return _execute_loaded_numpy_stage(
+            stage,
+            token_ids=np.array([[0, 1, 2]], dtype=np.int64),
+        )
+    hidden_size = runtime["model_config"]["n_embd"]
+    positions = np.arange(1, 4, dtype=np.float32).reshape(1, 3, 1)
+    channels = np.arange(1, hidden_size + 1, dtype=np.float32).reshape(
+        1, 1, hidden_size
+    )
+    hidden = (
+        np.sin(positions * channels)
+        + positions * np.square(channels) / max(hidden_size * hidden_size, 1)
+    ).astype(np.dtype(runtime["dtype"]))
+    return _execute_loaded_numpy_stage(stage, hidden_states=hidden)
 
 
 def load_assignment_stage(
@@ -1231,25 +1439,51 @@ def load_assignment_stage(
             verified_by_path,
             expected_keys,
             runtime_dtype,
+            runtime["backend"],
         )
         components = list(assignment["components"])
         _validate_gpt2_shapes(
             tensors, runtime, start, end, namespace, components, aliases
         )
+        mx = (
+            _mlx_module()
+            if runtime["backend"] == _MLX_RUNTIME_BACKEND
+            else None
+        )
         for key, tensor in tensors.items():
             if str(tensor.dtype) != str(runtime_dtype):
                 raise _fail(f"runtime dtype mismatch for tensor {key}")
-            if not bool(mx.all(mx.isfinite(tensor)).item()):
+            finite = (
+                bool(mx.all(mx.isfinite(tensor)).item())
+                if mx is not None
+                else bool(np.isfinite(tensor).all())
+            )
+            if not finite:
                 raise _fail(f"loaded tensor contains non-finite values: {key}")
-        probe_output = _run_gpt2_probe(
-            tensors,
-            runtime,
-            start,
-            end,
-            namespace,
-            components,
-            aliases,
+        loaded_tensor_digest = (
+            _digest_arrays(tensors)
+            if runtime["backend"] == _MLX_RUNTIME_BACKEND
+            else _numpy_tensor_digest(tensors)
         )
+        if runtime["backend"] == _MLX_RUNTIME_BACKEND:
+            probe_output = _run_gpt2_probe(
+                tensors,
+                runtime,
+                start,
+                end,
+                namespace,
+                components,
+                aliases,
+            )
+        else:
+            probe_output = _run_numpy_probe(
+                tensors=tensors,
+                runtime=runtime,
+                assignment=assignment,
+                aliases=aliases,
+                tensor_digest=loaded_tensor_digest,
+            )
+        claim_backend = "MLX" if runtime["backend"] == "mlx" else "NumPy"
         proof = {
             "protocol": LAYER_LOAD_PROOF_PROTOCOL,
             "deployment_id": assignment["deployment_id"],
@@ -1262,7 +1496,7 @@ def load_assignment_stage(
             "loaded_range": copy.deepcopy(assignment["range"]),
             "loaded_components": components,
             "loaded_tensor_keys": sorted(tensors),
-            "loaded_tensor_digest": _digest_arrays(tensors),
+            "loaded_tensor_digest": loaded_tensor_digest,
             "resolved_component_aliases": copy.deepcopy(aliases),
             "runtime": runtime,
             "runtime_identity": _actual_runtime_identity(runtime),
@@ -1272,7 +1506,8 @@ def load_assignment_stage(
             "control_plane_binding": binding,
             "route_ready": False,
             "claim_boundary": (
-                "assignment-bound local MLX stage loaded and deterministically probed; "
+                f"assignment-bound local {claim_backend} stage loaded and "
+                "deterministically probed; "
                 "no route challenge or distributed inference claim"
             ),
         }
@@ -1288,8 +1523,62 @@ def load_assignment_stage(
             resolved_aliases=frozen_aliases,
             probe_output=probe_output,
             proof=frozen_proof,
+            authenticated_assignment_id=assignment["assignment_id"],
+            authenticated_tensor_digest=loaded_tensor_digest,
         )
     except RuntimeLoadError:
         raise
     except Exception as exc:
         raise _fail(f"runtime load rejected: {exc}") from exc
+
+
+def execute_loaded_numpy_stage(
+    loaded_stage: Any,
+    *,
+    token_ids: Any | None = None,
+    hidden_states: Any | None = None,
+) -> np.ndarray:
+    """Execute an authenticated NumPy stage using loader-stable errors."""
+
+    try:
+        return _execute_loaded_numpy_stage(
+            loaded_stage,
+            token_ids=token_ids,
+            hidden_states=hidden_states,
+        )
+    except NumpyRuntimeError as exc:
+        raise _fail(str(exc)) from exc
+
+
+def select_stage_backend(*, runtime: Any, prefer: str) -> Any:
+    """Select the backend bound by a normalized runtime identity."""
+
+    if not isinstance(prefer, str) or prefer not in _VALID_STAGE_PREFERS:
+        raise _fail(
+            "unknown_prefer: stage backend preference must be auto, mlx, or numpy"
+        )
+    if not isinstance(runtime, Mapping):
+        raise _fail("runtime identity must be an object")
+    backend = runtime.get("backend")
+    if backend == _NUMPY_RUNTIME_BACKEND:
+        if prefer == _MLX_RUNTIME_BACKEND:
+            raise _fail(
+                "runtime_mismatch: numpy runtime cannot use the MLX backend"
+            )
+        try:
+            validate_normalized_numpy_runtime(runtime)
+        except (TypeError, ValueError) as exc:
+            raise _fail(str(exc)) from exc
+        return NumpyStageBackend()
+    if backend == _MLX_RUNTIME_BACKEND:
+        if prefer == _NUMPY_RUNTIME_BACKEND:
+            raise _fail(
+                "runtime_mismatch: mlx runtime cannot use the NumPy backend"
+            )
+        try:
+            validate_normalized_mlx_runtime(runtime)
+        except (TypeError, ValueError) as exc:
+            raise _fail(str(exc)) from exc
+        _mlx_module()
+        return MLXStageBackend()
+    raise _fail(f"unsupported runtime backend: {backend!r}")
