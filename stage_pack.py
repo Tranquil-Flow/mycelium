@@ -1068,6 +1068,8 @@ def verify_stage_pack_collection(
         raise ValueError("stage pack collection has duplicate nodes")
 
     first = assignments[0]
+    canonical_runtime = _normalize_runtime(first.get("runtime"))
+    canonical_control_plane_binding = first.get("control_plane_binding")
     for assignment in assignments[1:]:
         for field in (
             "deployment_id",
@@ -1078,6 +1080,15 @@ def verify_stage_pack_collection(
         ):
             if assignment[field] != first[field]:
                 raise ValueError(f"stage pack collection identity mismatch: {field}")
+        if _normalize_runtime(assignment.get("runtime")) != canonical_runtime:
+            raise ValueError("stage pack collection runtime identity mismatch")
+        if (
+            assignment.get("control_plane_binding")
+            != canonical_control_plane_binding
+        ):
+            raise ValueError(
+                "stage pack collection control-plane binding identity mismatch"
+            )
 
     expected_start = 0
     for assignment in assignments:

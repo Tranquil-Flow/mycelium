@@ -138,3 +138,5 @@ def test_pack_based_stage_logits_and_greedy_tokens_match_monolithic_reference(
         f"stage_count={stage_count} max_abs_logit_diff={max_abs_diff:.9g} "
         f"greedy_token_ids={generated}"
     )
+    assert max_abs_diff == 0.0
+    assert generated == [4599, 3329, 2506, 5145]

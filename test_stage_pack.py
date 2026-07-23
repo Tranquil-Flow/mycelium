@@ -27,6 +27,7 @@ from stage_pack import (
 )
 
 DEPLOYMENT_ID = "12345678-1234-5678-9234-abcdefabcdef"
+_UNCHANGED = object()
 
 
 def _write_safetensors(path: Path, tensor_names: list[str]) -> None:
@@ -169,6 +170,64 @@ def _case(tmp_path: Path) -> tuple[
 
 def _refresh_digest(pack: dict[str, Any]) -> None:
     pack["stage_pack_digest"] = stage_pack_digest_for(pack)
+
+
+def _mlx_runtime(dtype: str = "float32") -> dict[str, Any]:
+    return {
+        "backend": "mlx",
+        "dtype": dtype,
+        "quantization": "none",
+        "architecture": "gpt2",
+        "model_config": {
+            "n_layer": 3,
+            "n_embd": 4,
+            "n_head": 2,
+            "n_inner": 8,
+            "vocab_size": 7,
+            "n_positions": 8,
+            "layer_norm_epsilon": 1e-5,
+            "activation_function": "gelu_new",
+            "scale_attn_weights": True,
+            "scale_attn_by_inverse_layer_idx": False,
+            "reorder_and_upcast_attn": False,
+            "add_cross_attention": False,
+        },
+    }
+
+
+def _control_plane_binding(snapshot_generation: int = 1) -> dict[str, Any]:
+    return {
+        "protocol": "mycelium.control_plane_binding.v1",
+        "evidence_bundle_digest": "sha256:" + "a" * 64,
+        "planner_snapshot_digest": "sha256:" + "b" * 64,
+        "snapshot_generation": snapshot_generation,
+        "swarm_id": "swarm-stage-pack-test",
+        "deployment_id": DEPLOYMENT_ID,
+        "deployment_epoch": 7,
+    }
+
+
+def _rebind_assignment_pack(
+    assignment: dict[str, Any],
+    pack: dict[str, Any],
+    *,
+    runtime: dict[str, Any] | object = _UNCHANGED,
+    control_plane_binding: dict[str, Any] | None | object = _UNCHANGED,
+) -> None:
+    if runtime is not _UNCHANGED:
+        assignment["runtime"] = copy.deepcopy(runtime)
+        pack["runtime"] = copy.deepcopy(runtime)
+    if control_plane_binding is not _UNCHANGED:
+        if control_plane_binding is None:
+            assignment.pop("control_plane_binding", None)
+        else:
+            assignment["control_plane_binding"] = copy.deepcopy(
+                control_plane_binding
+            )
+        pack["control_plane_binding"] = copy.deepcopy(control_plane_binding)
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+    pack["assignment_id"] = assignment["assignment_id"]
+    _refresh_digest(pack)
 
 
 def test_compiles_deterministic_assignment_local_packs_and_verifies_warm_artifacts(
@@ -929,6 +988,169 @@ def test_five_way_collection_has_exact_logical_ownership_with_shared_shards(
         record["overfetched_tensor_count"] > 0
         for record in summary["pack_verifications"]
     )
+
+
+@pytest.mark.parametrize("drift", ("backend", "dtype", "model_config"))
+def test_collection_verifier_rejects_mixed_canonical_runtime_identity(
+    tmp_path: Path,
+    drift: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(assignment, pack, runtime=_mlx_runtime())
+
+    divergent_runtime = _mlx_runtime()
+    if drift == "backend":
+        divergent_runtime = {
+            "backend": "artifact_verifier",
+            "dtype": "source",
+            "quantization": "none",
+        }
+    elif drift == "dtype":
+        divergent_runtime["dtype"] = "float16"
+    else:
+        divergent_runtime["model_config"]["n_positions"] = 16
+    _rebind_assignment_pack(
+        assignments[1],
+        packs[1],
+        runtime=divergent_runtime,
+    )
+
+    assert all(
+        verify_stage_pack(pack, assignment=assignment, manifest=manifest)[
+            "ready_for_load"
+        ]
+        for assignment, pack in zip(assignments, packs, strict=True)
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack collection runtime identity mismatch$",
+    ):
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    (
+        "missing",
+        "snapshot_generation",
+        "evidence_bundle_digest",
+        "planner_snapshot_digest",
+    ),
+)
+def test_collection_verifier_rejects_mixed_control_plane_binding_identity(
+    tmp_path: Path,
+    drift: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    binding = _control_plane_binding()
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            control_plane_binding=binding,
+        )
+
+    divergent_binding = copy.deepcopy(binding)
+    if drift == "missing":
+        replacement = None
+    elif drift == "snapshot_generation":
+        divergent_binding[drift] = 2
+        replacement = divergent_binding
+    else:
+        divergent_binding[drift] = "sha256:" + "f" * 64
+        replacement = divergent_binding
+    _rebind_assignment_pack(
+        assignments[1],
+        packs[1],
+        control_plane_binding=replacement,
+    )
+
+    assert all(
+        verify_stage_pack(pack, assignment=assignment, manifest=manifest)[
+            "ready_for_load"
+        ]
+        for assignment, pack in zip(assignments, packs, strict=True)
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack collection control-plane binding identity mismatch$",
+    ):
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize("with_control_plane_binding", (False, True))
+def test_collection_verifier_accepts_uniform_canonical_identities(
+    tmp_path: Path,
+    with_control_plane_binding: bool,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    binding = _control_plane_binding() if with_control_plane_binding else None
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            runtime=_mlx_runtime("float16"),
+            control_plane_binding=binding,
+        )
+
+    summary = sp.verify_stage_pack_collection(
+        json.loads(json.dumps(packs)),
+        assignments=json.loads(json.dumps(assignments)),
+        manifest=manifest,
+    )
+
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
+    assert all(
+        pack["control_plane_binding"] == binding
+        for pack in packs
+    )
+
+
+@pytest.mark.parametrize("mutation", ("swap", "gap"))
+def test_collection_verifier_preserves_order_and_range_rejections(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    if mutation == "swap":
+        assignments[0], assignments[1] = assignments[1], assignments[0]
+        packs[0], packs[1] = packs[1], packs[0]
+    else:
+        assignments.pop(1)
+        packs.pop(1)
+
+    with pytest.raises(ValueError, match="ranges overlap or contain a gap"):
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
 
 
 @pytest.mark.parametrize("mutation", ("omit", "duplicate", "misassign"))
