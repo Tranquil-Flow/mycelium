@@ -8,7 +8,6 @@ import hashlib
 import importlib.metadata
 import json
 import math
-import uuid
 from types import MappingProxyType
 from typing import Any, Mapping, NoReturn
 
@@ -17,6 +16,8 @@ import numpy as np
 from runtime_contracts import (
     GPT2_DECODER_TENSOR_SUFFIXES,
     assignment_stage_role,
+    validate_assignment_stage_boundaries,
+    validate_loaded_stage_authentication,
     validate_normalized_numpy_runtime,
 )
 
@@ -288,16 +289,6 @@ def tensor_digest(tensors: Mapping[str, Any]) -> str:
     return "sha256:" + digest.hexdigest()
 
 
-def _canonical_assignment_id(value: Any) -> str:
-    try:
-        canonical = str(uuid.UUID(str(value)))
-    except (TypeError, ValueError) as exc:
-        raise NumpyRuntimeError("assignment_id_mismatch") from exc
-    if value != canonical:
-        _reject("assignment_id_mismatch")
-    return canonical
-
-
 def _stage_namespace(tensors: Mapping[str, Any], start: int) -> str:
     transformer_key = f"transformer.h.{start}.ln_1.weight"
     plain_key = f"h.{start}.ln_1.weight"
@@ -374,19 +365,31 @@ def _validated_stage(
     aliases = getattr(loaded_stage, "resolved_aliases", None)
     if not isinstance(proof, Mapping):
         _reject("invalid_loaded_stage_proof")
-    if proof.get("protocol") != "mycelium.layer_load_proof.v1":
-        _reject("invalid_loaded_stage_proof")
-    if proof.get("route_ready") is not False:
-        _reject("invalid_loaded_stage_route_claim")
-    assignment_id = _canonical_assignment_id(proof.get("assignment_id"))
-    if getattr(loaded_stage, "authenticated_assignment_id", None) != assignment_id:
-        _reject("assignment_id_mismatch")
     try:
         runtime = validate_normalized_numpy_runtime(
             json.loads(_canonical_json(proof.get("runtime")))
         )
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise NumpyRuntimeError("invalid_loaded_stage_runtime") from exc
+    try:
+        validate_loaded_stage_authentication(
+            proof,
+            authenticated_assignment_id=getattr(
+                loaded_stage, "authenticated_assignment_id", None
+            ),
+            authenticated_load_generation=getattr(
+                loaded_stage, "authenticated_load_generation", None
+            ),
+            authenticated_runtime=getattr(
+                loaded_stage, "authenticated_runtime", None
+            ),
+            authenticated_runtime_identity=getattr(
+                loaded_stage, "authenticated_runtime_identity", None
+            ),
+            normalized_runtime=runtime,
+        )
+    except ValueError as exc:
+        raise NumpyRuntimeError(str(exc)) from exc
     config = runtime["model_config"]
     layer_range = proof.get("loaded_range")
     if not isinstance(layer_range, Mapping):
@@ -420,6 +423,15 @@ def _validated_stage(
         or "decoder" not in components
     ):
         _reject("invalid_loaded_stage_components")
+    try:
+        validate_assignment_stage_boundaries(
+            components,
+            start_layer=start,
+            end_layer_exclusive=end,
+            total_layers=config["n_layer"],
+        )
+    except ValueError as exc:
+        raise NumpyRuntimeError("invalid_loaded_stage_boundaries") from exc
     if not isinstance(tensors, Mapping):
         _reject("invalid_loaded_stage_tensors")
     if not isinstance(aliases, Mapping):

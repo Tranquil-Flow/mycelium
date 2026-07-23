@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import uuid
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 MLX_RUNTIME_BASE_FIELDS = frozenset({"backend", "dtype", "quantization"})
@@ -42,6 +43,17 @@ GPT2_MODEL_CONFIG_FIELDS = frozenset(
     }
 )
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
+SUPPORTED_NUMPY_DTYPES = frozenset({"float32"})
+_RUNTIME_IDENTITY_FIELDS = frozenset(
+    {
+        "backend",
+        "backend_version",
+        "device",
+        "dtype",
+        "quantization",
+        "architecture",
+    }
+)
 _SUPPORTED_GPT2_FLAGS = {
     "scale_attn_weights": True,
     "scale_attn_by_inverse_layer_idx": False,
@@ -191,8 +203,8 @@ def validate_normalized_numpy_runtime(runtime: Any) -> dict[str, Any]:
         raise ValueError("unsupported runtime backend; expected numpy")
     if runtime.get("quantization") != "none":
         raise ValueError("unsupported runtime quantization; only none is supported")
-    if runtime.get("dtype") not in {"float16", "float32"}:
-        raise ValueError("unsupported numpy runtime dtype; expected float16 or float32")
+    if runtime.get("dtype") not in SUPPORTED_NUMPY_DTYPES:
+        raise ValueError("unsupported numpy runtime dtype; expected float32")
     if runtime.get("architecture") != "gpt2":
         raise ValueError("unsupported runtime architecture; only gpt2 is supported")
     model_config = runtime.get("model_config")
@@ -237,6 +249,90 @@ def validate_normalized_runtime(
     raise ValueError(f"unsupported runtime backend: {backend!r}")
 
 
+def _plain_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise ValueError("canonical JSON mappings require string keys")
+        return {key: _plain_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_json(item) for item in value]
+    return value
+
+
+def validate_loaded_stage_authentication(
+    proof: Any,
+    *,
+    authenticated_assignment_id: Any,
+    authenticated_load_generation: Any,
+    authenticated_runtime: Any,
+    authenticated_runtime_identity: Any,
+    normalized_runtime: Mapping[str, Any],
+) -> None:
+    """Authenticate execution-critical proof fields against loader-held values."""
+
+    if not isinstance(proof, Mapping):
+        raise ValueError("invalid_loaded_stage_proof")
+    if proof.get("protocol") != "mycelium.layer_load_proof.v1":
+        raise ValueError("invalid_loaded_stage_proof")
+    if proof.get("route_ready") is not False:
+        raise ValueError("invalid_loaded_stage_route_claim")
+
+    assignment_id = proof.get("assignment_id")
+    try:
+        canonical_assignment_id = str(uuid.UUID(str(assignment_id)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("assignment_id_mismatch") from exc
+    if (
+        assignment_id != canonical_assignment_id
+        or authenticated_assignment_id != canonical_assignment_id
+    ):
+        raise ValueError("assignment_id_mismatch")
+
+    proof_generation = proof.get("load_generation")
+    if (
+        not isinstance(proof_generation, int)
+        or isinstance(proof_generation, bool)
+        or proof_generation < 0
+        or not isinstance(authenticated_load_generation, int)
+        or isinstance(authenticated_load_generation, bool)
+        or authenticated_load_generation < 0
+        or proof_generation != authenticated_load_generation
+    ):
+        raise ValueError("load_generation_mismatch")
+
+    try:
+        runtime = _plain_json(normalized_runtime)
+        bound_runtime = _plain_json(authenticated_runtime)
+        runtime_identity = _plain_json(proof.get("runtime_identity"))
+        bound_runtime_identity = _plain_json(authenticated_runtime_identity)
+        json.dumps(runtime, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        json.dumps(
+            runtime_identity,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("runtime_identity_mismatch") from exc
+    if runtime != bound_runtime:
+        raise ValueError("runtime_identity_mismatch")
+    if (
+        not isinstance(runtime_identity, dict)
+        or set(runtime_identity) != _RUNTIME_IDENTITY_FIELDS
+        or runtime_identity != bound_runtime_identity
+    ):
+        raise ValueError("runtime_identity_mismatch")
+    for field in ("backend", "dtype", "quantization", "architecture"):
+        if runtime_identity.get(field) != runtime.get(field):
+            raise ValueError("runtime_identity_mismatch")
+    for field in ("backend_version", "device"):
+        if (
+            not isinstance(runtime_identity.get(field), str)
+            or not runtime_identity[field]
+        ):
+            raise ValueError("runtime_identity_mismatch")
+
+
 _ASSIGNMENT_STAGE_COMPONENTS = frozenset(
     {"input_embedding", "decoder", "final_norm", "lm_head"}
 )
@@ -274,3 +370,24 @@ def assignment_stage_role(components: Any) -> str:
     if "final_norm" in tokens or "lm_head" in tokens:
         return "final"
     return "intermediate"
+
+
+def validate_assignment_stage_boundaries(
+    components: Any,
+    *,
+    start_layer: int,
+    end_layer_exclusive: int,
+    total_layers: int,
+) -> None:
+    """Validate component ownership against executable GPT-2 stage boundaries."""
+
+    assignment_stage_role(components)
+    tokens = set(components)
+    if "input_embedding" in tokens and start_layer != 0:
+        raise ValueError("input_embedding may only be assigned with the first layer")
+    if {"final_norm", "lm_head"}.intersection(tokens) and (
+        end_layer_exclusive != total_layers
+    ):
+        raise ValueError(
+            "final_norm and lm_head may only be assigned with the final layer"
+        )

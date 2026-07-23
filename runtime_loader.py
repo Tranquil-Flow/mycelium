@@ -38,6 +38,9 @@ from numpy_runtime import (
 )
 from runtime_contracts import (
     GPT2_DECODER_TENSOR_SUFFIXES,
+    SUPPORTED_NUMPY_DTYPES,
+    validate_assignment_stage_boundaries,
+    validate_loaded_stage_authentication,
     validate_normalized_mlx_runtime,
     validate_normalized_numpy_runtime,
 )
@@ -118,7 +121,7 @@ def _runtime_dtypes() -> dict[str, Any]:
 def _numpy_runtime_dtypes() -> frozenset[str]:
     """Return the canonical NumPy runtime dtype set (backend-neutral)."""
 
-    return frozenset({"float16", "float32"})
+    return SUPPORTED_NUMPY_DTYPES
 
 
 class RuntimeExecutionError(ValueError):
@@ -135,6 +138,9 @@ class LoadedStage:
     proof: Mapping[str, Any]
     authenticated_assignment_id: str | None = None
     authenticated_tensor_digest: str | None = None
+    authenticated_load_generation: int | None = None
+    authenticated_runtime: Mapping[str, Any] | None = None
+    authenticated_runtime_identity: Mapping[str, Any] | None = None
 
 
 def _json_compatible(value: Any) -> Any:
@@ -397,11 +403,15 @@ def _validate_stage_boundaries(
     total_layers = runtime["model_config"]["n_layer"]
     if end > total_layers:
         raise _fail("assigned layer range exceeds bound gpt2 model depth")
-    if "input_embedding" in components and start != 0:
-        raise _fail("input_embedding may only be assigned with the first layer")
-    terminal_components = {"final_norm", "lm_head"}.intersection(components)
-    if terminal_components and end != total_layers:
-        raise _fail("final_norm and lm_head may only be assigned with the final layer")
+    try:
+        validate_assignment_stage_boundaries(
+            components,
+            start_layer=start,
+            end_layer_exclusive=end,
+            total_layers=total_layers,
+        )
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
 
 
 def _validate_assignment(
@@ -1139,6 +1149,19 @@ def execute_loaded_stage(
         )
     except (TypeError, ValueError) as exc:
         raise RuntimeExecutionError("invalid_loaded_stage_runtime") from exc
+    try:
+        validate_loaded_stage_authentication(
+            proof,
+            authenticated_assignment_id=loaded_stage.authenticated_assignment_id,
+            authenticated_load_generation=loaded_stage.authenticated_load_generation,
+            authenticated_runtime=loaded_stage.authenticated_runtime,
+            authenticated_runtime_identity=(
+                loaded_stage.authenticated_runtime_identity
+            ),
+            normalized_runtime=runtime,
+        )
+    except ValueError as exc:
+        raise RuntimeExecutionError(str(exc)) from exc
     config = runtime["model_config"]
     layer_range = proof.get("loaded_range")
     if not isinstance(layer_range, Mapping):
@@ -1171,6 +1194,15 @@ def execute_loaded_stage(
         - {"input_embedding", "decoder", "final_norm", "lm_head"}
     ):
         reject("invalid_loaded_stage_components")
+    try:
+        validate_assignment_stage_boundaries(
+            components,
+            start_layer=start,
+            end_layer_exclusive=end,
+            total_layers=config["n_layer"],
+        )
+    except ValueError:
+        reject("invalid_loaded_stage_boundaries")
 
     tensors = loaded_stage.tensors
     if not isinstance(tensors, Mapping):
@@ -1366,6 +1398,8 @@ def _run_numpy_probe(
     assignment: Mapping[str, Any],
     aliases: Mapping[str, Any],
     tensor_digest: str,
+    load_generation: int,
+    runtime_identity: Mapping[str, Any],
 ) -> np.ndarray:
     """Run the same deterministic local probe through the NumPy stage adapter."""
 
@@ -1378,6 +1412,8 @@ def _run_numpy_probe(
         "loaded_tensor_digest": tensor_digest,
         "resolved_component_aliases": copy.deepcopy(aliases),
         "runtime": runtime,
+        "runtime_identity": runtime_identity,
+        "load_generation": load_generation,
         "route_ready": False,
     }
     stage = LoadedStage(
@@ -1387,6 +1423,9 @@ def _run_numpy_probe(
         proof=proof,
         authenticated_assignment_id=assignment["assignment_id"],
         authenticated_tensor_digest=tensor_digest,
+        authenticated_load_generation=load_generation,
+        authenticated_runtime=_deep_freeze(runtime),
+        authenticated_runtime_identity=_deep_freeze(runtime_identity),
     )
     components = assignment["components"]
     if "input_embedding" in components:
@@ -1465,6 +1504,7 @@ def load_assignment_stage(
             if runtime["backend"] == _MLX_RUNTIME_BACKEND
             else _numpy_tensor_digest(tensors)
         )
+        runtime_identity = _actual_runtime_identity(runtime)
         if runtime["backend"] == _MLX_RUNTIME_BACKEND:
             probe_output = _run_gpt2_probe(
                 tensors,
@@ -1482,6 +1522,8 @@ def load_assignment_stage(
                 assignment=assignment,
                 aliases=aliases,
                 tensor_digest=loaded_tensor_digest,
+                load_generation=load_generation,
+                runtime_identity=runtime_identity,
             )
         claim_backend = "MLX" if runtime["backend"] == "mlx" else "NumPy"
         proof = {
@@ -1499,7 +1541,7 @@ def load_assignment_stage(
             "loaded_tensor_digest": loaded_tensor_digest,
             "resolved_component_aliases": copy.deepcopy(aliases),
             "runtime": runtime,
-            "runtime_identity": _actual_runtime_identity(runtime),
+            "runtime_identity": runtime_identity,
             "probe_shape": list(_shape(probe_output)),
             "probe_digest": _digest_array(probe_output),
             "load_generation": load_generation,
@@ -1525,6 +1567,9 @@ def load_assignment_stage(
             proof=frozen_proof,
             authenticated_assignment_id=assignment["assignment_id"],
             authenticated_tensor_digest=loaded_tensor_digest,
+            authenticated_load_generation=load_generation,
+            authenticated_runtime=_deep_freeze(runtime),
+            authenticated_runtime_identity=_deep_freeze(runtime_identity),
         )
     except RuntimeLoadError:
         raise

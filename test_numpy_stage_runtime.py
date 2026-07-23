@@ -23,6 +23,7 @@ import json
 import subprocess
 import sys
 import textwrap
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +32,7 @@ import numpy as np
 import pytest
 
 import runtime_loader
-from numpy_runtime import NumpyGPT2Runtime, NumpyStageBackend
+from numpy_runtime import NumpyGPT2Runtime, NumpyStageBackend, tensor_digest
 from runtime_contracts import (
     MonolithicRuntimePort,
     StageRuntimeBackend,
@@ -42,6 +43,7 @@ from runtime_contracts import (
 from runtime_loader import (
     LoadedStage,
     MLXStageBackend,
+    RuntimeExecutionError,
     RuntimeLoadError,
     _numpy_runtime_dtypes,
     canonical_json,
@@ -367,7 +369,14 @@ def test_stage_runtime_backend_protocol_recognizes_existing_adapters() -> None:
 
 def test_numpy_runtime_dtypes_are_backend_neutral() -> None:
     dtypes = _numpy_runtime_dtypes()
-    assert set(dtypes) == {"float16", "float32"}
+    assert set(dtypes) == {"float32"}
+
+
+def test_numpy_runtime_contract_rejects_unproven_float16_capability() -> None:
+    runtime = _numpy_runtime()
+    runtime["dtype"] = "float16"
+    with pytest.raises(ValueError, match="expected float32"):
+        validate_normalized_numpy_runtime(runtime)
 
 
 def test_runtime_contracts_import_without_mlx() -> None:
@@ -551,14 +560,17 @@ def test_loaded_numpy_stage_rejects_unverified_stage_pack(
 # ---------------------------------------------------------------------------
 
 
-def test_loaded_numpy_stage_matches_mlx_within_frozen_tolerance(
-    tmp_path: Path,
+@pytest.mark.parametrize("advertised_dtype", sorted(_numpy_runtime_dtypes()))
+def test_loaded_numpy_stage_matches_mlx_within_frozen_tolerance_for_every_advertised_dtype(
+    tmp_path: Path, advertised_dtype: str
 ) -> None:
     """Same assignment must produce numerically equivalent hidden states on
     the NumPy stage backend and the MLX reference within the frozen
     monolithic NumPy-vs-MLX tolerance and yield exact greedy token parity.
     """
     assignment, report, _ = _case(tmp_path, backend="numpy")
+    assignment["runtime"]["dtype"] = advertised_dtype
+    _rebind(assignment, report)
     _restrict(
         assignment,
         report,
@@ -571,6 +583,8 @@ def test_loaded_numpy_stage_matches_mlx_within_frozen_tolerance(
     numpy_hidden = execute_loaded_numpy_stage(loaded, token_ids=tokens)
 
     reference_assignment, reference_report, _ = _case(tmp_path, backend="mlx")
+    reference_assignment["runtime"]["dtype"] = advertised_dtype
+    _rebind(reference_assignment, reference_report)
     _restrict(
         reference_assignment,
         reference_report,
@@ -590,9 +604,13 @@ def test_loaded_numpy_stage_matches_mlx_within_frozen_tolerance(
     )
 
     assignment, report, _ = _case(tmp_path, backend="numpy")
+    assignment["runtime"]["dtype"] = advertised_dtype
+    _rebind(assignment, report)
     loaded = load_assignment_stage(assignment, report, load_generation=1)
     numpy_logits = execute_loaded_numpy_stage(loaded, token_ids=tokens)
     reference_assignment, reference_report, _ = _case(tmp_path, backend="mlx")
+    reference_assignment["runtime"]["dtype"] = advertised_dtype
+    _rebind(reference_assignment, reference_report)
     reference_loaded = load_assignment_stage(
         reference_assignment, reference_report, load_generation=1
     )
@@ -605,6 +623,72 @@ def test_loaded_numpy_stage_matches_mlx_within_frozen_tolerance(
     assert np.argmax(np.asarray(numpy_logits), axis=-1).tolist() == np.argmax(
         np.asarray(mlx_logits), axis=-1
     ).tolist()
+
+
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+@pytest.mark.parametrize(
+    ("proof_field", "expected_error"),
+    [
+        ("load_generation", "load_generation_mismatch"),
+        ("runtime_identity", "runtime_identity_mismatch"),
+    ],
+)
+def test_stage_execution_rejects_proof_only_authentication_tampering(
+    tmp_path: Path,
+    backend: str,
+    proof_field: str,
+    expected_error: str,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend=backend)
+    tampered_proof = json.loads(canonical_json(loaded.proof))
+    if proof_field == "load_generation":
+        tampered_proof[proof_field] = -1
+    else:
+        tampered_proof[proof_field]["backend"] = (
+            "mlx" if backend == "numpy" else "numpy"
+        )
+    tampered = replace(loaded, proof=tampered_proof)
+    tokens = mx.array([[1, 2, 3]], dtype=mx.int32)
+    error = RuntimeLoadError if backend == "numpy" else RuntimeExecutionError
+    execute = (
+        execute_loaded_numpy_stage
+        if backend == "numpy"
+        else runtime_loader.execute_loaded_stage
+    )
+    with pytest.raises(error, match=expected_error):
+        execute(tampered, token_ids=tokens)
+
+
+def test_loaded_numpy_stage_revalidates_terminal_layer_boundary_at_execution(
+    tmp_path: Path,
+) -> None:
+    loaded = _load_loaded_stage(tmp_path, backend="numpy")
+    tensors = {
+        key: value
+        for key, value in loaded.tensors.items()
+        if not key.startswith("transformer.h.1.")
+    }
+    digest = tensor_digest(tensors)
+    tampered_proof = json.loads(canonical_json(loaded.proof))
+    tampered_proof["loaded_range"] = {
+        "start_layer": 0,
+        "end_layer_exclusive": 1,
+        "layer_count": 1,
+    }
+    tampered_proof["loaded_tensor_keys"] = sorted(tensors)
+    tampered_proof["loaded_tensor_digest"] = digest
+    nonterminal = replace(
+        loaded,
+        tensors=tensors,
+        proof=tampered_proof,
+        authenticated_tensor_digest=digest,
+    )
+
+    with pytest.raises(RuntimeLoadError, match="invalid_loaded_stage_boundaries"):
+        execute_loaded_numpy_stage(
+            nonterminal,
+            token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
+        )
 
 
 def test_loaded_numpy_stage_rejects_invalid_dtype_for_entry(

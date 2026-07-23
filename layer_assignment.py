@@ -10,7 +10,7 @@ from typing import Any
 
 import model_manifest as mm
 from route_contract import upgrade_legacy_route_plan_v1, validate_layer_range, validate_manual_provisioning_route_v1
-from runtime_contracts import MLX_RUNTIME_BASE_FIELDS, validate_normalized_mlx_runtime
+from runtime_contracts import MLX_RUNTIME_BASE_FIELDS, validate_normalized_runtime
 
 
 def _canonical(document: Any) -> str:
@@ -83,14 +83,16 @@ def _normalize_runtime(
       if not isinstance(runtime.get(field), str) or not runtime[field]:
          raise ValueError(f"runtime {field} missing for {node_id}")
    normalized = copy.deepcopy(runtime)
-   if runtime["backend"] == "mlx":
+   if runtime["backend"] in {"mlx", "numpy"}:
       runtime_model = manifest.get("runtime_model")
       if not isinstance(runtime_model, dict):
          raise ValueError(
-            f"manifest lacks normalized MLX runtime model for {node_id}"
+            f"manifest lacks normalized {runtime['backend']} runtime model for {node_id}"
          )
       normalized.update(copy.deepcopy(runtime_model))
-      normalized = validate_normalized_mlx_runtime(normalized)
+      normalized = validate_normalized_runtime(
+         normalized, expected_backend=runtime["backend"]
+      )
    return normalized
 
 
