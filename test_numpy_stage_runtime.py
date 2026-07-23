@@ -901,21 +901,40 @@ def test_loaded_mlx_stage_authenticates_materialized_tensors_before_compute(
         )
 
 
-def test_loaded_mlx_stage_maps_tensor_digest_recomputation_failure(
+@pytest.mark.parametrize("backend", ["numpy", "mlx"])
+def test_loaded_stage_maps_tensor_digest_recomputation_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    backend: str,
 ) -> None:
-    loaded = _load_loaded_stage(tmp_path, backend="mlx")
+    loaded = _load_loaded_stage(tmp_path, backend=backend)
 
     def reject_digest_recomputation(*args: Any, **kwargs: Any) -> None:
         raise RuntimeError("raw_backend_digest_detail")
 
-    monkeypatch.setattr(runtime_loader, "_digest_arrays", reject_digest_recomputation)
+    def reject_backend_compute(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("backend_compute_reached")
+
+    if backend == "numpy":
+        monkeypatch.setattr(
+            numpy_runtime, "tensor_digest", reject_digest_recomputation
+        )
+        monkeypatch.setattr(numpy_runtime, "_gpt2_block", reject_backend_compute)
+        execute = execute_loaded_numpy_stage
+        error = RuntimeLoadError
+    else:
+        monkeypatch.setattr(
+            runtime_loader, "_digest_arrays", reject_digest_recomputation
+        )
+        monkeypatch.setattr(runtime_loader, "_gpt2_block", reject_backend_compute)
+        execute = runtime_loader.execute_loaded_stage
+        error = RuntimeExecutionError
+
     with pytest.raises(
-        RuntimeExecutionError,
+        error,
         match=r"^loaded_tensor_digest_mismatch$",
     ):
-        runtime_loader.execute_loaded_stage(
+        execute(
             loaded,
             token_ids=mx.array([[1, 2, 3]], dtype=mx.int32),
         )

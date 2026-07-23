@@ -475,7 +475,10 @@ def _validated_stage(
     authenticated_digest = getattr(
         loaded_stage, "authenticated_tensor_digest", None
     )
-    actual_digest = tensor_digest(materialized)
+    try:
+        actual_digest = tensor_digest(materialized)
+    except Exception:
+        raise NumpyRuntimeError("loaded_tensor_digest_mismatch") from None
     if (
         not isinstance(proof_digest, str)
         or proof_digest != authenticated_digest
