@@ -1,5 +1,20 @@
 # Open Questions and Blockers
 
+## RESOLVED 2026-07-23: SwarmCoordinator convergence
+
+The operator selected **EXTEND**: there is one signed, durable seed membership
+plane, not a parallel browser membership system.
+
+`mycelium_seed` owns identity, signed admission, leases, generation fencing,
+durability, and activation eligibility. `mycelium_interactive.swarm` remains the
+`browser_http` adapter for invitations, origin policy, stage matrices,
+dispatch/results, cancellation, and status. Browser bearer tokens are transport
+credentials only; current seed member state and generation are authoritative.
+
+Browser membership/evidence is admitted on the same plane as Mac membership,
+but browser peers remain activation-ineligible and all interactive claims remain
+`route_ready=false`.
+
 ## Pre-existing claim-boundary failure (Phase 0 / Phase 4)
 
 The authoritative plan identifies `tests/claims/test_claim_boundary_audit.py::test_current_checkout_and_runbook_preserve_claim_boundary` as pre-existing and explicitly says not to change the Device Lab or weaken the audit. The failing finding is:

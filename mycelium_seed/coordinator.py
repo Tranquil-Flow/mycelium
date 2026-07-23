@@ -526,6 +526,69 @@ class SeedCoordinator:
             projection.update(self._liveness_projection(member, now=self._now()))
             return projection
 
+    def members(self, *, peer_class: str | None = None) -> tuple[dict[str, Any], ...]:
+        """Return detached, stable projections for transport adapters."""
+
+        if peer_class is not None:
+            peer_class = _segment(peer_class, "peer_class")
+        with self._lock:
+            now = self._now()
+            projections = []
+            for member in sorted(
+                self._members.values(),
+                key=lambda item: item.node_id,
+            ):
+                if peer_class is not None and member.peer_class != peer_class:
+                    continue
+                projection = member.projection()
+                projection.update(self._liveness_projection(member, now=now))
+                projections.append(projection)
+            return tuple(projections)
+
+    def advance_member_generation(
+        self,
+        *,
+        node_id: str,
+        expected_generation: int,
+        lifecycle_state: str,
+    ) -> dict[str, Any]:
+        """Durably fence one adapter member without defining a second trust plane."""
+
+        node_id = _segment(node_id, "node_id")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+            or expected_generation < 1
+        ):
+            raise ValueError("expected_generation is invalid")
+        if lifecycle_state not in {"STOPPING", "STOPPED"}:
+            raise ValueError("lifecycle_state is invalid")
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            self._ensure_current_member(member)
+            if member.generation != expected_generation:
+                raise SeedCoordinatorError("seed_member_generation_stale")
+            now = self._now()
+            persisted = member.projection()
+            persisted.update(
+                generation=member.generation + 1,
+                last_liveness_at=now,
+                next_heartbeat_due_at=now,
+                active_requests=0,
+                lifecycle_state=lifecycle_state,
+            )
+            self._persist("save_member", persisted)
+            member.generation += 1
+            member.last_liveness_at = now
+            member.next_heartbeat_due_at = now
+            member.active_requests = 0
+            member.lifecycle_state = lifecycle_state
+            projection = member.projection()
+            projection.update(self._liveness_projection(member, now=now))
+            return projection
+
     def compile_placement(self) -> PlacementDecision:
         """Compile placement intent from a stable public membership snapshot."""
 

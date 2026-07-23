@@ -11,8 +11,7 @@ import mimetypes
 from pathlib import Path
 import secrets
 import ssl
-import threading
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from .runtime import InteractiveRuntime, InteractiveRuntimeError
@@ -295,6 +294,7 @@ def make_handler() -> type[BaseHTTPRequestHandler]:
                                 "session_token": grant.session_token,
                                 "expires_at": grant.expires_at,
                                 "stage_pack": grant.stage_pack,
+                                "membership_acceptance": grant.membership_acceptance,
                                 "route_ready": False,
                             },
                         }

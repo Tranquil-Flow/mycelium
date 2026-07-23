@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -10,10 +10,17 @@ import json
 import math
 import secrets
 import struct
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Any, NoReturn
 from urllib.parse import urlsplit
+
+from mycelium_invite import InviteError, SqliteInviteRegistry
+from mycelium_node import NodeMembershipSession
+from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
 
 WORK_PROTOCOL = "mycelium.browser_stage_work.v1"
 RESULT_PROTOCOL = "mycelium.browser_stage_result.v1"
@@ -95,7 +102,7 @@ def matrix_digest(value: Any) -> str:
 
 
 def _token_digest(token: str) -> str:
-    if not isinstance(token, str) or not 16 <= len(token) <= 512:
+    if not isinstance(token, str) or not 16 <= len(token) <= 4096:
         _reject("credential_invalid")
     try:
         raw = token.encode("ascii")
@@ -239,6 +246,7 @@ class JoinGrant:
     session_token: str
     expires_at: float
     stage_pack: dict[str, Any]
+    membership_acceptance: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,12 +262,14 @@ class BrowserStageResult:
 class _Invite:
     digest: str
     expires_at: float
+    nonce: str
 
 
 @dataclass(slots=True)
 class _Peer:
     peer_id: str
-    token_digest: str
+    token_digest: str | None
+    membership_generation: int
     created_at: float
     expires_at: float
     last_seen_at: float
@@ -280,6 +290,7 @@ class _Job:
     cancel_event: threading.Event | None = None
     state: str = "pending"
     peer_id: str | None = None
+    membership_generation: int | None = None
     result: BrowserStageResult | None = None
     result_document_digest: str | None = None
 
@@ -293,6 +304,7 @@ class SwarmCoordinator:
         stage_pack: Mapping[str, Any],
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
+        seed_coordinator: SeedCoordinator | None = None,
         token_source: Callable[[], str] | None = None,
         id_source: Callable[[str], str] | None = None,
         max_peers: int = 16,
@@ -342,11 +354,39 @@ class SwarmCoordinator:
             _reject("peer_idle_ttl_invalid")
         self._max_pending_jobs = max_pending_jobs
         self._max_job_history = max_job_history
+        if seed_coordinator is not None and not isinstance(
+            seed_coordinator,
+            SeedCoordinator,
+        ):
+            raise TypeError("seed coordinator must be a SeedCoordinator")
+        self._membership_tempdir: tempfile.TemporaryDirectory[str] | None = None
+        if seed_coordinator is None:
+            self._membership_tempdir = tempfile.TemporaryDirectory(
+                prefix="mycelium-browser-membership-",
+                dir=Path(tempfile.gettempdir()).resolve(),
+            )
+            database = self._membership_tempdir.name + "/seed-state.sqlite3"
+            seed_coordinator = SeedCoordinator(
+                swarm_id="interactive-swarm",
+                seed_node_id="interactive-seed",
+                seed_url="https://interactive.invalid",
+                signer=generate_ed25519_signer(
+                    endpoint_id="interactive-seed-endpoint"
+                ),
+                invite_registry=SqliteInviteRegistry(database),
+                state=SqliteSeedState(database),
+                incarnation="interactive-seed-incarnation",
+                clock=self._wall_clock,
+                lease_seconds=min(self._session_ttl, 3_600.0),
+                message_ttl_seconds=min(self._session_ttl, 60.0),
+            )
+        self._seed = seed_coordinator
         self._condition = threading.Condition(threading.RLock())
         self._invites: dict[str, _Invite] = {}
         self._peers: OrderedDict[str, _Peer] = OrderedDict()
         self._jobs: OrderedDict[str, _Job] = OrderedDict()
         self._poll_waiters: dict[str, int] = {}
+        self._restore_browser_members()
 
     def __repr__(self) -> str:
         with self._condition:
@@ -369,6 +409,39 @@ class SwarmCoordinator:
             _reject("wall_clock_unavailable")
         return _positive_finite(now, "wall_clock_invalid", allow_zero=True)
 
+    @staticmethod
+    def _browser_state(member: Mapping[str, Any], *, wall_now: float) -> str:
+        lifecycle_state = member.get("lifecycle_state")
+        if lifecycle_state == "STOPPING":
+            return "revoked"
+        if lifecycle_state == "STOPPED":
+            return "left"
+        if wall_now >= float(member["lease_expires_at"]):
+            return "expired"
+        return "connected"
+
+    def _restore_browser_members(self) -> None:
+        now = self._now()
+        wall_now = self._wall_now()
+        try:
+            members = self._seed.members(peer_class="browser_http")
+        except SeedCoordinatorError:
+            _reject("membership_state_unavailable")
+        for member in members:
+            remaining_lease = max(
+                0.0,
+                float(member["lease_expires_at"]) - wall_now,
+            )
+            self._peers[member["node_id"]] = _Peer(
+                peer_id=member["node_id"],
+                token_digest=None,
+                membership_generation=int(member["generation"]),
+                created_at=now,
+                expires_at=now + min(remaining_lease, self._session_ttl),
+                last_seen_at=now,
+                state=self._browser_state(member, wall_now=wall_now),
+            )
+
     def _new_token(self) -> tuple[str, str]:
         for _ in range(8):
             try:
@@ -377,7 +450,8 @@ class SwarmCoordinator:
                 _reject("token_source_unavailable")
             digest = _token_digest(token)
             if digest not in self._invites and all(
-                not hmac.compare_digest(digest, peer.token_digest)
+                peer.token_digest is None
+                or not hmac.compare_digest(digest, peer.token_digest)
                 for peer in self._peers.values()
             ):
                 return token, digest
@@ -431,9 +505,30 @@ class SwarmCoordinator:
         with self._condition:
             now = self._now()
             self._expire_locked(now)
-            token, digest = self._new_token()
+            nonce = f"browser-{secrets.token_hex(16)}"
+            try:
+                bundle = self._seed.mint_invite(
+                    nonce=nonce,
+                    ttl_seconds=max(1, math.ceil(ttl)),
+                )
+                token = bundle["token"]
+                digest = _token_digest(token)
+            except (
+                InviteError,
+                SeedCoordinatorError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                _reject("invite_mint_failed")
+            if digest in self._invites:
+                _reject("token_collision")
             deadline = now + ttl
-            self._invites[digest] = _Invite(digest=digest, expires_at=deadline)
+            self._invites[digest] = _Invite(
+                digest=digest,
+                expires_at=deadline,
+                nonce=nonce,
+            )
             return Invitation(
                 token=token,
                 url=f"{origin}/#join/{token}",
@@ -457,14 +552,62 @@ class SwarmCoordinator:
             if active_peers >= self._max_peers:
                 _reject("peer_capacity_exhausted")
             self._prune_peer_history_locked()
-            session_token, session_digest = self._new_token()
             peer_id = self._new_id("peer")
             if peer_id in self._peers:
                 _reject("id_collision")
+            browser_signer = generate_ed25519_signer(
+                endpoint_id=(
+                    "browser-http-"
+                    + hashlib.sha256(peer_id.encode("utf-8")).hexdigest()[:32]
+                )
+            )
+            try:
+                membership = NodeMembershipSession(
+                    node_id=peer_id,
+                    swarm_id=self._seed.swarm_id,
+                    seed_node_id=self._seed.seed_node_id,
+                    signer=browser_signer,
+                    incarnation=(
+                        "browser-"
+                        + hashlib.sha256(
+                            f"{peer_id}:{digest}".encode("utf-8")
+                        ).hexdigest()[:32]
+                    ),
+                    software_version="mycelium-interactive",
+                    peer_class="browser_http",
+                    runtime_capability={
+                        "runtime_backend": "browser",
+                        "transport": "http",
+                        "activation_protocol": None,
+                    },
+                    clock=self._wall_clock,
+                    id_source=lambda: f"browser-message-{secrets.token_hex(16)}",
+                )
+                request = membership.join_request(
+                    invite_nonce=invite.nonce,
+                    endpoint_addrs=["https://browser.invalid/control"],
+                )
+                acceptance = self._seed.accept_join(
+                    invite_token=token,
+                    join_envelope=request,
+                )
+            except SeedCoordinatorError as exc:
+                if exc.code in {
+                    "seed_member_identity_reused",
+                    "seed_node_endpoint_conflict",
+                    "seed_node_key_conflict",
+                }:
+                    _reject("id_collision")
+                _reject("membership_join_failed")
+            except (InviteError, TypeError, ValueError):
+                _reject("membership_join_failed")
+            session_token, session_digest = self._new_token()
+            generation = int(acceptance["message"]["membership_generation"])
             expires_at = now + self._session_ttl
             self._peers[peer_id] = _Peer(
                 peer_id=peer_id,
                 token_digest=session_digest,
+                membership_generation=generation,
                 created_at=now,
                 expires_at=expires_at,
                 last_seen_at=now,
@@ -475,6 +618,7 @@ class SwarmCoordinator:
                 session_token=session_token,
                 expires_at=public_expires_at,
                 stage_pack=_copy_json(self._stage_pack),
+                membership_acceptance=_copy_json(acceptance),
             )
 
     def _authenticate_peer_locked(
@@ -492,7 +636,10 @@ class SwarmCoordinator:
             supplied = _token_digest(session_token)
         except SwarmError:
             _reject("peer_unauthorized")
-        if not hmac.compare_digest(peer.token_digest, supplied):
+        if peer.token_digest is None or not hmac.compare_digest(
+            peer.token_digest,
+            supplied,
+        ):
             _reject("peer_unauthorized")
         if peer.state == "revoked":
             _reject("peer_revoked")
@@ -500,8 +647,23 @@ class SwarmCoordinator:
             _reject("peer_expired")
         if peer.state == "left" and not permit_left:
             _reject("peer_left")
+        self._require_current_membership_locked(peer)
         peer.last_seen_at = now
         return peer
+
+    def _require_current_membership_locked(self, peer: _Peer) -> dict[str, Any]:
+        try:
+            member = self._seed.member(peer.peer_id)
+        except SeedCoordinatorError as exc:
+            if exc.code == "seed_member_unknown":
+                _reject("peer_membership_unknown")
+            _reject("membership_state_unavailable")
+        if (
+            member["peer_class"] != "browser_http"
+            or int(member["generation"]) != peer.membership_generation
+        ):
+            _reject("peer_membership_generation_revoked")
+        return member
 
     def poll_work(
         self,
@@ -563,6 +725,7 @@ class SwarmCoordinator:
                         if selected is not None and selected.peer_id == peer.peer_id:
                             pending.state = "assigned"
                             pending.peer_id = peer.peer_id
+                            pending.membership_generation = peer.membership_generation
                             peer.outstanding_job_id = pending.job_id
                             self._condition.notify_all()
                             return self._work_document(pending)
@@ -617,6 +780,8 @@ class SwarmCoordinator:
             job = self._jobs.get(job_id)
             if job is None or job.peer_id != peer.peer_id:
                 _reject("work_start_job_mismatch")
+            if job.membership_generation != peer.membership_generation:
+                _reject("peer_membership_generation_revoked")
             if job.request_id != request_id or job.input_digest != input_digest:
                 _reject("work_start_binding_invalid")
             if job.cancel_event is not None and job.cancel_event.is_set():
@@ -750,6 +915,8 @@ class SwarmCoordinator:
             job = self._jobs.get(job_id)
             if job is None or job.peer_id != peer.peer_id:
                 _reject("result_job_mismatch")
+            if job.membership_generation != peer.membership_generation:
+                _reject("peer_membership_generation_revoked")
             if (
                 document.get("request_id") != job.request_id
                 or document.get("assignment_id") != self._stage_pack["assignment_id"]
@@ -843,12 +1010,30 @@ class SwarmCoordinator:
         peer.outstanding_job_id = None
         self._condition.notify_all()
 
+    def _advance_membership_locked(
+        self,
+        peer: _Peer,
+        *,
+        lifecycle_state: str,
+    ) -> None:
+        try:
+            self._seed.advance_member_generation(
+                node_id=peer.peer_id,
+                expected_generation=peer.membership_generation,
+                lifecycle_state=lifecycle_state,
+            )
+        except SeedCoordinatorError as exc:
+            if exc.code == "seed_member_generation_stale":
+                _reject("peer_membership_generation_revoked")
+            _reject("membership_state_unavailable")
+
     def revoke_peer(self, peer_id: str) -> bool:
         peer_id = _identifier(peer_id, "peer_id_invalid")
         with self._condition:
             peer = self._peers.get(peer_id)
             if peer is None or peer.state == "revoked":
                 return False
+            self._advance_membership_locked(peer, lifecycle_state="STOPPING")
             peer.state = "revoked"
             self._fail_peer_job_locked(peer, "peer_unavailable")
             self._condition.notify_all()
@@ -865,7 +1050,10 @@ class SwarmCoordinator:
                 supplied = _token_digest(session_token)
             except SwarmError:
                 _reject("peer_unauthorized")
-            if not hmac.compare_digest(peer.token_digest, supplied):
+            if peer.token_digest is None or not hmac.compare_digest(
+                peer.token_digest,
+                supplied,
+            ):
                 _reject("peer_unauthorized")
             if peer.state == "left":
                 return False
@@ -873,6 +1061,7 @@ class SwarmCoordinator:
                 _reject("peer_revoked")
             if peer.state == "expired":
                 _reject("peer_expired")
+            self._advance_membership_locked(peer, lifecycle_state="STOPPED")
             peer.state = "left"
             self._fail_peer_job_locked(peer, "peer_unavailable")
             self._condition.notify_all()
@@ -882,29 +1071,49 @@ class SwarmCoordinator:
         with self._condition:
             now = self._now()
             self._expire_locked(now)
-            peers = [
-                {
-                    "peer_id": peer.peer_id,
-                    "state": peer.state,
-                    "completed_jobs": peer.completed_jobs,
-                    "assigned_layer": {
-                        "start_layer": self._stage_pack["start_layer"],
-                        "end_layer_exclusive": self._stage_pack["end_layer_exclusive"],
-                    },
-                    "pack_digest": self._stage_pack["pack_digest"],
-                }
-                for peer in self._peers.values()
-            ]
+            wall_now = self._wall_now()
+            peers = []
+            for peer in self._peers.values():
+                try:
+                    member = self._seed.member(peer.peer_id)
+                except SeedCoordinatorError:
+                    _reject("membership_state_unavailable")
+                authority_state = self._browser_state(member, wall_now=wall_now)
+                state = peer.state
+                if authority_state != "connected":
+                    state = authority_state
+                elif (
+                    int(member["generation"]) != peer.membership_generation
+                    and state == "connected"
+                ):
+                    state = "revoked"
+                peers.append(
+                    {
+                        "peer_id": peer.peer_id,
+                        "state": state,
+                        "completed_jobs": peer.completed_jobs,
+                        "peer_class": member["peer_class"],
+                        "activation_eligible": member["activation_eligible"],
+                        "membership_generation": int(member["generation"]),
+                        "assigned_layer": {
+                            "start_layer": self._stage_pack["start_layer"],
+                            "end_layer_exclusive": self._stage_pack[
+                                "end_layer_exclusive"
+                            ],
+                        },
+                        "pack_digest": self._stage_pack["pack_digest"],
+                    }
+                )
             return {
                 "protocol": STATUS_PROTOCOL,
                 "local_evidence_only": True,
                 "route_ready": False,
                 "peer_count": sum(peer["state"] == "connected" for peer in peers),
                 "ready_peer_count": sum(
-                    peer.state == "connected"
-                    and peer.outstanding_job_id is None
-                    and self._poll_waiters.get(peer.peer_id, 0) > 0
-                    for peer in self._peers.values()
+                    item["state"] == "connected"
+                    and self._peers[item["peer_id"]].outstanding_job_id is None
+                    and self._poll_waiters.get(item["peer_id"], 0) > 0
+                    for item in peers
                 ),
                 "pending_job_count": sum(
                     job.state in {"pending", "assigned", "running"}
@@ -919,6 +1128,10 @@ class SwarmCoordinator:
         with self._condition:
             return {
                 "invite_digests": sorted(self._invites),
-                "peer_token_digests": sorted(peer.token_digest for peer in self._peers.values()),
+                "peer_token_digests": sorted(
+                    peer.token_digest
+                    for peer in self._peers.values()
+                    if peer.token_digest is not None
+                ),
                 "job_ids": list(self._jobs),
             }
