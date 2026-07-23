@@ -256,6 +256,24 @@ def test_physical_mode_requires_distinct_host_and_boot_then_stays_blocked(
     assert runner.calls == []
 
 
+def test_cli_bare_dry_run_preflight_is_inert_and_route_false(
+    capsys: Any,
+) -> None:
+    status = main(["preflight", "--dry-run"])
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert captured.err == ""
+    result = json.loads(captured.out)
+    assert result["command"] == "preflight"
+    assert result["mode"] == "dry-run"
+    assert result["peer_count"] == 0
+    assert result["actions"] == []
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert result["physical_execution"] is False
+
+
 def test_cli_rejects_operator_supplied_endpoint_identity(capsys: Any) -> None:
     status = main(
         [

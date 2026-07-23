@@ -570,6 +570,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.membership_snapshot,
             args.now,
         )
+        if args.command == "preflight" and args.dry_run and all(
+            value is None for value in required
+        ):
+            result = {
+                "protocol": _RESULT_PROTOCOL,
+                "command": "preflight",
+                "mode": "dry-run",
+                "peer_count": 0,
+                "peers": [],
+                "actions": [],
+                "route_ready": False,
+                "release_ready": False,
+                "physical_execution": False,
+                "claim_boundary": (
+                    "inert preflight template; no SSH, process launch, activation, "
+                    "qualification evidence, or readiness claim"
+                ),
+            }
+            sys.stdout.buffer.write(_canonical_bytes(result))
+            sys.stdout.buffer.flush()
+            return 0
         if any(value is None for value in required):
             _reject("invalid_arguments")
         peers = tuple(_peer_argument(value) for value in args.peers)
