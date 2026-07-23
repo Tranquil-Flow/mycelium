@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Mapping, Sequence
+import ctypes
 from dataclasses import dataclass
 import json
 import math
@@ -13,8 +14,11 @@ from pathlib import Path
 from queue import Empty, Queue
 import re
 import signal
+import stat
 import subprocess
+import sys
 import threading
+import time
 from typing import Any
 import uuid
 
@@ -27,6 +31,15 @@ MAX_STDERR_BYTES = 16 * 1024
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 _OPERATION_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _EOF = object()
+_DIRECTORY_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+_FILE_OPEN_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+)
 
 
 class NodeProcessError(RuntimeError):
@@ -45,6 +58,409 @@ class _RemoteNodeError(NodeProcessError):
 @dataclass(frozen=True)
 class _ReaderError:
     code: str
+
+
+@dataclass(frozen=True)
+class _ExecutableIdentity:
+    path: str
+    device: int
+    inode: int
+    mode: int
+    uid: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+@dataclass(frozen=True)
+class _ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    session_id: int
+    start_token: str
+    executable: _ExecutableIdentity
+
+
+def _absolute_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return Path(os.path.abspath(path))
+
+
+def _validate_walk_component(metadata: os.stat_result) -> None:
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("path component is invalid")
+    if metadata.st_uid not in {0, os.getuid()}:
+        raise ValueError("path component is invalid")
+    writable_by_others = stat.S_IMODE(metadata.st_mode) & 0o022
+    if writable_by_others and not (
+        metadata.st_uid == 0 and metadata.st_mode & stat.S_ISVTX
+    ):
+        raise ValueError("path component is invalid")
+
+
+def _descriptor_is_writable(metadata: os.stat_result) -> bool:
+    if os.geteuid() == 0:
+        return True
+    mode = stat.S_IMODE(metadata.st_mode)
+    if metadata.st_uid == os.geteuid():
+        return mode & 0o300 == 0o300
+    if metadata.st_gid in os.getgroups():
+        return mode & 0o030 == 0o030
+    return mode & 0o003 == 0o003
+
+
+def private_directory_path(
+    value: str | Path,
+    *,
+    create: bool = True,
+) -> Path:
+    """Validate or create a private directory using only verified directory fds."""
+
+    if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0):
+        raise ValueError("data directory is unavailable")
+    path = _absolute_path(value)
+    if path == Path("/"):
+        raise ValueError("data directory is invalid")
+    components = path.parts[1:]
+    descriptor = os.open("/", _DIRECTORY_OPEN_FLAGS)
+    try:
+        _validate_walk_component(os.fstat(descriptor))
+        for index, component in enumerate(components):
+            final = index == len(components) - 1
+            try:
+                child = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not create:
+                    if not _descriptor_is_writable(os.fstat(descriptor)):
+                        raise ValueError("data directory is unavailable")
+                    return path
+                created = False
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                    created = True
+                except FileExistsError:
+                    pass
+                child = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+                created_metadata = os.fstat(child)
+                if created:
+                    if (
+                        not stat.S_ISDIR(created_metadata.st_mode)
+                        or created_metadata.st_uid != os.getuid()
+                    ):
+                        os.close(child)
+                        raise ValueError("data directory is invalid")
+                    os.fchmod(child, 0o700)
+            metadata = os.fstat(child)
+            if final:
+                if (
+                    not stat.S_ISDIR(metadata.st_mode)
+                    or metadata.st_uid != os.getuid()
+                    or stat.S_IMODE(metadata.st_mode) != 0o700
+                ):
+                    os.close(child)
+                    raise ValueError("data directory is invalid")
+            else:
+                try:
+                    _validate_walk_component(metadata)
+                except ValueError:
+                    os.close(child)
+                    raise
+            os.close(descriptor)
+            descriptor = child
+        return path
+    except OSError as exc:
+        raise ValueError("data directory is unavailable") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _identity_from_stat(path: Path, metadata: os.stat_result) -> _ExecutableIdentity:
+    return _ExecutableIdentity(
+        path=str(path),
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        mode=metadata.st_mode,
+        uid=metadata.st_uid,
+        size=metadata.st_size,
+        mtime_ns=metadata.st_mtime_ns,
+        ctime_ns=metadata.st_ctime_ns,
+    )
+
+
+def capture_executable_identity(
+    value: str | Path,
+    *,
+    require_canonical: bool = False,
+    require_private_owner: bool = False,
+    require_executable: bool = True,
+) -> _ExecutableIdentity:
+    """Open and fingerprint one executable without following untrusted symlinks."""
+
+    supplied = Path(value).expanduser()
+    if require_canonical:
+        if not supplied.is_absolute() or supplied != _absolute_path(supplied):
+            raise ValueError("executable path is not canonical")
+        path = supplied
+    else:
+        try:
+            path = supplied.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ValueError("executable is unavailable") from exc
+    parent = private_directory_parent_fd(path, strict_components=False)
+    try:
+        descriptor = os.open(path.name, _FILE_OPEN_FLAGS, dir_fd=parent)
+    except OSError as exc:
+        os.close(parent)
+        raise ValueError("executable is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        executable_by_caller = (
+            metadata.st_mode & stat.S_IXUSR
+            if metadata.st_uid == os.geteuid()
+            else (
+                metadata.st_mode & stat.S_IXGRP
+                if metadata.st_gid in os.getgroups()
+                else metadata.st_mode & stat.S_IXOTH
+            )
+        )
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or (require_executable and not executable_by_caller)
+            or (require_private_owner and metadata.st_uid != os.getuid())
+            or (require_private_owner and stat.S_IMODE(metadata.st_mode) & 0o022)
+        ):
+            raise ValueError("executable is invalid")
+        return _identity_from_stat(path, metadata)
+    finally:
+        os.close(descriptor)
+        os.close(parent)
+
+
+def private_directory_parent_fd(
+    path: Path,
+    *,
+    strict_components: bool = True,
+) -> int:
+    """Open an absolute path's parent with a descriptor-relative no-follow walk."""
+
+    if not path.is_absolute() or not getattr(os, "O_NOFOLLOW", 0):
+        raise ValueError("path is invalid")
+    descriptor = os.open("/", _DIRECTORY_OPEN_FLAGS)
+    try:
+        for component in path.parts[1:-1]:
+            child = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            metadata = os.fstat(child)
+            if strict_components:
+                _validate_walk_component(metadata)
+            elif (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid not in {0, os.getuid()}
+                or stat.S_IMODE(metadata.st_mode) & 0o002
+            ):
+                os.close(child)
+                raise ValueError("path component is invalid")
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def revalidate_executable_identity(identity: _ExecutableIdentity) -> bool:
+    try:
+        current = capture_executable_identity(
+            identity.path,
+            require_canonical=True,
+            require_executable=False,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+    return current == identity
+
+
+def physical_service_interpreter_identity() -> _ExecutableIdentity:
+    if sys.platform == "darwin":
+        try:
+            homebrew = capture_executable_identity("/opt/homebrew/bin/python3")
+            framework = (
+                Path(homebrew.path).parent.parent
+                / "Resources"
+                / "Python.app"
+                / "Contents"
+                / "MacOS"
+                / "Python"
+            )
+            return capture_executable_identity(framework)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            pass
+    return capture_executable_identity(sys.executable)
+
+
+def _inventory_linux_process(pid: int) -> _ProcessIdentity:
+    stat_path = Path("/proc") / str(pid) / "stat"
+    raw = stat_path.read_text(encoding="ascii")
+    close_paren = raw.rfind(")")
+    if close_paren < 0:
+        raise ProcessLookupError(pid)
+    fields = raw[close_paren + 2 :].split()
+    if len(fields) < 20:
+        raise ProcessLookupError(pid)
+    parent_pid = int(fields[1])
+    process_group = int(fields[2])
+    session_id = int(fields[3])
+    start_token = fields[19]
+    executable_link = Path("/proc") / str(pid) / "exe"
+    executable_path = Path(os.readlink(executable_link))
+    metadata = os.stat(executable_link)
+    return _ProcessIdentity(
+        pid=pid,
+        parent_pid=parent_pid,
+        process_group=process_group,
+        session_id=session_id,
+        start_token=start_token,
+        executable=_identity_from_stat(executable_path, metadata),
+    )
+
+
+class _DarwinBSDInfo(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_uint32),
+        ("status", ctypes.c_uint32),
+        ("xstatus", ctypes.c_uint32),
+        ("pid", ctypes.c_uint32),
+        ("ppid", ctypes.c_uint32),
+        ("uid", ctypes.c_uint32),
+        ("gid", ctypes.c_uint32),
+        ("ruid", ctypes.c_uint32),
+        ("rgid", ctypes.c_uint32),
+        ("svuid", ctypes.c_uint32),
+        ("svgid", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+        ("comm", ctypes.c_char * 16),
+        ("name", ctypes.c_char * 32),
+        ("nfiles", ctypes.c_uint32),
+        ("pgid", ctypes.c_uint32),
+        ("pjobc", ctypes.c_uint32),
+        ("controlling_device", ctypes.c_uint32),
+        ("foreground_pgid", ctypes.c_uint32),
+        ("nice", ctypes.c_int32),
+        ("start_seconds", ctypes.c_uint64),
+        ("start_microseconds", ctypes.c_uint64),
+    ]
+
+
+def _darwin_process_snapshot(pid: int) -> tuple[int, int, int, str]:
+    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    proc_pidinfo = library.proc_pidinfo
+    proc_pidinfo.argtypes = [
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_uint64,
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    proc_pidinfo.restype = ctypes.c_int
+    information = _DarwinBSDInfo()
+    size = ctypes.sizeof(information)
+    received = proc_pidinfo(
+        pid,
+        3,
+        0,
+        ctypes.byref(information),
+        size,
+    )
+    if received != size or information.pid != pid:
+        raise ProcessLookupError(pid)
+    return (
+        int(information.pid),
+        int(information.ppid),
+        int(information.pgid),
+        f"{information.start_seconds}:{information.start_microseconds}",
+    )
+
+
+def _darwin_executable_path(pid: int) -> Path:
+    library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    proc_pidpath = library.proc_pidpath
+    proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    proc_pidpath.restype = ctypes.c_int
+    buffer = ctypes.create_string_buffer(4096)
+    length = proc_pidpath(pid, buffer, len(buffer))
+    if length <= 0:
+        raise ProcessLookupError(pid)
+    return Path(os.fsdecode(buffer.value)).resolve(strict=True)
+
+
+def _inventory_darwin_process(pid: int) -> _ProcessIdentity:
+    first = _darwin_process_snapshot(pid)
+    session_id = os.getsid(pid)
+    executable_path = _darwin_executable_path(pid)
+    metadata = executable_path.stat()
+    second = _darwin_process_snapshot(pid)
+    second_path = _darwin_executable_path(pid)
+    if (
+        first != second
+        or executable_path != second_path
+        or os.getsid(pid) != session_id
+    ):
+        raise ProcessLookupError(pid)
+    return _ProcessIdentity(
+        pid=pid,
+        parent_pid=first[1],
+        process_group=first[2],
+        session_id=session_id,
+        start_token=first[3],
+        executable=_identity_from_stat(executable_path, metadata),
+    )
+
+
+def _inventory_process(pid: int) -> _ProcessIdentity:
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        raise ProcessLookupError(pid)
+    if sys.platform == "linux":
+        return _inventory_linux_process(pid)
+    if sys.platform == "darwin":
+        return _inventory_darwin_process(pid)
+    raise ProcessLookupError(pid)
+
+
+def _darwin_parent_and_group(pid: int) -> tuple[int, int]:
+    output = subprocess.check_output(
+        ["/bin/ps", "-o", "pid=,ppid=,pgid=", "-p", str(pid)],
+        text=True,
+        timeout=1.0,
+    ).split()
+    if len(output) != 3 or int(output[0]) != pid:
+        raise ProcessLookupError(pid)
+    return int(output[1]), int(output[2])
+
+
+def _protected_process_groups() -> set[int]:
+    groups = {os.getpgrp()}
+    process_ids: set[int] = set()
+    pid = os.getpid()
+    while pid > 1:
+        if pid in process_ids:
+            raise ProcessLookupError(pid)
+        process_ids.add(pid)
+        try:
+            identity = _inventory_process(pid)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            if sys.platform != "darwin":
+                raise
+            parent_pid, process_group = _darwin_parent_and_group(pid)
+            groups.add(process_group)
+            pid = parent_pid
+        else:
+            groups.add(identity.process_group)
+            pid = identity.parent_pid
+    if any(group <= 1 for group in groups):
+        raise ProcessLookupError("protected process group is invalid")
+    return groups
 
 
 def _canonical_json_loads(raw: bytes) -> Any:
@@ -101,6 +517,38 @@ def _existing_path(value: str | Path, field: str, *, directory: bool) -> Path:
     return path
 
 
+def validate_physical_node_launch_shape(
+    *,
+    python_executable: str | Path,
+    service_script: str | Path,
+    run_id: str,
+    deployment_id: str,
+    node_id: str,
+    sidecar_binary: str | Path,
+    sidecar_local_only: bool,
+    command_timeout_seconds: float = 30.0,
+) -> tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity]:
+    """Apply the same side-effect-free launch validators used by real startup."""
+
+    python_identity = capture_executable_identity(python_executable)
+    service_identity = capture_executable_identity(
+        service_script,
+        require_executable=False,
+    )
+    sidecar_identity = capture_executable_identity(
+        sidecar_binary,
+        require_canonical=True,
+        require_private_owner=True,
+    )
+    _required_identifier(run_id, "run_id")
+    _required_identifier(deployment_id, "deployment_id")
+    _required_identifier(node_id, "node_id")
+    _positive_seconds(command_timeout_seconds, "command_timeout_seconds")
+    if not isinstance(sidecar_local_only, bool):
+        raise ValueError("sidecar_local_only must be a boolean")
+    return python_identity, service_identity, sidecar_identity
+
+
 def build_physical_node_command(
     *,
     python_executable: str | Path,
@@ -116,7 +564,9 @@ def build_physical_node_command(
 ) -> tuple[str, ...]:
     """Build an argv-only physical-node launch command with no secret material."""
 
-    python_path = _existing_path(python_executable, "python_executable", directory=False)
+    python_path = _existing_path(
+        python_executable, "python_executable", directory=False
+    )
     service_path = _existing_path(service_script, "service_script", directory=False)
     artifacts = _existing_path(artifact_root, "artifact_root", directory=True)
     sockets = _existing_path(socket_root, "socket_root", directory=True)
@@ -164,6 +614,7 @@ class PhysicalNodeProcess:
         response_timeout_seconds: float = 35.0,
         shutdown_timeout_seconds: float = 5.0,
         max_frame_bytes: int = MAX_CONTROL_FRAME_BYTES,
+        expected_executables: Sequence[_ExecutableIdentity] = (),
     ) -> None:
         if (
             not isinstance(command, Sequence)
@@ -193,13 +644,55 @@ class PhysicalNodeProcess:
         self._exchange_lock = threading.Lock()
         self._state_lock = threading.RLock()
         self._closed = False
+        self._cleanup_complete = False
         self._responses: Queue[bytes | object | _ReaderError] = Queue(maxsize=8)
         self._stderr_lock = threading.Lock()
         self._stderr_chunks: deque[bytes] = deque()
         self._stderr_size = 0
+        if (
+            not isinstance(expected_executables, Sequence)
+            or isinstance(expected_executables, (str, bytes))
+            or not all(
+                isinstance(identity, _ExecutableIdentity)
+                for identity in expected_executables
+            )
+        ):
+            raise ValueError("expected_executables is invalid")
+        command_identity = capture_executable_identity(self._command[0])
+        launch_command = self._command
+        if (
+            len(self._command) > 1
+            and Path(self._command[1]).name == "physical_inference_node.py"
+        ):
+            try:
+                physical_interpreter = physical_service_interpreter_identity()
+            except (OSError, RuntimeError, TypeError, ValueError):
+                pass
+            else:
+                command_identity = physical_interpreter
+                launch_command = (physical_interpreter.path, *self._command[1:])
+        try:
+            current_interpreter = capture_executable_identity(sys.executable)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            current_interpreter = None
+        if launch_command == self._command and current_interpreter == command_identity:
+            if sys.platform == "darwin" and sys.prefix == sys.base_prefix:
+                running_interpreter = _inventory_process(os.getpid()).executable
+                command_identity = running_interpreter
+                launch_command = (running_interpreter.path, *self._command[1:])
+            else:
+                launch_command = (sys.executable, *self._command[1:])
+        identities = tuple(expected_executables)
+        if command_identity not in identities:
+            identities = (command_identity, *identities)
+        if not all(revalidate_executable_identity(identity) for identity in identities):
+            raise NodeProcessError("node_process_executable_changed")
+        self._launch_identity: _ProcessIdentity | None = None
+        self._stdout_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
         try:
             self._process = subprocess.Popen(
-                self._command,
+                launch_command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -207,21 +700,44 @@ class PhysicalNodeProcess:
                 shell=False,
                 start_new_session=True,
             )
-        except OSError as exc:
+        except Exception as exc:
             self._closed = True
             raise NodeProcessError("node_process_start_failed") from exc
-        self._stdout_thread = threading.Thread(
-            target=self._read_stdout,
-            name=f"mycelium-node-stdout-{self.node_id}",
-            daemon=True,
-        )
-        self._stderr_thread = threading.Thread(
-            target=self._read_stderr,
-            name=f"mycelium-node-stderr-{self.node_id}",
-            daemon=True,
-        )
-        self._stdout_thread.start()
-        self._stderr_thread.start()
+        try:
+            launch = _inventory_process(self._process.pid)
+            if (
+                launch.pid != self._process.pid
+                or launch.parent_pid != os.getpid()
+                or launch.process_group != launch.pid
+                or launch.session_id != launch.pid
+                or launch.executable != command_identity
+            ):
+                raise NodeProcessError("node_process_identity_invalid")
+            self._launch_identity = launch
+            self._stdout_thread = threading.Thread(
+                target=self._read_stdout,
+                name=f"mycelium-node-stdout-{self.node_id}",
+                daemon=False,
+            )
+            self._stderr_thread = threading.Thread(
+                target=self._read_stderr,
+                name=f"mycelium-node-stderr-{self.node_id}",
+                daemon=False,
+            )
+            self._stdout_thread.start()
+            self._stderr_thread.start()
+        except Exception as exc:
+            self._closed = True
+            cleaned = self._cleanup_resources(
+                time.monotonic() + self.shutdown_timeout_seconds,
+                terminate=True,
+            )
+            code = (
+                "node_process_start_failed"
+                if cleaned
+                else "node_process_cleanup_failed"
+            )
+            raise NodeProcessError(code) from exc
 
     @property
     def pid(self) -> int:
@@ -282,41 +798,107 @@ class PhysicalNodeProcess:
         except (OSError, ValueError):
             return
 
-    def _terminate_process(self) -> None:
+    def _signal_process_group(self, signum: int) -> bool:
         process = self._process
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                try:
-                    process.terminate()
-                except OSError:
-                    pass
-            try:
-                process.wait(timeout=min(self.shutdown_timeout_seconds, 1.0))
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except (OSError, ProcessLookupError):
-                    try:
-                        process.kill()
-                    except OSError:
-                        pass
-                try:
-                    process.wait(timeout=self.shutdown_timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    pass
+        launch = self._launch_identity
+        if launch is None:
+            return False
+        if process.poll() is not None:
+            return True
+        try:
+            current = _inventory_process(process.pid)
+            protected_groups = _protected_process_groups()
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+            return False
+        if (
+            current != launch
+            or current.pid <= 1
+            or current.parent_pid <= 1
+            or current.process_group <= 1
+            or current.session_id <= 1
+            or current.pid in {os.getpid(), os.getppid()}
+            or current.process_group in protected_groups
+            or current.session_id in protected_groups
+            or process.poll() is not None
+        ):
+            return False
+        try:
+            os.killpg(current.process_group, signum)
+        except ProcessLookupError:
+            return process.poll() is not None
+        except OSError:
+            return False
+        return True
+
+    def _wait_process(self, deadline: float, maximum: float | None = None) -> bool:
+        if self._process.poll() is not None:
+            return True
+        remaining = max(0.0, deadline - time.monotonic())
+        if maximum is not None:
+            remaining = min(remaining, maximum)
+        if remaining <= 0:
+            return False
+        try:
+            self._process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            return False
+        except OSError:
+            return self._process.poll() is not None
+        return True
+
+    def _terminate_process(self, deadline: float) -> bool:
+        process = self._process
+        if process.poll() is not None:
+            return True
+        if not self._signal_process_group(signal.SIGKILL):
+            return process.poll() is not None
+        return self._wait_process(deadline)
+
+    @staticmethod
+    def _close_stream(stream: Any) -> bool:
+        if stream is None or stream.closed:
+            return True
+        try:
+            stream.close()
+        except (OSError, ValueError):
+            return False
+        return True
+
+    def _join_readers(self, deadline: float) -> bool:
+        complete = True
+        current = threading.current_thread()
+        for reader in (self._stdout_thread, self._stderr_thread):
+            if reader is None or reader is current:
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            reader.join(timeout=remaining)
+            if reader.is_alive():
+                complete = False
+        return complete
+
+    def _cleanup_resources(self, deadline: float, *, terminate: bool) -> bool:
+        complete = True
+        if terminate and self._process.poll() is None:
+            complete = self._close_stream(self._process.stdin) and complete
+            if not self._wait_process(deadline, 0.05):
+                complete = self._terminate_process(deadline) and complete
+        else:
+            complete = self._close_stream(self._process.stdin) and complete
+        if self._process.poll() is None:
+            complete = False
+        complete = self._close_stream(self._process.stdout) and complete
+        complete = self._close_stream(self._process.stderr) and complete
+        complete = self._join_readers(deadline) and complete
+        self._cleanup_complete = complete
+        return complete
 
     def _abort(self) -> None:
         with self._state_lock:
             self._closed = True
-        self._terminate_process()
-        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
-            if stream is not None and not stream.closed:
-                try:
-                    stream.close()
-                except OSError:
-                    pass
+        self._cleanup_resources(
+            time.monotonic() + self.shutdown_timeout_seconds,
+            terminate=True,
+        )
 
     def _validate_response(self, raw: bytes, command_id: str) -> Any:
         try:
@@ -364,9 +946,7 @@ class PhysicalNodeProcess:
             raise NodeProcessError("invalid_node_response")
         raise _RemoteNodeError(error["code"])
 
-    def command(
-        self, operation: str, payload: Mapping[str, Any] | None = None
-    ) -> Any:
+    def command(self, operation: str, payload: Mapping[str, Any] | None = None) -> Any:
         if not isinstance(operation, str) or not _OPERATION_RE.fullmatch(operation):
             raise ValueError("operation is invalid")
         if payload is None:
@@ -428,34 +1008,36 @@ class PhysicalNodeProcess:
                 raise
 
     def close(self) -> None:
-        with self._exchange_lock:
+        deadline = time.monotonic() + self.shutdown_timeout_seconds
+        lock_budget = min(
+            0.25,
+            max(0.0, deadline - time.monotonic()) / 4,
+        )
+        acquired = self._exchange_lock.acquire(timeout=lock_budget)
+        try:
             with self._state_lock:
-                if self._closed:
+                if self._cleanup_complete:
                     return
-            try:
-                self._command_stop()
-            except NodeProcessError:
-                pass
-            with self._state_lock:
                 self._closed = True
-            stdin = self._process.stdin
-            if stdin is not None and not stdin.closed:
-                try:
-                    stdin.close()
-                except OSError:
-                    pass
-            try:
-                self._process.wait(timeout=self.shutdown_timeout_seconds)
-            except subprocess.TimeoutExpired:
-                self._terminate_process()
-            for stream in (self._process.stdout, self._process.stderr):
-                if stream is not None and not stream.closed:
+            if acquired and self._process.poll() is None:
+                stop_timeout = min(
+                    self.response_timeout_seconds,
+                    0.5,
+                    max(0.0, deadline - time.monotonic()),
+                )
+                if stop_timeout > 0:
                     try:
-                        stream.close()
-                    except OSError:
+                        self._command_stop(timeout=stop_timeout)
+                    except NodeProcessError:
                         pass
+            cleaned = self._cleanup_resources(deadline, terminate=True)
+        finally:
+            if acquired:
+                self._exchange_lock.release()
+        if not cleaned:
+            raise NodeProcessError("node_process_cleanup_failed")
 
-    def _command_stop(self) -> None:
+    def _command_stop(self, *, timeout: float | None = None) -> None:
         if self._process.poll() is not None:
             return
         command_id = str(uuid.uuid4())
@@ -471,10 +1053,13 @@ class PhysicalNodeProcess:
         )
         stdin = self._process.stdin
         assert stdin is not None
+        response_timeout = (
+            self.response_timeout_seconds if timeout is None else float(timeout)
+        )
         try:
             stdin.write(frame + b"\n")
             stdin.flush()
-            item = self._responses.get(timeout=self.response_timeout_seconds)
+            item = self._responses.get(timeout=response_timeout)
         except (BrokenPipeError, OSError, ValueError, Empty) as exc:
             raise NodeProcessError("node_stop_failed") from exc
         if not isinstance(item, bytes):

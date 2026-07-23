@@ -4,20 +4,23 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 import signal
-import stat
 import sys
 import threading
 from typing import NoReturn, Sequence
 
 from mycelium_invite import SqliteInviteRegistry
 from mycelium_node.identity import load_or_create_node_signer
+from mycelium_node.process import private_directory_path
 from mycelium_qualification.evidence import canonical_json_bytes
 
-from .coordinator import SeedCoordinator
-from .http import SeedHTTPServer
+from .coordinator import SeedCoordinator, _segment
+from .http import (
+    SeedHTTPServer,
+    _validate_bind_address,
+    _validate_endpoint_url,
+)
 
 
 _STATUS_PROTOCOL = "mycelium.seed_main_status.v1"
@@ -42,38 +45,7 @@ class _SafeArgumentParser(argparse.ArgumentParser):
 
 
 def _private_directory(value: str | Path, *, create: bool = True) -> Path:
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    path = Path(os.path.abspath(path))
-    try:
-        if path.exists() or path.is_symlink():
-            metadata = path.lstat()
-            if (
-                not stat.S_ISDIR(metadata.st_mode)
-                or stat.S_ISLNK(metadata.st_mode)
-                or metadata.st_uid != os.getuid()
-                or stat.S_IMODE(metadata.st_mode) & 0o077
-            ):
-                raise ValueError("data directory is invalid")
-        elif create:
-            path.mkdir(mode=0o700, parents=True)
-            path.chmod(0o700)
-        else:
-            parent = path.parent
-            while not parent.exists() and parent != parent.parent:
-                parent = parent.parent
-            metadata = parent.lstat()
-            if (
-                not stat.S_ISDIR(metadata.st_mode)
-                or stat.S_ISLNK(metadata.st_mode)
-                or metadata.st_uid != os.getuid()
-                or not os.access(parent, os.W_OK | os.X_OK)
-            ):
-                raise ValueError("data directory is invalid")
-    except OSError as exc:
-        raise ValueError("data directory is unavailable") from exc
-    return path
+    return private_directory_path(value, create=create)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -96,12 +68,23 @@ def _emit_status(status: dict[str, object]) -> None:
 
 def _preflight(args: argparse.Namespace) -> Path:
     try:
-        if args.port < 0 or args.port > 65535:
-            raise ValueError("port is invalid")
+        _segment(args.swarm_id, "swarm_id")
+        _segment(args.seed_node_id, "seed_node_id")
+        _segment(args.incarnation, "incarnation")
+        _validate_bind_address(args.bind, args.port)
         if args.bind in {"0.0.0.0", "::"} and args.advertised_url is None:
             raise ValueError("advertised URL is required for wildcard binds")
+        if args.advertised_url is not None:
+            if args.port == 0:
+                raise ValueError("advertised URL requires a fixed port")
+            _validate_endpoint_url(
+                args.advertised_url,
+                expected_scheme="http",
+                expected_host=(None if args.bind in {"0.0.0.0", "::"} else args.bind),
+                expected_port=args.port,
+            )
         return _private_directory(args.data_dir, create=not args.dry_run)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except Exception as exc:
         raise _EntrypointFailure(
             "seed_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
@@ -132,7 +115,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             invite_registry=SqliteInviteRegistry(database),
             incarnation=args.incarnation,
         )
-    except (OSError, RuntimeError, ValueError) as exc:
+    except Exception as exc:
         raise _EntrypointFailure(
             "seed_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
@@ -145,6 +128,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         stopping.set()
 
     previous: dict[int, object] = {}
+    failure: _EntrypointFailure | None = None
     try:
         server = SeedHTTPServer(
             coordinator,
@@ -152,10 +136,8 @@ def run(argv: Sequence[str] | None = None) -> int:
             port=args.port,
             advertised_url=args.advertised_url,
         )
-        previous = {
-            signum: signal.signal(signum, request_stop)
-            for signum in (signal.SIGINT, signal.SIGTERM)
-        }
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.signal(signum, request_stop)
         server.start()
         _emit_status(
             {
@@ -168,18 +150,32 @@ def run(argv: Sequence[str] | None = None) -> int:
         )
         while not stopping.wait(0.5):
             pass
-    except _EntrypointFailure:
-        raise
-    except (OSError, RuntimeError, ValueError) as exc:
-        raise _EntrypointFailure(
+    except _EntrypointFailure as exc:
+        failure = exc
+    except Exception:
+        failure = _EntrypointFailure(
             "seed_runtime_failed",
             EXIT_RUNTIME_FAILURE,
-        ) from exc
+        )
     finally:
         if server is not None:
-            server.close()
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
+            try:
+                server.close()
+            except Exception:
+                failure = _EntrypointFailure(
+                    "seed_runtime_failed",
+                    EXIT_RUNTIME_FAILURE,
+                )
+        for signum in reversed(tuple(previous)):
+            try:
+                signal.signal(signum, previous[signum])
+            except Exception:
+                failure = _EntrypointFailure(
+                    "seed_runtime_failed",
+                    EXIT_RUNTIME_FAILURE,
+                )
+    if failure is not None:
+        raise failure from None
     return EXIT_SUCCESS
 
 
@@ -189,7 +185,7 @@ def main() -> None:
     except _EntrypointFailure as exc:
         print(exc.code, file=sys.stderr)
         raise SystemExit(exc.exit_status) from None
-    except (OSError, RuntimeError, ValueError):
+    except Exception:
         print("seed_runtime_failed", file=sys.stderr)
         raise SystemExit(EXIT_RUNTIME_FAILURE) from None
 

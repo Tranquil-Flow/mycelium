@@ -5,10 +5,12 @@ import json
 import os
 from pathlib import Path
 import selectors
+import signal
 import socket
 import stat
 import subprocess
 import sys
+import threading
 from typing import Any
 from urllib.request import urlopen
 
@@ -23,7 +25,9 @@ def _read_status(process: subprocess.Popen[str]) -> dict[str, Any]:
     selector.register(process.stdout, selectors.EVENT_READ)
     try:
         ready = selector.select(timeout=10)
-        assert ready, f"process did not emit startup status; returncode={process.poll()}"
+        assert ready, (
+            f"process did not emit startup status; returncode={process.poll()}"
+        )
         line = process.stdout.readline()
     finally:
         selector.close()
@@ -75,11 +79,14 @@ def test_seed_module_starts_real_listener_and_reuses_private_identity(
             "seed_endpoint_id": first_status["seed_endpoint_id"],
             "seed_url": first_status["seed_url"],
         }
-        with urlopen(first_status["seed_url"] + "/seed/identity", timeout=2) as response:
+        with urlopen(
+            first_status["seed_url"] + "/seed/identity", timeout=2
+        ) as response:
             identity = json.loads(response.read())
-        assert identity["statement"]["seed_endpoint_id"] == first_status[
-            "seed_endpoint_id"
-        ]
+        assert (
+            identity["statement"]["seed_endpoint_id"]
+            == first_status["seed_endpoint_id"]
+        )
     finally:
         first.terminate()
         first_stdout, first_stderr = first.communicate(timeout=5)
@@ -184,3 +191,321 @@ def test_seed_runtime_failure_has_distinct_exit_status(tmp_path: Path) -> None:
     assert completed.returncode == 4
     assert completed.stdout == ""
     assert completed.stderr == "seed_runtime_failed\n"
+
+
+def test_seed_state_root_rejects_nonfinal_symlink_without_creation(
+    tmp_path: Path,
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    real_parent = tmp_path / "real"
+    real_parent.mkdir(mode=0o700)
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(ValueError):
+        seed_main._private_directory(linked_parent / "state")
+
+    assert not (real_parent / "state").exists()
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--swarm-id", "invalid swarm"),
+        ("--seed-node-id", "invalid seed"),
+        ("--incarnation", "invalid incarnation"),
+        ("--bind", "http://127.0.0.1"),
+        ("--port", "65536"),
+        ("--advertised-url", "http://user:password@127.0.0.1:8765"),
+    ],
+)
+def test_seed_dry_run_uses_real_constructor_validators_without_state(
+    tmp_path: Path,
+    flag: str,
+    value: str,
+) -> None:
+    data_dir = tmp_path / "missing" / "seed"
+    command = _command(data_dir)
+    command.append("--dry-run")
+    if flag in command:
+        command[command.index(flag) + 1] = value
+    else:
+        command.extend([flag, value])
+
+    completed = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "seed_preflight_failed\n"
+    assert not data_dir.exists()
+
+
+def test_seed_dry_run_accepts_absent_root_without_creating_it(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    data_dir = tmp_path / "missing" / "seed"
+    assert seed_main.run(["--data-dir", str(data_dir), "--dry-run"]) == 0
+    assert not data_dir.exists()
+    capsys.readouterr()
+
+
+def test_second_signal_handler_failure_restores_first_and_closes_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    data_dir = tmp_path / "seed-handlers"
+    data_dir.mkdir(mode=0o700)
+    old_handler = object()
+    calls: list[tuple[int, object]] = []
+
+    class FakeSigner:
+        endpoint_id = "seed-handler-endpoint"
+
+    class FakeCoordinator:
+        seed_url = "http://127.0.0.1:8765"
+
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+    class FakeRegistry:
+        def __init__(self, _path: Path) -> None:
+            return None
+
+    class FakeServer:
+        instances: list["FakeServer"] = []
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.closed = False
+            self.started = False
+            self.instances.append(self)
+
+        def start(self) -> "FakeServer":
+            self.started = True
+            return self
+
+        def close(self) -> None:
+            self.closed = True
+
+    installs = 0
+
+    def fake_signal(signum: int, handler: object) -> object:
+        nonlocal installs
+        calls.append((signum, handler))
+        if handler is not old_handler:
+            installs += 1
+            if installs == 2:
+                raise RuntimeError("second-handler-secret")
+        return old_handler
+
+    monkeypatch.setattr(
+        seed_main, "load_or_create_node_signer", lambda _path: FakeSigner()
+    )
+    monkeypatch.setattr(seed_main, "SeedCoordinator", FakeCoordinator)
+    monkeypatch.setattr(seed_main, "SqliteInviteRegistry", FakeRegistry)
+    monkeypatch.setattr(seed_main, "SeedHTTPServer", FakeServer)
+    monkeypatch.setattr(seed_main.signal, "signal", fake_signal)
+
+    with pytest.raises(seed_main._EntrypointFailure) as failed:
+        seed_main.run(["--data-dir", str(data_dir)])
+
+    assert failed.value.code == "seed_runtime_failed"
+    assert FakeServer.instances[0].closed is True
+    assert (signal.SIGINT, old_handler) in calls
+
+
+def test_seed_status_failure_closes_started_server(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    data_dir = tmp_path / "seed-status"
+    data_dir.mkdir(mode=0o700)
+
+    class FakeSigner:
+        endpoint_id = "seed-status-endpoint"
+
+    class FakeCoordinator:
+        seed_url = "http://127.0.0.1:8765"
+
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+    class FakeRegistry:
+        def __init__(self, _path: Path) -> None:
+            return None
+
+    class FakeServer:
+        instance: "FakeServer"
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.started = False
+            self.closed = False
+            FakeServer.instance = self
+
+        def start(self) -> "FakeServer":
+            self.started = True
+            return self
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(
+        seed_main, "load_or_create_node_signer", lambda _path: FakeSigner()
+    )
+    monkeypatch.setattr(seed_main, "SeedCoordinator", FakeCoordinator)
+    monkeypatch.setattr(seed_main, "SqliteInviteRegistry", FakeRegistry)
+    monkeypatch.setattr(seed_main, "SeedHTTPServer", FakeServer)
+    monkeypatch.setattr(
+        seed_main,
+        "_emit_status",
+        lambda _status: (_ for _ in ()).throw(KeyError("status-secret")),
+    )
+
+    with pytest.raises(seed_main._EntrypointFailure) as failed:
+        seed_main.run(["--data-dir", str(data_dir)])
+
+    assert failed.value.code == "seed_runtime_failed"
+    assert FakeServer.instance.started is True
+    assert FakeServer.instance.closed is True
+
+
+def test_server_start_failure_closes_without_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+    class FakeHTTPServer:
+        server_address = ("127.0.0.1", 8765)
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.shutdown_calls = 0
+            self.close_calls = 0
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+        def server_close(self) -> None:
+            self.close_calls += 1
+
+        def serve_forever(self) -> None:
+            return None
+
+    class FailingThread:
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("thread-start-secret")
+
+    monkeypatch.setattr(seed_http, "ThreadingHTTPServer", FakeHTTPServer)
+    monkeypatch.setattr(seed_http.threading, "Thread", FailingThread)
+    server = seed_http.SeedHTTPServer(
+        FakeCoordinator(),
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    with pytest.raises(RuntimeError):
+        server.start()
+    server.close()
+
+    assert server._server.shutdown_calls == 0
+    assert server._server.close_calls == 1
+    assert server._thread is None
+
+
+def test_seed_main_catches_keyerror_without_value_or_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    secret = "seed-secret-value"
+
+    def fail() -> int:
+        raise KeyError(secret)
+
+    monkeypatch.setattr(seed_main, "run", fail)
+    with pytest.raises(SystemExit) as stopped:
+        seed_main.main()
+
+    captured = capsys.readouterr()
+    assert stopped.value.code == 4
+    assert captured.out == ""
+    assert captured.err == "seed_runtime_failed\n"
+    assert secret not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_seed_server_start_close_state_machine_leaves_no_thread() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+    server = seed_http.SeedHTTPServer(
+        FakeCoordinator(),
+        host="127.0.0.1",
+        port=0,
+    )
+    assert server.start() is server
+    assert server.start() is server
+    server.close()
+    server.close()
+
+    assert server._thread is None
+    assert not any(
+        thread.name == "mycelium-seed-http" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+    with pytest.raises(RuntimeError):
+        server.start()
+
+
+def test_seed_server_close_before_start_never_calls_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+    class FakeHTTPServer:
+        server_address = ("127.0.0.1", 8765)
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self.shutdown_calls = 0
+            self.close_calls = 0
+
+        def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+        def server_close(self) -> None:
+            self.close_calls += 1
+
+    monkeypatch.setattr(seed_http, "ThreadingHTTPServer", FakeHTTPServer)
+    server = seed_http.SeedHTTPServer(
+        FakeCoordinator(),
+        host="127.0.0.1",
+        port=8765,
+    )
+    server.close()
+    server.close()
+
+    assert server._server.shutdown_calls == 0
+    assert server._server.close_calls == 1

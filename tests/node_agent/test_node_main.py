@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 from itertools import count
 import json
 import os
@@ -20,7 +21,7 @@ from mycelium_invite import SqliteInviteRegistry
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator
-from mycelium_seed.http import SeedHTTPServer
+from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, SeedHTTPServer
 from tests.e2e_request_iroh.conftest import (
     native_iroh_sidecar_binary as node_main_sidecar_binary,  # noqa: F401
 )
@@ -37,7 +38,9 @@ def _read_status(process: subprocess.Popen[str]) -> dict[str, Any]:
     selector.register(process.stdout, selectors.EVENT_READ)
     try:
         ready = selector.select(timeout=15)
-        assert ready, f"process did not emit startup status; returncode={process.poll()}"
+        assert ready, (
+            f"process did not emit startup status; returncode={process.poll()}"
+        )
         line = process.stdout.readline()
     finally:
         selector.close()
@@ -268,15 +271,18 @@ def test_node_dry_run_performs_no_network_or_process_io(
     monkeypatch.setattr(node_main, "PhysicalNodeProcess", forbidden)
     monkeypatch.setattr(node_main, "load_or_create_node_signer", forbidden)
 
-    assert node_main.run(
-        _node_command(
-            data_dir=data_dir,
-            node_id="node-main-dry",
-            sidecar=sidecar,
-            bundle_file=bundle_file,
-            dry_run=True,
-        )[3:]
-    ) == 0
+    assert (
+        node_main.run(
+            _node_command(
+                data_dir=data_dir,
+                node_id="node-main-dry",
+                sidecar=sidecar,
+                bundle_file=bundle_file,
+                dry_run=True,
+            )[3:]
+        )
+        == 0
+    )
 
     captured = capsys.readouterr()
     expected = {
@@ -374,7 +380,9 @@ def test_node_join_rejection_has_distinct_exit_and_redacts_token(
         seed_node_id="seed-node",
         seed_url=None,
         signer=generate_ed25519_signer(endpoint_id="seed-endpoint-replay"),
-        invite_registry=SqliteInviteRegistry(tmp_path / "seed-replay" / "state.sqlite3"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-replay" / "state.sqlite3"
+        ),
         incarnation="seed-main-test",
         id_source=_ids(),
     )
@@ -437,7 +445,9 @@ def test_node_runtime_failure_has_distinct_exit_status(
         seed_node_id="seed-node",
         seed_url=None,
         signer=generate_ed25519_signer(endpoint_id="seed-endpoint-runtime"),
-        invite_registry=SqliteInviteRegistry(tmp_path / "seed-runtime" / "state.sqlite3"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-runtime" / "state.sqlite3"
+        ),
         incarnation="seed-main-test",
         id_source=_ids(),
     )
@@ -516,7 +526,9 @@ for line in sys.stdin:
         seed_node_id="seed-node",
         seed_url="http://127.0.0.1:9",
         signer=generate_ed25519_signer(endpoint_id="seed-endpoint-cleanup"),
-        invite_registry=SqliteInviteRegistry(tmp_path / "seed-cleanup" / "state.sqlite3"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-cleanup" / "state.sqlite3"
+        ),
         incarnation="seed-main-test",
         id_source=_ids(),
     )
@@ -601,7 +613,7 @@ for line in sys.stdin:
             return
         os.kill(os.getpid(), signal.SIGTERM)
 
-    timer = threading.Thread(target=terminate_entrypoint, daemon=True)
+    timer = threading.Thread(target=terminate_entrypoint, daemon=False)
     timer.start()
     cleanup_args = _node_command(
         data_dir=data_dir,
@@ -617,12 +629,524 @@ for line in sys.stdin:
     assert timer_errors == []
     pids = [int(value) for value in pid_file.read_text().split()]
     alive_after_cleanup = [pid for pid in pids if _pid_exists(pid)]
-    for pid in alive_after_cleanup:
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
     assert result == 0
     assert elapsed < 7.0
     assert alive_after_cleanup == []
+
+
+def test_node_state_root_rejects_nonfinal_symlink_without_creation(
+    tmp_path: Path,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    real_parent = tmp_path / "real"
+    real_parent.mkdir(mode=0o700)
+    linked_parent = tmp_path / "linked"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(ValueError):
+        node_main._private_directory(linked_parent / "state")
+
+    assert not (real_parent / "state").exists()
+
+
+def test_node_dry_run_accepts_absent_root_without_creating_it(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    state_root = tmp_path / "missing" / "node"
+    sidecar = tmp_path / "sidecar"
+    sidecar.write_text("#!/bin/sh\nexit 0\n")
+    sidecar.chmod(0o700)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-node-absent",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:9",
+        signer=generate_ed25519_signer(endpoint_id="seed-endpoint-absent"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-absent" / "state.sqlite3"
+        ),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    bundle_file = tmp_path / "absent-bundle.json"
+    _write_bundle(
+        bundle_file,
+        coordinator.mint_invite(nonce="node-absent", ttl_seconds=120),
+    )
+
+    assert (
+        node_main.run(
+            _node_command(
+                data_dir=state_root,
+                node_id="node-absent",
+                sidecar=sidecar,
+                bundle_file=bundle_file,
+                dry_run=True,
+            )[3:]
+        )
+        == 0
+    )
+    assert not state_root.exists()
+    capsys.readouterr()
+
+
+def test_join_bundle_open_is_descriptor_bounded_and_never_uses_read_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    bundle_file = tmp_path / "bundle.json"
+    bundle_file.write_bytes(b"{}")
+    bundle_file.chmod(0o600)
+
+    def forbidden_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("pathname read crossed the descriptor boundary")
+
+    monkeypatch.setattr(Path, "read_bytes", forbidden_read_bytes)
+    assert node_main._canonical_document(bundle_file) == {}
+
+
+def test_join_bundle_rejects_hardlink_symlink_oversize_and_noncanonical(
+    tmp_path: Path,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    original = tmp_path / "bundle.json"
+    original.write_bytes(b"{}")
+    original.chmod(0o600)
+    hardlink = tmp_path / "hardlink.json"
+    os.link(original, hardlink)
+    symlink = tmp_path / "symlink.json"
+    symlink.symlink_to(original)
+    oversized = tmp_path / "oversized.json"
+    oversized.write_bytes(b"x" * (1024 * 1024 + 1))
+    oversized.chmod(0o600)
+    noncanonical = tmp_path / "noncanonical.json"
+    noncanonical.write_bytes(b'{ "a": 1 }')
+    noncanonical.chmod(0o600)
+
+    for candidate in (original, hardlink, symlink, oversized, noncanonical):
+        with pytest.raises(ValueError):
+            node_main._canonical_document(candidate)
+
+
+def test_node_refuses_path_sidecar_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    sidecar = tmp_path / "mycelium-iroh-sidecar"
+    sidecar.write_text("#!/bin/sh\nexit 0\n")
+    sidecar.chmod(0o700)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setattr(node_main, "__file__", str(tmp_path / "pkg" / "__main__.py"))
+
+    with pytest.raises(ValueError):
+        node_main._sidecar_path(None)
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "expected"),
+    [
+        (400, "seed_join_mismatch", True),
+        (401, "invite_signature_invalid", True),
+        (409, "invite_replayed", True),
+        (408, "seed_join_mismatch", False),
+        (400, "seed_http_remote_error", False),
+        (400, "invite_registry_unavailable", False),
+        (404, "seed_http_route_unknown", False),
+        (500, "seed_join_mismatch", False),
+        (None, "seed_http_unreachable", False),
+    ],
+)
+def test_join_rejection_requires_authoritative_status_and_code(
+    status: int | None,
+    code: str,
+    expected: bool,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    assert node_main._join_rejected(SeedHTTPError(code, status=status)) is expected
+
+
+@pytest.mark.parametrize(
+    "invalid_url",
+    [
+        "http://user:password@seed.test:8765",
+        "http://seed.test:8765?token=secret",
+        "http://seed.test:8765/#secret",
+        "http://seed.test:not-a-port",
+        "http://seed.test:8765\\@attacker.test",
+        "http:///seed.test:8765",
+    ],
+)
+def test_seed_client_rejects_credentialed_or_ambiguous_urls(
+    invalid_url: str,
+) -> None:
+    signer = generate_ed25519_signer(endpoint_id="seed-url-validator")
+    with pytest.raises(ValueError):
+        SeedHTTPClient(
+            seed_url=invalid_url,
+            swarm_id="swarm-url-validator",
+            seed_key_digest=signer.verification_key_digest,
+            seed_key_records=[signer.public_key_record()],
+        )
+
+
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--node-id", "invalid node"),
+        ("--run-id", "invalid run"),
+        ("--deployment-id", "invalid deployment"),
+        ("--incarnation", "invalid incarnation"),
+        ("--advertise", ""),
+        (
+            "--advertise",
+            "https://user:password@node.test/control?secret=value",
+        ),
+    ],
+)
+def test_node_dry_run_uses_real_session_and_command_validators(
+    tmp_path: Path,
+    flag: str,
+    value: str,
+) -> None:
+    data_dir = tmp_path / "node-dry-invalid"
+    sidecar = tmp_path / "sidecar"
+    sidecar.write_text("#!/bin/sh\nexit 0\n")
+    sidecar.chmod(0o700)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-node-dry-invalid",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:9",
+        signer=generate_ed25519_signer(endpoint_id="seed-dry-invalid"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-dry-invalid" / "state.sqlite3"
+        ),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    bundle_file = tmp_path / "dry-invalid-bundle.json"
+    _write_bundle(
+        bundle_file,
+        coordinator.mint_invite(nonce="node-dry-invalid", ttl_seconds=120),
+    )
+    command = _node_command(
+        data_dir=data_dir,
+        node_id="node-dry-invalid",
+        sidecar=sidecar,
+        bundle_file=bundle_file,
+        dry_run=True,
+    )
+    if flag in command:
+        command[command.index(flag) + 1] = value
+    else:
+        command.extend([flag, value])
+
+    completed = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "node_preflight_failed\n"
+    assert not data_dir.exists()
+
+
+def test_node_main_catches_keyerror_without_value_or_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    secret = "secret-token-value"
+
+    def fail() -> int:
+        raise KeyError(secret)
+
+    monkeypatch.setattr(node_main, "run", fail)
+    with pytest.raises(SystemExit) as stopped:
+        node_main.main()
+
+    captured = capsys.readouterr()
+    assert stopped.value.code == 4
+    assert captured.out == ""
+    assert captured.err == "node_runtime_failed\n"
+    assert secret not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_process_verified_signal_refuses_changed_or_protected_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    executable = process_module._ExecutableIdentity(
+        path="/trusted/python",
+        device=1,
+        inode=2,
+        mode=stat.S_IFREG | 0o755,
+        uid=os.getuid(),
+        size=10,
+        mtime_ns=11,
+        ctime_ns=12,
+    )
+    launch = process_module._ProcessIdentity(
+        pid=4242,
+        parent_pid=os.getpid(),
+        process_group=4242,
+        session_id=4242,
+        start_token="launch",
+        executable=executable,
+    )
+
+    class FakePopen:
+        pid = 4242
+
+        def poll(self) -> None:
+            return None
+
+    supervised = process_module.PhysicalNodeProcess.__new__(
+        process_module.PhysicalNodeProcess
+    )
+    supervised._process = FakePopen()
+    supervised._launch_identity = launch
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
+    monkeypatch.setattr(
+        process_module,
+        "_inventory_process",
+        lambda _pid: process_module._ProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_token="reused",
+            executable=executable,
+        ),
+    )
+    monkeypatch.setattr(process_module, "_protected_process_groups", lambda: {9999})
+
+    assert supervised._signal_process_group(signal.SIGKILL) is False
+    assert sent == []
+
+    monkeypatch.setattr(process_module, "_inventory_process", lambda _pid: launch)
+    monkeypatch.setattr(
+        process_module,
+        "_protected_process_groups",
+        lambda: {launch.process_group},
+    )
+    assert supervised._signal_process_group(signal.SIGKILL) is False
+    assert sent == []
+
+
+def test_reader_thread_start_failure_reaps_launched_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    executable_path = Path(sys.executable).resolve()
+    metadata = executable_path.stat()
+    executable = process_module._ExecutableIdentity(
+        path=str(executable_path),
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        mode=metadata.st_mode,
+        uid=metadata.st_uid,
+        size=metadata.st_size,
+        mtime_ns=metadata.st_mtime_ns,
+        ctime_ns=metadata.st_ctime_ns,
+    )
+    identity = process_module._ProcessIdentity(
+        pid=4343,
+        parent_pid=os.getpid(),
+        process_group=4343,
+        session_id=4343,
+        start_token="launch",
+        executable=executable,
+    )
+
+    class FakePopen:
+        pid = 4343
+        stdin = io.BytesIO()
+        stdout = io.BytesIO()
+        stderr = io.BytesIO()
+
+        def __init__(self, *_args: Any, **kwargs: Any) -> None:
+            if kwargs:
+                assert kwargs["start_new_session"] is True
+            self.returncode: int | None = None
+
+        def poll(self) -> int | None:
+            return self.returncode
+
+        def wait(self, timeout: float | None = None) -> int:
+            if self.returncode is None:
+                raise subprocess.TimeoutExpired("fake", timeout)
+            return self.returncode
+
+    starts = 0
+
+    class FakeThread:
+        def __init__(self, **kwargs: Any) -> None:
+            assert kwargs["daemon"] is False
+            self.started = False
+
+        def start(self) -> None:
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("thread-start-secret")
+            self.started = True
+
+        def join(self, timeout: float | None = None) -> None:
+            return None
+
+        def is_alive(self) -> bool:
+            return False
+
+    sent: list[tuple[int, int]] = []
+
+    def kill_group(pgid: int, sig: int) -> None:
+        sent.append((pgid, sig))
+        fake_process.returncode = -sig
+
+    fake_process = FakePopen()
+    monkeypatch.setattr(
+        process_module.subprocess, "Popen", lambda *_a, **_k: fake_process
+    )
+    monkeypatch.setattr(process_module.threading, "Thread", FakeThread)
+    monkeypatch.setattr(process_module, "_inventory_process", lambda _pid: identity)
+    monkeypatch.setattr(
+        process_module, "_protected_process_groups", lambda: {os.getpgrp()}
+    )
+    monkeypatch.setattr(os, "killpg", kill_group)
+
+    with pytest.raises(process_module.NodeProcessError) as failed:
+        process_module.PhysicalNodeProcess(
+            command=(str(executable_path), "-c", "pass"),
+            node_id="node-thread-start",
+            run_id="run-thread-start",
+            deployment_id="deployment-thread-start",
+            response_timeout_seconds=0.01,
+            shutdown_timeout_seconds=0.1,
+        )
+
+    assert failed.value.code == "node_process_start_failed"
+    assert sent
+    assert all(pgid == identity.process_group for pgid, _sig in sent)
+    assert fake_process.returncode is not None
+
+
+def test_join_bundle_rejects_path_replacement_during_descriptor_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    bundle_file = tmp_path / "bundle.json"
+    replacement = tmp_path / "replacement.json"
+    bundle_file.write_bytes(b"{}")
+    replacement.write_bytes(b"{}")
+    bundle_file.chmod(0o600)
+    replacement.chmod(0o600)
+    real_read = os.read
+    replaced = False
+
+    def replace_then_read(descriptor: int, size: int) -> bytes:
+        nonlocal replaced
+        if not replaced:
+            os.replace(replacement, bundle_file)
+            replaced = True
+        return real_read(descriptor, size)
+
+    monkeypatch.setattr(os, "read", replace_then_read)
+    with pytest.raises(ValueError):
+        node_main._canonical_document(bundle_file)
+
+
+def test_node_parser_rejects_file_and_stdin_bundle_sources(
+    tmp_path: Path,
+) -> None:
+    sidecar = tmp_path / "sidecar"
+    sidecar.write_text("#!/bin/sh\nexit 0\n")
+    sidecar.chmod(0o700)
+    bundle = tmp_path / "bundle.json"
+    bundle.write_bytes(b"{}")
+    bundle.chmod(0o600)
+    command = _node_command(
+        data_dir=tmp_path / "node",
+        node_id="node-parser",
+        sidecar=sidecar,
+        bundle_file=bundle,
+        bundle_stdin=True,
+    )
+
+    completed = subprocess.run(
+        command,
+        input="{}",
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "node_preflight_failed\n"
+
+
+def test_sidecar_replacement_is_rejected_before_popen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    sidecar = tmp_path / "sidecar"
+    replacement = tmp_path / "replacement"
+    sidecar.write_text("#!/bin/sh\nexit 0\n")
+    replacement.write_text("#!/bin/sh\nexit 1\n")
+    sidecar.chmod(0o700)
+    replacement.chmod(0o700)
+    identity = process_module.capture_executable_identity(
+        sidecar,
+        require_canonical=True,
+        require_private_owner=True,
+    )
+    os.replace(replacement, sidecar)
+    popen_calls = 0
+
+    def forbidden_popen(*_args: Any, **_kwargs: Any) -> Any:
+        nonlocal popen_calls
+        popen_calls += 1
+        raise AssertionError("replaced executable reached Popen")
+
+    monkeypatch.setattr(process_module.subprocess, "Popen", forbidden_popen)
+    with pytest.raises(process_module.NodeProcessError) as failed:
+        process_module.PhysicalNodeProcess(
+            command=(sys.executable, "-c", "pass"),
+            node_id="node-sidecar-replaced",
+            run_id="run-sidecar-replaced",
+            deployment_id="deployment-sidecar-replaced",
+            expected_executables=(identity,),
+        )
+
+    assert failed.value.code == "node_process_executable_changed"
+    assert popen_calls == 0
+
+
+def test_temporary_root_cleanup_refuses_path_replacement(tmp_path: Path) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    original = node_main._temporary_root()
+    moved = tmp_path / "moved-original"
+    original.path.rename(moved)
+    original.path.mkdir(mode=0o700)
+
+    with pytest.raises(RuntimeError):
+        node_main._remove_temporary_root(original)
+
+    assert original.path.is_dir()
+    assert moved.is_dir()
+    original.path.rmdir()
+    moved.rmdir()
