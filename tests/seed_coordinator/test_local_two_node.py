@@ -40,6 +40,7 @@ from tests.qualification.conftest import make_case, synthetic_signature_verifier
 from tests.physical_qualification.test_node_service import (
     SIDECAR_BINARY,
     _NodeClient,
+    _command,
 )
 from tests.seed_coordinator import native_process_harness as harness
 
@@ -240,13 +241,47 @@ class _IsolatedNodeClient(_NodeClient):
             self.command("stop")
             self.process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT)
 
+    def request_stop(self) -> bool:
+        if self.process.poll() is not None:
+            return True
+        stream = self.process.stdin
+        if stream is None or stream.closed:
+            raise BrokenPipeError("owned process stdin unavailable")
+        command_id = f"{self.node_id}-{self.next_id}"
+        self.next_id += 1
+        encoded = (
+            json.dumps(
+                _command(
+                    "stop",
+                    command_id=command_id,
+                    run_id=self.run_id,
+                    deployment_id=self.deployment_id,
+                ),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            + b"\n"
+        )
+        descriptor = stream.fileno()
+        was_blocking = os.get_blocking(descriptor)
+        os.set_blocking(descriptor, False)
+        try:
+            written = os.write(descriptor, encoded)
+        finally:
+            os.set_blocking(descriptor, was_blocking)
+        if written != len(encoded):
+            raise BlockingIOError("incomplete owned stop request")
+        return True
+
 
 def _native_sidecar_pid(
-    owner: harness.OwnedGroup,
+    owned_groups: dict[str, harness.OwnedGroup],
+    node_id: str,
     *,
     discovered_pids: set[int],
     expected_binary: Path = SIDECAR_BINARY,
 ) -> int:
+    owner = owned_groups[node_id]
     children = [
         process
         for process in harness.process_inventory().values()
@@ -264,6 +299,12 @@ def _native_sidecar_pid(
     assert harness.same_canonical_file(child.comm, expected_binary), (
         f"service process {owner.pid} child {child.pid} has unexpected "
         f"executable {child.comm}; expected {expected_binary.resolve(strict=True)}"
+    )
+    harness.register_owned_member(
+        owned_groups,
+        node_id,
+        child,
+        expected_binary,
     )
     return child.pid
 
@@ -284,6 +325,19 @@ def _fake_owner(
         if started is None
         else harness.ProcessRecord(pid, os.getpid(), pid, started, str(executable))
     )
+    members = (
+        ()
+        if leader is None
+        else (
+            harness.OwnedMember(
+                leader,
+                executable,
+                harness.path_identity(executable),
+                worktree,
+                harness.path_identity(worktree),
+            ),
+        )
+    )
     return harness.OwnedGroup(
         f"node-{pid}",
         process,
@@ -295,6 +349,7 @@ def _fake_owner(
         harness.path_identity(executable),
         harness.path_identity(worktree),
         leader,
+        members,
     )
 
 
@@ -527,7 +582,8 @@ def test_sidecar_observation_requires_exact_child_and_owned_group(
     for path in (expected, spoof):
         path.parent.mkdir()
         path.write_bytes(path.parent.name.encode())
-    owner, child_pid = _fake_owner(4_242, started=None), 9_001
+    owner, child_pid = _fake_owner(4_242), 9_001
+    owners = {owner.node_id: owner}
     records = iter(
         harness.ProcessRecord(child_pid, owner.pid, owner.pgid, "start", str(path))
         for path in (spoof, expected)
@@ -537,16 +593,61 @@ def test_sidecar_observation_requires_exact_child_and_owned_group(
         "process_inventory",
         lambda: {child_pid: next(records)},
     )
-    monkeypatch.setattr(os, "getpgid", lambda pid: owner.pgid)
+    real_getpgid = os.getpgid
+    monkeypatch.setattr(
+        os,
+        "getpgid",
+        lambda pid: (
+            owner.pgid if pid in {owner.pid, child_pid} else real_getpgid(pid)
+        ),
+    )
     monkeypatch.setattr(os, "getsid", lambda pid: owner.sid)
+    monkeypatch.setattr(harness, "process_cwd", lambda pid: WORKTREE_ROOT)
     discovered: set[int] = set()
     with pytest.raises(AssertionError, match="unexpected executable"):
-        _native_sidecar_pid(owner, discovered_pids=discovered, expected_binary=expected)
+        _native_sidecar_pid(
+            owners,
+            owner.node_id,
+            discovered_pids=discovered,
+            expected_binary=expected,
+        )
     assert (
-        _native_sidecar_pid(owner, discovered_pids=discovered, expected_binary=expected)
+        _native_sidecar_pid(
+            owners,
+            owner.node_id,
+            discovered_pids=discovered,
+            expected_binary=expected,
+        )
         == child_pid
     )
     assert discovered == {child_pid}
+    assert [member.record for member in owners[owner.node_id].members] == [
+        owner.leader,
+        harness.ProcessRecord(
+            child_pid,
+            owner.pid,
+            owner.pgid,
+            "start",
+            str(expected),
+        ),
+    ]
+    registered = owners[owner.node_id]
+    monkeypatch.setattr(
+        harness,
+        "process_inventory",
+        lambda: {
+            member.record.pid: member.record for member in registered.members
+        },
+    )
+    signals: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(
+        os,
+        "killpg",
+        lambda pgid, requested: signals.append((pgid, requested)),
+    )
+    errors, uncertain = harness.signal_owned_groups([registered], signal.SIGTERM)
+    assert errors == [] and uncertain is False
+    assert signals == [(registered.pgid, signal.SIGTERM)]
 
 
 @pytest.mark.parametrize("requested", [signal.SIGTERM, signal.SIGKILL])
@@ -630,6 +731,47 @@ def test_group_signal_accepts_only_exact_immutable_ownership(
     assert [str(error) for error in errors] == ["ps failed"]
 
 
+def test_group_signal_refuses_unregistered_same_group_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = _fake_owner(9_121)
+    extra = harness.ProcessRecord(
+        9_122,
+        owner.pid,
+        owner.pgid,
+        "Thu Jul 23 21:00:01 2026",
+        str(SIDECAR_BINARY),
+    )
+    monkeypatch.setattr(
+        harness,
+        "process_inventory",
+        lambda: {owner.pid: owner.leader, extra.pid: extra},
+    )
+    monkeypatch.setattr(harness, "process_cwd", lambda pid: WORKTREE_ROOT)
+    real_getpgid = os.getpgid
+    monkeypatch.setattr(
+        os,
+        "getpgid",
+        lambda pid: (
+            owner.pgid if pid in {owner.pid, extra.pid} else real_getpgid(pid)
+        ),
+    )
+    monkeypatch.setattr(os, "getsid", lambda pid: owner.sid)
+    signals: list[tuple[int, signal.Signals]] = []
+    monkeypatch.setattr(
+        os,
+        "killpg",
+        lambda pgid, requested: signals.append((pgid, requested)),
+    )
+
+    errors, uncertain = harness.signal_owned_groups([owner], signal.SIGTERM)
+
+    assert uncertain
+    assert signals == []
+    assert len(errors) == 1
+    assert "unregistered" in str(errors[0])
+
+
 def test_owner_registration_requires_live_exact_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -662,34 +804,12 @@ def test_owner_registration_requires_live_exact_process(
     assert owner.leader == inventory[pid] and owners == {"node": owner}
 
 
-def test_cleanup_preserves_constructor_and_post_start_faults(
+def test_cleanup_preserves_body_and_cleanup_faults_without_helpers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real_thread = threading.Thread
-    constructed = count()
-    constructor_fault = GeneratorExit("constructor fault")
-    post_start_fault = GeneratorExit("post-start fault")
-
-    class FaultThread(real_thread):
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            fault_index = next(constructed)
-            if fault_index == 0:
-                raise constructor_fault
-            super().__init__(*args, **kwargs)
-            self.fault_index = fault_index
-
-        def start(self) -> None:
-            super().start()
-            if self.fault_index == 1:
-                raise post_start_fault
-
-    monkeypatch.setattr(harness.threading, "Thread", FaultThread)
     ledger: list[str] = []
-    stop_release = threading.Event()
-    before_threads = set(threading.enumerate())
     processes = {node: Mock(pid=8_200 + index) for index, node in enumerate(NODE_IDS)}
     clients = {node: Mock(process=processes[node]) for node in NODE_IDS}
-    clients[NODE_IDS[1]].stop.side_effect = stop_release.wait
     owners = {
         node: _fake_owner(process.pid, process=process, started=None)._replace(
             node_id=node
@@ -705,9 +825,11 @@ def test_cleanup_preserves_constructor_and_post_start_faults(
         ledger.append("inventory")
         return {}, []
 
+    cleanup_fault = GeneratorExit("signal fault")
+
     def signal_groups(groups: Any, requested: signal.Signals):
         ledger.append(f"signal:{requested.name}")
-        return [], False
+        return ([cleanup_fault], False) if requested == signal.SIGTERM else ([], False)
 
     monkeypatch.setattr(harness, "owned_inventory", inventory)
     monkeypatch.setattr(harness, "signal_owned_groups", signal_groups)
@@ -716,8 +838,7 @@ def test_cleanup_preserves_constructor_and_post_start_faults(
         "groups_still_present",
         lambda groups, timeout: ledger.append("poll") or [],
     )
-    for name in ("STOP_TIMEOUT", "STOP_REJOIN_TIMEOUT", "PROCESS_WAIT_TIMEOUT"):
-        monkeypatch.setattr(harness, name, 0.01)
+    monkeypatch.setattr(harness, "PROCESS_WAIT_TIMEOUT", 0.01)
     root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
     body_fault = ValueError("body")
     try:
@@ -731,25 +852,69 @@ def test_cleanup_preserves_constructor_and_post_start_faults(
                 raise body_fault
         cleanup_removed_root = not root.exists()
     finally:
-        stop_release.set()
-        for thread in set(threading.enumerate()) - before_threads:
-            thread.join(0.2)
         if root.exists():
             shutil.rmtree(root)
     leaves = _exception_leaves(grouped.value)
-    for injected in (body_fault, constructor_fault, post_start_fault):
+    for injected in (body_fault, cleanup_fault):
         assert sum(error is injected for error in leaves) == 1
     assert [ledger.count(item) for item in ("inventory", "poll", "wait")] == [2, 2, 4]
     assert ledger.count("signal:SIGTERM") == ledger.count("signal:SIGKILL") == 1
     assert cleanup_removed_root
-    assert all(
-        not getattr(processes[NODE_IDS[1]], name).close.called
-        for name in ("stdin", "stdout", "stderr")
-    )
+    assert all(client.stop.call_count == 0 for client in clients.values())
     assert not any(
         thread.name.startswith("native-iroh-cleanup-")
         for thread in threading.enumerate()
     )
+
+
+def test_cleanup_returns_without_starting_or_leaving_stop_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_id = NODE_IDS[0]
+    process = Mock(pid=8_250, stdin=None, stdout=None, stderr=None)
+    process.poll.return_value = 0
+    process.wait.return_value = 0
+    owner = _fake_owner(process.pid, process=process, started=None)._replace(
+        node_id=node_id
+    )
+    release = threading.Event()
+    client = Mock(process=process)
+    client.stop.side_effect = release.wait
+    monkeypatch.setattr(harness, "owned_inventory", lambda *a, **k: ({}, []))
+    monkeypatch.setattr(
+        harness,
+        "signal_owned_groups",
+        lambda *a, **k: ([], False),
+    )
+    monkeypatch.setattr(harness, "groups_still_present", lambda *a, **k: [])
+    monkeypatch.setattr(harness, "PROCESS_WAIT_TIMEOUT", 0.01)
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    before = set(threading.enumerate())
+    caught: BaseException | None = None
+    try:
+        try:
+            harness.cleanup_node_processes(
+                {node_id: client},
+                owned_groups={node_id: owner},
+                known_pids=set(),
+                root_identity=harness.capture_temp_root(root),
+            )
+        except BaseException as error:
+            caught = error
+        helpers = [
+            thread
+            for thread in set(threading.enumerate()) - before
+            if thread.name.startswith("native-iroh-cleanup-")
+        ]
+        assert helpers == []
+        assert caught is None
+        client.stop.assert_not_called()
+    finally:
+        release.set()
+        for thread in set(threading.enumerate()) - before:
+            thread.join(0.2)
+        if root.exists():
+            shutil.rmtree(root)
 
 
 def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> None:
@@ -828,6 +993,281 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
         for candidate in raced.parent.glob(raced.name + "*"):
             if candidate.is_dir():
                 real_rmtree(candidate)
+
+
+@pytest.mark.parametrize(
+    ("kind", "nested"),
+    [
+        ("file", False),
+        ("directory", False),
+        ("symlink", False),
+        ("file", True),
+    ],
+)
+def test_temp_root_removal_never_unlinks_raced_child_replacement(
+    kind: str,
+    nested: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    target_parent = root / "nested" if nested else root
+    target_parent.mkdir(exist_ok=True)
+    target_name = f"victim-{kind}"
+    target = target_parent / target_name
+    if kind == "file":
+        target.write_text("original")
+    elif kind == "directory":
+        target.mkdir()
+    else:
+        target.symlink_to("original-target")
+    guard = harness.capture_temp_root(root)
+    parent_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    target_parent_fd = os.open(target_parent, parent_flags)
+    target_parent_inode = (
+        os.fstat(target_parent_fd).st_dev,
+        os.fstat(target_parent_fd).st_ino,
+    )
+    replacement_fds: list[int] = []
+    injected = False
+    real_rename, real_unlink, real_rmdir = os.rename, os.unlink, os.rmdir
+
+    def is_target(name: str, directory_fd: int | None) -> bool:
+        if name != target_name or directory_fd is None:
+            return False
+        metadata = os.fstat(directory_fd)
+        return (metadata.st_dev, metadata.st_ino) == target_parent_inode
+
+    def inject(directory_fd: int) -> None:
+        nonlocal injected
+        if injected:
+            return
+        injected = True
+        backup = f"{target_name}.original"
+        real_rename(
+            target_name,
+            backup,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        if kind == "file":
+            replacement_fds.append(
+                os.open(
+                    target_name,
+                    os.O_CREAT | os.O_EXCL | os.O_RDWR,
+                    0o600,
+                    dir_fd=directory_fd,
+                )
+            )
+        elif kind == "directory":
+            os.mkdir(target_name, dir_fd=directory_fd)
+            replacement_fds.append(
+                os.open(target_name, parent_flags, dir_fd=directory_fd)
+            )
+        else:
+            os.symlink("replacement-target", target_name, dir_fd=directory_fd)
+            if hasattr(os, "O_SYMLINK"):
+                symlink_flags = os.O_RDONLY | os.O_SYMLINK
+            else:
+                symlink_flags = (
+                    os.O_PATH
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0)
+                )
+            replacement_fds.append(
+                os.open(target_name, symlink_flags, dir_fd=directory_fd)
+            )
+
+    def racing_rename(
+        source: str,
+        destination: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if is_target(source, src_dir_fd):
+            inject(src_dir_fd)
+        real_rename(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    def racing_unlink(
+        name: str,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        if is_target(name, dir_fd):
+            inject(dir_fd)
+        real_unlink(name, dir_fd=dir_fd)
+
+    def racing_rmdir(
+        name: str,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        if is_target(name, dir_fd):
+            inject(dir_fd)
+        real_rmdir(name, dir_fd=dir_fd)
+
+    try:
+        monkeypatch.setattr(harness.os, "rename", racing_rename)
+        monkeypatch.setattr(harness.os, "unlink", racing_unlink)
+        monkeypatch.setattr(harness.os, "rmdir", racing_rmdir)
+        with pytest.raises((AssertionError, OSError), match="replaced|quarantined|empty"):
+            harness.remove_temp_root(guard)
+        assert injected and len(replacement_fds) == 1
+        replacement_stat = os.fstat(replacement_fds[0])
+        restored_stat = os.stat(
+            target_name,
+            dir_fd=target_parent_fd,
+            follow_symlinks=False,
+        )
+        assert replacement_stat.st_nlink > 0
+        assert (restored_stat.st_dev, restored_stat.st_ino) == (
+            replacement_stat.st_dev,
+            replacement_stat.st_ino,
+        )
+    finally:
+        monkeypatch.undo()
+        os.close(target_parent_fd)
+        for replacement_fd in replacement_fds:
+            os.close(replacement_fd)
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_symlink() or candidate.is_file():
+                candidate.unlink()
+            elif candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_removal_restores_raced_root_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    guard = harness.capture_temp_root(root)
+    backup = root.with_name(root.name + ".original")
+    replacement_fd: int | None = None
+    injected = False
+    real_rename = os.rename
+
+    def racing_rename(
+        source: str,
+        destination: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal injected, replacement_fd
+        if source == root.name and not injected:
+            injected = True
+            real_rename(
+                source,
+                backup.name,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+            os.mkdir(source, dir_fd=src_dir_fd)
+            replacement_fd = os.open(
+                source,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                dir_fd=src_dir_fd,
+            )
+        real_rename(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    try:
+        monkeypatch.setattr(harness.os, "rename", racing_rename)
+        with pytest.raises(AssertionError, match="replaced|quarantined"):
+            harness.remove_temp_root(guard)
+        assert injected and replacement_fd is not None
+        assert os.fstat(replacement_fd).st_nlink > 0
+        assert root.is_dir()
+    finally:
+        monkeypatch.undo()
+        if replacement_fd is not None:
+            os.close(replacement_fd)
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_optimized_mode_keeps_cleanup_and_trace_guards_active(tmp_path: Path) -> None:
+    wrong_parent = tmp_path / f"{harness.TEMP_ROOT_PREFIX}optimized"
+    wrong_parent.mkdir()
+    script = """
+import json
+from pathlib import Path
+import sys
+from mycelium_router.transports.iroh import _bounded_trace_identity
+from tests.seed_coordinator.native_process_harness import (
+    capture_temp_root,
+    remove_temp_root,
+)
+
+root = Path(sys.argv[1])
+try:
+    remove_temp_root(capture_temp_root(root))
+except BaseException as error:
+    cleanup_error = type(error).__name__
+else:
+    cleanup_error = None
+sensitive_request = "request-sensitive-" + "r" * 2048
+sensitive_phase = "phase-sensitive-" + "p" * 2048
+sensitive_token = int("7" * 800)
+identity = _bounded_trace_identity(
+    type(
+        "TraceMessage",
+        (),
+        {
+            "request_id": sensitive_request,
+            "phase": sensitive_phase,
+            "token_index": sensitive_token,
+        },
+    )()
+)
+entry = f"TokenEvent->peer:remote:{identity}"
+print(
+    json.dumps(
+        {
+            "cleanup_error": cleanup_error,
+            "identity": identity,
+            "identity_bytes": len(identity.encode()),
+            "entry_bytes": len(entry.encode()),
+        }
+    )
+)
+"""
+    result = subprocess.run(
+        [sys.executable, "-O", "-c", script, str(wrong_parent)],
+        cwd=WORKTREE_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    evidence = json.loads(result.stdout)
+
+    assert wrong_parent.is_dir()
+    assert evidence["cleanup_error"] == "AssertionError"
+    assert evidence["identity_bytes"] <= 512
+    assert evidence["entry_bytes"] <= 512
+    assert all(
+        value not in evidence["identity"]
+        for value in (
+            "request-sensitive-",
+            "phase-sensitive-",
+            "7" * 800,
+        )
+    )
 
 
 def test_redacted_evidence_shape_excludes_raw_values() -> None:
@@ -946,7 +1386,8 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             )
             configured[node_id] = observation["details"]
             sidecar_pids[node_id] = _native_sidecar_pid(
-                owned_groups[node_id],
+                owned_groups,
+                node_id,
                 discovered_pids=discovered_child_pids,
             )
         service_pid_by_node = {

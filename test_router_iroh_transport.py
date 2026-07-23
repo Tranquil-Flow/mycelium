@@ -21,6 +21,7 @@ from mycelium_router.transports.iroh import (
     IrohTransport,
     IrohTransportError,
     PeerBinding,
+    _bounded_trace_identity,
 )
 from mycelium_router.wire import ROUTER_WIRE_PROTOCOL, encode_frame
 
@@ -302,6 +303,32 @@ def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> Non
     assert "request_id_sha256" in trace[1] and long_request not in trace[1]
     assert "123456789" not in trace[1]
     assert all(len(entry.encode()) <= 512 for entry in trace)
+
+
+def test_trace_identity_omits_overlong_public_fields_without_leaking_them() -> None:
+    sensitive_request = "request-sensitive-" + "r" * 2_048
+    sensitive_phase = "phase-sensitive-" + "p" * 2_048
+    sensitive_token = int("7" * 800)
+    identity = _bounded_trace_identity(
+        type(
+            "TraceMessage",
+            (),
+            {
+                "request_id": sensitive_request,
+                "phase": sensitive_phase,
+                "token_index": sensitive_token,
+            },
+        )()
+    )
+    entry = f"TokenEvent->peer:remote:{identity}"
+
+    assert len(identity.encode()) <= 512
+    assert len(entry.encode()) <= 512
+    assert "request_id_sha256" in identity
+    assert all(
+        value not in identity
+        for value in (sensitive_request, sensitive_phase, str(sensitive_token))
+    )
 
 
 def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_generation() -> None:

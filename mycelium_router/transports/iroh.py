@@ -69,26 +69,54 @@ class IrohTransportError(RuntimeError):
       super().__init__(code if not detail else f"{code}:{detail}")
 
 
-def _bounded_trace_identity(message: object) -> str:
+def _bounded_trace_identity(
+   message: object,
+   *,
+   max_bytes: int = _TRACE_ENTRY_BYTES,
+) -> str:
+   if type(max_bytes) is not int or max_bytes < 2:
+      raise IrohTransportError("trace_identity_budget_invalid")
+
+   def render(candidate: Mapping[str, Any]) -> str:
+      return json.dumps(candidate, sort_keys=True, separators=(",", ":"))
+
+   def fits(candidate: Mapping[str, Any]) -> bool:
+      return len(render(candidate).encode("utf-8")) <= max_bytes
+
    header = getattr(message, "header", None)
    request_id = getattr(message, "request_id", None)
    if request_id is None and header is not None:
       request_id = getattr(header, "request_id", None)
    identity: dict[str, Any] = {}
    encoded_request = request_id.encode("utf-8") if isinstance(request_id, str) else b""
-   if encoded_request and len(encoded_request) <= _TRACE_ID_BYTES:
-      identity["request_id"] = request_id
-   elif encoded_request:
-      identity["request_id_sha256"] = hashlib.sha256(encoded_request).hexdigest()
+   if encoded_request:
+      public_request = {"request_id": request_id}
+      if len(encoded_request) <= _TRACE_ID_BYTES and fits(public_request):
+         identity.update(public_request)
+      else:
+         request_digest = {
+            "request_id_sha256": hashlib.sha256(encoded_request).hexdigest()
+         }
+         if not fits(request_digest):
+            raise IrohTransportError("trace_identity_budget_exhausted")
+         identity.update(request_digest)
    source = header if header is not None else message
    phase = getattr(source, "phase", None)
    if isinstance(phase, str) and len(phase.encode("utf-8")) <= _TRACE_ID_BYTES:
-      identity["phase"] = phase
+      candidate = {**identity, "phase": phase}
+      if fits(candidate):
+         identity = candidate
    token_index = getattr(source, "token_index", None)
-   if type(token_index) is int:
-      identity["token_index"] = token_index
-   rendered = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-   assert len(rendered.encode("utf-8")) <= _TRACE_ENTRY_BYTES
+   if (
+      type(token_index) is int
+      and -(2**63) <= token_index < 2**63
+   ):
+      candidate = {**identity, "token_index": token_index}
+      if fits(candidate):
+         identity = candidate
+   rendered = render(identity)
+   if len(rendered.encode("utf-8")) > max_bytes:
+      raise IrohTransportError("trace_identity_too_large")
    return rendered
 
 
@@ -378,7 +406,8 @@ class IrohTransport:
          if replacement.generation <= current.generation:
             raise IrohTransportError("stale_peer_generation")
          control = self._control_client
-      assert control is not None
+      if control is None:
+         raise IrohTransportError("transport_control_unavailable")
       try:
          self._configure_peer(control, replacement)
       except BaseException as error:
@@ -480,7 +509,8 @@ class IrohTransport:
                   if pending.cancelled or current.generation != pending.generation:
                      raise IrohTransportError(pending.reason or "peer_rotated")
                   client = self._send_client
-               assert client is not None
+               if client is None:
+                  raise IrohTransportError("transport_not_running")
                self._send_confirmed(
                   client,
                   frame,
@@ -1124,12 +1154,19 @@ class IrohTransport:
    def _send_or_dispatch(self, destination: str, frame: bytes) -> None:
       decoded = decode_frame(frame)
       remote = destination != self.node_id
-      trace = (
+      trace_prefix = (
          f"{type(decoded.message).__name__}->"
          f"{'peer:remote' if remote else 'self:local'}:"
-         f"{_bounded_trace_identity(decoded.message)}"
       )
-      assert len(trace.encode("utf-8")) <= _TRACE_ENTRY_BYTES
+      identity_budget = _TRACE_ENTRY_BYTES - len(
+         trace_prefix.encode("utf-8")
+      )
+      trace = trace_prefix + _bounded_trace_identity(
+         decoded.message,
+         max_bytes=identity_budget,
+      )
+      if len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES:
+         raise IrohTransportError("trace_entry_too_large")
       with self._state_lock:
          self._require_running()
          self._outbound_trace.append(trace)

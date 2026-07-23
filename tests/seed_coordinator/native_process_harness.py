@@ -5,20 +5,17 @@ from contextlib import contextmanager
 from functools import partial
 import os
 from pathlib import Path
-import queue
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from typing import Any, Iterator, NamedTuple
 
 
 WORKTREE_ROOT = Path(__file__).resolve().parents[2]
 TEMP_ROOT_PREFIX = "myc-seed-e2e-"
-STOP_TIMEOUT, STOP_REJOIN_TIMEOUT = 2.0, 0.25
 PROCESS_WAIT_TIMEOUT = POLL_TIMEOUT = 2.0
 
 
@@ -33,6 +30,14 @@ class ProcessRecord(NamedTuple):
 PathIdentity = tuple[int, int, int, int, int, int, int, int, int | None]
 
 
+class OwnedMember(NamedTuple):
+    record: ProcessRecord
+    executable: Path
+    executable_identity: PathIdentity
+    worktree: Path
+    worktree_identity: PathIdentity
+
+
 class OwnedGroup(NamedTuple):
     node_id: str
     process: subprocess.Popen[str]
@@ -44,9 +49,15 @@ class OwnedGroup(NamedTuple):
     executable_identity: PathIdentity
     worktree_identity: PathIdentity
     leader: ProcessRecord | None
+    members: tuple[OwnedMember, ...] = ()
 
 
 TempRootIdentity = tuple[Path, Path, os.stat_result]
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
 
 
 def same_canonical_file(actual: str | Path, expected: Path) -> bool:
@@ -83,8 +94,14 @@ def process_cwd(pid: int) -> Path:
         timeout=2.0,
     )
     lines = result.stdout.splitlines()
-    assert lines[:2] == [f"p{pid}", "fcwd"] and len(lines) == 3
-    assert lines[2].startswith("n/") and "\x00" not in lines[2]
+    _require(
+        lines[:2] == [f"p{pid}", "fcwd"] and len(lines) == 3,
+        f"unexpected cwd inventory for process {pid}",
+    )
+    _require(
+        lines[2].startswith("n/") and "\x00" not in lines[2],
+        f"invalid cwd inventory for process {pid}",
+    )
     return Path(lines[2][1:])
 
 
@@ -99,13 +116,59 @@ def process_inventory() -> dict[int, ProcessRecord]:
     processes: dict[int, ProcessRecord] = {}
     for line in result.stdout.splitlines():
         fields = line.strip().split(maxsplit=8)
-        assert len(fields) == 9, f"unparseable process inventory row: {line!r}"
+        _require(len(fields) == 9, f"unparseable process inventory row: {line!r}")
         pid, ppid, pgid = map(int, fields[:3])
-        assert pid not in processes, f"duplicate process inventory PID: {pid}"
+        _require(pid not in processes, f"duplicate process inventory PID: {pid}")
         processes[pid] = ProcessRecord(
             pid, ppid, pgid, " ".join(fields[3:8]), fields[8]
         )
     return processes
+
+
+def _capture_member(
+    owner: OwnedGroup,
+    record: ProcessRecord,
+    expected_executable: Path,
+) -> OwnedMember:
+    executable = expected_executable.resolve(strict=True)
+    _require(
+        type(record.pid) is int and record.pid > 1,
+        "member PID must be an exact positive integer",
+    )
+    _require(record.pgid == owner.pgid, "member process group changed")
+    _require(
+        record.ppid == os.getpid()
+        if record.pid == owner.pid
+        else record.ppid in {member.record.pid for member in owner.members},
+        "member has unexpected ancestry",
+    )
+    _require(
+        same_canonical_file(record.comm, executable),
+        "member has unexpected executable",
+    )
+    executable_identity = path_identity(executable)
+    _require(
+        path_identity(record.comm) == executable_identity,
+        "member executable identity changed",
+    )
+    _require(_kernel_identity(record.pid, owner), "member kernel identity changed")
+    cwd = process_cwd(record.pid).resolve(strict=True)
+    _require(
+        same_canonical_file(cwd, owner.worktree),
+        "member has unexpected working directory",
+    )
+    cwd_identity = path_identity(cwd)
+    _require(
+        cwd_identity == owner.worktree_identity,
+        "member working directory identity changed",
+    )
+    return OwnedMember(
+        record,
+        executable,
+        executable_identity,
+        cwd,
+        cwd_identity,
+    )
 
 
 def register_owned_group(
@@ -133,17 +196,37 @@ def register_owned_group(
     )
     owners[node_id] = owner
     _validate_owner(owner, None)
-    assert process.poll() is None, f"registration requires live process {pid}"
-    assert os.getpgid(pid) == pid and os.getsid(pid) == pid
+    _require(process.poll() is None, f"registration requires live process {pid}")
+    _require(
+        os.getpgid(pid) == pid and os.getsid(pid) == pid,
+        f"registration requires isolated session {pid}",
+    )
     inventory = process_inventory()
     leader = inventory.get(pid)
-    assert leader is not None, f"registration missing process {pid}"
-    assert leader.ppid == os.getpid() and leader.pgid == pid
-    assert same_canonical_file(leader.comm, executable), "unexpected executable"
-    assert path_identity(leader.comm) == owner.executable_identity
-    assert path_identity(process_cwd(pid)) == owner.worktree_identity
-    assert process.poll() is None, f"registration lost live process {pid}"
-    owners[node_id] = owner._replace(leader=leader)
+    _require(leader is not None, f"registration missing process {pid}")
+    _require(
+        leader.ppid == os.getpid() and leader.pgid == pid,
+        "registration found unexpected leader ancestry",
+    )
+    member = _capture_member(owner, leader, executable)
+    _require(process.poll() is None, f"registration lost live process {pid}")
+    owners[node_id] = owner._replace(leader=leader, members=(member,))
+    return owners[node_id]
+
+
+def register_owned_member(
+    owners: dict[str, OwnedGroup],
+    node_id: str,
+    record: ProcessRecord,
+    expected_executable: Path,
+) -> OwnedGroup:
+    owner = owners.get(node_id)
+    _require(owner is not None, f"member registration missing owner {node_id}")
+    _validate_owner(owner, None)
+    registered_pids = {member.record.pid for member in owner.members}
+    _require(record.pid not in registered_pids, "duplicate member registration")
+    member = _capture_member(owner, record, expected_executable)
+    owners[node_id] = owner._replace(members=(*owner.members, member))
     return owners[node_id]
 
 
@@ -151,11 +234,38 @@ def _validate_owner(
     owner: OwnedGroup, inventory: dict[int, ProcessRecord] | None
 ) -> None:
     identifiers = (owner.pid, owner.pgid, owner.sid, owner.process.pid)
-    assert all(type(value) is int and value > 1 for value in identifiers)
-    assert owner.pid == owner.pgid == owner.sid == owner.process.pid
-    assert same_canonical_file(owner.worktree, WORKTREE_ROOT)
-    assert path_identity(owner.executable) == owner.executable_identity
-    assert path_identity(owner.worktree) == owner.worktree_identity
+    _require(
+        all(type(value) is int and value > 1 for value in identifiers),
+        "owner identifiers must be exact positive integers",
+    )
+    _require(
+        owner.pid == owner.pgid == owner.sid == owner.process.pid,
+        "owner process/session identifiers changed",
+    )
+    _require(
+        same_canonical_file(owner.worktree, WORKTREE_ROOT),
+        "owner worktree is outside the registered repository",
+    )
+    _require(
+        path_identity(owner.executable) == owner.executable_identity,
+        "owner executable path identity changed",
+    )
+    _require(
+        path_identity(owner.worktree) == owner.worktree_identity,
+        "owner worktree path identity changed",
+    )
+    member_pids = [member.record.pid for member in owner.members]
+    _require(
+        len(member_pids) == len(set(member_pids)),
+        "duplicate registered group member",
+    )
+    if owner.leader is not None:
+        _require(bool(owner.members), "registered leader is missing member fingerprint")
+        _require(
+            owner.members[0].record == owner.leader
+            and owner.members[0].record.pid == owner.pid,
+            "registered leader fingerprint changed",
+        )
     protected_pids = {os.getpid(), os.getppid()}
     protected_groups = {os.getpgrp(), os.getpgid(os.getppid())}
     if inventory is not None:
@@ -167,8 +277,11 @@ def _validate_owner(
             protected_pids.add(record.pid)
             protected_groups.add(record.pgid)
             cursor = record.ppid if record.ppid > 1 else 0
-    assert owner.pid not in protected_pids
-    assert owner.pgid not in protected_groups, f"cleanup refused group {owner.pgid}"
+    _require(owner.pid not in protected_pids, f"cleanup refused PID {owner.pid}")
+    _require(
+        owner.pgid not in protected_groups,
+        f"cleanup refused group {owner.pgid}",
+    )
 
 
 def _kernel_identity(pid: int, owner: OwnedGroup) -> bool:
@@ -176,7 +289,10 @@ def _kernel_identity(pid: int, owner: OwnedGroup) -> bool:
         pgid, sid = os.getpgid(pid), os.getsid(pid)
     except ProcessLookupError:
         return False
-    assert pgid == owner.pgid and sid == owner.sid
+    _require(
+        pgid == owner.pgid and sid == owner.sid,
+        f"process {pid} kernel group/session identity changed",
+    )
     return True
 
 
@@ -184,24 +300,58 @@ def _revalidate_owned_group(
     owner: OwnedGroup, inventory: dict[int, ProcessRecord]
 ) -> bool:
     _validate_owner(owner, inventory)
-    leader = inventory.get(owner.pid)
-    if leader is not None:
-        assert owner.process.poll() is None, f"refused exited leader {owner.pid}"
-        assert owner.leader is not None and owner.leader == leader
-        assert same_canonical_file(leader.comm, owner.executable)
-        assert path_identity(leader.comm) == owner.executable_identity
-        cwd = process_cwd(owner.pid)
-        assert same_canonical_file(cwd, owner.worktree)
-        assert path_identity(cwd) == owner.worktree_identity
-        return _kernel_identity(owner.pid, owner)
-
-    members = [item for item in inventory.values() if item.pgid == owner.pgid]
-    if not members:
+    live_members = {
+        item.pid: item for item in inventory.values() if item.pgid == owner.pgid
+    }
+    if not live_members:
         return False
-    raise AssertionError(
-        f"cleanup refused uncertain leader-absent group {owner.pgid}: "
-        f"{sorted(item.pid for item in members)}"
+    registered_members = {member.record.pid: member for member in owner.members}
+    _require(
+        set(live_members) == set(registered_members),
+        f"cleanup refused unregistered, missing, or reused group member "
+        f"{owner.pgid}: live={sorted(live_members)} "
+        f"registered={sorted(registered_members)}",
     )
+    _require(
+        owner.process.poll() is None,
+        f"refused exited leader {owner.pid}",
+    )
+    _require(owner.leader is not None, "group leader was never registered")
+    for pid, member in registered_members.items():
+        current = live_members[pid]
+        _require(current == member.record, f"process {pid} fingerprint changed")
+        if pid == owner.pid:
+            _require(
+                current.ppid == os.getpid(),
+                f"leader {pid} ancestry changed",
+            )
+        else:
+            _require(
+                current.ppid in registered_members,
+                f"member {pid} ancestry changed",
+            )
+        _require(
+            same_canonical_file(current.comm, member.executable),
+            f"process {pid} executable changed",
+        )
+        _require(
+            path_identity(current.comm) == member.executable_identity,
+            f"process {pid} executable identity changed",
+        )
+        cwd = process_cwd(pid)
+        _require(
+            same_canonical_file(cwd, member.worktree),
+            f"process {pid} working directory changed",
+        )
+        _require(
+            path_identity(cwd) == member.worktree_identity,
+            f"process {pid} working directory identity changed",
+        )
+        _require(
+            _kernel_identity(pid, owner),
+            f"process {pid} disappeared during identity check",
+        )
+    return True
 
 
 def signal_owned_groups(
@@ -272,9 +422,15 @@ def capture_temp_root(socket_root: Path) -> TempRootIdentity:
 def remove_temp_root(identity: TempRootIdentity) -> None:
     root, parent, original = identity
     expected_parent = Path(tempfile.gettempdir()).resolve(strict=True)
-    assert parent == expected_parent, f"cleanup refused temporary parent {parent}"
-    assert root.parent == parent and root.name.startswith(TEMP_ROOT_PREFIX)
-    assert stat.S_ISDIR(original.st_mode)
+    _require(
+        parent == expected_parent,
+        f"cleanup refused temporary parent {parent}",
+    )
+    _require(
+        root.parent == parent and root.name.startswith(TEMP_ROOT_PREFIX),
+        f"cleanup refused temporary root {root}",
+    )
+    _require(stat.S_ISDIR(original.st_mode), "cleanup root is not a directory")
     directory_flags = (
         os.O_RDONLY
         | getattr(os, "O_DIRECTORY", 0)
@@ -283,51 +439,172 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
     )
     parent_fd = os.open(parent, directory_flags)
     root_fd: int | None = None
-    quarantine = f"{root.name}.quarantine-{os.getpid()}-{time.monotonic_ns()}"
+    nonce = iter(range(1_000_000))
 
     def inode(metadata: os.stat_result) -> tuple[int, int, int]:
         return metadata.st_dev, metadata.st_ino, metadata.st_mode
 
+    def quarantine_name() -> str:
+        return (
+            f".myc-quarantine-{os.getpid()}-"
+            f"{time.monotonic_ns()}-{next(nonce)}"
+        )
+
+    def lstat_at(directory_fd: int, name: str) -> os.stat_result:
+        return os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+
+    def entry_flags(metadata: os.stat_result) -> int:
+        common = getattr(os, "O_CLOEXEC", 0)
+        if stat.S_ISDIR(metadata.st_mode):
+            return directory_flags
+        if stat.S_ISLNK(metadata.st_mode):
+            if hasattr(os, "O_SYMLINK"):
+                return os.O_RDONLY | os.O_SYMLINK | common
+            if hasattr(os, "O_PATH"):
+                return os.O_PATH | getattr(os, "O_NOFOLLOW", 0) | common
+            raise AssertionError("cleanup cannot open symlink identity")
+        if stat.S_ISREG(metadata.st_mode):
+            return os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | common
+        if hasattr(os, "O_PATH"):
+            return os.O_PATH | getattr(os, "O_NOFOLLOW", 0) | common
+        if hasattr(os, "O_EVTONLY"):
+            return os.O_EVTONLY | getattr(os, "O_NOFOLLOW", 0) | common
+        raise AssertionError("cleanup cannot open special entry identity")
+
+    def restore_quarantine(
+        directory_fd: int,
+        quarantine: str,
+        original_name: str,
+        quarantined: os.stat_result,
+    ) -> None:
+        try:
+            lstat_at(directory_fd, original_name)
+        except FileNotFoundError:
+            os.rename(
+                quarantine,
+                original_name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+            )
+            _require(
+                inode(lstat_at(directory_fd, original_name))
+                == inode(quarantined),
+                "cleanup could not safely restore raced replacement",
+            )
+            return
+        raise AssertionError(
+            f"cleanup preserved raced replacement as {quarantine}; "
+            f"{original_name} became occupied"
+        )
+
+    def remove_open_entry(
+        directory_fd: int,
+        name: str,
+        opened_fd: int,
+        opened: os.stat_result,
+        *,
+        quarantine: str | None = None,
+    ) -> None:
+        quarantine = quarantine or quarantine_name()
+        os.rename(
+            name,
+            quarantine,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        quarantined = lstat_at(directory_fd, quarantine)
+        if inode(quarantined) != inode(opened):
+            restore_quarantine(directory_fd, quarantine, name, quarantined)
+            raise AssertionError(
+                f"cleanup refused replaced entry {name}; replacement restored"
+            )
+        if stat.S_ISDIR(opened.st_mode):
+            empty_open_directory(opened_fd)
+        _require(
+            inode(lstat_at(directory_fd, quarantine))
+            == inode(os.fstat(opened_fd))
+            == inode(opened),
+            f"cleanup refused changed quarantined entry {name}",
+        )
+        if stat.S_ISDIR(opened.st_mode):
+            os.rmdir(quarantine, dir_fd=directory_fd)
+        else:
+            os.unlink(quarantine, dir_fd=directory_fd)
+
+    def remove_socket_entry(
+        directory_fd: int,
+        name: str,
+        inspected: os.stat_result,
+    ) -> None:
+        _require(
+            stat.S_ISSOCK(inspected.st_mode),
+            f"cleanup refused unopenable special entry {name}",
+        )
+        quarantine = quarantine_name()
+        os.rename(
+            name,
+            quarantine,
+            src_dir_fd=directory_fd,
+            dst_dir_fd=directory_fd,
+        )
+        quarantined = lstat_at(directory_fd, quarantine)
+        if inode(quarantined) != inode(inspected):
+            restore_quarantine(directory_fd, quarantine, name, quarantined)
+            raise AssertionError(
+                f"cleanup refused replaced socket {name}; replacement restored"
+            )
+        _require(
+            inode(lstat_at(directory_fd, quarantine)) == inode(inspected),
+            f"cleanup refused changed quarantined socket {name}",
+        )
+        os.unlink(quarantine, dir_fd=directory_fd)
+
     def empty_open_directory(directory_fd: int) -> None:
         for name in os.listdir(directory_fd):
-            current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-            if stat.S_ISDIR(current.st_mode):
-                child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
-                try:
-                    assert inode(os.fstat(child_fd)) == inode(current)
-                    empty_open_directory(child_fd)
-                    assert inode(os.fstat(child_fd)) == inode(
-                        os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-                    )
-                finally:
-                    os.close(child_fd)
-                os.rmdir(name, dir_fd=directory_fd)
-            else:
-                os.unlink(name, dir_fd=directory_fd)
+            inspected = lstat_at(directory_fd, name)
+            try:
+                child_fd = os.open(
+                    name,
+                    entry_flags(inspected),
+                    dir_fd=directory_fd,
+                )
+            except OSError:
+                if not stat.S_ISSOCK(inspected.st_mode):
+                    raise
+                remove_socket_entry(directory_fd, name, inspected)
+                continue
+            try:
+                opened = os.fstat(child_fd)
+                _require(
+                    inode(opened) == inode(inspected),
+                    f"cleanup refused entry changed while opening {name}",
+                )
+                remove_open_entry(directory_fd, name, child_fd, opened)
+            finally:
+                os.close(child_fd)
 
     try:
-        lstat_at = partial(os.stat, dir_fd=parent_fd, follow_symlinks=False)
         try:
-            current = lstat_at(root.name)
+            current = lstat_at(parent_fd, root.name)
         except FileNotFoundError:
             return
-        assert inode(current) == inode(original), "cleanup refused replaced root"
-        assert stat.S_ISDIR(current.st_mode)
+        _require(inode(current) == inode(original), "cleanup refused replaced root")
+        _require(stat.S_ISDIR(current.st_mode), "cleanup root changed type")
         root_fd = os.open(root.name, directory_flags, dir_fd=parent_fd)
-        assert inode(os.fstat(root_fd)) == inode(original)
-        os.rename(
+        opened_root = os.fstat(root_fd)
+        _require(
+            inode(opened_root) == inode(original),
+            "cleanup root changed while opening",
+        )
+        remove_open_entry(
+            parent_fd,
             root.name,
-            quarantine,
-            src_dir_fd=parent_fd,
-            dst_dir_fd=parent_fd,
+            root_fd,
+            opened_root,
+            quarantine=(
+                f"{root.name}.quarantine-{os.getpid()}-{time.monotonic_ns()}"
+            ),
         )
-        quarantined = lstat_at(quarantine)
-        assert inode(quarantined) == inode(os.fstat(root_fd)) == inode(original), (
-            "cleanup refused quarantined replacement; replacement preserved"
-        )
-        empty_open_directory(root_fd)
-        assert inode(lstat_at(quarantine)) == inode(os.fstat(root_fd))
-        os.rmdir(quarantine, dir_fd=parent_fd)
     finally:
         if root_fd is not None:
             os.close(root_fd)
@@ -363,64 +640,31 @@ def cleanup_node_processes(
     failed_inventory = ({owner.pgid: [] for owner in owners}, sorted(known_pids))
     inventory_action = partial(owned_inventory, owners, known_pids=known_pids)
     attempt("initial-inventory", inventory_action, failed_inventory, inventory=True)
-    stop_results: queue.SimpleQueue[tuple[str, BaseException]] = queue.SimpleQueue()
-
-    def stop_client(node_id: str, client: Any) -> None:
-        try:
-            client.stop()
-        except BaseException as error:
-            stop_results.put((node_id, error))
-
-    stop_threads: dict[str, threading.Thread] = {}
+    graceful_stop_requested: list[OwnedGroup] = []
     for node_id, client in node_processes.items():
-        thread = attempt(
-            f"stop-thread-create[{node_id}]",
-            partial(
-                threading.Thread,
-                target=stop_client,
-                args=(node_id, client),
-                daemon=True,
-                name=f"native-iroh-cleanup-stop-{node_id}",
-            ),
-            None,
-        )
-        if thread is not None:
-            stop_threads[node_id] = thread
-    started_threads: set[str] = set()
-    uncertain_threads: set[str] = set()
-    for node_id, thread in stop_threads.items():
-        started_threads.add(node_id)
-        if attempt(f"stop-thread-start[{node_id}]", thread.start, False) is False:
-            uncertain_threads.add(node_id)
-
-    def drain_stop_errors() -> None:
-        while True:
-            try:
-                node_id, error = stop_results.get_nowait()
-            except queue.Empty:
-                return
-            record(error, f"stop[{node_id}]")
-
-    def thread_alive(node_id: str) -> bool:
-        return attempt(
-            f"stop-thread-state[{node_id}]", stop_threads[node_id].is_alive, True
-        )
-
-    def join_stops(timeout: float, *, report_timeout: bool = False) -> None:
-        deadline = time.monotonic() + timeout
-        for node_id in started_threads:
-            attempt(
-                f"stop-thread-join[{node_id}]",
-                lambda: stop_threads[node_id].join(
-                    max(0.0, deadline - time.monotonic())
-                ),
-                None,
+        owner = owned_groups.get(node_id)
+        if owner is None or getattr(client, "process", None) is not owner.process:
+            record(
+                AssertionError("cleanup client lacks exact registered process"),
+                f"client-identity[{node_id}]",
             )
-            if report_timeout and thread_alive(node_id):
-                record(TimeoutError(f"stop timeout: {node_id}"), f"stop[{node_id}]")
-        drain_stop_errors()
-
-    join_stops(STOP_TIMEOUT, report_timeout=True)
+            continue
+        request_stop = getattr(type(client), "request_stop", None)
+        if request_stop is None:
+            continue
+        if attempt(
+            f"stop-request[{node_id}]",
+            lambda: request_stop(client),
+            False,
+        ) is not False:
+            graceful_stop_requested.append(owner)
+    for owner in graceful_stop_requested:
+        try:
+            owner.process.wait(timeout=PROCESS_WAIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            pass
+        except BaseException as error:
+            record(error, f"stop-wait[{owner.node_id}]")
     remaining = owners
     for requested, label in ((signal.SIGTERM, "TERM"), (signal.SIGKILL, "KILL")):
         phase = f"signal[{label}]"
@@ -433,7 +677,6 @@ def cleanup_node_processes(
         inventory_failures.extend([True] * uncertain)
         for error in errors:
             record(error, phase)
-        join_stops(STOP_REJOIN_TIMEOUT)
         for owner in owners:
             attempt(
                 f"wait[{label}][{owner.node_id}]",
@@ -448,13 +691,7 @@ def cleanup_node_processes(
             attempt(f"close-skip[{owner.node_id}]", owner.process.poll, None)
             is not None
         )
-        stop_alive = owner.node_id in started_threads and thread_alive(owner.node_id)
-        if (
-            not process_exited
-            or stop_alive
-            or owner.node_id in uncertain_threads
-            or owner in remaining
-        ):
+        if not process_exited or owner in remaining:
             record(
                 AssertionError("unsafe stream close"), f"close-skip[{owner.node_id}]"
             )
@@ -471,11 +708,6 @@ def cleanup_node_processes(
     )
     if any(final_inventory):
         record(AssertionError(f"native-Iroh leak: {final_inventory}"), "leak-check")
-    join_stops(STOP_REJOIN_TIMEOUT)
-    for node_id in started_threads:
-        if thread_alive(node_id):
-            record(AssertionError("cleanup thread survived"), f"stop-thread[{node_id}]")
-    drain_stop_errors()
     if inventory_failures:
         record(AssertionError("unproven empty process inventory"), "inventory-proof")
     if cleanup_errors:
