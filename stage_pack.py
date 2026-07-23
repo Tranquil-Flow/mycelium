@@ -21,6 +21,7 @@ from typing import Any, BinaryIO, Sequence
 
 import model_manifest as mm
 from layer_assignment import validate_assignment_identity
+from planner_assignment import CONTROL_PLANE_BINDING_PROTOCOL
 from runtime_contracts import MLX_RUNTIME_BASE_FIELDS, validate_normalized_mlx_runtime
 from weight_provisioning import artifact_report_errors
 
@@ -118,6 +119,17 @@ _ASSIGNMENT_PACK_FIELDS = (
     "expected_tensor_keys",
     "runtime",
     "control_plane_binding",
+)
+_CONTROL_PLANE_BINDING_FIELDS = frozenset(
+    {
+        "protocol",
+        "evidence_bundle_digest",
+        "planner_snapshot_digest",
+        "snapshot_generation",
+        "swarm_id",
+        "deployment_id",
+        "deployment_epoch",
+    }
 )
 _TOLERANCE_FIELDS = frozenset(
     {
@@ -1034,6 +1046,42 @@ def verify_stage_pack(
     return verification
 
 
+def _canonical_control_plane_binding(assignment: dict[str, Any]) -> bytes:
+    binding = assignment.get("control_plane_binding")
+    if (
+        not isinstance(binding, dict)
+        or set(binding) != _CONTROL_PLANE_BINDING_FIELDS
+        or type(binding.get("protocol")) is not str
+        or binding["protocol"] != CONTROL_PLANE_BINDING_PROTOCOL
+    ):
+        raise ValueError("stage pack collection control-plane binding is invalid")
+    for field in ("evidence_bundle_digest", "planner_snapshot_digest"):
+        value = binding.get(field)
+        if type(value) is not str or _SHA256_REF_RE.fullmatch(value) is None:
+            raise ValueError("stage pack collection control-plane binding is invalid")
+    for field in ("snapshot_generation", "deployment_epoch"):
+        value = binding.get(field)
+        if type(value) is not int or value < 0:
+            raise ValueError("stage pack collection control-plane binding is invalid")
+    for field in ("swarm_id", "deployment_id"):
+        value = binding.get(field)
+        if type(value) is not str or not value:
+            raise ValueError("stage pack collection control-plane binding is invalid")
+
+    assignment_deployment_id = assignment.get("deployment_id")
+    assignment_deployment_epoch = assignment.get("deployment_epoch")
+    if (
+        type(assignment_deployment_id) is not str
+        or not assignment_deployment_id
+        or binding["deployment_id"] != assignment_deployment_id
+        or type(assignment_deployment_epoch) is not int
+        or assignment_deployment_epoch < 0
+        or binding["deployment_epoch"] != assignment_deployment_epoch
+    ):
+        raise ValueError("stage pack collection control-plane binding is invalid")
+    return _canonical_json(binding).encode("utf-8")
+
+
 def verify_stage_pack_collection(
     packs: Sequence[dict[str, Any]],
     *,
@@ -1052,6 +1100,17 @@ def verify_stage_pack_collection(
     if not isinstance(manifest, dict):
         raise ValueError("manifest must be an object")
 
+    entry_snapshot = copy.deepcopy(
+        {
+            "packs": list(packs),
+            "assignments": list(assignments),
+            "manifest": manifest,
+        }
+    )
+    packs = entry_snapshot["packs"]
+    assignments = entry_snapshot["assignments"]
+    manifest = entry_snapshot["manifest"]
+
     pack_verifications = [
         verify_stage_pack(
             pack,
@@ -1069,7 +1128,31 @@ def verify_stage_pack_collection(
 
     first = assignments[0]
     canonical_runtime = _normalize_runtime(first.get("runtime"))
-    canonical_control_plane_binding = first.get("control_plane_binding")
+    binding_presence = [
+        "control_plane_binding" in assignment for assignment in assignments
+    ]
+    canonical_control_plane_bindings = [
+        _canonical_control_plane_binding(assignment)
+        for assignment, present in zip(
+            assignments,
+            binding_presence,
+            strict=True,
+        )
+        if present
+    ]
+    if canonical_control_plane_bindings:
+        if not all(binding_presence):
+            raise ValueError(
+                "stage pack collection control-plane binding identity mismatch"
+            )
+        canonical_control_plane_binding = canonical_control_plane_bindings[0]
+        if any(
+            binding != canonical_control_plane_binding
+            for binding in canonical_control_plane_bindings[1:]
+        ):
+            raise ValueError(
+                "stage pack collection control-plane binding identity mismatch"
+            )
     for assignment in assignments[1:]:
         for field in (
             "deployment_id",
@@ -1082,13 +1165,6 @@ def verify_stage_pack_collection(
                 raise ValueError(f"stage pack collection identity mismatch: {field}")
         if _normalize_runtime(assignment.get("runtime")) != canonical_runtime:
             raise ValueError("stage pack collection runtime identity mismatch")
-        if (
-            assignment.get("control_plane_binding")
-            != canonical_control_plane_binding
-        ):
-            raise ValueError(
-                "stage pack collection control-plane binding identity mismatch"
-            )
 
     expected_start = 0
     for assignment in assignments:

@@ -1095,6 +1095,137 @@ def test_collection_verifier_rejects_mixed_control_plane_binding_identity(
         )
 
 
+def test_collection_verifier_rejects_invalid_control_plane_bindings(
+    tmp_path: Path,
+) -> None:
+    manifest, base_assignments, reports, _ = _case(tmp_path)
+    base_packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(base_assignments, reports, strict=True)
+    ]
+    attacks = (
+        "not_object",
+        "missing_field",
+        "extra_field",
+        "wrong_protocol",
+        "malformed_evidence_digest",
+        "malformed_snapshot_digest",
+        "negative_generation",
+        "bool_generation",
+        "float_generation",
+        "empty_swarm",
+        "wrong_deployment",
+        "negative_epoch",
+        "wrong_epoch",
+        "bool_epoch",
+        "float_epoch",
+        "explicit_none",
+        "type_collision_generation",
+        "type_collision_epoch",
+    )
+
+    for attack in attacks:
+        assignments = copy.deepcopy(base_assignments)
+        packs = copy.deepcopy(base_packs)
+        if attack == "explicit_none":
+            for assignment in assignments:
+                assignment["control_plane_binding"] = None
+        else:
+            binding: Any = _control_plane_binding()
+            if attack == "not_object":
+                binding = ["mycelium.control_plane_binding.v1"]
+            elif attack == "missing_field":
+                binding.pop("swarm_id")
+            elif attack == "extra_field":
+                binding["unexpected"] = "field"
+            elif attack == "wrong_protocol":
+                binding["protocol"] = "mycelium.control_plane_binding.v2"
+            elif attack == "malformed_evidence_digest":
+                binding["evidence_bundle_digest"] = "sha256:" + "A" * 64
+            elif attack == "malformed_snapshot_digest":
+                binding["planner_snapshot_digest"] = "sha256:short"
+            elif attack == "negative_generation":
+                binding["snapshot_generation"] = -1
+            elif attack == "bool_generation":
+                binding["snapshot_generation"] = True
+            elif attack == "float_generation":
+                binding["snapshot_generation"] = 1.0
+            elif attack == "empty_swarm":
+                binding["swarm_id"] = ""
+            elif attack == "wrong_deployment":
+                binding["deployment_id"] = "87654321-4321-8765-9234-fedcbafedcba"
+            elif attack == "negative_epoch":
+                binding["deployment_epoch"] = -1
+            elif attack == "wrong_epoch":
+                binding["deployment_epoch"] = 8
+            elif attack == "bool_epoch":
+                binding["deployment_epoch"] = True
+            elif attack == "float_epoch":
+                binding["deployment_epoch"] = 7.0
+            for assignment, pack in zip(assignments, packs, strict=True):
+                _rebind_assignment_pack(
+                    assignment,
+                    pack,
+                    control_plane_binding=binding,
+                )
+
+        if attack in ("type_collision_generation", "type_collision_epoch"):
+            type_colliding = _control_plane_binding()
+            field, replacement = (
+                ("snapshot_generation", True)
+                if attack == "type_collision_generation"
+                else ("deployment_epoch", 7.0)
+            )
+            type_colliding[field] = replacement
+            _rebind_assignment_pack(
+                assignments[1],
+                packs[1],
+                control_plane_binding=type_colliding,
+            )
+
+        with pytest.raises(
+            ValueError,
+            match=r"^stage pack collection control-plane binding is invalid$",
+        ):
+            sp.verify_stage_pack_collection(
+                packs,
+                assignments=assignments,
+                manifest=manifest,
+            )
+
+
+def test_collection_verifier_accepts_reordered_control_plane_binding_keys(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    binding = _control_plane_binding()
+    for assignment, pack in zip(assignments, packs, strict=True):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            control_plane_binding=binding,
+        )
+    reordered = dict(reversed(list(binding.items())))
+    _rebind_assignment_pack(
+        assignments[1],
+        packs[1],
+        control_plane_binding=reordered,
+    )
+
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+
+    assert summary["exact_logical_coverage"] is True
+    assert summary["route_ready"] is False
+
+
 @pytest.mark.parametrize("with_control_plane_binding", (False, True))
 def test_collection_verifier_accepts_uniform_canonical_identities(
     tmp_path: Path,
@@ -1126,6 +1257,61 @@ def test_collection_verifier_accepts_uniform_canonical_identities(
         pack["control_plane_binding"] == binding
         for pack in packs
     )
+
+
+def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    authenticated_keys = copy.deepcopy(packs[1]["expected_tensor_keys"])
+    actual_verify = sp.verify_stage_pack
+    verification_count = 0
+
+    def verify_then_mutate_original(
+        pack: dict[str, Any],
+        *,
+        assignment: dict[str, Any],
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        nonlocal verification_count
+        verification = actual_verify(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+        verification_count += 1
+        if verification_count == len(packs):
+            packs[1]["expected_tensor_keys"].reverse()
+        return verification
+
+    monkeypatch.setattr(sp, "verify_stage_pack", verify_then_mutate_original)
+
+    summary = sp.verify_stage_pack_collection(
+        packs,
+        assignments=assignments,
+        manifest=manifest,
+    )
+
+    assert verification_count == len(packs)
+    assert summary["exact_logical_coverage"] is True
+    assert summary["logical_owned_tensor_keys"][1]["tensor_keys"] == authenticated_keys
+    with pytest.raises(ValueError, match=r"^stage pack digest mismatch$"):
+        actual_verify(
+            packs[1],
+            assignment=assignments[1],
+            manifest=manifest,
+        )
+
+    detached_summary = copy.deepcopy(summary)
+    packs[0]["expected_tensor_keys"].clear()
+    assignments[0]["range"]["start_layer"] = 99
+    manifest["tensor_keys_by_layer"].clear()
+    assert summary == detached_summary
 
 
 @pytest.mark.parametrize("mutation", ("swap", "gap"))
