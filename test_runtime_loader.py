@@ -13,6 +13,7 @@ from typing import Any
 import mlx.core as mx
 import pytest
 
+import runtime_loader
 from layer_assignment import assignment_id_for
 from runtime_loader import (
     RuntimeLoadError,
@@ -695,14 +696,30 @@ def test_rejects_wrong_artifact_report_protocol(tmp_path: Path) -> None:
         load_assignment_stage(assignment, report, load_generation=1)
 
 
-def test_rejects_assigned_artifact_path_traversal(tmp_path: Path) -> None:
+def test_rejects_assigned_artifact_path_traversal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assignment, report, _ = _case(tmp_path)
     assignment["files"][0]["path"] = "../model.safetensors"
     report["verified_files"][0]["path"] = "../model.safetensors"
     _rebind(assignment, report)
 
-    with pytest.raises(RuntimeLoadError, match=r"unsafe .*artifact path"):
+    artifact_opened = False
+
+    def forbidden_artifact_open(*args: Any, **kwargs: Any) -> Any:
+        nonlocal artifact_opened
+        artifact_opened = True
+        raise AssertionError("verified artifact must not be opened")
+
+    monkeypatch.setattr(
+        runtime_loader, "_open_verified_artifact", forbidden_artifact_open
+    )
+    with pytest.raises(RuntimeLoadError) as exc_info:
         load_assignment_stage(assignment, report, load_generation=1)
+    assert str(exc_info.value) == (
+        "stage-pack evidence rejected: stage pack assignment files are invalid"
+    )
+    assert artifact_opened is False
 
 
 def test_rejects_verified_local_path_outside_cache_root(tmp_path: Path) -> None:
