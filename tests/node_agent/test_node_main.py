@@ -747,27 +747,85 @@ def test_node_refuses_path_sidecar_discovery(
         node_main._sidecar_path(None)
 
 
-@pytest.mark.parametrize(
-    ("status", "code", "expected"),
-    [
-        (400, "seed_join_mismatch", True),
-        (401, "invite_signature_invalid", True),
-        (409, "invite_replayed", True),
-        (408, "seed_join_mismatch", False),
-        (400, "seed_http_remote_error", False),
-        (400, "invite_registry_unavailable", False),
-        (404, "seed_http_route_unknown", False),
-        (500, "seed_join_mismatch", False),
-        (None, "seed_http_unreachable", False),
-    ],
-)
-def test_join_rejection_requires_authoritative_status_and_code(
-    status: int | None,
-    code: str,
-    expected: bool,
-) -> None:
+def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None:
     node_main = importlib.import_module("mycelium_node.__main__")
-    assert node_main._join_rejected(SeedHTTPError(code, status=status)) is expected
+    seed_http = importlib.import_module("mycelium_seed.http")
+    canonical_codes = {
+        400: {
+            "invite_expired",
+            "invite_field_invalid",
+            "invite_malformed",
+            "invite_protocol_invalid",
+            "join_request_protocol_required",
+            "membership_endpoint_addr_invalid",
+            "membership_endpoint_id_mismatch",
+            "membership_envelope_invalid",
+            "membership_field_unusable",
+            "membership_fields_invalid",
+            "membership_generation_invalid",
+            "membership_identifier_invalid",
+            "membership_integer_invalid",
+            "membership_join_generation_invalid",
+            "membership_message_expired",
+            "membership_message_from_future",
+            "membership_message_invalid",
+            "membership_peer_class_invalid",
+            "membership_protocol_invalid",
+            "membership_runtime_capability_invalid",
+            "membership_runtime_capability_mismatch",
+            "membership_sender_endpoint_mismatch",
+            "membership_signer_endpoint_mismatch",
+            "membership_swarm_mismatch",
+            "membership_text_invalid",
+            "membership_time_invalid",
+            "membership_ttl_invalid",
+            "membership_verifier_invalid",
+            "seed_join_invite_replayed",
+            "seed_join_key_invalid",
+            "seed_join_mismatch",
+            "seed_join_retry_mismatch",
+            "seed_member_identity_reused",
+            "seed_node_endpoint_conflict",
+        },
+        401: {
+            "invite_signature_invalid",
+            "membership_key_pin_mismatch",
+            "membership_signature_invalid",
+        },
+        409: {
+            "invite_replayed",
+            "seed_node_key_conflict",
+        },
+    }
+    explicitly_allowed = (
+        node_main._JOIN_REJECTION_BAD_REQUEST_CODES
+        | node_main._JOIN_REJECTION_UNAUTHORIZED_CODES
+        | node_main._JOIN_REJECTION_CONFLICT_CODES
+    )
+    assert explicitly_allowed == frozenset().union(*canonical_codes.values())
+
+    received_statuses = (None, 400, 401, 404, 409, 500)
+    for canonical_status, codes in canonical_codes.items():
+        for code in codes:
+            assert int(seed_http._error_status(code)) == canonical_status
+            for received_status in received_statuses:
+                assert node_main._join_rejected(
+                    SeedHTTPError(code, status=received_status)
+                ) is (received_status == canonical_status)
+
+    for unknown_code in (
+        "invite_registry_unavailable",
+        "seed_http_remote_error",
+        "seed_http_route_unknown",
+        "seed_http_unreachable",
+    ):
+        for received_status in received_statuses:
+            assert (
+                node_main._join_rejected(
+                    SeedHTTPError(unknown_code, status=received_status)
+                )
+                is False
+            )
 
 
 @pytest.mark.parametrize(
@@ -1229,23 +1287,121 @@ def test_process_group_signal_reinventories_after_protected_group_discovery(
     monkeypatch.setattr(os, "killpg", kill_group)
 
     assert supervised._signal_process_group(signal.SIGKILL) is False
-    assert calls[0] == "poll"
-    assert calls[1][0] == "protected"
-    assert isinstance(calls[1][1], float)
-    assert calls[2:] == [("inventory", launch.pid)]
+    assert calls[0][0] == "protected"
+    assert isinstance(calls[0][1], float)
+    assert calls[1:] == ["poll", ("inventory", launch.pid)]
 
     calls.clear()
     current[0] = launch
     drift_on_discovery[0] = False
     assert supervised._signal_process_group(signal.SIGKILL) is True
-    assert calls[0] == "poll"
-    assert calls[1][0] == "protected"
-    assert isinstance(calls[1][1], float)
-    assert calls[2:] == [
-        ("inventory", launch.pid),
+    assert calls[0][0] == "protected"
+    assert isinstance(calls[0][1], float)
+    assert calls[1:] == [
         "poll",
+        ("inventory", launch.pid),
         ("killpg", launch.process_group, signal.SIGKILL),
     ]
+
+
+def test_process_group_signal_poll_consuming_deadline_prevents_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    executable = process_module._ExecutableIdentity(
+        path="/trusted/python",
+        device=1,
+        inode=2,
+        mode=stat.S_IFREG | 0o755,
+        uid=os.getuid(),
+        size=10,
+        mtime_ns=11,
+        ctime_ns=12,
+    )
+    launch = process_module._ProcessIdentity(
+        pid=4242,
+        parent_pid=3131,
+        process_group=4242,
+        session_id=4242,
+        start_token="launch",
+        executable=executable,
+    )
+    clock = [10.0]
+    calls: list[object] = []
+
+    class FakePopen:
+        pid = launch.pid
+
+        def poll(self) -> None:
+            calls.append("poll")
+            if calls and isinstance(calls[0], tuple):
+                clock[0] = 11.0
+            return None
+
+    supervised = process_module.PhysicalNodeProcess.__new__(
+        process_module.PhysicalNodeProcess
+    )
+    supervised._process = FakePopen()
+    supervised._launch_identity = launch
+    supervised.shutdown_timeout_seconds = 1.0
+    monkeypatch.setattr(process_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        process_module,
+        "_protected_process_groups",
+        lambda deadline: calls.append(("protected", deadline)) or {9999},
+    )
+    monkeypatch.setattr(
+        process_module,
+        "_inventory_process",
+        lambda pid: calls.append(("inventory", pid)) or launch,
+    )
+    monkeypatch.setattr(
+        os,
+        "killpg",
+        lambda pgid, signum: calls.append(("killpg", pgid, signum)),
+    )
+
+    assert supervised._signal_process_group(signal.SIGKILL, deadline=11.0) is False
+    assert calls == [("protected", 11.0), "poll"]
+
+
+def test_process_group_signal_poll_error_prevents_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    calls: list[object] = []
+
+    class FakePopen:
+        pid = 4242
+
+        def poll(self) -> None:
+            calls.append("poll")
+            raise RuntimeError("poll failed")
+
+    supervised = process_module.PhysicalNodeProcess.__new__(
+        process_module.PhysicalNodeProcess
+    )
+    supervised._process = FakePopen()
+    supervised._launch_identity = object()
+    supervised.shutdown_timeout_seconds = 1.0
+    monkeypatch.setattr(
+        process_module,
+        "_protected_process_groups",
+        lambda deadline: calls.append(("protected", deadline)) or {9999},
+    )
+    monkeypatch.setattr(
+        process_module,
+        "_inventory_process",
+        lambda pid: calls.append(("inventory", pid)),
+    )
+    monkeypatch.setattr(
+        os,
+        "killpg",
+        lambda pgid, signum: calls.append(("killpg", pgid, signum)),
+    )
+
+    assert supervised._signal_process_group(signal.SIGKILL, deadline=11.0) is False
+    assert calls == [("protected", 11.0), "poll"]
 
 
 def test_seed_http_client_only_exposes_exact_authoritative_error_envelope() -> None:

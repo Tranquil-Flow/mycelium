@@ -21,7 +21,12 @@ from urllib.parse import urlsplit
 from mycelium_invite import verify_invite_bundle
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
-from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, _validate_endpoint_url
+from mycelium_seed.http import (
+    SeedHTTPClient,
+    SeedHTTPError,
+    _error_status,
+    _validate_endpoint_url,
+)
 
 from . import membership as membership_module
 from .identity import load_or_create_node_signer
@@ -460,13 +465,12 @@ def _preflight(
 
 
 def _join_rejected(exc: SeedHTTPError) -> bool:
-    if exc.status == 400:
-        return exc.code in _JOIN_REJECTION_BAD_REQUEST_CODES
-    if exc.status == 401:
-        return exc.code in _JOIN_REJECTION_UNAUTHORIZED_CODES
-    if exc.status == 409:
-        return exc.code in _JOIN_REJECTION_CONFLICT_CODES
-    return False
+    allowed = (
+        _JOIN_REJECTION_BAD_REQUEST_CODES
+        | _JOIN_REJECTION_UNAUTHORIZED_CODES
+        | _JOIN_REJECTION_CONFLICT_CODES
+    )
+    return exc.code in allowed and exc.status == _error_status(exc.code)
 
 
 def _run_bound(

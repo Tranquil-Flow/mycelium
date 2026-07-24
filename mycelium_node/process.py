@@ -328,65 +328,75 @@ def private_directory_lease(
         _validate_walk_component(os.fstat(descriptor))
         for index, component in enumerate(components):
             final = index == len(components) - 1
+            child: int | None = None
             try:
-                child = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
-            except FileNotFoundError:
-                if not create:
-                    if not _descriptor_is_writable(os.fstat(descriptor)):
-                        raise ValueError("data directory is unavailable")
+                try:
+                    child = os.open(
+                        component,
+                        _DIRECTORY_OPEN_FLAGS,
+                        dir_fd=descriptor,
+                    )
+                except FileNotFoundError:
+                    if not create:
+                        if not _descriptor_is_writable(os.fstat(descriptor)):
+                            raise ValueError("data directory is unavailable")
+                        lease = PrivateDirectoryLease(
+                            path,
+                            parent_descriptor=descriptor,
+                            descriptor=None,
+                        )
+                        descriptor = -1
+                        return lease
+                    created = False
+                    try:
+                        os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                        created = True
+                    except FileExistsError:
+                        pass
+                    child = os.open(
+                        component,
+                        _DIRECTORY_OPEN_FLAGS,
+                        dir_fd=descriptor,
+                    )
+                    created_metadata = os.fstat(child)
+                    if created:
+                        if (
+                            not stat.S_ISDIR(created_metadata.st_mode)
+                            or created_metadata.st_uid != os.getuid()
+                        ):
+                            raise ValueError("data directory is invalid")
+                        os.fchmod(child, 0o700)
+                metadata = os.fstat(child)
+                if final:
+                    if (
+                        not stat.S_ISDIR(metadata.st_mode)
+                        or metadata.st_uid != os.getuid()
+                        or stat.S_IMODE(metadata.st_mode) != 0o700
+                    ):
+                        raise ValueError("data directory is invalid")
+                else:
+                    _validate_walk_component(metadata)
+                if final:
                     lease = PrivateDirectoryLease(
                         path,
                         parent_descriptor=descriptor,
-                        descriptor=None,
+                        descriptor=child,
                     )
                     descriptor = -1
+                    child = None
+                    try:
+                        lease.revalidate()
+                    except BaseException:
+                        lease.close()
+                        raise
                     return lease
-                created = False
-                try:
-                    os.mkdir(component, mode=0o700, dir_fd=descriptor)
-                    created = True
-                except FileExistsError:
-                    pass
-                child = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
-                created_metadata = os.fstat(child)
-                if created:
-                    if (
-                        not stat.S_ISDIR(created_metadata.st_mode)
-                        or created_metadata.st_uid != os.getuid()
-                    ):
-                        os.close(child)
-                        raise ValueError("data directory is invalid")
-                    os.fchmod(child, 0o700)
-            metadata = os.fstat(child)
-            if final:
-                if (
-                    not stat.S_ISDIR(metadata.st_mode)
-                    or metadata.st_uid != os.getuid()
-                    or stat.S_IMODE(metadata.st_mode) != 0o700
-                ):
+                previous = descriptor
+                descriptor = child
+                child = None
+                os.close(previous)
+            finally:
+                if child is not None:
                     os.close(child)
-                    raise ValueError("data directory is invalid")
-            else:
-                try:
-                    _validate_walk_component(metadata)
-                except ValueError:
-                    os.close(child)
-                    raise
-            if final:
-                lease = PrivateDirectoryLease(
-                    path,
-                    parent_descriptor=descriptor,
-                    descriptor=child,
-                )
-                descriptor = -1
-                try:
-                    lease.revalidate()
-                except BaseException:
-                    lease.close()
-                    raise
-                return lease
-            os.close(descriptor)
-            descriptor = child
         raise ValueError("data directory is invalid")
     except OSError as exc:
         raise ValueError("data directory is unavailable") from exc
@@ -480,26 +490,40 @@ def private_directory_parent_fd(
 
     if not path.is_absolute() or not getattr(os, "O_NOFOLLOW", 0):
         raise ValueError("path is invalid")
-    descriptor = os.open("/", _DIRECTORY_OPEN_FLAGS)
+    descriptor: int | None = os.open("/", _DIRECTORY_OPEN_FLAGS)
     try:
         for component in path.parts[1:-1]:
-            child = os.open(component, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
-            metadata = os.fstat(child)
-            if strict_components:
-                _validate_walk_component(metadata)
-            elif (
-                not stat.S_ISDIR(metadata.st_mode)
-                or metadata.st_uid not in {0, os.getuid()}
-                or stat.S_IMODE(metadata.st_mode) & 0o002
-            ):
-                os.close(child)
-                raise ValueError("path component is invalid")
+            child: int | None = None
+            try:
+                if descriptor is None:
+                    raise ValueError("path is invalid")
+                parent = descriptor
+                child = os.open(
+                    component,
+                    _DIRECTORY_OPEN_FLAGS,
+                    dir_fd=parent,
+                )
+                metadata = os.fstat(child)
+                if strict_components:
+                    _validate_walk_component(metadata)
+                elif (
+                    not stat.S_ISDIR(metadata.st_mode)
+                    or metadata.st_uid not in {0, os.getuid()}
+                    or stat.S_IMODE(metadata.st_mode) & 0o002
+                ):
+                    raise ValueError("path component is invalid")
+                descriptor = child
+                child = None
+                os.close(parent)
+            finally:
+                if child is not None:
+                    os.close(child)
+        result = descriptor
+        descriptor = None
+        return result
+    finally:
+        if descriptor is not None:
             os.close(descriptor)
-            descriptor = child
-        return descriptor
-    except Exception:
-        os.close(descriptor)
-        raise
 
 
 def revalidate_executable_identity(identity: _ExecutableIdentity) -> bool:
@@ -1062,13 +1086,14 @@ class PhysicalNodeProcess:
         launch = self._launch_identity
         if launch is None:
             return False
-        if process.poll() is not None:
-            return True
         if deadline is None:
             deadline = time.monotonic() + self.shutdown_timeout_seconds
         try:
             protected_groups = _protected_process_groups(deadline)
+            stopped = process.poll() is not None
             _deadline_remaining(deadline)
+            if stopped:
+                return True
             current = _inventory_process(process.pid)
             _deadline_remaining(deadline)
         except (
@@ -1088,7 +1113,6 @@ class PhysicalNodeProcess:
             or current.pid in {os.getpid(), os.getppid()}
             or current.process_group in protected_groups
             or current.session_id in protected_groups
-            or process.poll() is not None
         ):
             return False
         try:

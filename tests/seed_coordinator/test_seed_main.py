@@ -582,6 +582,226 @@ def test_private_directory_lease_rejects_opened_final_replacement(
     assert moved.is_dir()
 
 
+@pytest.mark.parametrize(
+    ("created", "final", "failure"),
+    [
+        (False, True, "fstat"),
+        (True, True, "fchmod"),
+        (True, False, "fchmod"),
+    ],
+)
+def test_private_directory_lease_closes_each_opened_fd_on_post_open_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    created: bool,
+    final: bool,
+    failure: str,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    target_name = f"tracked-{created}-{final}-{failure}"
+    target = tmp_path / target_name
+    path = target if final else target / "final"
+    if not created:
+        target.mkdir(mode=0o700)
+    opened: list[int] = []
+    closed: list[int] = []
+    components: dict[int, str] = {}
+    failed = False
+    real_open = os.open
+    real_close = os.close
+    real_fstat = os.fstat
+    real_fchmod = os.fchmod
+
+    def tracked_open(
+        name: Any,
+        flags: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> int:
+        descriptor = real_open(name, flags, *args, **kwargs)
+        opened.append(descriptor)
+        components[descriptor] = os.fspath(name)
+        return descriptor
+
+    def tracked_close(descriptor: int) -> None:
+        closed.append(descriptor)
+        components.pop(descriptor, None)
+        real_close(descriptor)
+
+    def injected_fstat(descriptor: int) -> os.stat_result:
+        nonlocal failed
+        if (
+            failure == "fstat"
+            and components.get(descriptor) == target_name
+            and not failed
+        ):
+            failed = True
+            raise OSError("injected fstat failure")
+        return real_fstat(descriptor)
+
+    def injected_fchmod(descriptor: int, mode: int) -> None:
+        nonlocal failed
+        if (
+            failure == "fchmod"
+            and components.get(descriptor) == target_name
+            and not failed
+        ):
+            failed = True
+            raise OSError("injected fchmod failure")
+        real_fchmod(descriptor, mode)
+
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "close", tracked_close)
+    monkeypatch.setattr(os, "fstat", injected_fstat)
+    monkeypatch.setattr(os, "fchmod", injected_fchmod)
+
+    with pytest.raises(ValueError):
+        process_module.private_directory_lease(path)
+
+    assert failed is True
+    assert sorted(closed) == sorted(opened)
+
+
+@pytest.mark.parametrize("failure", ["fstat", "validation"])
+def test_private_directory_parent_fd_closes_each_opened_fd_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    target_name = f"tracked-parent-{failure}"
+    target = tmp_path / target_name
+    target.mkdir(mode=0o700)
+    path = target / "leaf"
+    opened: list[int] = []
+    closed: list[int] = []
+    components: dict[int, str] = {}
+    failed = False
+    real_open = os.open
+    real_close = os.close
+    real_fstat = os.fstat
+    real_validate = process_module._validate_walk_component
+
+    def tracked_open(
+        name: Any,
+        flags: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> int:
+        descriptor = real_open(name, flags, *args, **kwargs)
+        opened.append(descriptor)
+        components[descriptor] = os.fspath(name)
+        return descriptor
+
+    def tracked_close(descriptor: int) -> None:
+        closed.append(descriptor)
+        components.pop(descriptor, None)
+        real_close(descriptor)
+
+    def injected_fstat(descriptor: int) -> os.stat_result:
+        nonlocal failed
+        if (
+            failure == "fstat"
+            and components.get(descriptor) == target_name
+            and not failed
+        ):
+            failed = True
+            raise OSError("injected fstat failure")
+        return real_fstat(descriptor)
+
+    def injected_validation(metadata: os.stat_result) -> None:
+        nonlocal failed
+        if (
+            failure == "validation"
+            and target_name in components.values()
+            and not failed
+        ):
+            failed = True
+            raise ValueError("injected validation failure")
+        real_validate(metadata)
+
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "close", tracked_close)
+    monkeypatch.setattr(os, "fstat", injected_fstat)
+    monkeypatch.setattr(
+        process_module,
+        "_validate_walk_component",
+        injected_validation,
+    )
+
+    with pytest.raises((OSError, ValueError)):
+        process_module.private_directory_parent_fd(path)
+
+    assert failed is True
+    assert sorted(closed) == sorted(opened)
+
+
+def test_private_directory_walkers_transfer_fd_ownership_exactly_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    state_root = tmp_path / "tracked-success"
+    state_root.mkdir(mode=0o700)
+    opened: list[int] = []
+    closed: list[int] = []
+    real_open = os.open
+    real_close = os.close
+
+    def tracked_open(
+        name: Any,
+        flags: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> int:
+        descriptor = real_open(name, flags, *args, **kwargs)
+        opened.append(descriptor)
+        return descriptor
+
+    def tracked_close(descriptor: int) -> None:
+        closed.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "close", tracked_close)
+
+    lease = process_module.private_directory_lease(state_root)
+    assert sorted(opened).count(lease._parent_descriptor) == (
+        sorted(closed).count(lease._parent_descriptor) + 1
+    )
+    assert sorted(opened).count(lease._descriptor) == (
+        sorted(closed).count(lease._descriptor) + 1
+    )
+    lease.close()
+    assert sorted(closed) == sorted(opened)
+
+    parent = process_module.private_directory_parent_fd(state_root / "leaf")
+    assert sorted(opened).count(parent) == sorted(closed).count(parent) + 1
+    os.close(parent)
+    assert sorted(closed) == sorted(opened)
+
+
+def test_private_directory_walkers_keep_fd_inventory_stable_for_200_cycles(
+    tmp_path: Path,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    state_root = tmp_path / "inventory-stability"
+    state_root.mkdir(mode=0o700)
+    inventory_root = Path("/proc/self/fd")
+    if not inventory_root.is_dir():
+        inventory_root = Path("/dev/fd")
+
+    before = {int(name) for name in os.listdir(inventory_root) if name.isdigit()}
+    for _cycle in range(200):
+        lease = process_module.private_directory_lease(state_root)
+        lease.close()
+        parent = process_module.private_directory_parent_fd(state_root / "leaf")
+        os.close(parent)
+    after = {int(name) for name in os.listdir(inventory_root) if name.isdigit()}
+
+    assert after == before
+
+
 @pytest.mark.parametrize("value", ["0", "1", "65535"])
 def test_seed_port_parser_accepts_only_canonical_decimal_range(value: str) -> None:
     seed_main = importlib.import_module("mycelium_seed.__main__")
