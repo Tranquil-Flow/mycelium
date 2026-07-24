@@ -338,9 +338,33 @@ class NodeMembershipSession:
                 heartbeat_message_id,
                 "heartbeat_message_id",
             )
-            message = self._verify_seed_message(
+            if (
+                self._seed_key_digest is None
+                or self._seed_endpoint_id is None
+                or self._generation is None
+                or self._lease_expires_at is None
+            ):
+                raise NodeMembershipError("membership_not_joined")
+            now = self._now()
+            old_lease_expires_at = self._lease_expires_at
+            message = verify_membership_message(
                 envelope,
+                now=now,
+                expected_key_digest=self._seed_key_digest,
                 expected_protocol=LEASE_RENEWAL_PROTOCOL,
+            )
+            if (
+                message["swarm_id"] != self.swarm_id
+                or message["sender_node_id"] != self.seed_node_id
+                or message["sender_endpoint_id"] != self._seed_endpoint_id
+                or message["recipient_node_id"] != self.node_id
+                or message["generation"] != self._generation
+            ):
+                raise NodeMembershipError("membership_message_mismatch")
+            self._remember_incoming(
+                message["message_id"],
+                expires_at=float(message["expires_at"]),
+                now=now,
             )
             if (
                 message["heartbeat_message_id"] != heartbeat_message_id
@@ -352,10 +376,12 @@ class NodeMembershipSession:
             if pending_liveness is None:
                 raise NodeMembershipError("membership_lease_renewal_unknown")
             renewed_until = float(message["lease_expires_at"])
+            if float(message["issued_at"]) >= old_lease_expires_at:
+                raise NodeMembershipError("membership_lease_renewal_causality")
             if (
-                self._lease_expires_at is None
-                or renewed_until < self._lease_expires_at
-                or renewed_until <= self._now()
+                renewed_until <= old_lease_expires_at
+                or now >= renewed_until
+                or float(message["expires_at"]) < renewed_until
             ):
                 raise NodeMembershipError("membership_lease_renewal_stale")
             self._lease_expires_at = renewed_until

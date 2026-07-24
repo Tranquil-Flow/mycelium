@@ -30,6 +30,7 @@ from mycelium_membership import (
     LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MAX_MESSAGE_TTL_SECONDS,
+    MembershipContractError,
     peer_runtime_is_activation_eligible,
     sign_membership_message,
     verify_join_request,
@@ -775,6 +776,65 @@ class SeedCoordinator:
             raise SeedCoordinatorError("seed_replay_window_full")
         member.seen_ids[message_id] = float(message["expires_at"])
 
+    def _validate_committed_heartbeat_renewal(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        member: _Member,
+        heartbeat_message_id: str,
+        now: float,
+    ) -> dict[str, Any]:
+        message = verify_membership_message(
+            envelope,
+            now=now,
+            expected_key_digest=self.signer.verification_key_digest,
+            expected_protocol=LEASE_RENEWAL_PROTOCOL,
+            expected_swarm_id=self.swarm_id,
+            expected_sender_node_id=self.seed_node_id,
+            expected_sender_endpoint_id=self.signer.endpoint_id,
+            expected_recipient_node_id=member.node_id,
+        )
+        if (
+            message["incarnation"] != self.incarnation
+            or message["generation"] != member.generation
+            or message["heartbeat_message_id"] != heartbeat_message_id
+            or message["member_incarnation"] != member.incarnation
+            or message["membership_generation"] != member.generation
+        ):
+            raise SeedCoordinatorError("seed_state_corrupt")
+        return message
+
+    def _apply_committed_heartbeat(
+        self,
+        member: _Member,
+        *,
+        heartbeat: Mapping[str, Any],
+        renewal: Mapping[str, Any],
+        renewal_message: Mapping[str, Any],
+    ) -> None:
+        sequence = int(heartbeat["heartbeat_sequence"])
+        if sequence >= member.last_heartbeat_sequence:
+            committed_at = float(renewal_message["issued_at"])
+            heartbeat_intervals = (
+                2 if heartbeat["liveness_source"] == "activation_receipt" else 1
+            )
+            member.last_heartbeat_sequence = sequence
+            member.lease_expires_at = max(
+                member.lease_expires_at,
+                float(renewal_message["lease_expires_at"]),
+            )
+            member.last_liveness_at = committed_at
+            member.next_heartbeat_due_at = (
+                committed_at
+                + heartbeat_intervals * self._keepalive_interval_seconds
+            )
+            member.active_requests = int(heartbeat["active_requests"])
+            member.lifecycle_state = heartbeat["lifecycle_state"]
+            if heartbeat["liveness_source"] == "activation_receipt":
+                member.last_activity_receipt_at = committed_at
+        member.latest_messages[LEASE_RENEWAL_PROTOCOL] = dict(renewal)
+        member.latest_messages[HEARTBEAT_PROTOCOL] = dict(heartbeat)
+
     def receive_member_message(
         self,
         envelope: Mapping[str, Any],
@@ -795,11 +855,23 @@ class SeedCoordinator:
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
             now = self._now()
-            if now >= member.lease_expires_at:
+            if (
+                expected_protocol != HEARTBEAT_PROTOCOL
+                and now >= member.lease_expires_at
+            ):
                 raise SeedCoordinatorError("seed_member_lease_expired")
+
+            verification_now = now
+            if expected_protocol == HEARTBEAT_PROTOCOL:
+                try:
+                    request_expiry = float(untrusted_message["expires_at"])
+                    if math.isfinite(request_expiry):
+                        verification_now = min(now, request_expiry)
+                except (KeyError, TypeError, ValueError):
+                    pass
             message = verify_membership_message(
                 envelope,
-                now=now,
+                now=verification_now,
                 expected_key_digest=member.verification_key_digest,
                 expected_protocol=expected_protocol,
             )
@@ -813,8 +885,42 @@ class SeedCoordinator:
             ):
                 raise SeedCoordinatorError("seed_message_mismatch")
             self._ensure_current_member(member)
-            self._ensure_not_replayed(member, message["message_id"])
+
             if expected_protocol == HEARTBEAT_PROTOCOL:
+                request_digest = hashlib.sha256(
+                    canonical_json_bytes(dict(envelope))
+                ).hexdigest()
+                try:
+                    committed = self._state.load_heartbeat_renewal(
+                        node_id=member.node_id,
+                        endpoint_id=member.endpoint_id,
+                        verification_key_digest=member.verification_key_digest,
+                        incarnation=member.incarnation,
+                        generation=member.generation,
+                        heartbeat_message_id=message["message_id"],
+                        request_envelope_digest=request_digest,
+                    )
+                except SeedStateError as exc:
+                    raise SeedCoordinatorError(exc.code) from exc
+                if committed is not None:
+                    renewal_message = self._validate_committed_heartbeat_renewal(
+                        committed,
+                        member=member,
+                        heartbeat_message_id=message["message_id"],
+                        now=now,
+                    )
+                    self._apply_committed_heartbeat(
+                        member,
+                        heartbeat=message,
+                        renewal=committed,
+                        renewal_message=renewal_message,
+                    )
+                    return message
+                if now > float(message["expires_at"]):
+                    raise MembershipContractError("membership_message_expired")
+                if now >= member.lease_expires_at:
+                    raise SeedCoordinatorError("seed_member_lease_expired")
+
                 sequence = int(message["heartbeat_sequence"])
                 if sequence <= member.last_heartbeat_sequence:
                     raise SeedCoordinatorError("seed_heartbeat_sequence_stale")
@@ -822,9 +928,17 @@ class SeedCoordinator:
                     member.lease_expires_at,
                     now + self._lease_seconds,
                 )
+                if renewed_until <= member.lease_expires_at:
+                    renewed_until = math.nextafter(
+                        member.lease_expires_at,
+                        math.inf,
+                    )
+                renewal_message_id = _segment(self._id_source(), "message_id")
+                if renewal_message_id in self._emitted_ids:
+                    raise SeedCoordinatorError("seed_message_id_reused")
                 renewal_message = {
                     "protocol": LEASE_RENEWAL_PROTOCOL,
-                    "message_id": self._new_message_id(),
+                    "message_id": renewal_message_id,
                     "swarm_id": self.swarm_id,
                     "sender_node_id": self.seed_node_id,
                     "sender_endpoint_id": self.signer.endpoint_id,
@@ -832,10 +946,7 @@ class SeedCoordinator:
                     "incarnation": self.incarnation,
                     "generation": member.generation,
                     "issued_at": now,
-                    "expires_at": min(
-                        now + self._message_ttl_seconds,
-                        member.lease_expires_at,
-                    ),
+                    "expires_at": renewed_until,
                     "heartbeat_message_id": message["message_id"],
                     "member_incarnation": member.incarnation,
                     "membership_generation": member.generation,
@@ -862,8 +973,29 @@ class SeedCoordinator:
                 persisted_member["lifecycle_state"] = message["lifecycle_state"]
                 if message["liveness_source"] == "activation_receipt":
                     persisted_member["last_activity_receipt_at"] = now
-                self._persist("save_member", persisted_member)
+                try:
+                    committed = self._state.commit_heartbeat_renewal(
+                        request_envelope_digest=request_digest,
+                        heartbeat_message_id=message["message_id"],
+                        heartbeat_sequence=sequence,
+                        heartbeat_expires_at=float(message["expires_at"]),
+                        renewal_message_id=renewal_message_id,
+                        member=persisted_member,
+                        renewal=renewal,
+                        now=now,
+                        capacity=_MAX_REPLAY_IDS,
+                    )
+                except SeedStateError as exc:
+                    raise SeedCoordinatorError(exc.code) from exc
+                committed_message = self._validate_committed_heartbeat_renewal(
+                    committed,
+                    member=member,
+                    heartbeat_message_id=message["message_id"],
+                    now=now,
+                )
+                self._emitted_ids.add(committed_message["message_id"])
             elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
+                self._ensure_not_replayed(member, message["message_id"])
                 assignment = self._assignments.get(message["assignment_id"])
                 if (
                     assignment is None
@@ -885,17 +1017,17 @@ class SeedCoordinator:
                     "runtime_endpoint": message["runtime_endpoint"],
                 }
                 self._persist("save_assignment_result", updated_assignment)
-            self._remember(member, message, now)
+            else:
+                self._ensure_not_replayed(member, message["message_id"])
+            if expected_protocol != HEARTBEAT_PROTOCOL:
+                self._remember(member, message, now)
             if expected_protocol == HEARTBEAT_PROTOCOL:
-                member.last_heartbeat_sequence = sequence
-                member.lease_expires_at = renewed_until
-                member.last_liveness_at = now
-                member.next_heartbeat_due_at = next_heartbeat_due_at
-                member.active_requests = int(message["active_requests"])
-                member.lifecycle_state = message["lifecycle_state"]
-                if message["liveness_source"] == "activation_receipt":
-                    member.last_activity_receipt_at = now
-                member.latest_messages[LEASE_RENEWAL_PROTOCOL] = renewal
+                self._apply_committed_heartbeat(
+                    member,
+                    heartbeat=message,
+                    renewal=committed,
+                    renewal_message=committed_message,
+                )
             elif expected_protocol == ASSIGNMENT_RESULT_PROTOCOL:
                 assignment.update(updated_assignment)
             member.latest_messages[expected_protocol] = dict(message)
@@ -916,13 +1048,30 @@ class SeedCoordinator:
             member = self._members.get(node_id)
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
+            self._ensure_current_member(member)
             envelope = member.latest_messages.get(LEASE_RENEWAL_PROTOCOL)
             if (
                 envelope is None
                 or envelope.get("message", {}).get("heartbeat_message_id")
                 != heartbeat_message_id
             ):
+                try:
+                    envelope = self._state.find_heartbeat_renewal(
+                        node_id=member.node_id,
+                        generation=member.generation,
+                        heartbeat_message_id=heartbeat_message_id,
+                    )
+                except SeedStateError as exc:
+                    raise SeedCoordinatorError(exc.code) from exc
+            if envelope is None:
                 raise SeedCoordinatorError("seed_lease_renewal_unknown")
+            self._validate_committed_heartbeat_renewal(
+                envelope,
+                member=member,
+                heartbeat_message_id=heartbeat_message_id,
+                now=self._now(),
+            )
+            member.latest_messages[LEASE_RENEWAL_PROTOCOL] = dict(envelope)
             return dict(envelope)
 
     def assignment_offer(
