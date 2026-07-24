@@ -880,6 +880,130 @@ def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
         transport.close()
 
 
+def test_rotation_configured_before_close_cannot_commit_after_close() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    assert configured.wait(timeout=1)
+    transport.close()
+    state_after_close = (
+        transport.peer_binding,
+        transport.pending_delivery_count,
+        transport.outbound_trace,
+        transport.evidence(),
+        tuple(hub.cancels),
+    )
+    release_commit.set()
+    rotation.join(timeout=1)
+
+    assert not rotation.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], IrohTransportError)
+    assert errors[0].code == "transport_closed"
+    assert (
+        transport.peer_binding,
+        transport.pending_delivery_count,
+        transport.outbound_trace,
+        transport.evidence(),
+        tuple(hub.cancels),
+    ) == state_after_close
+    assert transport.peer_binding.generation == 7
+    assert hub.configurations[-1][2] == 8
+
+
+@pytest.mark.parametrize(
+    ("state_change", "expected_code"),
+    [
+        ("control", "transport_control_changed"),
+        ("peer", "peer_rotated"),
+    ],
+)
+def test_rotation_revalidates_control_and_current_before_commit(
+    state_change: str,
+    expected_code: str,
+) -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    original_control = transport._control_client
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    assert configured.wait(timeout=1)
+    with transport._state_lock:
+        if state_change == "control":
+            swapped_control = object()
+            transport._control_client = swapped_control
+        else:
+            swapped_control = None
+            transport._peer = PeerBinding(
+                "peer-node",
+                "peer-9",
+                {"id": "peer-9"},
+                9,
+            )
+        state_before_release = (
+            transport._peer,
+            tuple(transport._pending.items()),
+            tuple(transport._outbound_trace),
+        )
+    release_commit.set()
+    rotation.join(timeout=1)
+    try:
+        assert not rotation.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == expected_code
+        with transport._state_lock:
+            assert (
+                transport._peer,
+                tuple(transport._pending.items()),
+                tuple(transport._outbound_trace),
+            ) == state_before_release
+            if state_change == "control":
+                assert transport._control_client is swapped_control
+                transport._control_client = original_control
+    finally:
+        transport.close()
+
+
 @pytest.mark.parametrize("_interleaving", range(12))
 def test_rotation_and_deadline_reserve_one_cancel_per_message(
     _interleaving: int,

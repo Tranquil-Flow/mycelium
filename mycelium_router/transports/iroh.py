@@ -530,6 +530,11 @@ class IrohTransport:
          raise self._map_sidecar_error("peer_rotation_failed", error) from error
 
       with self._state_lock:
+         self._require_running()
+         if self._control_client is not control:
+            raise IrohTransportError("transport_control_changed")
+         if self._peer != current:
+            raise IrohTransportError("peer_rotated")
          self._peer = replacement
          for message_id, pending in self._pending.items():
             if pending.generation >= replacement.generation:
