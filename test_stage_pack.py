@@ -275,6 +275,46 @@ def _refresh_digest(pack: dict[str, Any]) -> None:
     pack["stage_pack_digest"] = stage_pack_digest_for(pack)
 
 
+def _refresh_joint_evidence_digests(
+    pack: dict[str, Any],
+    verification: dict[str, Any],
+) -> None:
+    _refresh_digest(pack)
+    verification["stage_pack_digest"] = pack["stage_pack_digest"]
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+
+def _swap_embedded_tensor_ownership(
+    pack: dict[str, Any],
+    verification: dict[str, Any],
+    left_key: str,
+    right_key: str,
+) -> None:
+    artifacts_by_path = {
+        record["upstream_path"]: record for record in pack["artifacts"]
+    }
+    verified_by_path = {
+        record["path"]: record for record in verification["verified_files"]
+    }
+    left_path = verification["tensor_file_map"][left_key]
+    right_path = verification["tensor_file_map"][right_key]
+    assert left_path != right_path
+    for records_by_path in (artifacts_by_path, verified_by_path):
+        left_keys = records_by_path[left_path]["tensor_keys"]
+        right_keys = records_by_path[right_path]["tensor_keys"]
+        left_keys.remove(left_key)
+        right_keys.remove(right_key)
+        left_keys.append(right_key)
+        right_keys.append(left_key)
+        left_keys.sort()
+        right_keys.sort()
+    verification["tensor_file_map"][left_key] = right_path
+    verification["tensor_file_map"][right_key] = left_path
+    _refresh_joint_evidence_digests(pack, verification)
+
+
 def _mlx_runtime(dtype: str = "float32") -> dict[str, Any]:
     return {
         "backend": "mlx",
@@ -918,7 +958,17 @@ def test_tied_alias_pack_includes_embedding_source_for_final_stage(tmp_path: Pat
     assert pack["component_aliases"] == {"lm_head": "input_embedding"}
     assert pack["component_tensor_keys"]["lm_head"] == ["transformer.wte.weight"]
     assert "embed.safetensors" in [item["upstream_path"] for item in pack["artifacts"]]
-    assert verify_stage_pack(pack, assignment=final, manifest=manifest)["ready_for_load"] is True
+    verification = verify_stage_pack(pack, assignment=final, manifest=manifest)
+    assert verification["ready_for_load"] is True
+    assert sp.validate_stage_pack_evidence(
+        pack,
+        verification,
+        assignment=final,
+        manifest=manifest,
+    ) == (
+        pack["stage_pack_digest"],
+        verification["stage_pack_verification_digest"],
+    )
     collection = sp.verify_stage_pack_collection(
         packs,
         assignments=assignments,
@@ -1656,6 +1706,123 @@ def test_redigested_verification_rejects_verified_file_tensor_key_drift(
         )
 
 
+def test_joint_redigest_rejects_cross_component_tensor_ownership_swap(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[2]
+    pack = compile_stage_pack(assignment, manifest, reports[2])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    layer_key = manifest["tensor_keys_by_layer"]["2"][0]
+    classifier_key = manifest["component_tensor_keys"]["classifier"][0]
+    _swap_embedded_tensor_ownership(
+        pack,
+        verification,
+        layer_key,
+        classifier_key,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack artifact tensor ownership mismatch$",
+    ):
+        verify_stage_pack(pack, assignment=assignment, manifest=manifest)
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification evidence is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+def test_joint_redigest_physically_rejects_same_layer_multifile_ownership_swap(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    left_key, right_key = manifest["tensor_keys_by_layer"]["1"]
+    original_paths = {
+        verification["tensor_file_map"][left_key],
+        verification["tensor_file_map"][right_key],
+    }
+    assert original_paths == set(manifest["layer_files"]["1"])
+    _swap_embedded_tensor_ownership(
+        pack,
+        verification,
+        left_key,
+        right_key,
+    )
+    assert {
+        verification["tensor_file_map"][left_key],
+        verification["tensor_file_map"][right_key],
+    } <= set(manifest["layer_files"]["1"])
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack artifact tensor ownership mismatch$",
+    ):
+        verify_stage_pack(pack, assignment=assignment, manifest=manifest)
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack physical verification evidence is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+def test_joint_redigest_cannot_replace_authoritative_file_digest(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    assignment_snapshot = copy.deepcopy(assignment)
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    artifact = pack["artifacts"][0]
+    verified_file = next(
+        record
+        for record in verification["verified_files"]
+        if record["path"] == artifact["upstream_path"]
+    )
+    artifact["content_digest"] = "sha256:" + "f" * 64
+    verified_file["content_digest"] = artifact["content_digest"]
+    _refresh_joint_evidence_digests(pack, verification)
+
+    assert assignment == assignment_snapshot
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification file evidence is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
 @pytest.mark.parametrize(
     "layout_attack",
     ("nested-relative-path", "post-verification-symlink"),
@@ -1668,7 +1835,6 @@ def test_adapter_never_emits_ready_report_rejected_by_loader_path_contract(
     from mycelium_qualification.physical_deployment import (
         prepare_assignment_artifacts,
     )
-    from runtime_loader import RuntimeLoadError, load_assignment_stage
 
     prepared = prepare_assignment_artifacts(tmp_path)
     assignment = prepared.assignments[0]
@@ -1696,27 +1862,19 @@ def test_adapter_never_emits_ready_report_rejected_by_loader_path_contract(
         local_path.unlink()
         local_path.symlink_to(backing.name)
 
-    try:
-        report = artifact_report_for_loader(
+    expected_error = (
+        "stage pack artifacts are not loader-compatible"
+        if layout_attack == "nested-relative-path"
+        else "stage pack physical verification evidence is invalid"
+    )
+    with pytest.raises(ValueError) as raised:
+        artifact_report_for_loader(
             pack,
             verification,
             assignment=assignment,
             manifest=prepared.manifest,
         )
-    except ValueError as error:
-        assert str(error) == "stage pack artifacts are not loader-compatible"
-    else:
-        assert report["ready_for_load"] is True
-        with pytest.raises(
-            RuntimeLoadError,
-            match="verified local path|unable to open verified artifact",
-        ):
-            load_assignment_stage(
-                assignment,
-                report,
-                load_generation=17,
-            )
-        pytest.fail("adapter emitted a ready report rejected by the loader path contract")
+    assert str(raised.value) == expected_error
 
 
 def test_flat_local_adapter_report_loads_through_runtime_contract(
@@ -1743,6 +1901,56 @@ def test_flat_local_adapter_report_loads_through_runtime_contract(
     ] == [
         pack["stage_pack_digest"] for pack in prepared.stage_packs
     ]
+
+
+def test_direct_loader_rejects_joint_embedded_file_metadata_rewrite(
+    tmp_path: Path,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    from runtime_loader import RuntimeLoadError, load_assignment_stage
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    assignment = prepared.assignments[0]
+    report = copy.deepcopy(prepared.reports[0])
+    outer_report_snapshot = {
+        "verified_files": copy.deepcopy(report["verified_files"]),
+        "expected_bytes": report["expected_bytes"],
+        "cache_hit_bytes": report["cache_hit_bytes"],
+    }
+    pack = report["stage_pack"]
+    verification = report["stage_pack_verification"]
+    artifact = pack["artifacts"][0]
+    verified_file = verification["verified_files"][0]
+    artifact["size_bytes"] += 1
+    verified_file["size_bytes"] += 1
+    verification["expected_bytes"] += 1
+    _refresh_joint_evidence_digests(pack, verification)
+    report["stage_pack_digest"] = pack["stage_pack_digest"]
+    report["stage_pack_verification_digest"] = verification[
+        "stage_pack_verification_digest"
+    ]
+    forged_digest = pack["stage_pack_digest"]
+
+    assert {
+        "verified_files": report["verified_files"],
+        "expected_bytes": report["expected_bytes"],
+        "cache_hit_bytes": report["cache_hit_bytes"],
+    } == outer_report_snapshot
+    with pytest.raises(
+        RuntimeLoadError,
+        match=(
+            r"^stage-pack evidence rejected: "
+            r"stage pack verification file evidence is invalid$"
+        ),
+    ) as raised:
+        load_assignment_stage(
+            assignment,
+            report,
+            load_generation=17,
+        )
+    assert forged_digest not in str(raised.value)
 
 
 def test_coherent_nested_upstream_path_loads_through_runtime_contract(

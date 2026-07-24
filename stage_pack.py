@@ -1601,6 +1601,25 @@ def _validate_verification_evidence(
     supplied = verification["stage_pack_verification_digest"]
     if supplied != _verification_digest_for(verification):
         raise ValueError("stage pack verification digest mismatch")
+    authoritative_files = {
+        record["path"]: record for record in assignment["files"]
+    }
+    artifacts_by_path = {
+        record["upstream_path"]: record for record in pack["artifacts"]
+    }
+    if (
+        set(artifacts_by_path) != set(authoritative_files)
+        or any(
+            artifact["size_bytes"] != authoritative_files[path]["size_bytes"]
+            or artifact["content_digest"]
+            != authoritative_files[path]["content_digest"]
+            for path, artifact in artifacts_by_path.items()
+        )
+    ):
+        raise ValueError("stage pack verification file evidence is invalid")
+    authoritative_expected_bytes = sum(
+        record["size_bytes"] for record in authoritative_files.values()
+    )
     expected_bindings = {
         "protocol": STAGE_PACK_VERIFICATION_PROTOCOL,
         "stage_pack_digest": pack["stage_pack_digest"],
@@ -1618,7 +1637,7 @@ def _validate_verification_evidence(
         "verified_tensor_prefixes": pack["expected_tensor_prefixes"],
         "verified_tensor_keys": pack["expected_tensor_keys"],
         "verified_tensor_count": len(pack["expected_tensor_keys"]),
-        "expected_bytes": sum(item["size_bytes"] for item in pack["artifacts"]),
+        "expected_bytes": authoritative_expected_bytes,
         "ready_for_load": True,
         "route_ready": False,
     }
@@ -1629,8 +1648,12 @@ def _validate_verification_evidence(
     expected_files = {
         item["upstream_path"]: {
             "relative_path": item["relative_path"],
-            "size_bytes": item["size_bytes"],
-            "content_digest": item["content_digest"],
+            "size_bytes": authoritative_files[item["upstream_path"]][
+                "size_bytes"
+            ],
+            "content_digest": authoritative_files[item["upstream_path"]][
+                "content_digest"
+            ],
             "tensor_keys": item["tensor_keys"],
         }
         for item in pack["artifacts"]
@@ -1699,6 +1722,26 @@ def _validate_verification_evidence(
         != verification["expected_bytes"]
     ):
         raise ValueError("stage pack verification evidence is invalid")
+    layer_range = assignment["range"]
+    for layer in range(
+        layer_range["start_layer"],
+        layer_range["end_layer_exclusive"],
+    ):
+        allowed_files = set(manifest["layer_files"][str(layer)])
+        if any(
+            tensor_map[tensor_key] not in allowed_files
+            for tensor_key in manifest["tensor_keys_by_layer"][str(layer)]
+        ):
+            raise ValueError("stage pack verification evidence is invalid")
+    for component in assignment["components"]:
+        if component == "decoder":
+            continue
+        allowed_files = set(manifest["component_files"][component])
+        if any(
+            tensor_map[tensor_key] not in allowed_files
+            for tensor_key in manifest["component_tensor_keys"][component]
+        ):
+            raise ValueError("stage pack verification evidence is invalid")
 
 
 def validate_stage_pack_evidence(
@@ -1708,10 +1751,22 @@ def validate_stage_pack_evidence(
     assignment: dict[str, Any],
     manifest: dict[str, Any],
 ) -> tuple[str, str]:
-    """Validate canonical pack evidence without rereading already verified files."""
+    """Validate canonical pack evidence and physically reproduce its verification."""
 
     _validate_authoritative_assignment(assignment, manifest)
     _validate_verification_evidence(pack, verification, assignment, manifest)
+    try:
+        reproduced = verify_stage_pack(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+    except ValueError:
+        raise ValueError(
+            "stage pack physical verification evidence is invalid"
+        ) from None
+    if _canonical_json(reproduced) != _canonical_json(verification):
+        raise ValueError("stage pack verification evidence is invalid")
     return (
         pack["stage_pack_digest"],
         verification["stage_pack_verification_digest"],
