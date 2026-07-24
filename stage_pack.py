@@ -194,6 +194,13 @@ _CONTROL_PLANE_BINDING_FIELDS = frozenset(
         "deployment_epoch",
     }
 )
+_ASSIGNMENT_FILE_FIELDS = frozenset(
+    {
+        "path",
+        "size_bytes",
+        "content_digest",
+    }
+)
 _TOLERANCE_FIELDS = frozenset(
     {
         "protocol",
@@ -576,6 +583,45 @@ def _safe_relative_path(value: Any) -> PurePosixPath:
     return path
 
 
+def _canonical_assignment_files(
+    files: Any,
+    *,
+    diagnostic: str = "stage pack assignment files are invalid",
+) -> list[dict[str, Any]]:
+    if type(files) is not list or not files:
+        raise ValueError(diagnostic)
+    normalized: list[dict[str, Any]] = []
+    for record in files:
+        if type(record) is not dict or set(record) != _ASSIGNMENT_FILE_FIELDS:
+            raise ValueError(diagnostic)
+        path = record["path"]
+        size = record["size_bytes"]
+        digest = record["content_digest"]
+        if (
+            type(path) is not str
+            or type(size) is not int
+            or size <= 0
+            or type(digest) is not str
+            or _SHA256_REF_RE.fullmatch(digest) is None
+        ):
+            raise ValueError(diagnostic)
+        try:
+            _safe_relative_path(path)
+        except ValueError:
+            raise ValueError(diagnostic) from None
+        normalized.append(
+            {
+                "path": path,
+                "size_bytes": size,
+                "content_digest": digest,
+            }
+        )
+    paths = [record["path"] for record in normalized]
+    if len(paths) != len(set(paths)):
+        raise ValueError(diagnostic)
+    return normalized
+
+
 def _normalize_runtime(runtime: Any) -> dict[str, Any]:
     if not isinstance(runtime, dict):
         raise ValueError("stage pack runtime identity must be an object")
@@ -640,10 +686,11 @@ def _validate_manifest_component_aliases(aliases: Any) -> None:
 
 def _validate_authoritative_assignment(
     assignment: dict[str, Any], manifest: dict[str, Any]
-) -> None:
-    _validate_manifest_component_aliases(manifest.get("component_aliases"))
+) -> list[dict[str, Any]]:
     if not isinstance(assignment, dict):
         raise ValueError("assignment must be an object")
+    assignment_files = _canonical_assignment_files(assignment.get("files"))
+    _validate_manifest_component_aliases(manifest.get("component_aliases"))
     try:
         _validate_manifest_component_aliases(assignment.get("component_aliases"))
     except ValueError:
@@ -774,9 +821,10 @@ def _validate_authoritative_assignment(
         expected_files = [manifest_files[path] for path in sorted(paths)]
     except KeyError as exc:
         raise ValueError(f"manifest covering file missing: {exc.args[0]}") from exc
-    if assignment.get("files") != expected_files:
+    if assignment_files != expected_files:
         raise ValueError("assignment does not contain the minimal covering files")
     _normalize_runtime(assignment.get("runtime"))
+    return assignment_files
 
 
 def compile_stage_pack(
@@ -787,7 +835,7 @@ def compile_stage_pack(
     """Compile one canonical local pack from authoritative assignment evidence."""
     if not isinstance(assignment, dict) or not isinstance(manifest, dict):
         raise ValueError("assignment and manifest must be objects")
-    _validate_authoritative_assignment(assignment, manifest)
+    assignment_files = _validate_authoritative_assignment(assignment, manifest)
     errors = artifact_report_errors(assignment, artifact_report)
     if errors:
         raise ValueError("artifact report rejected: " + "; ".join(errors))
@@ -813,7 +861,7 @@ def compile_stage_pack(
         by_path[record["path"]] = record
 
     artifacts = []
-    for upstream in assignment["files"]:
+    for upstream in assignment_files:
         path = upstream["path"]
         record = by_path[path]
         local_raw = record.get("local_path")
@@ -863,7 +911,7 @@ def compile_stage_pack(
             assignment["expected_tensor_prefixes"]
         ),
         "expected_tensor_keys": copy.deepcopy(assignment["expected_tensor_keys"]),
-        "upstream_files": copy.deepcopy(assignment["files"]),
+        "upstream_files": copy.deepcopy(assignment_files),
         "artifact_root": str(root),
         "artifacts": artifacts,
         "runtime": copy.deepcopy(assignment["runtime"]),
@@ -880,13 +928,17 @@ def compile_stage_pack(
     return pack
 
 
-def _validate_pack_shape(pack: dict[str, Any]) -> None:
+def _validate_pack_shape(pack: dict[str, Any]) -> list[dict[str, Any]]:
     if set(pack) != _PACK_FIELDS:
         raise ValueError("stage pack fields do not match the v1 contract")
     if pack.get("protocol") != STAGE_PACK_PROTOCOL:
         raise ValueError("unsupported stage pack protocol")
     if pack.get("route_ready") is not False:
         raise ValueError("stage pack cannot claim route readiness")
+    upstream_files = _canonical_assignment_files(
+        pack.get("upstream_files"),
+        diagnostic="stage pack upstream files are invalid",
+    )
     _validate_deployment_epoch(pack.get("deployment_epoch"))
     try:
         _validate_manifest_component_aliases(pack.get("component_aliases"))
@@ -1008,9 +1060,16 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         upstream_paths.add(artifact["upstream_path"])
         relative_paths.add(artifact["relative_path"])
         artifact_tensor_keys.update(artifact["tensor_keys"])
+    return upstream_files
 
 
-def _validate_against_assignment(pack: dict[str, Any], assignment: dict[str, Any]) -> None:
+def _validate_against_assignment(
+    pack: dict[str, Any],
+    assignment: dict[str, Any],
+    *,
+    assignment_files: list[dict[str, Any]],
+    upstream_files: list[dict[str, Any]],
+) -> None:
     try:
         validate_assignment_identity(assignment)
     except (KeyError, TypeError, ValueError) as exc:
@@ -1018,7 +1077,7 @@ def _validate_against_assignment(pack: dict[str, Any], assignment: dict[str, Any
     for field in _ASSIGNMENT_PACK_FIELDS:
         if pack.get(field) != assignment.get(field):
             raise ValueError(f"stage pack assignment mismatch: {field}")
-    if pack.get("upstream_files") != assignment.get("files"):
+    if upstream_files != assignment_files:
         raise ValueError("stage pack assignment mismatch: files")
 
 
@@ -1211,9 +1270,14 @@ def verify_stage_pack(
         raise ValueError("assignment must be an object")
     if not isinstance(manifest, dict):
         raise ValueError("manifest must be an object")
-    _validate_authoritative_assignment(assignment, manifest)
-    _validate_pack_shape(pack)
-    _validate_against_assignment(pack, assignment)
+    assignment_files = _validate_authoritative_assignment(assignment, manifest)
+    upstream_files = _validate_pack_shape(pack)
+    _validate_against_assignment(
+        pack,
+        assignment,
+        assignment_files=assignment_files,
+        upstream_files=upstream_files,
+    )
 
     root_raw = pack.get("artifact_root")
     if not isinstance(root_raw, str) or not Path(root_raw).is_absolute():
@@ -1228,24 +1292,10 @@ def verify_stage_pack(
     if str(resolved_root) != root_raw or not resolved_root.is_dir():
         raise ValueError("stage pack artifact root must be exact and canonical")
 
-    upstream_raw = pack.get("upstream_files")
     artifacts_raw = pack.get("artifacts")
-    if not isinstance(upstream_raw, list) or not upstream_raw:
-        raise ValueError("stage pack upstream files are invalid")
     if not isinstance(artifacts_raw, list) or not artifacts_raw:
         raise ValueError("stage pack artifacts are invalid")
-    upstream: dict[str, dict[str, Any]] = {}
-    for record in upstream_raw:
-        if not isinstance(record, dict) or set(record) != {
-            "path",
-            "size_bytes",
-            "content_digest",
-        }:
-            raise ValueError("stage pack upstream file record is invalid")
-        path = record.get("path")
-        if not isinstance(path, str) or path in upstream:
-            raise ValueError(f"duplicate upstream artifact: {path}")
-        upstream[path] = record
+    upstream = {record["path"]: record for record in upstream_files}
 
     seen_artifacts: set[str] = set()
     all_tensor_files: dict[str, str] = {}
@@ -1593,16 +1643,22 @@ def _validate_verification_evidence(
     verification: dict[str, Any],
     assignment: dict[str, Any],
     manifest: dict[str, Any],
+    assignment_files: list[dict[str, Any]],
 ) -> None:
-    _validate_pack_shape(pack)
-    _validate_against_assignment(pack, assignment)
+    upstream_files = _validate_pack_shape(pack)
+    _validate_against_assignment(
+        pack,
+        assignment,
+        assignment_files=assignment_files,
+        upstream_files=upstream_files,
+    )
     _validate_verification_schema(verification)
     _validate_verification_scalar_semantics(verification)
     supplied = verification["stage_pack_verification_digest"]
     if supplied != _verification_digest_for(verification):
         raise ValueError("stage pack verification digest mismatch")
     authoritative_files = {
-        record["path"]: record for record in assignment["files"]
+        record["path"]: record for record in assignment_files
     }
     artifacts_by_path = {
         record["upstream_path"]: record for record in pack["artifacts"]
@@ -1753,8 +1809,14 @@ def validate_stage_pack_evidence(
 ) -> tuple[str, str]:
     """Validate canonical pack evidence and physically reproduce its verification."""
 
-    _validate_authoritative_assignment(assignment, manifest)
-    _validate_verification_evidence(pack, verification, assignment, manifest)
+    assignment_files = _validate_authoritative_assignment(assignment, manifest)
+    _validate_verification_evidence(
+        pack,
+        verification,
+        assignment,
+        manifest,
+        assignment_files,
+    )
     try:
         reproduced = verify_stage_pack(
             pack,

@@ -42,6 +42,10 @@ class _StrictStrCollision(str):
     pass
 
 
+class _StrictIntCollision(int):
+    pass
+
+
 def _write_safetensors(path: Path, tensor_names: list[str]) -> None:
     header: dict[str, Any] = {}
     payload = bytearray()
@@ -387,6 +391,89 @@ def _set_present_assignment_pack_binding(
     pack["assignment_id"] = assignment["assignment_id"]
     pack["control_plane_binding"] = copy.deepcopy(binding)
     _refresh_digest(pack)
+
+
+def _rebind_assignment_file_evidence(
+    assignment: dict[str, Any],
+    pack: dict[str, Any],
+    verification: dict[str, Any],
+    report: dict[str, Any],
+) -> None:
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+    pack["assignment_id"] = assignment["assignment_id"]
+    pack["upstream_files"] = copy.deepcopy(assignment["files"])
+    report["assignment_id"] = assignment["assignment_id"]
+    verification["assignment_id"] = assignment["assignment_id"]
+    _refresh_joint_evidence_digests(pack, verification)
+
+
+def _mutate_assignment_files(
+    assignment: dict[str, Any],
+    collision: str,
+) -> None:
+    files = assignment["files"]
+    record = files[0]
+    if collision == "list-subclass":
+        assignment["files"] = _StrictListCollision(files)
+    elif collision == "dict-subclass":
+        files[0] = _StrictDictCollision(record)
+    elif collision == "path-str-subclass":
+        record["path"] = _StrictStrCollision(record["path"])
+    elif collision == "size-int-subclass":
+        record["size_bytes"] = _StrictIntCollision(record["size_bytes"])
+    elif collision == "digest-str-subclass":
+        record["content_digest"] = _StrictStrCollision(record["content_digest"])
+    elif collision == "bool-size":
+        record["size_bytes"] = True
+    elif collision == "missing-field":
+        record.pop("content_digest")
+    elif collision == "extra-field":
+        record["source_etag"] = "not-in-assignment-schema"
+    elif collision == "duplicate-path":
+        files.append(copy.deepcopy(record))
+    elif collision == "empty-path":
+        record["path"] = ""
+    elif collision == "noncanonical-path":
+        record["path"] = "nested/../escape.safetensors"
+    elif collision == "malformed-digest":
+        record["content_digest"] = "sha256:not-a-digest"
+    elif collision == "record-scalar":
+        files[0] = "not-a-record"
+    elif collision == "path-int":
+        record["path"] = 7
+    elif collision == "size-str":
+        record["size_bytes"] = str(record["size_bytes"])
+    elif collision == "digest-list":
+        record["content_digest"] = [record["content_digest"]]
+    elif collision == "size-float":
+        record["size_bytes"] = float(record["size_bytes"])
+    elif collision == "size-zero":
+        record["size_bytes"] = 0
+    elif collision == "size-negative":
+        record["size_bytes"] = -1
+    else:
+        assignment["files"] = []
+
+
+def _exercise_assignment_file_boundary(
+    validation_path: str,
+    *,
+    assignment: dict[str, Any],
+    manifest: dict[str, Any],
+    report: dict[str, Any],
+    pack: dict[str, Any],
+    verification: dict[str, Any],
+) -> Any:
+    if validation_path == "compile":
+        return compile_stage_pack(assignment, manifest, report)
+    if validation_path == "verify":
+        return verify_stage_pack(pack, assignment=assignment, manifest=manifest)
+    return sp.validate_stage_pack_evidence(
+        pack,
+        verification,
+        assignment=assignment,
+        manifest=manifest,
+    )
 
 
 def _assert_collection_error_is_value_free(
@@ -1209,6 +1296,99 @@ def test_compile_rejects_manifest_digest_and_minimal_file_drift(tmp_path: Path) 
     bad_report["network_download_bytes"] = bad_report["expected_bytes"]
     with pytest.raises(ValueError, match="minimal covering files"):
         compile_stage_pack(bad_assignment, manifest, bad_report)
+
+
+@pytest.mark.parametrize(
+    "collision",
+    (
+        "list-subclass",
+        "dict-subclass",
+        "path-str-subclass",
+        "size-int-subclass",
+        "digest-str-subclass",
+        "bool-size",
+        "missing-field",
+        "extra-field",
+        "duplicate-path",
+        "empty-path",
+        "noncanonical-path",
+        "malformed-digest",
+        "record-scalar",
+        "path-int",
+        "size-str",
+        "digest-list",
+        "size-float",
+        "size-zero",
+        "size-negative",
+        "empty-list",
+    ),
+    ids=lambda collision: collision,
+)
+@pytest.mark.parametrize("validation_path", ("compile", "verify", "evidence"))
+def test_authoritative_assignment_files_require_exact_canonical_schema(
+    tmp_path: Path,
+    validation_path: str,
+    collision: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    report = reports[1]
+    pack = compile_stage_pack(assignment, manifest, report)
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    _mutate_assignment_files(assignment, collision)
+    _rebind_assignment_file_evidence(
+        assignment,
+        pack,
+        verification,
+        report,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack assignment files are invalid$",
+    ):
+        _exercise_assignment_file_boundary(
+            validation_path,
+            assignment=assignment,
+            manifest=manifest,
+            report=report,
+            pack=pack,
+            verification=verification,
+        )
+
+
+@pytest.mark.parametrize("validation_path", ("compile", "verify", "evidence"))
+def test_authoritative_assignment_file_schema_valid_epoch_zero_control(
+    tmp_path: Path,
+    validation_path: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path, deployment_epoch=0)
+    assignment = assignments[1]
+    report = reports[1]
+    pack = compile_stage_pack(assignment, manifest, report)
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    result = _exercise_assignment_file_boundary(
+        validation_path,
+        assignment=assignment,
+        manifest=manifest,
+        report=report,
+        pack=pack,
+        verification=verification,
+    )
+
+    assert assignment["files"]
+    assert all(record["size_bytes"] > 0 for record in assignment["files"])
+    assert result
 
 
 def test_verifier_rejects_corruption_traversal_and_symlink(tmp_path: Path) -> None:
