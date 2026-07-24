@@ -44,8 +44,15 @@ class _WeakReferenceableCloseError(OSError):
         self,
         references: list[weakref.ReferenceType[_WeakReferenceableCloseError]],
         private_marker: object,
+        *,
+        private_errno: int = errno.EIO,
+        private_path: str | None = None,
+        private_secret: str = "tracked close failure",
     ) -> None:
-        super().__init__(errno.EIO, "tracked close failure")
+        if private_path is None:
+            super().__init__(private_errno, private_secret)
+        else:
+            super().__init__(private_errno, private_secret, private_path)
         self.private_marker = private_marker
         references.append(weakref.ref(self))
 
@@ -3082,7 +3089,7 @@ def test_cwd_deactivation_does_not_retain_close_failures(
             gc.enable()
 
 
-def test_cwd_cleanup_error_traceback_locals_exclude_close_marker(
+def test_cwd_cleanup_error_traceback_excludes_descriptor_and_private_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     process_module = importlib.import_module("mycelium_node.process")
@@ -3103,11 +3110,21 @@ def test_cwd_cleanup_error_traceback_locals_exclude_close_marker(
         weakref.ReferenceType[_WeakReferenceableCloseError]
     ] = []
     private_marker = object()
+    private_errno = 987_654_321
+    private_path = "/private/cwd-close-path-sentinel-2r5-fix9"
+    private_secret = "private-cwd-close-secret-sentinel-2r5-fix9"
+    raw_descriptor = descriptors[0]
     try:
 
         def fail_close(received_descriptor: int) -> None:
             close_calls.append(received_descriptor)
-            raise _WeakReferenceableCloseError(references, private_marker)
+            raise _WeakReferenceableCloseError(
+                references,
+                private_marker,
+                private_errno=private_errno,
+                private_path=private_path,
+                private_secret=private_secret,
+            )
 
         monkeypatch.setattr(os, "close", fail_close)
         process_module._deactivate_working_directory_token(tokens[0])
@@ -3125,12 +3142,18 @@ def test_cwd_cleanup_error_traceback_locals_exclude_close_marker(
         process_module._deactivate_working_directory_token(tokens[0])
         assert close_calls == expected_close_calls
 
-        def contains_private_marker(value: object) -> bool:
+        def contains_target(value: object, target: object) -> bool:
             pending = [value]
             visited: set[int] = set()
             while pending:
                 candidate = pending.pop()
-                if candidate is private_marker:
+                if candidate is target:
+                    return True
+                if (
+                    type(candidate) is type(target)
+                    and isinstance(candidate, (int, str, bytes))
+                    and candidate == target
+                ):
                     return True
                 identity = id(candidate)
                 if identity in visited:
@@ -3138,6 +3161,27 @@ def test_cwd_cleanup_error_traceback_locals_exclude_close_marker(
                 visited.add(identity)
                 if isinstance(candidate, BaseException):
                     pending.extend(candidate.args)
+                    pending.extend(vars(candidate).values())
+                    pending.extend(
+                        (
+                            candidate.__cause__,
+                            candidate.__context__,
+                            getattr(candidate, "__notes__", ()),
+                        )
+                    )
+                    if isinstance(candidate, OSError):
+                        pending.extend(
+                            (
+                                candidate.errno,
+                                candidate.filename,
+                                candidate.filename2,
+                                candidate.strerror,
+                            )
+                        )
+                elif isinstance(
+                    candidate,
+                    process_module._WorkingDirectoryToken,
+                ):
                     pending.extend(vars(candidate).values())
                 elif isinstance(candidate, dict):
                     pending.extend(candidate.keys())
@@ -3155,11 +3199,37 @@ def test_cwd_cleanup_error_traceback_locals_exclude_close_marker(
                 production_locals.append(dict(frame.f_locals))
             traceback = traceback.tb_next
         assert production_locals
-        assert not any(
-            contains_private_marker(value)
-            for frame_locals in production_locals
-            for value in frame_locals.values()
+
+        exception_surfaces = (
+            caught.value.__cause__,
+            caught.value.__context__,
+            caught.value.args,
+            getattr(caught.value, "__notes__", ()),
         )
+        non_traceback_roots = (
+            exception_surfaces,
+            tokens,
+            process_module._CWD_LEASE_STACK,
+        )
+        injected_private_values = (
+            private_marker,
+            private_errno,
+            private_path,
+            private_secret,
+        )
+        assert not any(
+            contains_target(root, private_value)
+            for root in (*non_traceback_roots, *production_locals)
+            for private_value in injected_private_values
+        )
+        assert not any(
+            contains_target(frame_locals, raw_descriptor)
+            for frame_locals in production_locals
+        ), (
+            "raw descriptor remains in production traceback locals"
+        )
+        assert len(references) == len(descriptors)
+        assert all(reference() is None for reference in references)
     finally:
         monkeypatch.setattr(os, "close", real_close)
         os.fchdir(safety)

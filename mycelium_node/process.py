@@ -88,43 +88,48 @@ def _deactivate_working_directory_token(token: _WorkingDirectoryToken) -> None:
     while _CWD_LEASE_STACK and not _CWD_LEASE_STACK[-1].active:
         retired.append(_CWD_LEASE_STACK.pop())
     restoration_descriptor = retired[-1].original_descriptor
-    restored = False
-    close_failed = False
+    descriptor: int | None = None
     try:
-        if restoration_descriptor is not None:
-            for _attempt in range(_CWD_RESTORE_ATTEMPTS):
-                try:
-                    os.fchdir(restoration_descriptor)
-                except OSError:
-                    continue
-                restored = True
-                break
+        restored = False
+        close_failed = False
+        try:
+            if restoration_descriptor is not None:
+                for _attempt in range(_CWD_RESTORE_ATTEMPTS):
+                    try:
+                        os.fchdir(restoration_descriptor)
+                    except OSError:
+                        continue
+                    restored = True
+                    break
+        finally:
+            for retired_token in retired:
+                descriptor = retired_token.original_descriptor
+                retired_token.original_descriptor = None
+                if descriptor is not None:
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        close_failed = True
+        if restored and not close_failed:
+            return
+        body_failures = [
+            retired_token.body_failure
+            for retired_token in retired
+            if retired_token.body_failure is not None
+        ]
+        if body_failures:
+            for body_failure in body_failures:
+                if _CWD_RESTORATION_ERROR not in getattr(
+                    body_failure,
+                    "__notes__",
+                    (),
+                ):
+                    body_failure.add_note(_CWD_RESTORATION_ERROR)
+            return
+        raise ValueError(_CWD_RESTORATION_ERROR) from None
     finally:
-        for retired_token in retired:
-            descriptor = retired_token.original_descriptor
-            retired_token.original_descriptor = None
-            if descriptor is not None:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    close_failed = True
-    if restored and not close_failed:
-        return
-    body_failures = [
-        retired_token.body_failure
-        for retired_token in retired
-        if retired_token.body_failure is not None
-    ]
-    if body_failures:
-        for body_failure in body_failures:
-            if _CWD_RESTORATION_ERROR not in getattr(
-                body_failure,
-                "__notes__",
-                (),
-            ):
-                body_failure.add_note(_CWD_RESTORATION_ERROR)
-        return
-    raise ValueError(_CWD_RESTORATION_ERROR) from None
+        descriptor = None
+        restoration_descriptor = None
 
 
 class NodeProcessError(RuntimeError):
