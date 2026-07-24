@@ -235,11 +235,13 @@ class PeerBinding:
    generation: int
 
    def __post_init__(self) -> None:
-      if not self.node_id or not self.endpoint_id:
+      if type(self.node_id) is not str or not self.node_id:
+         raise ValueError("peer node and endpoint ids must not be empty")
+      if type(self.endpoint_id) is not str or not self.endpoint_id:
          raise ValueError("peer node and endpoint ids must not be empty")
       if self.endpoint_addr.get("id") != self.endpoint_id:
          raise ValueError("endpoint_addr id must match endpoint_id")
-      if self.generation <= 0:
+      if type(self.generation) is not int or isinstance(self.generation, bool) or self.generation <= 0:
          raise ValueError("peer generation must be positive")
 
 
@@ -247,28 +249,38 @@ def _canonical_endpoint_document(
    endpoint_addr: Mapping[str, Any],
 ) -> dict[str, Any]:
    try:
+      pairs = list(endpoint_addr.items())
+   except Exception:
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   for key in (pair[0] for pair in pairs):
+      if type(key) is not str:
+         raise ValueError("endpoint_addr must be valid JSON data") from None
+   try:
       encoded = json.dumps(
-         dict(endpoint_addr),
+         dict(pairs),
          allow_nan=False,
          sort_keys=True,
          separators=(",", ":"),
       )
+   except Exception:
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   try:
       document = json.loads(encoded)
    except Exception:
-      raise ValueError(
-         "endpoint_addr must be valid JSON data"
-      ) from None
+      raise ValueError("endpoint_addr must be valid JSON data") from None
    if not isinstance(document, dict):
-      raise ValueError("endpoint_addr must be valid JSON data")
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   if len(document) != len(pairs):
+      raise ValueError("endpoint_addr must be valid JSON data") from None
    return document
 
 
 def _canonical_peer_binding(binding: PeerBinding) -> PeerBinding:
    return PeerBinding(
-      node_id=binding.node_id,
-      endpoint_id=binding.endpoint_id,
+      node_id=str(binding.node_id),
+      endpoint_id=str(binding.endpoint_id),
       endpoint_addr=_canonical_endpoint_document(binding.endpoint_addr),
-      generation=binding.generation,
+      generation=int(binding.generation),
    )
 
 
@@ -277,15 +289,15 @@ def _peer_binding_snapshot(
 ) -> tuple[str, str, str, int]:
    endpoint_document = _canonical_endpoint_document(binding.endpoint_addr)
    return (
-      binding.node_id,
-      binding.endpoint_id,
+      str(binding.node_id),
+      str(binding.endpoint_id),
       json.dumps(
          endpoint_document,
          allow_nan=False,
          sort_keys=True,
          separators=(",", ":"),
       ),
-      binding.generation,
+      int(binding.generation),
    )
 
 
@@ -856,8 +868,12 @@ class IrohTransport:
          name=f"mycelium-iroh-cancel-{message_id.hex()}",
          daemon=True,
       )
+      try:
+         thread.start()
+      except BaseException:
+         thread = None
+         raise
       self._delivery_cancel_threads[message_id] = thread
-      thread.start()
 
    def _delivery_cancel_worker(
       self,
@@ -1584,7 +1600,11 @@ class IrohTransport:
             self._set_fatal(error)
             raise error
       for delivery_cancel_thread in delivery_cancel_threads:
+         if delivery_cancel_thread is None:
+            continue
          if delivery_cancel_thread is threading.current_thread():
+            continue
+         if not delivery_cancel_thread.is_alive():
             continue
          delivery_cancel_thread.join(
             timeout=max(0.05, self.poll_interval_seconds * 4)
