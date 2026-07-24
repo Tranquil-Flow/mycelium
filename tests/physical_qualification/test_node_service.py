@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 from dataclasses import asdict
 import json
 import os
@@ -258,14 +259,33 @@ class _NodeClient:
         self._streams_closed = True
 
 
-def _process_group_members(process_group_id: int) -> tuple[tuple[int, str], ...]:
+def _process_executable_identity(process_id: int) -> str:
+    path_buffer = ctypes.create_string_buffer(4096)
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    proc_pidpath = libproc.proc_pidpath
+    proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    proc_pidpath.restype = ctypes.c_int
+    path_length = proc_pidpath(process_id, path_buffer, len(path_buffer))
+    if path_length <= 0:
+        error_number = ctypes.get_errno()
+        raise OSError(
+            error_number,
+            os.strerror(error_number),
+            process_id,
+        )
+    return str(Path(os.fsdecode(path_buffer.value)).resolve())
+
+
+def _process_group_members(
+    process_group_id: int,
+) -> tuple[tuple[int, str, str], ...]:
     inventory = subprocess.run(
-        ["ps", "-axo", "pid=,pgid=,command="],
+        ["ps", "-ww", "-axo", "pid=,pgid=,command="],
         check=True,
         capture_output=True,
         text=True,
     ).stdout
-    members: list[tuple[int, str]] = []
+    members: list[tuple[int, str, str]] = []
     for line in inventory.splitlines():
         fields = line.strip().split(maxsplit=2)
         if len(fields) < 2:
@@ -277,7 +297,11 @@ def _process_group_members(process_group_id: int) -> tuple[tuple[int, str], ...]
             continue
         if candidate_group == process_group_id:
             members.append(
-                (process_id, fields[2] if len(fields) == 3 else "")
+                (
+                    process_id,
+                    _process_executable_identity(process_id),
+                    fields[2] if len(fields) == 3 else "",
+                )
             )
     return tuple(members)
 
@@ -657,20 +681,50 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
         disconnected_group_id = second.process_group_id
         disconnected_socket = socket_base / "b" / "i.sock"
         group_before_disconnect = _process_group_members(disconnected_group_id)
+        sidecar_executable = str(SIDECAR_BINARY.resolve())
+        sidecars_before_disconnect = tuple(
+            member
+            for member in group_before_disconnect
+            if member[1] == sidecar_executable
+        )
         assert second.session_id == disconnected_group_id == disconnected_wrapper_id
         assert disconnected_socket.is_socket()
         assert disconnected_wrapper_id in {
-            process_id for process_id, _command_line in group_before_disconnect
+            process_id
+            for process_id, _executable_identity, _command_line in group_before_disconnect
         }
+        assert len(sidecars_before_disconnect) == 1, (
+            sidecar_executable,
+            group_before_disconnect,
+        )
+        disconnected_sidecar_id = sidecars_before_disconnect[0][0]
         assert len(group_before_disconnect) >= 2
         second.process.kill()
         second.process.wait(timeout=10)
         disconnected_returncode = second.process.returncode
         group_after_wrapper_exit = _process_group_members(disconnected_group_id)
         assert disconnected_wrapper_id not in {
-            process_id for process_id, _command_line in group_after_wrapper_exit
+            process_id
+            for process_id, _executable_identity, _command_line in (
+                group_after_wrapper_exit
+            )
         }
-        assert group_after_wrapper_exit
+        sidecars_after_wrapper_exit = tuple(
+            member
+            for member in group_after_wrapper_exit
+            if member[1] == sidecar_executable
+        )
+        assert tuple(
+            (process_id, executable_identity)
+            for process_id, executable_identity, _command_line in (
+                sidecars_after_wrapper_exit
+            )
+        ) == ((disconnected_sidecar_id, sidecar_executable),), (
+            disconnected_sidecar_id,
+            sidecar_executable,
+            group_before_disconnect,
+            group_after_wrapper_exit,
+        )
         second.stop()
         group_after_stop = _process_group_members(disconnected_group_id)
         assert group_after_stop == (), (
