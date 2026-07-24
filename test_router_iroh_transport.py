@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import socket
 import struct
@@ -18,10 +19,12 @@ from mycelium_iroh_sidecar import client as sidecar_client_module
 from mycelium_router.contracts import TokenEvent
 from mycelium_router.transports.iroh import (
     PROCESS_LIFETIME_LIMITATION,
+    DeliveryReceipt,
     IrohTransport,
     IrohTransportError,
     PeerBinding,
     _bounded_trace_identity,
+    _delivery_receipt_digest,
 )
 from mycelium_router.wire import ROUTER_WIRE_PROTOCOL, encode_frame
 
@@ -53,6 +56,8 @@ class _Hub:
         self.release_cancel = threading.Event()
         self.cancel_completed = threading.Event()
         self.block_cancel = False
+        self.cancel_timeouts: list[float | None] = []
+        self.cancel_failure: BaseException | None = None
 
     def client(self, *_args, **_kwargs) -> "_FakeClient":
         client = _FakeClient(self)
@@ -149,10 +154,12 @@ class _FakeClient:
         self.hub.acks.append(message_id)
 
     def cancel(self, message_id: bytes, *, timeout: float | None = None) -> None:
-        del timeout
+        self.hub.cancel_timeouts.append(timeout)
         self.hub.cancel_entered.set()
         if self.hub.block_cancel:
             self.hub.release_cancel.wait()
+        if self.hub.cancel_failure is not None:
+            raise self.hub.cancel_failure
         self.hub.cancels.append(message_id)
         self.hub.cancel_completed.set()
 
@@ -309,12 +316,32 @@ def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> Non
     finally:
         transport.close()
 
-    assert len(trace) == 2
+    assert len(trace) == 4
     assert "request-1" in trace[0]
     assert "TokenEvent" in trace[0] and '"token_index":7' in trace[0]
     assert "987654321" not in trace[0]
-    assert "request_id_sha256" in trace[1] and long_request not in trace[1]
-    assert "123456789" not in trace[1]
+    assert trace[1].startswith("DeliveryReceipt->peer:remote:")
+    assert "request_id_sha256" in trace[2] and long_request not in trace[2]
+    assert "123456789" not in trace[2]
+    assert trace[3].startswith("DeliveryReceipt->peer:remote:")
+    for sent, message_trace, receipt_trace in zip(
+        hub.sent,
+        trace[::2],
+        trace[1::2],
+        strict=True,
+    ):
+        receipt_identity = json.loads(receipt_trace.partition(":remote:")[2])
+        receipt = DeliveryReceipt(
+            message_id=sent[0],
+            peer_endpoint_id=receipt_identity["peer_endpoint_id"],
+            peer_generation=receipt_identity["peer_generation"],
+        )
+        assert sent[0].hex() in message_trace
+        assert receipt_identity["message_id"] == sent[0].hex()
+        assert (
+            receipt_identity["delivery_receipt_sha256"]
+            == _delivery_receipt_digest(receipt)
+        )
     assert all(len(entry.encode()) <= 512 for entry in trace)
 
 
@@ -641,6 +668,211 @@ def test_rotation_and_deadline_reserve_one_cancel_per_message(
     finally:
         release_cancel.set()
         hub.release_confirmed_send.set()
+        transport.close()
+
+
+def test_deadline_cancel_worker_is_accounted_and_close_is_bounded() -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    hub.block_cancel = True
+    transport = _transport(
+        hub,
+        delivery_timeout_seconds=0.05,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(),
+                destination_node_id="peer-node",
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    try:
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        assert hub.cancel_entered.wait(timeout=1)
+        sender.join(timeout=1)
+        assert not sender.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == "delivery_deadline_exceeded"
+        assert hub.cancel_timeouts
+        assert all(
+            timeout is not None and 0 < timeout <= 0.05
+            for timeout in hub.cancel_timeouts
+        )
+        started = time.monotonic()
+        with pytest.raises(
+            IrohTransportError,
+            match="delivery_cancellation_shutdown_timeout",
+        ):
+            transport.close()
+        assert time.monotonic() - started < 0.5
+        assert transport.worker_threads_alive == 1
+        assert hub.cancels == []
+        hub.release_cancel.set()
+        transport.close()
+        assert transport.worker_threads_alive == 0
+        assert hub.cancels == [hub.sent[0][0]] if hub.sent else len(hub.cancels) == 1
+    finally:
+        hub.release_confirmed_send.set()
+        hub.release_cancel.set()
+        sender.join(timeout=1)
+        transport.close()
+
+
+@pytest.mark.parametrize("first_winner", ["close", "rotation"])
+def test_close_or_rotation_first_blocked_cancel_has_bounded_lifecycle(
+    first_winner: str,
+) -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    hub.block_cancel = True
+    transport = _transport(
+        hub,
+        delivery_timeout_seconds=10.0,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    send_errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(),
+                destination_node_id="peer-node",
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    lifecycle_errors: list[BaseException] = []
+
+    def lifecycle() -> None:
+        try:
+            if first_winner == "close":
+                transport.close()
+            else:
+                transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            lifecycle_errors.append(error)
+
+    lifecycle_thread = threading.Thread(target=lifecycle)
+    try:
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        lifecycle_thread.start()
+        assert hub.cancel_entered.wait(timeout=1)
+        lifecycle_thread.join(timeout=0.5)
+        assert not lifecycle_thread.is_alive()
+        if first_winner == "close":
+            assert len(lifecycle_errors) == 1
+            assert isinstance(lifecycle_errors[0], IrohTransportError)
+            assert (
+                lifecycle_errors[0].code
+                == "delivery_cancellation_shutdown_timeout"
+            )
+        else:
+            assert lifecycle_errors == []
+            with pytest.raises(
+                IrohTransportError,
+                match="delivery_cancellation_shutdown_timeout",
+            ):
+                transport.close()
+        assert transport.worker_threads_alive == 1
+        assert len(hub.cancel_timeouts) == 1
+        assert hub.cancel_timeouts[0] is not None
+        hub.release_cancel.set()
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
+        transport.close()
+        assert transport.worker_threads_alive == 0
+        assert len(hub.cancels) == 1
+        assert len(send_errors) == 1
+        assert isinstance(send_errors[0], IrohTransportError)
+        assert send_errors[0].code == (
+            "transport_closed" if first_winner == "close" else "peer_rotated"
+        )
+    finally:
+        hub.release_cancel.set()
+        hub.release_confirmed_send.set()
+        lifecycle_thread.join(timeout=1)
+        sender.join(timeout=1)
+        transport.close()
+
+
+def test_cancel_failure_unregisters_late_registered_message_worker_once() -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    hub.cancel_failure = RuntimeError("injected cancel RPC failure")
+    transport = _transport(
+        hub,
+        delivery_timeout_seconds=10.0,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    worker_entered = threading.Event()
+    release_worker = threading.Event()
+    original_cancel = transport._cancel_with_client
+
+    def delayed_cancel(control, message_id, *, timeout) -> None:
+        worker_entered.set()
+        assert release_worker.wait(timeout=1)
+        original_cancel(control, message_id, timeout=timeout)
+
+    transport._cancel_with_client = delayed_cancel
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(),
+                destination_node_id="peer-node",
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    try:
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        with transport._state_lock:
+            [(message_id, pending)] = transport._pending.items()
+        transport._expire_pending(
+            message_id,
+            pending,
+            "delivery_deadline_exceeded",
+        )
+        assert worker_entered.wait(timeout=1)
+        with transport._state_lock:
+            assert message_id in transport._delivery_cancel_threads
+        assert transport.worker_threads_alive == 3
+        release_worker.set()
+        assert hub.cancel_entered.wait(timeout=1)
+        deadline = time.monotonic() + 1
+        while transport.worker_threads_alive == 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        with transport._state_lock:
+            assert message_id not in transport._delivery_cancel_threads
+        assert len(hub.cancel_timeouts) == 1
+        assert hub.cancel_timeouts[0] is not None
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == "delivery_deadline_exceeded"
+        transport.close()
+        assert transport.worker_threads_alive == 0
+    finally:
+        release_worker.set()
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
         transport.close()
 
 

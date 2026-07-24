@@ -11,7 +11,7 @@ simultaneous loss of both sidecars is not durable exactly-once delivery.
 from __future__ import annotations
 
 from collections import OrderedDict, deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -73,6 +73,7 @@ def _bounded_trace_identity(
    message: object,
    *,
    max_bytes: int = _TRACE_ENTRY_BYTES,
+   delivery_message_id: bytes | None = None,
 ) -> str:
    if type(max_bytes) is not int or max_bytes < 2:
       raise IrohTransportError("trace_identity_budget_invalid")
@@ -114,9 +115,115 @@ def _bounded_trace_identity(
       candidate = {**identity, "token_index": token_index}
       if fits(candidate):
          identity = candidate
+   request = getattr(message, "request", None)
+   graph = getattr(message, "graph", None)
+   build = getattr(message, "build", None)
+   if request is None and build is not None:
+      request = getattr(build, "request", None)
+   if graph is None and build is not None:
+      graph = getattr(build, "graph", None)
+   if request is not None and is_dataclass(request):
+      request_input = asdict(request)
+      request_input.pop("admitted_at", None)
+      encoded_request_input = json.dumps(
+         request_input,
+         sort_keys=True,
+         separators=(",", ":"),
+      ).encode()
+      candidate = {
+         **identity,
+         "request_input_sha256": (
+            "sha256:" + hashlib.sha256(encoded_request_input).hexdigest()
+         ),
+      }
+      if fits(candidate):
+         identity = candidate
+   deployment_id = getattr(graph, "deployment_id", None)
+   if (
+      isinstance(deployment_id, str)
+      and len(deployment_id.encode("utf-8")) <= _TRACE_ID_BYTES
+   ):
+      candidate = {**identity, "deployment_id": deployment_id}
+      if fits(candidate):
+         identity = candidate
+   deployment_epoch = getattr(graph, "deployment_epoch", None)
+   if type(deployment_epoch) is int and 0 < deployment_epoch < 2**63:
+      candidate = {**identity, "deployment_epoch": deployment_epoch}
+      if fits(candidate):
+         identity = candidate
+   stages = getattr(graph, "stages", None)
+   if stages:
+      cuts = [
+         {
+            "end_layer_exclusive": stage.layer_range.end_layer_exclusive,
+            "node_ids": [
+               placement.node_id for placement in stage.placements
+            ],
+            "placement_ids": [
+               placement.placement_id for placement in stage.placements
+            ],
+            "stage_id": stage.stage_id,
+            "start_layer": stage.layer_range.start_layer,
+         }
+         for stage in stages
+      ]
+      encoded_cuts = json.dumps(
+         cuts,
+         sort_keys=True,
+         separators=(",", ":"),
+      ).encode()
+      candidate = {
+         **identity,
+         "planner_stage_cuts_sha256": (
+            "sha256:" + hashlib.sha256(encoded_cuts).hexdigest()
+         ),
+      }
+      if fits(candidate):
+         identity = candidate
+   if isinstance(delivery_message_id, bytes) and len(delivery_message_id) == 16:
+      candidate = {
+         **identity,
+         "delivery_message_id": delivery_message_id.hex(),
+      }
+      if fits(candidate):
+         identity = candidate
    rendered = render(identity)
    if len(rendered.encode("utf-8")) > max_bytes:
       raise IrohTransportError("trace_identity_too_large")
+   return rendered
+
+
+def _delivery_receipt_document(receipt: "DeliveryReceipt") -> dict[str, Any]:
+   return {
+      "message_id": receipt.message_id.hex(),
+      "peer_endpoint_id": receipt.peer_endpoint_id,
+      "peer_generation": receipt.peer_generation,
+      "router_protocol": receipt.router_protocol,
+      "semantics": receipt.semantics,
+   }
+
+
+def _delivery_receipt_digest(receipt: "DeliveryReceipt") -> str:
+   encoded = json.dumps(
+      _delivery_receipt_document(receipt),
+      sort_keys=True,
+      separators=(",", ":"),
+   ).encode()
+   return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _bounded_delivery_receipt_identity(
+   receipt: "DeliveryReceipt",
+   *,
+   max_bytes: int,
+) -> str:
+   identity = {
+      **_delivery_receipt_document(receipt),
+      "delivery_receipt_sha256": _delivery_receipt_digest(receipt),
+   }
+   rendered = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+   if len(rendered.encode()) > max_bytes:
+      raise IrohTransportError("delivery_receipt_trace_too_large")
    return rendered
 
 
@@ -239,6 +346,7 @@ class IrohTransport:
       ] = Queue(maxsize=queue_capacity)
       self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
+      self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
       self._stop = threading.Event()
       self._running = False
       self._closed = False
@@ -274,7 +382,13 @@ class IrohTransport:
 
    @property
    def worker_threads_alive(self) -> int:
-      threads = (self._receiver_thread, self._dispatcher_thread)
+      with self._state_lock:
+         threads = (
+            self._receiver_thread,
+            self._dispatcher_thread,
+            *self._cancellation_threads.values(),
+            *self._delivery_cancel_threads.values(),
+         )
       return sum(
          int(thread is not None and thread.is_alive()) for thread in threads
       )
@@ -415,7 +529,6 @@ class IrohTransport:
 
       with self._state_lock:
          self._peer = replacement
-         stale: list[tuple[bytes, Any | None]] = []
          for message_id, pending in self._pending.items():
             if pending.generation >= replacement.generation:
                continue
@@ -427,9 +540,10 @@ class IrohTransport:
                )
             )
             if reserved:
-               stale.append((message_id, cancellation_client))
-      for message_id, cancellation_client in stale:
-         self._cancel_with_client(cancellation_client, message_id)
+               self._start_delivery_cancel_locked(
+                  cancellation_client,
+                  message_id,
+               )
 
    def send_router_frame(
       self,
@@ -646,16 +760,8 @@ class IrohTransport:
             pending,
             reason,
          )
-      if not reserved:
-         return
-      thread = threading.Thread(
-         target=self._cancel_with_client,
-         args=(control, message_id),
-         kwargs={"timeout": self.poll_interval_seconds},
-         name=f"mycelium-iroh-cancel-{message_id.hex()}",
-         daemon=True,
-      )
-      thread.start()
+         if reserved:
+            self._start_delivery_cancel_locked(control, message_id)
 
    def _reserve_pending_cancellation_locked(
       self,
@@ -674,12 +780,48 @@ class IrohTransport:
       pending.cancel_started = True
       return True, self._control_client
 
+   def _start_delivery_cancel_locked(
+      self,
+      control: Any | None,
+      message_id: bytes,
+   ) -> None:
+      if message_id in self._delivery_cancel_threads:
+         raise IrohTransportError("delivery_cancel_worker_collision")
+      thread = threading.Thread(
+         target=self._delivery_cancel_worker,
+         args=(control, message_id),
+         name=f"mycelium-iroh-cancel-{message_id.hex()}",
+         daemon=True,
+      )
+      self._delivery_cancel_threads[message_id] = thread
+      thread.start()
+
+   def _delivery_cancel_worker(
+      self,
+      control: Any | None,
+      message_id: bytes,
+   ) -> None:
+      try:
+         self._cancel_with_client(
+            control,
+            message_id,
+            timeout=min(
+               self.poll_interval_seconds,
+               self.delivery_timeout_seconds,
+            ),
+         )
+      finally:
+         current = threading.current_thread()
+         with self._state_lock:
+            if self._delivery_cancel_threads.get(message_id) is current:
+               self._delivery_cancel_threads.pop(message_id, None)
+
    @staticmethod
    def _cancel_with_client(
       control: Any | None,
       message_id: bytes,
       *,
-      timeout: float | None = None,
+      timeout: float,
    ) -> None:
       if control is None:
          return
@@ -879,7 +1021,7 @@ class IrohTransport:
       except TypeError as error:
          if "wait_seconds" not in str(error):
             raise
-         return receive(timeout=max(self.poll_interval_seconds, 0.5))
+         return receive(timeout=self.poll_interval_seconds)
 
    def _reconnect_receive_client(self) -> None:
       replacement = self._new_client()
@@ -1172,22 +1314,48 @@ class IrohTransport:
          f"{type(decoded.message).__name__}->"
          f"{'peer:remote' if remote else 'self:local'}:"
       )
+      with self._state_lock:
+         self._require_running()
+      if destination == self.node_id:
+         identity_budget = _TRACE_ENTRY_BYTES - len(
+            trace_prefix.encode("utf-8")
+         )
+         trace = trace_prefix + _bounded_trace_identity(
+            decoded.message,
+            max_bytes=identity_budget,
+         )
+         if len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES:
+            raise IrohTransportError("trace_entry_too_large")
+         with self._state_lock:
+            self._outbound_trace.append(trace)
+         self._dispatch(decoded, source_node_id=self.node_id)
+         return
+      receipt = self.send_router_frame(
+         frame,
+         destination_node_id=destination,
+      )
       identity_budget = _TRACE_ENTRY_BYTES - len(
          trace_prefix.encode("utf-8")
       )
       trace = trace_prefix + _bounded_trace_identity(
          decoded.message,
          max_bytes=identity_budget,
+         delivery_message_id=receipt.message_id,
       )
-      if len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES:
+      receipt_prefix = "DeliveryReceipt->peer:remote:"
+      receipt_trace = receipt_prefix + _bounded_delivery_receipt_identity(
+         receipt,
+         max_bytes=(
+            _TRACE_ENTRY_BYTES - len(receipt_prefix.encode("utf-8"))
+         ),
+      )
+      if (
+         len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES
+         or len(receipt_trace.encode("utf-8")) > _TRACE_ENTRY_BYTES
+      ):
          raise IrohTransportError("trace_entry_too_large")
       with self._state_lock:
-         self._require_running()
-         self._outbound_trace.append(trace)
-      if destination == self.node_id:
-         self._dispatch(decoded, source_node_id=self.node_id)
-         return
-      self.send_router_frame(frame, destination_node_id=destination)
+         self._outbound_trace.extend((trace, receipt_trace))
 
    def _entry_node(self, request_id: str) -> str:
       node_id = self._entry_nodes.get(request_id)
@@ -1235,7 +1403,6 @@ class IrohTransport:
 
    def _close(self) -> None:
       with self._state_lock:
-         pending_cancellations: list[tuple[bytes, Any | None]] = []
          if self._closed:
             clients: tuple[Any | None, ...] = ()
          else:
@@ -1251,8 +1418,9 @@ class IrohTransport:
                   )
                )
                if reserved:
-                  pending_cancellations.append(
-                     (message_id, cancellation_client)
+                  self._start_delivery_cancel_locked(
+                     cancellation_client,
+                     message_id,
                   )
             clients = (
                self._receive_client,
@@ -1265,8 +1433,9 @@ class IrohTransport:
          thread = self._receiver_thread
          dispatcher_thread = self._dispatcher_thread
          cancellation_threads = tuple(self._cancellation_threads.values())
-      for message_id, cancellation_client in pending_cancellations:
-         self._cancel_with_client(cancellation_client, message_id)
+         delivery_cancel_threads = tuple(
+            self._delivery_cancel_threads.values()
+         )
       for client in clients:
          if client is None:
             continue
@@ -1303,6 +1472,18 @@ class IrohTransport:
          )
          if cancellation_thread.is_alive():
             error = IrohTransportError("path_cancellation_shutdown_timeout")
+            self._set_fatal(error)
+            raise error
+      for delivery_cancel_thread in delivery_cancel_threads:
+         if delivery_cancel_thread is threading.current_thread():
+            continue
+         delivery_cancel_thread.join(
+            timeout=max(0.05, self.poll_interval_seconds * 4)
+         )
+         if delivery_cancel_thread.is_alive():
+            error = IrohTransportError(
+               "delivery_cancellation_shutdown_timeout"
+            )
             self._set_fatal(error)
             raise error
       with self._state_lock:

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import signal
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -168,7 +169,11 @@ def _join_node(
     return session, client, bundle
 
 
-def _inference_request(request_id: str) -> dict[str, Any]:
+def _inference_request(
+    request_id: str,
+    *,
+    generation_config_digest: str = "sha256:" + "e" * 64,
+) -> dict[str, Any]:
     return {
         "request": {
             "request_id": request_id,
@@ -181,7 +186,7 @@ def _inference_request(request_id: str) -> dict[str, Any]:
             "target_tpot_ms": 1_000.0,
             "target_tokens_per_second": 1.0,
             "sampling_seed": 37,
-            "generation_config_digest": "sha256:" + "e" * 64,
+            "generation_config_digest": generation_config_digest,
         }
     }
 
@@ -201,6 +206,7 @@ class _IsolatedNodeClient(_NodeClient):
         self.run_id = run_id
         self.deployment_id = deployment_id
         self.next_id = 1
+        self.owned_socket_path = socket_root / "i.sock"
         executable = SERVICE_EXECUTABLE
         self.process = subprocess.Popen(
             [
@@ -362,6 +368,10 @@ def _exception_leaves(error: BaseException) -> list[BaseException]:
     return [error]
 
 
+def _owned_temp_root_for_test() -> Path:
+    return harness.create_owned_temp_root()
+
+
 _ObservationTrust = tuple[bytes, str, dict[str, Any]]
 
 
@@ -474,15 +484,83 @@ def _assert_request_route_evidence(
             if not marker:
                 continue
             identity = json.loads(payload)
+            if prefix.startswith("DeliveryReceipt->"):
+                continue
             assert set(identity) <= {
+                "delivery_message_id",
+                "deployment_epoch",
+                "deployment_id",
+                "generation_config_digest",
                 "phase",
+                "planner_stage_cuts_sha256",
                 "request_id",
                 "request_id_sha256",
+                "request_input_sha256",
                 "token_index",
             }
             if identity.get("request_id") == request_id:
                 observed.append(prefix.split("->", 1)[0])
         assert tuple(observed) == expected
+
+
+def _planner_stage_cuts(graph: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "end_layer_exclusive": stage.layer_range.end_layer_exclusive,
+            "node_ids": [
+                placement.node_id for placement in stage.placements
+            ],
+            "placement_ids": [
+                placement.placement_id for placement in stage.placements
+            ],
+            "stage_id": stage.stage_id,
+            "start_layer": stage.layer_range.start_layer,
+        }
+        for stage in graph.stages
+    ]
+
+
+def _observed_request_receipt(
+    traces: dict[str, list[str]],
+    *,
+    request_id: str,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    request_entries: list[tuple[str, dict[str, Any]]] = []
+    receipt_entries: list[tuple[str, dict[str, Any]]] = []
+    for node_id, entries in traces.items():
+        for entry in entries:
+            prefix, marker, payload = entry.partition(":remote:")
+            if not marker:
+                continue
+            identity = json.loads(payload)
+            if (
+                prefix.startswith("ProgressivePrefillMessage->")
+                and identity.get("request_id") == request_id
+            ):
+                request_entries.append((node_id, identity))
+            elif prefix.startswith("DeliveryReceipt->"):
+                receipt_entries.append((node_id, identity))
+    assert len(request_entries) == 1
+    source_node_id, request_identity = request_entries[0]
+    message_id = request_identity["delivery_message_id"]
+    matching_receipts = [
+        identity
+        for node_id, identity in receipt_entries
+        if node_id == source_node_id and identity["message_id"] == message_id
+    ]
+    assert len(matching_receipts) == 1
+    receipt_identity = matching_receipts[0]
+    receipt_document = {
+        "message_id": receipt_identity["message_id"],
+        "peer_endpoint_id": receipt_identity["peer_endpoint_id"],
+        "peer_generation": receipt_identity["peer_generation"],
+        "router_protocol": receipt_identity["router_protocol"],
+        "semantics": receipt_identity["semantics"],
+    }
+    assert receipt_identity["delivery_receipt_sha256"] == _digest(
+        receipt_document
+    )
+    return source_node_id, request_identity, receipt_identity
 
 
 def _signed_observation(
@@ -840,7 +918,7 @@ def test_cleanup_preserves_body_and_cleanup_faults_without_helpers(
         lambda groups, timeout: ledger.append("poll") or [],
     )
     monkeypatch.setattr(harness, "PROCESS_WAIT_TIMEOUT", 0.01)
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     body_fault = ValueError("body")
     try:
         with pytest.raises(BaseExceptionGroup) as grouped:
@@ -889,7 +967,7 @@ def test_cleanup_returns_without_starting_or_leaving_stop_helpers(
     )
     monkeypatch.setattr(harness, "groups_still_present", lambda *a, **k: [])
     monkeypatch.setattr(harness, "PROCESS_WAIT_TIMEOUT", 0.01)
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     before = set(threading.enumerate())
     caught: BaseException | None = None
     try:
@@ -919,7 +997,7 @@ def test_cleanup_returns_without_starting_or_leaving_stop_helpers(
 
 
 def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> None:
-    valid = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    valid = harness.create_owned_temp_root()
     harness.remove_temp_root(harness.capture_temp_root(valid))
     assert not valid.exists()
     wrong_parent = tmp_path / f"{harness.TEMP_ROOT_PREFIX}wrong-parent"
@@ -938,7 +1016,7 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
         assert (target / "keep").read_text() == "safe"
     finally:
         link.unlink(missing_ok=True)
-    replaced = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    replaced = harness.create_owned_temp_root()
     backup = replaced.with_name(replaced.name + "-original")
     guard = harness.capture_temp_root(replaced)
     try:
@@ -954,10 +1032,11 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
             shutil.rmtree(replaced)
         if backup.exists():
             shutil.rmtree(backup)
-    raced = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    raced = harness.create_owned_temp_root()
     raced_backup = raced.with_name(raced.name + "-original")
     raced_guard = harness.capture_temp_root(raced)
-    real_rename, real_rmtree = os.rename, shutil.rmtree
+    real_rename = os.rename
+    real_rename_noreplace = harness._rename_noreplace_at
     injected = False
 
     def inject_replacement() -> None:
@@ -969,18 +1048,32 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
         raced.mkdir()
         (raced / "keep").write_text("replacement")
 
-    def racing(action: Any) -> Any:
-        def run(*args: Any, **kwargs: Any) -> None:
+    def racing_rename_noreplace(
+        source_fd: int,
+        source: str,
+        destination_fd: int,
+        destination: str,
+    ) -> None:
+        if source == raced.name:
             inject_replacement()
-            action(*args, **kwargs)
-
-        return run
+        real_rename_noreplace(
+            source_fd,
+            source,
+            destination_fd,
+            destination,
+        )
 
     try:
         with pytest.MonkeyPatch.context() as race:
-            race.setattr(harness.os, "rename", racing(real_rename))
-            race.setattr(shutil, "rmtree", racing(real_rmtree))
-            with pytest.raises(AssertionError, match="replaced|quarantined"):
+            race.setattr(
+                harness,
+                "_rename_noreplace_at",
+                racing_rename_noreplace,
+            )
+            with pytest.raises(
+                (AssertionError, BaseExceptionGroup),
+                match="replaced|quarantined|restoration",
+            ):
                 harness.remove_temp_root(raced_guard)
         survivors = [
             candidate / "keep"
@@ -993,7 +1086,140 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
     finally:
         for candidate in raced.parent.glob(raced.name + "*"):
             if candidate.is_dir():
-                real_rmtree(candidate)
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_quarantine_acquisition_never_replaces_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _owned_temp_root_for_test()
+    (root / "source").write_text("preserve-source")
+    guard = harness.capture_temp_root(root)
+    fixed_monotonic_ns = 7_654_321
+    quarantine = root.with_name(
+        f"{root.name}.quarantine-{os.getpid()}-{fixed_monotonic_ns}"
+    )
+    quarantine.mkdir()
+    occupant_fd = os.open(
+        quarantine,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    occupant_identity = (
+        os.fstat(occupant_fd).st_dev,
+        os.fstat(occupant_fd).st_ino,
+    )
+    try:
+        monkeypatch.setattr(
+            harness.time,
+            "monotonic_ns",
+            lambda: fixed_monotonic_ns,
+        )
+        with pytest.raises((FileExistsError, AssertionError, OSError)):
+            harness.remove_temp_root(guard)
+        assert (root / "source").read_text() == "preserve-source"
+        current_occupant = os.stat(quarantine, follow_symlinks=False)
+        assert (current_occupant.st_dev, current_occupant.st_ino) == (
+            occupant_identity
+        )
+        assert os.fstat(occupant_fd).st_nlink > 0
+    finally:
+        monkeypatch.undo()
+        os.close(occupant_fd)
+        for candidate in (root, quarantine):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+@pytest.mark.parametrize(
+    "unsafe_marker",
+    ["missing", "tampered", "replaced", "sentinel-hardlink"],
+)
+def test_temp_root_capture_requires_birth_sentinel(
+    unsafe_marker: str,
+) -> None:
+    marker_name = getattr(
+        harness,
+        "OWNED_ROOT_SENTINEL",
+        ".mycelium-owned-root-v1",
+    )
+    if unsafe_marker == "missing":
+        root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    else:
+        root = _owned_temp_root_for_test()
+    other_root: Path | None = None
+    outside_link: Path | None = None
+    try:
+        marker = root / marker_name
+        if unsafe_marker == "tampered":
+            marker.write_bytes(b"tampered")
+        elif unsafe_marker == "replaced":
+            other_root = _owned_temp_root_for_test()
+            replacement = other_root / marker_name
+            marker.unlink(missing_ok=True)
+            os.link(replacement, marker)
+        elif unsafe_marker == "sentinel-hardlink":
+            outside_link = root.with_name(root.name + "-sentinel-link")
+            os.link(marker, outside_link)
+        with pytest.raises(AssertionError, match="sentinel|owned"):
+            harness.capture_temp_root(root)
+        assert root.is_dir()
+    finally:
+        if outside_link is not None:
+            outside_link.unlink(missing_ok=True)
+        for candidate in (root, other_root):
+            if candidate is not None and candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+@pytest.mark.parametrize("unsafe_entry", ["hardlink", "symlink", "socket"])
+def test_temp_root_preflight_rejects_unowned_entry_without_mutation(
+    unsafe_entry: str,
+) -> None:
+    root = _owned_temp_root_for_test()
+    entry = root / "unsafe-entry"
+    outside = root.with_name(root.name + "-outside")
+    socket_entry: socket.socket | None = None
+    try:
+        if unsafe_entry == "hardlink":
+            entry.write_text("externally-linked")
+            os.link(entry, outside)
+        elif unsafe_entry == "symlink":
+            outside.write_text("outside-target")
+            entry.symlink_to(outside)
+        else:
+            socket_entry = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            socket_entry.bind(str(entry))
+        guard = harness.capture_temp_root(root)
+        with pytest.raises(AssertionError, match="hardlink|link|regular|special"):
+            harness.remove_temp_root(guard)
+        assert root.is_dir()
+        assert os.path.lexists(entry)
+        if unsafe_entry != "socket":
+            assert os.path.lexists(outside)
+    finally:
+        if socket_entry is not None:
+            socket_entry.close()
+        if outside.exists() or outside.is_symlink():
+            outside.unlink()
+        if root.is_dir():
+            shutil.rmtree(root)
+
+
+def test_temp_root_removes_only_explicitly_registered_owned_socket() -> None:
+    root = _owned_temp_root_for_test()
+    socket_parent = root / "node-a"
+    socket_parent.mkdir()
+    socket_path = socket_parent / "i.sock"
+    owned_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        owned_socket.bind(str(socket_path))
+    finally:
+        owned_socket.close()
+    harness.remove_temp_root(
+        harness.capture_temp_root(root),
+        owned_socket_paths=(socket_path,),
+    )
+    assert not root.exists()
 
 
 def _changed_stat(
@@ -1045,7 +1271,7 @@ def test_temp_root_capture_rejects_forged_safety_metadata(
     field: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     real_lstat = os.lstat
     captured = real_lstat(root)
     unsafe_values = {
@@ -1074,17 +1300,19 @@ def test_temp_root_capture_rejects_forged_safety_metadata(
 def test_temp_root_removal_rejects_forged_captured_metadata(
     field: str,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     guard = harness.capture_temp_root(root)
     original = guard[2]
     unsafe_values = {
         "st_uid": os.getuid() + 1,
         "st_nlink": 1,
     }
-    forged = (
-        guard[0],
-        guard[1],
+    forged = harness.TempRootIdentity(
+        guard.root,
+        guard.parent,
         _changed_stat(original, **{field: unsafe_values[field]}),
+        guard.sentinel_metadata,
+        guard.sentinel_content,
     )
     try:
         with pytest.raises(AssertionError, match="captured.*(owner|link)"):
@@ -1096,7 +1324,7 @@ def test_temp_root_removal_rejects_forged_captured_metadata(
 
 
 def test_temp_root_removal_rejects_current_mode_drift() -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     guard = harness.capture_temp_root(root)
     try:
         root.chmod(0o777)
@@ -1113,7 +1341,7 @@ def test_temp_root_removal_rejects_current_safety_metadata_drift(
     field: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     guard = harness.capture_temp_root(root)
     real_stat = os.stat
     unsafe_values = {
@@ -1151,41 +1379,50 @@ def test_temp_root_removal_rejects_current_safety_metadata_drift(
             shutil.rmtree(root)
 
 
-def test_temp_root_removal_restores_quarantined_link_drift(
+def test_temp_root_removal_retains_quarantined_link_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     guard = harness.capture_temp_root(root)
-    real_rename = os.rename
+    real_rename_noreplace = harness._rename_noreplace_at
     injected = False
 
-    def drifting_rename(
+    def drifting_rename_noreplace(
+        source_fd: int,
         source: str,
+        destination_fd: int,
         destination: str,
-        *,
-        src_dir_fd: int | None = None,
-        dst_dir_fd: int | None = None,
     ) -> None:
         nonlocal injected
-        real_rename(
+        real_rename_noreplace(
+            source_fd,
             source,
+            destination_fd,
             destination,
-            src_dir_fd=src_dir_fd,
-            dst_dir_fd=dst_dir_fd,
         )
         if source == root.name and not injected:
             injected = True
             os.mkdir(
                 f"{destination}/metadata-link-drift",
-                dir_fd=dst_dir_fd,
+                dir_fd=destination_fd,
             )
 
     try:
-        monkeypatch.setattr(harness.os, "rename", drifting_rename)
-        with pytest.raises(AssertionError, match="changed quarantined|metadata"):
+        monkeypatch.setattr(
+            harness,
+            "_rename_noreplace_at",
+            drifting_rename_noreplace,
+        )
+        with pytest.raises(
+            BaseExceptionGroup,
+            match="restoration",
+        ):
             harness.remove_temp_root(guard)
         assert injected
-        assert (root / "metadata-link-drift").is_dir()
+        assert not root.exists()
+        quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
+        assert len(quarantines) == 1
+        assert (quarantines[0] / "metadata-link-drift").is_dir()
     finally:
         monkeypatch.undo()
         for candidate in root.parent.glob(root.name + "*"):
@@ -1196,13 +1433,27 @@ def test_temp_root_removal_restores_quarantined_link_drift(
 def test_temp_root_restore_never_replaces_concurrent_occupant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     guard = harness.capture_temp_root(root)
-    real_rename = os.rename
-    real_rename_noreplace = getattr(harness, "_rename_noreplace_at", None)
+    real_rename_noreplace = harness._rename_noreplace_at
+    real_listdir = os.listdir
+    root_identity = (
+        guard.root_metadata.st_dev,
+        guard.root_metadata.st_ino,
+    )
+    root_scans = 0
     occupant_fd: int | None = None
-    quarantine_name: str | None = None
-    drift_injected = False
+
+    def failing_listdir(path: str | bytes | os.PathLike[str] | int) -> list[str]:
+        nonlocal root_scans
+        if isinstance(path, int) and (
+            os.fstat(path).st_dev,
+            os.fstat(path).st_ino,
+        ) == root_identity:
+            root_scans += 1
+        if root_scans == 2:
+            raise OSError(errno.EIO, "injected pre-mutation cleanup failure")
+        return real_listdir(path)
 
     def create_occupant(directory_fd: int, name: str) -> None:
         nonlocal occupant_fd
@@ -1215,51 +1466,17 @@ def test_temp_root_restore_never_replaces_concurrent_occupant(
             dir_fd=directory_fd,
         )
 
-    def racing_rename(
-        source: str,
-        destination: str,
-        *,
-        src_dir_fd: int | None = None,
-        dst_dir_fd: int | None = None,
-    ) -> None:
-        nonlocal drift_injected, quarantine_name
-        if source == root.name and not drift_injected:
-            drift_injected = True
-            quarantine_name = destination
-            real_rename(
-                source,
-                destination,
-                src_dir_fd=src_dir_fd,
-                dst_dir_fd=dst_dir_fd,
-            )
-            os.mkdir("metadata-link-drift", dir_fd=dst_dir_fd)
-            real_rename(
-                "metadata-link-drift",
-                f"{destination}/metadata-link-drift",
-                src_dir_fd=dst_dir_fd,
-                dst_dir_fd=dst_dir_fd,
-            )
-            return
-        if (
-            source == quarantine_name
-            and destination == root.name
-            and dst_dir_fd is not None
-        ):
-            create_occupant(dst_dir_fd, destination)
-        real_rename(
-            source,
-            destination,
-            src_dir_fd=src_dir_fd,
-            dst_dir_fd=dst_dir_fd,
-        )
-
     def racing_rename_noreplace(
         source_fd: int,
         source: str,
         destination_fd: int,
         destination: str,
     ) -> None:
-        create_occupant(destination_fd, destination)
+        if (
+            source.startswith(root.name + ".quarantine-")
+            and destination == root.name
+        ):
+            create_occupant(destination_fd, destination)
         real_rename_noreplace(
             source_fd,
             source,
@@ -1268,24 +1485,22 @@ def test_temp_root_restore_never_replaces_concurrent_occupant(
         )
 
     try:
-        monkeypatch.setattr(harness.os, "rename", racing_rename)
-        if real_rename_noreplace is not None:
-            monkeypatch.setattr(
-                harness,
-                "_rename_noreplace_at",
-                racing_rename_noreplace,
-            )
+        monkeypatch.setattr(harness.os, "listdir", failing_listdir)
+        monkeypatch.setattr(
+            harness,
+            "_rename_noreplace_at",
+            racing_rename_noreplace,
+        )
         with pytest.raises(BaseExceptionGroup, match="restoration") as raised:
             harness.remove_temp_root(guard)
         assert len(raised.value.exceptions) == 2
         cleanup_error, restoration_error = raised.value.exceptions
-        assert isinstance(cleanup_error, AssertionError)
-        assert "quarantined" in str(cleanup_error)
+        assert isinstance(cleanup_error, OSError)
+        assert cleanup_error.errno == errno.EIO
         assert isinstance(restoration_error, AssertionError)
         assert "occupied" in str(restoration_error)
         assert isinstance(restoration_error.__cause__, FileExistsError)
         assert restoration_error.__cause__.errno == errno.EEXIST
-        assert drift_injected
         assert occupant_fd is not None
         occupant = os.fstat(occupant_fd)
         current = os.stat(root, follow_symlinks=False)
@@ -1296,7 +1511,7 @@ def test_temp_root_restore_never_replaces_concurrent_occupant(
         )
         quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
         assert len(quarantines) == 1
-        assert (quarantines[0] / "metadata-link-drift").is_dir()
+        assert (quarantines[0] / harness.OWNED_ROOT_SENTINEL).is_file()
     finally:
         monkeypatch.undo()
         if occupant_fd is not None:
@@ -1306,43 +1521,21 @@ def test_temp_root_restore_never_replaces_concurrent_occupant(
                 shutil.rmtree(candidate)
 
 
-def test_temp_root_restore_fails_closed_without_native_primitive(
+def test_temp_root_quarantine_acquisition_fails_closed_without_native_primitive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     child = root / "blocked-child"
     child.write_text("preserve")
     guard = harness.capture_temp_root(root)
-    real_open = os.open
-
-    def failing_open(
-        path: str | bytes | os.PathLike[str],
-        flags: int,
-        mode: int = 0o777,
-        *,
-        dir_fd: int | None = None,
-    ) -> int:
-        if path == child.name and dir_fd is not None:
-            raise OSError(errno.EACCES, "injected child-open failure")
-        return real_open(path, flags, mode, dir_fd=dir_fd)
 
     try:
-        monkeypatch.setattr(harness.os, "open", failing_open)
         monkeypatch.setattr(harness.sys, "platform", "unsupported-test-platform")
-        with pytest.raises(BaseExceptionGroup) as raised:
+        with pytest.raises(OSError) as raised:
             harness.remove_temp_root(guard)
-        assert len(raised.value.exceptions) == 2
-        cleanup_error, restoration_error = raised.value.exceptions
-        assert isinstance(cleanup_error, OSError)
-        assert cleanup_error.errno == errno.EACCES
-        assert isinstance(restoration_error, AssertionError)
-        assert "atomically restore" in str(restoration_error)
-        assert isinstance(restoration_error.__cause__, OSError)
-        assert restoration_error.__cause__.errno == errno.ENOTSUP
-        assert not root.exists()
-        quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
-        assert len(quarantines) == 1
-        assert (quarantines[0] / child.name).read_text() == "preserve"
+        assert raised.value.errno == errno.ENOTSUP
+        assert child.read_text() == "preserve"
+        assert list(root.parent.glob(root.name + ".quarantine-*")) == []
     finally:
         monkeypatch.undo()
         for candidate in root.parent.glob(root.name + "*"):
@@ -1353,28 +1546,34 @@ def test_temp_root_restore_fails_closed_without_native_primitive(
 def test_temp_root_cleanup_failure_restores_quarantined_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     child = root / "blocked-child"
     child.write_text("preserve")
     guard = harness.capture_temp_root(root)
-    real_open = os.open
+    root_identity = (
+        guard.root_metadata.st_dev,
+        guard.root_metadata.st_ino,
+    )
+    real_listdir = os.listdir
+    root_scans = 0
 
-    def failing_open(
-        path: str | bytes | os.PathLike[str],
-        flags: int,
-        mode: int = 0o777,
-        *,
-        dir_fd: int | None = None,
-    ) -> int:
-        if path == child.name and dir_fd is not None:
+    def failing_listdir(path: str | bytes | os.PathLike[str] | int) -> list[str]:
+        nonlocal root_scans
+        if isinstance(path, int) and (
+            os.fstat(path).st_dev,
+            os.fstat(path).st_ino,
+        ) == root_identity:
+            root_scans += 1
+        if root_scans == 2:
             raise OSError(errno.EACCES, "injected child-open failure")
-        return real_open(path, flags, mode, dir_fd=dir_fd)
+        return real_listdir(path)
 
     try:
-        monkeypatch.setattr(harness.os, "open", failing_open)
+        monkeypatch.setattr(harness.os, "listdir", failing_listdir)
         with pytest.raises(OSError, match="injected child-open failure") as raised:
             harness.remove_temp_root(guard)
         assert raised.value.errno == errno.EACCES
+        assert root_scans >= 3
         assert child.read_text() == "preserve"
         assert list(root.parent.glob(root.name + ".quarantine-*")) == []
     finally:
@@ -1384,26 +1583,96 @@ def test_temp_root_cleanup_failure_restores_quarantined_root(
                 shutil.rmtree(candidate)
 
 
+def test_temp_root_partial_cleanup_never_restores_incomplete_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _owned_temp_root_for_test()
+    (root / "child-a").write_text("deleted-first")
+    (root / "child-b").write_text("must-remain-quarantined")
+    guard = harness.capture_temp_root(root)
+    real_unlink = os.unlink
+    unlink_calls = 0
+
+    def fail_second_unlink(
+        name: str,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        nonlocal unlink_calls
+        if dir_fd is not None:
+            unlink_calls += 1
+            if unlink_calls == 2:
+                raise OSError(errno.EIO, "injected post-mutation failure")
+        real_unlink(name, dir_fd=dir_fd)
+
+    try:
+        monkeypatch.setattr(harness.os, "unlink", fail_second_unlink)
+        with pytest.raises(BaseExceptionGroup) as raised:
+            harness.remove_temp_root(guard)
+        leaves = _exception_leaves(raised.value)
+        assert any(
+            isinstance(error, OSError) and error.errno == errno.EIO
+            for error in leaves
+        )
+        assert any("partial cleanup" in str(error).lower() for error in leaves)
+        assert not root.exists()
+        quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
+        assert len(quarantines) == 1
+        assert not (quarantines[0] / "child-a").exists()
+        assert (
+            quarantines[0] / "child-b"
+        ).read_text() == "must-remain-quarantined"
+    finally:
+        monkeypatch.undo()
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_recursive_cleanup_fd_stress_leaves_no_owned_residue() -> None:
+    descriptor_directory = Path("/dev/fd")
+    before_descriptors = len(os.listdir(descriptor_directory))
+    roots: list[Path] = []
+    for index in range(64):
+        root = harness.create_owned_temp_root()
+        roots.append(root)
+        nested = root / f"nested-{index}" / "leaf"
+        nested.mkdir(parents=True)
+        (nested / "payload").write_bytes(f"payload-{index}".encode())
+        harness.remove_temp_root(harness.capture_temp_root(root))
+    assert all(not root.exists() for root in roots)
+    assert all(
+        list(root.parent.glob(root.name + ".quarantine-*")) == []
+        for root in roots
+    )
+    assert len(os.listdir(descriptor_directory)) == before_descriptors
+
+
 def test_temp_root_cleanup_aggregates_restore_failure_and_preserves_both(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     child = root / "blocked-child"
     child.write_text("preserve")
     guard = harness.capture_temp_root(root)
-    real_open = os.open
-    real_rename_noreplace = getattr(harness, "_rename_noreplace_at", None)
+    root_identity = (
+        guard.root_metadata.st_dev,
+        guard.root_metadata.st_ino,
+    )
+    real_listdir = os.listdir
+    real_rename_noreplace = harness._rename_noreplace_at
+    root_scans = 0
 
-    def failing_open(
-        path: str | bytes | os.PathLike[str],
-        flags: int,
-        mode: int = 0o777,
-        *,
-        dir_fd: int | None = None,
-    ) -> int:
-        if path == child.name and dir_fd is not None:
+    def failing_listdir(path: str | bytes | os.PathLike[str] | int) -> list[str]:
+        nonlocal root_scans
+        if isinstance(path, int) and (
+            os.fstat(path).st_dev,
+            os.fstat(path).st_ino,
+        ) == root_identity:
+            root_scans += 1
+        if root_scans == 2:
             raise OSError(errno.EACCES, "injected child-open failure")
-        return real_open(path, flags, mode, dir_fd=dir_fd)
+        return real_listdir(path)
 
     def occupy_restore_boundary(
         source_fd: int,
@@ -1411,6 +1680,17 @@ def test_temp_root_cleanup_aggregates_restore_failure_and_preserves_both(
         destination_fd: int,
         destination: str,
     ) -> None:
+        if not (
+            source.startswith(root.name + ".quarantine-")
+            and destination == root.name
+        ):
+            real_rename_noreplace(
+                source_fd,
+                source,
+                destination_fd,
+                destination,
+            )
+            return
         os.mkdir(destination, dir_fd=destination_fd)
         occupant_fd = os.open(
             destination,
@@ -1438,13 +1718,12 @@ def test_temp_root_cleanup_aggregates_restore_failure_and_preserves_both(
         )
 
     try:
-        monkeypatch.setattr(harness.os, "open", failing_open)
-        if real_rename_noreplace is not None:
-            monkeypatch.setattr(
-                harness,
-                "_rename_noreplace_at",
-                occupy_restore_boundary,
-            )
+        monkeypatch.setattr(harness.os, "listdir", failing_listdir)
+        monkeypatch.setattr(
+            harness,
+            "_rename_noreplace_at",
+            occupy_restore_boundary,
+        )
         with pytest.raises(BaseExceptionGroup) as raised:
             harness.remove_temp_root(guard)
         assert len(raised.value.exceptions) == 2
@@ -1478,7 +1757,7 @@ def test_temp_root_removal_never_unlinks_raced_child_replacement(
     nested: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     target_parent = root / "nested" if nested else root
     target_parent.mkdir(exist_ok=True)
     target_name = f"victim-{kind}"
@@ -1502,7 +1781,8 @@ def test_temp_root_removal_never_unlinks_raced_child_replacement(
     )
     replacement_fds: list[int] = []
     injected = False
-    real_rename, real_unlink, real_rmdir = os.rename, os.unlink, os.rmdir
+    real_rename = os.rename
+    real_rename_noreplace = harness._rename_noreplace_at
 
     def is_target(name: str, directory_fd: int | None) -> bool:
         if name != target_name or directory_fd is None:
@@ -1550,58 +1830,59 @@ def test_temp_root_removal_never_unlinks_raced_child_replacement(
                 os.open(target_name, symlink_flags, dir_fd=directory_fd)
             )
 
-    def racing_rename(
+    def racing_rename_noreplace(
+        source_fd: int,
         source: str,
+        destination_fd: int,
         destination: str,
-        *,
-        src_dir_fd: int | None = None,
-        dst_dir_fd: int | None = None,
     ) -> None:
-        if is_target(source, src_dir_fd):
-            inject(src_dir_fd)
-        real_rename(
+        if is_target(source, source_fd):
+            inject(source_fd)
+        real_rename_noreplace(
+            source_fd,
             source,
+            destination_fd,
             destination,
-            src_dir_fd=src_dir_fd,
-            dst_dir_fd=dst_dir_fd,
         )
 
-    def racing_unlink(
-        name: str,
-        *,
-        dir_fd: int | None = None,
-    ) -> None:
-        if is_target(name, dir_fd):
-            inject(dir_fd)
-        real_unlink(name, dir_fd=dir_fd)
-
-    def racing_rmdir(
-        name: str,
-        *,
-        dir_fd: int | None = None,
-    ) -> None:
-        if is_target(name, dir_fd):
-            inject(dir_fd)
-        real_rmdir(name, dir_fd=dir_fd)
-
     try:
-        monkeypatch.setattr(harness.os, "rename", racing_rename)
-        monkeypatch.setattr(harness.os, "unlink", racing_unlink)
-        monkeypatch.setattr(harness.os, "rmdir", racing_rmdir)
-        with pytest.raises((AssertionError, OSError), match="replaced|quarantined|empty"):
+        monkeypatch.setattr(
+            harness,
+            "_rename_noreplace_at",
+            racing_rename_noreplace,
+        )
+        if kind == "symlink":
+            with pytest.raises(
+                AssertionError,
+                match="preflight.*symlink|nonregular",
+            ):
+                harness.remove_temp_root(guard)
+            assert not injected and replacement_fds == []
+            assert target.is_symlink()
+            return
+        with pytest.raises(
+            (AssertionError, BaseExceptionGroup, OSError),
+            match="replaced|quarantined|restoration",
+        ):
             harness.remove_temp_root(guard)
         assert injected and len(replacement_fds) == 1
         replacement_stat = os.fstat(replacement_fds[0])
-        restored_stat = os.stat(
-            target_name,
-            dir_fd=target_parent_fd,
-            follow_symlinks=False,
-        )
         assert replacement_stat.st_nlink > 0
-        assert (restored_stat.st_dev, restored_stat.st_ino) == (
+        survivor_identities = {
+            (metadata.st_dev, metadata.st_ino)
+            for name in os.listdir(target_parent_fd)
+            for metadata in (
+                os.stat(
+                    name,
+                    dir_fd=target_parent_fd,
+                    follow_symlinks=False,
+                ),
+            )
+        }
+        assert (
             replacement_stat.st_dev,
             replacement_stat.st_ino,
-        )
+        ) in survivor_identities
     finally:
         monkeypatch.undo()
         os.close(target_parent_fd)
@@ -1617,19 +1898,19 @@ def test_temp_root_removal_never_unlinks_raced_child_replacement(
 def test_temp_root_removal_restores_raced_root_replacement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    root = harness.create_owned_temp_root()
     guard = harness.capture_temp_root(root)
     backup = root.with_name(root.name + ".original")
     replacement_fd: int | None = None
     injected = False
     real_rename = os.rename
+    real_rename_noreplace = harness._rename_noreplace_at
 
-    def racing_rename(
+    def racing_rename_noreplace(
+        source_fd: int,
         source: str,
+        destination_fd: int,
         destination: str,
-        *,
-        src_dir_fd: int | None = None,
-        dst_dir_fd: int | None = None,
     ) -> None:
         nonlocal injected, replacement_fd
         if source == root.name and not injected:
@@ -1637,29 +1918,38 @@ def test_temp_root_removal_restores_raced_root_replacement(
             real_rename(
                 source,
                 backup.name,
-                src_dir_fd=src_dir_fd,
-                dst_dir_fd=dst_dir_fd,
+                src_dir_fd=source_fd,
+                dst_dir_fd=destination_fd,
             )
-            os.mkdir(source, dir_fd=src_dir_fd)
+            os.mkdir(source, dir_fd=source_fd)
             replacement_fd = os.open(
                 source,
                 os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
-                dir_fd=src_dir_fd,
+                dir_fd=source_fd,
             )
-        real_rename(
+        real_rename_noreplace(
+            source_fd,
             source,
+            destination_fd,
             destination,
-            src_dir_fd=src_dir_fd,
-            dst_dir_fd=dst_dir_fd,
         )
 
     try:
-        monkeypatch.setattr(harness.os, "rename", racing_rename)
-        with pytest.raises(AssertionError, match="replaced|quarantined"):
+        monkeypatch.setattr(
+            harness,
+            "_rename_noreplace_at",
+            racing_rename_noreplace,
+        )
+        with pytest.raises(
+            BaseExceptionGroup,
+            match="restoration",
+        ):
             harness.remove_temp_root(guard)
         assert injected and replacement_fd is not None
         assert os.fstat(replacement_fd).st_nlink > 0
-        assert root.is_dir()
+        assert not root.exists()
+        assert backup.is_dir()
+        assert len(list(root.parent.glob(root.name + ".quarantine-*"))) == 1
     finally:
         monkeypatch.undo()
         if replacement_fd is not None:
@@ -1765,7 +2055,26 @@ def test_redacted_evidence_shape_excludes_raw_values() -> None:
     assert {"host_id_sha256", "sidecar_path", "trace_deltas"} <= constants
 
 
-def test_seed_two_memberships_assign_and_run_native_iroh_inference(
+def test_native_evidence_structure_binds_two_receipts_and_planner_cuts() -> None:
+    module = sys.modules[__name__]
+    native_test = getattr(module, "test_local_two_node_native_process_e2e", None)
+    assert native_test is not None
+    source = inspect.getsource(native_test)
+    required_evidence = {
+        "receipt_ledger",
+        "planner_stage_cuts",
+        "receipt_binding_digest",
+        "request_input_digest",
+        "source_membership_generation",
+        "peer_membership_generation",
+    }
+    assert all(marker in source for marker in required_evidence)
+    assert "for request_index in range(2)" in source
+    assert "generation_config_digest=receipt_binding_digest" in source
+    assert "len(receipt_ledger) == 2" in source
+
+
+def test_local_two_node_native_process_e2e(
     tmp_path: Path,
     local_control_sidecar_binary: Path,  # noqa: F811
 ) -> None:
@@ -1817,7 +2126,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     accepted_offers: dict[str, dict[str, Any]] = {}
     sidecar_pids: dict[str, int] = {}
     discovered_child_pids: set[int] = set()
-    socket_root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    socket_root = harness.create_owned_temp_root()
     run_id = str(uuid.uuid4())
     seed_port: int | None = None
     with harness.node_process_cleanup(
@@ -2008,124 +2317,265 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     == "iroh://" + details["endpoint_addr"]["id"]
                 )
                 assert coordinator.member(node_id)["last_heartbeat_sequence"] == 2
-            before_request: dict[str, dict[str, Any]] = {}
-            before_observations: dict[str, dict[str, Any]] = {}
-            for node_id in NODE_IDS:
-                response = node_processes[node_id].raw_command("snapshot")
-                assert response["ok"] is True and response["route_ready"] is False
-                observation = _verified_observation(
-                    response["result"],
-                    trust=observation_trusts[node_id],
-                    expected_event="snapshot",
+            planner_stage_cuts = _planner_stage_cuts(graph)
+            assert len(planner_stage_cuts) == len(NODE_IDS) == 2
+            assert planner_stage_cuts[0]["start_layer"] == 0
+            assert all(
+                left["end_layer_exclusive"] == right["start_layer"]
+                for left, right in zip(
+                    planner_stage_cuts,
+                    planner_stage_cuts[1:],
                 )
-                before_observations[node_id] = observation
-                before_request[node_id] = observation["details"]
-            request_id = str(uuid.uuid4())
-            started = _verified_observation(
-                first.command("infer_start", _inference_request(request_id)),
-                trust=observation_trusts[NODE_IDS[0]],
-                expected_event="inference_started",
-            )["details"]
-            assert (started["request_id"], started["status"]) == (
-                request_id,
-                "DECODING",
             )
-            decoded = _verified_observation(
-                first.command(
-                    "infer_decode",
-                    {"request_id": request_id, "count": 2},
-                ),
-                trust=observation_trusts[NODE_IDS[0]],
-                expected_event="inference_decoded",
-            )["details"]
-            assert (decoded["request_id"], decoded["status"]) == (
-                request_id,
-                "COMPLETED",
-            )
-            assert decoded["output"]["token_indexes"] == [0, 1, 2]
+            assert [
+                cut["node_ids"] for cut in planner_stage_cuts
+            ] == [[NODE_IDS[0]], [NODE_IDS[1]]]
+            planner_stage_cuts_digest = _digest(planner_stage_cuts)
             reference = load_assignment_stage(
                 deployment.reference_assignment,
                 deployment.reference_report,
                 load_generation=7,
             )
-            context = [1, 2, 3]
-            expected_tokens: list[int] = []
-            for _ in range(3):
-                logits = execute_loaded_stage(
-                    reference,
-                    token_ids=mx.array((tuple(context),), dtype=mx.uint32),
-                )
-                mx.eval(logits)
-                token = int(mx.argmax(logits[0, -1, :]).item())
-                expected_tokens.append(token)
-                context.append(token)
-            assert expected_tokens == [6, 6, 6]
-            assert decoded["output"]["token_ids"] == expected_tokens
+            receipt_ledger: list[dict[str, Any]] = []
+            request_evidence: list[dict[str, Any]] = []
             node_observations: dict[str, dict[str, Any]] = {}
-            for node_id in NODE_IDS:
-                response = node_processes[node_id].raw_command("snapshot")
-                assert response["ok"] is True and response["route_ready"] is False
-                observation = _verified_observation(
-                    response["result"],
-                    trust=observation_trusts[node_id],
-                    expected_event="snapshot",
-                )
-                node_observations[node_id] = observation
-                before = before_observations[node_id]
-                assert observation["node_id"] == before["node_id"] == node_id
-                assert (
-                    observation["process_id"]
-                    == before["process_id"]
-                    == service_pid_by_node[node_id]
-                )
-                assert observation["host_id"] == before["host_id"]
-                assert (
-                    observation["endpoint_id"]
-                    == before["endpoint_id"]
-                    == configured[node_id]["endpoint_addr"]["id"]
-                )
-                snapshot = observation["details"]
-                assert snapshot["runtime"]["active_state_count"] == 0
-                assert snapshot["transport_fatal_error"] is None
-                clients[node_id].send_member_message(
-                    sessions[node_id].drain_acknowledgement(
-                        drain_id="drain-local-e2e",
-                        last_request_id=request_id,
-                        completed_at=NOW,
-                    ),
-                    now=NOW,
-                )
             request_frame_deltas: dict[str, tuple[int, int]] = {}
             request_trace_deltas: dict[str, list[str]] = {}
-            for node_id in NODE_IDS:
-                before = before_request[node_id]
-                after = node_observations[node_id]["details"]
-                sent_delta, received_delta = (
-                    after["transport"][key] - before["transport"][key]
-                    for key in ("remote_frames_sent", "remote_frames_received")
+            receipt_binding_digest = "sha256:" + "e" * 64
+            request_id = ""
+            decoded: dict[str, Any] = {}
+            expected_tokens: list[int] = []
+            for request_index in range(2):
+                before_request: dict[str, dict[str, Any]] = {}
+                before_observations: dict[str, dict[str, Any]] = {}
+                for node_id in NODE_IDS:
+                    response = node_processes[node_id].raw_command("snapshot")
+                    assert (
+                        response["ok"] is True
+                        and response["route_ready"] is False
+                    )
+                    observation = _verified_observation(
+                        response["result"],
+                        trust=observation_trusts[node_id],
+                        expected_event="snapshot",
+                    )
+                    before_observations[node_id] = observation
+                    before_request[node_id] = observation["details"]
+                request_id = str(uuid.uuid4())
+                request_payload = _inference_request(
+                    request_id,
+                    generation_config_digest=receipt_binding_digest,
                 )
-                request_frame_deltas[node_id] = (sent_delta, received_delta)
-                before_trace = before["transport_outbound_trace"]
-                after_trace = after["transport_outbound_trace"]
-                assert after_trace[: len(before_trace)] == before_trace
-                request_trace_deltas[node_id] = after_trace[len(before_trace) :]
-            _assert_request_route_evidence(
-                request_frame_deltas,
-                request_trace_deltas,
-                request_id=request_id,
-                expected_types={
-                    NODE_IDS[0]: (
-                        "ProgressivePrefillMessage",
-                        "HopHeader",
-                        "HopHeader",
+                authenticated_request_input = {
+                    key: value
+                    for key, value in request_payload["request"].items()
+                    if key != "admitted_at"
+                }
+                request_input_digest = _digest(authenticated_request_input)
+                started = _verified_observation(
+                    first.command("infer_start", request_payload),
+                    trust=observation_trusts[NODE_IDS[0]],
+                    expected_event="inference_started",
+                )["details"]
+                assert (started["request_id"], started["status"]) == (
+                    request_id,
+                    "DECODING",
+                )
+                decoded = _verified_observation(
+                    first.command(
+                        "infer_decode",
+                        {"request_id": request_id, "count": 2},
                     ),
-                    NODE_IDS[1]: (
-                        "ManifestLocked",
-                        "TokenEvent",
-                        "TokenEvent",
-                        "TokenEvent",
-                    ),
-                },
+                    trust=observation_trusts[NODE_IDS[0]],
+                    expected_event="inference_decoded",
+                )["details"]
+                assert (decoded["request_id"], decoded["status"]) == (
+                    request_id,
+                    "COMPLETED",
+                )
+                assert decoded["output"]["token_indexes"] == [0, 1, 2]
+                context = list(request_payload["request"]["prompt_token_ids"])
+                expected_tokens = []
+                for _ in range(3):
+                    logits = execute_loaded_stage(
+                        reference,
+                        token_ids=mx.array(
+                            (tuple(context),),
+                            dtype=mx.uint32,
+                        ),
+                    )
+                    mx.eval(logits)
+                    token = int(mx.argmax(logits[0, -1, :]).item())
+                    expected_tokens.append(token)
+                    context.append(token)
+                assert expected_tokens == [6, 6, 6]
+                assert decoded["output"]["token_ids"] == expected_tokens
+                node_observations = {}
+                for node_id in NODE_IDS:
+                    response = node_processes[node_id].raw_command("snapshot")
+                    assert (
+                        response["ok"] is True
+                        and response["route_ready"] is False
+                    )
+                    observation = _verified_observation(
+                        response["result"],
+                        trust=observation_trusts[node_id],
+                        expected_event="snapshot",
+                    )
+                    node_observations[node_id] = observation
+                    before = before_observations[node_id]
+                    assert observation["node_id"] == before["node_id"] == node_id
+                    assert (
+                        observation["process_id"]
+                        == before["process_id"]
+                        == service_pid_by_node[node_id]
+                    )
+                    assert observation["host_id"] == before["host_id"]
+                    assert (
+                        observation["endpoint_id"]
+                        == before["endpoint_id"]
+                        == configured[node_id]["endpoint_addr"]["id"]
+                    )
+                    snapshot = observation["details"]
+                    assert snapshot["runtime"]["active_state_count"] == 0
+                    assert snapshot["transport_fatal_error"] is None
+                    assert snapshot["transport_worker_threads"] == 2
+                    clients[node_id].send_member_message(
+                        sessions[node_id].drain_acknowledgement(
+                            drain_id=f"drain-local-e2e-{request_index}",
+                            last_request_id=request_id,
+                            completed_at=NOW,
+                        ),
+                        now=NOW,
+                    )
+                request_frame_deltas = {}
+                request_trace_deltas = {}
+                for node_id in NODE_IDS:
+                    before = before_request[node_id]
+                    after = node_observations[node_id]["details"]
+                    sent_delta, received_delta = (
+                        after["transport"][key] - before["transport"][key]
+                        for key in (
+                            "remote_frames_sent",
+                            "remote_frames_received",
+                        )
+                    )
+                    request_frame_deltas[node_id] = (
+                        sent_delta,
+                        received_delta,
+                    )
+                    before_trace = before["transport_outbound_trace"]
+                    after_trace = after["transport_outbound_trace"]
+                    assert after_trace[: len(before_trace)] == before_trace
+                    request_trace_deltas[node_id] = after_trace[
+                        len(before_trace) :
+                    ]
+                _assert_request_route_evidence(
+                    request_frame_deltas,
+                    request_trace_deltas,
+                    request_id=request_id,
+                    expected_types={
+                        NODE_IDS[0]: (
+                            "ProgressivePrefillMessage",
+                            "HopHeader",
+                            "HopHeader",
+                        ),
+                        NODE_IDS[1]: (
+                            "ManifestLocked",
+                            "TokenEvent",
+                            "TokenEvent",
+                            "TokenEvent",
+                        ),
+                    },
+                )
+                (
+                    source_node_id,
+                    request_identity,
+                    receipt_identity,
+                ) = _observed_request_receipt(
+                    request_trace_deltas,
+                    request_id=request_id,
+                )
+                assert source_node_id == NODE_IDS[0]
+                assert request_identity["request_input_sha256"] == (
+                    request_input_digest
+                )
+                assert request_identity["deployment_id"] == graph.deployment_id
+                assert (
+                    request_identity["deployment_epoch"]
+                    == graph.deployment_epoch
+                )
+                assert (
+                    request_identity["planner_stage_cuts_sha256"]
+                    == planner_stage_cuts_digest
+                )
+                peer_node_id = NODE_IDS[1]
+                assert (
+                    receipt_identity["peer_endpoint_id"]
+                    == configured[peer_node_id]["endpoint_addr"]["id"]
+                )
+                source_member = coordinator.member(source_node_id)
+                peer_member = coordinator.member(peer_node_id)
+                assert sessions[source_node_id].generation == source_member[
+                    "generation"
+                ]
+                ledger_entry = {
+                    "deployment_epoch": graph.deployment_epoch,
+                    "deployment_id": graph.deployment_id,
+                    "delivery_message_id": receipt_identity["message_id"],
+                    "delivery_receipt_sha256": receipt_identity[
+                        "delivery_receipt_sha256"
+                    ],
+                    "peer_endpoint_id": peer_member["endpoint_id"],
+                    "peer_membership_generation": peer_member["generation"],
+                    "peer_node_id": peer_node_id,
+                    "planner_stage_cuts_sha256": planner_stage_cuts_digest,
+                    "request_id": request_id,
+                    "request_input_digest": request_input_digest,
+                    "run_id": run_id,
+                    "session_epoch": sessions[source_node_id].generation,
+                    "source_endpoint_id": source_member["endpoint_id"],
+                    "source_membership_generation": source_member["generation"],
+                    "source_node_id": source_node_id,
+                }
+                ledger_entry["receipt_binding_digest"] = _digest(ledger_entry)
+                if request_index == 1:
+                    assert (
+                        request_payload["request"]["generation_config_digest"]
+                        == receipt_ledger[0]["delivery_receipt_sha256"]
+                    )
+                receipt_ledger.append(ledger_entry)
+                receipt_binding_digest = receipt_identity[
+                    "delivery_receipt_sha256"
+                ]
+                request_evidence.append(
+                    {
+                        "distributed_token_ids": decoded["output"]["token_ids"],
+                        "frame_deltas": {
+                            node_id: {
+                                "received": received,
+                                "sent": sent,
+                            }
+                            for node_id, (
+                                sent,
+                                received,
+                            ) in request_frame_deltas.items()
+                        },
+                        "reference_token_ids": expected_tokens,
+                        "request_id": request_id,
+                        "request_input_digest": request_input_digest,
+                    }
+                )
+            assert len(receipt_ledger) == 2
+            assert len(
+                {
+                    entry["delivery_message_id"]
+                    for entry in receipt_ledger
+                }
+            ) == 2
+            assert all(
+                item["distributed_token_ids"] == item["reference_token_ids"]
+                for item in request_evidence
             )
             host_ids = {item["host_id"] for item in node_observations.values()}
             assert len(host_ids) == 1
@@ -2257,10 +2707,6 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     "route_ready": False,
                     "sidecar_mode": "local-only",
                 },
-                "frame_deltas": {
-                    node_id: {"received": received, "sent": sent}
-                    for node_id, (sent, received) in request_frame_deltas.items()
-                },
                 "nodes": {
                     node_id: {
                         "endpoint_id": configured[node_id]["endpoint_addr"]["id"],
@@ -2270,14 +2716,13 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     for node_id in NODE_IDS
                 },
                 "protocol": "mycelium.seed_native_iroh_e2e_evidence.v1",
+                "planner_stage_cuts": planner_stage_cuts,
+                "planner_stage_cuts_sha256": planner_stage_cuts_digest,
                 "qualifier_error": unqualified.value.code,
                 "redacted": True,
+                "receipt_ledger": receipt_ledger,
                 "replay_error": replayed.value.code,
-                "request_id": request_id,
-                "token_ids": {
-                    "distributed": decoded["output"]["token_ids"],
-                    "reference": expected_tokens,
-                },
+                "requests": request_evidence,
             },
             raw_host_id=shared_host_id,
             sidecar_binary=local_control_sidecar_binary,
