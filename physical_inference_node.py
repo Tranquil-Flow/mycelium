@@ -73,6 +73,23 @@ def _require(condition: bool, code: str) -> None:
         raise NodeCommandError(code)
 
 
+def _validated_endpoint_secret_file(value: Path | None) -> Path | None:
+    if value is None:
+        return None
+    _require(isinstance(value, Path), "invalid_endpoint_secret_file")
+    lexical = os.fspath(value)
+    _require(
+        bool(lexical)
+        and value.is_absolute()
+        and not any(
+            ord(character) <= 0x1F or 0x7F <= ord(character) <= 0x9F
+            for character in lexical
+        ),
+        "invalid_endpoint_secret_file",
+    )
+    return value
+
+
 def _exact_fields(document: Any, expected: set[str] | frozenset[str], code: str) -> dict[str, Any]:
     _require(isinstance(document, dict) and set(document) == set(expected), code)
     return document
@@ -264,12 +281,16 @@ class NativeSidecarProcess:
         local_only: bool,
         queue_capacity: int,
         startup_timeout: float,
+        endpoint_secret_file: Path | None = None,
     ) -> None:
         self.binary = binary
         self.socket_root = socket_root
         self.local_only = local_only
         self.queue_capacity = queue_capacity
         self.startup_timeout = startup_timeout
+        self.endpoint_secret_file = _validated_endpoint_secret_file(
+            endpoint_secret_file
+        )
         self.socket_path = socket_root / "i.sock"
         self._bootstrap_material: bytes | None = None
         self.process: subprocess.Popen[str] | None = None
@@ -279,6 +300,24 @@ class NativeSidecarProcess:
     def bootstrap_material(self) -> bytes:
         _require(self._bootstrap_material is not None, "sidecar_not_started")
         return self._bootstrap_material
+
+    def _argv(self, bootstrap_fd: int) -> list[str]:
+        command = [
+            str(self.binary),
+            "--uds",
+            str(self.socket_path),
+            "--bootstrap-fd",
+            str(bootstrap_fd),
+            "--queue-capacity",
+            str(self.queue_capacity),
+        ]
+        if self.local_only:
+            command.append("--local-only")
+        if self.endpoint_secret_file is not None:
+            command.extend(
+                ["--endpoint-secret-file", str(self.endpoint_secret_file)]
+            )
+        return command
 
     def start(self) -> dict[str, Any]:
         _require(self.process is None, "sidecar_already_started")
@@ -291,17 +330,7 @@ class NativeSidecarProcess:
             os.write(write_fd, material)
         finally:
             os.close(write_fd)
-        command = [
-            str(self.binary),
-            "--uds",
-            str(self.socket_path),
-            "--bootstrap-fd",
-            str(read_fd),
-            "--queue-capacity",
-            str(self.queue_capacity),
-        ]
-        if self.local_only:
-            command.append("--local-only")
+        command = self._argv(read_fd)
         try:
             process = subprocess.Popen(
                 command,
@@ -374,6 +403,7 @@ class PhysicalNodeService:
         sidecar_binary: Path,
         sidecar_local_only: bool,
         command_timeout: float,
+        endpoint_secret_file: Path | None = None,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -390,6 +420,9 @@ class PhysicalNodeService:
         self.sidecar_binary = sidecar_binary.resolve(strict=False)
         self.sidecar_local_only = sidecar_local_only
         self.command_timeout = command_timeout
+        self.endpoint_secret_file = _validated_endpoint_secret_file(
+            endpoint_secret_file
+        )
         self.host_id = platform.node()
         self.process_id = os.getpid()
         self.state = "NEW"
@@ -534,6 +567,16 @@ class PhysicalNodeService:
             "verification_key": self.signer.public_key_record(),
         }
 
+    def _new_sidecar_process(self) -> NativeSidecarProcess:
+        return NativeSidecarProcess(
+            binary=self.sidecar_binary,
+            socket_root=self.socket_root,
+            local_only=self.sidecar_local_only,
+            queue_capacity=128,
+            startup_timeout=min(self.command_timeout, 30.0),
+            endpoint_secret_file=self.endpoint_secret_file,
+        )
+
     def _configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "NEW", "invalid_state_for_configure")
         legacy_fields = {
@@ -628,13 +671,7 @@ class PhysicalNodeService:
             {placement.placement_id: loaded},
             clock=self._clock.now,
         )
-        sidecar = NativeSidecarProcess(
-            binary=self.sidecar_binary,
-            socket_root=self.socket_root,
-            local_only=self.sidecar_local_only,
-            queue_capacity=128,
-            startup_timeout=min(self.command_timeout, 30.0),
-        )
+        sidecar = self._new_sidecar_process()
         try:
             ready = sidecar.start()
         except BaseException:
@@ -960,6 +997,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--socket-root", type=Path, required=True)
     parser.add_argument("--sidecar-binary", type=Path, required=True)
     parser.add_argument("--sidecar-local-only", action="store_true")
+    parser.add_argument("--endpoint-secret-file", type=Path)
     parser.add_argument("--command-timeout", type=float, default=30.0)
     return parser.parse_args()
 
@@ -976,6 +1014,7 @@ def main() -> int:
             sidecar_binary=args.sidecar_binary,
             sidecar_local_only=args.sidecar_local_only,
             command_timeout=args.command_timeout,
+            endpoint_secret_file=args.endpoint_secret_file,
         )
     except (NodeCommandError, OSError) as exc:
         print(f"physical-node startup rejected: {type(exc).__name__}", file=sys.stderr)
