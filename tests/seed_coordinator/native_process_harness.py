@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from builtins import BaseExceptionGroup
 from contextlib import contextmanager
+import ctypes
+import errno
 from functools import partial
 import os
 from pathlib import Path
@@ -17,6 +19,71 @@ from typing import Any, Iterator, NamedTuple
 WORKTREE_ROOT = Path(__file__).resolve().parents[2]
 TEMP_ROOT_PREFIX = "myc-seed-e2e-"
 PROCESS_WAIT_TIMEOUT = POLL_TIMEOUT = 2.0
+_RENAME_EXCL = 0x00000004
+_RENAME_NOREPLACE = 0x00000001
+
+
+def _rename_noreplace_at(
+    source_fd: int,
+    source: str,
+    destination_fd: int,
+    destination: str,
+) -> None:
+    """Atomically rename one directory entry without replacing another."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    arguments = (
+        source_fd,
+        os.fsencode(source),
+        destination_fd,
+        os.fsencode(destination),
+    )
+    if sys.platform == "darwin":
+        try:
+            rename = libc.renameatx_np
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP,
+                "renameatx_np(RENAME_EXCL) is unavailable",
+            ) from error
+        rename.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename.restype = ctypes.c_int
+        call_arguments = (*arguments, _RENAME_EXCL)
+    elif sys.platform.startswith("linux"):
+        try:
+            rename = libc.renameat2
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP,
+                "renameat2(RENAME_NOREPLACE) is unavailable",
+            ) from error
+        rename.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename.restype = ctypes.c_int
+        call_arguments = (*arguments, _RENAME_NOREPLACE)
+    else:
+        raise OSError(
+            errno.ENOTSUP,
+            "atomic no-replace directory rename is unsupported",
+        )
+    ctypes.set_errno(0)
+    if rename(*call_arguments) != 0:
+        error_number = ctypes.get_errno() or errno.EIO
+        raise OSError(
+            error_number,
+            os.strerror(error_number),
+            destination,
+        )
 
 
 class ProcessRecord(NamedTuple):
@@ -532,26 +599,55 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
         quarantined: os.stat_result,
     ) -> None:
         try:
-            lstat_at(directory_fd, original_name)
+            _rename_noreplace_at(
+                directory_fd,
+                quarantine,
+                directory_fd,
+                original_name,
+            )
+        except FileExistsError as error:
+            raise AssertionError(
+                f"cleanup preserved quarantined entry as {quarantine}; "
+                f"{original_name} became occupied"
+            ) from error
+        except OSError as error:
+            raise AssertionError(
+                f"cleanup could not atomically restore {quarantine} to "
+                f"{original_name}; quarantine preserved"
+            ) from error
+        _require(
+            _stable_entry_identity(lstat_at(directory_fd, original_name))
+            == _stable_entry_identity(quarantined),
+            "cleanup could not safely restore quarantined entry",
+        )
+
+    def restore_after_failure(
+        directory_fd: int,
+        quarantine: str,
+        original_name: str,
+        cleanup_error: BaseException,
+    ) -> None:
+        try:
+            quarantined = lstat_at(directory_fd, quarantine)
         except FileNotFoundError:
-            os.rename(
+            return
+        except BaseException as restoration_error:
+            raise BaseExceptionGroup(
+                "cleanup failed and quarantine restoration could not be inspected",
+                [cleanup_error, restoration_error],
+            ) from None
+        try:
+            restore_quarantine(
+                directory_fd,
                 quarantine,
                 original_name,
-                src_dir_fd=directory_fd,
-                dst_dir_fd=directory_fd,
+                quarantined,
             )
-            _require(
-                _stable_entry_identity(
-                    lstat_at(directory_fd, original_name)
-                )
-                == _stable_entry_identity(quarantined),
-                "cleanup could not safely restore raced replacement",
-            )
-            return
-        raise AssertionError(
-            f"cleanup preserved raced replacement as {quarantine}; "
-            f"{original_name} became occupied"
-        )
+        except BaseException as restoration_error:
+            raise BaseExceptionGroup(
+                "cleanup and quarantine restoration both failed",
+                [cleanup_error, restoration_error],
+            ) from None
 
     def remove_open_entry(
         directory_fd: int,
@@ -568,47 +664,49 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
             src_dir_fd=directory_fd,
             dst_dir_fd=directory_fd,
         )
-        quarantined = lstat_at(directory_fd, quarantine)
-        if _stable_entry_identity(quarantined) != _stable_entry_identity(
-            opened
-        ):
-            restore_quarantine(directory_fd, quarantine, name, quarantined)
-            raise AssertionError(
-                f"cleanup refused replaced or changed quarantined entry {name}; "
-                "replacement restored"
-            )
-        if stat.S_ISDIR(opened.st_mode):
-            empty_open_directory(opened_fd)
-        final_quarantined = lstat_at(directory_fd, quarantine)
-        final_opened = os.fstat(opened_fd)
-        if stat.S_ISDIR(opened.st_mode):
-            unchanged = (
-                _temp_root_identity(final_quarantined)
-                == _temp_root_identity(final_opened)
-                == _temp_root_identity(opened)
-                and final_quarantined.st_nlink == final_opened.st_nlink == 2
-            )
-        else:
-            unchanged = (
-                _stable_entry_identity(final_quarantined)
-                == _stable_entry_identity(final_opened)
-                == _stable_entry_identity(opened)
-            )
-        if not unchanged:
-            restore_quarantine(
+        try:
+            quarantined = lstat_at(directory_fd, quarantine)
+            if _stable_entry_identity(quarantined) != _stable_entry_identity(
+                opened
+            ):
+                raise AssertionError(
+                    f"cleanup refused replaced or changed quarantined entry "
+                    f"{name}; replacement requires restoration"
+                )
+            if stat.S_ISDIR(opened.st_mode):
+                empty_open_directory(opened_fd)
+            final_quarantined = lstat_at(directory_fd, quarantine)
+            final_opened = os.fstat(opened_fd)
+            if stat.S_ISDIR(opened.st_mode):
+                unchanged = (
+                    _temp_root_identity(final_quarantined)
+                    == _temp_root_identity(final_opened)
+                    == _temp_root_identity(opened)
+                    and final_quarantined.st_nlink == final_opened.st_nlink == 2
+                )
+            else:
+                unchanged = (
+                    _stable_entry_identity(final_quarantined)
+                    == _stable_entry_identity(final_opened)
+                    == _stable_entry_identity(opened)
+                )
+            if not unchanged:
+                raise AssertionError(
+                    f"cleanup refused changed quarantined metadata for {name}; "
+                    "entry requires restoration"
+                )
+            if stat.S_ISDIR(opened.st_mode):
+                os.rmdir(quarantine, dir_fd=directory_fd)
+            else:
+                os.unlink(quarantine, dir_fd=directory_fd)
+        except BaseException as cleanup_error:
+            restore_after_failure(
                 directory_fd,
                 quarantine,
                 name,
-                final_quarantined,
+                cleanup_error,
             )
-            raise AssertionError(
-                f"cleanup refused changed quarantined metadata for {name}; "
-                "entry restored"
-            )
-        if stat.S_ISDIR(opened.st_mode):
-            os.rmdir(quarantine, dir_fd=directory_fd)
-        else:
-            os.unlink(quarantine, dir_fd=directory_fd)
+            raise
 
     def remove_socket_entry(
         directory_fd: int,
@@ -626,20 +724,29 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
             src_dir_fd=directory_fd,
             dst_dir_fd=directory_fd,
         )
-        quarantined = lstat_at(directory_fd, quarantine)
-        if _stable_entry_identity(quarantined) != _stable_entry_identity(
-            inspected
-        ):
-            restore_quarantine(directory_fd, quarantine, name, quarantined)
-            raise AssertionError(
-                f"cleanup refused replaced socket {name}; replacement restored"
+        try:
+            quarantined = lstat_at(directory_fd, quarantine)
+            if _stable_entry_identity(quarantined) != _stable_entry_identity(
+                inspected
+            ):
+                raise AssertionError(
+                    f"cleanup refused replaced socket {name}; "
+                    "replacement requires restoration"
+                )
+            _require(
+                _stable_entry_identity(lstat_at(directory_fd, quarantine))
+                == _stable_entry_identity(inspected),
+                f"cleanup refused changed quarantined socket {name}",
             )
-        _require(
-            _stable_entry_identity(lstat_at(directory_fd, quarantine))
-            == _stable_entry_identity(inspected),
-            f"cleanup refused changed quarantined socket {name}",
-        )
-        os.unlink(quarantine, dir_fd=directory_fd)
+            os.unlink(quarantine, dir_fd=directory_fd)
+        except BaseException as cleanup_error:
+            restore_after_failure(
+                directory_fd,
+                quarantine,
+                name,
+                cleanup_error,
+            )
+            raise
 
     def empty_open_directory(directory_fd: int) -> None:
         for name in os.listdir(directory_fd):

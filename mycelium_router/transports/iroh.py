@@ -415,16 +415,21 @@ class IrohTransport:
 
       with self._state_lock:
          self._peer = replacement
-         stale = [
-            (message_id, pending)
-            for message_id, pending in self._pending.items()
-            if pending.generation < replacement.generation
-         ]
-         for _, pending in stale:
-            pending.cancelled = True
-            pending.reason = "peer_rotated"
-      for message_id, _ in stale:
-         self._cancel(message_id)
+         stale: list[tuple[bytes, Any | None]] = []
+         for message_id, pending in self._pending.items():
+            if pending.generation >= replacement.generation:
+               continue
+            reserved, cancellation_client = (
+               self._reserve_pending_cancellation_locked(
+                  message_id,
+                  pending,
+                  "peer_rotated",
+               )
+            )
+            if reserved:
+               stale.append((message_id, cancellation_client))
+      for message_id, cancellation_client in stale:
+         self._cancel_with_client(cancellation_client, message_id)
 
    def send_router_frame(
       self,
@@ -636,16 +641,13 @@ class IrohTransport:
       reason: str,
    ) -> None:
       with self._state_lock:
-         if (
-            self._pending.get(message_id) is not pending
-            or pending.completed
-            or pending.cancel_started
-         ):
-            return
-         pending.cancelled = True
-         pending.reason = reason
-         pending.cancel_started = True
-         control = self._control_client
+         reserved, control = self._reserve_pending_cancellation_locked(
+            message_id,
+            pending,
+            reason,
+         )
+      if not reserved:
+         return
       thread = threading.Thread(
          target=self._cancel_with_client,
          args=(control, message_id),
@@ -655,10 +657,22 @@ class IrohTransport:
       )
       thread.start()
 
-   def _cancel(self, message_id: bytes) -> None:
-      with self._state_lock:
-         control = self._control_client
-      self._cancel_with_client(control, message_id)
+   def _reserve_pending_cancellation_locked(
+      self,
+      message_id: bytes,
+      pending: _PendingSend,
+      reason: str,
+   ) -> tuple[bool, Any | None]:
+      if (
+         self._pending.get(message_id) is not pending
+         or pending.completed
+         or pending.cancel_started
+      ):
+         return False, None
+      pending.cancelled = True
+      pending.reason = reason
+      pending.cancel_started = True
+      return True, self._control_client
 
    @staticmethod
    def _cancel_with_client(
@@ -1221,33 +1235,38 @@ class IrohTransport:
 
    def _close(self) -> None:
       with self._state_lock:
+         pending_cancellations: list[tuple[bytes, Any | None]] = []
          if self._closed:
-            pending_ids: tuple[bytes, ...] = ()
             clients: tuple[Any | None, ...] = ()
-            control = None
          else:
             self._closed = True
             self._running = False
             self._stop.set()
-            for pending in self._pending.values():
-               pending.cancelled = True
-               pending.reason = "transport_closed"
-               pending.cancel_started = True
-            pending_ids = tuple(self._pending)
+            for message_id, pending in self._pending.items():
+               reserved, cancellation_client = (
+                  self._reserve_pending_cancellation_locked(
+                     message_id,
+                     pending,
+                     "transport_closed",
+                  )
+               )
+               if reserved:
+                  pending_cancellations.append(
+                     (message_id, cancellation_client)
+                  )
             clients = (
                self._receive_client,
                self._send_client,
                self._control_client,
             )
-            control = self._control_client
             self._receive_client = None
             self._send_client = None
             self._control_client = None
          thread = self._receiver_thread
          dispatcher_thread = self._dispatcher_thread
          cancellation_threads = tuple(self._cancellation_threads.values())
-      for message_id in pending_ids:
-         self._cancel_with_client(control, message_id)
+      for message_id, cancellation_client in pending_cancellations:
+         self._cancel_with_client(cancellation_client, message_id)
       for client in clients:
          if client is None:
             continue

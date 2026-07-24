@@ -563,6 +563,87 @@ def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
         transport.close()
 
 
+@pytest.mark.parametrize("_interleaving", range(12))
+def test_rotation_and_deadline_reserve_one_cancel_per_message(
+    _interleaving: int,
+) -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    transport = _transport(hub, delivery_timeout_seconds=10.0)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    cancel_entered = threading.Event()
+    release_cancel = threading.Event()
+    cancel_call_lock = threading.Lock()
+    cancel_calls = 0
+    original_cancel = transport._cancel_with_client
+    errors: list[BaseException] = []
+
+    def paused_cancel(control, message_id, *, timeout=None) -> None:
+        nonlocal cancel_calls
+        with cancel_call_lock:
+            cancel_calls += 1
+            call_number = cancel_calls
+        if call_number == 1:
+            cancel_entered.set()
+            assert release_cancel.wait(timeout=1.0)
+        original_cancel(control, message_id, timeout=timeout)
+
+    transport._cancel_with_client = paused_cancel
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(), destination_node_id="peer-node"
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send)
+    rotation = threading.Thread(
+        target=transport.rotate_peer,
+        args=(_binding(generation=8),),
+    )
+    sender.start()
+    assert hub.confirmed_send_entered.wait(timeout=1.0)
+    with transport._state_lock:
+        [(message_id, pending)] = transport._pending.items()
+
+    deadline = threading.Thread(
+        target=transport._expire_pending,
+        args=(message_id, pending, "delivery_deadline_exceeded"),
+    )
+    if _interleaving % 2:
+        deadline.start()
+        expected_error = "delivery_deadline_exceeded"
+    else:
+        rotation.start()
+        expected_error = "peer_rotated"
+    assert cancel_entered.wait(timeout=1.0)
+    if _interleaving % 2:
+        rotation.start()
+    else:
+        deadline.start()
+    deadline.join(timeout=1.0)
+    assert not deadline.is_alive()
+    release_cancel.set()
+    rotation.join(timeout=1.0)
+    hub.release_confirmed_send.set()
+    sender.join(timeout=1.0)
+    try:
+        assert not rotation.is_alive()
+        assert not sender.is_alive()
+        assert len(hub.cancels) == 1
+        assert hub.cancels == [message_id]
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == expected_error
+    finally:
+        release_cancel.set()
+        hub.release_confirmed_send.set()
+        transport.close()
+
+
 def test_clean_shutdown_rejects_new_work_and_leaves_no_threads() -> None:
     hub = _Hub()
     transport = _transport(hub)

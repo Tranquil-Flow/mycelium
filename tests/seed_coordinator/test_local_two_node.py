@@ -2,6 +2,7 @@ from __future__ import annotations
 import ast
 from builtins import BaseExceptionGroup
 from dataclasses import asdict
+import errno
 import hashlib
 import inspect
 from itertools import count
@@ -1185,6 +1186,277 @@ def test_temp_root_removal_restores_quarantined_link_drift(
             harness.remove_temp_root(guard)
         assert injected
         assert (root / "metadata-link-drift").is_dir()
+    finally:
+        monkeypatch.undo()
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_restore_never_replaces_concurrent_occupant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    guard = harness.capture_temp_root(root)
+    real_rename = os.rename
+    real_rename_noreplace = getattr(harness, "_rename_noreplace_at", None)
+    occupant_fd: int | None = None
+    quarantine_name: str | None = None
+    drift_injected = False
+
+    def create_occupant(directory_fd: int, name: str) -> None:
+        nonlocal occupant_fd
+        if occupant_fd is not None:
+            return
+        os.mkdir(name, dir_fd=directory_fd)
+        occupant_fd = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            dir_fd=directory_fd,
+        )
+
+    def racing_rename(
+        source: str,
+        destination: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal drift_injected, quarantine_name
+        if source == root.name and not drift_injected:
+            drift_injected = True
+            quarantine_name = destination
+            real_rename(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+            os.mkdir("metadata-link-drift", dir_fd=dst_dir_fd)
+            real_rename(
+                "metadata-link-drift",
+                f"{destination}/metadata-link-drift",
+                src_dir_fd=dst_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+            return
+        if (
+            source == quarantine_name
+            and destination == root.name
+            and dst_dir_fd is not None
+        ):
+            create_occupant(dst_dir_fd, destination)
+        real_rename(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    def racing_rename_noreplace(
+        source_fd: int,
+        source: str,
+        destination_fd: int,
+        destination: str,
+    ) -> None:
+        create_occupant(destination_fd, destination)
+        real_rename_noreplace(
+            source_fd,
+            source,
+            destination_fd,
+            destination,
+        )
+
+    try:
+        monkeypatch.setattr(harness.os, "rename", racing_rename)
+        if real_rename_noreplace is not None:
+            monkeypatch.setattr(
+                harness,
+                "_rename_noreplace_at",
+                racing_rename_noreplace,
+            )
+        with pytest.raises(BaseExceptionGroup, match="restoration") as raised:
+            harness.remove_temp_root(guard)
+        assert len(raised.value.exceptions) == 2
+        cleanup_error, restoration_error = raised.value.exceptions
+        assert isinstance(cleanup_error, AssertionError)
+        assert "quarantined" in str(cleanup_error)
+        assert isinstance(restoration_error, AssertionError)
+        assert "occupied" in str(restoration_error)
+        assert isinstance(restoration_error.__cause__, FileExistsError)
+        assert restoration_error.__cause__.errno == errno.EEXIST
+        assert drift_injected
+        assert occupant_fd is not None
+        occupant = os.fstat(occupant_fd)
+        current = os.stat(root, follow_symlinks=False)
+        assert occupant.st_nlink > 0
+        assert (current.st_dev, current.st_ino) == (
+            occupant.st_dev,
+            occupant.st_ino,
+        )
+        quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
+        assert len(quarantines) == 1
+        assert (quarantines[0] / "metadata-link-drift").is_dir()
+    finally:
+        monkeypatch.undo()
+        if occupant_fd is not None:
+            os.close(occupant_fd)
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_restore_fails_closed_without_native_primitive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    child = root / "blocked-child"
+    child.write_text("preserve")
+    guard = harness.capture_temp_root(root)
+    real_open = os.open
+
+    def failing_open(
+        path: str | bytes | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == child.name and dir_fd is not None:
+            raise OSError(errno.EACCES, "injected child-open failure")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    try:
+        monkeypatch.setattr(harness.os, "open", failing_open)
+        monkeypatch.setattr(harness.sys, "platform", "unsupported-test-platform")
+        with pytest.raises(BaseExceptionGroup) as raised:
+            harness.remove_temp_root(guard)
+        assert len(raised.value.exceptions) == 2
+        cleanup_error, restoration_error = raised.value.exceptions
+        assert isinstance(cleanup_error, OSError)
+        assert cleanup_error.errno == errno.EACCES
+        assert isinstance(restoration_error, AssertionError)
+        assert "atomically restore" in str(restoration_error)
+        assert isinstance(restoration_error.__cause__, OSError)
+        assert restoration_error.__cause__.errno == errno.ENOTSUP
+        assert not root.exists()
+        quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
+        assert len(quarantines) == 1
+        assert (quarantines[0] / child.name).read_text() == "preserve"
+    finally:
+        monkeypatch.undo()
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_cleanup_failure_restores_quarantined_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    child = root / "blocked-child"
+    child.write_text("preserve")
+    guard = harness.capture_temp_root(root)
+    real_open = os.open
+
+    def failing_open(
+        path: str | bytes | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == child.name and dir_fd is not None:
+            raise OSError(errno.EACCES, "injected child-open failure")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    try:
+        monkeypatch.setattr(harness.os, "open", failing_open)
+        with pytest.raises(OSError, match="injected child-open failure") as raised:
+            harness.remove_temp_root(guard)
+        assert raised.value.errno == errno.EACCES
+        assert child.read_text() == "preserve"
+        assert list(root.parent.glob(root.name + ".quarantine-*")) == []
+    finally:
+        monkeypatch.undo()
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
+def test_temp_root_cleanup_aggregates_restore_failure_and_preserves_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    child = root / "blocked-child"
+    child.write_text("preserve")
+    guard = harness.capture_temp_root(root)
+    real_open = os.open
+    real_rename_noreplace = getattr(harness, "_rename_noreplace_at", None)
+
+    def failing_open(
+        path: str | bytes | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == child.name and dir_fd is not None:
+            raise OSError(errno.EACCES, "injected child-open failure")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def occupy_restore_boundary(
+        source_fd: int,
+        source: str,
+        destination_fd: int,
+        destination: str,
+    ) -> None:
+        os.mkdir(destination, dir_fd=destination_fd)
+        occupant_fd = os.open(
+            destination,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            dir_fd=destination_fd,
+        )
+        marker_fd: int | None = None
+        try:
+            marker_fd = os.open(
+                "occupant",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=occupant_fd,
+            )
+            os.write(marker_fd, b"occupied")
+        finally:
+            if marker_fd is not None:
+                os.close(marker_fd)
+            os.close(occupant_fd)
+        real_rename_noreplace(
+            source_fd,
+            source,
+            destination_fd,
+            destination,
+        )
+
+    try:
+        monkeypatch.setattr(harness.os, "open", failing_open)
+        if real_rename_noreplace is not None:
+            monkeypatch.setattr(
+                harness,
+                "_rename_noreplace_at",
+                occupy_restore_boundary,
+            )
+        with pytest.raises(BaseExceptionGroup) as raised:
+            harness.remove_temp_root(guard)
+        assert len(raised.value.exceptions) == 2
+        cleanup_error, restoration_error = raised.value.exceptions
+        assert isinstance(cleanup_error, OSError)
+        assert cleanup_error.errno == errno.EACCES
+        assert isinstance(restoration_error, AssertionError)
+        assert "occupied" in str(restoration_error)
+        assert (root / "occupant").is_file()
+        quarantines = list(root.parent.glob(root.name + ".quarantine-*"))
+        assert len(quarantines) == 1
+        assert (quarantines[0] / child.name).read_text() == "preserve"
     finally:
         monkeypatch.undo()
         for candidate in root.parent.glob(root.name + "*"):
