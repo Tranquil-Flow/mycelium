@@ -995,6 +995,203 @@ def test_temp_root_removal_requires_original_safe_identity(tmp_path: Path) -> No
                 real_rmtree(candidate)
 
 
+def _changed_stat(
+    metadata: os.stat_result,
+    **changes: int,
+) -> os.stat_result:
+    indexes = {
+        "st_mode": 0,
+        "st_ino": 1,
+        "st_dev": 2,
+        "st_nlink": 3,
+        "st_uid": 4,
+        "st_gid": 5,
+    }
+    values = list(metadata)
+    for field, value in changes.items():
+        values[indexes[field]] = value
+    return os.stat_result(values)
+
+
+@pytest.mark.parametrize("unsafe_root", ["parent", "prefix", "mode"])
+def test_temp_root_capture_rejects_unsafe_root_contract(
+    unsafe_root: str,
+    tmp_path: Path,
+) -> None:
+    if unsafe_root == "parent":
+        root = tmp_path / f"{harness.TEMP_ROOT_PREFIX}unsafe-parent"
+        root.mkdir(mode=0o700)
+    else:
+        prefix = (
+            "not-a-native-root-"
+            if unsafe_root == "prefix"
+            else harness.TEMP_ROOT_PREFIX
+        )
+        root = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        if unsafe_root == "mode":
+            root.chmod(0o777)
+        with pytest.raises(AssertionError, match="parent|root|mode"):
+            harness.capture_temp_root(root)
+        assert root.is_dir()
+    finally:
+        root.chmod(0o700)
+        shutil.rmtree(root)
+
+
+@pytest.mark.parametrize("field", ["st_uid", "st_nlink", "st_dev"])
+def test_temp_root_capture_rejects_forged_safety_metadata(
+    field: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    real_lstat = os.lstat
+    captured = real_lstat(root)
+    unsafe_values = {
+        "st_uid": os.getuid() + 1,
+        "st_nlink": 1,
+        "st_dev": captured.st_dev + 1,
+    }
+
+    def forged_lstat(path: str | bytes | os.PathLike[str]) -> os.stat_result:
+        metadata = real_lstat(path)
+        if Path(path).name == root.name:
+            return _changed_stat(metadata, **{field: unsafe_values[field]})
+        return metadata
+
+    try:
+        monkeypatch.setattr(harness.os, "lstat", forged_lstat)
+        with pytest.raises(AssertionError, match="owner|link|mount"):
+            harness.capture_temp_root(root)
+        assert root.is_dir()
+    finally:
+        monkeypatch.undo()
+        shutil.rmtree(root)
+
+
+@pytest.mark.parametrize("field", ["st_uid", "st_nlink"])
+def test_temp_root_removal_rejects_forged_captured_metadata(
+    field: str,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    guard = harness.capture_temp_root(root)
+    original = guard[2]
+    unsafe_values = {
+        "st_uid": os.getuid() + 1,
+        "st_nlink": 1,
+    }
+    forged = (
+        guard[0],
+        guard[1],
+        _changed_stat(original, **{field: unsafe_values[field]}),
+    )
+    try:
+        with pytest.raises(AssertionError, match="captured.*(owner|link)"):
+            harness.remove_temp_root(forged)
+        assert root.is_dir()
+    finally:
+        if root.exists():
+            shutil.rmtree(root)
+
+
+def test_temp_root_removal_rejects_current_mode_drift() -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    guard = harness.capture_temp_root(root)
+    try:
+        root.chmod(0o777)
+        with pytest.raises(AssertionError, match="mode|metadata"):
+            harness.remove_temp_root(guard)
+        assert root.is_dir()
+    finally:
+        root.chmod(0o700)
+        shutil.rmtree(root)
+
+
+@pytest.mark.parametrize("field", ["st_uid", "st_nlink"])
+def test_temp_root_removal_rejects_current_safety_metadata_drift(
+    field: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    guard = harness.capture_temp_root(root)
+    real_stat = os.stat
+    unsafe_values = {
+        "st_uid": os.getuid() + 1,
+        "st_nlink": 1,
+    }
+
+    def drifting_stat(
+        path: str | bytes | os.PathLike[str],
+        *,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+    ) -> os.stat_result:
+        metadata = real_stat(
+            path,
+            dir_fd=dir_fd,
+            follow_symlinks=follow_symlinks,
+        )
+        if (
+            path == root.name
+            and dir_fd is not None
+            and not follow_symlinks
+        ):
+            return _changed_stat(metadata, **{field: unsafe_values[field]})
+        return metadata
+
+    try:
+        monkeypatch.setattr(harness.os, "stat", drifting_stat)
+        with pytest.raises(AssertionError, match="current.*(owner|link)|opening"):
+            harness.remove_temp_root(guard)
+        assert root.is_dir()
+    finally:
+        monkeypatch.undo()
+        if root.exists():
+            shutil.rmtree(root)
+
+
+def test_temp_root_removal_restores_quarantined_link_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(tempfile.mkdtemp(prefix=harness.TEMP_ROOT_PREFIX))
+    guard = harness.capture_temp_root(root)
+    real_rename = os.rename
+    injected = False
+
+    def drifting_rename(
+        source: str,
+        destination: str,
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        nonlocal injected
+        real_rename(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+        if source == root.name and not injected:
+            injected = True
+            os.mkdir(
+                f"{destination}/metadata-link-drift",
+                dir_fd=dst_dir_fd,
+            )
+
+    try:
+        monkeypatch.setattr(harness.os, "rename", drifting_rename)
+        with pytest.raises(AssertionError, match="changed quarantined|metadata"):
+            harness.remove_temp_root(guard)
+        assert injected
+        assert (root / "metadata-link-drift").is_dir()
+    finally:
+        monkeypatch.undo()
+        for candidate in root.parent.glob(root.name + "*"):
+            if candidate.is_dir():
+                shutil.rmtree(candidate)
+
+
 @pytest.mark.parametrize(
     ("kind", "nested"),
     [

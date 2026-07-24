@@ -414,9 +414,66 @@ def groups_still_present(
 
 
 def capture_temp_root(socket_root: Path) -> TempRootIdentity:
+    expected_parent = Path(tempfile.gettempdir()).resolve(strict=True)
     parent = socket_root.parent.resolve(strict=True)
     root = parent / socket_root.name
-    return root, parent, os.lstat(root)
+    _require(
+        parent == expected_parent,
+        f"capture refused temporary parent {parent}",
+    )
+    _require(
+        root.parent == parent and root.name.startswith(TEMP_ROOT_PREFIX),
+        f"capture refused temporary root {root}",
+    )
+    original = os.lstat(root)
+    parent_metadata = os.stat(parent, follow_symlinks=False)
+    _validate_temp_root_metadata(
+        original,
+        parent_metadata,
+        phase="captured",
+    )
+    _require(not os.path.ismount(root), "captured root must not be a mount")
+    return root, parent, original
+
+
+def _temp_root_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_uid,
+    )
+
+
+def _stable_entry_identity(
+    metadata: os.stat_result,
+) -> tuple[int, int, int, int, int]:
+    return (*_temp_root_identity(metadata), metadata.st_nlink)
+
+
+def _validate_temp_root_metadata(
+    metadata: os.stat_result,
+    parent_metadata: os.stat_result,
+    *,
+    phase: str,
+) -> None:
+    _require(stat.S_ISDIR(metadata.st_mode), f"{phase} root is not a directory")
+    _require(
+        metadata.st_uid == os.getuid(),
+        f"{phase} root owner is not the current user",
+    )
+    _require(
+        stat.S_IMODE(metadata.st_mode) == 0o700,
+        f"{phase} root mode is not 0700",
+    )
+    _require(
+        metadata.st_nlink >= 2,
+        f"{phase} root has unsafe link semantics",
+    )
+    _require(
+        metadata.st_dev == parent_metadata.st_dev,
+        f"{phase} root has unsafe mount semantics",
+    )
 
 
 def remove_temp_root(identity: TempRootIdentity) -> None:
@@ -440,9 +497,6 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
     parent_fd = os.open(parent, directory_flags)
     root_fd: int | None = None
     nonce = iter(range(1_000_000))
-
-    def inode(metadata: os.stat_result) -> tuple[int, int, int]:
-        return metadata.st_dev, metadata.st_ino, metadata.st_mode
 
     def quarantine_name() -> str:
         return (
@@ -487,8 +541,10 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
                 dst_dir_fd=directory_fd,
             )
             _require(
-                inode(lstat_at(directory_fd, original_name))
-                == inode(quarantined),
+                _stable_entry_identity(
+                    lstat_at(directory_fd, original_name)
+                )
+                == _stable_entry_identity(quarantined),
                 "cleanup could not safely restore raced replacement",
             )
             return
@@ -513,19 +569,42 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
             dst_dir_fd=directory_fd,
         )
         quarantined = lstat_at(directory_fd, quarantine)
-        if inode(quarantined) != inode(opened):
+        if _stable_entry_identity(quarantined) != _stable_entry_identity(
+            opened
+        ):
             restore_quarantine(directory_fd, quarantine, name, quarantined)
             raise AssertionError(
-                f"cleanup refused replaced entry {name}; replacement restored"
+                f"cleanup refused replaced or changed quarantined entry {name}; "
+                "replacement restored"
             )
         if stat.S_ISDIR(opened.st_mode):
             empty_open_directory(opened_fd)
-        _require(
-            inode(lstat_at(directory_fd, quarantine))
-            == inode(os.fstat(opened_fd))
-            == inode(opened),
-            f"cleanup refused changed quarantined entry {name}",
-        )
+        final_quarantined = lstat_at(directory_fd, quarantine)
+        final_opened = os.fstat(opened_fd)
+        if stat.S_ISDIR(opened.st_mode):
+            unchanged = (
+                _temp_root_identity(final_quarantined)
+                == _temp_root_identity(final_opened)
+                == _temp_root_identity(opened)
+                and final_quarantined.st_nlink == final_opened.st_nlink == 2
+            )
+        else:
+            unchanged = (
+                _stable_entry_identity(final_quarantined)
+                == _stable_entry_identity(final_opened)
+                == _stable_entry_identity(opened)
+            )
+        if not unchanged:
+            restore_quarantine(
+                directory_fd,
+                quarantine,
+                name,
+                final_quarantined,
+            )
+            raise AssertionError(
+                f"cleanup refused changed quarantined metadata for {name}; "
+                "entry restored"
+            )
         if stat.S_ISDIR(opened.st_mode):
             os.rmdir(quarantine, dir_fd=directory_fd)
         else:
@@ -548,13 +627,16 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
             dst_dir_fd=directory_fd,
         )
         quarantined = lstat_at(directory_fd, quarantine)
-        if inode(quarantined) != inode(inspected):
+        if _stable_entry_identity(quarantined) != _stable_entry_identity(
+            inspected
+        ):
             restore_quarantine(directory_fd, quarantine, name, quarantined)
             raise AssertionError(
                 f"cleanup refused replaced socket {name}; replacement restored"
             )
         _require(
-            inode(lstat_at(directory_fd, quarantine)) == inode(inspected),
+            _stable_entry_identity(lstat_at(directory_fd, quarantine))
+            == _stable_entry_identity(inspected),
             f"cleanup refused changed quarantined socket {name}",
         )
         os.unlink(quarantine, dir_fd=directory_fd)
@@ -576,7 +658,8 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
             try:
                 opened = os.fstat(child_fd)
                 _require(
-                    inode(opened) == inode(inspected),
+                    _stable_entry_identity(opened)
+                    == _stable_entry_identity(inspected),
                     f"cleanup refused entry changed while opening {name}",
                 )
                 remove_open_entry(directory_fd, name, child_fd, opened)
@@ -584,17 +667,37 @@ def remove_temp_root(identity: TempRootIdentity) -> None:
                 os.close(child_fd)
 
     try:
+        parent_metadata = os.fstat(parent_fd)
+        _validate_temp_root_metadata(
+            original,
+            parent_metadata,
+            phase="captured",
+        )
         try:
             current = lstat_at(parent_fd, root.name)
         except FileNotFoundError:
             return
-        _require(inode(current) == inode(original), "cleanup refused replaced root")
-        _require(stat.S_ISDIR(current.st_mode), "cleanup root changed type")
+        _validate_temp_root_metadata(
+            current,
+            parent_metadata,
+            phase="current",
+        )
+        _require(
+            _temp_root_identity(current) == _temp_root_identity(original),
+            "cleanup refused current root metadata mismatch",
+        )
+        _require(not os.path.ismount(root), "current root must not be a mount")
         root_fd = os.open(root.name, directory_flags, dir_fd=parent_fd)
         opened_root = os.fstat(root_fd)
+        _validate_temp_root_metadata(
+            opened_root,
+            parent_metadata,
+            phase="opened",
+        )
         _require(
-            inode(opened_root) == inode(original),
-            "cleanup root changed while opening",
+            _stable_entry_identity(opened_root)
+            == _stable_entry_identity(current),
+            "cleanup root metadata changed while opening",
         )
         remove_open_entry(
             parent_fd,

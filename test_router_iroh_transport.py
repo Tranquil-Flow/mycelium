@@ -39,14 +39,20 @@ class _Hub:
         self.cancels: list[bytes] = []
         self.configurations: list[tuple[str, dict, int]] = []
         self.confirmed_send_entered = threading.Event()
+        self.retry_confirmed_send_entered = threading.Event()
         self.release_confirmed_send = threading.Event()
         self.block_confirmed_send = False
+        self.confirmed_send_timeouts: list[float | None] = []
         self.send_failure: BaseException | None = None
         self.send_failures: deque[BaseException] = deque()
         self.connect_delay = 0.0
         self.block_connect = False
         self.connect_entered = threading.Event()
         self.release_connect = threading.Event()
+        self.cancel_entered = threading.Event()
+        self.release_cancel = threading.Event()
+        self.cancel_completed = threading.Event()
+        self.block_cancel = False
 
     def client(self, *_args, **_kwargs) -> "_FakeClient":
         client = _FakeClient(self)
@@ -108,7 +114,10 @@ class _FakeClient:
     ) -> bytes:
         if not self.connected:
             raise ProtocolError("not_connected")
+        self.hub.confirmed_send_timeouts.append(timeout)
         self.hub.confirmed_send_entered.set()
+        if len(self.hub.confirmed_send_timeouts) == 2:
+            self.hub.retry_confirmed_send_entered.set()
         if self.hub.send_failures:
             raise self.hub.send_failures.popleft()
         if self.hub.block_confirmed_send:
@@ -141,7 +150,11 @@ class _FakeClient:
 
     def cancel(self, message_id: bytes, *, timeout: float | None = None) -> None:
         del timeout
+        self.hub.cancel_entered.set()
+        if self.hub.block_cancel:
+            self.hub.release_cancel.wait()
         self.hub.cancels.append(message_id)
+        self.hub.cancel_completed.set()
 
 
 class _PausedAcquireSemaphore:
@@ -888,24 +901,70 @@ def test_confirmed_send_deadline_includes_wait_for_client_lock() -> None:
 
 def test_reconnect_retry_uses_original_end_to_end_deadline() -> None:
     hub = _Hub()
-    transport = _transport(hub, delivery_timeout_seconds=0.1)
+    delivery_timeout = 0.3
+    transport = _transport(hub, delivery_timeout_seconds=delivery_timeout)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    hub.send_failures.append(ProtocolError("sidecar_disconnected"))
+    hub.connect_delay = 0.05
+    hub.block_confirmed_send = True
+    hub.block_cancel = True
+    errors: list[BaseException] = []
+    elapsed: list[float] = []
+    started = time.monotonic()
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(), destination_node_id="peer-node"
+            )
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            elapsed.append(time.monotonic() - started)
+
+    thread = threading.Thread(target=send)
+    thread.start()
+    try:
+        assert hub.retry_confirmed_send_entered.wait(timeout=1)
+        assert len(hub.confirmed_send_timeouts) == 2
+        retry_timeout = hub.confirmed_send_timeouts[1]
+        assert retry_timeout is not None
+        assert 0 < retry_timeout < delivery_timeout - 0.02
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == "delivery_deadline_exceeded"
+        assert len(elapsed) == 1 and elapsed[0] < delivery_timeout + 0.08
+        assert hub.cancel_entered.wait(timeout=1)
+        assert hub.cancels == []
+        hub.release_cancel.set()
+        assert hub.cancel_completed.wait(timeout=1)
+        assert len(hub.cancels) == 1
+    finally:
+        hub.release_confirmed_send.set()
+        hub.release_cancel.set()
+        thread.join(timeout=1)
+        transport.close()
+
+
+def test_reconnect_can_exhaust_deadline_before_retry_confirmed_send() -> None:
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=0.05)
     transport.bind_router(_RecordingRouter())
     transport.start()
     hub.send_failures.append(ProtocolError("sidecar_disconnected"))
     hub.connect_delay = 0.08
-    hub.block_confirmed_send = True
-    started = time.monotonic()
     try:
         with pytest.raises(IrohTransportError) as raised:
             transport.send_router_frame(
                 _event_frame(), destination_node_id="peer-node"
             )
-        elapsed = time.monotonic() - started
         assert raised.value.code == "delivery_deadline_exceeded"
-        assert elapsed < 0.16
-        assert len(hub.cancels) == 1
+        assert len(hub.confirmed_send_timeouts) == 1
+        assert not hub.retry_confirmed_send_entered.is_set()
     finally:
-        hub.release_confirmed_send.set()
         transport.close()
 
 
