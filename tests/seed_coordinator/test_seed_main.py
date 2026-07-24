@@ -965,3 +965,69 @@ def test_concurrent_seed_server_close_calls_socket_close_once(
     assert failures == []
     assert all(not closer.is_alive() for closer in closers)
     assert server._server.close_calls == 1
+
+
+def test_seed_server_base_url_maps_wildcards_to_loopback_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+    bound: list[tuple[str, int]] = []
+
+    class FakeHTTPServer:
+        def __init__(self, address: tuple[str, int], *_args: Any) -> None:
+            bound.append(address)
+            self.server_address = address
+            self.daemon_threads = False
+            self.block_on_close = True
+            self.timeout = None
+
+        def server_close(self) -> None:
+            return None
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.seed_url: str | None = None
+
+        def bind_seed_url(self, url: str) -> None:
+            self.seed_url = url
+
+    monkeypatch.setattr(seed_http, "ThreadingHTTPServer", FakeHTTPServer)
+    cases = (
+        (
+            "0.0.0.0",
+            "http://seed-v4.test:8765",
+            "http://127.0.0.1:8765",
+            "http://seed-v4.test:8765",
+        ),
+        (
+            "::",
+            "http://[::1]:8765",
+            "http://[::1]:8765",
+            "http://[::1]:8765",
+        ),
+        (
+            "127.0.0.1",
+            None,
+            "http://127.0.0.1:8765",
+            "http://127.0.0.1:8765",
+        ),
+        (
+            "::1",
+            None,
+            "http://[::1]:8765",
+            "http://[::1]:8765",
+        ),
+    )
+    for host, advertised_url, expected_base_url, expected_bound_url in cases:
+        coordinator = FakeCoordinator()
+        server = seed_http.SeedHTTPServer(
+            coordinator,
+            host=host,
+            port=8765,
+            advertised_url=advertised_url,
+        )
+        assert bound.pop() == (host, 8765)
+        assert server._server.server_address == (host, 8765)
+        assert server.base_url == expected_base_url
+        assert coordinator.seed_url == expected_bound_url
+        server.close()

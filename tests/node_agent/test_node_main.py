@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import errno
 import importlib
 import io
+from email.message import Message
 from itertools import count
 import json
 import os
@@ -775,12 +777,10 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             "membership_runtime_capability_mismatch",
             "membership_sender_endpoint_mismatch",
             "membership_signer_endpoint_mismatch",
-            "membership_swarm_mismatch",
             "membership_text_invalid",
             "membership_time_invalid",
             "membership_ttl_invalid",
             "membership_verifier_invalid",
-            "seed_join_invite_replayed",
             "seed_join_key_invalid",
             "seed_join_mismatch",
             "seed_join_retry_mismatch",
@@ -789,7 +789,7 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
         },
         401: {
             "invite_signature_invalid",
-            "membership_key_pin_mismatch",
+            "membership_key_pin_invalid",
             "membership_signature_invalid",
         },
         409: {
@@ -797,11 +797,7 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             "seed_node_key_conflict",
         },
     }
-    explicitly_allowed = (
-        node_main._JOIN_REJECTION_BAD_REQUEST_CODES
-        | node_main._JOIN_REJECTION_UNAUTHORIZED_CODES
-        | node_main._JOIN_REJECTION_CONFLICT_CODES
-    )
+    explicitly_allowed = frozenset(seed_http.JOIN_ROUTE_ERROR_STATUSES)
     assert explicitly_allowed == frozenset().union(*canonical_codes.values())
 
     received_statuses = (None, 400, 401, 404, 409, 500)
@@ -1417,11 +1413,13 @@ def test_seed_http_client_only_exposes_exact_authoritative_error_envelope() -> N
     def rejected(raw: bytes) -> SeedHTTPError:
         class ErrorOpener:
             def open(self, *_args: Any, **_kwargs: Any) -> Any:
+                headers = Message()
+                headers.add_header("Content-Type", "application/json")
                 raise HTTPError(
                     "http://seed.test:8765/seed/join",
                     400,
                     "rejected",
-                    {},
+                    headers,
                     io.BytesIO(raw),
                 )
 
@@ -1522,7 +1520,7 @@ def test_heartbeat_shape_validator_rejects_noncanonical_scheduled_shapes() -> No
         {"active_requests": 0.0},
         {"route_ready": True},
         {"route_ready": 0},
-        {"liveness_source": "activation_receipt"},
+        {"liveness_source": "unknown_source"},
         {"activity_receipt_digest": "sha256:" + "0" * 64},
         {"activity_peer_node_id": "peer-node"},
     ]
@@ -1626,3 +1624,544 @@ def test_heartbeat_validator_delegates_before_mutation_and_during_dry_run(
     assert not data_dir.exists()
     capsys.readouterr()
     assert original_validator is stop_after_shape
+
+
+def test_seed_http_client_requires_one_exact_json_response_content_type() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+    signer = generate_ed25519_signer(endpoint_id="seed-content-type")
+    client = SeedHTTPClient(
+        seed_url="http://seed.test:8765",
+        swarm_id="swarm-content-type",
+        seed_key_digest=signer.verification_key_digest,
+        seed_key_records=[signer.public_key_record()],
+    )
+    body = canonical_json_bytes(
+        {
+            "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+            "error": {"code": "seed_join_mismatch"},
+        }
+    )
+
+    def headers(values: tuple[str, ...]) -> Message:
+        result = Message()
+        for value in values:
+            result.add_header("Content-Type", value)
+        return result
+
+    def rejected(content_types: tuple[str, ...]) -> SeedHTTPError:
+        class ErrorOpener:
+            def open(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise HTTPError(
+                    "http://seed.test:8765/seed/join",
+                    400,
+                    "rejected",
+                    headers(content_types),
+                    io.BytesIO(body),
+                )
+
+        client._opener = ErrorOpener()
+        with pytest.raises(SeedHTTPError) as caught:
+            client._request("POST", "/seed/join", {})
+        return caught.value
+
+    exact = rejected(("application/json",))
+    assert (exact.status, exact.code) == (400, "seed_join_mismatch")
+
+    invalid_types = (
+        (),
+        ("text/plain",),
+        ("application/json; charset=utf-8",),
+        ("application/json", "application/json"),
+    )
+    for content_types in invalid_types:
+        hidden = rejected(content_types)
+        assert (hidden.status, hidden.code) == (400, "seed_http_remote_error")
+        assert "seed_join_mismatch" not in str(hidden)
+
+        class SuccessResponse:
+            status = 200
+
+            def __init__(self) -> None:
+                self.headers = headers(content_types)
+
+            def read(self, _size: int) -> bytes:
+                return body
+
+            def __enter__(self) -> "SuccessResponse":
+                return self
+
+            def __exit__(self, *_args: Any) -> None:
+                return None
+
+        class SuccessOpener:
+            def open(self, *_args: Any, **_kwargs: Any) -> SuccessResponse:
+                return SuccessResponse()
+
+        client._opener = SuccessOpener()
+        with pytest.raises(SeedHTTPError) as caught:
+            client._request("GET", "/seed/identity")
+        assert (caught.value.status, caught.value.code) == (
+            200,
+            "seed_http_remote_error",
+        )
+        assert "seed_join_mismatch" not in str(caught.value)
+
+
+def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
+    tmp_path: Path,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    membership = importlib.import_module("mycelium_node.membership")
+    seed_http = importlib.import_module("mycelium_seed.http")
+    coordinator_module = importlib.import_module("mycelium_seed.coordinator")
+    canonical_codes = {
+        400: {
+            "invite_expired",
+            "invite_field_invalid",
+            "invite_malformed",
+            "invite_protocol_invalid",
+            "join_request_protocol_required",
+            "membership_endpoint_addr_invalid",
+            "membership_endpoint_id_mismatch",
+            "membership_envelope_invalid",
+            "membership_field_unusable",
+            "membership_fields_invalid",
+            "membership_generation_invalid",
+            "membership_identifier_invalid",
+            "membership_integer_invalid",
+            "membership_join_generation_invalid",
+            "membership_message_expired",
+            "membership_message_from_future",
+            "membership_message_invalid",
+            "membership_peer_class_invalid",
+            "membership_protocol_invalid",
+            "membership_runtime_capability_invalid",
+            "membership_runtime_capability_mismatch",
+            "membership_sender_endpoint_mismatch",
+            "membership_signer_endpoint_mismatch",
+            "membership_text_invalid",
+            "membership_time_invalid",
+            "membership_ttl_invalid",
+            "membership_verifier_invalid",
+            "seed_join_key_invalid",
+            "seed_join_mismatch",
+            "seed_join_retry_mismatch",
+            "seed_member_identity_reused",
+            "seed_node_endpoint_conflict",
+        },
+        401: {
+            "invite_signature_invalid",
+            "membership_key_pin_invalid",
+            "membership_signature_invalid",
+        },
+        409: {
+            "invite_replayed",
+            "seed_node_key_conflict",
+        },
+    }
+    expected = {
+        code: status
+        for status, codes in canonical_codes.items()
+        for code in codes
+    }
+    authoritative = seed_http.JOIN_ROUTE_ERROR_STATUSES
+    assert dict(authoritative) == expected
+    with pytest.raises(TypeError):
+        authoritative["not_authoritative"] = 400
+
+    emitted: list[tuple[int, dict[str, Any]]] = []
+    seed_url = "http://127.0.0.1:8765"
+    seed_signer = generate_ed25519_signer(endpoint_id="seed-route-emission")
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-route-emission",
+        seed_node_id="seed-node",
+        seed_url=seed_url,
+        signer=seed_signer,
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "route-emission" / "state.sqlite3"
+        ),
+        incarnation="seed-route-emission",
+        id_source=_ids(),
+    )
+    bundle = coordinator.mint_invite(nonce="route-emission", ttl_seconds=120)
+    verified_bundle = node_main.verify_invite_bundle(bundle, now=time.time())
+    node = membership.NodeMembershipSession(
+        node_id="node-route-emission",
+        swarm_id="swarm-route-emission",
+        seed_node_id="seed-node",
+        signer=generate_ed25519_signer(endpoint_id="node-route-emission-endpoint"),
+        incarnation="node-route-emission",
+        software_version="test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
+        id_source=_ids(),
+    )
+    join_request = node.join_request(
+        invite_nonce=verified_bundle["payload"]["nonce"],
+        endpoint_addrs=["https://node-route-emission.test/control"],
+    )
+    join_request["verification_key"]["verification_key_digest"] = ""
+    real_handler = object.__new__(seed_http._SeedRequestHandler)
+    real_handler.path = "/seed/join"
+    real_handler.server = type(
+        "RealRouteServer",
+        (),
+        {"coordinator": coordinator},
+    )()
+    real_handler._read_body = lambda: {
+        "protocol": seed_http.SEED_JOIN_HTTP_PROTOCOL,
+        "invite_token": bundle["token"],
+        "join_envelope": join_request,
+    }
+    real_handler._send = lambda status, value: emitted.append(
+        (int(status), dict(value))
+    )
+    real_handler.do_POST()
+    assert emitted.pop() == (
+        401,
+        {
+            "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+            "error": {"code": "membership_key_pin_invalid"},
+        },
+    )
+
+    class RouteCoordinator:
+        def __init__(self, code: str) -> None:
+            self.code = code
+
+        def accept_join(self, **_kwargs: Any) -> None:
+            raise coordinator_module.SeedCoordinatorError(self.code)
+
+    for code, canonical_status in expected.items():
+        handler = object.__new__(seed_http._SeedRequestHandler)
+        handler.path = "/seed/join"
+        handler.server = type(
+            "RouteServer",
+            (),
+            {"coordinator": RouteCoordinator(code)},
+        )()
+        handler._read_body = lambda: {
+            "protocol": seed_http.SEED_JOIN_HTTP_PROTOCOL,
+            "invite_token": "opaque",
+            "join_envelope": {},
+        }
+        handler._send = lambda status, value: emitted.append(
+            (int(status), dict(value))
+        )
+        handler.do_POST()
+        assert emitted.pop() == (
+            canonical_status,
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {"code": code},
+            },
+        )
+        assert int(seed_http._error_status(code)) == canonical_status
+        for received_status in (None, 400, 401, 404, 409, 500):
+            assert node_main._join_rejected(
+                SeedHTTPError(code, status=received_status)
+            ) is (received_status == canonical_status)
+
+    assert int(authoritative["membership_key_pin_invalid"]) == 401
+    for excluded in (
+        "membership_swarm_mismatch",
+        "membership_key_pin_mismatch",
+        "seed_join_invite_replayed",
+    ):
+        assert excluded not in authoritative
+    for unknown in (
+        "",
+        "invite_registry_unavailable",
+        "seed_http_remote_error",
+        "seed_http_route_unknown",
+        "seed_http_unreachable",
+        "unknown_join_error",
+    ):
+        for received_status in (None, 400, 401, 404, 409, 500):
+            assert (
+                node_main._join_rejected(
+                    SeedHTTPError(unknown, status=received_status)
+                )
+                is False
+            )
+
+
+def test_working_directory_restore_retries_and_preserves_primary_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    inventory_root = Path("/proc/self/fd")
+    if not inventory_root.is_dir():
+        inventory_root = Path("/dev/fd")
+
+    def inventory() -> set[int]:
+        return {
+            int(name)
+            for name in os.listdir(inventory_root)
+            if name.isdigit()
+        }
+
+    original_path = Path.cwd()
+    original_identity = os.stat(".")
+    safety_fd = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    real_fchdir = os.fchdir
+    before = inventory()
+    first_root = tmp_path / "first-root"
+    second_root = tmp_path / "second-root"
+    first_root.mkdir(mode=0o700)
+    second_root.mkdir(mode=0o700)
+    first_lease = process_module.private_directory_lease(first_root)
+    second_lease = process_module.private_directory_lease(second_root)
+    try:
+        calls: list[int] = []
+
+        def fail_first_restore(descriptor: int) -> None:
+            calls.append(descriptor)
+            if len(calls) == 2:
+                raise OSError(errno.EIO, "restore-value-must-not-leak")
+            real_fchdir(descriptor)
+
+        monkeypatch.setattr(os, "fchdir", fail_first_restore)
+        retry_failure: BaseException | None = None
+        try:
+            with first_lease.working_directory():
+                assert os.fstat(first_lease._descriptor)[:2] == os.stat(".")[:2]
+        except BaseException as exc:
+            retry_failure = exc
+        finally:
+            real_fchdir(safety_fd)
+        assert retry_failure is None
+        assert len(calls) == 3
+        assert Path.cwd() == original_path
+        assert os.stat(".")[:2] == original_identity[:2]
+
+        body_failure = RuntimeError("authoritative-body-failure")
+        restore_calls = 0
+
+        def fail_every_restore(descriptor: int) -> None:
+            nonlocal restore_calls
+            restore_calls += 1
+            if restore_calls == 1:
+                real_fchdir(descriptor)
+                return
+            raise OSError(errno.EIO, "restore-secret-value")
+
+        monkeypatch.setattr(os, "fchdir", fail_every_restore)
+        caught_body: BaseException | None = None
+        try:
+            with first_lease.working_directory():
+                raise body_failure
+        except BaseException as exc:
+            caught_body = exc
+        finally:
+            real_fchdir(safety_fd)
+        assert caught_body is body_failure
+        assert getattr(caught_body, "__notes__", ()) == [
+            "working directory restoration failed"
+        ]
+        assert "restore-secret-value" not in str(caught_body)
+
+        restore_calls = 0
+        restoration_failure: BaseException | None = None
+        try:
+            with first_lease.working_directory():
+                pass
+        except BaseException as exc:
+            restoration_failure = exc
+        finally:
+            real_fchdir(safety_fd)
+        assert type(restoration_failure) is ValueError
+        assert str(restoration_failure) == "working directory restoration failed"
+        assert "restore-secret-value" not in str(restoration_failure)
+
+        monkeypatch.setattr(os, "fchdir", real_fchdir)
+        with first_lease.working_directory():
+            assert os.stat(".")[:2] == os.fstat(first_lease._descriptor)[:2]
+            with second_lease.working_directory():
+                assert os.stat(".")[:2] == os.fstat(second_lease._descriptor)[:2]
+            assert os.stat(".")[:2] == os.fstat(first_lease._descriptor)[:2]
+        assert Path.cwd() == original_path
+
+        begin = threading.Barrier(3)
+        observed: list[tuple[int, int]] = []
+
+        def visit(lease: Any) -> None:
+            begin.wait()
+            with lease.working_directory():
+                observed.append(os.stat(".")[:2])
+
+        visitors = [
+            threading.Thread(target=visit, args=(lease,), daemon=False)
+            for lease in (first_lease, second_lease)
+        ]
+        for visitor in visitors:
+            visitor.start()
+        begin.wait()
+        for visitor in visitors:
+            visitor.join(timeout=2.0)
+        assert all(not visitor.is_alive() for visitor in visitors)
+        assert sorted(observed) == sorted(
+            [
+                os.fstat(first_lease._descriptor)[:2],
+                os.fstat(second_lease._descriptor)[:2],
+            ]
+        )
+        assert Path.cwd() == original_path
+    finally:
+        real_fchdir(safety_fd)
+        monkeypatch.setattr(os, "fchdir", real_fchdir)
+        first_lease.close()
+        second_lease.close()
+        os.close(safety_fd)
+    assert len(inventory()) == len(before) - 1
+
+
+def test_activation_liveness_shape_is_validated_before_every_side_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    membership = importlib.import_module("mycelium_node.membership")
+    valid = {
+        "lifecycle_state": "RUNNING",
+        "active_requests": 2,
+        "route_ready": False,
+        "liveness_source": "activation_receipt",
+        "activity_receipt_digest": "sha256:" + "a" * 64,
+        "activity_peer_node_id": "peer-node",
+    }
+    membership.validate_heartbeat_shape(**valid)
+
+    invalid = [
+        {"lifecycle_state": "FAILED"},
+        {"active_requests": -1},
+        {"active_requests": True},
+        {"active_requests": 2.0},
+        {"route_ready": True},
+        {"liveness_source": "unknown-source"},
+        {"activity_receipt_digest": "secret-invalid-digest"},
+        {"activity_peer_node_id": None},
+        {"activity_peer_node_id": " secret-peer "},
+    ]
+    for change in invalid:
+        with pytest.raises(ValueError) as caught:
+            membership.validate_heartbeat_shape(**{**valid, **change})
+        assert "secret-" not in str(caught.value)
+
+    calls: list[str] = []
+    pending = {"pending": ("scheduled_heartbeat", 200.0)}
+    receipts = {"sha256:" + "b" * 64: 200.0}
+    session = membership.NodeMembershipSession.__new__(
+        membership.NodeMembershipSession
+    )
+    session._pending_liveness = dict(pending)
+    session._activity_receipts = dict(receipts)
+    session._heartbeat_sequence = 7
+    session._now = lambda: calls.append("clock") or 100.0
+    session._post_join_common = (
+        lambda _protocol: calls.append("message-id")
+        or {"message_id": "new-message", "expires_at": 200.0}
+    )
+    session.signer = object()
+
+    def sign_message(**kwargs: Any) -> dict[str, Any]:
+        calls.append("signer")
+        return {"message": kwargs["message"]}
+
+    monkeypatch.setattr(membership, "sign_membership_message", sign_message)
+    with pytest.raises(ValueError) as caught:
+        session._emit_liveness(
+            lifecycle_state="RUNNING",
+            active_requests=2,
+            liveness_source="activation_receipt",
+            activity_receipt_digest="secret-invalid-digest",
+            activity_peer_node_id="peer-node",
+        )
+    assert str(caught.value) == "heartbeat activity shape is invalid"
+    assert calls == []
+    assert session._heartbeat_sequence == 7
+    assert session._pending_liveness == pending
+    assert session._activity_receipts == receipts
+
+
+def test_process_group_terminal_action_has_no_followup_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    executable = process_module._ExecutableIdentity(
+        path="/trusted/python",
+        device=1,
+        inode=2,
+        mode=stat.S_IFREG | 0o755,
+        uid=os.getuid(),
+        size=10,
+        mtime_ns=11,
+        ctime_ns=12,
+    )
+    launch = process_module._ProcessIdentity(
+        pid=4242,
+        parent_pid=3131,
+        process_group=4242,
+        session_id=4242,
+        start_token="launch",
+        executable=executable,
+    )
+
+    class FakePopen:
+        pid = launch.pid
+
+        def __init__(self, calls: list[object]) -> None:
+            self.calls = calls
+
+        def poll(self) -> None:
+            self.calls.append("poll")
+            return None
+
+    for outcome, expected in (
+        ("success", True),
+        ("lookup", False),
+        ("other", False),
+    ):
+        calls: list[object] = []
+        supervised = process_module.PhysicalNodeProcess.__new__(
+            process_module.PhysicalNodeProcess
+        )
+        supervised._process = FakePopen(calls)
+        supervised._launch_identity = launch
+        supervised.shutdown_timeout_seconds = 1.0
+        monkeypatch.setattr(process_module.time, "monotonic", lambda: 10.0)
+        monkeypatch.setattr(
+            process_module,
+            "_protected_process_groups",
+            lambda deadline: calls.append(("protected", deadline)) or {9999},
+        )
+        monkeypatch.setattr(
+            process_module,
+            "_inventory_process",
+            lambda pid: calls.append(("inventory", pid)) or launch,
+        )
+
+        def terminal_action(pgid: int, signum: int) -> None:
+            calls.append(("killpg", pgid, signum))
+            if outcome == "lookup":
+                raise ProcessLookupError("terminal")
+            if outcome == "other":
+                raise OSError("terminal")
+
+        monkeypatch.setattr(os, "killpg", terminal_action)
+        assert (
+            supervised._signal_process_group(
+                signal.SIGKILL,
+                deadline=11.0,
+            )
+            is expected
+        )
+        assert calls == [
+            ("protected", 11.0),
+            "poll",
+            ("inventory", launch.pid),
+            ("killpg", launch.process_group, signal.SIGKILL),
+        ]

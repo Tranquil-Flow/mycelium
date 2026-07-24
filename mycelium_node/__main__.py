@@ -22,6 +22,7 @@ from mycelium_invite import verify_invite_bundle
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed.http import (
+    JOIN_ROUTE_ERROR_STATUSES,
     SeedHTTPClient,
     SeedHTTPError,
     _error_status,
@@ -64,58 +65,6 @@ EXIT_SUCCESS = 0
 EXIT_PREFLIGHT_FAILURE = 2
 EXIT_JOIN_REJECTION = 3
 EXIT_RUNTIME_FAILURE = 4
-_JOIN_REJECTION_BAD_REQUEST_CODES = frozenset(
-    {
-        "invite_expired",
-        "invite_field_invalid",
-        "invite_malformed",
-        "invite_protocol_invalid",
-        "join_request_protocol_required",
-        "membership_endpoint_addr_invalid",
-        "membership_endpoint_id_mismatch",
-        "membership_envelope_invalid",
-        "membership_field_unusable",
-        "membership_fields_invalid",
-        "membership_generation_invalid",
-        "membership_identifier_invalid",
-        "membership_integer_invalid",
-        "membership_join_generation_invalid",
-        "membership_message_expired",
-        "membership_message_from_future",
-        "membership_message_invalid",
-        "membership_peer_class_invalid",
-        "membership_protocol_invalid",
-        "membership_runtime_capability_invalid",
-        "membership_runtime_capability_mismatch",
-        "membership_sender_endpoint_mismatch",
-        "membership_signature_invalid",
-        "membership_signer_endpoint_mismatch",
-        "membership_swarm_mismatch",
-        "membership_text_invalid",
-        "membership_time_invalid",
-        "membership_ttl_invalid",
-        "membership_verifier_invalid",
-        "seed_join_key_invalid",
-        "seed_join_mismatch",
-        "seed_join_retry_mismatch",
-        "seed_member_identity_reused",
-        "seed_node_endpoint_conflict",
-    }
-)
-_JOIN_REJECTION_UNAUTHORIZED_CODES = frozenset(
-    {
-        "invite_signature_invalid",
-        "membership_key_pin_mismatch",
-        "membership_signature_invalid",
-    }
-)
-_JOIN_REJECTION_CONFLICT_CODES = frozenset(
-    {
-        "invite_replayed",
-        "seed_join_invite_replayed",
-        "seed_node_key_conflict",
-    }
-)
 
 
 class _EntrypointFailure(RuntimeError):
@@ -465,12 +414,12 @@ def _preflight(
 
 
 def _join_rejected(exc: SeedHTTPError) -> bool:
-    allowed = (
-        _JOIN_REJECTION_BAD_REQUEST_CODES
-        | _JOIN_REJECTION_UNAUTHORIZED_CODES
-        | _JOIN_REJECTION_CONFLICT_CODES
+    authoritative_status = JOIN_ROUTE_ERROR_STATUSES.get(exc.code)
+    return (
+        authoritative_status is not None
+        and exc.status == authoritative_status
+        and exc.status == _error_status(exc.code)
     )
-    return exc.code in allowed and exc.status == _error_status(exc.code)
 
 
 def _run_bound(

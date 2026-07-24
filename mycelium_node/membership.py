@@ -38,6 +38,7 @@ from mycelium_router.wire import ROUTER_WIRE_PROTOCOL
 
 
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MAX_REPLAY_IDS = 4096
 _LIFECYCLE_STATES = frozenset(
     {"NEW", "CONFIGURED", "RUNNING", "DRAINING", "STOPPING", "STOPPED"}
@@ -77,7 +78,7 @@ def validate_heartbeat_shape(
     activity_receipt_digest: Any,
     activity_peer_node_id: Any,
 ) -> None:
-    """Validate the unsigned, side-effect-free scheduled heartbeat shape."""
+    """Validate an unsigned, side-effect-free liveness message shape."""
 
     if (
         not isinstance(lifecycle_state, str)
@@ -92,9 +93,21 @@ def validate_heartbeat_shape(
         raise ValueError("heartbeat active requests is invalid")
     if route_ready is not False:
         raise ValueError("heartbeat route readiness is invalid")
-    if liveness_source != "scheduled_heartbeat":
+    if liveness_source not in {"scheduled_heartbeat", "activation_receipt"}:
         raise ValueError("heartbeat liveness source is invalid")
-    if activity_receipt_digest is not None or activity_peer_node_id is not None:
+    if liveness_source == "scheduled_heartbeat":
+        valid_activity = (
+            activity_receipt_digest is None
+            and activity_peer_node_id is None
+        )
+    else:
+        valid_activity = (
+            isinstance(activity_receipt_digest, str)
+            and _DIGEST_RE.fullmatch(activity_receipt_digest) is not None
+            and isinstance(activity_peer_node_id, str)
+            and _SEGMENT_RE.fullmatch(activity_peer_node_id) is not None
+        )
+    if not valid_activity:
         raise ValueError("heartbeat activity shape is invalid")
 
 
@@ -589,15 +602,14 @@ class NodeMembershipSession:
         activity_receipt_digest: str | None,
         activity_peer_node_id: str | None,
     ) -> dict[str, Any]:
-        if liveness_source == "scheduled_heartbeat":
-            validate_heartbeat_shape(
-                lifecycle_state=lifecycle_state,
-                active_requests=active_requests,
-                route_ready=False,
-                liveness_source=liveness_source,
-                activity_receipt_digest=activity_receipt_digest,
-                activity_peer_node_id=activity_peer_node_id,
-            )
+        validate_heartbeat_shape(
+            lifecycle_state=lifecycle_state,
+            active_requests=active_requests,
+            route_ready=False,
+            liveness_source=liveness_source,
+            activity_receipt_digest=activity_receipt_digest,
+            activity_peer_node_id=activity_peer_node_id,
+        )
         now = self._now()
         self._pending_liveness = {
             message_id: pending

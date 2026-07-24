@@ -12,6 +12,7 @@ import math
 import re
 import threading
 import time
+from types import MappingProxyType
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -54,6 +55,47 @@ _BASE_STATEMENT_FIELDS = frozenset(
 _HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _REMOTE_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _SERVER_CLOSE_SECONDS = 5.0
+JOIN_ROUTE_ERROR_STATUSES: Mapping[str, int] = MappingProxyType(
+    {
+        "invite_expired": HTTPStatus.BAD_REQUEST,
+        "invite_field_invalid": HTTPStatus.BAD_REQUEST,
+        "invite_malformed": HTTPStatus.BAD_REQUEST,
+        "invite_protocol_invalid": HTTPStatus.BAD_REQUEST,
+        "invite_replayed": HTTPStatus.CONFLICT,
+        "invite_signature_invalid": HTTPStatus.UNAUTHORIZED,
+        "join_request_protocol_required": HTTPStatus.BAD_REQUEST,
+        "membership_endpoint_addr_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_endpoint_id_mismatch": HTTPStatus.BAD_REQUEST,
+        "membership_envelope_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_field_unusable": HTTPStatus.BAD_REQUEST,
+        "membership_fields_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_generation_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_identifier_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_integer_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_join_generation_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_key_pin_invalid": HTTPStatus.UNAUTHORIZED,
+        "membership_message_expired": HTTPStatus.BAD_REQUEST,
+        "membership_message_from_future": HTTPStatus.BAD_REQUEST,
+        "membership_message_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_peer_class_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_protocol_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_runtime_capability_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_runtime_capability_mismatch": HTTPStatus.BAD_REQUEST,
+        "membership_sender_endpoint_mismatch": HTTPStatus.BAD_REQUEST,
+        "membership_signature_invalid": HTTPStatus.UNAUTHORIZED,
+        "membership_signer_endpoint_mismatch": HTTPStatus.BAD_REQUEST,
+        "membership_text_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_time_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_ttl_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_verifier_invalid": HTTPStatus.BAD_REQUEST,
+        "seed_join_key_invalid": HTTPStatus.BAD_REQUEST,
+        "seed_join_mismatch": HTTPStatus.BAD_REQUEST,
+        "seed_join_retry_mismatch": HTTPStatus.BAD_REQUEST,
+        "seed_member_identity_reused": HTTPStatus.BAD_REQUEST,
+        "seed_node_endpoint_conflict": HTTPStatus.BAD_REQUEST,
+        "seed_node_key_conflict": HTTPStatus.CONFLICT,
+    }
+)
 
 
 def _validate_bind_address(host: str, port: int) -> tuple[str, int]:
@@ -211,6 +253,9 @@ def _canonical_json_loads(raw: bytes) -> Any:
 
 
 def _error_status(code: str) -> int:
+    join_status = JOIN_ROUTE_ERROR_STATUSES.get(code)
+    if join_status is not None:
+        return join_status
     if code == "seed_http_frame_too_large":
         return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
     if code in {
@@ -254,6 +299,14 @@ def _authoritative_remote_error_code(raw: bytes) -> str | None:
     if not isinstance(code, str) or _REMOTE_ERROR_CODE_RE.fullmatch(code) is None:
         return None
     return code
+
+
+def _has_exact_json_content_type(headers: Any) -> bool:
+    try:
+        values = headers.get_all("Content-Type")
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return values == ["application/json"]
 
 
 class _SeedRequestHandler(BaseHTTPRequestHandler):
@@ -405,8 +458,12 @@ class SeedHTTPServer:
         self._server.coordinator = coordinator  # type: ignore[attr-defined]
         self._server.handle_error = lambda *_args: None
         bound_host, bound_port = self._server.server_address[:2]
+        published_host = {
+            "0.0.0.0": "127.0.0.1",
+            "::": "::1",
+        }.get(str(bound_host), str(bound_host))
         formatted_host = (
-            f"[{bound_host}]" if ":" in str(bound_host) else str(bound_host)
+            f"[{published_host}]" if ":" in published_host else published_host
         )
         self.base_url = f"http://{formatted_host}:{bound_port}"
         try:
@@ -603,17 +660,21 @@ class SeedHTTPClient:
             with self._opener.open(request, timeout=self.timeout) as response:
                 response_body = response.read(MAX_HTTP_FRAME_BYTES + 1)
                 status = response.status
+                response_headers = response.headers
         except HTTPError as exc:
             response_body = exc.read(MAX_HTTP_FRAME_BYTES + 1)
             code = (
                 _authoritative_remote_error_code(response_body)
-                or "seed_http_remote_error"
-            )
+                if _has_exact_json_content_type(exc.headers)
+                else None
+            ) or "seed_http_remote_error"
             raise SeedHTTPError(code, status=exc.code) from exc
         except (OSError, URLError) as exc:
             raise SeedHTTPError("seed_http_unreachable") from exc
         if len(response_body) > MAX_HTTP_FRAME_BYTES:
             raise SeedHTTPError("seed_http_response_too_large", status=status)
+        if not _has_exact_json_content_type(response_headers):
+            raise SeedHTTPError("seed_http_remote_error", status=status)
         value = _canonical_json_loads(response_body)
         if not isinstance(value, Mapping):
             raise SeedHTTPError("seed_http_response_invalid", status=status)

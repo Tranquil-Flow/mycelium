@@ -42,6 +42,8 @@ _FILE_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
 _CWD_LEASE_LOCK = threading.RLock()
+_CWD_RESTORE_ATTEMPTS = 3
+_CWD_RESTORATION_ERROR = "working directory restoration failed"
 
 
 class NodeProcessError(RuntimeError):
@@ -260,29 +262,36 @@ class PrivateDirectoryLease:
         descriptor = self._require_open_descriptor()
         with _CWD_LEASE_LOCK:
             original = os.open(".", _DIRECTORY_OPEN_FLAGS)
-            body_failed = False
+            body_failure: BaseException | None = None
             try:
                 self.revalidate()
                 os.fchdir(descriptor)
                 try:
                     yield
-                except BaseException:
-                    body_failed = True
+                except BaseException as exc:
+                    body_failure = exc
                     raise
             finally:
-                restore_failed = False
+                restored = False
                 try:
-                    os.fchdir(original)
-                except OSError:
-                    restore_failed = True
+                    for _attempt in range(_CWD_RESTORE_ATTEMPTS):
+                        try:
+                            os.fchdir(original)
+                        except OSError:
+                            continue
+                        restored = True
+                        break
                 finally:
                     os.close(original)
-                if restore_failed:
-                    raise ValueError("working directory restoration failed")
+                if not restored:
+                    if body_failure is not None:
+                        body_failure.add_note(_CWD_RESTORATION_ERROR)
+                    else:
+                        raise ValueError(_CWD_RESTORATION_ERROR) from None
                 try:
                     self.revalidate()
                 except ValueError:
-                    if not body_failed:
+                    if body_failure is None:
                         raise
 
     def close(self) -> None:
@@ -1118,7 +1127,7 @@ class PhysicalNodeProcess:
         try:
             os.killpg(current.process_group, signum)
         except ProcessLookupError:
-            return process.poll() is not None
+            return False
         except OSError:
             return False
         return True
