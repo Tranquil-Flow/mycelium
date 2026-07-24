@@ -294,14 +294,12 @@ class _NodeClient:
         ):
             raise RuntimeError("node_client_process_group_identity_invalid")
 
-    def _inventory_owned_process_group(self) -> frozenset[_ProcessIdentity]:
+    def _inventory_owned_process_group(self) -> tuple[_ProcessIdentity, ...]:
         try:
-            return frozenset(
-                _process_group_members(
-                    self.process_group_id,
-                    session_id=self.session_id,
-                    reject_identity_mismatch=True,
-                )
+            return _process_group_members(
+                self.process_group_id,
+                session_id=self.session_id,
+                reject_identity_mismatch=True,
             )
         except (
             OSError,
@@ -312,29 +310,73 @@ class _NodeClient:
                 "node_client_process_group_identity_unverifiable"
             ) from error
 
-    def _register_process_group_members(self) -> None:
-        self._validate_owned_process_group()
-        members = self._inventory_owned_process_group()
-        if self._wrapper_identity not in members:
+    def _validate_live_wrapper_identity(self) -> None:
+        if self.process.poll() is not None:
             raise RuntimeError(
                 "node_client_process_group_identity_unverifiable"
             )
+        try:
+            live_wrapper = _process_identity(
+                self.process.pid,
+                required_process_group_id=self.process_group_id,
+                required_session_id=self.session_id,
+            )
+        except (OSError, _ProcessIdentityMismatch) as error:
+            raise RuntimeError(
+                "node_client_process_group_identity_unverifiable"
+            ) from error
+        if live_wrapper != self._wrapper_identity:
+            raise RuntimeError(
+                "node_client_process_group_identity_unverifiable"
+            )
+
+    def _register_live_process_group_members(
+        self,
+    ) -> frozenset[_ProcessIdentity]:
+        self._validate_owned_process_group()
+        self._validate_live_wrapper_identity()
+        inventory = self._inventory_owned_process_group()
+        self._validate_live_wrapper_identity()
+        members = frozenset(inventory)
+        sidecars = tuple(
+            member
+            for member in inventory
+            if member != self._wrapper_identity
+        )
+        if (
+            len(inventory) != 2
+            or len(members) != 2
+            or self._wrapper_identity not in members
+            or len(sidecars) != 1
+            or sidecars[0].process_id == self._wrapper_identity.process_id
+            or sidecars[0].process_group_id != self.process_group_id
+            or sidecars[0].session_id != self.session_id
+            or sidecars[0].executable != str(SIDECAR_BINARY.resolve())
+        ):
+            raise RuntimeError(
+                "node_client_process_group_identity_unverifiable"
+            )
+        self._validate_live_wrapper_identity()
         self._registered_group_members = members
         self._group_registry_complete = True
+        return members
+
+    def _register_process_group_members(self) -> None:
+        if self._group_registry_complete:
+            self._validated_live_group_members()
+            return
+        self._register_live_process_group_members()
 
     def _validated_live_group_members(self) -> frozenset[_ProcessIdentity]:
         self._validate_owned_process_group()
-        members = self._inventory_owned_process_group()
         if not self._group_registry_complete:
-            if not members:
-                self._group_registry_complete = True
-            elif self._wrapper_identity in members:
-                self._registered_group_members = members
-                self._group_registry_complete = True
-            else:
-                raise RuntimeError(
-                    "node_client_process_group_identity_unverifiable"
-                )
+            return self._register_live_process_group_members()
+        inventory = self._inventory_owned_process_group()
+        members = frozenset(inventory)
+        if len(members) != len(inventory):
+            raise RuntimeError(
+                "node_client_process_group_identity_unverifiable"
+            )
         if not members.issubset(self._registered_group_members):
             raise RuntimeError(
                 "node_client_process_group_identity_unverifiable"
@@ -476,12 +518,25 @@ def _process_group_members(
     session_id: int | None = None,
     reject_identity_mismatch: bool = False,
 ) -> tuple[_ProcessIdentity, ...]:
-    inventory = subprocess.run(
-        ["ps", "-ww", "-axo", "pid=,pgid="],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
+    command = [
+        "ps",
+        "-ww",
+        "-o",
+        "pid=,pgid=",
+        "-g",
+        str(process_group_id),
+    ]
+    try:
+        inventory = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 1 or error.stdout or error.stderr:
+            raise
+        inventory = ""
     required_session_id = process_group_id if session_id is None else session_id
     members: list[_ProcessIdentity] = []
     for line in inventory.splitlines():
@@ -525,6 +580,51 @@ def _identity(
         start_microseconds=start_microseconds,
         executable=executable,
     )
+
+
+def test_process_group_inventory_uses_exact_process_group_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(
+        command: list[str],
+        **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert _process_group_members(7_000) == ()
+    assert commands == [
+        ["ps", "-ww", "-o", "pid=,pgid=", "-g", "7000"],
+    ]
+    assert not {"-a", "-A", "-x", "-axo"}.intersection(commands[0])
+
+
+def test_process_group_inventory_accepts_empty_exact_group_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run(
+        command: list[str],
+        **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(
+            1,
+            command,
+            output="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert _process_group_members(7_000) == ()
 
 
 def test_process_group_inventory_rejects_stale_ps_group(
@@ -605,6 +705,231 @@ def test_process_group_inventory_rejects_start_identity_change_during_path_looku
     )
 
     assert _process_group_members(7_000) == ()
+
+
+def test_explicit_registration_revalidates_wrapper_liveness_before_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrapper = _identity(7_000, start_microseconds=1, executable="/resolved/python")
+    sidecar = _identity(
+        7_001,
+        start_microseconds=2,
+        executable=str(SIDECAR_BINARY.resolve()),
+    )
+    events: list[str] = []
+    poll_results = iter((None, None, -signal.SIGKILL))
+
+    class _Process:
+        pid = 7_000
+
+        def poll(self) -> int | None:
+            events.append("poll")
+            return next(poll_results)
+
+    client = object.__new__(_NodeClient)
+    client.process = _Process()
+    client.process_group_id = 7_000
+    client.session_id = 7_000
+    client._wrapper_identity = wrapper
+    client._registered_group_members = frozenset((wrapper,))
+    client._group_registry_complete = False
+
+    def process_identity(*_args: Any, **_kwargs: Any) -> _ProcessIdentity:
+        events.append("identity")
+        return wrapper
+
+    def inventory(
+        _process_group_id: int,
+        **_kwargs: Any,
+    ) -> tuple[_ProcessIdentity, ...]:
+        events.append("inventory")
+        return wrapper, sidecar
+
+    monkeypatch.setattr(f"{__name__}._process_identity", process_identity)
+    monkeypatch.setattr(f"{__name__}._process_group_members", inventory)
+
+    with pytest.raises(
+        RuntimeError,
+        match="node_client_process_group_identity_unverifiable",
+    ):
+        client._register_process_group_members()
+
+    assert events == [
+        "poll",
+        "identity",
+        "inventory",
+        "poll",
+        "identity",
+        "poll",
+    ]
+    assert client._registered_group_members == frozenset((wrapper,))
+    assert client._group_registry_complete is False
+
+
+def test_lazy_registration_revalidates_exact_wrapper_identity_before_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrapper = _identity(7_000, start_microseconds=1, executable="/resolved/python")
+    sidecar = _identity(
+        7_001,
+        start_microseconds=2,
+        executable=str(SIDECAR_BINARY.resolve()),
+    )
+    replacement = _identity(
+        7_000,
+        start_microseconds=3,
+        executable="/resolved/python",
+    )
+    identities = iter((wrapper, wrapper, replacement))
+    events: list[str] = []
+
+    class _Process:
+        pid = 7_000
+
+        def poll(self) -> None:
+            events.append("poll")
+            return None
+
+    client = object.__new__(_NodeClient)
+    client.process = _Process()
+    client.process_group_id = 7_000
+    client.session_id = 7_000
+    client._wrapper_identity = wrapper
+    client._registered_group_members = frozenset((wrapper,))
+    client._group_registry_complete = False
+
+    def process_identity(*_args: Any, **_kwargs: Any) -> _ProcessIdentity:
+        events.append("identity")
+        return next(identities)
+
+    def inventory(
+        _process_group_id: int,
+        **_kwargs: Any,
+    ) -> tuple[_ProcessIdentity, ...]:
+        events.append("inventory")
+        return wrapper, sidecar
+
+    monkeypatch.setattr(f"{__name__}._process_identity", process_identity)
+    monkeypatch.setattr(f"{__name__}._process_group_members", inventory)
+
+    with pytest.raises(
+        RuntimeError,
+        match="node_client_process_group_identity_unverifiable",
+    ):
+        client._validated_live_group_members()
+
+    assert events == [
+        "poll",
+        "identity",
+        "inventory",
+        "poll",
+        "identity",
+        "poll",
+        "identity",
+    ]
+    assert client._registered_group_members == frozenset((wrapper,))
+    assert client._group_registry_complete is False
+
+
+@pytest.mark.parametrize(
+    "invalid_inventory",
+    ["wrong_executable", "duplicate_sidecar", "unexpected_member"],
+)
+def test_process_group_registration_rejects_untrusted_enrollment(
+    invalid_inventory: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrapper = _identity(7_000, start_microseconds=1, executable="/resolved/python")
+    sidecar = _identity(
+        7_001,
+        start_microseconds=2,
+        executable=str(SIDECAR_BINARY.resolve()),
+    )
+    if invalid_inventory == "wrong_executable":
+        members = (
+            wrapper,
+            _identity(
+                7_001,
+                start_microseconds=2,
+                executable="/resolved/not-the-sidecar",
+            ),
+        )
+    elif invalid_inventory == "duplicate_sidecar":
+        members = (wrapper, sidecar, sidecar)
+    else:
+        members = (
+            wrapper,
+            sidecar,
+            _identity(
+                7_002,
+                start_microseconds=3,
+                executable="/resolved/unexpected",
+            ),
+        )
+    client = object.__new__(_NodeClient)
+    client.process = type(
+        "_Process",
+        (),
+        {"pid": 7_000, "poll": lambda self: None},
+    )()
+    client.process_group_id = 7_000
+    client.session_id = 7_000
+    client._wrapper_identity = wrapper
+    client._registered_group_members = frozenset((wrapper,))
+    client._group_registry_complete = False
+    monkeypatch.setattr(
+        f"{__name__}._process_identity",
+        lambda *_args, **_kwargs: wrapper,
+    )
+    monkeypatch.setattr(
+        f"{__name__}._process_group_members",
+        lambda _process_group_id, **_kwargs: members,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="node_client_process_group_identity_unverifiable",
+    ):
+        client._register_process_group_members()
+
+    assert client._registered_group_members == frozenset((wrapper,))
+    assert client._group_registry_complete is False
+
+
+def test_process_group_registration_accepts_exact_resolved_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrapper = _identity(7_000, start_microseconds=1, executable="/resolved/python")
+    sidecar = _identity(
+        7_001,
+        start_microseconds=2,
+        executable=str(SIDECAR_BINARY.resolve()),
+    )
+    members = (wrapper, sidecar)
+    client = object.__new__(_NodeClient)
+    client.process = type(
+        "_Process",
+        (),
+        {"pid": 7_000, "poll": lambda self: None},
+    )()
+    client.process_group_id = 7_000
+    client.session_id = 7_000
+    client._wrapper_identity = wrapper
+    client._registered_group_members = frozenset((wrapper,))
+    client._group_registry_complete = False
+    monkeypatch.setattr(
+        f"{__name__}._process_identity",
+        lambda *_args, **_kwargs: wrapper,
+    )
+    monkeypatch.setattr(
+        f"{__name__}._process_group_members",
+        lambda _process_group_id, **_kwargs: members,
+    )
+
+    client._register_process_group_members()
+
+    assert client._registered_group_members == frozenset(members)
+    assert client._group_registry_complete is True
 
 
 def test_process_group_signal_rejects_unregistered_replacement_member(

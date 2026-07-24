@@ -931,6 +931,130 @@ def test_rotation_configured_before_close_cannot_commit_after_close() -> None:
     assert hub.configurations[-1][2] == 8
 
 
+def test_rotation_configure_finishing_during_close_cannot_commit() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    control = transport._control_client
+    assert control is not None
+    configure_entered = threading.Event()
+    release_configure = threading.Event()
+    close_in_progress = threading.Event()
+    release_close = threading.Event()
+    original_configure = transport._configure_peer
+    original_control_close = control.close
+    rotation_errors: list[BaseException] = []
+    close_errors: list[BaseException] = []
+
+    def configure_during_close(client, binding) -> None:
+        configure_entered.set()
+        assert release_configure.wait(timeout=1)
+        original_configure(client, binding)
+
+    def block_control_close() -> None:
+        close_in_progress.set()
+        assert release_close.wait(timeout=1)
+        original_control_close()
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            rotation_errors.append(error)
+
+    def close() -> None:
+        try:
+            transport.close()
+        except BaseException as error:
+            close_errors.append(error)
+
+    transport._configure_peer = configure_during_close
+    control.close = block_control_close
+    rotation = threading.Thread(target=rotate)
+    closing = threading.Thread(target=close)
+    rotation.start()
+    try:
+        assert configure_entered.wait(timeout=1)
+        closing.start()
+        assert close_in_progress.wait(timeout=1)
+        with transport._state_lock:
+            assert transport._closed is True
+            state_during_close = (
+                transport._peer,
+                tuple(transport._pending.items()),
+                tuple(transport._outbound_trace),
+            )
+        release_configure.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert len(rotation_errors) == 1
+        assert isinstance(rotation_errors[0], IrohTransportError)
+        assert rotation_errors[0].code == "transport_closed"
+        with transport._state_lock:
+            assert (
+                transport._peer,
+                tuple(transport._pending.items()),
+                tuple(transport._outbound_trace),
+            ) == state_during_close
+        assert transport.peer_binding.generation == 7
+        assert hub.configurations[-1][2] == 8
+    finally:
+        release_configure.set()
+        release_close.set()
+        rotation.join(timeout=1)
+        if closing.ident is not None:
+            closing.join(timeout=1)
+
+    assert not closing.is_alive()
+    assert close_errors == []
+
+
+def test_rotation_accepts_unchanged_same_object_control_and_peer_snapshot() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    captured_control = transport._control_client
+    captured_peer = transport._peer
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    try:
+        assert configured.wait(timeout=1)
+        with transport._state_lock:
+            transport._control_client = captured_control
+            transport._peer = captured_peer
+            assert transport._control_client is captured_control
+            assert transport._peer is captured_peer
+        release_commit.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert errors == []
+        assert transport.peer_binding.generation == 8
+        assert hub.configurations[-1][2] == 8
+    finally:
+        release_commit.set()
+        rotation.join(timeout=1)
+        transport.close()
+
+
 @pytest.mark.parametrize(
     ("state_change", "expected_code"),
     [
