@@ -418,6 +418,11 @@ class SeedCoordinator:
 
             generation = 1 if previous is None else previous.generation + 1
             lease_expires_at = now + self._lease_seconds
+            if self._lease_seconds == MAX_MESSAGE_TTL_SECONDS:
+                lease_expires_at = math.nextafter(
+                    lease_expires_at,
+                    -math.inf,
+                )
             endpoint = request["endpoint_addr"]
             member = _Member(
                 node_id=node_id,
@@ -875,18 +880,9 @@ class SeedCoordinator:
                 expected_key_digest=member.verification_key_digest,
                 expected_protocol=expected_protocol,
             )
-            if (
-                message["swarm_id"] != self.swarm_id
-                or message["sender_node_id"] != member.node_id
-                or message["sender_endpoint_id"] != member.endpoint_id
-                or message["incarnation"] != member.incarnation
-                or message["generation"] != member.generation
-                or message["recipient_node_id"] != self.seed_node_id
-            ):
-                raise SeedCoordinatorError("seed_message_mismatch")
-            self._ensure_current_member(member)
-
+            committed: dict[str, Any] | None = None
             if expected_protocol == HEARTBEAT_PROTOCOL:
+                self._ensure_current_member(member)
                 request_digest = hashlib.sha256(
                     canonical_json_bytes(dict(envelope))
                 ).hexdigest()
@@ -898,6 +894,7 @@ class SeedCoordinator:
                         incarnation=member.incarnation,
                         generation=member.generation,
                         heartbeat_message_id=message["message_id"],
+                        heartbeat_sequence=int(message["heartbeat_sequence"]),
                         request_envelope_digest=request_digest,
                     )
                 except SeedStateError as exc:
@@ -916,6 +913,19 @@ class SeedCoordinator:
                         renewal_message=renewal_message,
                     )
                     return message
+            if (
+                message["swarm_id"] != self.swarm_id
+                or message["sender_node_id"] != member.node_id
+                or message["sender_endpoint_id"] != member.endpoint_id
+                or message["incarnation"] != member.incarnation
+                or message["generation"] != member.generation
+                or message["recipient_node_id"] != self.seed_node_id
+            ):
+                raise SeedCoordinatorError("seed_message_mismatch")
+            if expected_protocol != HEARTBEAT_PROTOCOL:
+                self._ensure_current_member(member)
+
+            if expected_protocol == HEARTBEAT_PROTOCOL:
                 if now > float(message["expires_at"]):
                     raise MembershipContractError("membership_message_expired")
                 if now >= member.lease_expires_at:

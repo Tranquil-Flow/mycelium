@@ -170,14 +170,21 @@ class NodeMembershipSession:
         expires_at: float,
         now: float,
     ) -> None:
+        self._check_incoming(message_id, now=now)
         for expired_id, expiry in tuple(self._seen_ids.items()):
             if expiry < now:
                 del self._seen_ids[expired_id]
-        if message_id in self._seen_ids:
-            raise NodeMembershipError("membership_message_replayed")
-        if len(self._seen_ids) >= _MAX_REPLAY_IDS:
-            raise NodeMembershipError("membership_replay_window_full")
         self._seen_ids[message_id] = expires_at
+
+    def _check_incoming(self, message_id: str, *, now: float) -> None:
+        expiry = self._seen_ids.get(message_id)
+        if expiry is not None and expiry >= now:
+            raise NodeMembershipError("membership_message_replayed")
+        if (
+            sum(expiry >= now for expiry in self._seen_ids.values())
+            >= _MAX_REPLAY_IDS
+        ):
+            raise NodeMembershipError("membership_replay_window_full")
 
     def _post_join_common(
         self,
@@ -361,11 +368,7 @@ class NodeMembershipSession:
                 or message["generation"] != self._generation
             ):
                 raise NodeMembershipError("membership_message_mismatch")
-            self._remember_incoming(
-                message["message_id"],
-                expires_at=float(message["expires_at"]),
-                now=now,
-            )
+            self._check_incoming(message["message_id"], now=now)
             if (
                 message["heartbeat_message_id"] != heartbeat_message_id
                 or message["member_incarnation"] != self.incarnation
@@ -384,6 +387,11 @@ class NodeMembershipSession:
                 or float(message["expires_at"]) < renewed_until
             ):
                 raise NodeMembershipError("membership_lease_renewal_stale")
+            self._remember_incoming(
+                message["message_id"],
+                expires_at=float(message["expires_at"]),
+                now=now,
+            )
             self._lease_expires_at = renewed_until
             source, _expires_at = self._pending_liveness.pop(heartbeat_message_id)
             if source == "activation_receipt":

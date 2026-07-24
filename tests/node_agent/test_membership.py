@@ -451,6 +451,59 @@ def _delayed_renewal(
     )
 
 
+def test_rejected_renewal_binding_does_not_poison_exact_valid_retry(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path, clock)
+    heartbeat_id = _pending_heartbeat(session, clock)
+    renewal = _delayed_renewal(
+        seed,
+        message_id="renewal-binding-retry",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 304.0,
+        lease_expires_at=NOW + 304.0,
+    )
+    clock[0] = NOW + 299.5
+
+    with pytest.raises(NodeMembershipError) as mismatch:
+        session.accept_lease_renewal(
+            renewal,
+            heartbeat_message_id="wrong-heartbeat",
+        )
+    assert mismatch.value.code == "membership_lease_renewal_mismatch"
+
+    accepted = session.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=heartbeat_id,
+    )
+    assert accepted["message_id"] == "renewal-binding-retry"
+    assert accepted["lease_expires_at"] == NOW + 304.0
+
+
+def test_unknown_renewal_does_not_poison_replay_ledger(tmp_path: Path) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path, clock)
+    renewal = _delayed_renewal(
+        seed,
+        message_id="renewal-unknown-retry",
+        heartbeat_message_id="unknown-heartbeat",
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 304.0,
+        lease_expires_at=NOW + 304.0,
+    )
+    clock[0] = NOW + 299.5
+
+    for _attempt in range(2):
+        with pytest.raises(NodeMembershipError) as unknown:
+            session.accept_lease_renewal(
+                renewal,
+                heartbeat_message_id="unknown-heartbeat",
+            )
+        assert unknown.value.code == "membership_lease_renewal_unknown"
+
+
 def test_delayed_renewal_bypasses_only_old_lease_and_pops_pending_liveness(
     tmp_path: Path,
 ) -> None:
@@ -568,6 +621,26 @@ def test_lease_renewal_causality_and_staleness_fail_closed(
             heartbeat_message_id=heartbeat_id,
         )
     assert rejected.value.code == expected_code
+
+    with pytest.raises(NodeMembershipError) as exact_retry:
+        session.accept_lease_renewal(
+            renewal,
+            heartbeat_message_id=heartbeat_id,
+        )
+    assert exact_retry.value.code == expected_code
+
+    valid = _delayed_renewal(
+        seed,
+        message_id=f"renewal-{case}-valid",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 305.0,
+        lease_expires_at=NOW + 305.0,
+    )
+    assert session.accept_lease_renewal(
+        valid,
+        heartbeat_message_id=heartbeat_id,
+    )["message_id"] == f"renewal-{case}-valid"
 
 
 def test_nonrenewal_seed_message_still_rejects_after_old_local_lease(

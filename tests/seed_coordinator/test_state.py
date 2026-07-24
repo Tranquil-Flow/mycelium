@@ -54,7 +54,11 @@ def _renewal(message_id: str = "renewal-1") -> dict[str, object]:
         "message": {
             "protocol": "mycelium.membership.lease_renewal.v1",
             "message_id": message_id,
+            "recipient_node_id": "node-a",
+            "generation": 1,
             "heartbeat_message_id": "heartbeat-1",
+            "member_incarnation": "incarnation-1",
+            "membership_generation": 1,
             "lease_expires_at": 2_600.0,
         },
         "signature": {"value": "test-signature"},
@@ -194,6 +198,7 @@ def test_heartbeat_commit_and_lookup_are_exact_and_current_generation_bound(
         incarnation="incarnation-1",
         generation=1,
         heartbeat_message_id="heartbeat-1",
+        heartbeat_sequence=1,
         request_envelope_digest="digest-a",
     ) == renewal
     assert state.find_heartbeat_renewal(
@@ -210,6 +215,7 @@ def test_heartbeat_commit_and_lookup_are_exact_and_current_generation_bound(
             incarnation="incarnation-1",
             generation=1,
             heartbeat_message_id="heartbeat-1",
+            heartbeat_sequence=1,
             request_envelope_digest="digest-b",
         )
     assert mismatch.value.code == "seed_heartbeat_retry_mismatch"
@@ -227,6 +233,7 @@ def test_heartbeat_commit_and_lookup_are_exact_and_current_generation_bound(
         incarnation="incarnation-1",
         generation=1,
         heartbeat_message_id="heartbeat-1",
+        heartbeat_sequence=1,
         request_envelope_digest="digest-a",
     ) is None
 

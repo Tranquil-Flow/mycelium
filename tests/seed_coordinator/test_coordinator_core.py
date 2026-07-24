@@ -14,6 +14,7 @@ from mycelium_membership import (
     HEARTBEAT_PROTOCOL,
 )
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
+from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_router.transports.iroh import DeliveryReceipt
 from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
@@ -428,9 +429,13 @@ def test_member_generation_heartbeat_replay_and_assignments_survive_restart(
     node = _node(tmp_path)
     _join(first_seed, node, nonce="invite-before-restart")
     heartbeat = node.heartbeat(lifecycle_state="NEW", active_requests=0)
-    first_seed.receive_member_message(
+    accepted_heartbeat = first_seed.receive_member_message(
         heartbeat,
         expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    first_renewal = first_seed.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=accepted_heartbeat["message_id"],
     )
     first_seed.assignment_offer(
         node_id="node-a",
@@ -456,12 +461,23 @@ def test_member_generation_heartbeat_replay_and_assignments_survive_restart(
     assert restarted_seed.assignment_status("assignment-persisted")[
         "deployment_epoch"
     ] == 7
-    with pytest.raises(SeedCoordinatorError) as replay:
-        restarted_seed.receive_member_message(
-            heartbeat,
-            expected_protocol=HEARTBEAT_PROTOCOL,
-        )
-    assert replay.value.code == "seed_message_replayed"
+    retried_heartbeat = restarted_seed.receive_member_message(
+        heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    recovered_renewal = restarted_seed.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=accepted_heartbeat["message_id"],
+    )
+    assert retried_heartbeat == accepted_heartbeat
+    assert recovered_renewal == first_renewal
+    assert canonical_json_bytes(recovered_renewal) == canonical_json_bytes(
+        first_renewal
+    )
+    assert restarted_seed.member("node-a")["last_heartbeat_sequence"] == 1
+    assert restarted_seed.assignment_status("assignment-persisted")[
+        "deployment_epoch"
+    ] == 7
 
     restarted_node = _node(tmp_path, incarnation="incarnation-after-restart")
     _join(restarted_seed, restarted_node, nonce="invite-after-restart")

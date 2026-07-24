@@ -2,19 +2,30 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from dataclasses import replace
 from itertools import count
 from pathlib import Path
+import hashlib
 import sqlite3
 import threading
 
 import pytest
 
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
-from mycelium_membership import HEARTBEAT_PROTOCOL, sign_membership_message
+from mycelium_membership import (
+    HEARTBEAT_PROTOCOL,
+    MAX_MESSAGE_TTL_SECONDS,
+    sign_membership_message,
+)
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
-from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
+from mycelium_seed import (
+    SeedCoordinator,
+    SeedCoordinatorError,
+    SeedStateError,
+    SqliteSeedState,
+)
 
 
 NOW = 2_000.0
@@ -230,6 +241,163 @@ def test_same_heartbeat_id_with_changed_signed_payload_fails_closed(
     assert mismatch.value.code == "seed_heartbeat_retry_mismatch"
 
 
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    [
+        ("recipient_node_id", "other-seed"),
+        ("sender_endpoint_id", "other-endpoint"),
+        ("incarnation", "other-incarnation"),
+        ("generation", 2),
+    ],
+)
+def test_same_heartbeat_id_changed_signed_relational_binding_is_retry_mismatch(
+    tmp_path: Path,
+    field: str,
+    changed_value: object,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-relational-retry", now=NOW)
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert heartbeat is not None
+    coordinator.receive_member_message(
+        heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+
+    changed_message = deepcopy(heartbeat["message"])
+    changed_message[field] = changed_value
+    changed_signer = (
+        replace(node.signer, endpoint_id=str(changed_value))
+        if field == "sender_endpoint_id"
+        else node.signer
+    )
+    changed = sign_membership_message(
+        signer=changed_signer,
+        message=changed_message,
+    )
+    with pytest.raises(SeedCoordinatorError) as mismatch:
+        coordinator.receive_member_message(
+            changed,
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )
+    assert mismatch.value.code == "seed_heartbeat_retry_mismatch"
+
+
+def test_uncommitted_signed_relational_mismatch_keeps_generic_diagnostic(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-uncommitted-mismatch", now=NOW)
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert heartbeat is not None
+    changed_message = deepcopy(heartbeat["message"])
+    changed_message["recipient_node_id"] = "other-seed"
+    changed = sign_membership_message(signer=node.signer, message=changed_message)
+
+    with pytest.raises(SeedCoordinatorError) as mismatch:
+        coordinator.receive_member_message(
+            changed,
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )
+    assert mismatch.value.code == "seed_message_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("column", "tampered_value"),
+    [
+        ("heartbeat_sequence", 2),
+        ("renewal_message_id", "tampered-renewal-id"),
+    ],
+)
+@pytest.mark.parametrize("recovery_path", ["load", "find", "concurrent", "restart"])
+def test_tampered_heartbeat_binding_fails_closed_on_every_recovery_path(
+    tmp_path: Path,
+    column: str,
+    tampered_value: object,
+    recovery_path: str,
+) -> None:
+    signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    coordinator = _coordinator(tmp_path, signer=signer)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-binding-corruption", now=NOW)
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert heartbeat is not None
+    accepted = coordinator.receive_member_message(
+        heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    heartbeat_id = accepted["message_id"]
+    request_digest = hashlib.sha256(
+        canonical_json_bytes(heartbeat)
+    ).hexdigest()
+    renewal = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=heartbeat_id,
+    )
+    database = tmp_path / "seed-state" / "state.sqlite3"
+    with sqlite3.connect(database) as connection:
+        if column == "heartbeat_sequence":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_sequence = ? "
+                "WHERE heartbeat_message_id = ?",
+                (tampered_value, heartbeat_id),
+            )
+        else:
+            assert column == "renewal_message_id"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_message_id = ? "
+                "WHERE heartbeat_message_id = ?",
+                (tampered_value, heartbeat_id),
+            )
+
+    state = SqliteSeedState(database)
+    with pytest.raises(
+        (SeedCoordinatorError, SeedStateError),
+    ) as unavailable:
+        if recovery_path == "load":
+            state.load_heartbeat_renewal(
+                node_id="node-a",
+                endpoint_id=node.signer.endpoint_id,
+                verification_key_digest=node.signer.verification_key_digest,
+                incarnation="incarnation-a",
+                generation=1,
+                heartbeat_message_id=heartbeat_id,
+                heartbeat_sequence=1,
+                request_envelope_digest=request_digest,
+            )
+        elif recovery_path == "find":
+            state.find_heartbeat_renewal(
+                node_id="node-a",
+                generation=1,
+                heartbeat_message_id=heartbeat_id,
+            )
+        elif recovery_path == "concurrent":
+            state.commit_heartbeat_renewal(
+                request_envelope_digest=request_digest,
+                heartbeat_message_id=heartbeat_id,
+                heartbeat_sequence=1,
+                heartbeat_expires_at=float(accepted["expires_at"]),
+                renewal_message_id="unused-concurrent-renewal",
+                member=state.load_members()[0],
+                renewal=renewal,
+                now=NOW,
+                capacity=16,
+            )
+        else:
+            restarted = _coordinator(
+                tmp_path,
+                signer=signer,
+                id_prefix="seed-restarted-corrupt",
+            )
+            restarted.lease_renewal(
+                node_id="node-a",
+                heartbeat_message_id=heartbeat_id,
+            )
+    assert unavailable.value.code == "seed_state_unavailable"
+
+
 def test_immediate_heartbeat_still_emits_a_strictly_advancing_renewal(
     tmp_path: Path,
 ) -> None:
@@ -252,6 +420,55 @@ def test_immediate_heartbeat_still_emits_a_strictly_advancing_renewal(
         renewal,
         heartbeat_message_id=accepted["message_id"],
     )["lease_expires_at"] == renewal["message"]["lease_expires_at"]
+
+
+def test_maximum_lease_reserves_strict_renewal_ttl_headroom(
+    tmp_path: Path,
+) -> None:
+    maximum = _coordinator(
+        tmp_path / "equal",
+        lease_seconds=MAX_MESSAGE_TTL_SECONDS,
+    )
+    maximum_node = _node(tmp_path / "equal")
+    _join(maximum, maximum_node, nonce="invite-maximum", now=NOW)
+    initial_lease = maximum.member("node-a")["lease_expires_at"]
+    assert initial_lease < NOW + MAX_MESSAGE_TTL_SECONDS
+    maximum_heartbeat = maximum_node.heartbeat(
+        lifecycle_state="RUNNING",
+        active_requests=0,
+    )
+    assert maximum_heartbeat is not None
+    maximum_accepted = maximum.receive_member_message(
+        maximum_heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    maximum_renewal = maximum.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=maximum_accepted["message_id"],
+    )
+    assert maximum_renewal["message"]["lease_expires_at"] == (
+        NOW + MAX_MESSAGE_TTL_SECONDS
+    )
+    assert maximum_renewal["message"]["lease_expires_at"] > initial_lease
+
+    just_below = MAX_MESSAGE_TTL_SECONDS - 1.0
+    coordinator = _coordinator(
+        tmp_path / "below",
+        lease_seconds=just_below,
+    )
+    node = _node(tmp_path / "below")
+    _join(coordinator, node, nonce="invite-boundary", now=NOW)
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert heartbeat is not None
+    accepted = coordinator.receive_member_message(
+        heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    renewal = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=accepted["message_id"],
+    )
+    assert renewal["message"]["lease_expires_at"] > NOW + just_below
 
 
 def test_injected_heartbeat_transaction_failure_leaves_no_partial_effects(

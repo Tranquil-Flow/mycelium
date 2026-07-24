@@ -68,8 +68,14 @@ def test_schema_v1_migrates_directly_to_current_member_contract(tmp_path: Path) 
             row[1]: (row[2], row[3], row[4])
             for row in connection.execute("PRAGMA table_info(seed_members)")
         }
+        renewal_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(seed_heartbeat_renewals)"
+            )
+        }
 
-    assert version == ("4",)
+    assert version == ("5",)
     assert columns["last_heartbeat_sequence"] == ("INTEGER", 1, "0")
     assert columns["peer_class"] == ("TEXT", 1, "'linux_tbd'")
     assert columns["runtime_capability_json"][0:2] == ("TEXT", 1)
@@ -79,6 +85,15 @@ def test_schema_v1_migrates_directly_to_current_member_contract(tmp_path: Path) 
     assert columns["last_activity_receipt_at"] == ("REAL", 0, None)
     assert columns["active_requests"] == ("INTEGER", 1, "0")
     assert columns["lifecycle_state"] == ("TEXT", 1, "'NEW'")
+    assert renewal_columns == {
+        "node_id",
+        "generation",
+        "heartbeat_message_id",
+        "request_envelope_digest",
+        "heartbeat_sequence",
+        "renewal_message_id",
+        "renewal_json",
+    }
 
 
 def test_member_authority_guard_holds_cross_instance_write_reservation(
