@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.metadata
+import json
 import math
 from types import MappingProxyType
 from typing import Any, Mapping, NoReturn
@@ -13,6 +15,9 @@ import numpy as np
 
 from runtime_contracts import (
     GPT2_DECODER_TENSOR_SUFFIXES,
+    assignment_stage_role,
+    validate_assignment_stage_boundaries,
+    validate_loaded_stage_authentication,
     validate_normalized_numpy_runtime,
 )
 
@@ -243,3 +248,379 @@ class NumpyGPT2Runtime:
         result = np.ascontiguousarray(logits, dtype=self._dtype)
         result.flags.writeable = False
         return result
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        _plain(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def tensor_digest(tensors: Mapping[str, Any]) -> str:
+    """Digest a materialized tensor inventory independently of its proof."""
+
+    digest = hashlib.sha256()
+    for key in sorted(tensors):
+        array = np.ascontiguousarray(np.asarray(tensors[key]))
+        metadata = _canonical_json(
+            {
+                "dtype": str(array.dtype),
+                "name": key,
+                "shape": list(array.shape),
+            }
+        ).encode("utf-8")
+        payload = array.tobytes(order="C")
+        digest.update(len(metadata).to_bytes(8, "big"))
+        digest.update(metadata)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return "sha256:" + digest.hexdigest()
+
+
+def _stage_namespace(tensors: Mapping[str, Any], start: int) -> str:
+    transformer_key = f"transformer.h.{start}.ln_1.weight"
+    plain_key = f"h.{start}.ln_1.weight"
+    if transformer_key in tensors and plain_key not in tensors:
+        return "transformer."
+    if plain_key in tensors and transformer_key not in tensors:
+        return ""
+    _reject("invalid_loaded_stage_namespace")
+
+
+def _stage_shapes(
+    *,
+    config: Mapping[str, Any],
+    start: int,
+    end: int,
+    namespace: str,
+    components: list[str],
+    aliases: Mapping[str, Any],
+) -> dict[str, tuple[int, ...]]:
+    hidden = int(config["n_embd"])
+    all_shapes = _expected_shapes(config)
+
+    def stage_key(canonical: str) -> str:
+        if namespace:
+            return canonical
+        return canonical.removeprefix("transformer.")
+
+    shapes: dict[str, tuple[int, ...]] = {}
+    if "input_embedding" in components:
+        for canonical in (
+            "transformer.wte.weight",
+            "transformer.wpe.weight",
+        ):
+            shapes[stage_key(canonical)] = all_shapes[canonical]
+    for layer in range(start, end):
+        canonical_prefix = f"transformer.h.{layer}."
+        for suffix in GPT2_DECODER_TENSOR_SUFFIXES:
+            canonical = canonical_prefix + suffix
+            shapes[stage_key(canonical)] = all_shapes[canonical]
+    if "final_norm" in components:
+        for canonical in (
+            "transformer.ln_f.weight",
+            "transformer.ln_f.bias",
+        ):
+            shapes[stage_key(canonical)] = all_shapes[canonical]
+    if "lm_head" in components:
+        alias = aliases.get("lm_head")
+        if not isinstance(alias, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+        head_keys = alias.get("tensor_keys")
+        if (
+            not isinstance(head_keys, (list, tuple))
+            or len(head_keys) != 1
+            or not isinstance(head_keys[0], str)
+        ):
+            _reject("invalid_loaded_stage_aliases")
+        shapes[head_keys[0]] = (int(config["vocab_size"]), hidden)
+    return shapes
+
+
+def _validated_stage(
+    loaded_stage: Any,
+) -> tuple[
+    dict[str, Any],
+    int,
+    int,
+    list[str],
+    str,
+    dict[str, np.ndarray],
+    Mapping[str, Any],
+]:
+    proof = getattr(loaded_stage, "proof", None)
+    tensors = getattr(loaded_stage, "tensors", None)
+    aliases = getattr(loaded_stage, "resolved_aliases", None)
+    if not isinstance(proof, Mapping):
+        _reject("invalid_loaded_stage_proof")
+    try:
+        runtime = validate_normalized_numpy_runtime(
+            json.loads(_canonical_json(proof.get("runtime")))
+        )
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise NumpyRuntimeError("invalid_loaded_stage_runtime") from exc
+    try:
+        validate_loaded_stage_authentication(
+            proof,
+            authenticated_assignment_id=getattr(
+                loaded_stage, "authenticated_assignment_id", None
+            ),
+            authenticated_load_generation=getattr(
+                loaded_stage, "authenticated_load_generation", None
+            ),
+            authenticated_loaded_components=getattr(
+                loaded_stage, "authenticated_loaded_components", None
+            ),
+            authenticated_loaded_range=getattr(
+                loaded_stage, "authenticated_loaded_range", None
+            ),
+            resolved_aliases=aliases,
+            authenticated_resolved_aliases=getattr(
+                loaded_stage, "authenticated_resolved_aliases", None
+            ),
+            authenticated_runtime=getattr(
+                loaded_stage, "authenticated_runtime", None
+            ),
+            authenticated_runtime_identity=getattr(
+                loaded_stage, "authenticated_runtime_identity", None
+            ),
+            normalized_runtime=runtime,
+        )
+    except ValueError as exc:
+        raise NumpyRuntimeError(str(exc)) from exc
+    config = runtime["model_config"]
+    layer_range = proof.get("loaded_range")
+    if not isinstance(layer_range, Mapping):
+        _reject("invalid_loaded_stage_range")
+    start = layer_range.get("start_layer")
+    end = layer_range.get("end_layer_exclusive")
+    count = layer_range.get("layer_count")
+    if (
+        not isinstance(start, int)
+        or isinstance(start, bool)
+        or start < 0
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or end <= start
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or count != end - start
+        or end > config["n_layer"]
+    ):
+        _reject("invalid_loaded_stage_range")
+    raw_components = proof.get("loaded_components")
+    if not isinstance(raw_components, (list, tuple)):
+        _reject("invalid_loaded_stage_components")
+    components = list(raw_components)
+    try:
+        assignment_stage_role(components)
+    except ValueError as exc:
+        raise NumpyRuntimeError("invalid_loaded_stage_components") from exc
+    if (
+        len(components) != len(set(components))
+        or "decoder" not in components
+    ):
+        _reject("invalid_loaded_stage_components")
+    try:
+        validate_assignment_stage_boundaries(
+            components,
+            start_layer=start,
+            end_layer_exclusive=end,
+            total_layers=config["n_layer"],
+        )
+    except ValueError as exc:
+        raise NumpyRuntimeError("invalid_loaded_stage_boundaries") from exc
+    if not isinstance(tensors, Mapping):
+        _reject("invalid_loaded_stage_tensors")
+    namespace = _stage_namespace(tensors, start)
+    shapes = _stage_shapes(
+        config=config,
+        start=start,
+        end=end,
+        namespace=namespace,
+        components=components,
+        aliases=aliases,
+    )
+    loaded_keys = proof.get("loaded_tensor_keys")
+    if (
+        not isinstance(loaded_keys, (list, tuple))
+        or list(loaded_keys) != sorted(shapes)
+        or set(tensors) != set(shapes)
+    ):
+        _reject("loaded_tensor_inventory_mismatch")
+    expected_dtype = np.dtype(runtime["dtype"])
+    materialized: dict[str, np.ndarray] = {}
+    for key in sorted(shapes):
+        value = np.asarray(tensors[key])
+        if value.shape != shapes[key]:
+            _reject("tensor_shape_mismatch")
+        if value.dtype != expected_dtype:
+            _reject("unsupported_tensor_dtype")
+        if not np.isfinite(value).all():
+            _reject("nonfinite_tensor")
+        materialized[key] = value
+    proof_digest = proof.get("loaded_tensor_digest")
+    authenticated_digest = getattr(
+        loaded_stage, "authenticated_tensor_digest", None
+    )
+    try:
+        actual_digest = tensor_digest(materialized)
+    except Exception:
+        raise NumpyRuntimeError("loaded_tensor_digest_mismatch") from None
+    if (
+        not isinstance(proof_digest, str)
+        or proof_digest != authenticated_digest
+        or proof_digest != actual_digest
+    ):
+        _reject("loaded_tensor_digest_mismatch")
+    return (
+        runtime,
+        start,
+        end,
+        components,
+        namespace,
+        materialized,
+        aliases,
+    )
+
+
+def _validated_token_ids(token_ids: Any, config: Mapping[str, Any]) -> np.ndarray:
+    ids = np.asarray(token_ids)
+    if ids.ndim != 2 or ids.shape[0] <= 0 or ids.shape[1] <= 0:
+        _reject("invalid_token_id_shape")
+    if ids.dtype.kind not in {"i", "u"}:
+        _reject("invalid_token_id_dtype")
+    if ids.shape[1] > config["n_positions"]:
+        _reject("position_bounds_exceeded")
+    if np.any(ids < 0) or np.any(ids >= config["vocab_size"]):
+        _reject("token_bounds_exceeded")
+    return ids.astype(np.int64, copy=False)
+
+
+def _validated_hidden_states(
+    hidden_states: Any,
+    config: Mapping[str, Any],
+    dtype: np.dtype[Any],
+) -> np.ndarray:
+    hidden = np.asarray(hidden_states)
+    if hidden.ndim != 3:
+        _reject("invalid_hidden_state_rank")
+    if (
+        hidden.shape[0] <= 0
+        or hidden.shape[1] <= 0
+        or hidden.shape[2] != config["n_embd"]
+    ):
+        _reject("invalid_hidden_state_shape")
+    if hidden.shape[1] > config["n_positions"]:
+        _reject("position_bounds_exceeded")
+    if hidden.dtype != dtype:
+        _reject("hidden_state_dtype_mismatch")
+    if not np.isfinite(hidden).all():
+        _reject("nonfinite_hidden_states")
+    return hidden
+
+
+def execute_loaded_stage(
+    loaded_stage: Any,
+    *,
+    token_ids: Any | None = None,
+    hidden_states: Any | None = None,
+) -> np.ndarray:
+    """Execute an authenticated assignment-local stage with NumPy."""
+
+    (
+        runtime,
+        start,
+        end,
+        components,
+        namespace,
+        tensors,
+        aliases,
+    ) = _validated_stage(loaded_stage)
+    config = runtime["model_config"]
+    dtype = np.dtype(runtime["dtype"])
+    role = assignment_stage_role(components)
+
+    if role == "entry":
+        if token_ids is None or hidden_states is not None:
+            _reject("entry_stage_requires_token_ids")
+        ids = _validated_token_ids(token_ids, config)
+        positions = np.arange(ids.shape[1], dtype=np.int64)
+        hidden = (
+            tensors[f"{namespace}wte.weight"][ids]
+            + tensors[f"{namespace}wpe.weight"][positions]
+        ).astype(dtype, copy=False)
+    else:
+        if hidden_states is None or token_ids is not None:
+            _reject("non_entry_stage_requires_hidden_states")
+        hidden = _validated_hidden_states(hidden_states, config, dtype)
+
+    epsilon = float(config["layer_norm_epsilon"])
+    for layer in range(start, end):
+        hidden = _gpt2_block(
+            hidden,
+            tensors,
+            f"{namespace}h.{layer}.",
+            int(config["n_head"]),
+            epsilon,
+        )
+    if "final_norm" in components:
+        hidden = _layer_norm(
+            hidden,
+            tensors[f"{namespace}ln_f.weight"],
+            tensors[f"{namespace}ln_f.bias"],
+            epsilon,
+        )
+    if "lm_head" in components:
+        head_key = aliases["lm_head"]["tensor_keys"][0]
+        hidden = np.matmul(hidden, tensors[head_key].transpose(1, 0))
+    if not np.isfinite(hidden).all():
+        _reject("nonfinite_stage_output")
+    result = np.ascontiguousarray(hidden, dtype=dtype)
+    result.flags.writeable = False
+    return result
+
+
+class NumpyStageBackend:
+    """Assignment-local CPU stage adapter with no route or physical claim."""
+
+    backend = "numpy"
+
+    def execute_loaded_stage(
+        self,
+        loaded_stage: Any,
+        *,
+        token_ids: Any | None = None,
+        hidden_states: Any | None = None,
+    ) -> np.ndarray:
+        return execute_loaded_stage(
+            loaded_stage,
+            token_ids=token_ids,
+            hidden_states=hidden_states,
+        )
+
+    def runtime_identity(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {
+                "backend": "numpy",
+                "backend_version": importlib.metadata.version("numpy"),
+                "device": "cpu",
+                "route_ready": False,
+                "claim_boundary": (
+                    "assignment-bound local NumPy stage; no route challenge "
+                    "or physical execution claim"
+                ),
+            }
+        )

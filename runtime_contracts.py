@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import uuid
 from typing import Any, Mapping, Protocol, runtime_checkable
 
 MLX_RUNTIME_BASE_FIELDS = frozenset({"backend", "dtype", "quantization"})
@@ -42,6 +43,17 @@ GPT2_MODEL_CONFIG_FIELDS = frozenset(
     }
 )
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
+SUPPORTED_NUMPY_DTYPES = frozenset({"float32"})
+_RUNTIME_IDENTITY_FIELDS = frozenset(
+    {
+        "backend",
+        "backend_version",
+        "device",
+        "dtype",
+        "quantization",
+        "architecture",
+    }
+)
 _SUPPORTED_GPT2_FLAGS = {
     "scale_attn_weights": True,
     "scale_attn_by_inverse_layer_idx": False,
@@ -191,8 +203,8 @@ def validate_normalized_numpy_runtime(runtime: Any) -> dict[str, Any]:
         raise ValueError("unsupported runtime backend; expected numpy")
     if runtime.get("quantization") != "none":
         raise ValueError("unsupported runtime quantization; only none is supported")
-    if runtime.get("dtype") not in {"float16", "float32"}:
-        raise ValueError("unsupported numpy runtime dtype; expected float16 or float32")
+    if runtime.get("dtype") not in SUPPORTED_NUMPY_DTYPES:
+        raise ValueError("unsupported numpy runtime dtype; expected float32")
     if runtime.get("architecture") != "gpt2":
         raise ValueError("unsupported runtime architecture; only gpt2 is supported")
     model_config = runtime.get("model_config")
@@ -235,3 +247,222 @@ def validate_normalized_runtime(
     if backend == "numpy":
         return validate_normalized_numpy_runtime(runtime)
     raise ValueError(f"unsupported runtime backend: {backend!r}")
+
+
+def _plain_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        if not all(isinstance(key, str) for key in value):
+            raise ValueError("canonical JSON mappings require string keys")
+        return {key: _plain_json(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain_json(item) for item in value]
+    return value
+
+
+def validate_loaded_stage_authentication(
+    proof: Any,
+    *,
+    authenticated_assignment_id: Any,
+    authenticated_load_generation: Any,
+    authenticated_loaded_components: Any,
+    authenticated_loaded_range: Any,
+    resolved_aliases: Any,
+    authenticated_resolved_aliases: Any,
+    authenticated_runtime: Any,
+    authenticated_runtime_identity: Any,
+    normalized_runtime: Mapping[str, Any],
+) -> None:
+    """Authenticate execution-critical proof fields against loader-held values."""
+
+    if not isinstance(proof, Mapping):
+        raise ValueError("invalid_loaded_stage_proof")
+    if proof.get("protocol") != "mycelium.layer_load_proof.v1":
+        raise ValueError("invalid_loaded_stage_proof")
+    if proof.get("route_ready") is not False:
+        raise ValueError("invalid_loaded_stage_route_claim")
+
+    assignment_id = proof.get("assignment_id")
+    try:
+        canonical_assignment_id = str(uuid.UUID(str(assignment_id)))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("assignment_id_mismatch") from exc
+    if (
+        assignment_id != canonical_assignment_id
+        or authenticated_assignment_id != canonical_assignment_id
+    ):
+        raise ValueError("assignment_id_mismatch")
+
+    proof_generation = proof.get("load_generation")
+    if (
+        not isinstance(proof_generation, int)
+        or isinstance(proof_generation, bool)
+        or proof_generation < 0
+        or not isinstance(authenticated_load_generation, int)
+        or isinstance(authenticated_load_generation, bool)
+        or authenticated_load_generation < 0
+        or proof_generation != authenticated_load_generation
+    ):
+        raise ValueError("load_generation_mismatch")
+
+    try:
+        loaded_components = _plain_json(proof.get("loaded_components"))
+        bound_loaded_components = _plain_json(authenticated_loaded_components)
+        json.dumps(
+            loaded_components,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("loaded_components_mismatch") from exc
+    if (
+        not isinstance(loaded_components, list)
+        or not all(isinstance(component, str) for component in loaded_components)
+        or loaded_components != bound_loaded_components
+    ):
+        raise ValueError("loaded_components_mismatch")
+
+    try:
+        loaded_range = _plain_json(proof.get("loaded_range"))
+        bound_loaded_range = _plain_json(authenticated_loaded_range)
+        json.dumps(
+            loaded_range,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("loaded_range_mismatch") from exc
+    if not isinstance(loaded_range, dict) or loaded_range != bound_loaded_range:
+        raise ValueError("loaded_range_mismatch")
+
+    try:
+        alias_documents = (
+            _plain_json(proof.get("resolved_component_aliases")),
+            _plain_json(resolved_aliases),
+            _plain_json(authenticated_resolved_aliases),
+        )
+        canonical_aliases = []
+        for aliases in alias_documents:
+            if not isinstance(aliases, dict):
+                raise ValueError
+            for source, alias in aliases.items():
+                if (
+                    not source
+                    or not isinstance(alias, dict)
+                    or set(alias) != {"target_component", "tensor_keys"}
+                    or not isinstance(alias["target_component"], str)
+                    or not alias["target_component"]
+                    or not isinstance(alias["tensor_keys"], list)
+                    or not alias["tensor_keys"]
+                    or not all(
+                        isinstance(key, str) and key
+                        for key in alias["tensor_keys"]
+                    )
+                    or len(alias["tensor_keys"]) != len(set(alias["tensor_keys"]))
+                ):
+                    raise ValueError
+            canonical_aliases.append(
+                json.dumps(
+                    aliases,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+            )
+    except (TypeError, ValueError):
+        raise ValueError("resolved_aliases_mismatch") from None
+    if len(set(canonical_aliases)) != 1:
+        raise ValueError("resolved_aliases_mismatch")
+
+    try:
+        runtime = _plain_json(normalized_runtime)
+        bound_runtime = _plain_json(authenticated_runtime)
+        runtime_identity = _plain_json(proof.get("runtime_identity"))
+        bound_runtime_identity = _plain_json(authenticated_runtime_identity)
+        json.dumps(runtime, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        json.dumps(
+            runtime_identity,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("runtime_identity_mismatch") from exc
+    if runtime != bound_runtime:
+        raise ValueError("runtime_identity_mismatch")
+    if (
+        not isinstance(runtime_identity, dict)
+        or set(runtime_identity) != _RUNTIME_IDENTITY_FIELDS
+        or runtime_identity != bound_runtime_identity
+    ):
+        raise ValueError("runtime_identity_mismatch")
+    for field in ("backend", "dtype", "quantization", "architecture"):
+        if runtime_identity.get(field) != runtime.get(field):
+            raise ValueError("runtime_identity_mismatch")
+    for field in ("backend_version", "device"):
+        if (
+            not isinstance(runtime_identity.get(field), str)
+            or not runtime_identity[field]
+        ):
+            raise ValueError("runtime_identity_mismatch")
+
+
+_ASSIGNMENT_STAGE_COMPONENTS = frozenset(
+    {"input_embedding", "decoder", "final_norm", "lm_head"}
+)
+
+
+def assignment_stage_role(components: Any) -> str:
+    """Classify the assignment-bound role of a stage from its component set.
+
+    The role is determined by the inclusive endpoints of the stage range:
+
+    - "entry" when the stage owns input_embedding (regardless of other
+      components). It is the only role that may accept token_ids.
+    - "final" when the stage owns final_norm or lm_head (with or
+      without the decoder).
+    - "intermediate" for purely decoder-only stages that pass hidden
+      states between caller hops.
+
+    Raises ValueError when any component is unknown or the component set is
+    empty.
+    """
+    if not isinstance(components, (set, frozenset, list, tuple)):
+        raise ValueError(
+            "assignment components must be a set-like of component names"
+        )
+    tokens = set(components)
+    if not tokens:
+        raise ValueError("assignment components must not be empty")
+    unknown = tokens - _ASSIGNMENT_STAGE_COMPONENTS
+    if unknown:
+        raise ValueError(
+            f"unknown assignment component(s): {", ".join(sorted(unknown))}"
+        )
+    if "input_embedding" in tokens:
+        return "entry"
+    if "final_norm" in tokens or "lm_head" in tokens:
+        return "final"
+    return "intermediate"
+
+
+def validate_assignment_stage_boundaries(
+    components: Any,
+    *,
+    start_layer: int,
+    end_layer_exclusive: int,
+    total_layers: int,
+) -> None:
+    """Validate component ownership against executable GPT-2 stage boundaries."""
+
+    assignment_stage_role(components)
+    tokens = set(components)
+    if "input_embedding" in tokens and start_layer != 0:
+        raise ValueError("input_embedding may only be assigned with the first layer")
+    if {"final_norm", "lm_head"}.intersection(tokens) and (
+        end_layer_exclusive != total_layers
+    ):
+        raise ValueError(
+            "final_norm and lm_head may only be assigned with the final layer"
+        )
