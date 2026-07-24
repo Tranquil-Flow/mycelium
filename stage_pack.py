@@ -33,6 +33,7 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
 _MAX_ASSIGNMENT_JSON_DEPTH = 64
+_MAX_EXACT_JSON_NODES = 65_536
 _DTYPE_BYTES = {
     "BOOL": 1,
     "U8": 1,
@@ -79,6 +80,10 @@ _PACK_FIELDS = frozenset(
 _VERIFICATION_CLAIM_BOUNDARY = (
     "assignment-bound stage-pack files, digests, strict Safetensors headers, "
     "and exact tensor coverage verified; layers not loaded or probed"
+)
+_STAGE_PACK_CLAIM_BOUNDARY = (
+    "assignment-derived local artifact pack; files and tensor coverage "
+    "not yet reverified, layers not loaded"
 )
 _VERIFICATION_SCHEMA: tuple[str, Any] = (
     "map",
@@ -359,14 +364,20 @@ def _snapshot_exact_json(
     *,
     diagnostic: str,
     max_depth: int | None = _MAX_ASSIGNMENT_JSON_DEPTH,
+    max_nodes: int | None = _MAX_EXACT_JSON_NODES,
 ) -> Any:
     """Return a detached exact-built-in JSON snapshot without custom callbacks."""
 
     active_containers: set[int] = set()
+    emitted_nodes = 0
 
     def snapshot(value: Any, depth: int) -> Any:
+        nonlocal emitted_nodes
         if max_depth is not None and depth > max_depth:
             raise ValueError(diagnostic)
+        if max_nodes is not None and emitted_nodes >= max_nodes:
+            raise ValueError(diagnostic)
+        emitted_nodes += 1
         value_type = type(value)
         if value_type is dict:
             identifier = id(value)
@@ -713,6 +724,8 @@ def _validate_pack_schema_and_fields(pack: Any) -> None:
     if set(pack) != _PACK_FIELDS:
         raise ValueError("stage pack fields do not match the v1 contract")
     _validate_pack_schema(pack)
+    if pack["claim_boundary"] != _STAGE_PACK_CLAIM_BOUNDARY:
+        raise ValueError("stage pack claim boundary is invalid")
 
 
 def _validate_collection_pack_schema(pack: Any) -> None:
@@ -724,6 +737,10 @@ def _validate_collection_pack_schema(pack: Any) -> None:
             type(pack) is dict
             and not any(type(key) is not str for key in pack)
             and set(pack) == _PACK_FIELDS
+            and not _matches_exact_schema(
+                pack["control_plane_binding"],
+                fields["control_plane_binding"],
+            )
             and all(
                 field == "control_plane_binding"
                 or _matches_exact_schema(pack[field], field_schema)
@@ -739,7 +756,9 @@ def _validate_collection_pack_schema(pack: Any) -> None:
 def _validate_pack_schema_before_assignment(pack: Any, assignment: Any) -> None:
     try:
         _validate_pack_schema_and_fields(pack)
-    except ValueError:
+    except ValueError as exc:
+        if str(exc) == "stage pack claim boundary is invalid":
+            raise
         canonicalize_stage_pack_assignment(assignment)
         raise
 
@@ -1196,10 +1215,7 @@ def compile_stage_pack(
             assignment.get("control_plane_binding")
         ),
         "route_ready": False,
-        "claim_boundary": (
-            "assignment-derived local artifact pack; files and tensor coverage "
-            "not yet reverified, layers not loaded"
-        ),
+        "claim_boundary": _STAGE_PACK_CLAIM_BOUNDARY,
     }
     pack["stage_pack_digest"] = stage_pack_digest_for(pack)
     return pack

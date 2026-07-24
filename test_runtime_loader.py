@@ -653,6 +653,63 @@ def _loader_nested_value(depth: int) -> Any:
     return value
 
 
+def _loader_shared_exact_json_dag(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = [value, value]
+    return value
+
+
+def test_loader_rejects_compact_shared_dag_before_downstream_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stage_pack
+
+    assignment, report, _ = _case(tmp_path)
+    assignment["extra"] = _loader_shared_exact_json_dag(18)
+    effects = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+        "verifier": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"shared DAG reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+    monkeypatch.setattr(stage_pack, "validate_stage_pack_evidence", reject("verifier"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert "RecursionError" not in str(raised.value)
+    assert "leaf" not in str(raised.value)
+    assert effects == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+        "verifier": 0,
+    }
+
+
 @pytest.mark.parametrize(
     "mutation",
     ("over-limit", "python-recursion", "cycle"),

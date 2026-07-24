@@ -905,6 +905,163 @@ def test_compiles_deterministic_assignment_local_packs_and_verifies_warm_artifac
     assert second == verification
 
 
+_CANONICAL_STAGE_PACK_CLAIM_BOUNDARY = (
+    "assignment-derived local artifact pack; files and tensor coverage "
+    "not yet reverified, layers not loaded"
+)
+
+
+@pytest.mark.parametrize(
+    "invalid_claim",
+    (
+        "files loaded and physically qualified; route challenge complete",
+        (
+            "assignment-derived local artifact pack; files and tensor coverage "
+            "not yet reverified, layers not loaded."
+        ),
+        1,
+    ),
+    ids=("physical-readiness-inflation", "close-text", "exact-json-scalar"),
+)
+def test_authenticated_pack_claim_boundary_is_exact_before_downstream_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_claim: Any,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    import runtime_loader as rl
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    effects = {
+        "identity": 0,
+        "open": 0,
+        "physical": 0,
+        "file": 0,
+        "loader_report": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"claim boundary reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(sp, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(sp, "_open_beneath", reject("open"))
+    monkeypatch.setattr(sp, "_read_safetensors_header", reject("physical"))
+    monkeypatch.setattr(sp, "_hash_handle", reject("file"))
+    monkeypatch.setattr(sp, "artifact_report_errors", reject("loader_report"))
+    monkeypatch.setattr(rl, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(rl, "_run_gpt2_probe", reject("probe"))
+
+    for surface in ("verify", "evidence", "adapter", "collection"):
+        manifest = copy.deepcopy(prepared.manifest)
+        assignments = copy.deepcopy(prepared.assignments)
+        packs = copy.deepcopy(prepared.stage_packs)
+        verification = copy.deepcopy(prepared.stage_pack_verifications[0])
+        pack = packs[0]
+        original = copy.deepcopy(pack)
+        pack["claim_boundary"] = invalid_claim
+        pack["stage_pack_digest"] = stage_pack_digest_for(pack)
+        verification["stage_pack_digest"] = pack["stage_pack_digest"]
+        verification["stage_pack_verification_digest"] = (
+            sp._verification_digest_for(verification)
+        )
+
+        assert {
+            field
+            for field in pack
+            if pack[field] != original[field]
+        } == {"claim_boundary", "stage_pack_digest"}
+        with pytest.raises(ValueError) as raised:
+            if surface == "verify":
+                verify_stage_pack(
+                    pack,
+                    assignment=assignments[0],
+                    manifest=manifest,
+                )
+            elif surface == "evidence":
+                sp.validate_stage_pack_evidence(
+                    pack,
+                    verification,
+                    assignment=assignments[0],
+                    manifest=manifest,
+                )
+            elif surface == "adapter":
+                artifact_report_for_loader(
+                    pack,
+                    verification,
+                    assignment=assignments[0],
+                    manifest=manifest,
+                )
+            else:
+                sp.verify_stage_pack_collection(
+                    packs,
+                    assignments=assignments,
+                    manifest=manifest,
+                )
+
+        assert str(raised.value) == "stage pack claim boundary is invalid"
+        assert effects == {
+            "identity": 0,
+            "open": 0,
+            "physical": 0,
+            "file": 0,
+            "loader_report": 0,
+            "tensor": 0,
+            "probe": 0,
+        }
+
+
+def test_canonical_pack_claim_boundary_and_route_not_ready_remain_accepted(
+    tmp_path: Path,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    pack = prepared.stage_packs[0]
+    verification = prepared.stage_pack_verifications[0]
+
+    assert sp._STAGE_PACK_CLAIM_BOUNDARY == _CANONICAL_STAGE_PACK_CLAIM_BOUNDARY
+    assert all(
+        candidate["claim_boundary"] == sp._STAGE_PACK_CLAIM_BOUNDARY
+        and candidate["route_ready"] is False
+        for candidate in prepared.stage_packs
+    )
+    assert verify_stage_pack(
+        pack,
+        assignment=prepared.assignments[0],
+        manifest=prepared.manifest,
+    ) == verification
+    assert sp.validate_stage_pack_evidence(
+        pack,
+        verification,
+        assignment=prepared.assignments[0],
+        manifest=prepared.manifest,
+    ) == (
+        pack["stage_pack_digest"],
+        verification["stage_pack_verification_digest"],
+    )
+    assert artifact_report_for_loader(
+        pack,
+        verification,
+        assignment=prepared.assignments[0],
+        manifest=prepared.manifest,
+    )["route_ready"] is False
+    assert sp.verify_stage_pack_collection(
+        prepared.stage_packs,
+        assignments=prepared.assignments,
+        manifest=prepared.manifest,
+    )["route_ready"] is False
+
+
 def test_zero_deployment_epoch_producer_output_compiles_and_verifies_direct_pack(
     tmp_path: Path,
 ) -> None:
@@ -2096,6 +2253,91 @@ def _nested_assignment_value(depth: int, leaf: Any) -> Any:
     for _ in range(depth):
         value = [value]
     return value
+
+
+def _shared_exact_json_dag(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = [value, value]
+    return value
+
+
+def test_exact_json_snapshot_enforces_small_node_budget_and_detaches_aliases() -> None:
+    diagnostic = "bounded exact JSON"
+
+    exact = sp._snapshot_exact_json(
+        [1, 2],
+        diagnostic=diagnostic,
+        max_nodes=3,
+    )
+    assert exact == [1, 2]
+    with pytest.raises(ValueError) as raised:
+        sp._snapshot_exact_json(
+            [1, 2, 3],
+            diagnostic=diagnostic,
+            max_nodes=3,
+        )
+    assert str(raised.value) == diagnostic
+
+    shared = {"values": [1, 2]}
+    source = [shared, shared]
+    snapshot = sp._snapshot_exact_json(
+        source,
+        diagnostic=diagnostic,
+        max_nodes=9,
+    )
+    assert snapshot == source
+    assert snapshot is not source
+    assert snapshot[0] is not shared
+    assert snapshot[0] is not snapshot[1]
+    assert snapshot[0]["values"] is not shared["values"]
+    shared["values"].append(3)
+    assert snapshot == [{"values": [1, 2]}, {"values": [1, 2]}]
+
+
+@pytest.mark.parametrize(
+    ("surface", "expected"),
+    (
+        ("canonicalizer", "stage pack assignment files are invalid"),
+        (
+            "digest",
+            "stage pack must contain finite JSON-compatible values",
+        ),
+    ),
+)
+def test_default_exact_json_node_budget_rejects_compact_shared_dag(
+    surface: str,
+    expected: str,
+) -> None:
+    dag = _shared_exact_json_dag(18)
+    assert sp._MAX_EXACT_JSON_NODES == 65_536
+    assert len({id(dag)}) == 1
+
+    with pytest.raises(ValueError) as raised:
+        if surface == "canonicalizer":
+            sp.canonicalize_stage_pack_assignment(
+                {
+                    "files": [
+                        {
+                            "path": "model.safetensors",
+                            "size_bytes": 1,
+                            "content_digest": "sha256:" + "a" * 64,
+                        }
+                    ],
+                    "extra": dag,
+                }
+            )
+        else:
+            stage_pack_digest_for(
+                {
+                    "nested": dag,
+                    "stage_pack_digest": "ignored",
+                }
+            )
+
+    assert str(raised.value) == expected
+    assert "RecursionError" not in str(raised.value)
+    assert "leaf" not in str(raised.value)
 
 
 def test_assignment_canonicalizer_accepts_maximum_bounded_depth() -> None:
@@ -4320,6 +4562,69 @@ def test_collection_rejects_hostile_values_before_callbacks_or_effects(
     assert "PRIVATE-" not in str(raised.value)
     assert calls == []
     assert effects == {"verify": 0, "file": 0, "physical": 0}
+
+
+@pytest.mark.parametrize(
+    ("placement", "expected"),
+    (
+        ("pack", "stage pack schema is invalid"),
+        ("assignment", "stage pack assignment files are invalid"),
+        ("manifest", "manifest component aliases are invalid"),
+    ),
+)
+def test_collection_rejects_compact_shared_dag_before_downstream_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    placement: str,
+    expected: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    dag = _shared_exact_json_dag(18)
+    if placement == "pack":
+        packs[1]["components"] = dag
+    elif placement == "assignment":
+        assignments[1]["extra"] = dag
+    else:
+        manifest["extra"] = dag
+    effects = {
+        "identity": 0,
+        "verifier": 0,
+        "file": 0,
+        "physical": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"shared DAG reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(sp, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(sp, "verify_stage_pack", reject("verifier"))
+    monkeypatch.setattr(sp, "_open_beneath", reject("file"))
+    monkeypatch.setattr(sp, "_read_safetensors_header", reject("physical"))
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+    assert str(raised.value) == expected
+    assert "RecursionError" not in str(raised.value)
+    assert "leaf" not in str(raised.value)
+    assert effects == {
+        "identity": 0,
+        "verifier": 0,
+        "file": 0,
+        "physical": 0,
+    }
 
 
 def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
