@@ -46,6 +46,22 @@ class _StrictIntCollision(int):
     pass
 
 
+class _AssignmentFileKey(str):
+    def __new__(cls, value: str) -> _AssignmentFileKey:
+        instance = super().__new__(cls, value)
+        instance.armed = False
+        instance.equality_calls = 0
+        return instance
+
+    def __eq__(self, other: object) -> bool:
+        self.equality_calls += 1
+        if self.armed:
+            raise RuntimeError("assignment file key equality was invoked")
+        return super().__eq__(other)
+
+    __hash__ = str.__hash__
+
+
 def _write_safetensors(path: Path, tensor_names: list[str]) -> None:
     header: dict[str, Any] = {}
     payload = bytearray()
@@ -407,6 +423,81 @@ def _rebind_assignment_file_evidence(
     _refresh_joint_evidence_digests(pack, verification)
 
 
+def _rewrite_assignment_file_path(
+    *,
+    assignment: dict[str, Any],
+    manifest: dict[str, Any],
+    pack: dict[str, Any],
+    verification: dict[str, Any],
+    report: dict[str, Any],
+    new_path: str,
+    loader_report: dict[str, Any] | None = None,
+) -> None:
+    assignment_record = assignment["files"][0]
+    old_path = assignment_record["path"]
+    assignment_record["path"] = new_path
+    for manifest_record in manifest["files"]:
+        if manifest_record["path"] == old_path:
+            manifest_record["path"] = new_path
+    for paths in (
+        *manifest["layer_files"].values(),
+        *manifest["component_files"].values(),
+    ):
+        paths[:] = [
+            new_path if path == old_path else path
+            for path in paths
+        ]
+    _refresh_manifest_digest(manifest)
+    manifest_digest = mm.manifest_digest_ref(manifest)
+
+    assignment["manifest_digest"] = manifest_digest
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+    report["assignment_id"] = assignment["assignment_id"]
+    report["manifest_digest"] = manifest_digest
+    for verified_file in report["verified_files"]:
+        if verified_file["path"] == old_path:
+            verified_file["path"] = new_path
+            verified_file["local_path"] = report[
+                "resolved_artifact_cache_root"
+            ]
+
+    pack["assignment_id"] = assignment["assignment_id"]
+    pack["manifest_digest"] = manifest_digest
+    for upstream in pack["upstream_files"]:
+        if upstream["path"] == old_path:
+            upstream["path"] = new_path
+    for artifact in pack["artifacts"]:
+        if artifact["upstream_path"] == old_path:
+            artifact["upstream_path"] = new_path
+            artifact["relative_path"] = new_path
+
+    verification["assignment_id"] = assignment["assignment_id"]
+    verification["manifest_digest"] = manifest_digest
+    for verified_file in verification["verified_files"]:
+        if verified_file["path"] == old_path:
+            verified_file["path"] = new_path
+            verified_file["relative_path"] = new_path
+    verification["tensor_file_map"] = {
+        tensor_key: new_path if path == old_path else path
+        for tensor_key, path in verification["tensor_file_map"].items()
+    }
+    _refresh_joint_evidence_digests(pack, verification)
+
+    if loader_report is not None:
+        loader_report["assignment_id"] = assignment["assignment_id"]
+        loader_report["manifest_digest"] = manifest_digest
+        for verified_file in loader_report["verified_files"]:
+            if verified_file["path"] == old_path:
+                verified_file["path"] = new_path
+        loader_report["stage_pack"] = copy.deepcopy(pack)
+        loader_report["stage_pack_manifest"] = copy.deepcopy(manifest)
+        loader_report["stage_pack_verification"] = copy.deepcopy(verification)
+        loader_report["stage_pack_digest"] = pack["stage_pack_digest"]
+        loader_report["stage_pack_verification_digest"] = verification[
+            "stage_pack_verification_digest"
+        ]
+
+
 def _mutate_assignment_files(
     assignment: dict[str, Any],
     collision: str,
@@ -468,12 +559,21 @@ def _exercise_assignment_file_boundary(
         return compile_stage_pack(assignment, manifest, report)
     if validation_path == "verify":
         return verify_stage_pack(pack, assignment=assignment, manifest=manifest)
-    return sp.validate_stage_pack_evidence(
-        pack,
-        verification,
-        assignment=assignment,
-        manifest=manifest,
-    )
+    if validation_path == "evidence":
+        return sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+    if validation_path == "adapter":
+        return artifact_report_for_loader(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+    raise AssertionError(f"unknown assignment file validation path: {validation_path}")
 
 
 def _assert_collection_error_is_value_free(
@@ -1360,6 +1460,161 @@ def test_authoritative_assignment_files_require_exact_canonical_schema(
             pack=pack,
             verification=verification,
         )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("path", "size_bytes", "content_digest"),
+)
+@pytest.mark.parametrize("armed", (False, True), ids=("benign", "armed"))
+@pytest.mark.parametrize(
+    "validation_path",
+    ("compile", "verify", "evidence", "adapter"),
+)
+def test_authoritative_assignment_file_keys_require_exact_builtin_strings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    validation_path: str,
+    armed: bool,
+    field: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    report = reports[1]
+    pack = compile_stage_pack(assignment, manifest, report)
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    record = assignment["files"][0]
+    value = record.pop(field)
+    key = _AssignmentFileKey(field)
+    record[key] = value
+    _rebind_assignment_file_evidence(
+        assignment,
+        pack,
+        verification,
+        report,
+    )
+    key.equality_calls = 0
+    key.armed = armed
+    file_accesses: list[tuple[Any, ...]] = []
+
+    def reject_file_access(*args: Any, **kwargs: Any) -> Any:
+        file_accesses.append((*args, kwargs))
+        raise AssertionError("assignment validation reached file access")
+
+    monkeypatch.setattr(sp, "_open_beneath", reject_file_access)
+
+    with pytest.raises(ValueError) as raised:
+        _exercise_assignment_file_boundary(
+            validation_path,
+            assignment=assignment,
+            manifest=manifest,
+            report=report,
+            pack=pack,
+            verification=verification,
+        )
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+    assert key.equality_calls == 0
+    assert file_accesses == []
+
+
+@pytest.mark.parametrize(
+    "validation_path",
+    ("compile", "verify", "evidence", "adapter"),
+)
+def test_assignment_dot_path_is_rejected_before_file_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    validation_path: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    report = reports[1]
+    pack = compile_stage_pack(assignment, manifest, report)
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    _rewrite_assignment_file_path(
+        assignment=assignment,
+        manifest=manifest,
+        pack=pack,
+        verification=verification,
+        report=report,
+        new_path=".",
+    )
+    file_accesses: list[tuple[Any, ...]] = []
+
+    def reject_file_access(*args: Any, **kwargs: Any) -> Any:
+        file_accesses.append((*args, kwargs))
+        raise AssertionError("assignment validation reached file access")
+
+    monkeypatch.setattr(sp, "_open_beneath", reject_file_access)
+
+    with pytest.raises(ValueError) as raised:
+        _exercise_assignment_file_boundary(
+            validation_path,
+            assignment=assignment,
+            manifest=manifest,
+            report=report,
+            pack=pack,
+            verification=verification,
+        )
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+    assert file_accesses == []
+
+
+def test_direct_loader_rejects_assignment_dot_path_before_file_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    from runtime_loader import RuntimeLoadError, load_assignment_stage
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    assignment = copy.deepcopy(prepared.assignments[0])
+    manifest = copy.deepcopy(prepared.manifest)
+    pack = copy.deepcopy(prepared.stage_packs[0])
+    verification = copy.deepcopy(prepared.stage_pack_verifications[0])
+    loader_report = copy.deepcopy(prepared.reports[0])
+    _rewrite_assignment_file_path(
+        assignment=assignment,
+        manifest=manifest,
+        pack=pack,
+        verification=verification,
+        report=loader_report,
+        new_path=".",
+        loader_report=loader_report,
+    )
+    file_accesses: list[tuple[Any, ...]] = []
+
+    def reject_file_access(*args: Any, **kwargs: Any) -> Any:
+        file_accesses.append((*args, kwargs))
+        raise AssertionError("assignment validation reached file access")
+
+    monkeypatch.setattr(sp, "_open_beneath", reject_file_access)
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(
+            assignment,
+            loader_report,
+            load_generation=17,
+        )
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert file_accesses == []
 
 
 @pytest.mark.parametrize("validation_path", ("compile", "verify", "evidence"))

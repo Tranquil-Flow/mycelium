@@ -575,6 +575,7 @@ def _safe_relative_path(value: Any) -> PurePosixPath:
     path = PurePosixPath(value)
     if (
         path.is_absolute()
+        or not path.parts
         or len(path.parts) > 32
         or any(part in {"", ".", ".."} for part in path.parts)
         or str(path) != value
@@ -592,7 +593,12 @@ def _canonical_assignment_files(
         raise ValueError(diagnostic)
     normalized: list[dict[str, Any]] = []
     for record in files:
-        if type(record) is not dict or set(record) != _ASSIGNMENT_FILE_FIELDS:
+        if type(record) is not dict:
+            raise ValueError(diagnostic)
+        if (
+            any(type(key) is not str for key in record)
+            or set(record) != _ASSIGNMENT_FILE_FIELDS
+        ):
             raise ValueError(diagnostic)
         path = record["path"]
         size = record["size_bytes"]
