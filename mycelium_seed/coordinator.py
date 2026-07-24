@@ -186,6 +186,8 @@ class SeedCoordinator:
                 raise ValueError(f"{name} is invalid")
         if float(lease_seconds) > MAX_MESSAGE_TTL_SECONDS:
             raise ValueError("lease_seconds is invalid")
+        if float(message_ttl_seconds) > MAX_MESSAGE_TTL_SECONDS:
+            raise ValueError("message_ttl_seconds is invalid")
         self.seed_url = seed_url
         self.signer = signer
         self._invite_registry = invite_registry
@@ -279,6 +281,36 @@ class SeedCoordinator:
     def _now(self) -> float:
         return _now(self._clock())
 
+    @staticmethod
+    def _bounded_deadline(
+        *,
+        issued_at: float,
+        ttl_seconds: float,
+        previous_deadline: float | None = None,
+        reserve_headroom: bool = False,
+    ) -> float:
+        ceiling = issued_at + MAX_MESSAGE_TTL_SECONDS
+        requested = issued_at + ttl_seconds
+        if not math.isfinite(ceiling):
+            raise SeedCoordinatorError("seed_deadline_unavailable")
+        deadline = min(requested, ceiling)
+        if reserve_headroom and deadline >= ceiling:
+            deadline = math.nextafter(ceiling, -math.inf)
+        if previous_deadline is not None:
+            deadline = max(previous_deadline, deadline)
+            if deadline <= previous_deadline:
+                advanced = math.nextafter(previous_deadline, math.inf)
+                if not math.isfinite(advanced) or advanced > ceiling:
+                    raise SeedCoordinatorError("seed_deadline_unavailable")
+                deadline = advanced
+        if (
+            not math.isfinite(deadline)
+            or deadline <= issued_at
+            or deadline > ceiling
+        ):
+            raise SeedCoordinatorError("seed_deadline_unavailable")
+        return deadline
+
     def _new_message_id(self) -> str:
         message_id = _segment(self._id_source(), "message_id")
         if message_id in self._emitted_ids:
@@ -312,7 +344,10 @@ class SeedCoordinator:
             "seed_endpoint_id": self.signer.endpoint_id,
             "seed_url": self._require_seed_url(),
             "issued_at": now,
-            "expires_at": now + self._message_ttl_seconds,
+            "expires_at": self._bounded_deadline(
+                issued_at=now,
+                ttl_seconds=self._message_ttl_seconds,
+            ),
             **dict(fields),
         }
         return {
@@ -417,12 +452,11 @@ class SeedCoordinator:
                 raise SeedCoordinatorError("seed_node_endpoint_conflict")
 
             generation = 1 if previous is None else previous.generation + 1
-            lease_expires_at = now + self._lease_seconds
-            if self._lease_seconds == MAX_MESSAGE_TTL_SECONDS:
-                lease_expires_at = math.nextafter(
-                    lease_expires_at,
-                    -math.inf,
-                )
+            lease_expires_at = self._bounded_deadline(
+                issued_at=now,
+                ttl_seconds=self._lease_seconds,
+                reserve_headroom=True,
+            )
             endpoint = request["endpoint_addr"]
             member = _Member(
                 node_id=node_id,
@@ -452,7 +486,10 @@ class SeedCoordinator:
                 "incarnation": self.incarnation,
                 "generation": generation,
                 "issued_at": now,
-                "expires_at": now + self._message_ttl_seconds,
+                "expires_at": self._bounded_deadline(
+                    issued_at=now,
+                    ttl_seconds=self._message_ttl_seconds,
+                ),
                 "request_message_id": request["message_id"],
                 "accepted_node_id": node_id,
                 "accepted_incarnation": request["incarnation"],
@@ -934,15 +971,11 @@ class SeedCoordinator:
                 sequence = int(message["heartbeat_sequence"])
                 if sequence <= member.last_heartbeat_sequence:
                     raise SeedCoordinatorError("seed_heartbeat_sequence_stale")
-                renewed_until = max(
-                    member.lease_expires_at,
-                    now + self._lease_seconds,
+                renewed_until = self._bounded_deadline(
+                    issued_at=now,
+                    ttl_seconds=self._lease_seconds,
+                    previous_deadline=member.lease_expires_at,
                 )
-                if renewed_until <= member.lease_expires_at:
-                    renewed_until = math.nextafter(
-                        member.lease_expires_at,
-                        math.inf,
-                    )
                 renewal_message_id = _segment(self._id_source(), "message_id")
                 if renewal_message_id in self._emitted_ids:
                     raise SeedCoordinatorError("seed_message_id_reused")
@@ -986,6 +1019,7 @@ class SeedCoordinator:
                 try:
                     committed = self._state.commit_heartbeat_renewal(
                         request_envelope_digest=request_digest,
+                        heartbeat=envelope,
                         heartbeat_message_id=message["message_id"],
                         heartbeat_sequence=sequence,
                         heartbeat_expires_at=float(message["expires_at"]),
@@ -1059,20 +1093,14 @@ class SeedCoordinator:
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
             self._ensure_current_member(member)
-            envelope = member.latest_messages.get(LEASE_RENEWAL_PROTOCOL)
-            if (
-                envelope is None
-                or envelope.get("message", {}).get("heartbeat_message_id")
-                != heartbeat_message_id
-            ):
-                try:
-                    envelope = self._state.find_heartbeat_renewal(
-                        node_id=member.node_id,
-                        generation=member.generation,
-                        heartbeat_message_id=heartbeat_message_id,
-                    )
-                except SeedStateError as exc:
-                    raise SeedCoordinatorError(exc.code) from exc
+            try:
+                envelope = self._state.find_heartbeat_renewal(
+                    node_id=member.node_id,
+                    generation=member.generation,
+                    heartbeat_message_id=heartbeat_message_id,
+                )
+            except SeedStateError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
             if envelope is None:
                 raise SeedCoordinatorError("seed_lease_renewal_unknown")
             self._validate_committed_heartbeat_renewal(
@@ -1158,7 +1186,10 @@ class SeedCoordinator:
             if assignment_id in self._assignments:
                 raise SeedCoordinatorError("seed_assignment_exists")
             expires_at = min(
-                now + self._message_ttl_seconds,
+                self._bounded_deadline(
+                    issued_at=now,
+                    ttl_seconds=self._message_ttl_seconds,
+                ),
                 member.lease_expires_at,
                 *(peer.lease_expires_at for peer in peers),
             )

@@ -91,6 +91,7 @@ def test_schema_v1_migrates_directly_to_current_member_contract(tmp_path: Path) 
         "heartbeat_message_id",
         "request_envelope_digest",
         "heartbeat_sequence",
+        "heartbeat_json",
         "renewal_message_id",
         "renewal_json",
     }

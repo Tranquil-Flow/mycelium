@@ -6,6 +6,8 @@ from dataclasses import replace
 from itertools import count
 from pathlib import Path
 import hashlib
+import json
+import math
 import sqlite3
 import threading
 
@@ -48,6 +50,7 @@ def _coordinator(
     id_prefix: str = "seed-message",
     clock=lambda: NOW,
     lease_seconds: float = 300.0,
+    message_ttl_seconds: float = 60.0,
 ) -> SeedCoordinator:
     database = tmp_path / "seed-state" / "state.sqlite3"
     return SeedCoordinator(
@@ -65,6 +68,7 @@ def _coordinator(
         clock=clock,
         id_source=_ids(id_prefix),
         lease_seconds=lease_seconds,
+        message_ttl_seconds=message_ttl_seconds,
     )
 
 
@@ -376,6 +380,7 @@ def test_tampered_heartbeat_binding_fails_closed_on_every_recovery_path(
         elif recovery_path == "concurrent":
             state.commit_heartbeat_renewal(
                 request_envelope_digest=request_digest,
+                heartbeat=heartbeat,
                 heartbeat_message_id=heartbeat_id,
                 heartbeat_sequence=1,
                 heartbeat_expires_at=float(accepted["expires_at"]),
@@ -395,7 +400,395 @@ def test_tampered_heartbeat_binding_fails_closed_on_every_recovery_path(
                 node_id="node-a",
                 heartbeat_message_id=heartbeat_id,
             )
-    assert unavailable.value.code == "seed_state_unavailable"
+    assert unavailable.value.code == "seed_state_corrupt"
+
+
+_DURABLE_CORRUPTIONS = (
+    "digest_short",
+    "digest_nonhex",
+    "digest_different",
+    "row_sequence_bool_text",
+    "row_sequence_zero",
+    "row_sequence_later",
+    "heartbeat_malformed_json",
+    "heartbeat_noncanonical_json",
+    "heartbeat_nonfinite_json",
+    "heartbeat_bad_signature",
+    "heartbeat_changed_signed_field",
+    "heartbeat_bool_generation",
+    "heartbeat_bool_sequence",
+    "heartbeat_wrong_message_id",
+    "heartbeat_wrong_node",
+    "heartbeat_wrong_endpoint",
+    "heartbeat_wrong_incarnation",
+    "heartbeat_wrong_generation",
+    "heartbeat_wrong_recipient",
+    "renewal_row_message_id",
+    "renewal_wrong_message_id",
+    "renewal_wrong_heartbeat_id",
+    "renewal_wrong_generation",
+    "renewal_wrong_membership_generation",
+    "renewal_bool_generation",
+    "renewal_bool_membership_generation",
+    "renewal_wrong_member_incarnation",
+    "renewal_wrong_recipient",
+    "renewal_malformed_json",
+)
+
+
+def _canonical_text(value: object) -> str:
+    return canonical_json_bytes(value).decode("utf-8")
+
+
+def _mutate_durable_renewal(
+    database: Path,
+    *,
+    heartbeat_message_id: str,
+    corruption: str,
+) -> None:
+    with sqlite3.connect(database) as connection:
+        if corruption == "digest_short":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals "
+                "SET request_envelope_digest = 'abc' "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+        elif corruption == "digest_nonhex":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals "
+                "SET request_envelope_digest = ? "
+                "WHERE heartbeat_message_id = ?",
+                ("g" * 64, heartbeat_message_id),
+            )
+        elif corruption == "digest_different":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals "
+                "SET request_envelope_digest = ? "
+                "WHERE heartbeat_message_id = ?",
+                ("0" * 64, heartbeat_message_id),
+            )
+        elif corruption == "row_sequence_bool_text":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_sequence = 'true' "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+        elif corruption == "row_sequence_zero":
+            connection.execute("PRAGMA ignore_check_constraints = ON")
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_sequence = 0 "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+        elif corruption == "row_sequence_later":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_sequence = 2 "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+        elif corruption == "renewal_row_message_id":
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals "
+                "SET renewal_message_id = 'other-renewal' "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+        else:
+            row = connection.execute(
+                """
+                SELECT heartbeat_json, renewal_json
+                FROM seed_heartbeat_renewals
+                WHERE heartbeat_message_id = ?
+                """,
+                (heartbeat_message_id,),
+            ).fetchone()
+            assert row is not None
+            heartbeat = json.loads(row[0])
+            renewal = json.loads(row[1])
+
+        if corruption == "heartbeat_malformed_json":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = '{' "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+        elif corruption == "heartbeat_noncanonical_json":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (json.dumps(heartbeat, indent=2), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_nonfinite_json":
+            raw = _canonical_text(heartbeat).replace(
+                f'"issued_at":{heartbeat["message"]["issued_at"]}',
+                '"issued_at":NaN',
+            )
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (raw, heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_bad_signature":
+            heartbeat["signature"]["signature"] = "AAAA"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_changed_signed_field":
+            heartbeat["message"]["active_requests"] += 1
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_bool_generation":
+            heartbeat["message"]["generation"] = True
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_bool_sequence":
+            heartbeat["message"]["heartbeat_sequence"] = True
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_wrong_message_id":
+            heartbeat["message"]["message_id"] = "other-heartbeat"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_wrong_node":
+            heartbeat["message"]["sender_node_id"] = "other-node"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_wrong_endpoint":
+            heartbeat["message"]["sender_endpoint_id"] = "other-endpoint"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_wrong_incarnation":
+            heartbeat["message"]["incarnation"] = "other-incarnation"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_wrong_generation":
+            heartbeat["message"]["generation"] = 2
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "heartbeat_wrong_recipient":
+            heartbeat["message"]["recipient_node_id"] = "other-seed"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET heartbeat_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(heartbeat), heartbeat_message_id),
+            )
+        elif corruption == "renewal_wrong_message_id":
+            renewal["message"]["message_id"] = "other-renewal"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_wrong_heartbeat_id":
+            renewal["message"]["heartbeat_message_id"] = "other-heartbeat"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_wrong_generation":
+            renewal["message"]["generation"] = 2
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_wrong_membership_generation":
+            renewal["message"]["membership_generation"] = 2
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_bool_generation":
+            renewal["message"]["generation"] = True
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_bool_membership_generation":
+            renewal["message"]["membership_generation"] = True
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_wrong_member_incarnation":
+            renewal["message"]["member_incarnation"] = "other-incarnation"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_wrong_recipient":
+            renewal["message"]["recipient_node_id"] = "other-node"
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = ? "
+                "WHERE heartbeat_message_id = ?",
+                (_canonical_text(renewal), heartbeat_message_id),
+            )
+        elif corruption == "renewal_malformed_json":
+            connection.execute(
+                "UPDATE seed_heartbeat_renewals SET renewal_json = '[' "
+                "WHERE heartbeat_message_id = ?",
+                (heartbeat_message_id,),
+            )
+
+
+@pytest.mark.parametrize("corruption", _DURABLE_CORRUPTIONS)
+@pytest.mark.parametrize(
+    "recovery_path",
+    ("cache", "load", "find", "restart", "existing"),
+)
+def test_durable_heartbeat_corruption_matrix_fails_closed(
+    tmp_path: Path,
+    corruption: str,
+    recovery_path: str,
+) -> None:
+    signer = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    coordinator = _coordinator(tmp_path, signer=signer)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-corruption-matrix", now=NOW)
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert heartbeat is not None
+    accepted = coordinator.receive_member_message(
+        heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    heartbeat_id = accepted["message_id"]
+    renewal = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=heartbeat_id,
+    )
+    if corruption == "row_sequence_later":
+        heartbeat_two = node.heartbeat(
+            lifecycle_state="RUNNING",
+            active_requests=1,
+        )
+        assert heartbeat_two is not None
+        coordinator.receive_member_message(
+            heartbeat_two,
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )
+        coordinator.lease_renewal(
+            node_id="node-a",
+            heartbeat_message_id=heartbeat_id,
+        )
+    request_digest = hashlib.sha256(canonical_json_bytes(heartbeat)).hexdigest()
+    database = tmp_path / "seed-state" / "state.sqlite3"
+    _mutate_durable_renewal(
+        database,
+        heartbeat_message_id=heartbeat_id,
+        corruption=corruption,
+    )
+    state = SqliteSeedState(database)
+
+    with pytest.raises((SeedCoordinatorError, SeedStateError)) as failed:
+        if recovery_path == "cache":
+            coordinator.lease_renewal(
+                node_id="node-a",
+                heartbeat_message_id=heartbeat_id,
+            )
+        elif recovery_path == "load":
+            state.load_heartbeat_renewal(
+                node_id="node-a",
+                endpoint_id=node.signer.endpoint_id,
+                verification_key_digest=node.signer.verification_key_digest,
+                incarnation="incarnation-a",
+                generation=1,
+                heartbeat_message_id=heartbeat_id,
+                heartbeat_sequence=1,
+                request_envelope_digest=request_digest,
+            )
+        elif recovery_path == "find":
+            state.find_heartbeat_renewal(
+                node_id="node-a",
+                generation=1,
+                heartbeat_message_id=heartbeat_id,
+            )
+        elif recovery_path == "restart":
+            restarted = _coordinator(
+                tmp_path,
+                signer=signer,
+                id_prefix="seed-corruption-restart",
+            )
+            restarted.lease_renewal(
+                node_id="node-a",
+                heartbeat_message_id=heartbeat_id,
+            )
+        else:
+            assert recovery_path == "existing"
+            state.commit_heartbeat_renewal(
+                request_envelope_digest=request_digest,
+                heartbeat=heartbeat,
+                heartbeat_message_id=heartbeat_id,
+                heartbeat_sequence=1,
+                heartbeat_expires_at=float(accepted["expires_at"]),
+                renewal_message_id=renewal["message"]["message_id"],
+                member=state.load_members()[0],
+                renewal=renewal,
+                now=NOW,
+                capacity=16,
+            )
+    assert failed.value.code == "seed_state_corrupt"
+
+
+def test_valid_prior_heartbeat_remains_recoverable_after_later_sequence(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-prior-sequence", now=NOW)
+    heartbeat_one = node.heartbeat(lifecycle_state="CONFIGURED", active_requests=0)
+    heartbeat_two = node.heartbeat(lifecycle_state="RUNNING", active_requests=1)
+    assert heartbeat_one is not None
+    assert heartbeat_two is not None
+    coordinator.receive_member_message(
+        heartbeat_one,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    renewal_one = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=heartbeat_one["message"]["message_id"],
+    )
+    coordinator.receive_member_message(
+        heartbeat_two,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+
+    assert coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=heartbeat_one["message"]["message_id"],
+    ) == renewal_one
 
 
 def test_immediate_heartbeat_still_emits_a_strictly_advancing_renewal(
@@ -422,35 +815,102 @@ def test_immediate_heartbeat_still_emits_a_strictly_advancing_renewal(
     )["lease_expires_at"] == renewal["message"]["lease_expires_at"]
 
 
-def test_maximum_lease_reserves_strict_renewal_ttl_headroom(
+def test_exact_maximum_lease_is_accepted(
     tmp_path: Path,
 ) -> None:
-    maximum = _coordinator(
-        tmp_path / "equal",
+    """Exact MAX is valid per the membership contract (<= MAX)."""
+    _coordinator(
+        tmp_path,
         lease_seconds=MAX_MESSAGE_TTL_SECONDS,
     )
-    maximum_node = _node(tmp_path / "equal")
-    _join(maximum, maximum_node, nonce="invite-maximum", now=NOW)
-    initial_lease = maximum.member("node-a")["lease_expires_at"]
-    assert initial_lease < NOW + MAX_MESSAGE_TTL_SECONDS
-    maximum_heartbeat = maximum_node.heartbeat(
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("lease_seconds", True),
+        ("lease_seconds", math.inf),
+        ("lease_seconds", math.nan),
+        ("message_ttl_seconds", True),
+        ("message_ttl_seconds", math.inf),
+        ("message_ttl_seconds", math.nan),
+        (
+            "message_ttl_seconds",
+            math.nextafter(MAX_MESSAGE_TTL_SECONDS, math.inf),
+        ),
+    ],
+)
+def test_coordinator_ttl_boundaries_reject_nonfinite_bool_and_over_max(
+    tmp_path: Path,
+    field: str,
+    value: float,
+) -> None:
+    kwargs = {field: value}
+    with pytest.raises(ValueError, match=field + " is invalid"):
+        _coordinator(tmp_path, **kwargs)
+
+
+def test_message_ttl_exact_maximum_is_allowed(tmp_path: Path) -> None:
+    _coordinator(
+        tmp_path,
+        message_ttl_seconds=MAX_MESSAGE_TTL_SECONDS,
+    )
+
+
+def test_nextafter_max_lease_has_headroom_and_bounded_renewals(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    lease_seconds = math.nextafter(MAX_MESSAGE_TTL_SECONDS, -math.inf)
+    coordinator = _coordinator(
+        tmp_path,
+        clock=lambda: clock[0],
+        lease_seconds=lease_seconds,
+    )
+    node = _node(tmp_path, clock=lambda: clock[0])
+    _join(coordinator, node, nonce="invite-near-maximum", now=clock[0])
+    initial_lease = coordinator.member("node-a")["lease_expires_at"]
+    initial_ceiling = clock[0] + MAX_MESSAGE_TTL_SECONDS
+    assert initial_lease < initial_ceiling
+
+    heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    assert heartbeat is not None
+    accepted = coordinator.receive_member_message(
+        heartbeat,
+        expected_protocol=HEARTBEAT_PROTOCOL,
+    )
+    renewal = coordinator.lease_renewal(
+        node_id="node-a",
+        heartbeat_message_id=accepted["message_id"],
+    )
+    assert initial_lease < renewal["message"]["lease_expires_at"] <= initial_ceiling
+
+    node.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=accepted["message_id"],
+    )
+    clock[0] = math.nextafter(NOW + 1e-9, math.inf)
+    later_heartbeat = node.heartbeat(
         lifecycle_state="RUNNING",
         active_requests=0,
     )
-    assert maximum_heartbeat is not None
-    maximum_accepted = maximum.receive_member_message(
-        maximum_heartbeat,
+    assert later_heartbeat is not None
+    later_accepted = coordinator.receive_member_message(
+        later_heartbeat,
         expected_protocol=HEARTBEAT_PROTOCOL,
     )
-    maximum_renewal = maximum.lease_renewal(
+    later_renewal = coordinator.lease_renewal(
         node_id="node-a",
-        heartbeat_message_id=maximum_accepted["message_id"],
+        heartbeat_message_id=later_accepted["message_id"],
     )
-    assert maximum_renewal["message"]["lease_expires_at"] == (
-        NOW + MAX_MESSAGE_TTL_SECONDS
-    )
-    assert maximum_renewal["message"]["lease_expires_at"] > initial_lease
+    later_deadline = later_renewal["message"]["lease_expires_at"]
+    assert later_deadline > renewal["message"]["lease_expires_at"]
+    assert later_deadline <= clock[0] + MAX_MESSAGE_TTL_SECONDS
 
+
+def test_just_below_maximum_lease_still_strictly_advances(
+    tmp_path: Path,
+) -> None:
     just_below = MAX_MESSAGE_TTL_SECONDS - 1.0
     coordinator = _coordinator(
         tmp_path / "below",
