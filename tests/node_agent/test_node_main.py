@@ -755,7 +755,6 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
     canonical_codes = {
         400: {
             "invite_expired",
-            "invite_field_invalid",
             "invite_malformed",
             "invite_protocol_invalid",
             "join_request_protocol_required",
@@ -766,7 +765,6 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             "membership_fields_invalid",
             "membership_generation_invalid",
             "membership_identifier_invalid",
-            "membership_integer_invalid",
             "membership_join_generation_invalid",
             "membership_message_expired",
             "membership_message_from_future",
@@ -775,8 +773,6 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
             "membership_protocol_invalid",
             "membership_runtime_capability_invalid",
             "membership_runtime_capability_mismatch",
-            "membership_sender_endpoint_mismatch",
-            "membership_signer_endpoint_mismatch",
             "membership_text_invalid",
             "membership_time_invalid",
             "membership_ttl_invalid",
@@ -1717,7 +1713,6 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
     canonical_codes = {
         400: {
             "invite_expired",
-            "invite_field_invalid",
             "invite_malformed",
             "invite_protocol_invalid",
             "join_request_protocol_required",
@@ -1728,7 +1723,6 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
             "membership_fields_invalid",
             "membership_generation_invalid",
             "membership_identifier_invalid",
-            "membership_integer_invalid",
             "membership_join_generation_invalid",
             "membership_message_expired",
             "membership_message_from_future",
@@ -1737,8 +1731,6 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
             "membership_protocol_invalid",
             "membership_runtime_capability_invalid",
             "membership_runtime_capability_mismatch",
-            "membership_sender_endpoint_mismatch",
-            "membership_signer_endpoint_mismatch",
             "membership_text_invalid",
             "membership_time_invalid",
             "membership_ttl_invalid",
@@ -1868,6 +1860,10 @@ def test_join_route_uses_one_exact_immutable_error_status_vocabulary(
 
     assert int(authoritative["membership_key_pin_invalid"]) == 401
     for excluded in (
+        "invite_field_invalid",
+        "membership_integer_invalid",
+        "membership_sender_endpoint_mismatch",
+        "membership_signer_endpoint_mismatch",
         "membership_swarm_mismatch",
         "membership_key_pin_mismatch",
         "seed_join_invite_replayed",
@@ -2082,6 +2078,68 @@ def test_activation_liveness_shape_is_validated_before_every_side_effect(
         )
     assert str(caught.value) == "heartbeat activity shape is invalid"
     assert calls == []
+    assert session._heartbeat_sequence == 7
+    assert session._pending_liveness == pending
+    assert session._activity_receipts == receipts
+
+
+@pytest.mark.parametrize(
+    "invalid_source",
+    [
+        pytest.param([], id="list"),
+        pytest.param({}, id="dict"),
+        pytest.param(set(), id="set"),
+        pytest.param(
+            type("LivenessSource", (str,), {})("scheduled_heartbeat"),
+            id="str-subclass",
+        ),
+        pytest.param(None, id="none"),
+        pytest.param(0, id="integer"),
+        pytest.param(object(), id="object"),
+    ],
+)
+def test_liveness_source_requires_exact_str_before_every_side_effect(
+    invalid_source: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    membership = importlib.import_module("mycelium_node.membership")
+    events: list[str] = []
+    pending = {"pending": ("scheduled_heartbeat", 200.0)}
+    receipts = {"sha256:" + "b" * 64: 200.0}
+
+    class ObservedMap(dict[Any, Any]):
+        def items(self) -> Any:
+            events.append("maps")
+            return super().items()
+
+    session = membership.NodeMembershipSession.__new__(
+        membership.NodeMembershipSession
+    )
+    session._pending_liveness = ObservedMap(pending)
+    session._activity_receipts = ObservedMap(receipts)
+    session._heartbeat_sequence = 7
+    session._now = lambda: events.append("clock") or 100.0
+    session._post_join_common = (
+        lambda _protocol: events.append("message-id")
+        or {"message_id": "new-message", "expires_at": 200.0}
+    )
+    session.signer = object()
+
+    def sign_message(**kwargs: Any) -> dict[str, Any]:
+        events.append("signer")
+        return {"message": kwargs["message"]}
+
+    monkeypatch.setattr(membership, "sign_membership_message", sign_message)
+    with pytest.raises(ValueError) as caught:
+        session._emit_liveness(
+            lifecycle_state="RUNNING",
+            active_requests=2,
+            liveness_source=invalid_source,
+            activity_receipt_digest=None,
+            activity_peer_node_id=None,
+        )
+    assert str(caught.value) == "heartbeat liveness source is invalid"
+    assert events == []
     assert session._heartbeat_sequence == 7
     assert session._pending_liveness == pending
     assert session._activity_receipts == receipts

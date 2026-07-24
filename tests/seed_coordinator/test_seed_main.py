@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 from typing import Any
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 import pytest
@@ -992,6 +993,7 @@ def test_seed_server_base_url_maps_wildcards_to_loopback_only(
             self.seed_url = url
 
     monkeypatch.setattr(seed_http, "ThreadingHTTPServer", FakeHTTPServer)
+    monkeypatch.setattr(seed_http, "_IPv6ThreadingHTTPServer", FakeHTTPServer)
     cases = (
         (
             "0.0.0.0",
@@ -1030,4 +1032,128 @@ def test_seed_server_base_url_maps_wildcards_to_loopback_only(
         assert server._server.server_address == (host, 8765)
         assert server.base_url == expected_base_url
         assert coordinator.seed_url == expected_bound_url
+        server.close()
+
+
+@pytest.mark.parametrize(
+    ("host", "family"),
+    [
+        pytest.param("127.0.0.1", socket.AF_INET, id="ipv4-control"),
+        pytest.param("::1", socket.AF_INET6, id="ipv6-loopback"),
+        pytest.param("::", socket.AF_INET6, id="ipv6-wildcard"),
+    ],
+)
+def test_seed_server_real_bind_selects_literal_address_family(
+    host: str,
+    family: socket.AddressFamily,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as probe:
+            probe.bind((host, 0))
+            port = int(probe.getsockname()[1])
+    except OSError as exc:
+        if family == socket.AF_INET6:
+            pytest.skip(f"local IPv6 bind is unavailable: errno={exc.errno}")
+        raise
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.seed_url: str | None = None
+
+        def bind_seed_url(self, url: str) -> None:
+            self.seed_url = url
+
+    coordinator = FakeCoordinator()
+    advertised_url = f"http://[::1]:{port}" if host == "::" else None
+    server = seed_http.SeedHTTPServer(
+        coordinator,
+        host=host,
+        port=port,
+        advertised_url=advertised_url,
+    )
+    try:
+        assert server._server.address_family == family
+        assert server._server.server_address[0] == host
+        assert server._server.server_address[1] == port
+        expected_base_host = "::1" if host == "::" else host
+        assert urlsplit(server.base_url).hostname == expected_base_host
+        assert urlsplit(server.base_url).port == port
+        assert coordinator.seed_url == (advertised_url or server.base_url)
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize(
+    ("host", "family", "advertised_url", "expected_base_host"),
+    [
+        pytest.param(
+            "127.0.0.1",
+            socket.AF_INET,
+            "http://127.0.0.1:45678",
+            "127.0.0.1",
+            id="ipv4-concrete",
+        ),
+        pytest.param(
+            "0.0.0.0",
+            socket.AF_INET,
+            "http://seed-v4.test:45678",
+            "127.0.0.1",
+            id="ipv4-wildcard",
+        ),
+        pytest.param(
+            "::1",
+            socket.AF_INET6,
+            "http://[::1]:45678",
+            "::1",
+            id="ipv6-concrete",
+        ),
+        pytest.param(
+            "::",
+            socket.AF_INET6,
+            "http://seed-v6.test:45678",
+            "::1",
+            id="ipv6-wildcard",
+        ),
+    ],
+)
+def test_seed_server_port_zero_keeps_local_and_advertised_ports_distinct(
+    host: str,
+    family: socket.AddressFamily,
+    advertised_url: str,
+    expected_base_host: str,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    if family == socket.AF_INET6:
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.bind((host, 0))
+        except OSError as exc:
+            pytest.skip(f"local IPv6 bind is unavailable: errno={exc.errno}")
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.seed_url: str | None = None
+
+        def bind_seed_url(self, url: str) -> None:
+            self.seed_url = url
+
+    coordinator = FakeCoordinator()
+    server = seed_http.SeedHTTPServer(
+        coordinator,
+        host=host,
+        port=0,
+        advertised_url=advertised_url,
+    )
+    try:
+        bound_port = int(server._server.server_address[1])
+        parsed_base = urlsplit(server.base_url)
+        assert bound_port > 0
+        assert parsed_base.hostname == expected_base_host
+        assert parsed_base.port == bound_port
+        assert coordinator.seed_url == advertised_url
+        assert urlsplit(coordinator.seed_url).port == 45678
+    finally:
         server.close()

@@ -10,6 +10,7 @@ import ipaddress
 import json
 import math
 import re
+import socket
 import threading
 import time
 from types import MappingProxyType
@@ -58,7 +59,6 @@ _SERVER_CLOSE_SECONDS = 5.0
 JOIN_ROUTE_ERROR_STATUSES: Mapping[str, int] = MappingProxyType(
     {
         "invite_expired": HTTPStatus.BAD_REQUEST,
-        "invite_field_invalid": HTTPStatus.BAD_REQUEST,
         "invite_malformed": HTTPStatus.BAD_REQUEST,
         "invite_protocol_invalid": HTTPStatus.BAD_REQUEST,
         "invite_replayed": HTTPStatus.CONFLICT,
@@ -71,7 +71,6 @@ JOIN_ROUTE_ERROR_STATUSES: Mapping[str, int] = MappingProxyType(
         "membership_fields_invalid": HTTPStatus.BAD_REQUEST,
         "membership_generation_invalid": HTTPStatus.BAD_REQUEST,
         "membership_identifier_invalid": HTTPStatus.BAD_REQUEST,
-        "membership_integer_invalid": HTTPStatus.BAD_REQUEST,
         "membership_join_generation_invalid": HTTPStatus.BAD_REQUEST,
         "membership_key_pin_invalid": HTTPStatus.UNAUTHORIZED,
         "membership_message_expired": HTTPStatus.BAD_REQUEST,
@@ -81,9 +80,7 @@ JOIN_ROUTE_ERROR_STATUSES: Mapping[str, int] = MappingProxyType(
         "membership_protocol_invalid": HTTPStatus.BAD_REQUEST,
         "membership_runtime_capability_invalid": HTTPStatus.BAD_REQUEST,
         "membership_runtime_capability_mismatch": HTTPStatus.BAD_REQUEST,
-        "membership_sender_endpoint_mismatch": HTTPStatus.BAD_REQUEST,
         "membership_signature_invalid": HTTPStatus.UNAUTHORIZED,
-        "membership_signer_endpoint_mismatch": HTTPStatus.BAD_REQUEST,
         "membership_text_invalid": HTTPStatus.BAD_REQUEST,
         "membership_time_invalid": HTTPStatus.BAD_REQUEST,
         "membership_ttl_invalid": HTTPStatus.BAD_REQUEST,
@@ -96,6 +93,10 @@ JOIN_ROUTE_ERROR_STATUSES: Mapping[str, int] = MappingProxyType(
         "seed_node_key_conflict": HTTPStatus.CONFLICT,
     }
 )
+
+
+class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
 
 
 def _validate_bind_address(host: str, port: int) -> tuple[str, int]:
@@ -441,7 +442,7 @@ class SeedHTTPServer:
         port: int,
         advertised_url: str | None = None,
     ) -> None:
-        host, port = _validate_bind_address(host, port)
+        host, requested_port = _validate_bind_address(host, port)
         if host in {"0.0.0.0", "::"} and advertised_url is None:
             raise ValueError("advertised_url is required for wildcard binds")
         if advertised_url is not None:
@@ -449,9 +450,17 @@ class SeedHTTPServer:
                 advertised_url,
                 expected_scheme="http",
                 expected_host=None if host in {"0.0.0.0", "::"} else host,
-                expected_port=None if port == 0 else port,
+                expected_port=None if requested_port == 0 else requested_port,
             )
-        self._server = ThreadingHTTPServer((host, port), _SeedRequestHandler)
+        server_class = (
+            _IPv6ThreadingHTTPServer
+            if host != "localhost" and ipaddress.ip_address(host).version == 6
+            else ThreadingHTTPServer
+        )
+        self._server = server_class(
+            (host, requested_port),
+            _SeedRequestHandler,
+        )
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server.timeout = 0.05
@@ -476,7 +485,9 @@ class SeedHTTPServer:
                     expected_host=(
                         None if host in {"0.0.0.0", "::"} else str(bound_host)
                     ),
-                    expected_port=int(bound_port),
+                    expected_port=(
+                        None if requested_port == 0 else int(bound_port)
+                    ),
                 )
             )
             coordinator.bind_seed_url(bound_url)

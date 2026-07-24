@@ -93,7 +93,10 @@ def validate_heartbeat_shape(
         raise ValueError("heartbeat active requests is invalid")
     if route_ready is not False:
         raise ValueError("heartbeat route readiness is invalid")
-    if liveness_source not in {"scheduled_heartbeat", "activation_receipt"}:
+    if (
+        type(liveness_source) is not str
+        or liveness_source not in {"scheduled_heartbeat", "activation_receipt"}
+    ):
         raise ValueError("heartbeat liveness source is invalid")
     if liveness_source == "scheduled_heartbeat":
         valid_activity = (
