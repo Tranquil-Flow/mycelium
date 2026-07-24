@@ -32,6 +32,7 @@ _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
+_MAX_ASSIGNMENT_JSON_DEPTH = 64
 _DTYPE_BYTES = {
     "BOOL": 1,
     "U8": 1,
@@ -588,7 +589,15 @@ def _matches_exact_schema(value: Any, schema: Any) -> bool:
         return type(value) is schema
     kind = schema[0]
     if kind == "any":
-        return True
+        value_type = type(value)
+        if value_type is float:
+            return math.isfinite(value)
+        return (
+            value_type is str
+            or value_type is int
+            or value_type is bool
+            or value is None
+        )
     if kind == "map":
         fields = schema[1]
         if type(value) is not dict:
@@ -636,6 +645,22 @@ def _validate_pack_schema(pack: Any) -> None:
         _PACK_SCHEMA,
         diagnostic="stage pack schema is invalid",
     )
+
+
+def _validate_pack_schema_and_fields(pack: Any) -> None:
+    if type(pack) is not dict or any(type(key) is not str for key in pack):
+        raise ValueError("stage pack schema is invalid")
+    if set(pack) != _PACK_FIELDS:
+        raise ValueError("stage pack fields do not match the v1 contract")
+    _validate_pack_schema(pack)
+
+
+def _validate_pack_schema_before_assignment(pack: Any, assignment: Any) -> None:
+    try:
+        _validate_pack_schema_and_fields(pack)
+    except ValueError:
+        canonicalize_stage_pack_assignment(assignment)
+        raise
 
 
 def _validate_verification_schema(verification: Any) -> None:
@@ -777,19 +802,60 @@ def _canonical_assignment_files(
 def canonicalize_stage_pack_assignment(
     assignment: Any,
 ) -> dict[str, Any]:
-    """Snapshot an assignment after exact stage-pack file-key validation."""
+    """Return a bounded, detached exact-JSON assignment snapshot."""
 
     diagnostic = "stage pack assignment files are invalid"
-    if (
-        type(assignment) is not dict
-        or any(type(key) is not str for key in assignment)
-    ):
+
+    active_containers: set[int] = set()
+
+    def snapshot_json(value: Any, depth: int) -> Any:
+        if depth > _MAX_ASSIGNMENT_JSON_DEPTH:
+            raise ValueError(diagnostic)
+        value_type = type(value)
+        if value_type is dict:
+            identifier = id(value)
+            if identifier in active_containers:
+                raise ValueError(diagnostic)
+            active_containers.add(identifier)
+            try:
+                result: dict[str, Any] = {}
+                for key, item in dict.items(value):
+                    if type(key) is not str:
+                        raise ValueError(diagnostic)
+                    result[key] = snapshot_json(item, depth + 1)
+                return result
+            finally:
+                active_containers.remove(identifier)
+        if value_type is list:
+            identifier = id(value)
+            if identifier in active_containers:
+                raise ValueError(diagnostic)
+            active_containers.add(identifier)
+            try:
+                return [
+                    snapshot_json(item, depth + 1)
+                    for item in list.__iter__(value)
+                ]
+            finally:
+                active_containers.remove(identifier)
+        if value_type is float:
+            if not math.isfinite(value):
+                raise ValueError(diagnostic)
+            return value
+        if (
+            value_type is str
+            or value_type is int
+            or value_type is bool
+            or value is None
+        ):
+            return value
         raise ValueError(diagnostic)
+
+    snapshot = snapshot_json(assignment, 0)
     files = _canonical_assignment_files(
-        assignment.get("files"),
+        snapshot.get("files"),
         diagnostic=diagnostic,
     )
-    snapshot = copy.deepcopy(assignment)
     snapshot["files"] = files
     return snapshot
 
@@ -1100,11 +1166,7 @@ def compile_stage_pack(
 
 
 def _validate_pack_shape(pack: dict[str, Any]) -> list[dict[str, Any]]:
-    if type(pack) is not dict or any(type(key) is not str for key in pack):
-        raise ValueError("stage pack schema is invalid")
-    if set(pack) != _PACK_FIELDS:
-        raise ValueError("stage pack fields do not match the v1 contract")
-    _validate_pack_schema(pack)
+    _validate_pack_schema_and_fields(pack)
     if pack.get("protocol") != STAGE_PACK_PROTOCOL:
         raise ValueError("unsupported stage pack protocol")
     if pack.get("route_ready") is not False:
@@ -1444,6 +1506,7 @@ def verify_stage_pack(
         raise ValueError("assignment must be an object")
     if not isinstance(manifest, dict):
         raise ValueError("manifest must be an object")
+    _validate_pack_schema_before_assignment(pack, assignment)
     assignment_files = _validate_authoritative_assignment(assignment, manifest)
     upstream_files = _validate_pack_shape(pack)
     _validate_against_assignment(
@@ -1627,6 +1690,9 @@ def verify_stage_pack_collection(
     packs = entry_snapshot["packs"]
     assignments = entry_snapshot["assignments"]
     manifest = entry_snapshot["manifest"]
+
+    for assignment in assignments:
+        _canonical_optional_control_plane_binding(assignment)
 
     pack_verifications = [
         verify_stage_pack(
@@ -1983,6 +2049,7 @@ def validate_stage_pack_evidence(
 ) -> tuple[str, str]:
     """Validate canonical pack evidence and physically reproduce its verification."""
 
+    _validate_pack_schema_before_assignment(pack, assignment)
     assignment_files = _validate_authoritative_assignment(assignment, manifest)
     _validate_verification_evidence(
         pack,

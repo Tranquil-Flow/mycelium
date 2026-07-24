@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import shutil
 import struct
@@ -44,6 +45,159 @@ class _StrictStrCollision(str):
 
 class _StrictIntCollision(int):
     pass
+
+
+class _DeepcopyBomb:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-assignment-deepcopy")
+
+
+class _ArmedStr(str):
+    def __new__(cls, value: str, calls: list[str]) -> _ArmedStr:
+        instance = super().__new__(cls, value)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-armed-scalar")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    def __ne__(self, other: object) -> bool:
+        return self._trip("ne")
+
+    def __str__(self) -> str:
+        return self._trip("str")
+
+    def __bool__(self) -> bool:
+        return self._trip("bool")
+
+    __hash__ = str.__hash__
+
+
+class _ArmedInt(int):
+    def __new__(cls, value: int, calls: list[str]) -> _ArmedInt:
+        instance = super().__new__(cls, value)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-armed-scalar")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    def __ne__(self, other: object) -> bool:
+        return self._trip("ne")
+
+    def __int__(self) -> int:
+        return self._trip("int")
+
+    def __float__(self) -> float:
+        return self._trip("float")
+
+    def __bool__(self) -> bool:
+        return self._trip("bool")
+
+    __hash__ = int.__hash__
+
+
+class _ArmedFloat(float):
+    def __new__(cls, value: float, calls: list[str]) -> _ArmedFloat:
+        instance = super().__new__(cls, value)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-armed-scalar")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    def __ne__(self, other: object) -> bool:
+        return self._trip("ne")
+
+    def __int__(self) -> int:
+        return self._trip("int")
+
+    def __float__(self) -> float:
+        return self._trip("float")
+
+    def __bool__(self) -> bool:
+        return self._trip("bool")
+
+    __hash__ = float.__hash__
+
+
+class _ArmedDict(dict[Any, Any]):
+    def __init__(self, value: dict[Any, Any], calls: list[str]) -> None:
+        super().__init__(value)
+        self.calls = calls
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-armed-container")
+
+    def __iter__(self) -> Any:
+        self.calls.append("iter")
+        raise RuntimeError("PRIVATE-armed-container")
+
+    def items(self) -> Any:
+        self.calls.append("items")
+        raise RuntimeError("PRIVATE-armed-container")
+
+
+class _ArmedList(list[Any]):
+    def __init__(self, value: list[Any], calls: list[str]) -> None:
+        super().__init__(value)
+        self.calls = calls
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-armed-container")
+
+    def __iter__(self) -> Any:
+        self.calls.append("iter")
+        raise RuntimeError("PRIVATE-armed-container")
+
+
+class _BoolLike:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-bool-like")
+
+    def __bool__(self) -> bool:
+        self.calls.append("bool")
+        raise RuntimeError("PRIVATE-bool-like")
 
 
 class _AssignmentFileKey(str):
@@ -1738,6 +1892,9 @@ def test_assignment_canonicalizer_returns_plain_epoch_zero_snapshot(
 ) -> None:
     _, assignments, _, _ = _case(tmp_path, deployment_epoch=0)
     assignment = assignments[1]
+    assignment["extra_json"] = {
+        "list": [1, 1.5, True, None, {"text": "plain"}],
+    }
 
     snapshot = sp.canonicalize_stage_pack_assignment(assignment)
 
@@ -1751,6 +1908,186 @@ def test_assignment_canonicalizer_returns_plain_epoch_zero_snapshot(
         and all(type(key) is str for key in record)
         for record in snapshot["files"]
     )
+    assert type(snapshot["extra_json"]["list"][0]) is int
+    assert type(snapshot["extra_json"]["list"][1]) is float
+    assert type(snapshot["extra_json"]["list"][2]) is bool
+    assignment["range"]["start_layer"] = 99
+    assignment["components"].append("mutated")
+    assignment["extra_json"]["list"][4]["text"] = "mutated"
+    assert snapshot["range"]["start_layer"] != 99
+    assert "mutated" not in snapshot["components"]
+    assert snapshot["extra_json"]["list"][4]["text"] == "plain"
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "components",
+        "runtime",
+        "component_aliases",
+        "control_plane_binding",
+        "claim_boundary",
+        "extra",
+    ),
+)
+def test_assignment_canonicalizer_rejects_deepcopy_callbacks_value_free(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    _, assignments, _, _ = _case(tmp_path)
+    assignment = assignments[1]
+    calls: list[str] = []
+    assignment[field] = _DeepcopyBomb(calls)
+
+    with pytest.raises(ValueError) as raised:
+        sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+    assert "PRIVATE-" not in str(raised.value)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "collision",
+    (
+        "dict-subclass",
+        "list-subclass",
+        "str-subclass",
+        "int-subclass",
+        "float-subclass",
+        "bool-like",
+        "tuple",
+        "set",
+        "bytes",
+        "custom",
+    ),
+)
+def test_assignment_canonicalizer_rejects_non_exact_json_before_callbacks(
+    tmp_path: Path,
+    collision: str,
+) -> None:
+    _, assignments, _, _ = _case(tmp_path)
+    assignment = assignments[1]
+    calls: list[str] = []
+    if collision == "dict-subclass":
+        assignment["range"] = _ArmedDict(assignment["range"], calls)
+    elif collision == "list-subclass":
+        assignment["components"] = _ArmedList(assignment["components"], calls)
+    elif collision == "str-subclass":
+        assignment["components"][0] = _ArmedStr(
+            assignment["components"][0],
+            calls,
+        )
+    elif collision == "int-subclass":
+        assignment["range"]["start_layer"] = _ArmedInt(1, calls)
+    elif collision == "float-subclass":
+        assignment["extra"] = {"value": _ArmedFloat(1.5, calls)}
+    elif collision == "bool-like":
+        assignment["route_ready"] = _BoolLike(calls)
+    elif collision == "tuple":
+        assignment["extra"] = ("not", "json")
+    elif collision == "set":
+        assignment["extra"] = {"not-json"}
+    elif collision == "bytes":
+        assignment["extra"] = b"not-json"
+    else:
+        assignment["extra"] = _DeepcopyBomb(calls)
+
+    with pytest.raises(ValueError) as raised:
+        sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+    assert calls == []
+
+
+def _nested_assignment_value(depth: int, leaf: Any) -> Any:
+    value = leaf
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+def test_assignment_canonicalizer_accepts_maximum_bounded_depth() -> None:
+    maximum_depth = 64
+    assignment = {
+        "files": [
+            {
+                "path": "model.safetensors",
+                "size_bytes": 1,
+                "content_digest": "sha256:" + "a" * 64,
+            }
+        ],
+        "extra": _nested_assignment_value(maximum_depth - 1, "leaf"),
+    }
+
+    snapshot = sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert snapshot == assignment
+    assert snapshot is not assignment
+
+
+@pytest.mark.parametrize("depth", (64, 2000), ids=("over-limit", "python-recursion"))
+def test_assignment_canonicalizer_rejects_excess_nesting_without_callbacks(
+    depth: int,
+) -> None:
+    calls: list[str] = []
+    assignment = {
+        "files": [
+            {
+                "path": "model.safetensors",
+                "size_bytes": 1,
+                "content_digest": "sha256:" + "a" * 64,
+            }
+        ],
+        "extra": _nested_assignment_value(depth, _DeepcopyBomb(calls)),
+    }
+
+    with pytest.raises(ValueError) as raised:
+        sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+    assert calls == []
+
+
+def test_assignment_canonicalizer_rejects_cycles_value_free() -> None:
+    cycle: list[Any] = []
+    cycle.append(cycle)
+    assignment = {
+        "files": [
+            {
+                "path": "model.safetensors",
+                "size_bytes": 1,
+                "content_digest": "sha256:" + "a" * 64,
+            }
+        ],
+        "extra": cycle,
+    }
+
+    with pytest.raises(ValueError) as raised:
+        sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_assignment_canonicalizer_rejects_nonfinite_exact_floats(
+    value: float,
+) -> None:
+    assignment = {
+        "files": [
+            {
+                "path": "model.safetensors",
+                "size_bytes": 1,
+                "content_digest": "sha256:" + "a" * 64,
+            }
+        ],
+        "extra": value,
+    }
+
+    with pytest.raises(ValueError) as raised:
+        sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
 
 
 @pytest.mark.parametrize("validation_path", ("compile", "verify", "evidence"))
@@ -2217,6 +2554,190 @@ def test_recursive_schema_keys_are_exact_before_comparison_or_file_access(
     assert str(raised.value) == expected
     assert key.equality_calls == 0
     assert file_accesses == []
+
+
+_ARMED_PACK_SCALAR_LEAVES = (
+    "protocol",
+    "digest",
+    "epoch",
+    "route-ready",
+    "range",
+    "list-item",
+    "map-of-value",
+    "upstream-file",
+    "artifact",
+    "runtime",
+    "model-config",
+    "control-binding",
+    "claim-boundary",
+)
+
+
+def _arm_pack_scalar_leaf(
+    pack: dict[str, Any],
+    leaf: str,
+    calls: list[str],
+) -> None:
+    if leaf == "protocol":
+        pack["protocol"] = _ArmedStr(pack["protocol"], calls)
+    elif leaf == "digest":
+        pack["stage_pack_digest"] = _ArmedStr(
+            pack["stage_pack_digest"],
+            calls,
+        )
+    elif leaf == "epoch":
+        pack["deployment_epoch"] = _ArmedInt(pack["deployment_epoch"], calls)
+    elif leaf == "route-ready":
+        pack["route_ready"] = _ArmedInt(0, calls)
+    elif leaf == "range":
+        pack["range"]["start_layer"] = _ArmedInt(
+            pack["range"]["start_layer"],
+            calls,
+        )
+    elif leaf == "list-item":
+        pack["components"][0] = _ArmedStr(pack["components"][0], calls)
+    elif leaf == "map-of-value":
+        pack["component_aliases"]["armed-source"] = _ArmedStr(
+            "armed-target",
+            calls,
+        )
+    elif leaf == "upstream-file":
+        pack["upstream_files"][0]["path"] = _ArmedStr(
+            pack["upstream_files"][0]["path"],
+            calls,
+        )
+    elif leaf == "artifact":
+        pack["artifacts"][0]["size_bytes"] = _ArmedInt(
+            pack["artifacts"][0]["size_bytes"],
+            calls,
+        )
+    elif leaf == "runtime":
+        pack["runtime"]["backend"] = _ArmedStr(
+            pack["runtime"]["backend"],
+            calls,
+        )
+    elif leaf == "model-config":
+        pack["runtime"]["model_config"]["n_layer"] = _ArmedInt(
+            pack["runtime"]["model_config"]["n_layer"],
+            calls,
+        )
+    elif leaf == "control-binding":
+        pack["control_plane_binding"]["protocol"] = _ArmedStr(
+            pack["control_plane_binding"]["protocol"],
+            calls,
+        )
+    else:
+        pack["claim_boundary"] = _ArmedStr(pack["claim_boundary"], calls)
+
+
+@pytest.mark.parametrize("leaf", _ARMED_PACK_SCALAR_LEAVES)
+@pytest.mark.parametrize("validation_path", ("verify", "evidence", "adapter"))
+def test_pack_any_schema_rejects_armed_scalars_before_entry_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    validation_path: str,
+    leaf: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    if leaf in {"model-config", "control-binding"}:
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            runtime=_mlx_runtime() if leaf == "model-config" else _UNCHANGED,
+            control_plane_binding=(
+                _control_plane_binding()
+                if leaf == "control-binding"
+                else _UNCHANGED
+            ),
+        )
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    calls: list[str] = []
+    _arm_pack_scalar_leaf(pack, leaf, calls)
+
+    entry_calls = {
+        "assignment": 0,
+        "file": 0,
+        "physical_verifier": 0,
+    }
+
+    def reject_assignment(*args: Any, **kwargs: Any) -> Any:
+        entry_calls["assignment"] += 1
+        raise AssertionError("pack schema validation reached assignment semantics")
+
+    def reject_file(*args: Any, **kwargs: Any) -> Any:
+        entry_calls["file"] += 1
+        raise AssertionError("pack schema validation reached file access")
+
+    def reject_physical_verifier(*args: Any, **kwargs: Any) -> Any:
+        entry_calls["physical_verifier"] += 1
+        raise AssertionError("pack schema validation reached physical verifier")
+
+    monkeypatch.setattr(sp, "_validate_authoritative_assignment", reject_assignment)
+    monkeypatch.setattr(sp, "_open_beneath", reject_file)
+    if validation_path != "verify":
+        monkeypatch.setattr(sp, "verify_stage_pack", reject_physical_verifier)
+
+    with pytest.raises(ValueError) as raised:
+        _exercise_assignment_file_boundary(
+            validation_path,
+            assignment=assignment,
+            manifest=manifest,
+            report=reports[1],
+            pack=pack,
+            verification=verification,
+        )
+
+    assert str(raised.value) == "stage pack schema is invalid"
+    assert "PRIVATE-" not in str(raised.value)
+    assert calls == []
+    assert entry_calls == {
+        "assignment": 0,
+        "file": 0,
+        "physical_verifier": 0,
+    }
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_pack_any_schema_rejects_nonfinite_exact_floats(
+    tmp_path: Path,
+    value: float,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    _rebind_assignment_pack(assignment, pack, runtime=_mlx_runtime())
+    pack["runtime"]["model_config"]["layer_norm_epsilon"] = value
+
+    with pytest.raises(ValueError) as raised:
+        verify_stage_pack(pack, assignment=assignment, manifest=manifest)
+
+    assert str(raised.value) == "stage pack schema is invalid"
+
+
+def test_pack_any_schema_accepts_finite_float_and_bool_is_not_int(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    _rebind_assignment_pack(assignment, pack, runtime=_mlx_runtime())
+
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    assert math.isfinite(pack["runtime"]["model_config"]["layer_norm_epsilon"])
+    assert verification["deployment_epoch"] == 7
+    assert sp._matches_exact_schema(True, sp._ANY_SCHEMA)
+    assert not sp._matches_exact_schema(True, int)
 
 
 @pytest.mark.parametrize(

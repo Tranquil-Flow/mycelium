@@ -43,6 +43,46 @@ LAYER_SUFFIXES = (
 )
 
 
+class _LoaderDeepcopyBomb:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-direct-loader")
+
+
+class _LoaderArmedStr(str):
+    def __new__(cls, value: str, calls: list[str]) -> _LoaderArmedStr:
+        instance = super().__new__(cls, value)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-scalar")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    def __ne__(self, other: object) -> bool:
+        return self._trip("ne")
+
+    def __str__(self) -> str:
+        return self._trip("str")
+
+    def __bool__(self) -> bool:
+        return self._trip("bool")
+
+    __hash__ = str.__hash__
+
+
 def _values(
     shape: tuple[int, ...], *, offset: int = 0, scale: float = 0.01
 ) -> mx.array:
@@ -416,6 +456,159 @@ def test_loads_explicit_unnamespaced_gpt2_tensor_layout(tmp_path: Path) -> None:
 def test_canonical_json_rejects_nonfinite_numbers() -> None:
     with pytest.raises(ValueError, match="JSON compliant"):
         canonical_json({"invalid": float("nan")})
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "components",
+        "runtime",
+        "component_aliases",
+        "control_plane_binding",
+        "claim_boundary",
+        "extra",
+    ),
+)
+def test_loader_rejects_assignment_deepcopy_callbacks_before_entry_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    assignment, report, _ = _case(tmp_path)
+    calls: list[str] = []
+    assignment[field] = _LoaderDeepcopyBomb(calls)
+    downstream = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            downstream[name] += 1
+            raise AssertionError(f"assignment snapshot reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert "PRIVATE-" not in str(raised.value)
+    assert calls == []
+    assert downstream == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+
+def test_loader_rejects_armed_assignment_protocol_before_comparison_or_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assignment, report, _ = _case(tmp_path)
+    calls: list[str] = []
+    assignment["protocol"] = _LoaderArmedStr(assignment["protocol"], calls)
+    downstream = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            downstream[name] += 1
+            raise AssertionError(f"assignment snapshot reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert calls == []
+    assert downstream == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+        "tensor": 0,
+        "probe": 0,
+    }
+
+
+def _loader_nested_value(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("over-limit", "python-recursion", "cycle"),
+)
+def test_loader_rejects_excess_or_cyclic_assignment_values_stably(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    assignment, report, _ = _case(tmp_path)
+    if mutation == "cycle":
+        cycle: list[Any] = []
+        cycle.append(cycle)
+        assignment["extra"] = cycle
+    else:
+        assignment["extra"] = _loader_nested_value(
+            64 if mutation == "over-limit" else 2000
+        )
+    effects = {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"assignment snapshot reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(assignment, report, load_generation=1)
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert effects == {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
 
 
 @pytest.mark.parametrize(
