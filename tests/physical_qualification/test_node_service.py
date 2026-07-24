@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -91,6 +92,9 @@ class _NodeClient:
         self.run_id = run_id
         self.deployment_id = deployment_id
         self.next_id = 1
+        self.socket_path = socket_root / "i.sock"
+        self._streams_closed = False
+        self._stop_complete = False
         self.process = subprocess.Popen(
             [
                 "python3.14",
@@ -116,7 +120,16 @@ class _NodeClient:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
+        self.process_group_id = os.getpgid(self.process.pid)
+        self.session_id = os.getsid(self.process.pid)
+        if (
+            self.process_group_id != self.process.pid
+            or self.session_id != self.process.pid
+            or self.process_group_id == os.getpgrp()
+        ):
+            raise RuntimeError("node_client_process_group_identity_invalid")
 
     def raw_command(
         self, name: str, payload: dict[str, Any] | None = None
@@ -154,15 +167,119 @@ class _NodeClient:
         return response["result"]
 
     def stop(self) -> None:
-        if self.process.poll() is None:
+        if self._stop_complete:
+            return
+        try:
+            if self.process.poll() is None:
+                try:
+                    self.command("stop")
+                except BaseException:
+                    pass
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+            if self._owned_process_group_exists():
+                self._signal_owned_process_group(signal.SIGTERM)
+                if not self._wait_for_owned_process_group_exit(timeout=2):
+                    self._signal_owned_process_group(signal.SIGKILL)
+                    if not self._wait_for_owned_process_group_exit(timeout=2):
+                        raise RuntimeError(
+                            "node_client_process_group_shutdown_timeout"
+                        )
+            if self.process.poll() is None:
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired as error:
+                    raise RuntimeError(
+                        "node_client_wrapper_reap_timeout"
+                    ) from error
             try:
-                self.command("stop")
-            except (AssertionError, BrokenPipeError):
-                self.process.kill()
-            self.process.wait(timeout=10)
+                self.socket_path.unlink(missing_ok=True)
+            except OSError as error:
+                raise RuntimeError("node_client_socket_cleanup_failed") from error
+            if os.path.lexists(self.socket_path):
+                raise RuntimeError("node_client_socket_cleanup_failed")
+            if self._owned_process_group_exists():
+                raise RuntimeError("node_client_process_group_shutdown_timeout")
+            self._stop_complete = True
+        finally:
+            self._close_streams()
+
+    def _validate_owned_process_group(self) -> None:
+        if (
+            self.process_group_id != self.process.pid
+            or self.session_id != self.process.pid
+            or self.process_group_id == os.getpgrp()
+        ):
+            raise RuntimeError("node_client_process_group_identity_invalid")
+
+    def _owned_process_group_exists(self) -> bool:
+        self._validate_owned_process_group()
+        self.process.poll()
+        try:
+            os.killpg(self.process_group_id, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError as error:
+            raise RuntimeError(
+                "node_client_process_group_identity_unverifiable"
+            ) from error
+        except OSError as error:
+            raise RuntimeError(
+                "node_client_process_group_identity_unverifiable"
+            ) from error
+        return True
+
+    def _signal_owned_process_group(self, group_signal: signal.Signals) -> None:
+        self._validate_owned_process_group()
+        try:
+            os.killpg(self.process_group_id, group_signal)
+        except ProcessLookupError:
+            pass
+        except OSError as error:
+            raise RuntimeError("node_client_process_group_signal_failed") from error
+
+    def _wait_for_owned_process_group_exit(self, *, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while self._owned_process_group_exists():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(0.02, remaining))
+        return True
+
+    def _close_streams(self) -> None:
+        if self._streams_closed:
+            return
         for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
             if stream is not None and not stream.closed:
                 stream.close()
+        self._streams_closed = True
+
+
+def _process_group_members(process_group_id: int) -> tuple[tuple[int, str], ...]:
+    inventory = subprocess.run(
+        ["ps", "-axo", "pid=,pgid=,command="],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    members: list[tuple[int, str]] = []
+    for line in inventory.splitlines():
+        fields = line.strip().split(maxsplit=2)
+        if len(fields) < 2:
+            continue
+        try:
+            process_id = int(fields[0])
+            candidate_group = int(fields[1])
+        except ValueError:
+            continue
+        if candidate_group == process_group_id:
+            members.append(
+                (process_id, fields[2] if len(fields) == 3 else "")
+            )
+    return tuple(members)
 
 
 def _configure_and_start_pair(
@@ -536,10 +653,33 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
 
         old_first_endpoint = configured["node-a"]["endpoint_addr"]["id"]
         old_second_endpoint = configured["node-b"]["endpoint_addr"]["id"]
+        disconnected_wrapper_id = second.process.pid
+        disconnected_group_id = second.process_group_id
+        disconnected_socket = socket_base / "b" / "i.sock"
+        group_before_disconnect = _process_group_members(disconnected_group_id)
+        assert second.session_id == disconnected_group_id == disconnected_wrapper_id
+        assert disconnected_socket.is_socket()
+        assert disconnected_wrapper_id in {
+            process_id for process_id, _command_line in group_before_disconnect
+        }
+        assert len(group_before_disconnect) >= 2
         second.process.kill()
         second.process.wait(timeout=10)
         disconnected_returncode = second.process.returncode
+        group_after_wrapper_exit = _process_group_members(disconnected_group_id)
+        assert disconnected_wrapper_id not in {
+            process_id for process_id, _command_line in group_after_wrapper_exit
+        }
+        assert group_after_wrapper_exit
         second.stop()
+        group_after_stop = _process_group_members(disconnected_group_id)
+        assert group_after_stop == (), (
+            disconnected_group_id,
+            group_before_disconnect,
+            group_after_wrapper_exit,
+            group_after_stop,
+        )
+        assert not disconnected_socket.exists()
         disconnected_request_id = str(uuid.uuid4())
         disconnected = first.raw_command(
             "infer_start",

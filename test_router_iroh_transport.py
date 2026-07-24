@@ -16,6 +16,7 @@ import pytest
 
 from mycelium_iroh_sidecar import ProtocolError, SidecarClient
 from mycelium_iroh_sidecar import client as sidecar_client_module
+import mycelium_router.transports.iroh as iroh_module
 from mycelium_router.contracts import TokenEvent
 from mycelium_router.transports.iroh import (
     PROCESS_LIFETIME_LIMITATION,
@@ -343,6 +344,295 @@ def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> Non
             == _delivery_receipt_digest(receipt)
         )
     assert all(len(entry.encode()) <= 512 for entry in trace)
+
+
+def test_close_waits_for_confirmed_remote_receipt_trace_commit() -> None:
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=0.5)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    confirmed = threading.Event()
+    release = threading.Event()
+    original_send = transport.send_router_frame
+    send_errors: list[BaseException] = []
+    close_errors: list[BaseException] = []
+
+    def paused_send(*args, **kwargs):
+        receipt = original_send(*args, **kwargs)
+        confirmed.set()
+        assert release.wait(timeout=2)
+        return receipt
+
+    def send() -> None:
+        try:
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    def close() -> None:
+        try:
+            transport.close()
+        except BaseException as error:
+            close_errors.append(error)
+
+    transport.send_router_frame = paused_send
+    send_thread = threading.Thread(target=send)
+    close_thread = threading.Thread(target=close)
+    try:
+        send_thread.start()
+        assert confirmed.wait(timeout=1)
+        assert transport.outbound_trace == ()
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 1
+        close_thread.start()
+        time.sleep(0.05)
+        close_returned_before_commit = not close_thread.is_alive()
+        trace_before_release = transport.outbound_trace
+    finally:
+        release.set()
+        send_thread.join(timeout=2)
+        close_thread.join(timeout=2)
+        if close_thread.is_alive():
+            transport.close()
+
+    assert not send_thread.is_alive()
+    assert not close_thread.is_alive()
+    assert close_returned_before_commit is False
+    assert trace_before_release == ()
+    assert not send_errors
+    assert not close_errors
+    with transport._state_lock:
+        assert transport._inflight_receipt_trace_commits == 0
+    assert len(transport.outbound_trace) == 2
+    closed_trace = transport.outbound_trace
+    time.sleep(0.02)
+    assert transport.outbound_trace == closed_trace
+
+
+def test_close_timeout_is_stable_and_repeated_close_waits_for_trace_commit() -> None:
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=0.05)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    confirmed = threading.Event()
+    release = threading.Event()
+    original_send = transport.send_router_frame
+    send_errors: list[BaseException] = []
+
+    def paused_send(*args, **kwargs):
+        receipt = original_send(*args, **kwargs)
+        confirmed.set()
+        assert release.wait(timeout=2)
+        return receipt
+
+    def send() -> None:
+        try:
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    transport.send_router_frame = paused_send
+    thread = threading.Thread(target=send)
+    thread.start()
+    try:
+        assert confirmed.wait(timeout=1)
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 1
+        with pytest.raises(
+            IrohTransportError,
+            match=r"^receipt_trace_commit_shutdown_timeout$",
+        ) as raised:
+            transport.close()
+        assert raised.value.code == "receipt_trace_commit_shutdown_timeout"
+        assert raised.value.detail == ""
+        assert transport.outbound_trace == ()
+    finally:
+        release.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert not send_errors
+    with transport._state_lock:
+        assert transport._inflight_receipt_trace_commits == 0
+    assert len(transport.outbound_trace) == 2
+    transport.close()
+    closed_trace = transport.outbound_trace
+    time.sleep(0.02)
+    assert transport.outbound_trace == closed_trace
+
+
+def test_remote_trace_builder_preflight_failure_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    original_builder = iroh_module._bounded_trace_identity
+
+    def fail_delivery_identity(
+        message,
+        *,
+        max_bytes=iroh_module._TRACE_ENTRY_BYTES,
+        delivery_message_id=None,
+    ):
+        if delivery_message_id is not None:
+            raise IrohTransportError("trace_identity_budget_exhausted")
+        return original_builder(
+            message,
+            max_bytes=max_bytes,
+            delivery_message_id=delivery_message_id,
+        )
+
+    monkeypatch.setattr(
+        iroh_module,
+        "_bounded_trace_identity",
+        fail_delivery_identity,
+    )
+    try:
+        with pytest.raises(
+            IrohTransportError,
+            match=r"^trace_identity_budget_exhausted$",
+        ):
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        assert hub.sent == []
+        assert transport.outbound_trace == ()
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 0
+    finally:
+        transport.close()
+
+
+def test_remote_receipt_trace_oversize_is_rejected_before_send() -> None:
+    oversized_endpoint_id = "peer-endpoint-" + "x" * 600
+    hub = _Hub()
+    transport = _transport(hub)
+    transport._peer = PeerBinding(
+        node_id="peer-node",
+        endpoint_id=oversized_endpoint_id,
+        endpoint_addr={
+            "id": oversized_endpoint_id,
+            "addrs": ["127.0.0.1:1"],
+        },
+        generation=7,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    try:
+        with pytest.raises(
+            IrohTransportError,
+            match=r"^delivery_receipt_trace_too_large$",
+        ):
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        assert hub.sent == []
+        assert transport.outbound_trace == ()
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 0
+    finally:
+        transport.close()
+
+
+def test_local_trace_append_rechecks_running_after_builder_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = _Hub()
+    router = _RecordingRouter()
+    transport = _transport(hub)
+    transport.bind_router(router)
+    transport.start()
+    transport._entry_nodes["request-1"] = "local-node"
+    builder_entered = threading.Event()
+    release_builder = threading.Event()
+    original_builder = iroh_module._bounded_trace_identity
+    send_errors: list[BaseException] = []
+
+    def paused_builder(
+        message,
+        *,
+        max_bytes=iroh_module._TRACE_ENTRY_BYTES,
+        delivery_message_id=None,
+    ):
+        if delivery_message_id is None:
+            builder_entered.set()
+            assert release_builder.wait(timeout=2)
+        return original_builder(
+            message,
+            max_bytes=max_bytes,
+            delivery_message_id=delivery_message_id,
+        )
+
+    def send() -> None:
+        try:
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    monkeypatch.setattr(iroh_module, "_bounded_trace_identity", paused_builder)
+    thread = threading.Thread(target=send)
+    thread.start()
+    try:
+        assert builder_entered.wait(timeout=1)
+        transport.close()
+        assert transport.outbound_trace == ()
+    finally:
+        release_builder.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert len(send_errors) == 1
+    assert isinstance(send_errors[0], IrohTransportError)
+    assert send_errors[0].code == "transport_closed"
+    assert transport.outbound_trace == ()
+    assert router.token_events == []
 
 
 def test_trace_identity_omits_overlong_public_fields_without_leaking_them() -> None:

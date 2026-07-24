@@ -333,6 +333,7 @@ class IrohTransport:
       self._cancellation_slots = threading.BoundedSemaphore(queue_capacity)
       self._manifest_delta_capacity = queue_capacity
       self._state_lock = threading.RLock()
+      self._receipt_trace_condition = threading.Condition(self._state_lock)
       self._lifecycle_lock = threading.Lock()
       self._rotation_lock = threading.Lock()
       self._router: Any | None = None
@@ -356,6 +357,7 @@ class IrohTransport:
       self._inflight_received: dict[bytes, bytes] = {}
       self._dispatcher_phase = "idle"
       self._outbound_trace: deque[str] = deque(maxlen=256)
+      self._inflight_receipt_trace_commits = 0
       self._remote_frames_sent = 0
       self._remote_frames_received = 0
       self._router_frames_dispatched = 0
@@ -550,10 +552,13 @@ class IrohTransport:
       frame: bytes,
       *,
       destination_node_id: str,
+      _trace_peer_binding: PeerBinding | None = None,
    ) -> DeliveryReceipt:
       with self._state_lock:
          self._require_running()
          peer = self._peer
+         if _trace_peer_binding is not None and peer != _trace_peer_binding:
+            raise IrohTransportError("peer_rotated")
       if destination_node_id != peer.node_id:
          raise IrohTransportError("destination_binding_mismatch")
       try:
@@ -574,6 +579,8 @@ class IrohTransport:
          with self._state_lock:
             self._require_running()
             peer = self._peer
+            if _trace_peer_binding is not None and peer != _trace_peer_binding:
+               raise IrohTransportError("peer_rotated")
             if destination_node_id != peer.node_id:
                raise IrohTransportError("destination_binding_mismatch")
             pending = _PendingSend(peer.generation)
@@ -1327,18 +1334,54 @@ class IrohTransport:
          if len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES:
             raise IrohTransportError("trace_entry_too_large")
          with self._state_lock:
+            self._require_running()
             self._outbound_trace.append(trace)
          self._dispatch(decoded, source_node_id=self.node_id)
          return
-      receipt = self.send_router_frame(
-         frame,
-         destination_node_id=destination,
-      )
+
+      with self._receipt_trace_condition:
+         self._require_running()
+         trace_peer = self._peer
+         self._inflight_receipt_trace_commits += 1
+      try:
+         placeholder_receipt = DeliveryReceipt(
+            message_id=b"\0" * 16,
+            peer_endpoint_id=trace_peer.endpoint_id,
+            peer_generation=trace_peer.generation,
+         )
+         self._remote_trace_entries(
+            decoded.message,
+            trace_prefix,
+            placeholder_receipt,
+         )
+         receipt = self.send_router_frame(
+            frame,
+            destination_node_id=destination,
+            _trace_peer_binding=trace_peer,
+         )
+         trace, receipt_trace = self._remote_trace_entries(
+            decoded.message,
+            trace_prefix,
+            receipt,
+         )
+         with self._state_lock:
+            self._outbound_trace.extend((trace, receipt_trace))
+      finally:
+         with self._receipt_trace_condition:
+            self._inflight_receipt_trace_commits -= 1
+            self._receipt_trace_condition.notify_all()
+
+   @staticmethod
+   def _remote_trace_entries(
+      message: object,
+      trace_prefix: str,
+      receipt: DeliveryReceipt,
+   ) -> tuple[str, str]:
       identity_budget = _TRACE_ENTRY_BYTES - len(
          trace_prefix.encode("utf-8")
       )
       trace = trace_prefix + _bounded_trace_identity(
-         decoded.message,
+         message,
          max_bytes=identity_budget,
          delivery_message_id=receipt.message_id,
       )
@@ -1354,8 +1397,7 @@ class IrohTransport:
          or len(receipt_trace.encode("utf-8")) > _TRACE_ENTRY_BYTES
       ):
          raise IrohTransportError("trace_entry_too_large")
-      with self._state_lock:
-         self._outbound_trace.extend((trace, receipt_trace))
+      return trace, receipt_trace
 
    def _entry_node(self, request_id: str) -> str:
       node_id = self._entry_nodes.get(request_id)
@@ -1449,6 +1491,17 @@ class IrohTransport:
             client.close()
          except BaseException:
             pass
+      receipt_trace_deadline = (
+         time.monotonic() + self.delivery_timeout_seconds
+      )
+      with self._receipt_trace_condition:
+         while self._inflight_receipt_trace_commits:
+            remaining = receipt_trace_deadline - time.monotonic()
+            if remaining <= 0:
+               raise IrohTransportError(
+                  "receipt_trace_commit_shutdown_timeout"
+               )
+            self._receipt_trace_condition.wait(remaining)
       if thread is not None and thread is not threading.current_thread():
          thread.join(timeout=max(1.0, self.poll_interval_seconds * 4))
          if thread.is_alive():
