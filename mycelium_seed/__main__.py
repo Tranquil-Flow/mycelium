@@ -44,6 +44,31 @@ class _EntrypointFailure(RuntimeError):
         super().__init__(code)
 
 
+def _aggregate_cleanup_failures(
+    failure: _EntrypointFailure | None,
+    phases: Sequence[str],
+) -> _EntrypointFailure:
+    if failure is None:
+        failure = _EntrypointFailure(
+            "seed_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
+    prior_phases = tuple(getattr(failure, "_cleanup_phases", ()))
+    all_phases = (*prior_phases, *phases)
+    failure._cleanup_phases = all_phases
+    retained_notes = [
+        note
+        for note in getattr(failure, "__notes__", ())
+        if not note.startswith(("cleanup_phase=", "cleanup_failure_count="))
+    ]
+    cleanup_notes = [
+        *(f"cleanup_phase={phase}" for phase in all_phases),
+        f"cleanup_failure_count={len(all_phases)}",
+    ]
+    failure.__notes__ = [*retained_notes, *cleanup_notes]
+    return failure
+
+
 class _SafeArgumentParser(argparse.ArgumentParser):
     def error(self, _message: str) -> NoReturn:
         self.exit(EXIT_PREFLIGHT_FAILURE, "seed_preflight_failed\n")
@@ -93,13 +118,11 @@ def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
         if args.bind in {"0.0.0.0", "::"} and args.advertised_url is None:
             raise ValueError("advertised URL is required for wildcard binds")
         if args.advertised_url is not None:
-            if args.port == 0:
-                raise ValueError("advertised URL requires a fixed port")
             _validate_endpoint_url(
                 args.advertised_url,
                 expected_scheme="http",
                 expected_host=(None if args.bind in {"0.0.0.0", "::"} else args.bind),
-                expected_port=args.port,
+                expected_port=None if args.port == 0 else args.port,
             )
         state_root = private_directory_lease(
             args.data_dir,
@@ -107,16 +130,19 @@ def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
         )
         return state_root
     except Exception as exc:
-        failure = exc
+        failure = _EntrypointFailure(
+            "seed_preflight_failed",
+            EXIT_PREFLIGHT_FAILURE,
+        )
+        cleanup_phases: list[str] = []
         if state_root is not None:
             try:
                 state_root.close()
-            except Exception as close_exc:
-                failure = close_exc
-        raise _EntrypointFailure(
-            "seed_preflight_failed",
-            EXIT_PREFLIGHT_FAILURE,
-        ) from failure
+            except Exception:
+                cleanup_phases.append("state_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise failure from exc
 
 
 def _run_bound(
@@ -185,22 +211,19 @@ def _run_bound(
             EXIT_RUNTIME_FAILURE,
         )
     finally:
+        cleanup_phases = []
         if server is not None:
             try:
                 server.close()
             except Exception:
-                failure = _EntrypointFailure(
-                    "seed_runtime_failed",
-                    EXIT_RUNTIME_FAILURE,
-                )
+                cleanup_phases.append("server")
         for signum in reversed(tuple(previous)):
             try:
                 signal.signal(signum, previous[signum])
             except Exception:
-                failure = _EntrypointFailure(
-                    "seed_runtime_failed",
-                    EXIT_RUNTIME_FAILURE,
-                )
+                cleanup_phases.append("signal_restoration")
+        if cleanup_phases:
+            failure = _aggregate_cleanup_failures(failure, cleanup_phases)
     if failure is not None:
         raise failure from None
     return EXIT_SUCCESS
@@ -209,6 +232,8 @@ def _run_bound(
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     state_root = _preflight(args)
+    failure: _EntrypointFailure | None = None
+    result = EXIT_SUCCESS
     try:
         if args.dry_run:
             _emit_status(
@@ -218,11 +243,27 @@ def run(argv: Sequence[str] | None = None) -> int:
                     "route_ready": False,
                 }
             )
-            return EXIT_SUCCESS
-        with state_root.working_directory():
-            return _run_bound(args, state_root)
+        else:
+            with state_root.working_directory():
+                result = _run_bound(args, state_root)
+    except _EntrypointFailure as exc:
+        failure = exc
+    except Exception:
+        failure = _EntrypointFailure(
+            "seed_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
     finally:
-        state_root.close()
+        try:
+            state_root.close()
+        except Exception:
+            failure = _aggregate_cleanup_failures(
+                failure,
+                ("state_root",),
+            )
+    if failure is not None:
+        raise failure from None
+    return result
 
 
 def main() -> None:

@@ -1157,3 +1157,178 @@ def test_seed_server_port_zero_keeps_local_and_advertised_ports_distinct(
         assert urlsplit(coordinator.seed_url).port == 45678
     finally:
         server.close()
+
+
+def test_seed_cleanup_aggregation_preserves_primary_and_is_value_free() -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    primary = seed_main._EntrypointFailure("seed_preflight_failed", 2)
+    phases = ("server", "signal_restoration", "state_root")
+
+    aggregated = seed_main._aggregate_cleanup_failures(primary, phases)
+    assert aggregated is primary
+    assert (aggregated.code, aggregated.exit_status) == (
+        "seed_preflight_failed",
+        2,
+    )
+    assert getattr(aggregated, "__notes__", ()) == [
+        "cleanup_phase=server",
+        "cleanup_phase=signal_restoration",
+        "cleanup_phase=state_root",
+        "cleanup_failure_count=3",
+    ]
+
+    cleanup_only = seed_main._aggregate_cleanup_failures(None, phases)
+    assert (cleanup_only.code, cleanup_only.exit_status) == (
+        "seed_runtime_failed",
+        4,
+    )
+    assert "secret-close-value" not in str(cleanup_only)
+
+
+@pytest.mark.parametrize(
+    ("host", "advertised_url"),
+    [
+        ("127.0.0.1", "http://127.0.0.1:45678"),
+        ("localhost", "http://localhost:45678"),
+        ("0.0.0.0", "http://seed-v4.test:45678"),
+        ("::1", "http://[::1]:45678"),
+        ("::", "http://seed-v6.test:45678"),
+    ],
+)
+def test_seed_cli_port_zero_accepts_independent_nonzero_advertisement(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    host: str,
+    advertised_url: str,
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    data_dir = tmp_path / host.replace(":", "v6")
+    data_dir.mkdir(mode=0o700)
+
+    assert (
+        seed_main.run(
+            [
+                "--bind",
+                host,
+                "--port",
+                "0",
+                "--advertised-url",
+                advertised_url,
+                "--data-dir",
+                str(data_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+
+def test_seed_server_port_zero_preserves_localhost_advertised_identity() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.seed_url: str | None = None
+
+        def bind_seed_url(self, url: str) -> None:
+            self.seed_url = url
+
+    coordinator = FakeCoordinator()
+    server = seed_http.SeedHTTPServer(
+        coordinator,
+        host="localhost",
+        port=0,
+        advertised_url="http://localhost:45678",
+    )
+    try:
+        assert urlsplit(server.base_url).hostname in {"127.0.0.1", "::1"}
+        assert urlsplit(server.base_url).port == server._server.server_address[1]
+        assert coordinator.seed_url == "http://localhost:45678"
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:0",
+        "http://[::1]:0",
+        "https://seed.test:0",
+    ],
+)
+def test_endpoint_url_rejects_explicit_port_zero(url: str) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+    with pytest.raises(ValueError, match="URL is invalid"):
+        seed_http._validate_endpoint_url(url)
+
+
+@pytest.mark.parametrize(
+    ("bind_port", "advertised_url", "accepted"),
+    [
+        (0, "http://localhost", True),
+        (80, "http://localhost", True),
+        (8765, "http://localhost", False),
+        (0, "http://localhost:0", False),
+        (0, "http://localhost/", False),
+        (0, "http://localhost:45678/path", False),
+    ],
+)
+def test_seed_cli_advertised_url_default_missing_and_malformed_controls(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    bind_port: int,
+    advertised_url: str,
+    accepted: bool,
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    data_dir = tmp_path / f"control-{bind_port}-{accepted}"
+    data_dir.mkdir(mode=0o700)
+    arguments = [
+        "--bind",
+        "localhost",
+        "--port",
+        str(bind_port),
+        "--advertised-url",
+        advertised_url,
+        "--data-dir",
+        str(data_dir),
+        "--dry-run",
+    ]
+
+    if accepted:
+        assert seed_main.run(arguments) == 0
+    else:
+        with pytest.raises(seed_main._EntrypointFailure) as caught:
+            seed_main.run(arguments)
+        assert (caught.value.code, caught.value.exit_status) == (
+            "seed_preflight_failed",
+            2,
+        )
+    capsys.readouterr()
+
+
+def test_seed_server_port_zero_accepts_default_advertised_port() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.seed_url: str | None = None
+
+        def bind_seed_url(self, url: str) -> None:
+            self.seed_url = url
+
+    coordinator = FakeCoordinator()
+    server = seed_http.SeedHTTPServer(
+        coordinator,
+        host="localhost",
+        port=0,
+        advertised_url="http://localhost",
+    )
+    try:
+        assert server._server.server_address[1] > 0
+        assert urlsplit(server.base_url).port == server._server.server_address[1]
+        assert coordinator.seed_url == "http://localhost"
+        assert urlsplit(coordinator.seed_url).port is None
+    finally:
+        server.close()

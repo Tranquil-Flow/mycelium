@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 from queue import Empty, Queue
 import re
+import selectors
 import signal
 import stat
 import subprocess
@@ -42,8 +43,84 @@ _FILE_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
 _CWD_LEASE_LOCK = threading.RLock()
+_CWD_LEASE_STACK: list[_WorkingDirectoryToken] = []
 _CWD_RESTORE_ATTEMPTS = 3
 _CWD_RESTORATION_ERROR = "working directory restoration failed"
+_LAUNCH_HANDSHAKE_SECONDS = 2.0
+_LAUNCH_READY = b"R"
+_LAUNCH_RELEASE = b"G"
+_LAUNCHER_SOURCE = """import os
+import sys
+
+ready = int(sys.argv[1])
+release = int(sys.argv[2])
+exec_status = int(sys.argv[3])
+target = sys.argv[4:]
+try:
+    os.set_inheritable(exec_status, False)
+    os.write(ready, b"R")
+    os.close(ready)
+    if os.read(release, 1) != b"G":
+        os._exit(125)
+    os.close(release)
+    os.execv(target[0], target)
+except BaseException:
+    try:
+        os.write(exec_status, b"E")
+    except BaseException:
+        pass
+    os._exit(126)
+"""
+
+
+@dataclass
+class _WorkingDirectoryToken:
+    original_descriptor: int | None
+    active: bool = True
+    body_failure: BaseException | None = None
+
+
+def _deactivate_working_directory_token(token: _WorkingDirectoryToken) -> None:
+    token.active = False
+    if not _CWD_LEASE_STACK or _CWD_LEASE_STACK[-1] is not token:
+        return
+    retired: list[_WorkingDirectoryToken] = []
+    while _CWD_LEASE_STACK and not _CWD_LEASE_STACK[-1].active:
+        retired.append(_CWD_LEASE_STACK.pop())
+    restoration_descriptor = retired[-1].original_descriptor
+    restored = False
+    try:
+        if restoration_descriptor is not None:
+            for _attempt in range(_CWD_RESTORE_ATTEMPTS):
+                try:
+                    os.fchdir(restoration_descriptor)
+                except OSError:
+                    continue
+                restored = True
+                break
+    finally:
+        for retired_token in retired:
+            descriptor = retired_token.original_descriptor
+            retired_token.original_descriptor = None
+            if descriptor is not None:
+                os.close(descriptor)
+    if restored:
+        return
+    body_failures = [
+        retired_token.body_failure
+        for retired_token in retired
+        if retired_token.body_failure is not None
+    ]
+    if body_failures:
+        for body_failure in body_failures:
+            if _CWD_RESTORATION_ERROR not in getattr(
+                body_failure,
+                "__notes__",
+                (),
+            ):
+                body_failure.add_note(_CWD_RESTORATION_ERROR)
+        return
+    raise ValueError(_CWD_RESTORATION_ERROR) from None
 
 
 class NodeProcessError(RuntimeError):
@@ -84,6 +161,23 @@ class _ProcessIdentity:
     session_id: int
     start_token: str
     executable: _ExecutableIdentity
+
+
+@dataclass(frozen=True)
+class _PreExecOwnership:
+    pid: int
+    parent_pid: int
+    process_group: int
+    session_id: int
+    start_token: str
+    launcher_executable: _ExecutableIdentity
+
+
+@dataclass(frozen=True)
+class _ProcessGroupMember:
+    pid: int
+    process_group: int
+    session_id: int
 
 
 def _absolute_path(value: str | Path) -> Path:
@@ -262,37 +356,35 @@ class PrivateDirectoryLease:
         descriptor = self._require_open_descriptor()
         with _CWD_LEASE_LOCK:
             original = os.open(".", _DIRECTORY_OPEN_FLAGS)
+            token: _WorkingDirectoryToken | None = None
             body_failure: BaseException | None = None
             try:
                 self.revalidate()
                 os.fchdir(descriptor)
+                token = _WorkingDirectoryToken(original_descriptor=original)
+                _CWD_LEASE_STACK.append(token)
                 try:
                     yield
                 except BaseException as exc:
                     body_failure = exc
+                    token.body_failure = exc
                     raise
             finally:
-                restored = False
-                try:
-                    for _attempt in range(_CWD_RESTORE_ATTEMPTS):
-                        try:
-                            os.fchdir(original)
-                        except OSError:
-                            continue
-                        restored = True
-                        break
-                finally:
+                if token is None:
                     os.close(original)
-                if not restored:
-                    if body_failure is not None:
-                        body_failure.add_note(_CWD_RESTORATION_ERROR)
-                    else:
-                        raise ValueError(_CWD_RESTORATION_ERROR) from None
-                try:
-                    self.revalidate()
-                except ValueError:
-                    if body_failure is None:
-                        raise
+                else:
+                    restoration_failure: BaseException | None = None
+                    try:
+                        _deactivate_working_directory_token(token)
+                    except BaseException as exc:
+                        restoration_failure = exc
+                    try:
+                        self.revalidate()
+                    except ValueError:
+                        if body_failure is None and restoration_failure is None:
+                            raise
+                    if restoration_failure is not None:
+                        raise restoration_failure
 
     def close(self) -> None:
         if self._closed:
@@ -738,6 +830,243 @@ def _protected_process_groups(deadline: float) -> set[int]:
     return groups
 
 
+def _handshake_pipes() -> dict[str, int | None]:
+    descriptors: dict[str, int | None] = {
+        "ready_read": None,
+        "ready_write": None,
+        "release_read": None,
+        "release_write": None,
+        "exec_read": None,
+        "exec_write": None,
+    }
+    opened: list[int] = []
+    try:
+        for read_name, write_name in (
+            ("ready_read", "ready_write"),
+            ("release_read", "release_write"),
+            ("exec_read", "exec_write"),
+        ):
+            read_descriptor, write_descriptor = os.pipe()
+            opened.extend((read_descriptor, write_descriptor))
+            os.set_inheritable(read_descriptor, False)
+            os.set_inheritable(write_descriptor, False)
+            descriptors[read_name] = read_descriptor
+            descriptors[write_name] = write_descriptor
+        return descriptors
+    except BaseException:
+        for descriptor in opened:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+
+
+def _close_handshake_descriptor(
+    descriptors: dict[str, int | None],
+    name: str,
+) -> None:
+    descriptor = descriptors[name]
+    if descriptor is None:
+        return
+    descriptors[name] = None
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+
+
+def _handshake_descriptor(
+    descriptors: Mapping[str, int | None],
+    name: str,
+) -> int:
+    descriptor = descriptors.get(name)
+    if (
+        not isinstance(descriptor, int)
+        or isinstance(descriptor, bool)
+        or descriptor < 0
+    ):
+        raise RuntimeError("launcher handshake descriptor is unavailable")
+    return descriptor
+
+
+def _await_handshake_byte(
+    descriptor: int,
+    deadline: float,
+    *,
+    expected: bytes | None,
+) -> None:
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(descriptor, selectors.EVENT_READ)
+        ready = selector.select(timeout=_deadline_remaining(deadline))
+        if not ready:
+            raise TimeoutError("launcher handshake timed out")
+        value = os.read(descriptor, 1)
+    finally:
+        selector.close()
+    if expected is None:
+        if value:
+            raise RuntimeError("launcher exec failed")
+    elif value != expected:
+        raise RuntimeError("launcher readiness failed")
+
+
+def _await_pre_exec_launcher(
+    descriptor: int,
+    process: subprocess.Popen[bytes],
+    deadline: float,
+) -> None:
+    _await_handshake_byte(descriptor, deadline, expected=_LAUNCH_READY)
+    if process.poll() is not None:
+        raise RuntimeError("launcher exited before ownership capture")
+
+
+def _release_pre_exec_launcher(descriptor: int) -> None:
+    if os.write(descriptor, _LAUNCH_RELEASE) != len(_LAUNCH_RELEASE):
+        raise OSError("launcher release failed")
+
+
+def _await_target_exec(
+    descriptor: int,
+    process: subprocess.Popen[bytes],
+    deadline: float,
+) -> None:
+    _await_handshake_byte(descriptor, deadline, expected=None)
+    if process.poll() is not None:
+        raise RuntimeError("target exited during exec")
+
+
+def _capture_pre_exec_ownership(
+    process: subprocess.Popen[bytes],
+    launcher_executable: _ExecutableIdentity,
+    deadline: float,
+) -> _PreExecOwnership:
+    protected_groups = _protected_process_groups(deadline)
+    current = _inventory_process(process.pid)
+    _deadline_remaining(deadline)
+    if (
+        current.pid != process.pid
+        or current.parent_pid != os.getpid()
+        or current.process_group != current.pid
+        or current.session_id != current.pid
+        or current.pid <= 1
+        or current.pid in {os.getpid(), os.getppid()}
+        or current.process_group in protected_groups
+        or current.session_id in protected_groups
+        or current.executable != launcher_executable
+    ):
+        raise NodeProcessError("node_process_identity_invalid")
+    return _PreExecOwnership(
+        pid=current.pid,
+        parent_pid=current.parent_pid,
+        process_group=current.process_group,
+        session_id=current.session_id,
+        start_token=current.start_token,
+        launcher_executable=current.executable,
+    )
+
+
+def _identity_matches_pre_exec_ownership(
+    current: _ProcessIdentity,
+    ownership: _PreExecOwnership,
+    target_executable: _ExecutableIdentity,
+) -> bool:
+    return (
+        current.pid == ownership.pid
+        and current.parent_pid == ownership.parent_pid
+        and current.process_group == ownership.process_group
+        and current.session_id == ownership.session_id
+        and current.start_token == ownership.start_token
+        and current.executable
+        in {ownership.launcher_executable, target_executable}
+    )
+
+
+def _inventory_linux_process_group(
+    process_group: int,
+    deadline: float,
+) -> tuple[_ProcessGroupMember, ...]:
+    members: list[_ProcessGroupMember] = []
+    for candidate in Path("/proc").iterdir():
+        _deadline_remaining(deadline)
+        if not candidate.name.isdigit():
+            continue
+        try:
+            raw = (candidate / "stat").read_text(encoding="ascii")
+            close_paren = raw.rfind(")")
+            fields = raw[close_paren + 2 :].split()
+            if close_paren < 0 or len(fields) < 4:
+                continue
+            candidate_group = int(fields[2])
+            session_id = int(fields[3])
+            pid = int(candidate.name)
+        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
+            continue
+        if candidate_group == process_group:
+            members.append(
+                _ProcessGroupMember(
+                    pid=pid,
+                    process_group=candidate_group,
+                    session_id=session_id,
+                )
+            )
+    return tuple(members)
+
+
+def _inventory_darwin_process_group(
+    process_group: int,
+    deadline: float,
+) -> tuple[_ProcessGroupMember, ...]:
+    output = subprocess.check_output(
+        ["/bin/ps", "-axo", "pid=,pgid=,state="],
+        text=True,
+        timeout=min(1.0, _deadline_remaining(deadline)),
+    )
+    members: list[_ProcessGroupMember] = []
+    for line in output.splitlines():
+        _deadline_remaining(deadline)
+        fields = line.split()
+        if len(fields) < 3:
+            continue
+        try:
+            pid = int(fields[0])
+            candidate_group = int(fields[1])
+        except ValueError:
+            continue
+        if candidate_group != process_group:
+            continue
+        try:
+            session_id = os.getsid(pid)
+        except ProcessLookupError:
+            continue
+        members.append(
+            _ProcessGroupMember(
+                pid=pid,
+                process_group=candidate_group,
+                session_id=session_id,
+            )
+        )
+    return tuple(members)
+
+
+def _inventory_process_group(
+    process_group: int,
+    deadline: float,
+) -> tuple[_ProcessGroupMember, ...]:
+    if (
+        not isinstance(process_group, int)
+        or isinstance(process_group, bool)
+        or process_group <= 1
+    ):
+        raise ProcessLookupError(process_group)
+    if sys.platform == "linux":
+        return _inventory_linux_process_group(process_group, deadline)
+    if sys.platform == "darwin":
+        return _inventory_darwin_process_group(process_group, deadline)
+    raise ProcessLookupError(process_group)
+
+
 def _canonical_json_loads(raw: bytes) -> Any:
     def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         document: dict[str, Any] = {}
@@ -970,34 +1299,94 @@ class PhysicalNodeProcess:
                 launch_command = (running_interpreter.path, *self._command[1:])
             else:
                 launch_command = (sys.executable, *self._command[1:])
+        try:
+            launcher_identity = _inventory_process(os.getpid()).executable
+        except (OSError, RuntimeError, TypeError, ValueError):
+            launcher_identity = capture_executable_identity(sys.executable)
         identities = tuple(expected_executables)
         if command_identity not in identities:
             identities = (command_identity, *identities)
-        if not all(revalidate_executable_identity(identity) for identity in identities):
+        if not all(
+            revalidate_executable_identity(identity)
+            for identity in (launcher_identity, *identities)
+        ):
             raise NodeProcessError("node_process_executable_changed")
+        self._target_executable_identity = command_identity
+        self._launcher_executable_identity = launcher_identity
+        self._pre_exec_ownership: _PreExecOwnership | None = None
         self._launch_identity: _ProcessIdentity | None = None
         self._stdout_thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         try:
+            handshake = _handshake_pipes()
+        except Exception as exc:
+            self._closed = True
+            raise NodeProcessError("node_process_start_failed") from exc
+        try:
+            ready_write = _handshake_descriptor(handshake, "ready_write")
+            release_read = _handshake_descriptor(handshake, "release_read")
+            exec_write = _handshake_descriptor(handshake, "exec_write")
+            launcher_command = (
+                launcher_identity.path,
+                "-I",
+                "-S",
+                "-c",
+                _LAUNCHER_SOURCE,
+                str(ready_write),
+                str(release_read),
+                str(exec_write),
+                *launch_command,
+            )
             self._process = subprocess.Popen(
-                launch_command,
+                launcher_command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 bufsize=0,
                 shell=False,
+                close_fds=True,
+                pass_fds=(ready_write, release_read, exec_write),
                 start_new_session=True,
             )
         except Exception as exc:
+            for name in tuple(handshake):
+                _close_handshake_descriptor(handshake, name)
             self._closed = True
             raise NodeProcessError("node_process_start_failed") from exc
         try:
+            startup_deadline = time.monotonic() + _LAUNCH_HANDSHAKE_SECONDS
+            _close_handshake_descriptor(handshake, "ready_write")
+            _close_handshake_descriptor(handshake, "release_read")
+            _close_handshake_descriptor(handshake, "exec_write")
+            ready_read = _handshake_descriptor(handshake, "ready_read")
+            release_write = _handshake_descriptor(handshake, "release_write")
+            exec_read = _handshake_descriptor(handshake, "exec_read")
+            _await_pre_exec_launcher(
+                ready_read,
+                self._process,
+                startup_deadline,
+            )
+            _close_handshake_descriptor(handshake, "ready_read")
+            self._pre_exec_ownership = _capture_pre_exec_ownership(
+                self._process,
+                launcher_identity,
+                startup_deadline,
+            )
+            _release_pre_exec_launcher(release_write)
+            _close_handshake_descriptor(handshake, "release_write")
+            _await_target_exec(
+                exec_read,
+                self._process,
+                startup_deadline,
+            )
+            _close_handshake_descriptor(handshake, "exec_read")
             launch = _inventory_process(self._process.pid)
             if (
-                launch.pid != self._process.pid
-                or launch.parent_pid != os.getpid()
-                or launch.process_group != launch.pid
-                or launch.session_id != launch.pid
+                not _identity_matches_pre_exec_ownership(
+                    launch,
+                    self._pre_exec_ownership,
+                    command_identity,
+                )
                 or launch.executable != command_identity
             ):
                 raise NodeProcessError("node_process_identity_invalid")
@@ -1015,6 +1404,15 @@ class PhysicalNodeProcess:
             self._stdout_thread.start()
             self._stderr_thread.start()
         except Exception as exc:
+            if self._pre_exec_ownership is None:
+                try:
+                    self._pre_exec_ownership = _capture_pre_exec_ownership(
+                        self._process,
+                        launcher_identity,
+                        time.monotonic() + self.shutdown_timeout_seconds,
+                    )
+                except Exception:
+                    pass
             self._closed = True
             cleaned = self._cleanup_resources(
                 time.monotonic() + self.shutdown_timeout_seconds,
@@ -1026,6 +1424,9 @@ class PhysicalNodeProcess:
                 else "node_process_cleanup_failed"
             )
             raise NodeProcessError(code) from exc
+        finally:
+            for name in tuple(handshake):
+                _close_handshake_descriptor(handshake, name)
 
     @property
     def pid(self) -> int:
@@ -1092,19 +1493,72 @@ class PhysicalNodeProcess:
         deadline: float | None = None,
     ) -> bool:
         process = self._process
-        launch = self._launch_identity
-        if launch is None:
+        ownership = getattr(self, "_pre_exec_ownership", None)
+        launch = getattr(self, "_launch_identity", None)
+        if ownership is None and isinstance(launch, _ProcessIdentity):
+            ownership = _PreExecOwnership(
+                pid=launch.pid,
+                parent_pid=launch.parent_pid,
+                process_group=launch.process_group,
+                session_id=launch.session_id,
+                start_token=launch.start_token,
+                launcher_executable=launch.executable,
+            )
+        if not isinstance(ownership, _PreExecOwnership):
             return False
+        target_executable = getattr(
+            self,
+            "_target_executable_identity",
+            ownership.launcher_executable,
+        )
         if deadline is None:
             deadline = time.monotonic() + self.shutdown_timeout_seconds
         try:
             protected_groups = _protected_process_groups(deadline)
             stopped = process.poll() is not None
             _deadline_remaining(deadline)
+            members: tuple[_ProcessGroupMember, ...] | None = None
             if stopped:
-                return True
-            current = _inventory_process(process.pid)
-            _deadline_remaining(deadline)
+                members = _inventory_process_group(
+                    ownership.process_group,
+                    deadline,
+                )
+            else:
+                try:
+                    current = _inventory_process(process.pid)
+                except (
+                    OSError,
+                    RuntimeError,
+                    subprocess.SubprocessError,
+                    ValueError,
+                ):
+                    members = _inventory_process_group(
+                        ownership.process_group,
+                        deadline,
+                    )
+                else:
+                    _deadline_remaining(deadline)
+                    if (
+                        isinstance(launch, _ProcessIdentity)
+                        and current != launch
+                        or not _identity_matches_pre_exec_ownership(
+                            current,
+                            ownership,
+                            target_executable,
+                        )
+                    ):
+                        return False
+            if members is not None:
+                _deadline_remaining(deadline)
+                if not members:
+                    return True
+                if any(
+                    member.process_group != ownership.process_group
+                    or member.session_id != ownership.session_id
+                    or member.pid in {os.getpid(), os.getppid()}
+                    for member in members
+                ):
+                    return False
         except (
             OSError,
             RuntimeError,
@@ -1114,47 +1568,141 @@ class PhysicalNodeProcess:
         ):
             return False
         if (
-            current != launch
-            or current.pid <= 1
-            or current.parent_pid <= 1
-            or current.process_group <= 1
-            or current.session_id <= 1
-            or current.pid in {os.getpid(), os.getppid()}
-            or current.process_group in protected_groups
-            or current.session_id in protected_groups
+            ownership.pid <= 1
+            or ownership.parent_pid <= 1
+            or ownership.process_group <= 1
+            or ownership.session_id <= 1
+            or ownership.pid in {os.getpid(), os.getppid()}
+            or ownership.parent_pid != os.getpid()
+            or ownership.process_group != ownership.pid
+            or ownership.session_id != ownership.pid
+            or ownership.process_group in protected_groups
+            or ownership.session_id in protected_groups
         ):
             return False
         try:
-            os.killpg(current.process_group, signum)
+            os.killpg(ownership.process_group, signum)
         except ProcessLookupError:
             return False
         except OSError:
             return False
         return True
 
-    def _wait_process(self, deadline: float, maximum: float | None = None) -> bool:
-        if self._process.poll() is not None:
-            return True
-        remaining = max(0.0, deadline - time.monotonic())
-        if maximum is not None:
-            remaining = min(remaining, maximum)
-        if remaining <= 0:
-            return False
+    def _owned_group_state(self, deadline: float) -> str:
+        ownership = getattr(self, "_pre_exec_ownership", None)
+        launch = getattr(self, "_launch_identity", None)
+        if ownership is None and isinstance(launch, _ProcessIdentity):
+            ownership = _PreExecOwnership(
+                pid=launch.pid,
+                parent_pid=launch.parent_pid,
+                process_group=launch.process_group,
+                session_id=launch.session_id,
+                start_token=launch.start_token,
+                launcher_executable=launch.executable,
+            )
+        if not isinstance(ownership, _PreExecOwnership):
+            return "unsafe"
+        target_executable = getattr(
+            self,
+            "_target_executable_identity",
+            ownership.launcher_executable,
+        )
         try:
-            self._process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            return False
-        except OSError:
-            return self._process.poll() is not None
-        return True
+            protected_groups = _protected_process_groups(deadline)
+            stopped = self._process.poll() is not None
+            _deadline_remaining(deadline)
+            members: tuple[_ProcessGroupMember, ...] | None = None
+            if not stopped:
+                try:
+                    current = _inventory_process(self._process.pid)
+                except (
+                    OSError,
+                    RuntimeError,
+                    subprocess.SubprocessError,
+                    ValueError,
+                ):
+                    pass
+                else:
+                    _deadline_remaining(deadline)
+                    if (
+                        isinstance(launch, _ProcessIdentity)
+                        and current != launch
+                        or not _identity_matches_pre_exec_ownership(
+                            current,
+                            ownership,
+                            target_executable,
+                        )
+                    ):
+                        return "unsafe"
+            members = _inventory_process_group(ownership.process_group, deadline)
+            if not members and not stopped:
+                stopped = self._process.poll() is not None
+                _deadline_remaining(deadline)
+        except (
+            OSError,
+            RuntimeError,
+            subprocess.SubprocessError,
+            TimeoutError,
+            ValueError,
+        ):
+            return "unsafe"
+        if (
+            ownership.pid <= 1
+            or ownership.parent_pid != os.getpid()
+            or ownership.process_group != ownership.pid
+            or ownership.session_id != ownership.pid
+            or ownership.pid in {os.getpid(), os.getppid()}
+            or ownership.process_group in protected_groups
+            or ownership.session_id in protected_groups
+            or any(
+                member.process_group != ownership.process_group
+                or member.session_id != ownership.session_id
+                or member.pid in {os.getpid(), os.getppid()}
+                for member in members
+            )
+        ):
+            return "unsafe"
+        if stopped and not members:
+            return "empty"
+        return "owned"
+
+    def _wait_owned_group_exit(self, deadline: float) -> bool:
+        while True:
+            state = self._owned_group_state(deadline)
+            if state == "empty":
+                return True
+            if state == "unsafe":
+                return False
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            interval = min(0.02, remaining)
+            if self._process.poll() is None:
+                try:
+                    self._process.wait(timeout=interval)
+                except subprocess.TimeoutExpired:
+                    continue
+                except OSError:
+                    pass
+            else:
+                threading.Event().wait(interval)
 
     def _terminate_process(self, deadline: float) -> bool:
-        process = self._process
-        if process.poll() is not None:
+        term_sent = self._signal_process_group(signal.SIGTERM, deadline)
+        remaining = max(0.0, deadline - time.monotonic())
+        term_deadline = min(
+            deadline,
+            time.monotonic() + min(0.25, remaining / 2),
+        )
+        if term_sent and self._wait_owned_group_exit(term_deadline):
             return True
+        if not term_sent and self._owned_group_state(term_deadline) == "empty":
+            return True
+        if time.monotonic() >= deadline:
+            return False
         if not self._signal_process_group(signal.SIGKILL, deadline):
-            return process.poll() is not None
-        return self._wait_process(deadline)
+            return self._owned_group_state(deadline) == "empty"
+        return self._wait_owned_group_exit(deadline)
 
     @staticmethod
     def _close_stream(stream: Any) -> bool:
@@ -1180,14 +1728,15 @@ class PhysicalNodeProcess:
 
     def _cleanup_resources(self, deadline: float, *, terminate: bool) -> bool:
         complete = True
-        if terminate and self._process.poll() is None:
-            complete = self._close_stream(self._process.stdin) and complete
-            if not self._wait_process(deadline, 0.05):
-                complete = self._terminate_process(deadline) and complete
+        complete = self._close_stream(self._process.stdin) and complete
+        if terminate:
+            graceful_deadline = min(deadline, time.monotonic() + 0.05)
+            group_complete = self._wait_owned_group_exit(graceful_deadline)
+            if not group_complete:
+                group_complete = self._terminate_process(deadline)
         else:
-            complete = self._close_stream(self._process.stdin) and complete
-        if self._process.poll() is None:
-            complete = False
+            group_complete = self._owned_group_state(deadline) == "empty"
+        complete = group_complete and complete
         complete = self._close_stream(self._process.stdout) and complete
         complete = self._close_stream(self._process.stderr) and complete
         complete = self._join_readers(deadline) and complete

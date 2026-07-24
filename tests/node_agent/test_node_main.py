@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import selectors
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -17,6 +18,7 @@ import threading
 import time
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -1074,8 +1076,33 @@ def test_reader_thread_start_failure_reaps_launched_child(
     monkeypatch.setattr(
         process_module.subprocess, "Popen", lambda *_a, **_k: fake_process
     )
+    monkeypatch.setattr(
+        process_module,
+        "_await_pre_exec_launcher",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        process_module,
+        "_release_pre_exec_launcher",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        process_module,
+        "_await_target_exec",
+        lambda *_args: None,
+    )
     monkeypatch.setattr(process_module.threading, "Thread", FakeThread)
     monkeypatch.setattr(process_module, "_inventory_process", lambda _pid: identity)
+    member = process_module._ProcessGroupMember(
+        pid=identity.pid,
+        process_group=identity.process_group,
+        session_id=identity.session_id,
+    )
+    monkeypatch.setattr(
+        process_module,
+        "_inventory_process_group",
+        lambda *_args: () if fake_process.returncode is not None else (member,),
+    )
     monkeypatch.setattr(
         process_module,
         "_protected_process_groups",
@@ -1226,7 +1253,7 @@ def test_process_group_signal_reinventories_after_protected_group_discovery(
     )
     launch = process_module._ProcessIdentity(
         pid=4242,
-        parent_pid=3131,
+        parent_pid=os.getpid(),
         process_group=4242,
         session_id=4242,
         start_token="launch",
@@ -1234,7 +1261,7 @@ def test_process_group_signal_reinventories_after_protected_group_discovery(
     )
     drifted = process_module._ProcessIdentity(
         pid=4242,
-        parent_pid=3131,
+        parent_pid=os.getpid(),
         process_group=4242,
         session_id=4242,
         start_token="reused-during-protected-discovery",
@@ -1362,6 +1389,24 @@ def test_process_group_signal_poll_error_prevents_action(
 ) -> None:
     process_module = importlib.import_module("mycelium_node.process")
     calls: list[object] = []
+    executable = process_module._ExecutableIdentity(
+        path="/trusted/python",
+        device=1,
+        inode=2,
+        mode=stat.S_IFREG | 0o755,
+        uid=os.getuid(),
+        size=10,
+        mtime_ns=11,
+        ctime_ns=12,
+    )
+    launch = process_module._ProcessIdentity(
+        pid=4242,
+        parent_pid=os.getpid(),
+        process_group=4242,
+        session_id=4242,
+        start_token="launch",
+        executable=executable,
+    )
 
     class FakePopen:
         pid = 4242
@@ -1374,7 +1419,7 @@ def test_process_group_signal_poll_error_prevents_action(
         process_module.PhysicalNodeProcess
     )
     supervised._process = FakePopen()
-    supervised._launch_identity = object()
+    supervised._launch_identity = launch
     supervised.shutdown_timeout_seconds = 1.0
     monkeypatch.setattr(
         process_module,
@@ -2161,7 +2206,7 @@ def test_process_group_terminal_action_has_no_followup_observation(
     )
     launch = process_module._ProcessIdentity(
         pid=4242,
-        parent_pid=3131,
+        parent_pid=os.getpid(),
         process_group=4242,
         session_id=4242,
         start_token="launch",
@@ -2223,3 +2268,785 @@ def test_process_group_terminal_action_has_no_followup_observation(
             ("inventory", launch.pid),
             ("killpg", launch.process_group, signal.SIGKILL),
         ]
+
+
+def test_pre_exec_launcher_blocks_target_until_owned_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    marker = tmp_path / "target-executed"
+    target = tmp_path / "handshake-target.py"
+    target.write_text(
+        """from pathlib import Path
+import signal
+import sys
+
+Path(sys.argv[1]).write_text("executed")
+signal.pause()
+"""
+    )
+    release_reached = threading.Event()
+    allow_release = threading.Event()
+    real_release = process_module._release_pre_exec_launcher
+
+    def gated_release(descriptor: int) -> None:
+        release_reached.set()
+        assert allow_release.wait(2.0)
+        real_release(descriptor)
+
+    monkeypatch.setattr(
+        process_module,
+        "_release_pre_exec_launcher",
+        gated_release,
+    )
+    result: list[Any] = []
+
+    def construct() -> None:
+        try:
+            result.append(
+                process_module.PhysicalNodeProcess(
+                    command=(sys.executable, str(target), str(marker)),
+                    node_id="node-handshake",
+                    run_id="run-handshake",
+                    deployment_id="deployment-handshake",
+                    response_timeout_seconds=0.05,
+                    shutdown_timeout_seconds=1.0,
+                )
+            )
+        except BaseException as exc:
+            result.append(exc)
+
+    constructor = threading.Thread(target=construct, daemon=False)
+    constructor.start()
+    assert release_reached.wait(2.0)
+    assert marker.exists() is False
+    allow_release.set()
+    constructor.join(timeout=3.0)
+    assert constructor.is_alive() is False
+    assert len(result) == 1
+    assert isinstance(result[0], process_module.PhysicalNodeProcess)
+    supervised = result[0]
+    try:
+        deadline = time.monotonic() + 2.0
+        while not marker.exists() and time.monotonic() < deadline:
+            marker_event = threading.Event()
+            marker_event.wait(0.01)
+        assert marker.read_text() == "executed"
+        assert supervised._pre_exec_ownership.pid == supervised.pid
+        assert supervised._pre_exec_ownership.process_group == supervised.pid
+        assert supervised._pre_exec_ownership.session_id == supervised.pid
+    finally:
+        supervised.close()
+
+
+def test_owned_group_receives_term_before_kill(
+    tmp_path: Path,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    event_fifo = tmp_path / "signal-events"
+    os.mkfifo(event_fifo, mode=0o600)
+    reader = os.open(event_fifo, os.O_RDONLY | os.O_NONBLOCK)
+    target = tmp_path / "term-target.py"
+    target.write_text(
+        """import os
+import signal
+import sys
+
+events = os.open(sys.argv[1], os.O_WRONLY)
+signal.signal(signal.SIGTERM, lambda _signum, _frame: os.write(events, b"T"))
+os.write(events, b"R")
+while True:
+    signal.pause()
+"""
+    )
+    supervised = process_module.PhysicalNodeProcess(
+        command=(sys.executable, str(target), str(event_fifo)),
+        node_id="node-term-order",
+        run_id="run-term-order",
+        deployment_id="deployment-term-order",
+        response_timeout_seconds=0.05,
+        shutdown_timeout_seconds=1.0,
+    )
+    selector = selectors.DefaultSelector()
+    selector.register(reader, selectors.EVENT_READ)
+    try:
+        assert selector.select(timeout=2.0)
+        assert os.read(reader, 1) == b"R"
+        supervised.close()
+        assert selector.select(timeout=2.0)
+        assert os.read(reader, 1) == b"T"
+        assert supervised._process.returncode == -signal.SIGKILL
+    finally:
+        selector.close()
+        os.close(reader)
+        if supervised._process.poll() is None:
+            os.killpg(supervised.pid, signal.SIGKILL)
+            supervised._process.wait(timeout=2.0)
+
+
+def test_post_release_inventory_failure_cleans_preowned_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    target = tmp_path / "post-release-target.py"
+    target.write_text("import signal\nsignal.pause()\n")
+    real_popen = subprocess.Popen
+    real_inventory = process_module._inventory_process
+    launched: list[Any] = []
+    child_inventory_calls = 0
+
+    def tracked_popen(*args: Any, **kwargs: Any) -> Any:
+        process = real_popen(*args, **kwargs)
+        if kwargs.get("start_new_session") is True:
+            launched.append(process)
+        return process
+
+    def fail_post_release(pid: int) -> Any:
+        nonlocal child_inventory_calls
+        if launched and pid == launched[0].pid:
+            child_inventory_calls += 1
+            if child_inventory_calls >= 2:
+                raise ProcessLookupError("forced-post-release-inventory")
+        return real_inventory(pid)
+
+    monkeypatch.setattr(process_module.subprocess, "Popen", tracked_popen)
+    monkeypatch.setattr(process_module, "_inventory_process", fail_post_release)
+    with pytest.raises(process_module.NodeProcessError) as failed:
+        process_module.PhysicalNodeProcess(
+            command=(sys.executable, str(target)),
+            node_id="node-post-release",
+            run_id="run-post-release",
+            deployment_id="deployment-post-release",
+            response_timeout_seconds=0.05,
+            shutdown_timeout_seconds=1.0,
+        )
+
+    assert failed.value.code == "node_process_start_failed"
+    assert child_inventory_calls >= 3
+    assert len(launched) == 1
+    assert launched[0].poll() is not None
+    with pytest.raises(ProcessLookupError):
+        os.killpg(launched[0].pid, 0)
+
+
+def test_leader_dead_inherited_sidecar_group_is_cleaned(
+    tmp_path: Path,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    pid_file = tmp_path / "leader-sidecar.pids"
+    target = tmp_path / "leader-exits.py"
+    target.write_text(
+        """from pathlib import Path
+import os
+import subprocess
+import sys
+
+ready_read, ready_write = os.pipe()
+sidecar = subprocess.Popen(
+    [
+        sys.executable,
+        "-c",
+        "import os,signal,sys; os.write(int(sys.argv[1]), b'R'); "
+        "os.close(int(sys.argv[1])); signal.pause()",
+        str(ready_write),
+    ],
+    pass_fds=(ready_write,),
+)
+os.close(ready_write)
+assert os.read(ready_read, 1) == b"R"
+os.close(ready_read)
+Path(sys.argv[1]).write_text(f"{os.getpid()} {sidecar.pid}")
+os._exit(0)
+"""
+    )
+    supervised: Any = None
+    try:
+        try:
+            supervised = process_module.PhysicalNodeProcess(
+                command=(sys.executable, str(target), str(pid_file)),
+                node_id="node-dead-leader",
+                run_id="run-dead-leader",
+                deployment_id="deployment-dead-leader",
+                response_timeout_seconds=0.05,
+                shutdown_timeout_seconds=1.0,
+            )
+        except process_module.NodeProcessError as exc:
+            assert exc.code == "node_process_start_failed"
+        deadline = time.monotonic() + 2.0
+        while not pid_file.exists() and time.monotonic() < deadline:
+            threading.Event().wait(0.01)
+        leader_pid, sidecar_pid = [
+            int(value) for value in pid_file.read_text().split()
+        ]
+        if supervised is not None:
+            supervised._process.wait(timeout=2.0)
+            supervised.close()
+        deadline = time.monotonic() + 2.0
+        while _pid_exists(sidecar_pid) and time.monotonic() < deadline:
+            threading.Event().wait(0.01)
+        assert _pid_exists(leader_pid) is False
+        assert _pid_exists(sidecar_pid) is False
+        with pytest.raises(ProcessLookupError):
+            os.killpg(leader_pid, 0)
+    finally:
+        if pid_file.exists():
+            leader_pid = int(pid_file.read_text().split()[0])
+            try:
+                os.killpg(leader_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if supervised is not None and supervised._process.poll() is None:
+            supervised._process.wait(timeout=2.0)
+
+
+def test_process_cleanup_retry_and_handshake_fd_thread_inventory_stay_stable(
+    tmp_path: Path,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    inventory_root = Path("/proc/self/fd")
+    if not inventory_root.is_dir():
+        inventory_root = Path("/dev/fd")
+
+    def descriptors() -> set[int]:
+        return {
+            int(name)
+            for name in os.listdir(inventory_root)
+            if name.isdigit()
+        }
+
+    target = tmp_path / "retry-target.py"
+    target.write_text(
+        """import signal
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+while True:
+    signal.pause()
+"""
+    )
+    baseline_descriptors = descriptors()
+    baseline_threads = {
+        thread.name for thread in threading.enumerate() if thread.is_alive()
+    }
+    for cycle in range(8):
+        supervised = process_module.PhysicalNodeProcess(
+            command=(sys.executable, str(target)),
+            node_id=f"node-retry-{cycle}",
+            run_id=f"run-retry-{cycle}",
+            deployment_id=f"deployment-retry-{cycle}",
+            response_timeout_seconds=0.01,
+            shutdown_timeout_seconds=1.0,
+        )
+        if cycle == 0:
+            supervised.shutdown_timeout_seconds = 0.000001
+            with pytest.raises(process_module.NodeProcessError) as failed:
+                supervised.close()
+            assert failed.value.code == "node_process_cleanup_failed"
+            assert supervised._process.poll() is None
+            supervised.shutdown_timeout_seconds = 1.0
+        supervised.close()
+        supervised.close()
+    assert descriptors() == baseline_descriptors
+    assert {
+        thread.name for thread in threading.enumerate() if thread.is_alive()
+    } == baseline_threads
+
+
+def test_handshake_release_failure_closes_fds_and_reaps_blocked_launcher(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    inventory_root = Path("/proc/self/fd")
+    if not inventory_root.is_dir():
+        inventory_root = Path("/dev/fd")
+
+    def descriptors() -> set[int]:
+        return {
+            int(name)
+            for name in os.listdir(inventory_root)
+            if name.isdigit()
+        }
+
+    marker = tmp_path / "must-not-exec"
+    target = tmp_path / "blocked-target.py"
+    target.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[1]).write_text('unexpected')\n"
+    )
+    real_popen = subprocess.Popen
+    launched: list[Any] = []
+
+    def tracked_popen(*args: Any, **kwargs: Any) -> Any:
+        process = real_popen(*args, **kwargs)
+        if kwargs.get("start_new_session") is True:
+            launched.append(process)
+        return process
+
+    monkeypatch.setattr(process_module.subprocess, "Popen", tracked_popen)
+    monkeypatch.setattr(
+        process_module,
+        "_release_pre_exec_launcher",
+        lambda _descriptor: (_ for _ in ()).throw(
+            OSError("secret-release-failure")
+        ),
+    )
+    before = descriptors()
+    with pytest.raises(process_module.NodeProcessError) as caught:
+        process_module.PhysicalNodeProcess(
+            command=(sys.executable, str(target), str(marker)),
+            node_id="node-release-failure",
+            run_id="run-release-failure",
+            deployment_id="deployment-release-failure",
+            response_timeout_seconds=0.05,
+            shutdown_timeout_seconds=1.0,
+        )
+
+    assert caught.value.code == "node_process_start_failed"
+    assert marker.exists() is False
+    assert len(launched) == 1
+    assert launched[0].poll() is not None
+    assert descriptors() == before
+    assert not any(
+        thread.name.startswith("mycelium-node-") and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+def test_entrypoint_cleanup_aggregation_preserves_primary_and_all_phases() -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    phases = (
+        "process",
+        "temporary_root",
+        "artifact_root",
+        "signal_restoration",
+    )
+    primary = node_main._EntrypointFailure("node_join_rejected", 3)
+    aggregated = node_main._aggregate_cleanup_failures(primary, phases)
+
+    assert aggregated is primary
+    assert (aggregated.code, aggregated.exit_status) == ("node_join_rejected", 3)
+    assert getattr(aggregated, "__notes__", ()) == [
+        "cleanup_phase=process",
+        "cleanup_phase=temporary_root",
+        "cleanup_phase=artifact_root",
+        "cleanup_phase=signal_restoration",
+        "cleanup_failure_count=4",
+    ]
+
+    cleanup_only = node_main._aggregate_cleanup_failures(None, phases)
+    assert (cleanup_only.code, cleanup_only.exit_status) == (
+        "node_runtime_failed",
+        4,
+    )
+    assert getattr(cleanup_only, "__notes__", ()) == [
+        "cleanup_phase=process",
+        "cleanup_phase=temporary_root",
+        "cleanup_phase=artifact_root",
+        "cleanup_phase=signal_restoration",
+        "cleanup_failure_count=4",
+    ]
+    assert "secret-cleanup-value" not in str(primary)
+
+
+def test_node_run_bound_finally_retains_primary_through_four_cleanup_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    primary = node_main._EntrypointFailure("node_join_rejected", 3)
+
+    class ArtifactRoot:
+        def revalidate(self) -> None:
+            return None
+
+        def close(self) -> None:
+            raise OSError("secret-artifact-close")
+
+    artifact_root = ArtifactRoot()
+
+    class StateRoot:
+        def revalidate(self) -> None:
+            return None
+
+        def private_subdirectory(self, _name: str) -> ArtifactRoot:
+            return artifact_root
+
+    class Client:
+        def identity(self, *, now: float) -> dict[str, str]:
+            return {"seed_node_id": "seed-node"}
+
+    class FakeSigner:
+        endpoint_id = "node-cleanup-primary"
+
+    class FakeSession:
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+    class FakeProcess:
+        pid = 4242
+
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+        def command(self, _operation: str) -> None:
+            raise primary
+
+        def close(self) -> None:
+            raise OSError("secret-process-close")
+
+    temporary_root = type(
+        "TemporaryRoot",
+        (),
+        {"path": Path("/private/nonsecret")},
+    )()
+    old_handlers = {
+        signal.SIGINT: object(),
+        signal.SIGTERM: object(),
+    }
+    restore_calls = 0
+
+    def fake_signal(signum: int, handler: object) -> object:
+        nonlocal restore_calls
+        if handler in old_handlers.values():
+            restore_calls += 1
+            if restore_calls == 1:
+                raise OSError("secret-signal-restore")
+            return handler
+        return old_handlers[signum]
+
+    monkeypatch.setattr(
+        node_main,
+        "load_or_create_node_signer",
+        lambda _path: FakeSigner(),
+    )
+    monkeypatch.setattr(node_main, "NodeMembershipSession", FakeSession)
+    monkeypatch.setattr(
+        node_main,
+        "_temporary_root",
+        lambda: temporary_root,
+    )
+    monkeypatch.setattr(
+        node_main,
+        "build_physical_node_command",
+        lambda **_kwargs: (sys.executable, "-c", "pass"),
+    )
+    monkeypatch.setattr(node_main, "PhysicalNodeProcess", FakeProcess)
+    monkeypatch.setattr(
+        node_main,
+        "_remove_temporary_root",
+        lambda _root: (_ for _ in ()).throw(
+            OSError("secret-temporary-close")
+        ),
+    )
+    monkeypatch.setattr(node_main.signal, "signal", fake_signal)
+    args = type(
+        "Args",
+        (),
+        {
+            "node_id": "node-cleanup-primary",
+            "incarnation": "incarnation-cleanup-primary",
+            "run_id": "run-cleanup-primary",
+            "deployment_id": "deployment-cleanup-primary",
+            "advertise": ["https://node.test/control"],
+            "heartbeat_interval": 1.0,
+        },
+    )()
+
+    with pytest.raises(node_main._EntrypointFailure) as caught:
+        node_main._run_bound(
+            args,
+            StateRoot(),
+            {"token": "secret-token"},
+            {
+                "payload": {
+                    "swarm_id": "swarm-cleanup-primary",
+                    "nonce": "nonce-cleanup-primary",
+                    "seed_url": "http://seed.test",
+                },
+                "seed_key_digest": "sha256:" + "a" * 64,
+            },
+            Client(),
+            Path("/private/sidecar"),
+            (),
+        )
+
+    assert caught.value is primary
+    assert (caught.value.code, caught.value.exit_status) == (
+        "node_join_rejected",
+        3,
+    )
+    assert getattr(caught.value, "__notes__", ()) == [
+        "cleanup_phase=process",
+        "cleanup_phase=temporary_root",
+        "cleanup_phase=artifact_root",
+        "cleanup_phase=signal_restoration",
+        "cleanup_failure_count=4",
+    ]
+    assert "secret-" not in str(caught.value)
+
+
+def _raw_join_request(port: int, body: bytes) -> bytes:
+    request = (
+        b"POST /seed/join HTTP/1.1\r\n"
+        b"Host: 127.0.0.1\r\n"
+        b"Content-Type: application/json\r\n"
+        + f"Content-Length: {len(body)}\r\n".encode("ascii")
+        + b"Connection: close\r\n\r\n"
+        + body
+    )
+    with socket.create_connection(("127.0.0.1", port), timeout=2.0) as connection:
+        connection.sendall(request)
+        chunks: list[bytes] = []
+        while True:
+            chunk = connection.recv(65536)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+
+
+def test_join_route_internal_code_is_generic_and_emits_one_response() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+    secret = "secret_internal_join_code"
+
+    class InternalJoinError(ValueError):
+        code = secret
+
+    class FailingCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+        def accept_join(self, **_kwargs: Any) -> None:
+            raise InternalJoinError
+
+    body = canonical_json_bytes(
+        {
+            "protocol": seed_http.SEED_JOIN_HTTP_PROTOCOL,
+            "invite_token": "opaque",
+            "join_envelope": {},
+        }
+    )
+    with SeedHTTPServer(
+        FailingCoordinator(),
+        host="127.0.0.1",
+        port=0,
+    ) as server:
+        response = _raw_join_request(urlsplit(server.base_url).port, body)
+
+    assert response.count(b"HTTP/1.1 ") == 1
+    assert response.startswith(b"HTTP/1.1 500 ")
+    assert secret.encode() not in response
+    assert canonical_json_bytes(
+        {
+            "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+            "error": {"code": "seed_http_internal_error"},
+        }
+    ) in response
+
+
+def test_join_success_write_failure_never_emits_a_second_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class AcceptingCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+        def accept_join(self, **_kwargs: Any) -> dict[str, bool]:
+            return {"accepted": True}
+
+    original_send = seed_http._SeedRequestHandler._send
+
+    def fail_success_write(
+        handler: Any,
+        status: int,
+        value: dict[str, Any],
+    ) -> None:
+        if int(status) != 200:
+            original_send(handler, status, value)
+            return
+        response_body = canonical_json_bytes(dict(value))
+        handler._response_started = True
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(response_body)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+        handler.wfile.write(response_body[:1])
+        handler.wfile.flush()
+        raise OSError("secret-write-failure")
+
+    monkeypatch.setattr(
+        seed_http._SeedRequestHandler,
+        "_send",
+        fail_success_write,
+    )
+    body = canonical_json_bytes(
+        {
+            "protocol": seed_http.SEED_JOIN_HTTP_PROTOCOL,
+            "invite_token": "opaque",
+            "join_envelope": {},
+        }
+    )
+    with SeedHTTPServer(
+        AcceptingCoordinator(),
+        host="127.0.0.1",
+        port=0,
+    ) as server:
+        response = _raw_join_request(urlsplit(server.base_url).port, body)
+
+    assert response.count(b"HTTP/1.1 ") == 1
+    assert response.startswith(b"HTTP/1.1 200 ")
+    assert b"HTTP/1.1 500 " not in response
+    assert b"seed_http_internal_error" not in response
+
+
+def test_join_client_hides_status_mismatched_authoritative_error() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+    signer = generate_ed25519_signer(endpoint_id="seed-status-mismatch")
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    response_body = canonical_json_bytes(
+        {
+            "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+            "error": {"code": "membership_signature_invalid"},
+        }
+    )
+    served = threading.Event()
+
+    def serve_one() -> None:
+        connection, _address = listener.accept()
+        with connection:
+            connection.recv(65536)
+            connection.sendall(
+                b"HTTP/1.1 500 Internal Server Error\r\n"
+                b"Content-Type: application/json\r\n"
+                + f"Content-Length: {len(response_body)}\r\n".encode("ascii")
+                + b"Connection: close\r\n\r\n"
+                + response_body
+            )
+        served.set()
+
+    server_thread = threading.Thread(target=serve_one, daemon=False)
+    server_thread.start()
+    client = SeedHTTPClient(
+        seed_url=f"http://127.0.0.1:{listener.getsockname()[1]}",
+        swarm_id="swarm-status-mismatch",
+        seed_key_digest=signer.verification_key_digest,
+        seed_key_records=[signer.public_key_record()],
+    )
+    try:
+        with pytest.raises(SeedHTTPError) as caught:
+            client._request("POST", "/seed/join", {})
+    finally:
+        listener.close()
+        server_thread.join(timeout=2.0)
+
+    assert served.is_set()
+    assert server_thread.is_alive() is False
+    assert (caught.value.status, caught.value.code) == (
+        500,
+        "seed_http_remote_error",
+    )
+    assert "membership_signature_invalid" not in str(caught.value)
+
+
+def test_working_directory_out_of_order_lease_stack_unwinds_to_origin(
+    tmp_path: Path,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    inventory_root = Path("/proc/self/fd")
+    if not inventory_root.is_dir():
+        inventory_root = Path("/dev/fd")
+
+    def descriptors() -> set[int]:
+        return {
+            int(name)
+            for name in os.listdir(inventory_root)
+            if name.isdigit()
+        }
+
+    original = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    original_identity = os.fstat(original)[:2]
+    roots = [tmp_path / f"lease-{index}" for index in range(3)]
+    for root in roots:
+        root.mkdir(mode=0o700)
+    leases = [process_module.private_directory_lease(root) for root in roots]
+    permutations = (
+        (0, 1, 2),
+        (0, 2, 1),
+        (1, 0, 2),
+        (1, 2, 0),
+        (2, 0, 1),
+        (2, 1, 0),
+    )
+    baseline_descriptors = descriptors()
+    try:
+        for _cycle in range(20):
+            for order in permutations:
+                contexts = [lease.working_directory() for lease in leases]
+                try:
+                    for index, context in enumerate(contexts):
+                        context.__enter__()
+                        assert os.stat(".")[:2] == os.fstat(
+                            leases[index]._descriptor
+                        )[:2]
+                    for index in order:
+                        contexts[index].__exit__(None, None, None)
+                    assert os.stat(".")[:2] == original_identity
+                    assert process_module._CWD_LEASE_STACK == []
+                finally:
+                    os.fchdir(original)
+        assert descriptors() == baseline_descriptors
+    finally:
+        os.fchdir(original)
+        for lease in leases:
+            lease.close()
+        os.close(original)
+
+
+def test_out_of_order_cwd_restore_failure_notes_deferred_primary_and_reuses_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    safety = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    first_root = tmp_path / "deferred-first"
+    second_root = tmp_path / "deferred-second"
+    first_root.mkdir(mode=0o700)
+    second_root.mkdir(mode=0o700)
+    first = process_module.private_directory_lease(first_root)
+    second = process_module.private_directory_lease(second_root)
+    real_fchdir = os.fchdir
+    outer = first.working_directory()
+    inner = second.working_directory()
+    primary = RuntimeError("authoritative-cwd-body")
+    try:
+        outer.__enter__()
+        inner.__enter__()
+        assert outer.__exit__(type(primary), primary, primary.__traceback__) is False
+
+        def fail_restore(_descriptor: int) -> None:
+            raise OSError(errno.EIO, "secret-deferred-restore")
+
+        monkeypatch.setattr(os, "fchdir", fail_restore)
+        assert inner.__exit__(None, None, None) is False
+        assert getattr(primary, "__notes__", ()) == [
+            "working directory restoration failed"
+        ]
+        assert "secret-deferred-restore" not in str(primary)
+        assert process_module._CWD_LEASE_STACK == []
+
+        monkeypatch.setattr(os, "fchdir", real_fchdir)
+        real_fchdir(safety)
+        with first.working_directory():
+            assert os.stat(".")[:2] == os.fstat(first._descriptor)[:2]
+    finally:
+        monkeypatch.setattr(os, "fchdir", real_fchdir)
+        real_fchdir(safety)
+        first.close()
+        second.close()
+        os.close(safety)

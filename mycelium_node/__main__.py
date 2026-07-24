@@ -74,6 +74,31 @@ class _EntrypointFailure(RuntimeError):
         super().__init__(code)
 
 
+def _aggregate_cleanup_failures(
+    failure: _EntrypointFailure | None,
+    phases: Sequence[str],
+) -> _EntrypointFailure:
+    if failure is None:
+        failure = _EntrypointFailure(
+            "node_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
+    prior_phases = tuple(getattr(failure, "_cleanup_phases", ()))
+    all_phases = (*prior_phases, *phases)
+    failure._cleanup_phases = all_phases
+    retained_notes = [
+        note
+        for note in getattr(failure, "__notes__", ())
+        if not note.startswith(("cleanup_phase=", "cleanup_failure_count="))
+    ]
+    cleanup_notes = [
+        *(f"cleanup_phase={phase}" for phase in all_phases),
+        f"cleanup_failure_count={len(all_phases)}",
+    ]
+    failure.__notes__ = [*retained_notes, *cleanup_notes]
+    return failure
+
+
 class _SafeArgumentParser(argparse.ArgumentParser):
     def error(self, _message: str) -> NoReturn:
         self.exit(EXIT_PREFLIGHT_FAILURE, "node_preflight_failed\n")
@@ -398,19 +423,30 @@ def _preflight(
             activity_peer_node_id=None,
         )
         return state_root, bundle, verified, client, sidecar, identities
-    except _EntrypointFailure:
-        raise
-    except Exception as exc:
-        failure = exc
+    except _EntrypointFailure as failure:
+        cleanup_phases: list[str] = []
         if state_root is not None:
             try:
                 state_root.close()
-            except Exception as close_exc:
-                failure = close_exc
-        raise _EntrypointFailure(
+            except Exception:
+                cleanup_phases.append("state_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise
+    except Exception as exc:
+        failure = _EntrypointFailure(
             "node_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
-        ) from failure
+        )
+        cleanup_phases: list[str] = []
+        if state_root is not None:
+            try:
+                state_root.close()
+            except Exception:
+                cleanup_phases.append("state_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise failure from exc
 
 
 def _join_rejected(exc: SeedHTTPError) -> bool:
@@ -479,26 +515,24 @@ def _run_bound(
         state_root.revalidate()
         artifact_root.revalidate()
     except Exception as exc:
-        cleanup_failed = False
+        failure = _EntrypointFailure(
+            "node_preflight_failed",
+            EXIT_PREFLIGHT_FAILURE,
+        )
+        cleanup_phases: list[str] = []
         if temporary_root is not None:
             try:
                 _remove_temporary_root(temporary_root)
             except Exception:
-                cleanup_failed = True
+                cleanup_phases.append("temporary_root")
         if artifact_root is not None:
             try:
                 artifact_root.close()
             except Exception:
-                cleanup_failed = True
-        if cleanup_failed:
-            raise _EntrypointFailure(
-                "node_runtime_failed",
-                EXIT_RUNTIME_FAILURE,
-            ) from None
-        raise _EntrypointFailure(
-            "node_preflight_failed",
-            EXIT_PREFLIGHT_FAILURE,
-        ) from exc
+                cleanup_phases.append("artifact_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise failure from exc
 
     process: PhysicalNodeProcess | None = None
     stopping = threading.Event()
@@ -593,38 +627,29 @@ def _run_bound(
             EXIT_RUNTIME_FAILURE,
         )
     finally:
+        cleanup_phases = []
         if process is not None:
             try:
                 process.close()
             except Exception:
-                failure = _EntrypointFailure(
-                    "node_runtime_failed",
-                    EXIT_RUNTIME_FAILURE,
-                )
+                cleanup_phases.append("process")
         try:
             assert temporary_root is not None
             _remove_temporary_root(temporary_root)
         except Exception:
-            failure = _EntrypointFailure(
-                "node_runtime_failed",
-                EXIT_RUNTIME_FAILURE,
-            )
+            cleanup_phases.append("temporary_root")
         try:
             assert artifact_root is not None
             artifact_root.close()
         except Exception:
-            failure = _EntrypointFailure(
-                "node_runtime_failed",
-                EXIT_RUNTIME_FAILURE,
-            )
+            cleanup_phases.append("artifact_root")
         for signum in reversed(tuple(previous)):
             try:
                 signal.signal(signum, previous[signum])
             except Exception:
-                failure = _EntrypointFailure(
-                    "node_runtime_failed",
-                    EXIT_RUNTIME_FAILURE,
-                )
+                cleanup_phases.append("signal_restoration")
+        if cleanup_phases:
+            failure = _aggregate_cleanup_failures(failure, cleanup_phases)
     if failure is not None:
         raise failure from None
     return EXIT_SUCCESS
@@ -633,6 +658,8 @@ def _run_bound(
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     state_root, bundle, verified, client, sidecar, identities = _preflight(args)
+    failure: _EntrypointFailure | None = None
+    result = EXIT_SUCCESS
     try:
         if args.dry_run:
             _emit_status(
@@ -642,19 +669,35 @@ def run(argv: Sequence[str] | None = None) -> int:
                     "route_ready": False,
                 }
             )
-            return EXIT_SUCCESS
-        with state_root.working_directory():
-            return _run_bound(
-                args,
-                state_root,
-                bundle,
-                verified,
-                client,
-                sidecar,
-                identities,
-            )
+        else:
+            with state_root.working_directory():
+                result = _run_bound(
+                    args,
+                    state_root,
+                    bundle,
+                    verified,
+                    client,
+                    sidecar,
+                    identities,
+                )
+    except _EntrypointFailure as exc:
+        failure = exc
+    except Exception:
+        failure = _EntrypointFailure(
+            "node_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
     finally:
-        state_root.close()
+        try:
+            state_root.close()
+        except Exception:
+            failure = _aggregate_cleanup_failures(
+                failure,
+                ("state_root",),
+            )
+    if failure is not None:
+        raise failure from None
+    return result
 
 
 def main() -> None:

@@ -149,6 +149,7 @@ def _validate_endpoint_url(
         or parsed.password is not None
         or "@" in parsed.netloc
         or "%" in parsed.netloc
+        or port == 0
     ):
         raise ValueError("URL is invalid")
     host = parsed.hostname
@@ -328,14 +329,25 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, value: Mapping[str, Any]) -> None:
         body = canonical_json_bytes(dict(value))
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        if getattr(self, "_response_started", False):
+            self.close_connection = True
+            return
+        self._response_started = True
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except BaseException:
+            self.close_connection = True
+            raise
 
     def _fail(self, code: str, *, status: int | None = None) -> None:
+        if getattr(self, "_response_started", False):
+            self.close_connection = True
+            return
         self._send(_error_status(code) if status is None else status, _error_body(code))
 
     def _read_body(self) -> Mapping[str, Any]:
@@ -364,6 +376,7 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
         return value
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        self._response_started = False
         if self.path != "/seed/identity":
             self._fail("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
             return
@@ -378,6 +391,7 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
             )
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        self._response_started = False
         try:
             body = self._read_body()
             if self.path == "/seed/join":
@@ -385,11 +399,33 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                     raise SeedHTTPError("seed_http_body_invalid")
                 if body.get("protocol") != SEED_JOIN_HTTP_PROTOCOL:
                     raise SeedHTTPError("seed_http_protocol_invalid")
-                acceptance = self.coordinator.accept_join(
-                    invite_token=body["invite_token"],
-                    join_envelope=body["join_envelope"],
-                )
-                self._send(HTTPStatus.OK, acceptance)
+                try:
+                    acceptance = self.coordinator.accept_join(
+                        invite_token=body["invite_token"],
+                        join_envelope=body["join_envelope"],
+                    )
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    status = (
+                        JOIN_ROUTE_ERROR_STATUSES.get(code)
+                        if isinstance(code, str)
+                        else None
+                    )
+                    if status is None:
+                        self._fail(
+                            "seed_http_internal_error",
+                            status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        )
+                    else:
+                        self._fail(code, status=status)
+                    return
+                try:
+                    self._send(HTTPStatus.OK, acceptance)
+                except Exception:
+                    self._fail(
+                        "seed_http_internal_error",
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
                 return
             if self.path == "/seed/message":
                 if set(body) != {"protocol", "envelope"}:
@@ -483,7 +519,7 @@ class SeedHTTPServer:
                     advertised_url,
                     expected_scheme="http",
                     expected_host=(
-                        None if host in {"0.0.0.0", "::"} else str(bound_host)
+                        None if host in {"0.0.0.0", "::"} else host
                     ),
                     expected_port=(
                         None if requested_port == 0 else int(bound_port)
@@ -674,11 +710,17 @@ class SeedHTTPClient:
                 response_headers = response.headers
         except HTTPError as exc:
             response_body = exc.read(MAX_HTTP_FRAME_BYTES + 1)
-            code = (
+            exposed_code = (
                 _authoritative_remote_error_code(response_body)
                 if _has_exact_json_content_type(exc.headers)
                 else None
-            ) or "seed_http_remote_error"
+            )
+            if path == "/seed/join" and (
+                exposed_code is None
+                or JOIN_ROUTE_ERROR_STATUSES.get(exposed_code) != exc.code
+            ):
+                exposed_code = None
+            code = exposed_code or "seed_http_remote_error"
             raise SeedHTTPError(code, status=exc.code) from exc
         except (OSError, URLError) as exc:
             raise SeedHTTPError("seed_http_unreachable") from exc
