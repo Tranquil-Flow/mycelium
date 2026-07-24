@@ -6,9 +6,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 import math
+import re
+import socket
 import threading
+import time
+from types import MappingProxyType
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -48,6 +53,150 @@ _BASE_STATEMENT_FIELDS = frozenset(
         "expires_at",
     }
 )
+_HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_REMOTE_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
+_SERVER_CLOSE_SECONDS = 5.0
+JOIN_ROUTE_ERROR_STATUSES: Mapping[str, int] = MappingProxyType(
+    {
+        "invite_expired": HTTPStatus.BAD_REQUEST,
+        "invite_malformed": HTTPStatus.BAD_REQUEST,
+        "invite_protocol_invalid": HTTPStatus.BAD_REQUEST,
+        "invite_replayed": HTTPStatus.CONFLICT,
+        "invite_signature_invalid": HTTPStatus.UNAUTHORIZED,
+        "join_request_protocol_required": HTTPStatus.BAD_REQUEST,
+        "membership_endpoint_addr_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_endpoint_id_mismatch": HTTPStatus.BAD_REQUEST,
+        "membership_envelope_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_field_unusable": HTTPStatus.BAD_REQUEST,
+        "membership_fields_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_generation_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_identifier_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_join_generation_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_key_pin_invalid": HTTPStatus.UNAUTHORIZED,
+        "membership_message_expired": HTTPStatus.BAD_REQUEST,
+        "membership_message_from_future": HTTPStatus.BAD_REQUEST,
+        "membership_message_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_peer_class_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_protocol_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_runtime_capability_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_runtime_capability_mismatch": HTTPStatus.BAD_REQUEST,
+        "membership_signature_invalid": HTTPStatus.UNAUTHORIZED,
+        "membership_text_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_time_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_ttl_invalid": HTTPStatus.BAD_REQUEST,
+        "membership_verifier_invalid": HTTPStatus.BAD_REQUEST,
+        "seed_join_key_invalid": HTTPStatus.BAD_REQUEST,
+        "seed_join_mismatch": HTTPStatus.BAD_REQUEST,
+        "seed_join_retry_mismatch": HTTPStatus.BAD_REQUEST,
+        "seed_member_identity_reused": HTTPStatus.BAD_REQUEST,
+        "seed_node_endpoint_conflict": HTTPStatus.BAD_REQUEST,
+        "seed_node_key_conflict": HTTPStatus.CONFLICT,
+    }
+)
+
+
+class _IPv6ThreadingHTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def _validate_bind_address(host: str, port: int) -> tuple[str, int]:
+    if (
+        not isinstance(host, str)
+        or not host
+        or host != host.strip()
+        or any(character.isspace() for character in host)
+        or any(character in host for character in "/\\@?#")
+    ):
+        raise ValueError("host is invalid")
+    if host != "localhost":
+        try:
+            ipaddress.ip_address(host)
+        except ValueError as exc:
+            raise ValueError("host is invalid") from exc
+    if not isinstance(port, int) or isinstance(port, bool) or port < 0 or port > 65535:
+        raise ValueError("port is invalid")
+    return host, port
+
+
+def _validate_endpoint_url(
+    value: str,
+    *,
+    expected_scheme: str | None = None,
+    expected_host: str | None = None,
+    expected_port: int | None = None,
+) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(ord(character) < 0x20 for character in value)
+        or "\\" in value
+    ):
+        raise ValueError("URL is invalid")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("URL is invalid") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.hostname is None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+        or "@" in parsed.netloc
+        or "%" in parsed.netloc
+        or port == 0
+    ):
+        raise ValueError("URL is invalid")
+    host = parsed.hostname
+    try:
+        host.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError("URL is invalid") from exc
+    try:
+        ip_value = ipaddress.ip_address(host)
+    except ValueError:
+        labels = host.rstrip(".").split(".")
+        if (
+            host.endswith(".")
+            or not labels
+            or any(_HOST_LABEL_RE.fullmatch(label) is None for label in labels)
+        ):
+            raise ValueError("URL is invalid")
+        canonical_host = host.lower()
+        bracketed_host = canonical_host
+    else:
+        canonical_host = ip_value.compressed
+        bracketed_host = (
+            f"[{canonical_host}]" if ip_value.version == 6 else canonical_host
+        )
+    effective_port = port
+    if effective_port is None:
+        effective_port = 80 if parsed.scheme == "http" else 443
+    canonical_netloc = bracketed_host
+    if port is not None:
+        canonical_netloc = f"{canonical_netloc}:{port}"
+    if parsed.netloc.lower() != canonical_netloc.lower():
+        raise ValueError("URL is invalid")
+    if expected_scheme is not None and parsed.scheme != expected_scheme:
+        raise ValueError("URL is invalid")
+    if expected_host is not None:
+        try:
+            expected_host = ipaddress.ip_address(expected_host).compressed
+        except ValueError:
+            expected_host = expected_host.lower()
+        if canonical_host != expected_host:
+            raise ValueError("URL is invalid")
+    if expected_port is not None and effective_port != expected_port:
+        raise ValueError("URL is invalid")
+    canonical = f"{parsed.scheme}://{canonical_netloc}"
+    if value != canonical:
+        raise ValueError("URL is invalid")
+    return canonical
 
 
 class SeedHTTPError(RuntimeError):
@@ -106,6 +255,9 @@ def _canonical_json_loads(raw: bytes) -> Any:
 
 
 def _error_status(code: str) -> int:
+    join_status = JOIN_ROUTE_ERROR_STATUSES.get(code)
+    if join_status is not None:
+        return join_status
     if code == "seed_http_frame_too_large":
         return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
     if code in {
@@ -129,10 +281,44 @@ def _error_body(code: str) -> dict[str, Any]:
     }
 
 
+def _authoritative_remote_error_code(raw: bytes) -> str | None:
+    if not raw or len(raw) > MAX_HTTP_FRAME_BYTES:
+        return None
+    try:
+        value = _canonical_json_loads(raw)
+    except SeedHTTPError:
+        return None
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"protocol", "error"}
+        or value.get("protocol") != SEED_HTTP_ERROR_PROTOCOL
+    ):
+        return None
+    error = value.get("error")
+    if not isinstance(error, Mapping) or set(error) != {"code"}:
+        return None
+    code = error.get("code")
+    if not isinstance(code, str) or _REMOTE_ERROR_CODE_RE.fullmatch(code) is None:
+        return None
+    return code
+
+
+def _has_exact_json_content_type(headers: Any) -> bool:
+    try:
+        values = headers.get_all("Content-Type")
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return values == ["application/json"]
+
+
 class _SeedRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "MyceliumSeed/1"
     sys_version = ""
+
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(2.0)
 
     def log_message(self, _format: str, *_args: Any) -> None:
         return
@@ -143,14 +329,25 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, value: Mapping[str, Any]) -> None:
         body = canonical_json_bytes(dict(value))
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        if getattr(self, "_response_started", False):
+            self.close_connection = True
+            return
+        self._response_started = True
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except BaseException:
+            self.close_connection = True
+            raise
 
     def _fail(self, code: str, *, status: int | None = None) -> None:
+        if getattr(self, "_response_started", False):
+            self.close_connection = True
+            return
         self._send(_error_status(code) if status is None else status, _error_body(code))
 
     def _read_body(self) -> Mapping[str, Any]:
@@ -179,6 +376,7 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
         return value
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        self._response_started = False
         if self.path != "/seed/identity":
             self._fail("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
             return
@@ -187,8 +385,13 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
         except (SeedCoordinatorError, ValueError) as exc:
             code = getattr(exc, "code", "seed_http_request_invalid")
             self._fail(code)
+        except Exception:
+            self._fail(
+                "seed_http_internal_error", status=HTTPStatus.INTERNAL_SERVER_ERROR
+            )
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        self._response_started = False
         try:
             body = self._read_body()
             if self.path == "/seed/join":
@@ -196,11 +399,33 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                     raise SeedHTTPError("seed_http_body_invalid")
                 if body.get("protocol") != SEED_JOIN_HTTP_PROTOCOL:
                     raise SeedHTTPError("seed_http_protocol_invalid")
-                acceptance = self.coordinator.accept_join(
-                    invite_token=body["invite_token"],
-                    join_envelope=body["join_envelope"],
-                )
-                self._send(HTTPStatus.OK, acceptance)
+                try:
+                    acceptance = self.coordinator.accept_join(
+                        invite_token=body["invite_token"],
+                        join_envelope=body["join_envelope"],
+                    )
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    status = (
+                        JOIN_ROUTE_ERROR_STATUSES.get(code)
+                        if isinstance(code, str)
+                        else None
+                    )
+                    if status is None:
+                        self._fail(
+                            "seed_http_internal_error",
+                            status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                        )
+                    else:
+                        self._fail(code, status=status)
+                    return
+                try:
+                    self._send(HTTPStatus.OK, acceptance)
+                except Exception:
+                    self._fail(
+                        "seed_http_internal_error",
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
                 return
             if self.path == "/seed/message":
                 if set(body) != {"protocol", "envelope"}:
@@ -222,18 +447,24 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                         heartbeat_message_id=message["message_id"],
                     )
                 else:
-                    response = self.coordinator.receipt_envelope(
-                        message["message_id"]
-                    )
+                    response = self.coordinator.receipt_envelope(message["message_id"])
                 self._send(HTTPStatus.OK, response)
                 return
             raise SeedHTTPError("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
-        except (SeedHTTPError, InviteError, MembershipContractError, SeedCoordinatorError, ValueError) as exc:
+        except (
+            SeedHTTPError,
+            InviteError,
+            MembershipContractError,
+            SeedCoordinatorError,
+            ValueError,
+        ) as exc:
             code = getattr(exc, "code", "seed_http_request_invalid")
             status = exc.status if isinstance(exc, SeedHTTPError) else None
             self._fail(code, status=status)
         except Exception:
-            self._fail("seed_http_internal_error", status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._fail(
+                "seed_http_internal_error", status=HTTPStatus.INTERNAL_SERVER_ERROR
+            )
 
 
 class SeedHTTPServer:
@@ -247,39 +478,158 @@ class SeedHTTPServer:
         port: int,
         advertised_url: str | None = None,
     ) -> None:
+        host, requested_port = _validate_bind_address(host, port)
         if host in {"0.0.0.0", "::"} and advertised_url is None:
             raise ValueError("advertised_url is required for wildcard binds")
-        self._server = ThreadingHTTPServer((host, port), _SeedRequestHandler)
-        self._server.daemon_threads = True
-        self._server.coordinator = coordinator  # type: ignore[attr-defined]
-        bound_host, bound_port = self._server.server_address[:2]
-        self.base_url = f"http://{bound_host}:{bound_port}"
-        try:
-            coordinator.bind_seed_url(
-                self.base_url if advertised_url is None else advertised_url
+        if advertised_url is not None:
+            _validate_endpoint_url(
+                advertised_url,
+                expected_scheme="http",
+                expected_host=None if host in {"0.0.0.0", "::"} else host,
+                expected_port=None if requested_port == 0 else requested_port,
             )
+        server_class = (
+            _IPv6ThreadingHTTPServer
+            if host != "localhost" and ipaddress.ip_address(host).version == 6
+            else ThreadingHTTPServer
+        )
+        self._server = server_class(
+            (host, requested_port),
+            _SeedRequestHandler,
+        )
+        self._server.daemon_threads = False
+        self._server.block_on_close = True
+        self._server.timeout = 0.05
+        self._server.coordinator = coordinator  # type: ignore[attr-defined]
+        self._server.handle_error = lambda *_args: None
+        bound_host, bound_port = self._server.server_address[:2]
+        published_host = {
+            "0.0.0.0": "127.0.0.1",
+            "::": "::1",
+        }.get(str(bound_host), str(bound_host))
+        formatted_host = (
+            f"[{published_host}]" if ":" in published_host else published_host
+        )
+        self.base_url = f"http://{formatted_host}:{bound_port}"
+        try:
+            bound_url = (
+                self.base_url
+                if advertised_url is None
+                else _validate_endpoint_url(
+                    advertised_url,
+                    expected_scheme="http",
+                    expected_host=(
+                        None if host in {"0.0.0.0", "::"} else host
+                    ),
+                    expected_port=(
+                        None if requested_port == 0 else int(bound_port)
+                    ),
+                )
+            )
+            coordinator.bind_seed_url(bound_url)
         except Exception:
             self._server.server_close()
             raise
         self._thread: threading.Thread | None = None
+        self._state_lock = threading.RLock()
+        self._started = threading.Event()
+        self._serve_failed = threading.Event()
+        self._stop = threading.Event()
+        self._closed = False
+        self._close_requested = False
+        self._server_closed = False
+        self._request_threads: tuple[Any, ...] = ()
+
+    def _serve(self) -> None:
+        self._started.set()
+        try:
+            while not self._stop.is_set():
+                self._server.handle_request()
+        except Exception:
+            self._serve_failed.set()
 
     def start(self) -> "SeedHTTPServer":
-        if self._thread is not None:
-            return self
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            name="mycelium-seed-http",
-            daemon=True,
-        )
-        self._thread.start()
+        with self._state_lock:
+            if self._closed or self._close_requested:
+                raise RuntimeError("seed HTTP server is closed")
+            if self._thread is not None:
+                return self
+            thread = threading.Thread(
+                target=self._serve,
+                name="mycelium-seed-http",
+                daemon=False,
+            )
+            try:
+                thread.start()
+            except Exception:
+                self._close_socket()
+                raise
+            self._thread = thread
+        if (
+            not self._started.wait(1.0)
+            or self._serve_failed.is_set()
+            or not thread.is_alive()
+        ):
+            self.close()
+            raise RuntimeError("seed HTTP server failed to start")
         return self
 
+    def _close_socket(self) -> None:
+        if self._server_closed:
+            return
+        try:
+            self._server.server_close()
+        except Exception:
+            raise RuntimeError("seed HTTP server cleanup failed") from None
+        self._server_closed = True
+
     def close(self) -> None:
-        if self._thread is not None:
-            self._server.shutdown()
-            self._thread.join(timeout=5)
+        with self._state_lock:
+            if self._closed:
+                return
+            self._close_requested = True
+            thread = self._thread
+            self._stop.set()
+            deadline = time.monotonic() + _SERVER_CLOSE_SECONDS
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            try:
+                observed_threads = tuple(getattr(self._server, "_threads", ()))
+            except TypeError:
+                observed_threads = ()
+            known_threads = {
+                id(request_thread): request_thread
+                for request_thread in self._request_threads
+            }
+            known_threads.update(
+                {
+                    id(request_thread): request_thread
+                    for request_thread in observed_threads
+                }
+            )
+            request_threads = tuple(known_threads.values())
+            self._request_threads = request_threads
+            current = threading.current_thread()
+            for request_thread in request_threads:
+                if request_thread is current:
+                    continue
+                request_thread.join(
+                    timeout=max(0.0, deadline - time.monotonic())
+                )
+            self._server.block_on_close = False
+            self._close_socket()
+            if (
+                thread is not None
+                and thread.is_alive()
+                or any(
+                    request_thread.is_alive()
+                    for request_thread in request_threads
+                )
+            ):
+                raise RuntimeError("seed HTTP server cleanup failed")
             self._thread = None
-        self._server.server_close()
+            self._request_threads = ()
+            self._closed = True
 
     def __enter__(self) -> "SeedHTTPServer":
         return self.start()
@@ -300,21 +650,23 @@ class SeedHTTPClient:
         seed_key_records: list[Mapping[str, Any]],
         timeout: float = 10.0,
     ) -> None:
-        parsed = urlsplit(seed_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path not in {"", "/"}:
-            raise ValueError("seed_url is invalid")
-        if parsed.query or parsed.fragment:
-            raise ValueError("seed_url is invalid")
-        if parsed.username is not None or parsed.password is not None:
-            raise ValueError("seed_url is invalid")
-        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or not math.isfinite(float(timeout)) or timeout <= 0:
+        try:
+            canonical_seed_url = _validate_endpoint_url(seed_url)
+        except ValueError as exc:
+            raise ValueError("seed_url is invalid") from exc
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(float(timeout))
+            or timeout <= 0
+        ):
             raise ValueError("timeout is invalid")
         if len(seed_key_records) != 1:
             raise ValueError("seed_key_records is invalid")
         record = dict(seed_key_records[0])
         if record.get("verification_key_digest") != seed_key_digest:
             raise ValueError("seed key pin mismatch")
-        self.seed_url = seed_url.rstrip("/")
+        self.seed_url = canonical_seed_url
         self.swarm_id = swarm_id
         self.seed_key_digest = seed_key_digest
         self.seed_key_records = [record]
@@ -355,18 +707,27 @@ class SeedHTTPClient:
             with self._opener.open(request, timeout=self.timeout) as response:
                 response_body = response.read(MAX_HTTP_FRAME_BYTES + 1)
                 status = response.status
+                response_headers = response.headers
         except HTTPError as exc:
             response_body = exc.read(MAX_HTTP_FRAME_BYTES + 1)
-            try:
-                error = _canonical_json_loads(response_body)
-                code = error["error"]["code"]
-            except Exception:
-                code = "seed_http_remote_error"
+            exposed_code = (
+                _authoritative_remote_error_code(response_body)
+                if _has_exact_json_content_type(exc.headers)
+                else None
+            )
+            if path == "/seed/join" and (
+                exposed_code is None
+                or JOIN_ROUTE_ERROR_STATUSES.get(exposed_code) != exc.code
+            ):
+                exposed_code = None
+            code = exposed_code or "seed_http_remote_error"
             raise SeedHTTPError(code, status=exc.code) from exc
         except (OSError, URLError) as exc:
             raise SeedHTTPError("seed_http_unreachable") from exc
         if len(response_body) > MAX_HTTP_FRAME_BYTES:
             raise SeedHTTPError("seed_http_response_too_large", status=status)
+        if not _has_exact_json_content_type(response_headers):
+            raise SeedHTTPError("seed_http_remote_error", status=status)
         value = _canonical_json_loads(response_body)
         if not isinstance(value, Mapping):
             raise SeedHTTPError("seed_http_response_invalid", status=status)
@@ -386,12 +747,19 @@ class SeedHTTPClient:
         statement = envelope.get("statement")
         signature = envelope.get("signature")
         record = envelope.get("verification_key")
-        if not isinstance(statement, Mapping) or not isinstance(signature, Mapping) or not isinstance(record, Mapping):
+        if (
+            not isinstance(statement, Mapping)
+            or not isinstance(signature, Mapping)
+            or not isinstance(record, Mapping)
+        ):
             raise SeedHTTPError("seed_http_seed_envelope_invalid")
         expected_fields = set(_BASE_STATEMENT_FIELDS)
         if expected_protocol == SEED_RECEIPT_PROTOCOL:
             expected_fields.add("accepted_message_id")
-        if set(statement) != expected_fields or statement.get("protocol") != expected_protocol:
+        if (
+            set(statement) != expected_fields
+            or statement.get("protocol") != expected_protocol
+        ):
             raise SeedHTTPError("seed_http_seed_envelope_invalid")
         if (
             record.get("verification_key_digest") != self.seed_key_digest
