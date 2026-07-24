@@ -10,7 +10,7 @@ import threading
 import pytest
 
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
-from mycelium_membership import CAPABILITY_REPORT_PROTOCOL
+from mycelium_membership import LEASE_RENEWAL_PROTOCOL
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator
@@ -85,6 +85,14 @@ def test_real_http_join_and_member_message_roundtrip(tmp_path: Path) -> None:
         receipt = client.send_member_message(capability, now=NOW)
         assert receipt["accepted_message_id"] == capability["message"]["message_id"]
         assert coordinator.member("node-http")["generation"] == 1
+
+        heartbeat = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+        assert heartbeat is not None
+        first_renewal = client.send_member_message(heartbeat, now=NOW)
+        retried_renewal = client.send_member_message(heartbeat, now=NOW)
+        assert retried_renewal == first_renewal
+        assert first_renewal["message"]["protocol"] == LEASE_RENEWAL_PROTOCOL
+        assert coordinator.member("node-http")["last_heartbeat_sequence"] == 1
 
         retry_acceptance = client.join(
             invite_token=bundle["token"],

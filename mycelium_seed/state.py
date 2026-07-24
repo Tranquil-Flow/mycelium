@@ -5,17 +5,30 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import contextmanager
+import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import sqlite3
 from typing import Any, Iterator
 
 from mycelium_invite import SqliteInviteRegistry
+from mycelium_membership import (
+    HEARTBEAT_PROTOCOL,
+    LEASE_RENEWAL_PROTOCOL,
+    MembershipContractError,
+    verify_membership_message,
+)
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _reject_json_constant(_value: str) -> Any:
+    raise ValueError("non-finite JSON number")
 
 
 def _sqlite_state_error_code(exc: sqlite3.Error) -> str:
@@ -113,6 +126,22 @@ class SqliteSeedState:
                     FOREIGN KEY (nonce) REFERENCES consumed_invites(nonce),
                     FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
                 ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS seed_heartbeat_renewals (
+                    node_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL CHECK (generation >= 1),
+                    heartbeat_message_id TEXT NOT NULL,
+                    request_envelope_digest TEXT NOT NULL,
+                    heartbeat_sequence INTEGER NOT NULL
+                        CHECK (heartbeat_sequence >= 1),
+                    heartbeat_json TEXT NOT NULL,
+                    renewal_message_id TEXT NOT NULL UNIQUE,
+                    renewal_json TEXT NOT NULL,
+                    PRIMARY KEY (node_id, generation, heartbeat_message_id),
+                    FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (renewal_message_id)
+                        REFERENCES seed_emitted_messages(message_id)
+                ) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS seed_assignments (
                     assignment_id TEXT PRIMARY KEY NOT NULL,
                     node_id TEXT NOT NULL,
@@ -136,7 +165,7 @@ class SqliteSeedState:
                     "INSERT INTO seed_metadata (key, value) VALUES ('schema_version', ?)",
                     (str(_SCHEMA_VERSION),),
                 )
-            elif row["value"] in {"1", "2", "3"}:
+            elif row["value"] in {"1", "2", "3", "4"}:
                 columns = {
                     item["name"]
                     for item in connection.execute("PRAGMA table_info(seed_members)")
@@ -187,6 +216,7 @@ class SqliteSeedState:
                 )
             elif row["value"] != str(_SCHEMA_VERSION):
                 raise SeedStateError("seed_state_schema_unsupported")
+            self._validate_heartbeat_renewal_schema(connection)
             connection.commit()
         except SeedStateError:
             connection.rollback()
@@ -196,6 +226,137 @@ class SqliteSeedState:
             raise SeedStateError("seed_state_unavailable") from exc
         finally:
             connection.close()
+
+    @staticmethod
+    def _validate_heartbeat_renewal_schema(
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Reject any current-version renewal table outside the exact contract."""
+
+        expected_columns = (
+            (0, "node_id", "TEXT", 1, None, 1),
+            (1, "generation", "INTEGER", 1, None, 2),
+            (2, "heartbeat_message_id", "TEXT", 1, None, 3),
+            (3, "request_envelope_digest", "TEXT", 1, None, 0),
+            (4, "heartbeat_sequence", "INTEGER", 1, None, 0),
+            (5, "heartbeat_json", "TEXT", 1, None, 0),
+            (6, "renewal_message_id", "TEXT", 1, None, 0),
+            (7, "renewal_json", "TEXT", 1, None, 0),
+        )
+        table_info = tuple(
+            tuple(row)
+            for row in connection.execute(
+                "PRAGMA table_info(seed_heartbeat_renewals)"
+            )
+        )
+        table_xinfo = tuple(
+            tuple(row)
+            for row in connection.execute(
+                "PRAGMA table_xinfo(seed_heartbeat_renewals)"
+            )
+        )
+        if table_info != expected_columns or table_xinfo != tuple(
+            (*column, 0) for column in expected_columns
+        ):
+            raise SeedStateError("seed_state_corrupt")
+
+        indexes: set[tuple[int, str, int, tuple[str, ...]]] = set()
+        for row in connection.execute(
+            "PRAGMA index_list(seed_heartbeat_renewals)"
+        ):
+            index_name = row["name"].replace('"', '""')
+            index_columns = tuple(
+                item["name"]
+                for item in connection.execute(
+                    f'PRAGMA index_info("{index_name}")'
+                )
+            )
+            indexes.add(
+                (
+                    int(row["unique"]),
+                    row["origin"],
+                    int(row["partial"]),
+                    index_columns,
+                )
+            )
+        expected_indexes = {
+            (
+                1,
+                "pk",
+                0,
+                ("node_id", "generation", "heartbeat_message_id"),
+            ),
+            (1, "u", 0, ("renewal_message_id",)),
+        }
+        if indexes != expected_indexes:
+            raise SeedStateError("seed_state_corrupt")
+
+        foreign_keys = {
+            (
+                row["table"],
+                row["from"],
+                row["to"],
+                row["on_update"],
+                row["on_delete"],
+                row["match"],
+            )
+            for row in connection.execute(
+                "PRAGMA foreign_key_list(seed_heartbeat_renewals)"
+            )
+        }
+        if foreign_keys != {
+            (
+                "seed_members",
+                "node_id",
+                "node_id",
+                "NO ACTION",
+                "CASCADE",
+                "NONE",
+            ),
+            (
+                "seed_emitted_messages",
+                "renewal_message_id",
+                "message_id",
+                "NO ACTION",
+                "NO ACTION",
+                "NONE",
+            ),
+        }:
+            raise SeedStateError("seed_state_corrupt")
+
+        schema_row = connection.execute(
+            """
+            SELECT sql FROM sqlite_master
+            WHERE type = 'table' AND name = 'seed_heartbeat_renewals'
+            """
+        ).fetchone()
+        if schema_row is None or not isinstance(schema_row["sql"], str):
+            raise SeedStateError("seed_state_corrupt")
+        normalized_sql = re.sub(r"\s+", "", schema_row["sql"].lower())
+        expected_declarations = (
+            "node_idtextnotnull,",
+            "generationintegernotnullcheck(generation>=1),",
+            "heartbeat_message_idtextnotnull,",
+            "request_envelope_digesttextnotnull,",
+            (
+                "heartbeat_sequenceintegernotnull"
+                "check(heartbeat_sequence>=1),"
+            ),
+            "heartbeat_jsontextnotnull,",
+            "renewal_message_idtextnotnullunique,",
+            "renewal_jsontextnotnull,",
+        )
+        if (
+            not normalized_sql.endswith(")withoutrowid")
+            or normalized_sql.count("check(") != 2
+            or "check(generation>=1)" not in normalized_sql
+            or "check(heartbeat_sequence>=1)" not in normalized_sql
+            or any(
+                declaration not in normalized_sql
+                for declaration in expected_declarations
+            )
+        ):
+            raise SeedStateError("seed_state_corrupt")
 
     def bind_identity(
         self,
@@ -465,13 +626,237 @@ class SqliteSeedState:
     def _decode_acceptance(raw_text: str) -> dict[str, Any]:
         try:
             raw = raw_text.encode("utf-8")
-            value = json.loads(raw)
+            value = json.loads(raw, parse_constant=_reject_json_constant)
             if not isinstance(value, dict) or canonical_json_bytes(value) != raw:
                 raise SeedStateError("seed_state_corrupt")
             return value
         except SeedStateError:
             raise
         except (TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+
+    @classmethod
+    def _verify_heartbeat_envelope(
+        cls,
+        envelope: Mapping[str, Any],
+        *,
+        node_id: str,
+        endpoint_id: str,
+        verification_key_digest: str,
+        incarnation: str,
+        generation: int,
+        heartbeat_message_id: str,
+        heartbeat_sequence: int,
+        swarm_id: str,
+        seed_node_id: str,
+    ) -> dict[str, Any]:
+        try:
+            untrusted_message = envelope["message"]
+            issued_at = untrusted_message["issued_at"]
+            if (
+                isinstance(issued_at, bool)
+                or not isinstance(issued_at, (int, float))
+                or not math.isfinite(float(issued_at))
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            message = verify_membership_message(
+                envelope,
+                now=float(issued_at),
+                expected_key_digest=verification_key_digest,
+                expected_protocol=HEARTBEAT_PROTOCOL,
+                expected_swarm_id=swarm_id,
+                expected_sender_node_id=node_id,
+                expected_sender_endpoint_id=endpoint_id,
+                expected_recipient_node_id=seed_node_id,
+            )
+            if (
+                type(message["generation"]) is not int
+                or type(message["heartbeat_sequence"]) is not int
+                or message["incarnation"] != incarnation
+                or message["generation"] != generation
+                or message["message_id"] != heartbeat_message_id
+                or message["heartbeat_sequence"] != heartbeat_sequence
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            return message
+        except SeedStateError:
+            raise
+        except (
+            IndexError,
+            KeyError,
+            MembershipContractError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+
+    @classmethod
+    def _verify_renewal_envelope(
+        cls,
+        envelope: Mapping[str, Any],
+        *,
+        node_id: str,
+        incarnation: str,
+        generation: int,
+        heartbeat_message_id: str,
+        renewal_message_id: str,
+        swarm_id: str,
+        seed_node_id: str,
+        seed_key_digest: str,
+    ) -> dict[str, Any]:
+        try:
+            untrusted_message = envelope["message"]
+            issued_at = untrusted_message["issued_at"]
+            if (
+                isinstance(issued_at, bool)
+                or not isinstance(issued_at, (int, float))
+                or not math.isfinite(float(issued_at))
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            message = verify_membership_message(
+                envelope,
+                now=float(issued_at),
+                expected_key_digest=seed_key_digest,
+                expected_protocol=LEASE_RENEWAL_PROTOCOL,
+                expected_swarm_id=swarm_id,
+                expected_sender_node_id=seed_node_id,
+                expected_recipient_node_id=node_id,
+            )
+            if (
+                type(message["generation"]) is not int
+                or type(message["membership_generation"]) is not int
+                or message["message_id"] != renewal_message_id
+                or message["heartbeat_message_id"] != heartbeat_message_id
+                or message["generation"] != generation
+                or message["membership_generation"] != generation
+                or message["member_incarnation"] != incarnation
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            return message
+        except SeedStateError:
+            raise
+        except (
+            IndexError,
+            KeyError,
+            MembershipContractError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+
+    @classmethod
+    def _decode_heartbeat_renewal_row(
+        cls,
+        row: sqlite3.Row,
+        *,
+        expected_node_id: str,
+        expected_generation: int,
+        expected_heartbeat_message_id: str,
+        expected_endpoint_id: str | None = None,
+        expected_verification_key_digest: str | None = None,
+        expected_incarnation: str | None = None,
+    ) -> tuple[str, int, dict[str, Any], dict[str, Any]]:
+        """Decode and cross-check one durable heartbeat response binding."""
+
+        try:
+            text_fields = (
+                "node_id",
+                "heartbeat_message_id",
+                "request_envelope_digest",
+                "heartbeat_json",
+                "renewal_message_id",
+                "renewal_json",
+                "current_endpoint_id",
+                "current_verification_key_digest",
+                "current_incarnation",
+                "current_swarm_id",
+                "current_seed_node_id",
+                "current_seed_key_digest",
+            )
+            if any(
+                not isinstance(row[field], str) or not row[field]
+                for field in text_fields
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            generation = row["generation"]
+            heartbeat_sequence = row["heartbeat_sequence"]
+            current_generation = row["current_generation"]
+            current_heartbeat_sequence = row["current_heartbeat_sequence"]
+            if (
+                type(generation) is not int
+                or type(heartbeat_sequence) is not int
+                or type(current_generation) is not int
+                or type(current_heartbeat_sequence) is not int
+                or generation != expected_generation
+                or current_generation != expected_generation
+                or heartbeat_sequence < 1
+                or heartbeat_sequence > current_heartbeat_sequence
+                or _SHA256_HEX_RE.fullmatch(
+                    row["request_envelope_digest"]
+                )
+                is None
+                or row["node_id"] != expected_node_id
+                or row["heartbeat_message_id"]
+                != expected_heartbeat_message_id
+                or (
+                    expected_endpoint_id is not None
+                    and row["current_endpoint_id"] != expected_endpoint_id
+                )
+                or (
+                    expected_verification_key_digest is not None
+                    and row["current_verification_key_digest"]
+                    != expected_verification_key_digest
+                )
+                or (
+                    expected_incarnation is not None
+                    and row["current_incarnation"] != expected_incarnation
+                )
+            ):
+                raise SeedStateError("seed_state_corrupt")
+
+            heartbeat = cls._decode_acceptance(row["heartbeat_json"])
+            cls._verify_heartbeat_envelope(
+                heartbeat,
+                node_id=expected_node_id,
+                endpoint_id=row["current_endpoint_id"],
+                verification_key_digest=row[
+                    "current_verification_key_digest"
+                ],
+                incarnation=row["current_incarnation"],
+                generation=expected_generation,
+                heartbeat_message_id=expected_heartbeat_message_id,
+                heartbeat_sequence=heartbeat_sequence,
+                swarm_id=row["current_swarm_id"],
+                seed_node_id=row["current_seed_node_id"],
+            )
+            heartbeat_raw = row["heartbeat_json"].encode("utf-8")
+            if (
+                hashlib.sha256(heartbeat_raw).hexdigest()
+                != row["request_envelope_digest"]
+            ):
+                raise SeedStateError("seed_state_corrupt")
+
+            renewal = cls._decode_acceptance(row["renewal_json"])
+            cls._verify_renewal_envelope(
+                renewal,
+                node_id=expected_node_id,
+                incarnation=row["current_incarnation"],
+                generation=expected_generation,
+                heartbeat_message_id=expected_heartbeat_message_id,
+                renewal_message_id=row["renewal_message_id"],
+                swarm_id=row["current_swarm_id"],
+                seed_node_id=row["current_seed_node_id"],
+                seed_key_digest=row["current_seed_key_digest"],
+            )
+            return (
+                row["request_envelope_digest"],
+                heartbeat_sequence,
+                heartbeat,
+                renewal,
+            )
+        except SeedStateError:
+            raise
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
             raise SeedStateError("seed_state_corrupt") from exc
 
     def load_join_acceptance(
@@ -503,6 +888,425 @@ class SqliteSeedState:
             raise
         except sqlite3.Error as exc:
             raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def load_heartbeat_renewal(
+        self,
+        *,
+        node_id: str,
+        endpoint_id: str,
+        verification_key_digest: str,
+        incarnation: str,
+        generation: int,
+        heartbeat_message_id: str,
+        heartbeat_sequence: int,
+        request_envelope_digest: str,
+    ) -> dict[str, Any] | None:
+        """Return an exact committed renewal for the current bound member."""
+
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT renewal.node_id, renewal.generation,
+                       renewal.heartbeat_message_id,
+                       renewal.request_envelope_digest,
+                       renewal.heartbeat_sequence,
+                       renewal.heartbeat_json,
+                       renewal.renewal_message_id, renewal.renewal_json,
+                       member.endpoint_id AS current_endpoint_id,
+                       member.verification_key_digest
+                           AS current_verification_key_digest,
+                       member.incarnation AS current_incarnation,
+                       member.generation AS current_generation,
+                       member.last_heartbeat_sequence
+                           AS current_heartbeat_sequence,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'swarm_id') AS current_swarm_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_node_id') AS current_seed_node_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_key_digest') AS current_seed_key_digest
+                FROM seed_heartbeat_renewals AS renewal
+                JOIN seed_members AS member
+                  ON member.node_id = renewal.node_id
+                 AND member.generation = renewal.generation
+                WHERE renewal.node_id = ? AND renewal.generation = ?
+                  AND renewal.heartbeat_message_id = ?
+                  AND member.endpoint_id = ?
+                  AND member.verification_key_digest = ?
+                  AND member.incarnation = ?
+                """,
+                (
+                    node_id,
+                    generation,
+                    heartbeat_message_id,
+                    endpoint_id,
+                    verification_key_digest,
+                    incarnation,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            (
+                stored_request_digest,
+                stored_heartbeat_sequence,
+                _stored_heartbeat,
+                renewal,
+            ) = self._decode_heartbeat_renewal_row(
+                row,
+                expected_node_id=node_id,
+                expected_generation=generation,
+                expected_heartbeat_message_id=heartbeat_message_id,
+                expected_endpoint_id=endpoint_id,
+                expected_verification_key_digest=verification_key_digest,
+                expected_incarnation=incarnation,
+            )
+            if stored_request_digest != request_envelope_digest:
+                raise SeedStateError("seed_heartbeat_retry_mismatch")
+            if stored_heartbeat_sequence != heartbeat_sequence:
+                raise SeedStateError("seed_heartbeat_retry_mismatch")
+            return renewal
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    def find_heartbeat_renewal(
+        self,
+        *,
+        node_id: str,
+        generation: int,
+        heartbeat_message_id: str,
+    ) -> dict[str, Any] | None:
+        """Recover a committed renewal only for the current member generation."""
+
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT renewal.node_id, renewal.generation,
+                       renewal.heartbeat_message_id,
+                       renewal.request_envelope_digest,
+                       renewal.heartbeat_sequence,
+                       renewal.heartbeat_json,
+                       renewal.renewal_message_id, renewal.renewal_json,
+                       member.endpoint_id AS current_endpoint_id,
+                       member.verification_key_digest
+                           AS current_verification_key_digest,
+                       member.incarnation AS current_incarnation,
+                       member.generation AS current_generation,
+                       member.last_heartbeat_sequence
+                           AS current_heartbeat_sequence,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'swarm_id') AS current_swarm_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_node_id') AS current_seed_node_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_key_digest') AS current_seed_key_digest
+                FROM seed_heartbeat_renewals AS renewal
+                JOIN seed_members AS member
+                  ON member.node_id = renewal.node_id
+                 AND member.generation = renewal.generation
+                WHERE renewal.node_id = ? AND renewal.generation = ?
+                  AND renewal.heartbeat_message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone()
+            if row is None:
+                return None
+            _request_digest, _heartbeat_sequence, _heartbeat, renewal = (
+                self._decode_heartbeat_renewal_row(
+                    row,
+                    expected_node_id=node_id,
+                    expected_generation=generation,
+                    expected_heartbeat_message_id=heartbeat_message_id,
+                )
+            )
+            return renewal
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    def commit_heartbeat_renewal(
+        self,
+        *,
+        request_envelope_digest: str,
+        heartbeat: Mapping[str, Any],
+        heartbeat_message_id: str,
+        heartbeat_sequence: int,
+        heartbeat_expires_at: float,
+        renewal_message_id: str,
+        member: Mapping[str, Any],
+        renewal: Mapping[str, Any],
+        now: float,
+        capacity: int,
+    ) -> dict[str, Any]:
+        """Atomically accept a heartbeat and persist its exact signed response."""
+
+        try:
+            heartbeat_json = canonical_json_bytes(dict(heartbeat)).decode("utf-8")
+            renewal_json = canonical_json_bytes(dict(renewal)).decode("utf-8")
+            node_id = member["node_id"]
+            generation = member["generation"]
+        except (KeyError, TypeError, ValueError, UnicodeError) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+        if (
+            not isinstance(node_id, str)
+            or not node_id
+            or type(generation) is not int
+            or generation < 1
+            or type(heartbeat_sequence) is not int
+            or heartbeat_sequence < 1
+            or not isinstance(request_envelope_digest, str)
+            or _SHA256_HEX_RE.fullmatch(request_envelope_digest) is None
+            or hashlib.sha256(heartbeat_json.encode("utf-8")).hexdigest()
+            != request_envelope_digest
+        ):
+            raise SeedStateError("seed_state_corrupt")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """
+                SELECT endpoint_id, verification_key_digest, incarnation,
+                       generation, last_heartbeat_sequence,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'swarm_id') AS current_swarm_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_node_id') AS current_seed_node_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_key_digest') AS current_seed_key_digest
+                FROM seed_members WHERE node_id = ?
+                """,
+                (node_id,),
+            ).fetchone()
+            if current is None:
+                raise SeedStateError("seed_state_member_stale")
+            if (
+                type(current["generation"]) is not int
+                or type(current["last_heartbeat_sequence"]) is not int
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            if (
+                current["endpoint_id"] != member["endpoint_id"]
+                or current["verification_key_digest"]
+                != member["verification_key_digest"]
+                or current["incarnation"] != member["incarnation"]
+                or current["generation"] != generation
+            ):
+                raise SeedStateError("seed_state_member_stale")
+
+            existing = connection.execute(
+                """
+                SELECT renewal.node_id, renewal.generation,
+                       renewal.heartbeat_message_id,
+                       renewal.request_envelope_digest,
+                       renewal.heartbeat_sequence,
+                       renewal.heartbeat_json,
+                       renewal.renewal_message_id, renewal.renewal_json,
+                       member.endpoint_id AS current_endpoint_id,
+                       member.verification_key_digest
+                           AS current_verification_key_digest,
+                       member.incarnation AS current_incarnation,
+                       member.generation AS current_generation,
+                       member.last_heartbeat_sequence
+                           AS current_heartbeat_sequence,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'swarm_id') AS current_swarm_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_node_id') AS current_seed_node_id,
+                       (SELECT value FROM seed_metadata
+                        WHERE key = 'seed_key_digest') AS current_seed_key_digest
+                FROM seed_heartbeat_renewals AS renewal
+                JOIN seed_members AS member
+                  ON member.node_id = renewal.node_id
+                 AND member.generation = renewal.generation
+                WHERE renewal.node_id = ? AND renewal.generation = ?
+                  AND renewal.heartbeat_message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone()
+            if existing is not None:
+                (
+                    stored_request_digest,
+                    stored_heartbeat_sequence,
+                    stored_heartbeat,
+                    stored_renewal,
+                ) = self._decode_heartbeat_renewal_row(
+                    existing,
+                    expected_node_id=node_id,
+                    expected_generation=generation,
+                    expected_heartbeat_message_id=heartbeat_message_id,
+                    expected_endpoint_id=member["endpoint_id"],
+                    expected_verification_key_digest=member[
+                        "verification_key_digest"
+                    ],
+                    expected_incarnation=member["incarnation"],
+                )
+                if stored_request_digest != request_envelope_digest:
+                    raise SeedStateError("seed_heartbeat_retry_mismatch")
+                if stored_heartbeat_sequence != heartbeat_sequence:
+                    raise SeedStateError("seed_heartbeat_retry_mismatch")
+                if canonical_json_bytes(stored_heartbeat) != heartbeat_json.encode(
+                    "utf-8"
+                ):
+                    raise SeedStateError("seed_heartbeat_retry_mismatch")
+                connection.commit()
+                return stored_renewal
+            if heartbeat_sequence <= current["last_heartbeat_sequence"]:
+                raise SeedStateError("seed_state_member_conflict")
+
+            text_metadata = (
+                current["current_swarm_id"],
+                current["current_seed_node_id"],
+                current["current_seed_key_digest"],
+            )
+            if any(not isinstance(value, str) or not value for value in text_metadata):
+                raise SeedStateError("seed_state_corrupt")
+            heartbeat_message = self._verify_heartbeat_envelope(
+                heartbeat,
+                node_id=node_id,
+                endpoint_id=current["endpoint_id"],
+                verification_key_digest=current["verification_key_digest"],
+                incarnation=current["incarnation"],
+                generation=generation,
+                heartbeat_message_id=heartbeat_message_id,
+                heartbeat_sequence=heartbeat_sequence,
+                swarm_id=current["current_swarm_id"],
+                seed_node_id=current["current_seed_node_id"],
+            )
+            if (
+                isinstance(heartbeat_expires_at, bool)
+                or not isinstance(heartbeat_expires_at, (int, float))
+                or not math.isfinite(float(heartbeat_expires_at))
+                or float(heartbeat_message["expires_at"])
+                != float(heartbeat_expires_at)
+                or type(member["last_heartbeat_sequence"]) is not int
+                or member["last_heartbeat_sequence"] != heartbeat_sequence
+            ):
+                raise SeedStateError("seed_state_corrupt")
+            self._verify_renewal_envelope(
+                renewal,
+                node_id=node_id,
+                incarnation=current["incarnation"],
+                generation=generation,
+                heartbeat_message_id=heartbeat_message_id,
+                renewal_message_id=renewal_message_id,
+                swarm_id=current["current_swarm_id"],
+                seed_node_id=current["current_seed_node_id"],
+                seed_key_digest=current["current_seed_key_digest"],
+            )
+
+            connection.execute(
+                "DELETE FROM seed_replay WHERE expires_at < ?",
+                (now,),
+            )
+            if connection.execute(
+                """
+                SELECT 1 FROM seed_replay
+                WHERE node_id = ? AND generation = ? AND message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone() is not None:
+                raise SeedStateError("seed_message_replayed")
+            count = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM seed_replay
+                WHERE node_id = ? AND generation = ?
+                """,
+                (node_id, generation),
+            ).fetchone()["count"]
+            if int(count) >= capacity:
+                raise SeedStateError("seed_replay_window_full")
+            if connection.execute(
+                "SELECT 1 FROM seed_emitted_messages WHERE message_id = ?",
+                (renewal_message_id,),
+            ).fetchone() is not None:
+                raise SeedStateError("seed_message_id_reused")
+
+            connection.execute(
+                """
+                INSERT INTO seed_replay (
+                    node_id, generation, message_id, expires_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    node_id,
+                    generation,
+                    heartbeat_message_id,
+                    heartbeat_expires_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO seed_emitted_messages (message_id) VALUES (?)",
+                (renewal_message_id,),
+            )
+            cursor = connection.execute(
+                """
+                UPDATE seed_members SET
+                    lease_expires_at = ?,
+                    last_heartbeat_sequence = ?,
+                    last_liveness_at = ?,
+                    next_heartbeat_due_at = ?,
+                    last_activity_receipt_at = ?,
+                    active_requests = ?,
+                    lifecycle_state = ?
+                WHERE node_id = ? AND endpoint_id = ?
+                  AND verification_key_digest = ? AND incarnation = ?
+                  AND generation = ? AND last_heartbeat_sequence < ?
+                """,
+                (
+                    member["lease_expires_at"],
+                    heartbeat_sequence,
+                    member["last_liveness_at"],
+                    member["next_heartbeat_due_at"],
+                    member["last_activity_receipt_at"],
+                    member["active_requests"],
+                    member["lifecycle_state"],
+                    node_id,
+                    member["endpoint_id"],
+                    member["verification_key_digest"],
+                    member["incarnation"],
+                    generation,
+                    heartbeat_sequence,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise SeedStateError("seed_state_member_conflict")
+            connection.execute(
+                """
+                INSERT INTO seed_heartbeat_renewals (
+                    node_id, generation, heartbeat_message_id,
+                    request_envelope_digest, heartbeat_sequence,
+                    heartbeat_json, renewal_message_id, renewal_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    node_id,
+                    generation,
+                    heartbeat_message_id,
+                    request_envelope_digest,
+                    heartbeat_sequence,
+                    heartbeat_json,
+                    renewal_message_id,
+                    renewal_json,
+                ),
+            )
+            connection.commit()
+            return dict(renewal)
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
         finally:
             connection.close()
 

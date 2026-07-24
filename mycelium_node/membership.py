@@ -170,14 +170,21 @@ class NodeMembershipSession:
         expires_at: float,
         now: float,
     ) -> None:
+        self._check_incoming(message_id, now=now)
         for expired_id, expiry in tuple(self._seen_ids.items()):
             if expiry < now:
                 del self._seen_ids[expired_id]
-        if message_id in self._seen_ids:
-            raise NodeMembershipError("membership_message_replayed")
-        if len(self._seen_ids) >= _MAX_REPLAY_IDS:
-            raise NodeMembershipError("membership_replay_window_full")
         self._seen_ids[message_id] = expires_at
+
+    def _check_incoming(self, message_id: str, *, now: float) -> None:
+        expiry = self._seen_ids.get(message_id)
+        if expiry is not None and expiry >= now:
+            raise NodeMembershipError("membership_message_replayed")
+        if (
+            sum(expiry >= now for expiry in self._seen_ids.values())
+            >= _MAX_REPLAY_IDS
+        ):
+            raise NodeMembershipError("membership_replay_window_full")
 
     def _post_join_common(
         self,
@@ -338,10 +345,30 @@ class NodeMembershipSession:
                 heartbeat_message_id,
                 "heartbeat_message_id",
             )
-            message = self._verify_seed_message(
+            if (
+                self._seed_key_digest is None
+                or self._seed_endpoint_id is None
+                or self._generation is None
+                or self._lease_expires_at is None
+            ):
+                raise NodeMembershipError("membership_not_joined")
+            now = self._now()
+            old_lease_expires_at = self._lease_expires_at
+            message = verify_membership_message(
                 envelope,
+                now=now,
+                expected_key_digest=self._seed_key_digest,
                 expected_protocol=LEASE_RENEWAL_PROTOCOL,
             )
+            if (
+                message["swarm_id"] != self.swarm_id
+                or message["sender_node_id"] != self.seed_node_id
+                or message["sender_endpoint_id"] != self._seed_endpoint_id
+                or message["recipient_node_id"] != self.node_id
+                or message["generation"] != self._generation
+            ):
+                raise NodeMembershipError("membership_message_mismatch")
+            self._check_incoming(message["message_id"], now=now)
             if (
                 message["heartbeat_message_id"] != heartbeat_message_id
                 or message["member_incarnation"] != self.incarnation
@@ -352,12 +379,19 @@ class NodeMembershipSession:
             if pending_liveness is None:
                 raise NodeMembershipError("membership_lease_renewal_unknown")
             renewed_until = float(message["lease_expires_at"])
+            if float(message["issued_at"]) >= old_lease_expires_at:
+                raise NodeMembershipError("membership_lease_renewal_causality")
             if (
-                self._lease_expires_at is None
-                or renewed_until < self._lease_expires_at
-                or renewed_until <= self._now()
+                renewed_until <= old_lease_expires_at
+                or now >= renewed_until
+                or float(message["expires_at"]) < renewed_until
             ):
                 raise NodeMembershipError("membership_lease_renewal_stale")
+            self._remember_incoming(
+                message["message_id"],
+                expires_at=float(message["expires_at"]),
+                now=now,
+            )
             self._lease_expires_at = renewed_until
             source, _expires_at = self._pending_liveness.pop(heartbeat_message_id)
             if source == "activation_receipt":

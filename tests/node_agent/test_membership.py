@@ -383,6 +383,302 @@ def test_capability_and_heartbeat_are_signed_generation_bound_and_never_ready(
     assert second_message["route_ready"] is False
 
 
+def _clocked_joined(
+    tmp_path: Path,
+    clock: list[float],
+) -> tuple[NodeMembershipSession, object]:
+    session = NodeMembershipSession(
+        node_id="node-a",
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        signer=load_or_create_node_signer(tmp_path / "private" / "node.key"),
+        incarnation="incarnation-a",
+        software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability=MAC_RUNTIME_CAPABILITY,
+        clock=lambda: clock[0],
+        id_source=_ids("clocked-node-message"),
+    )
+    seed = generate_ed25519_signer(endpoint_id="seed-endpoint")
+    request = session.join_request(
+        invite_nonce="invite-clocked",
+        endpoint_addrs=["https://node-a.example.test/control"],
+    )
+    session.accept_join(
+        _acceptance(session, request, seed),
+        seed_key_digest=seed.verification_key_digest,
+    )
+    return session, seed
+
+
+def _pending_heartbeat(
+    session: NodeMembershipSession,
+    clock: list[float],
+) -> str:
+    clock[0] = NOW + 299.0
+    heartbeat = session.heartbeat(lifecycle_state="RUNNING", active_requests=1)
+    assert heartbeat is not None
+    return heartbeat["message"]["message_id"]
+
+
+def _delayed_renewal(
+    seed,
+    *,
+    message_id: str,
+    heartbeat_message_id: str,
+    issued_at: float,
+    expires_at: float,
+    lease_expires_at: float,
+) -> dict:
+    return sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": LEASE_RENEWAL_PROTOCOL,
+            "message_id": message_id,
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "heartbeat_message_id": heartbeat_message_id,
+            "member_incarnation": "incarnation-a",
+            "membership_generation": 1,
+            "lease_expires_at": lease_expires_at,
+        },
+    )
+
+
+def test_rejected_renewal_binding_does_not_poison_exact_valid_retry(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path, clock)
+    heartbeat_id = _pending_heartbeat(session, clock)
+    renewal = _delayed_renewal(
+        seed,
+        message_id="renewal-binding-retry",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 304.0,
+        lease_expires_at=NOW + 304.0,
+    )
+    clock[0] = NOW + 299.5
+
+    with pytest.raises(NodeMembershipError) as mismatch:
+        session.accept_lease_renewal(
+            renewal,
+            heartbeat_message_id="wrong-heartbeat",
+        )
+    assert mismatch.value.code == "membership_lease_renewal_mismatch"
+
+    accepted = session.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=heartbeat_id,
+    )
+    assert accepted["message_id"] == "renewal-binding-retry"
+    assert accepted["lease_expires_at"] == NOW + 304.0
+
+
+def test_unknown_renewal_does_not_poison_replay_ledger(tmp_path: Path) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path, clock)
+    renewal = _delayed_renewal(
+        seed,
+        message_id="renewal-unknown-retry",
+        heartbeat_message_id="unknown-heartbeat",
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 304.0,
+        lease_expires_at=NOW + 304.0,
+    )
+    clock[0] = NOW + 299.5
+
+    for _attempt in range(2):
+        with pytest.raises(NodeMembershipError) as unknown:
+            session.accept_lease_renewal(
+                renewal,
+                heartbeat_message_id="unknown-heartbeat",
+            )
+        assert unknown.value.code == "membership_lease_renewal_unknown"
+
+
+def test_delayed_renewal_bypasses_only_old_lease_and_pops_pending_liveness(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path, clock)
+    heartbeat_id = _pending_heartbeat(session, clock)
+    renewal = _delayed_renewal(
+        seed,
+        message_id="renewal-delayed",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 304.0,
+        lease_expires_at=NOW + 304.0,
+    )
+
+    clock[0] = NOW + 301.0
+    accepted = session.accept_lease_renewal(
+        renewal,
+        heartbeat_message_id=heartbeat_id,
+    )
+    assert accepted["lease_expires_at"] == NOW + 304.0
+    assert session.heartbeat(lifecycle_state="RUNNING", active_requests=0) is not None
+
+    second = _delayed_renewal(
+        seed,
+        message_id="renewal-after-pop",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=NOW + 302.0,
+        expires_at=NOW + 305.0,
+        lease_expires_at=NOW + 305.0,
+    )
+    with pytest.raises(NodeMembershipError) as unknown:
+        session.accept_lease_renewal(
+            second,
+            heartbeat_message_id=heartbeat_id,
+        )
+    assert unknown.value.code == "membership_lease_renewal_unknown"
+    with pytest.raises(NodeMembershipError) as replay:
+        session.accept_lease_renewal(
+            renewal,
+            heartbeat_message_id=heartbeat_id,
+        )
+    assert replay.value.code == "membership_message_replayed"
+
+
+@pytest.mark.parametrize(
+    (
+        "case",
+        "accept_at",
+        "issued_at",
+        "expires_at",
+        "lease_expires_at",
+        "expected_code",
+    ),
+    [
+        (
+            "late-issued",
+            NOW + 301.0,
+            NOW + 300.0,
+            NOW + 304.0,
+            NOW + 304.0,
+            "membership_lease_renewal_causality",
+        ),
+        (
+            "nonadvancing",
+            NOW + 299.5,
+            NOW + 299.0,
+            NOW + 301.0,
+            NOW + 300.0,
+            "membership_lease_renewal_stale",
+        ),
+        (
+            "short-envelope",
+            NOW + 299.5,
+            NOW + 299.0,
+            NOW + 302.0,
+            NOW + 304.0,
+            "membership_lease_renewal_stale",
+        ),
+        (
+            "renewed-expired",
+            NOW + 304.0,
+            NOW + 299.0,
+            NOW + 304.0,
+            NOW + 304.0,
+            "membership_lease_renewal_stale",
+        ),
+    ],
+)
+def test_lease_renewal_causality_and_staleness_fail_closed(
+    tmp_path: Path,
+    case: str,
+    accept_at: float,
+    issued_at: float,
+    expires_at: float,
+    lease_expires_at: float,
+    expected_code: str,
+) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path / case, clock)
+    heartbeat_id = _pending_heartbeat(session, clock)
+    renewal = _delayed_renewal(
+        seed,
+        message_id=f"renewal-{case}",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        lease_expires_at=lease_expires_at,
+    )
+    clock[0] = accept_at
+
+    with pytest.raises(NodeMembershipError) as rejected:
+        session.accept_lease_renewal(
+            renewal,
+            heartbeat_message_id=heartbeat_id,
+        )
+    assert rejected.value.code == expected_code
+
+    with pytest.raises(NodeMembershipError) as exact_retry:
+        session.accept_lease_renewal(
+            renewal,
+            heartbeat_message_id=heartbeat_id,
+        )
+    assert exact_retry.value.code == expected_code
+
+    valid = _delayed_renewal(
+        seed,
+        message_id=f"renewal-{case}-valid",
+        heartbeat_message_id=heartbeat_id,
+        issued_at=NOW + 299.0,
+        expires_at=NOW + 305.0,
+        lease_expires_at=NOW + 305.0,
+    )
+    assert session.accept_lease_renewal(
+        valid,
+        heartbeat_message_id=heartbeat_id,
+    )["message_id"] == f"renewal-{case}-valid"
+
+
+def test_nonrenewal_seed_message_still_rejects_after_old_local_lease(
+    tmp_path: Path,
+) -> None:
+    clock = [NOW]
+    session, seed = _clocked_joined(tmp_path, clock)
+    offer = sign_membership_message(
+        signer=seed,
+        message={
+            "protocol": ASSIGNMENT_OFFER_PROTOCOL,
+            "message_id": "late-offer",
+            "swarm_id": "swarm-a",
+            "sender_node_id": "seed-node",
+            "sender_endpoint_id": seed.endpoint_id,
+            "recipient_node_id": "node-a",
+            "incarnation": "seed-incarnation",
+            "generation": 1,
+            "issued_at": NOW + 299.0,
+            "expires_at": NOW + 304.0,
+            "deployment_id": "deployment-late",
+            "deployment_epoch": 1,
+            "assignment_id": "assignment-late",
+            "assignment_digest": "sha256:" + "1" * 64,
+            "stage_pack_digest": "sha256:" + "2" * 64,
+            "graph_digest": "sha256:" + "3" * 64,
+            "load_generation": 1,
+            "placement_provenance": "frozen_fixture",
+            "peer_endpoint_records": [],
+        },
+    )
+    clock[0] = NOW + 301.0
+
+    with pytest.raises(NodeMembershipError) as expired:
+        session.accept_assignment_offer(offer)
+    assert expired.value.code == "membership_lease_expired"
+
+
 def test_signed_peer_endpoint_records_are_the_only_transport_authority(
     tmp_path: Path,
 ) -> None:
@@ -594,7 +890,7 @@ def test_valid_activation_receipt_suppresses_exactly_one_scheduled_heartbeat(
             "incarnation": "seed-incarnation",
             "generation": 1,
             "issued_at": NOW,
-            "expires_at": NOW + 60.0,
+            "expires_at": NOW + 400.0,
             "heartbeat_message_id": activity_message["message_id"],
             "member_incarnation": "incarnation-a",
             "membership_generation": 1,
