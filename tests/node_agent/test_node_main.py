@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import gc
 import importlib
 import io
 from email.message import Message
@@ -19,6 +20,7 @@ import time
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
+import weakref
 
 import pytest
 
@@ -35,6 +37,17 @@ from tests.e2e_request_iroh.conftest import (
 def _ids():
     values = count(1)
     return lambda: f"node-main-seed-message-{next(values)}"
+
+
+class _WeakReferenceableCloseError(OSError):
+    def __init__(
+        self,
+        references: list[weakref.ReferenceType[_WeakReferenceableCloseError]],
+        private_marker: object,
+    ) -> None:
+        super().__init__(errno.EIO, "tracked close failure")
+        self.private_marker = private_marker
+        references.append(weakref.ref(self))
 
 
 def _read_status(process: subprocess.Popen[str]) -> dict[str, Any]:
@@ -3006,6 +3019,153 @@ def test_working_directory_out_of_order_lease_stack_unwinds_to_origin(
         for lease in leases:
             lease.close()
         os.close(original)
+
+
+@pytest.mark.parametrize("primary_fails", (False, True))
+def test_cwd_deactivation_does_not_retain_close_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    primary_fails: bool,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    assert process_module._CWD_LEASE_STACK == []
+    safety = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    descriptor = os.dup(safety)
+    primary = RuntimeError("authoritative-cwd-body") if primary_fails else None
+    token = process_module._WorkingDirectoryToken(
+        original_descriptor=descriptor,
+        body_failure=primary,
+    )
+    process_module._CWD_LEASE_STACK.append(token)
+    real_close = os.close
+    close_calls: list[int] = []
+    references: list[
+        weakref.ReferenceType[_WeakReferenceableCloseError]
+    ] = []
+    private_marker = object()
+    garbage_collection_was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+
+        def fail_close(received_descriptor: int) -> None:
+            close_calls.append(received_descriptor)
+            raise _WeakReferenceableCloseError(references, private_marker)
+
+        monkeypatch.setattr(os, "close", fail_close)
+        outcome: BaseException | None = None
+        try:
+            process_module._deactivate_working_directory_token(token)
+        except ValueError as caught:
+            outcome = caught
+
+        assert close_calls == [descriptor]
+        assert token.original_descriptor is None
+        assert process_module._CWD_LEASE_STACK == []
+        if primary is None:
+            assert type(outcome) is ValueError
+            assert str(outcome) == "working directory restoration failed"
+        else:
+            assert outcome is None
+            assert getattr(primary, "__notes__", ()) == [
+                "working directory restoration failed"
+            ]
+
+        process_module._deactivate_working_directory_token(token)
+        assert close_calls == [descriptor]
+        assert len(references) == 1
+        assert references[0]() is None
+    finally:
+        monkeypatch.setattr(os, "close", real_close)
+        os.fchdir(safety)
+        real_close(descriptor)
+        real_close(safety)
+        if garbage_collection_was_enabled:
+            gc.enable()
+
+
+def test_cwd_cleanup_error_traceback_locals_exclude_close_marker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    assert process_module._CWD_LEASE_STACK == []
+    safety = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    descriptors = [os.dup(safety), os.dup(safety)]
+    tokens = [
+        process_module._WorkingDirectoryToken(
+            original_descriptor=descriptor,
+        )
+        for descriptor in descriptors
+    ]
+    process_module._CWD_LEASE_STACK.extend(tokens)
+    expected_close_calls = list(reversed(descriptors))
+    real_close = os.close
+    close_calls: list[int] = []
+    references: list[
+        weakref.ReferenceType[_WeakReferenceableCloseError]
+    ] = []
+    private_marker = object()
+    try:
+
+        def fail_close(received_descriptor: int) -> None:
+            close_calls.append(received_descriptor)
+            raise _WeakReferenceableCloseError(references, private_marker)
+
+        monkeypatch.setattr(os, "close", fail_close)
+        process_module._deactivate_working_directory_token(tokens[0])
+        with pytest.raises(
+            ValueError,
+            match="^working directory restoration failed$",
+        ) as caught:
+            process_module._deactivate_working_directory_token(tokens[1])
+
+        assert close_calls == expected_close_calls
+        assert all(token.original_descriptor is None for token in tokens)
+        assert process_module._CWD_LEASE_STACK == []
+        assert caught.value.__cause__ is None
+        process_module._deactivate_working_directory_token(tokens[1])
+        process_module._deactivate_working_directory_token(tokens[0])
+        assert close_calls == expected_close_calls
+
+        def contains_private_marker(value: object) -> bool:
+            pending = [value]
+            visited: set[int] = set()
+            while pending:
+                candidate = pending.pop()
+                if candidate is private_marker:
+                    return True
+                identity = id(candidate)
+                if identity in visited:
+                    continue
+                visited.add(identity)
+                if isinstance(candidate, BaseException):
+                    pending.extend(candidate.args)
+                    pending.extend(vars(candidate).values())
+                elif isinstance(candidate, dict):
+                    pending.extend(candidate.keys())
+                    pending.extend(candidate.values())
+                elif isinstance(candidate, (list, tuple, set, frozenset)):
+                    pending.extend(candidate)
+            return False
+
+        process_path = Path(process_module.__file__).resolve()
+        production_locals: list[dict[str, object]] = []
+        traceback = caught.value.__traceback__
+        while traceback is not None:
+            frame = traceback.tb_frame
+            if Path(frame.f_code.co_filename).resolve() == process_path:
+                production_locals.append(dict(frame.f_locals))
+            traceback = traceback.tb_next
+        assert production_locals
+        assert not any(
+            contains_private_marker(value)
+            for frame_locals in production_locals
+            for value in frame_locals.values()
+        )
+    finally:
+        monkeypatch.setattr(os, "close", real_close)
+        os.fchdir(safety)
+        for descriptor in descriptors:
+            real_close(descriptor)
+        real_close(safety)
 
 
 @pytest.mark.parametrize(

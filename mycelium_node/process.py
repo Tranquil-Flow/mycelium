@@ -89,7 +89,7 @@ def _deactivate_working_directory_token(token: _WorkingDirectoryToken) -> None:
         retired.append(_CWD_LEASE_STACK.pop())
     restoration_descriptor = retired[-1].original_descriptor
     restored = False
-    close_failures: list[OSError] = []
+    close_failed = False
     try:
         if restoration_descriptor is not None:
             for _attempt in range(_CWD_RESTORE_ATTEMPTS):
@@ -106,9 +106,9 @@ def _deactivate_working_directory_token(token: _WorkingDirectoryToken) -> None:
             if descriptor is not None:
                 try:
                     os.close(descriptor)
-                except OSError as exc:
-                    close_failures.append(exc)
-    if restored and not close_failures:
+                except OSError:
+                    close_failed = True
+    if restored and not close_failed:
         return
     body_failures = [
         retired_token.body_failure
