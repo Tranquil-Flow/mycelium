@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import socket
 import struct
@@ -15,12 +16,16 @@ import pytest
 
 from mycelium_iroh_sidecar import ProtocolError, SidecarClient
 from mycelium_iroh_sidecar import client as sidecar_client_module
+import mycelium_router.transports.iroh as iroh_module
 from mycelium_router.contracts import TokenEvent
 from mycelium_router.transports.iroh import (
     PROCESS_LIFETIME_LIMITATION,
+    DeliveryReceipt,
     IrohTransport,
     IrohTransportError,
     PeerBinding,
+    _bounded_trace_identity,
+    _delivery_receipt_digest,
 )
 from mycelium_router.wire import ROUTER_WIRE_PROTOCOL, encode_frame
 
@@ -38,14 +43,22 @@ class _Hub:
         self.cancels: list[bytes] = []
         self.configurations: list[tuple[str, dict, int]] = []
         self.confirmed_send_entered = threading.Event()
+        self.retry_confirmed_send_entered = threading.Event()
         self.release_confirmed_send = threading.Event()
         self.block_confirmed_send = False
+        self.confirmed_send_timeouts: list[float | None] = []
         self.send_failure: BaseException | None = None
         self.send_failures: deque[BaseException] = deque()
         self.connect_delay = 0.0
         self.block_connect = False
         self.connect_entered = threading.Event()
         self.release_connect = threading.Event()
+        self.cancel_entered = threading.Event()
+        self.release_cancel = threading.Event()
+        self.cancel_completed = threading.Event()
+        self.block_cancel = False
+        self.cancel_timeouts: list[float | None] = []
+        self.cancel_failure: BaseException | None = None
 
     def client(self, *_args, **_kwargs) -> "_FakeClient":
         client = _FakeClient(self)
@@ -107,7 +120,10 @@ class _FakeClient:
     ) -> bytes:
         if not self.connected:
             raise ProtocolError("not_connected")
+        self.hub.confirmed_send_timeouts.append(timeout)
         self.hub.confirmed_send_entered.set()
+        if len(self.hub.confirmed_send_timeouts) == 2:
+            self.hub.retry_confirmed_send_entered.set()
         if self.hub.send_failures:
             raise self.hub.send_failures.popleft()
         if self.hub.block_confirmed_send:
@@ -139,8 +155,14 @@ class _FakeClient:
         self.hub.acks.append(message_id)
 
     def cancel(self, message_id: bytes, *, timeout: float | None = None) -> None:
-        del timeout
+        self.hub.cancel_timeouts.append(timeout)
+        self.hub.cancel_entered.set()
+        if self.hub.block_cancel:
+            self.hub.release_cancel.wait()
+        if self.hub.cancel_failure is not None:
+            raise self.hub.cancel_failure
         self.hub.cancels.append(message_id)
+        self.hub.cancel_completed.set()
 
 
 class _PausedAcquireSemaphore:
@@ -259,6 +281,384 @@ def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() ->
     assert receipt.semantics == "remote_router_dispatch_ack"
     assert receipt.router_protocol == ROUTER_WIRE_PROTOCOL
     assert transport.route_ready is False
+
+
+def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    try:
+        transport.remember_entry("request-1", "local-node")
+        transport._entry_nodes["request-1"] = "peer-node"
+        transport.send_token_event(
+            TokenEvent(
+                request_id="request-1",
+                path_id="path-1",
+                path_attempt=0,
+                token_index=7,
+                token_id=987_654_321,
+                sampling_counter=8,
+            )
+        )
+        long_request = "public-" + "x" * 2_048
+        transport._entry_nodes[long_request] = "peer-node"
+        transport.send_token_event(
+            TokenEvent(
+                request_id=long_request,
+                path_id="path-long",
+                path_attempt=0,
+                token_index=8,
+                token_id=123_456_789,
+                sampling_counter=9,
+            )
+        )
+        trace = transport.outbound_trace
+    finally:
+        transport.close()
+
+    assert len(trace) == 4
+    assert "request-1" in trace[0]
+    assert "TokenEvent" in trace[0] and '"token_index":7' in trace[0]
+    assert "987654321" not in trace[0]
+    assert trace[1].startswith("DeliveryReceipt->peer:remote:")
+    assert "request_id_sha256" in trace[2] and long_request not in trace[2]
+    assert "123456789" not in trace[2]
+    assert trace[3].startswith("DeliveryReceipt->peer:remote:")
+    for sent, message_trace, receipt_trace in zip(
+        hub.sent,
+        trace[::2],
+        trace[1::2],
+        strict=True,
+    ):
+        receipt_identity = json.loads(receipt_trace.partition(":remote:")[2])
+        receipt = DeliveryReceipt(
+            message_id=sent[0],
+            peer_endpoint_id=receipt_identity["peer_endpoint_id"],
+            peer_generation=receipt_identity["peer_generation"],
+        )
+        assert sent[0].hex() in message_trace
+        assert receipt_identity["message_id"] == sent[0].hex()
+        assert (
+            receipt_identity["delivery_receipt_sha256"]
+            == _delivery_receipt_digest(receipt)
+        )
+    assert all(len(entry.encode()) <= 512 for entry in trace)
+
+
+def test_close_waits_for_confirmed_remote_receipt_trace_commit() -> None:
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=0.5)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    confirmed = threading.Event()
+    release = threading.Event()
+    original_send = transport.send_router_frame
+    send_errors: list[BaseException] = []
+    close_errors: list[BaseException] = []
+
+    def paused_send(*args, **kwargs):
+        receipt = original_send(*args, **kwargs)
+        confirmed.set()
+        assert release.wait(timeout=2)
+        return receipt
+
+    def send() -> None:
+        try:
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    def close() -> None:
+        try:
+            transport.close()
+        except BaseException as error:
+            close_errors.append(error)
+
+    transport.send_router_frame = paused_send
+    send_thread = threading.Thread(target=send)
+    close_thread = threading.Thread(target=close)
+    try:
+        send_thread.start()
+        assert confirmed.wait(timeout=1)
+        assert transport.outbound_trace == ()
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 1
+        close_thread.start()
+        time.sleep(0.05)
+        close_returned_before_commit = not close_thread.is_alive()
+        trace_before_release = transport.outbound_trace
+    finally:
+        release.set()
+        send_thread.join(timeout=2)
+        close_thread.join(timeout=2)
+        if close_thread.is_alive():
+            transport.close()
+
+    assert not send_thread.is_alive()
+    assert not close_thread.is_alive()
+    assert close_returned_before_commit is False
+    assert trace_before_release == ()
+    assert not send_errors
+    assert not close_errors
+    with transport._state_lock:
+        assert transport._inflight_receipt_trace_commits == 0
+    assert len(transport.outbound_trace) == 2
+    closed_trace = transport.outbound_trace
+    time.sleep(0.02)
+    assert transport.outbound_trace == closed_trace
+
+
+def test_close_timeout_is_stable_and_repeated_close_waits_for_trace_commit() -> None:
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=0.05)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    confirmed = threading.Event()
+    release = threading.Event()
+    original_send = transport.send_router_frame
+    send_errors: list[BaseException] = []
+
+    def paused_send(*args, **kwargs):
+        receipt = original_send(*args, **kwargs)
+        confirmed.set()
+        assert release.wait(timeout=2)
+        return receipt
+
+    def send() -> None:
+        try:
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    transport.send_router_frame = paused_send
+    thread = threading.Thread(target=send)
+    thread.start()
+    try:
+        assert confirmed.wait(timeout=1)
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 1
+        with pytest.raises(
+            IrohTransportError,
+            match=r"^receipt_trace_commit_shutdown_timeout$",
+        ) as raised:
+            transport.close()
+        assert raised.value.code == "receipt_trace_commit_shutdown_timeout"
+        assert raised.value.detail == ""
+        assert transport.outbound_trace == ()
+    finally:
+        release.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert not send_errors
+    with transport._state_lock:
+        assert transport._inflight_receipt_trace_commits == 0
+    assert len(transport.outbound_trace) == 2
+    transport.close()
+    closed_trace = transport.outbound_trace
+    time.sleep(0.02)
+    assert transport.outbound_trace == closed_trace
+
+
+def test_remote_trace_builder_preflight_failure_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    original_builder = iroh_module._bounded_trace_identity
+
+    def fail_delivery_identity(
+        message,
+        *,
+        max_bytes=iroh_module._TRACE_ENTRY_BYTES,
+        delivery_message_id=None,
+    ):
+        if delivery_message_id is not None:
+            raise IrohTransportError("trace_identity_budget_exhausted")
+        return original_builder(
+            message,
+            max_bytes=max_bytes,
+            delivery_message_id=delivery_message_id,
+        )
+
+    monkeypatch.setattr(
+        iroh_module,
+        "_bounded_trace_identity",
+        fail_delivery_identity,
+    )
+    try:
+        with pytest.raises(
+            IrohTransportError,
+            match=r"^trace_identity_budget_exhausted$",
+        ):
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        assert hub.sent == []
+        assert transport.outbound_trace == ()
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 0
+    finally:
+        transport.close()
+
+
+def test_remote_receipt_trace_oversize_is_rejected_before_send() -> None:
+    oversized_endpoint_id = "peer-endpoint-" + "x" * 600
+    hub = _Hub()
+    transport = _transport(hub)
+    transport._peer = PeerBinding(
+        node_id="peer-node",
+        endpoint_id=oversized_endpoint_id,
+        endpoint_addr={
+            "id": oversized_endpoint_id,
+            "addrs": ["127.0.0.1:1"],
+        },
+        generation=7,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    transport._entry_nodes["request-1"] = "peer-node"
+    try:
+        with pytest.raises(
+            IrohTransportError,
+            match=r"^delivery_receipt_trace_too_large$",
+        ):
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        assert hub.sent == []
+        assert transport.outbound_trace == ()
+        with transport._state_lock:
+            assert transport._inflight_receipt_trace_commits == 0
+    finally:
+        transport.close()
+
+
+def test_local_trace_append_rechecks_running_after_builder_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub = _Hub()
+    router = _RecordingRouter()
+    transport = _transport(hub)
+    transport.bind_router(router)
+    transport.start()
+    transport._entry_nodes["request-1"] = "local-node"
+    builder_entered = threading.Event()
+    release_builder = threading.Event()
+    original_builder = iroh_module._bounded_trace_identity
+    send_errors: list[BaseException] = []
+
+    def paused_builder(
+        message,
+        *,
+        max_bytes=iroh_module._TRACE_ENTRY_BYTES,
+        delivery_message_id=None,
+    ):
+        if delivery_message_id is None:
+            builder_entered.set()
+            assert release_builder.wait(timeout=2)
+        return original_builder(
+            message,
+            max_bytes=max_bytes,
+            delivery_message_id=delivery_message_id,
+        )
+
+    def send() -> None:
+        try:
+            transport.send_token_event(
+                TokenEvent(
+                    request_id="request-1",
+                    path_id="path-1",
+                    path_attempt=0,
+                    token_index=0,
+                    token_id=101,
+                    sampling_counter=1,
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    monkeypatch.setattr(iroh_module, "_bounded_trace_identity", paused_builder)
+    thread = threading.Thread(target=send)
+    thread.start()
+    try:
+        assert builder_entered.wait(timeout=1)
+        transport.close()
+        assert transport.outbound_trace == ()
+    finally:
+        release_builder.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert len(send_errors) == 1
+    assert isinstance(send_errors[0], IrohTransportError)
+    assert send_errors[0].code == "transport_closed"
+    assert transport.outbound_trace == ()
+    assert router.token_events == []
+
+
+def test_trace_identity_omits_overlong_public_fields_without_leaking_them() -> None:
+    sensitive_request = "request-sensitive-" + "r" * 2_048
+    sensitive_phase = "phase-sensitive-" + "p" * 2_048
+    sensitive_token = int("7" * 800)
+    identity = _bounded_trace_identity(
+        type(
+            "TraceMessage",
+            (),
+            {
+                "request_id": sensitive_request,
+                "phase": sensitive_phase,
+                "token_index": sensitive_token,
+            },
+        )()
+    )
+    entry = f"TokenEvent->peer:remote:{identity}"
+
+    assert len(identity.encode()) <= 512
+    assert len(entry.encode()) <= 512
+    assert "request_id_sha256" in identity
+    assert all(
+        value not in identity
+        for value in (sensitive_request, sensitive_phase, str(sensitive_token))
+    )
 
 
 def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_generation() -> None:
@@ -477,6 +877,807 @@ def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
         assert hub.configurations[-1][2] == 8
         assert transport.peer_binding.generation == 8
     finally:
+        transport.close()
+
+
+def test_constructor_peer_endpoint_document_is_deeply_detached() -> None:
+    hub = _Hub()
+    endpoint_addr = {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+    peer = PeerBinding(
+        "peer-node",
+        "peer-endpoint",
+        endpoint_addr,
+        7,
+    )
+    transport = IrohTransport(
+        node_id="local-node",
+        socket_path="/unused",
+        bootstrap_secret=b"s" * 32,
+        peer=peer,
+        expected_endpoint_id="local-endpoint",
+        client_factory=hub.client,
+    )
+
+    endpoint_addr["relay"]["urls"].append("https://relay.invalid/alias")
+    endpoint_addr["concurrent_marker"] = "caller-owned"
+
+    assert transport.peer_binding.endpoint_addr == {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+
+
+def test_public_peer_binding_document_is_a_deep_defensive_copy() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    exposed = transport.peer_binding
+
+    exposed.endpoint_addr["addrs"].append("127.0.0.1:2")
+    exposed.endpoint_addr["concurrent_marker"] = "public-alias"
+
+    assert transport.peer_binding.endpoint_addr == {
+        "id": "peer-endpoint",
+        "addrs": ["127.0.0.1:1"],
+    }
+
+
+def test_replacement_endpoint_document_is_owned_before_remote_configure() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    replacement_addr = {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+    replacement = PeerBinding(
+        "peer-node",
+        "peer-endpoint",
+        replacement_addr,
+        8,
+    )
+    configure_entered = threading.Event()
+    release_configure = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        configure_entered.set()
+        assert release_configure.wait(timeout=1)
+        original_configure(client, binding)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(replacement)
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    try:
+        assert configure_entered.wait(timeout=1)
+        replacement_addr["relay"]["urls"].append(
+            "https://relay.invalid/during-configure"
+        )
+        replacement_addr["concurrent_marker"] = "during-configure"
+        release_configure.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert errors == []
+
+        replacement_addr["relay"]["urls"].append(
+            "https://relay.invalid/after-commit"
+        )
+        replacement_addr["post_commit_marker"] = "caller-owned"
+        expected = {
+            "id": "peer-endpoint",
+            "relay": {"urls": ["https://relay.invalid/original"]},
+        }
+        assert hub.configurations[-1][1] == expected
+        assert transport.peer_binding.endpoint_addr == expected
+    finally:
+        release_configure.set()
+        rotation.join(timeout=1)
+        transport.close()
+
+
+def test_sidecar_configure_document_cannot_mutate_candidate_binding() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    control = transport._control_client
+    assert control is not None
+    configured_documents: list[dict] = []
+
+    def mutate_configure_document(
+        endpoint_id: str,
+        endpoint_addr: dict,
+        *,
+        generation: int,
+        timeout: float | None = None,
+    ) -> None:
+        del endpoint_id, generation, timeout
+        configured_documents.append(endpoint_addr)
+        endpoint_addr["relay"]["urls"].append(
+            "https://relay.invalid/sidecar-mutated"
+        )
+        endpoint_addr["sidecar_marker"] = True
+
+    control.configure_peer = mutate_configure_document
+    replacement_addr = {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+    replacement = PeerBinding(
+        "peer-node",
+        "peer-endpoint",
+        replacement_addr,
+        8,
+    )
+    try:
+        transport.rotate_peer(replacement)
+
+        assert configured_documents == [
+            {
+                "id": "peer-endpoint",
+                "relay": {
+                    "urls": [
+                        "https://relay.invalid/original",
+                        "https://relay.invalid/sidecar-mutated",
+                    ]
+                },
+                "sidecar_marker": True,
+            }
+        ]
+        expected = {
+            "id": "peer-endpoint",
+            "relay": {"urls": ["https://relay.invalid/original"]},
+        }
+        assert replacement.endpoint_addr == expected
+        assert transport.peer_binding.endpoint_addr == expected
+    finally:
+        transport.close()
+
+
+def test_rotation_detects_in_place_current_peer_document_mutation() -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    transport = _transport(hub, delivery_timeout_seconds=1.0)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    send_results: list[DeliveryReceipt] = []
+    send_errors: list[BaseException] = []
+    rotation_errors: list[BaseException] = []
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+
+    def send() -> None:
+        try:
+            send_results.append(
+                transport.send_router_frame(
+                    _event_frame(),
+                    destination_node_id="peer-node",
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            rotation_errors.append(error)
+
+    sender = threading.Thread(target=send)
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    sender.start()
+    assert hub.confirmed_send_entered.wait(timeout=1)
+    rotation.start()
+    try:
+        assert configured.wait(timeout=1)
+        with transport._state_lock:
+            current = transport._peer
+            current.endpoint_addr["addrs"].append("127.0.0.1:2")
+            assert transport._peer is current
+            state_after_mutation = transport._peer
+            pending_after_mutation = tuple(transport._pending)
+        release_commit.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert len(rotation_errors) == 1
+        assert isinstance(rotation_errors[0], IrohTransportError)
+        assert rotation_errors[0].code == "peer_rotated"
+        with transport._state_lock:
+            assert transport._peer is state_after_mutation
+            assert transport._peer.generation == 7
+            assert tuple(transport._pending) == pending_after_mutation
+        assert hub.cancels == []
+
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
+        assert not sender.is_alive()
+        assert send_errors == []
+        assert len(send_results) == 1
+        assert send_results[0].peer_generation == 7
+        assert hub.cancels == []
+    finally:
+        release_commit.set()
+        hub.release_confirmed_send.set()
+        rotation.join(timeout=1)
+        sender.join(timeout=1)
+        transport.close()
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), object()])
+def test_peer_endpoint_document_rejects_non_json_without_value_leak(
+    invalid_value: object,
+) -> None:
+    endpoint_addr = {
+        "id": "peer-endpoint",
+        "private_material": {"value": invalid_value},
+    }
+
+    with pytest.raises(ValueError) as raised:
+        IrohTransport(
+            node_id="local-node",
+            socket_path="/unused",
+            bootstrap_secret=b"s" * 32,
+            peer=PeerBinding(
+                "peer-node",
+                "peer-endpoint",
+                endpoint_addr,
+                7,
+            ),
+            expected_endpoint_id="local-endpoint",
+        )
+
+    assert str(raised.value) == "endpoint_addr must be valid JSON data"
+    assert "private_material" not in str(raised.value)
+
+
+def test_rotation_configured_before_close_cannot_commit_after_close() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    assert configured.wait(timeout=1)
+    transport.close()
+    state_after_close = (
+        transport.peer_binding,
+        transport.pending_delivery_count,
+        transport.outbound_trace,
+        transport.evidence(),
+        tuple(hub.cancels),
+    )
+    release_commit.set()
+    rotation.join(timeout=1)
+
+    assert not rotation.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], IrohTransportError)
+    assert errors[0].code == "transport_closed"
+    assert (
+        transport.peer_binding,
+        transport.pending_delivery_count,
+        transport.outbound_trace,
+        transport.evidence(),
+        tuple(hub.cancels),
+    ) == state_after_close
+    assert transport.peer_binding.generation == 7
+    assert hub.configurations[-1][2] == 8
+
+
+def test_rotation_configure_finishing_during_close_cannot_commit() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    control = transport._control_client
+    assert control is not None
+    configure_entered = threading.Event()
+    release_configure = threading.Event()
+    close_in_progress = threading.Event()
+    release_close = threading.Event()
+    original_configure = transport._configure_peer
+    original_control_close = control.close
+    rotation_errors: list[BaseException] = []
+    close_errors: list[BaseException] = []
+
+    def configure_during_close(client, binding) -> None:
+        configure_entered.set()
+        assert release_configure.wait(timeout=1)
+        original_configure(client, binding)
+
+    def block_control_close() -> None:
+        close_in_progress.set()
+        assert release_close.wait(timeout=1)
+        original_control_close()
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            rotation_errors.append(error)
+
+    def close() -> None:
+        try:
+            transport.close()
+        except BaseException as error:
+            close_errors.append(error)
+
+    transport._configure_peer = configure_during_close
+    control.close = block_control_close
+    rotation = threading.Thread(target=rotate)
+    closing = threading.Thread(target=close)
+    rotation.start()
+    try:
+        assert configure_entered.wait(timeout=1)
+        closing.start()
+        assert close_in_progress.wait(timeout=1)
+        with transport._state_lock:
+            assert transport._closed is True
+            state_during_close = (
+                transport._peer,
+                tuple(transport._pending.items()),
+                tuple(transport._outbound_trace),
+            )
+        release_configure.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert len(rotation_errors) == 1
+        assert isinstance(rotation_errors[0], IrohTransportError)
+        assert rotation_errors[0].code == "transport_closed"
+        with transport._state_lock:
+            assert (
+                transport._peer,
+                tuple(transport._pending.items()),
+                tuple(transport._outbound_trace),
+            ) == state_during_close
+        assert transport.peer_binding.generation == 7
+        assert hub.configurations[-1][2] == 8
+    finally:
+        release_configure.set()
+        release_close.set()
+        rotation.join(timeout=1)
+        if closing.ident is not None:
+            closing.join(timeout=1)
+
+    assert not closing.is_alive()
+    assert close_errors == []
+
+
+def test_rotation_accepts_unchanged_same_object_control_and_peer_snapshot() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    captured_control = transport._control_client
+    captured_peer = transport._peer
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    try:
+        assert configured.wait(timeout=1)
+        with transport._state_lock:
+            transport._control_client = captured_control
+            transport._peer = captured_peer
+            assert transport._control_client is captured_control
+            assert transport._peer is captured_peer
+        release_commit.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert errors == []
+        assert transport.peer_binding.generation == 8
+        assert hub.configurations[-1][2] == 8
+    finally:
+        release_commit.set()
+        rotation.join(timeout=1)
+        transport.close()
+
+
+@pytest.mark.parametrize(
+    ("state_change", "expected_code"),
+    [
+        ("control", "transport_control_changed"),
+        ("peer", "peer_rotated"),
+    ],
+)
+def test_rotation_revalidates_control_and_current_before_commit(
+    state_change: str,
+    expected_code: str,
+) -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    original_control = transport._control_client
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    assert configured.wait(timeout=1)
+    with transport._state_lock:
+        if state_change == "control":
+            swapped_control = object()
+            transport._control_client = swapped_control
+        else:
+            swapped_control = None
+            transport._peer = PeerBinding(
+                "peer-node",
+                "peer-9",
+                {"id": "peer-9"},
+                9,
+            )
+        state_before_release = (
+            transport._peer,
+            tuple(transport._pending.items()),
+            tuple(transport._outbound_trace),
+        )
+    release_commit.set()
+    rotation.join(timeout=1)
+    try:
+        assert not rotation.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == expected_code
+        with transport._state_lock:
+            assert (
+                transport._peer,
+                tuple(transport._pending.items()),
+                tuple(transport._outbound_trace),
+            ) == state_before_release
+            if state_change == "control":
+                assert transport._control_client is swapped_control
+                transport._control_client = original_control
+    finally:
+        transport.close()
+
+
+@pytest.mark.parametrize("_interleaving", range(12))
+def test_rotation_and_deadline_reserve_one_cancel_per_message(
+    _interleaving: int,
+) -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    transport = _transport(hub, delivery_timeout_seconds=10.0)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    cancel_entered = threading.Event()
+    release_cancel = threading.Event()
+    cancel_call_lock = threading.Lock()
+    cancel_calls = 0
+    original_cancel = transport._cancel_with_client
+    errors: list[BaseException] = []
+
+    def paused_cancel(control, message_id, *, timeout=None) -> None:
+        nonlocal cancel_calls
+        with cancel_call_lock:
+            cancel_calls += 1
+            call_number = cancel_calls
+        if call_number == 1:
+            cancel_entered.set()
+            assert release_cancel.wait(timeout=1.0)
+        original_cancel(control, message_id, timeout=timeout)
+
+    transport._cancel_with_client = paused_cancel
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(), destination_node_id="peer-node"
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send)
+    rotation = threading.Thread(
+        target=transport.rotate_peer,
+        args=(_binding(generation=8),),
+    )
+    sender.start()
+    assert hub.confirmed_send_entered.wait(timeout=1.0)
+    with transport._state_lock:
+        [(message_id, pending)] = transport._pending.items()
+
+    deadline = threading.Thread(
+        target=transport._expire_pending,
+        args=(message_id, pending, "delivery_deadline_exceeded"),
+    )
+    if _interleaving % 2:
+        deadline.start()
+        expected_error = "delivery_deadline_exceeded"
+    else:
+        rotation.start()
+        expected_error = "peer_rotated"
+    assert cancel_entered.wait(timeout=1.0)
+    if _interleaving % 2:
+        rotation.start()
+    else:
+        deadline.start()
+    deadline.join(timeout=1.0)
+    assert not deadline.is_alive()
+    release_cancel.set()
+    rotation.join(timeout=1.0)
+    hub.release_confirmed_send.set()
+    sender.join(timeout=1.0)
+    try:
+        assert not rotation.is_alive()
+        assert not sender.is_alive()
+        assert len(hub.cancels) == 1
+        assert hub.cancels == [message_id]
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == expected_error
+    finally:
+        release_cancel.set()
+        hub.release_confirmed_send.set()
+        transport.close()
+
+
+def test_deadline_cancel_worker_is_accounted_and_close_is_bounded() -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    hub.block_cancel = True
+    transport = _transport(
+        hub,
+        delivery_timeout_seconds=0.05,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(),
+                destination_node_id="peer-node",
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    try:
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        assert hub.cancel_entered.wait(timeout=1)
+        sender.join(timeout=1)
+        assert not sender.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == "delivery_deadline_exceeded"
+        assert hub.cancel_timeouts
+        assert all(
+            timeout is not None and 0 < timeout <= 0.05
+            for timeout in hub.cancel_timeouts
+        )
+        started = time.monotonic()
+        with pytest.raises(
+            IrohTransportError,
+            match="delivery_cancellation_shutdown_timeout",
+        ):
+            transport.close()
+        assert time.monotonic() - started < 0.5
+        assert transport.worker_threads_alive == 1
+        assert hub.cancels == []
+        hub.release_cancel.set()
+        transport.close()
+        assert transport.worker_threads_alive == 0
+        assert hub.cancels == [hub.sent[0][0]] if hub.sent else len(hub.cancels) == 1
+    finally:
+        hub.release_confirmed_send.set()
+        hub.release_cancel.set()
+        sender.join(timeout=1)
+        transport.close()
+
+
+@pytest.mark.parametrize("first_winner", ["close", "rotation"])
+def test_close_or_rotation_first_blocked_cancel_has_bounded_lifecycle(
+    first_winner: str,
+) -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    hub.block_cancel = True
+    transport = _transport(
+        hub,
+        delivery_timeout_seconds=10.0,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    send_errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(),
+                destination_node_id="peer-node",
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    lifecycle_errors: list[BaseException] = []
+
+    def lifecycle() -> None:
+        try:
+            if first_winner == "close":
+                transport.close()
+            else:
+                transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            lifecycle_errors.append(error)
+
+    lifecycle_thread = threading.Thread(target=lifecycle)
+    try:
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        lifecycle_thread.start()
+        assert hub.cancel_entered.wait(timeout=1)
+        lifecycle_thread.join(timeout=0.5)
+        assert not lifecycle_thread.is_alive()
+        if first_winner == "close":
+            assert len(lifecycle_errors) == 1
+            assert isinstance(lifecycle_errors[0], IrohTransportError)
+            assert (
+                lifecycle_errors[0].code
+                == "delivery_cancellation_shutdown_timeout"
+            )
+        else:
+            assert lifecycle_errors == []
+            with pytest.raises(
+                IrohTransportError,
+                match="delivery_cancellation_shutdown_timeout",
+            ):
+                transport.close()
+        assert transport.worker_threads_alive == 1
+        assert len(hub.cancel_timeouts) == 1
+        assert hub.cancel_timeouts[0] is not None
+        hub.release_cancel.set()
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
+        transport.close()
+        assert transport.worker_threads_alive == 0
+        assert len(hub.cancels) == 1
+        assert len(send_errors) == 1
+        assert isinstance(send_errors[0], IrohTransportError)
+        assert send_errors[0].code == (
+            "transport_closed" if first_winner == "close" else "peer_rotated"
+        )
+    finally:
+        hub.release_cancel.set()
+        hub.release_confirmed_send.set()
+        lifecycle_thread.join(timeout=1)
+        sender.join(timeout=1)
+        transport.close()
+
+
+def test_cancel_failure_unregisters_late_registered_message_worker_once() -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    hub.cancel_failure = RuntimeError("injected cancel RPC failure")
+    transport = _transport(
+        hub,
+        delivery_timeout_seconds=10.0,
+    )
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    worker_entered = threading.Event()
+    release_worker = threading.Event()
+    original_cancel = transport._cancel_with_client
+
+    def delayed_cancel(control, message_id, *, timeout) -> None:
+        worker_entered.set()
+        assert release_worker.wait(timeout=1)
+        original_cancel(control, message_id, timeout=timeout)
+
+    transport._cancel_with_client = delayed_cancel
+    errors: list[BaseException] = []
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(),
+                destination_node_id="peer-node",
+            )
+        except BaseException as error:
+            errors.append(error)
+
+    sender = threading.Thread(target=send)
+    sender.start()
+    try:
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        with transport._state_lock:
+            [(message_id, pending)] = transport._pending.items()
+        transport._expire_pending(
+            message_id,
+            pending,
+            "delivery_deadline_exceeded",
+        )
+        assert worker_entered.wait(timeout=1)
+        with transport._state_lock:
+            assert message_id in transport._delivery_cancel_threads
+        assert transport.worker_threads_alive == 3
+        release_worker.set()
+        assert hub.cancel_entered.wait(timeout=1)
+        deadline = time.monotonic() + 1
+        while transport.worker_threads_alive == 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        with transport._state_lock:
+            assert message_id not in transport._delivery_cancel_threads
+        assert len(hub.cancel_timeouts) == 1
+        assert hub.cancel_timeouts[0] is not None
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == "delivery_deadline_exceeded"
+        transport.close()
+        assert transport.worker_threads_alive == 0
+    finally:
+        release_worker.set()
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
         transport.close()
 
 
@@ -818,24 +2019,70 @@ def test_confirmed_send_deadline_includes_wait_for_client_lock() -> None:
 
 def test_reconnect_retry_uses_original_end_to_end_deadline() -> None:
     hub = _Hub()
-    transport = _transport(hub, delivery_timeout_seconds=0.1)
+    delivery_timeout = 0.3
+    transport = _transport(hub, delivery_timeout_seconds=delivery_timeout)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    hub.send_failures.append(ProtocolError("sidecar_disconnected"))
+    hub.connect_delay = 0.05
+    hub.block_confirmed_send = True
+    hub.block_cancel = True
+    errors: list[BaseException] = []
+    elapsed: list[float] = []
+    started = time.monotonic()
+
+    def send() -> None:
+        try:
+            transport.send_router_frame(
+                _event_frame(), destination_node_id="peer-node"
+            )
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            elapsed.append(time.monotonic() - started)
+
+    thread = threading.Thread(target=send)
+    thread.start()
+    try:
+        assert hub.retry_confirmed_send_entered.wait(timeout=1)
+        assert len(hub.confirmed_send_timeouts) == 2
+        retry_timeout = hub.confirmed_send_timeouts[1]
+        assert retry_timeout is not None
+        assert 0 < retry_timeout < delivery_timeout - 0.02
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], IrohTransportError)
+        assert errors[0].code == "delivery_deadline_exceeded"
+        assert len(elapsed) == 1 and elapsed[0] < delivery_timeout + 0.08
+        assert hub.cancel_entered.wait(timeout=1)
+        assert hub.cancels == []
+        hub.release_cancel.set()
+        assert hub.cancel_completed.wait(timeout=1)
+        assert len(hub.cancels) == 1
+    finally:
+        hub.release_confirmed_send.set()
+        hub.release_cancel.set()
+        thread.join(timeout=1)
+        transport.close()
+
+
+def test_reconnect_can_exhaust_deadline_before_retry_confirmed_send() -> None:
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=0.05)
     transport.bind_router(_RecordingRouter())
     transport.start()
     hub.send_failures.append(ProtocolError("sidecar_disconnected"))
     hub.connect_delay = 0.08
-    hub.block_confirmed_send = True
-    started = time.monotonic()
     try:
         with pytest.raises(IrohTransportError) as raised:
             transport.send_router_frame(
                 _event_frame(), destination_node_id="peer-node"
             )
-        elapsed = time.monotonic() - started
         assert raised.value.code == "delivery_deadline_exceeded"
-        assert elapsed < 0.16
-        assert len(hub.cancels) == 1
+        assert len(hub.confirmed_send_timeouts) == 1
+        assert not hub.retry_confirmed_send_entered.is_set()
     finally:
-        hub.release_confirmed_send.set()
         transport.close()
 
 

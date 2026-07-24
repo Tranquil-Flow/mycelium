@@ -10,7 +10,7 @@ import signal
 import stat
 import sys
 import threading
-from typing import Sequence
+from typing import NoReturn, Sequence
 
 from mycelium_invite import SqliteInviteRegistry
 from mycelium_node.identity import load_or_create_node_signer
@@ -22,8 +22,26 @@ from .http import SeedHTTPServer
 
 _STATUS_PROTOCOL = "mycelium.seed_main_status.v1"
 
+# Stable process contract shared with the node entrypoint.
+EXIT_SUCCESS = 0
+EXIT_PREFLIGHT_FAILURE = 2
+EXIT_JOIN_REJECTION = 3
+EXIT_RUNTIME_FAILURE = 4
 
-def _private_directory(value: str | Path) -> Path:
+
+class _EntrypointFailure(RuntimeError):
+    def __init__(self, code: str, exit_status: int) -> None:
+        self.code = code
+        self.exit_status = exit_status
+        super().__init__(code)
+
+
+class _SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, _message: str) -> NoReturn:
+        self.exit(EXIT_PREFLIGHT_FAILURE, "seed_preflight_failed\n")
+
+
+def _private_directory(value: str | Path, *, create: bool = True) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
@@ -31,20 +49,35 @@ def _private_directory(value: str | Path) -> Path:
     try:
         if path.exists() or path.is_symlink():
             metadata = path.lstat()
-            if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) & 0o077
+            ):
                 raise ValueError("data directory is invalid")
-            if metadata.st_uid != os.getuid():
-                raise ValueError("data directory owner is invalid")
-        else:
+        elif create:
             path.mkdir(mode=0o700, parents=True)
-        path.chmod(0o700)
+            path.chmod(0o700)
+        else:
+            parent = path.parent
+            while not parent.exists() and parent != parent.parent:
+                parent = parent.parent
+            metadata = parent.lstat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or not os.access(parent, os.W_OK | os.X_OK)
+            ):
+                raise ValueError("data directory is invalid")
     except OSError as exc:
         raise ValueError("data directory is unavailable") from exc
     return path
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m mycelium_seed")
+    parser = _SafeArgumentParser(prog="python -m mycelium_seed")
     parser.add_argument("--bind", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data-dir", required=True)
@@ -52,66 +85,113 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--swarm-id", default="mycelium-swarm")
     parser.add_argument("--seed-node-id", default="seed-node")
     parser.add_argument("--incarnation", default="seed-main")
+    parser.add_argument("--dry-run", action="store_true")
     return parser
+
+
+def _emit_status(status: dict[str, object]) -> None:
+    sys.stdout.buffer.write(canonical_json_bytes(status) + b"\n")
+    sys.stdout.buffer.flush()
+
+
+def _preflight(args: argparse.Namespace) -> Path:
+    try:
+        if args.port < 0 or args.port > 65535:
+            raise ValueError("port is invalid")
+        if args.bind in {"0.0.0.0", "::"} and args.advertised_url is None:
+            raise ValueError("advertised URL is required for wildcard binds")
+        return _private_directory(args.data_dir, create=not args.dry_run)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _EntrypointFailure(
+            "seed_preflight_failed",
+            EXIT_PREFLIGHT_FAILURE,
+        ) from exc
 
 
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.port < 0 or args.port > 65535:
-        raise ValueError("port is invalid")
-    data_dir = _private_directory(args.data_dir)
-    signer = load_or_create_node_signer(data_dir / "identity" / "seed.key")
-    database = data_dir / "state.sqlite3"
-    coordinator = SeedCoordinator(
-        swarm_id=args.swarm_id,
-        seed_node_id=args.seed_node_id,
-        seed_url=None,
-        signer=signer,
-        invite_registry=SqliteInviteRegistry(database),
-        incarnation=args.incarnation,
-    )
-    server = SeedHTTPServer(
-        coordinator,
-        host=args.bind,
-        port=args.port,
-        advertised_url=args.advertised_url,
-    )
+    data_dir = _preflight(args)
+    if args.dry_run:
+        _emit_status(
+            {
+                "protocol": _STATUS_PROTOCOL,
+                "event": "seed_dry_run",
+                "route_ready": False,
+            }
+        )
+        return EXIT_SUCCESS
+
+    try:
+        signer = load_or_create_node_signer(data_dir / "identity" / "seed.key")
+        database = data_dir / "state.sqlite3"
+        coordinator = SeedCoordinator(
+            swarm_id=args.swarm_id,
+            seed_node_id=args.seed_node_id,
+            seed_url=None,
+            signer=signer,
+            invite_registry=SqliteInviteRegistry(database),
+            incarnation=args.incarnation,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _EntrypointFailure(
+            "seed_preflight_failed",
+            EXIT_PREFLIGHT_FAILURE,
+        ) from exc
+
+    server: SeedHTTPServer | None = None
     stopping = threading.Event()
 
     def request_stop(_signum: int, _frame: object) -> None:
         stopping.set()
 
-    previous = {
-        signum: signal.signal(signum, request_stop)
-        for signum in (signal.SIGINT, signal.SIGTERM)
-    }
+    previous: dict[int, object] = {}
     try:
-        server.start()
-        status = {
-            "protocol": _STATUS_PROTOCOL,
-            "event": "seed_started",
-            "seed_url": coordinator.seed_url,
-            "seed_endpoint_id": signer.endpoint_id,
-            "route_ready": False,
+        server = SeedHTTPServer(
+            coordinator,
+            host=args.bind,
+            port=args.port,
+            advertised_url=args.advertised_url,
+        )
+        previous = {
+            signum: signal.signal(signum, request_stop)
+            for signum in (signal.SIGINT, signal.SIGTERM)
         }
-        sys.stdout.buffer.write(canonical_json_bytes(status) + b"\n")
-        sys.stdout.buffer.flush()
+        server.start()
+        _emit_status(
+            {
+                "protocol": _STATUS_PROTOCOL,
+                "event": "seed_started",
+                "seed_url": coordinator.seed_url,
+                "seed_endpoint_id": signer.endpoint_id,
+                "route_ready": False,
+            }
+        )
         while not stopping.wait(0.5):
             pass
+    except _EntrypointFailure:
+        raise
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _EntrypointFailure(
+            "seed_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        ) from exc
     finally:
-        server.close()
+        if server is not None:
+            server.close()
         for signum, handler in previous.items():
             signal.signal(signum, handler)
-    return 0
+    return EXIT_SUCCESS
 
 
 def main() -> None:
     try:
         raise SystemExit(run())
-    except (OSError, RuntimeError, ValueError) as exc:
-        code = getattr(exc, "code", "seed_main_start_failed")
-        print(str(code), file=sys.stderr)
-        raise SystemExit(2) from None
+    except _EntrypointFailure as exc:
+        print(exc.code, file=sys.stderr)
+        raise SystemExit(exc.exit_status) from None
+    except (OSError, RuntimeError, ValueError):
+        print("seed_runtime_failed", file=sys.stderr)
+        raise SystemExit(EXIT_RUNTIME_FAILURE) from None
 
 
 if __name__ == "__main__":
