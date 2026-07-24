@@ -880,6 +880,273 @@ def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
         transport.close()
 
 
+def test_constructor_peer_endpoint_document_is_deeply_detached() -> None:
+    hub = _Hub()
+    endpoint_addr = {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+    peer = PeerBinding(
+        "peer-node",
+        "peer-endpoint",
+        endpoint_addr,
+        7,
+    )
+    transport = IrohTransport(
+        node_id="local-node",
+        socket_path="/unused",
+        bootstrap_secret=b"s" * 32,
+        peer=peer,
+        expected_endpoint_id="local-endpoint",
+        client_factory=hub.client,
+    )
+
+    endpoint_addr["relay"]["urls"].append("https://relay.invalid/alias")
+    endpoint_addr["concurrent_marker"] = "caller-owned"
+
+    assert transport.peer_binding.endpoint_addr == {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+
+
+def test_public_peer_binding_document_is_a_deep_defensive_copy() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    exposed = transport.peer_binding
+
+    exposed.endpoint_addr["addrs"].append("127.0.0.1:2")
+    exposed.endpoint_addr["concurrent_marker"] = "public-alias"
+
+    assert transport.peer_binding.endpoint_addr == {
+        "id": "peer-endpoint",
+        "addrs": ["127.0.0.1:1"],
+    }
+
+
+def test_replacement_endpoint_document_is_owned_before_remote_configure() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    replacement_addr = {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+    replacement = PeerBinding(
+        "peer-node",
+        "peer-endpoint",
+        replacement_addr,
+        8,
+    )
+    configure_entered = threading.Event()
+    release_configure = threading.Event()
+    original_configure = transport._configure_peer
+    errors: list[BaseException] = []
+
+    def configure_then_pause(client, binding) -> None:
+        configure_entered.set()
+        assert release_configure.wait(timeout=1)
+        original_configure(client, binding)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(replacement)
+        except BaseException as error:
+            errors.append(error)
+
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    rotation.start()
+    try:
+        assert configure_entered.wait(timeout=1)
+        replacement_addr["relay"]["urls"].append(
+            "https://relay.invalid/during-configure"
+        )
+        replacement_addr["concurrent_marker"] = "during-configure"
+        release_configure.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert errors == []
+
+        replacement_addr["relay"]["urls"].append(
+            "https://relay.invalid/after-commit"
+        )
+        replacement_addr["post_commit_marker"] = "caller-owned"
+        expected = {
+            "id": "peer-endpoint",
+            "relay": {"urls": ["https://relay.invalid/original"]},
+        }
+        assert hub.configurations[-1][1] == expected
+        assert transport.peer_binding.endpoint_addr == expected
+    finally:
+        release_configure.set()
+        rotation.join(timeout=1)
+        transport.close()
+
+
+def test_sidecar_configure_document_cannot_mutate_candidate_binding() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    control = transport._control_client
+    assert control is not None
+    configured_documents: list[dict] = []
+
+    def mutate_configure_document(
+        endpoint_id: str,
+        endpoint_addr: dict,
+        *,
+        generation: int,
+        timeout: float | None = None,
+    ) -> None:
+        del endpoint_id, generation, timeout
+        configured_documents.append(endpoint_addr)
+        endpoint_addr["relay"]["urls"].append(
+            "https://relay.invalid/sidecar-mutated"
+        )
+        endpoint_addr["sidecar_marker"] = True
+
+    control.configure_peer = mutate_configure_document
+    replacement_addr = {
+        "id": "peer-endpoint",
+        "relay": {"urls": ["https://relay.invalid/original"]},
+    }
+    replacement = PeerBinding(
+        "peer-node",
+        "peer-endpoint",
+        replacement_addr,
+        8,
+    )
+    try:
+        transport.rotate_peer(replacement)
+
+        assert configured_documents == [
+            {
+                "id": "peer-endpoint",
+                "relay": {
+                    "urls": [
+                        "https://relay.invalid/original",
+                        "https://relay.invalid/sidecar-mutated",
+                    ]
+                },
+                "sidecar_marker": True,
+            }
+        ]
+        expected = {
+            "id": "peer-endpoint",
+            "relay": {"urls": ["https://relay.invalid/original"]},
+        }
+        assert replacement.endpoint_addr == expected
+        assert transport.peer_binding.endpoint_addr == expected
+    finally:
+        transport.close()
+
+
+def test_rotation_detects_in_place_current_peer_document_mutation() -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    transport = _transport(hub, delivery_timeout_seconds=1.0)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    send_results: list[DeliveryReceipt] = []
+    send_errors: list[BaseException] = []
+    rotation_errors: list[BaseException] = []
+    configured = threading.Event()
+    release_commit = threading.Event()
+    original_configure = transport._configure_peer
+
+    def send() -> None:
+        try:
+            send_results.append(
+                transport.send_router_frame(
+                    _event_frame(),
+                    destination_node_id="peer-node",
+                )
+            )
+        except BaseException as error:
+            send_errors.append(error)
+
+    def configure_then_pause(client, binding) -> None:
+        original_configure(client, binding)
+        configured.set()
+        assert release_commit.wait(timeout=1)
+
+    def rotate() -> None:
+        try:
+            transport.rotate_peer(_binding(generation=8))
+        except BaseException as error:
+            rotation_errors.append(error)
+
+    sender = threading.Thread(target=send)
+    transport._configure_peer = configure_then_pause
+    rotation = threading.Thread(target=rotate)
+    sender.start()
+    assert hub.confirmed_send_entered.wait(timeout=1)
+    rotation.start()
+    try:
+        assert configured.wait(timeout=1)
+        with transport._state_lock:
+            current = transport._peer
+            current.endpoint_addr["addrs"].append("127.0.0.1:2")
+            assert transport._peer is current
+            state_after_mutation = transport._peer
+            pending_after_mutation = tuple(transport._pending)
+        release_commit.set()
+        rotation.join(timeout=1)
+        assert not rotation.is_alive()
+        assert len(rotation_errors) == 1
+        assert isinstance(rotation_errors[0], IrohTransportError)
+        assert rotation_errors[0].code == "peer_rotated"
+        with transport._state_lock:
+            assert transport._peer is state_after_mutation
+            assert transport._peer.generation == 7
+            assert tuple(transport._pending) == pending_after_mutation
+        assert hub.cancels == []
+
+        hub.release_confirmed_send.set()
+        sender.join(timeout=1)
+        assert not sender.is_alive()
+        assert send_errors == []
+        assert len(send_results) == 1
+        assert send_results[0].peer_generation == 7
+        assert hub.cancels == []
+    finally:
+        release_commit.set()
+        hub.release_confirmed_send.set()
+        rotation.join(timeout=1)
+        sender.join(timeout=1)
+        transport.close()
+
+
+@pytest.mark.parametrize("invalid_value", [float("nan"), object()])
+def test_peer_endpoint_document_rejects_non_json_without_value_leak(
+    invalid_value: object,
+) -> None:
+    endpoint_addr = {
+        "id": "peer-endpoint",
+        "private_material": {"value": invalid_value},
+    }
+
+    with pytest.raises(ValueError) as raised:
+        IrohTransport(
+            node_id="local-node",
+            socket_path="/unused",
+            bootstrap_secret=b"s" * 32,
+            peer=PeerBinding(
+                "peer-node",
+                "peer-endpoint",
+                endpoint_addr,
+                7,
+            ),
+            expected_endpoint_id="local-endpoint",
+        )
+
+    assert str(raised.value) == "endpoint_addr must be valid JSON data"
+    assert "private_material" not in str(raised.value)
+
+
 def test_rotation_configured_before_close_cannot_commit_after_close() -> None:
     hub = _Hub()
     transport = _transport(hub)

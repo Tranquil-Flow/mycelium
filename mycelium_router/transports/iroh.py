@@ -243,6 +243,52 @@ class PeerBinding:
          raise ValueError("peer generation must be positive")
 
 
+def _canonical_endpoint_document(
+   endpoint_addr: Mapping[str, Any],
+) -> dict[str, Any]:
+   try:
+      encoded = json.dumps(
+         dict(endpoint_addr),
+         allow_nan=False,
+         sort_keys=True,
+         separators=(",", ":"),
+      )
+      document = json.loads(encoded)
+   except Exception:
+      raise ValueError(
+         "endpoint_addr must be valid JSON data"
+      ) from None
+   if not isinstance(document, dict):
+      raise ValueError("endpoint_addr must be valid JSON data")
+   return document
+
+
+def _canonical_peer_binding(binding: PeerBinding) -> PeerBinding:
+   return PeerBinding(
+      node_id=binding.node_id,
+      endpoint_id=binding.endpoint_id,
+      endpoint_addr=_canonical_endpoint_document(binding.endpoint_addr),
+      generation=binding.generation,
+   )
+
+
+def _peer_binding_snapshot(
+   binding: PeerBinding,
+) -> tuple[str, str, str, int]:
+   endpoint_document = _canonical_endpoint_document(binding.endpoint_addr)
+   return (
+      binding.node_id,
+      binding.endpoint_id,
+      json.dumps(
+         endpoint_document,
+         allow_nan=False,
+         sort_keys=True,
+         separators=(",", ":"),
+      ),
+      binding.generation,
+   )
+
+
 @dataclass(frozen=True)
 class DeliveryReceipt:
    message_id: bytes
@@ -324,7 +370,7 @@ class IrohTransport:
       self.node_id = node_id
       self.socket_path = Path(socket_path)
       self._bootstrap_secret = bytes(bootstrap_secret)
-      self._peer = peer
+      self._peer = _canonical_peer_binding(peer)
       self.expected_endpoint_id = expected_endpoint_id
       self.delivery_timeout_seconds = delivery_timeout_seconds
       self.poll_interval_seconds = poll_interval_seconds
@@ -370,7 +416,7 @@ class IrohTransport:
    @property
    def peer_binding(self) -> PeerBinding:
       with self._state_lock:
-         return self._peer
+         return _canonical_peer_binding(self._peer)
 
    @property
    def fatal_error(self) -> IrohTransportError | None:
@@ -504,7 +550,7 @@ class IrohTransport:
    ) -> None:
       client.configure_peer(
          binding.endpoint_id,
-         dict(binding.endpoint_addr),
+         _canonical_endpoint_document(binding.endpoint_addr),
          generation=binding.generation,
          timeout=timeout,
       )
@@ -516,16 +562,17 @@ class IrohTransport:
    def _rotate_peer(self, replacement: PeerBinding) -> None:
       with self._state_lock:
          self._require_running()
-         current = self._peer
-         if replacement.node_id != current.node_id:
+         current_snapshot = _peer_binding_snapshot(self._peer)
+         candidate = _canonical_peer_binding(replacement)
+         if candidate.node_id != self._peer.node_id:
             raise IrohTransportError("peer_node_mismatch")
-         if replacement.generation <= current.generation:
+         if candidate.generation <= self._peer.generation:
             raise IrohTransportError("stale_peer_generation")
          control = self._control_client
       if control is None:
          raise IrohTransportError("transport_control_unavailable")
       try:
-         self._configure_peer(control, replacement)
+         self._configure_peer(control, candidate)
       except BaseException as error:
          raise self._map_sidecar_error("peer_rotation_failed", error) from error
 
@@ -533,11 +580,15 @@ class IrohTransport:
          self._require_running()
          if self._control_client is not control:
             raise IrohTransportError("transport_control_changed")
-         if self._peer != current:
+         try:
+            refreshed_snapshot = _peer_binding_snapshot(self._peer)
+         except ValueError:
+            raise IrohTransportError("peer_rotated") from None
+         if refreshed_snapshot != current_snapshot:
             raise IrohTransportError("peer_rotated")
-         self._peer = replacement
+         self._peer = candidate
          for message_id, pending in self._pending.items():
-            if pending.generation >= replacement.generation:
+            if pending.generation >= candidate.generation:
                continue
             reserved, cancellation_client = (
                self._reserve_pending_cancellation_locked(
