@@ -30,6 +30,18 @@ DEPLOYMENT_ID = "12345678-1234-5678-9234-abcdefabcdef"
 _UNCHANGED = object()
 
 
+class _StrictDictCollision(dict[Any, Any]):
+    pass
+
+
+class _StrictListCollision(list[Any]):
+    pass
+
+
+class _StrictStrCollision(str):
+    pass
+
+
 def _write_safetensors(path: Path, tensor_names: list[str]) -> None:
     header: dict[str, Any] = {}
     payload = bytearray()
@@ -166,6 +178,97 @@ def _case(tmp_path: Path, *, deployment_epoch: int = 7) -> tuple[
 
         reports.append(wp.provision_assignment(assignment, fetch_file=fetch))
     return manifest, assignments, reports, source
+
+
+def _refresh_manifest_digest(manifest: dict[str, Any]) -> None:
+    unsigned = copy.deepcopy(manifest)
+    unsigned.pop("manifest_digest", None)
+    manifest["manifest_digest"] = mm._digest_document(unsigned)
+
+
+def _alias_collection_case(
+    tmp_path: Path,
+    *,
+    aliases: dict[Any, Any],
+    tied_sources: tuple[str, ...] = ("classifier",),
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    source = tmp_path / "source"
+    source.mkdir(parents=True)
+    manifest, _ = _manifest_and_files(source)
+    tied_key = manifest["component_tensor_keys"]["input_embedding"][0]
+    for component in tied_sources:
+        manifest["component_tensor_keys"][component] = [tied_key]
+        manifest["component_files"][component] = ["a.safetensors"]
+    manifest["component_aliases"] = copy.deepcopy(aliases)
+    _refresh_manifest_digest(manifest)
+    assignments = la.compile_layer_assignments(
+        route_plan=_route(manifest),
+        manifest=manifest,
+        deployment_id=DEPLOYMENT_ID,
+        deployment_epoch=7,
+        cache_roots={
+            f"node-{index}": str((tmp_path / f"cache-{index}").resolve())
+            for index in range(3)
+        },
+        runtime_by_node={
+            f"node-{index}": {
+                "backend": "artifact_verifier",
+                "dtype": "source",
+                "quantization": "none",
+            }
+            for index in range(3)
+        },
+    )
+
+    def fetch(
+        model_id: str,
+        revision: str,
+        filename: str,
+        cache_root: str | Path,
+        local_files_only: bool = False,
+    ) -> tuple[Path, bool]:
+        target = Path(cache_root) / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / filename, target)
+        return target, True
+
+    reports = [
+        wp.provision_assignment(
+            assignment,
+            fetch_file=fetch,
+            local_files_only=True,
+        )
+        for assignment in assignments
+    ]
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    return manifest, assignments, packs
+
+
+def _replace_collection_aliases(
+    manifest: dict[str, Any],
+    assignments: list[dict[str, Any]],
+    packs: list[dict[str, Any]],
+    aliases: dict[Any, Any],
+) -> None:
+    manifest["component_aliases"] = copy.deepcopy(aliases)
+    _refresh_manifest_digest(manifest)
+    manifest_digest = mm.manifest_digest_ref(manifest)
+    for assignment, pack in zip(assignments, packs, strict=True):
+        component_aliases = {
+            source: copy.deepcopy(target)
+            for source, target in aliases.items()
+            if source in assignment["components"]
+        }
+        assignment["manifest_digest"] = manifest_digest
+        assignment["component_aliases"] = component_aliases
+        assignment["assignment_id"] = la.assignment_id_for(assignment)
+        pack["manifest_digest"] = manifest_digest
+        pack["component_aliases"] = copy.deepcopy(component_aliases)
+        pack["assignment_id"] = assignment["assignment_id"]
+        _refresh_digest(pack)
 
 
 def _refresh_digest(pack: dict[str, Any]) -> None:
@@ -830,6 +933,121 @@ def test_tied_alias_pack_includes_embedding_source_for_final_stage(tmp_path: Pat
     } == {"blocks.safetensors", "embed.safetensors"}
 
 
+def test_tied_alias_ownership_is_stable_when_manifest_aliases_are_reordered(
+    tmp_path: Path,
+) -> None:
+    aliases = {
+        "classifier": "input_embedding",
+        "pooler": "input_embedding",
+    }
+    first = _alias_collection_case(
+        tmp_path / "first",
+        aliases=aliases,
+    )
+    second = _alias_collection_case(
+        tmp_path / "second",
+        aliases=dict(reversed(list(aliases.items()))),
+    )
+
+    summaries = [
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+        for manifest, assignments, packs in (first, second)
+    ]
+
+    assert [
+        {
+            "tensor_key": record["tensor_key"],
+            "alias_component": record["alias_component"],
+            "target_component": record["target_component"],
+        }
+        for record in summaries[0]["tied_aliases"]
+    ] == [
+        {
+            "tensor_key": record["tensor_key"],
+            "alias_component": record["alias_component"],
+            "target_component": record["target_component"],
+        }
+        for record in summaries[1]["tied_aliases"]
+    ]
+
+
+@pytest.mark.parametrize(
+    "reverse_alias_order",
+    (False, True),
+    ids=("duplicate-target-forward", "duplicate-target-reversed"),
+)
+def test_tied_alias_ownership_rejects_ambiguous_duplicate_targets(
+    tmp_path: Path,
+    reverse_alias_order: bool,
+) -> None:
+    aliases = {
+        "classifier": "input_embedding",
+        "pooler": "input_embedding",
+    }
+    if reverse_alias_order:
+        aliases = dict(reversed(list(aliases.items())))
+    manifest, assignments, packs = _alias_collection_case(
+        tmp_path,
+        aliases=aliases,
+        tied_sources=("classifier", "pooler"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack collection tied alias ownership is ambiguous$",
+    ):
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize(
+    "aliases",
+    (
+        {1: "input_embedding"},
+        {"classifier": ["input_embedding"]},
+        {"": "input_embedding"},
+        {"classifier": ""},
+    ),
+    ids=(
+        "non-string-source",
+        "non-string-target",
+        "empty-source",
+        "empty-target",
+    ),
+)
+def test_collection_rejects_invalid_alias_schema_without_raw_type_errors(
+    tmp_path: Path,
+    aliases: dict[Any, Any],
+) -> None:
+    manifest, assignments, packs = _alias_collection_case(
+        tmp_path,
+        aliases={"classifier": "input_embedding"},
+    )
+    _replace_collection_aliases(
+        manifest,
+        assignments,
+        packs,
+        aliases,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^manifest component aliases are invalid$",
+    ):
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=manifest,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutation", "error"),
     [
@@ -1016,15 +1234,16 @@ def test_verifier_rejects_concurrent_artifact_mutation(
 
 
 def test_loader_report_is_bound_to_pack_and_assignment(tmp_path: Path) -> None:
-    manifest, assignments, reports, _ = _case(tmp_path)
-    pack = compile_stage_pack(assignments[1], manifest, reports[1])
-    verification = verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
-    report = artifact_report_for_loader(
-        pack,
-        verification,
-        assignment=assignments[1],
-        manifest=manifest,
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
     )
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    manifest = prepared.manifest
+    assignments = prepared.assignments
+    pack = prepared.stage_packs[1]
+    verification = prepared.stage_pack_verifications[1]
+    report = prepared.reports[1]
 
     assert report["protocol"] == "mycelium.artifact_verification_report.v1"
     assert report["stage_pack_digest"] == pack["stage_pack_digest"]
@@ -1056,6 +1275,274 @@ def test_loader_report_is_bound_to_pack_and_assignment(tmp_path: Path) -> None:
             assignment=assignments[1],
             manifest=manifest,
         )
+
+
+@pytest.mark.parametrize(
+    "collision",
+    (
+        "protocol-str-subclass",
+        "verification-digest-str-subclass",
+        "deployment-epoch-float",
+        "range-start-float",
+        "range-map-subclass",
+        "components-list-subclass",
+        "runtime-map-subclass",
+        "runtime-nested-int-float",
+        "runtime-nested-bool-int",
+        "verified-files-list-subclass",
+        "verified-file-map-subclass",
+        "verified-file-relative-path-str-subclass",
+        "verified-file-digest-str-subclass",
+        "verified-file-size-float",
+        "verified-tensor-keys-list-subclass",
+        "verified-tensor-key-str-subclass",
+        "tensor-file-map-subclass",
+        "tensor-file-map-value-str-subclass",
+        "verified-tensor-count-float",
+        "expected-bytes-float",
+        "ready-for-load-int",
+        "route-ready-int",
+        "claim-boundary-int",
+    ),
+    ids=lambda collision: collision,
+)
+def test_redigested_verification_rejects_exact_type_collisions(
+    tmp_path: Path,
+    collision: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    if collision.startswith("runtime-nested-"):
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            runtime=_mlx_runtime(),
+        )
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    if collision == "protocol-str-subclass":
+        verification["protocol"] = _StrictStrCollision(verification["protocol"])
+    elif collision == "verification-digest-str-subclass":
+        verification["stage_pack_verification_digest"] = _StrictStrCollision(
+            verification["stage_pack_verification_digest"]
+        )
+    elif collision == "deployment-epoch-float":
+        verification["deployment_epoch"] = float(verification["deployment_epoch"])
+    elif collision == "range-start-float":
+        verification["range"]["start_layer"] = float(
+            verification["range"]["start_layer"]
+        )
+    elif collision == "range-map-subclass":
+        verification["range"] = _StrictDictCollision(verification["range"])
+    elif collision == "components-list-subclass":
+        verification["components"] = _StrictListCollision(
+            verification["components"]
+        )
+    elif collision == "runtime-map-subclass":
+        verification["runtime"] = _StrictDictCollision(verification["runtime"])
+    elif collision == "runtime-nested-int-float":
+        model_config = verification["runtime"]["model_config"]
+        model_config["n_layer"] = float(model_config["n_layer"])
+    elif collision == "runtime-nested-bool-int":
+        verification["runtime"]["model_config"]["scale_attn_weights"] = 1
+    elif collision == "verified-files-list-subclass":
+        verification["verified_files"] = _StrictListCollision(
+            verification["verified_files"]
+        )
+    elif collision == "verified-file-map-subclass":
+        verification["verified_files"][0] = _StrictDictCollision(
+            verification["verified_files"][0]
+        )
+    elif collision == "verified-file-relative-path-str-subclass":
+        record = verification["verified_files"][0]
+        record["relative_path"] = _StrictStrCollision(record["relative_path"])
+    elif collision == "verified-file-digest-str-subclass":
+        record = verification["verified_files"][0]
+        record["content_digest"] = _StrictStrCollision(record["content_digest"])
+    elif collision == "verified-file-size-float":
+        record = verification["verified_files"][0]
+        record["size_bytes"] = float(record["size_bytes"])
+    elif collision == "verified-tensor-keys-list-subclass":
+        verification["verified_tensor_keys"] = _StrictListCollision(
+            verification["verified_tensor_keys"]
+        )
+    elif collision == "verified-tensor-key-str-subclass":
+        verification["verified_tensor_keys"][0] = _StrictStrCollision(
+            verification["verified_tensor_keys"][0]
+        )
+    elif collision == "tensor-file-map-subclass":
+        verification["tensor_file_map"] = _StrictDictCollision(
+            verification["tensor_file_map"]
+        )
+    elif collision == "tensor-file-map-value-str-subclass":
+        tensor_key = next(iter(verification["tensor_file_map"]))
+        verification["tensor_file_map"][tensor_key] = _StrictStrCollision(
+            verification["tensor_file_map"][tensor_key]
+        )
+    elif collision == "verified-tensor-count-float":
+        verification["verified_tensor_count"] = float(
+            verification["verified_tensor_count"]
+        )
+    elif collision == "expected-bytes-float":
+        verification["expected_bytes"] = float(verification["expected_bytes"])
+    elif collision == "ready-for-load-int":
+        verification["ready_for_load"] = 1
+    elif collision == "route-ready-int":
+        verification["route_ready"] = 0
+    else:
+        verification["claim_boundary"] = 1
+    if collision != "verification-digest-str-subclass":
+        verification["stage_pack_verification_digest"] = (
+            sp._verification_digest_for(verification)
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification schema is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize(
+    "cross_link",
+    (
+        "claim-boundary",
+        "file-tensor-count",
+        "tensor-file-ownership",
+    ),
+    ids=lambda cross_link: cross_link,
+)
+def test_redigested_verification_rejects_semantic_cross_link_drift(
+    tmp_path: Path,
+    cross_link: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    index = 2 if cross_link == "tensor-file-ownership" else 1
+    assignment = assignments[index]
+    pack = compile_stage_pack(assignment, manifest, reports[index])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    if cross_link == "claim-boundary":
+        verification["claim_boundary"] = "authenticated but overclaimed"
+    elif cross_link == "file-tensor-count":
+        verification["verified_files"][0]["tensor_count"] += 1
+    else:
+        classifier_key = manifest["component_tensor_keys"]["classifier"][0]
+        verification["tensor_file_map"][classifier_key] = "b.safetensors"
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+    with pytest.raises(ValueError, match=r"^stage pack verification evidence is invalid$"):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+@pytest.mark.parametrize(
+    "layout_attack",
+    ("nested-relative-path", "post-verification-symlink"),
+    ids=lambda layout_attack: layout_attack,
+)
+def test_adapter_never_emits_ready_report_rejected_by_loader_path_contract(
+    tmp_path: Path,
+    layout_attack: str,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    from runtime_loader import RuntimeLoadError, load_assignment_stage
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    assignment = prepared.assignments[0]
+    pack = prepared.stage_packs[0]
+    root = Path(pack["artifact_root"])
+    artifact_record = pack["artifacts"][0]
+    local_path = root / artifact_record["relative_path"]
+    if layout_attack == "nested-relative-path":
+        nested_path = root / "snapshot" / artifact_record["upstream_path"]
+        nested_path.parent.mkdir(parents=True)
+        local_path.replace(nested_path)
+        artifact_record["relative_path"] = (
+            f"snapshot/{artifact_record['upstream_path']}"
+        )
+        _refresh_digest(pack)
+        verification = verify_stage_pack(
+            pack,
+            assignment=assignment,
+            manifest=prepared.manifest,
+        )
+    else:
+        verification = prepared.stage_pack_verifications[0]
+        backing = root / "authenticated-backing.safetensors"
+        shutil.copyfile(local_path, backing)
+        local_path.unlink()
+        local_path.symlink_to(backing.name)
+
+    try:
+        report = artifact_report_for_loader(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=prepared.manifest,
+        )
+    except ValueError as error:
+        assert str(error) == "stage pack artifacts are not loader-compatible"
+    else:
+        assert report["ready_for_load"] is True
+        with pytest.raises(
+            RuntimeLoadError,
+            match="verified local path|unable to open verified artifact",
+        ):
+            load_assignment_stage(
+                assignment,
+                report,
+                load_generation=17,
+            )
+        pytest.fail("adapter emitted a ready report rejected by the loader path contract")
+
+
+def test_flat_local_adapter_report_loads_through_runtime_contract(
+    tmp_path: Path,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    from runtime_loader import load_assignment_stage
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    loaded = [
+        load_assignment_stage(assignment, report, load_generation=17)
+        for assignment, report in zip(
+            prepared.assignments,
+            prepared.reports,
+            strict=True,
+        )
+    ]
+
+    assert all(stage.proof["route_ready"] is False for stage in loaded)
+    assert [
+        stage.proof["stage_pack_digest"] for stage in loaded
+    ] == [
+        pack["stage_pack_digest"] for pack in prepared.stage_packs
+    ]
 
 
 def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_records(
@@ -1504,15 +1991,9 @@ def test_collection_verifier_rejects_mixed_control_plane_binding_identity(
         )
 
 
-def test_collection_verifier_rejects_invalid_control_plane_bindings(
-    tmp_path: Path,
-) -> None:
-    manifest, base_assignments, reports, _ = _case(tmp_path)
-    base_packs = [
-        compile_stage_pack(assignment, manifest, report)
-        for assignment, report in zip(base_assignments, reports, strict=True)
-    ]
-    attacks = (
+@pytest.mark.parametrize(
+    "attack",
+    (
         "not_object",
         "missing_field",
         "extra_field",
@@ -1531,84 +2012,110 @@ def test_collection_verifier_rejects_invalid_control_plane_bindings(
         "explicit_none",
         "type_collision_generation",
         "type_collision_epoch",
-    )
-
-    for attack in attacks:
-        assignments = copy.deepcopy(base_assignments)
-        packs = copy.deepcopy(base_packs)
-        if attack == "explicit_none":
-            for assignment, pack in zip(assignments, packs, strict=True):
-                _set_present_assignment_pack_binding(
-                    assignment,
-                    pack,
-                    None,
-                )
-        else:
-            binding: Any = _control_plane_binding()
-            if attack == "not_object":
-                binding = ["mycelium.control_plane_binding.v1"]
-            elif attack == "missing_field":
-                binding.pop("swarm_id")
-            elif attack == "extra_field":
-                binding["unexpected"] = "field"
-            elif attack == "wrong_protocol":
-                binding["protocol"] = "mycelium.control_plane_binding.v2"
-            elif attack == "malformed_evidence_digest":
-                binding["evidence_bundle_digest"] = "sha256:" + "A" * 64
-            elif attack == "malformed_snapshot_digest":
-                binding["planner_snapshot_digest"] = "sha256:short"
-            elif attack == "negative_generation":
-                binding["snapshot_generation"] = -1
-            elif attack == "bool_generation":
-                binding["snapshot_generation"] = True
-            elif attack == "float_generation":
-                binding["snapshot_generation"] = 1.0
-            elif attack == "empty_swarm":
-                binding["swarm_id"] = ""
-            elif attack == "wrong_deployment":
-                binding["deployment_id"] = "87654321-4321-8765-9234-fedcbafedcba"
-            elif attack == "negative_epoch":
-                binding["deployment_epoch"] = -1
-            elif attack == "wrong_epoch":
-                binding["deployment_epoch"] = 8
-            elif attack == "bool_epoch":
-                binding["deployment_epoch"] = True
-            elif attack == "float_epoch":
-                binding["deployment_epoch"] = 7.0
-            for assignment, pack in zip(assignments, packs, strict=True):
-                _rebind_assignment_pack(
-                    assignment,
-                    pack,
-                    control_plane_binding=binding,
-                )
-
-        if attack in ("type_collision_generation", "type_collision_epoch"):
-            type_colliding = _control_plane_binding()
-            field, replacement = (
-                ("snapshot_generation", True)
-                if attack == "type_collision_generation"
-                else ("deployment_epoch", 7.0)
+    ),
+    ids=(
+        "not-object",
+        "missing-field",
+        "extra-field",
+        "wrong-protocol",
+        "malformed-evidence-digest",
+        "malformed-snapshot-digest",
+        "negative-generation",
+        "bool-generation",
+        "float-generation",
+        "empty-swarm",
+        "wrong-deployment",
+        "negative-epoch",
+        "wrong-epoch",
+        "bool-epoch",
+        "float-epoch",
+        "explicit-none",
+        "type-collision-generation",
+        "type-collision-epoch",
+    ),
+)
+def test_collection_verifier_rejects_invalid_control_plane_bindings(
+    tmp_path: Path,
+    attack: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    if attack == "explicit_none":
+        for assignment, pack in zip(assignments, packs, strict=True):
+            _set_present_assignment_pack_binding(
+                assignment,
+                pack,
+                None,
             )
-            type_colliding[field] = replacement
+    else:
+        binding: Any = _control_plane_binding()
+        if attack == "not_object":
+            binding = ["mycelium.control_plane_binding.v1"]
+        elif attack == "missing_field":
+            binding.pop("swarm_id")
+        elif attack == "extra_field":
+            binding["unexpected"] = "field"
+        elif attack == "wrong_protocol":
+            binding["protocol"] = "mycelium.control_plane_binding.v2"
+        elif attack == "malformed_evidence_digest":
+            binding["evidence_bundle_digest"] = "sha256:" + "A" * 64
+        elif attack == "malformed_snapshot_digest":
+            binding["planner_snapshot_digest"] = "sha256:short"
+        elif attack == "negative_generation":
+            binding["snapshot_generation"] = -1
+        elif attack == "bool_generation":
+            binding["snapshot_generation"] = True
+        elif attack == "float_generation":
+            binding["snapshot_generation"] = 1.0
+        elif attack == "empty_swarm":
+            binding["swarm_id"] = ""
+        elif attack == "wrong_deployment":
+            binding["deployment_id"] = "87654321-4321-8765-9234-fedcbafedcba"
+        elif attack == "negative_epoch":
+            binding["deployment_epoch"] = -1
+        elif attack == "wrong_epoch":
+            binding["deployment_epoch"] = 8
+        elif attack == "bool_epoch":
+            binding["deployment_epoch"] = True
+        elif attack == "float_epoch":
+            binding["deployment_epoch"] = 7.0
+        for assignment, pack in zip(assignments, packs, strict=True):
             _rebind_assignment_pack(
-                assignments[1],
-                packs[1],
-                control_plane_binding=type_colliding,
+                assignment,
+                pack,
+                control_plane_binding=binding,
             )
 
-        with pytest.raises(ValueError) as raised:
-            sp.verify_stage_pack_collection(
-                packs,
-                assignments=assignments,
-                manifest=manifest,
-            )
-        assert str(raised.value) == "stage pack control-plane binding is invalid"
-        _assert_collection_error_is_value_free(
-            raised.value,
+    if attack in ("type_collision_generation", "type_collision_epoch"):
+        type_colliding = _control_plane_binding()
+        field, replacement = (
+            ("snapshot_generation", True)
+            if attack == "type_collision_generation"
+            else ("deployment_epoch", 7.0)
+        )
+        type_colliding[field] = replacement
+        _rebind_assignment_pack(
+            assignments[1],
+            packs[1],
+            control_plane_binding=type_colliding,
+        )
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            packs,
             assignments=assignments,
             manifest=manifest,
-            extra_forbidden=("control_plane_binding",),
         )
+    assert str(raised.value) == "stage pack control-plane binding is invalid"
+    _assert_collection_error_is_value_free(
+        raised.value,
+        assignments=assignments,
+        manifest=manifest,
+        extra_forbidden=("control_plane_binding",),
+    )
 
 
 @pytest.mark.parametrize(
