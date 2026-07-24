@@ -1,18 +1,25 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import itertools
+import sqlite3
 import threading
 import time
 from typing import Any
 
 import pytest
 
+from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
+import mycelium_interactive.swarm as swarm_module
 from mycelium_interactive.swarm import (
     SwarmCoordinator,
     SwarmError,
-    canonical_digest,
     matrix_digest,
 )
+from mycelium_membership import JOIN_ACCEPTANCE_PROTOCOL, verify_membership_message
+from mycelium_node import NodeMembershipSession
+from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
 
 
 class ManualClock:
@@ -41,6 +48,7 @@ def coordinator(
     *,
     clock: ManualClock | None = None,
     wall_clock: ManualClock | None = None,
+    seed_coordinator: SeedCoordinator | None = None,
     max_peers: int = 4,
     max_pending_jobs: int = 4,
     max_peer_history: int = 64,
@@ -53,6 +61,7 @@ def coordinator(
         stage_pack=stage_pack(),
         clock=clock or time.monotonic,
         wall_clock=wall_clock or time.time,
+        seed_coordinator=seed_coordinator,
         token_source=lambda: f"secret-token-{next(token_counter):040d}",
         id_source=lambda prefix: f"{prefix}-{next(id_counter):04d}",
         max_peers=max_peers,
@@ -62,6 +71,30 @@ def coordinator(
         max_pending_jobs=max_pending_jobs,
         max_peer_history=max_peer_history,
         max_job_history=max_job_history,
+    )
+
+
+def durable_seed(
+    tmp_path: Any,
+    *,
+    clock: ManualClock,
+    signer: Any | None = None,
+    id_prefix: str = "seed-message",
+    lease_seconds: float = 300.0,
+) -> SeedCoordinator:
+    database = tmp_path / "seed-state" / "state.sqlite3"
+    message_ids = itertools.count()
+    return SeedCoordinator(
+        swarm_id="swarm-a",
+        seed_node_id="seed-node",
+        seed_url="https://seed.example.test",
+        signer=signer or generate_ed25519_signer(endpoint_id="seed-endpoint"),
+        invite_registry=SqliteInviteRegistry(database),
+        state=SqliteSeedState(database),
+        incarnation="seed-incarnation",
+        clock=clock,
+        id_source=lambda: f"{id_prefix}-{next(message_ids):04d}",
+        lease_seconds=lease_seconds,
     )
 
 
@@ -86,6 +119,17 @@ def valid_result(work: dict[str, Any], output: list[list[float]]) -> dict[str, A
     }
 
 
+def durable_generation(tmp_path: Any, peer_id: str) -> int:
+    database = tmp_path / "seed-state" / "state.sqlite3"
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT generation FROM seed_members WHERE node_id = ?",
+            (peer_id,),
+        ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
 def start_work(
     swarm: SwarmCoordinator,
     peer_id: str,
@@ -99,6 +143,532 @@ def start_work(
         request_id=work["request_id"],
         input_digest=work["input_digest"],
     )
+
+
+def test_browser_membership_is_signed_and_survives_seed_restart(tmp_path: Any) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+
+    invitation = swarm.create_invite(public_origin="https://swarm.example.test")
+    grant = swarm.exchange_invite(invitation.token)
+    acceptance = verify_membership_message(
+        grant.membership_acceptance,
+        now=clock.value,
+        expected_key_digest=seed.signer.verification_key_digest,
+        expected_protocol=JOIN_ACCEPTANCE_PROTOCOL,
+    )
+    assert acceptance["accepted_node_id"] == grant.peer_id
+    assert acceptance["membership_generation"] == 1
+    assert seed.member(grant.peer_id)["peer_class"] == "browser_http"
+
+    restored_seed = durable_seed(
+        tmp_path,
+        clock=clock,
+        signer=seed.signer,
+        id_prefix="restored-seed-message",
+    )
+    restored = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=restored_seed,
+    )
+    peer = next(
+        peer
+        for peer in restored.status()["peers"]
+        if peer["peer_id"] == grant.peer_id
+    )
+    assert peer["membership_generation"] == 1
+    assert peer["peer_class"] == "browser_http"
+    with pytest.raises(SwarmError, match="peer_unauthorized"):
+        restored.poll_work(
+            peer_id=grant.peer_id,
+            session_token=grant.session_token,
+            timeout_seconds=0,
+        )
+
+
+def test_browser_and_mac_members_cannot_collide_on_node_id(tmp_path: Any) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    browser_id, _token = join(swarm)
+    mac = NodeMembershipSession(
+        node_id=browser_id,
+        swarm_id=seed.swarm_id,
+        seed_node_id=seed.seed_node_id,
+        signer=generate_ed25519_signer(endpoint_id="mac-endpoint"),
+        incarnation="mac-incarnation",
+        software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
+        clock=clock,
+        id_source=lambda: "mac-join-message",
+    )
+    bundle = seed.mint_invite(nonce="mac-collision", ttl_seconds=120)
+    verified = verify_invite_bundle(bundle, now=clock.value)
+    request = mac.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://mac.example.test/control"],
+    )
+
+    with pytest.raises(SeedCoordinatorError, match="seed_node_key_conflict"):
+        seed.accept_join(invite_token=bundle["token"], join_envelope=request)
+    assert seed.member(browser_id)["peer_class"] == "browser_http"
+
+
+def test_browser_cannot_collide_with_existing_mac_node_id(tmp_path: Any) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    mac = NodeMembershipSession(
+        node_id="peer-0000",
+        swarm_id=seed.swarm_id,
+        seed_node_id=seed.seed_node_id,
+        signer=generate_ed25519_signer(endpoint_id="mac-endpoint"),
+        incarnation="mac-incarnation",
+        software_version="mycelium-test",
+        peer_class="mac_mlx_iroh",
+        runtime_capability={
+            "runtime_backend": "mlx",
+            "transport": "iroh",
+            "activation_protocol": "mycelium.router_wire.v1",
+        },
+        clock=clock,
+        id_source=lambda: "mac-join-message",
+    )
+    mac_bundle = seed.mint_invite(nonce="mac-first", ttl_seconds=120)
+    verified = verify_invite_bundle(mac_bundle, now=clock.value)
+    request = mac.join_request(
+        invite_nonce=verified["payload"]["nonce"],
+        endpoint_addrs=["https://mac.example.test/control"],
+    )
+    seed.accept_join(invite_token=mac_bundle["token"], join_envelope=request)
+
+    browser_invite = swarm.create_invite(
+        public_origin="https://swarm.example.test"
+    )
+    with pytest.raises(SwarmError, match="id_collision"):
+        swarm.exchange_invite(browser_invite.token)
+    assert seed.member("peer-0000")["peer_class"] == "mac_mlx_iroh"
+
+
+def test_expired_authoritative_lease_rejects_browser_poll(tmp_path: Any) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock, lease_seconds=10.0)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, token = join(swarm)
+
+    clock.value = 2_010.0
+    with pytest.raises(SwarmError, match="peer_expired"):
+        swarm.poll_work(
+            peer_id=peer_id,
+            session_token=token,
+            timeout_seconds=0,
+        )
+    peer = next(
+        item for item in swarm.status()["peers"] if item["peer_id"] == peer_id
+    )
+    assert peer["state"] == "expired"
+
+
+def test_revoked_in_flight_browser_is_fenced_by_membership_generation(
+    tmp_path: Any,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, token = join(swarm)
+    outcome: list[str] = []
+
+    def dispatch() -> None:
+        try:
+            swarm.dispatch(
+                request_id="generation-fenced",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+            )
+        except SwarmError as exc:
+            outcome.append(exc.code)
+
+    thread = threading.Thread(target=dispatch)
+    thread.start()
+    work = swarm.poll_work(
+        peer_id=peer_id,
+        session_token=token,
+        timeout_seconds=1,
+    )
+    assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
+    generation = seed.member(peer_id)["generation"]
+    revoked = seed.advance_member_generation(
+        node_id=peer_id,
+        expected_generation=generation,
+        lifecycle_state="STOPPING",
+    )
+    assert revoked["generation"] == generation + 1
+
+    with pytest.raises(SwarmError, match="peer_membership_generation_revoked"):
+        swarm.submit_result(
+            peer_id=peer_id,
+            session_token=token,
+            document=valid_result(work, [[1.0, 2.0]]),
+        )
+    assert swarm.cancel_request("generation-fenced") is True
+    thread.join(timeout=1)
+    assert outcome == ["request_cancelled"]
+
+
+def test_generation_advance_during_result_validation_is_not_accepted(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, token = join(swarm)
+    outcome: list[str] = []
+
+    def dispatch() -> None:
+        try:
+            swarm.dispatch(
+                request_id="validation-race-fenced",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+            )
+        except SwarmError as exc:
+            outcome.append(exc.code)
+
+    thread = threading.Thread(target=dispatch, daemon=True)
+    thread.start()
+    work = swarm.poll_work(
+        peer_id=peer_id,
+        session_token=token,
+        timeout_seconds=1,
+    )
+    assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
+    generation = seed.member(peer_id)["generation"]
+    original_validate = swarm_module._validate_hidden
+    advanced = False
+
+    def advance_during_validation(value: Any, hidden_size: int) -> list[list[float]]:
+        nonlocal advanced
+        output = original_validate(value, hidden_size)
+        if not advanced:
+            advanced = True
+            seed.advance_member_generation(
+                node_id=peer_id,
+                expected_generation=generation,
+                lifecycle_state="STOPPING",
+            )
+        return output
+
+    monkeypatch.setattr(swarm_module, "_validate_hidden", advance_during_validation)
+    with pytest.raises(SwarmError, match="peer_membership_generation_revoked"):
+        swarm.submit_result(
+            peer_id=peer_id,
+            session_token=token,
+            document=valid_result(work, [[1.0, 2.0]]),
+        )
+    assert seed.member(peer_id)["generation"] == generation + 1
+    assert swarm.cancel_request("validation-race-fenced") is True
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert outcome == ["request_cancelled"]
+
+
+def test_seed_member_authority_guard_serializes_generation_advance(
+    tmp_path: Any,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    peer_id, _token = join(swarm)
+    generation = seed.member(peer_id)["generation"]
+    advance_started = threading.Event()
+    advance_finished = threading.Event()
+
+    def advance() -> None:
+        advance_started.set()
+        seed.advance_member_generation(
+            node_id=peer_id,
+            expected_generation=generation,
+            lifecycle_state="STOPPING",
+        )
+        advance_finished.set()
+
+    thread = threading.Thread(target=advance, daemon=True)
+    with seed.member_authority_guard(
+        node_id=peer_id,
+        expected_generation=generation,
+        expected_peer_class="browser_http",
+        eligible_lifecycle_states=frozenset({"NEW", "CONFIGURED", "RUNNING"}),
+    ) as member:
+        assert member["generation"] == generation
+        thread.start()
+        assert advance_started.wait(timeout=1)
+        assert not advance_finished.wait(timeout=0.05)
+        assert seed.member(peer_id)["generation"] == generation
+
+    thread.join(timeout=1)
+    assert not thread.is_alive()
+    assert advance_finished.is_set()
+    assert seed.member(peer_id)["generation"] == generation + 1
+
+
+@pytest.mark.parametrize("completion", ["accepted", "duplicate"])
+def test_result_completion_holds_cross_instance_durable_authority_fence(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    completion: str,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    guarded_seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=guarded_seed,
+    )
+    peer_id, token = join(swarm)
+    contender_seed = durable_seed(
+        tmp_path,
+        clock=clock,
+        signer=guarded_seed.signer,
+        id_prefix="contender-seed-message",
+    )
+    dispatch_result: list[Any] = []
+
+    def dispatch() -> None:
+        dispatch_result.append(
+            swarm.dispatch(
+                request_id=f"cross-instance-{completion}",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+            )
+        )
+
+    dispatch_thread = threading.Thread(target=dispatch, daemon=True)
+    dispatch_thread.start()
+    work = swarm.poll_work(
+        peer_id=peer_id,
+        session_token=token,
+        timeout_seconds=1,
+    )
+    assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
+    document = valid_result(work, [[1.0, 2.0]])
+    if completion == "duplicate":
+        assert (
+            swarm.submit_result(
+                peer_id=peer_id,
+                session_token=token,
+                document=document,
+            )
+            == "accepted"
+        )
+        dispatch_thread.join(timeout=1)
+        assert not dispatch_thread.is_alive()
+
+    generation = guarded_seed.member(peer_id)["generation"]
+    save_entered = threading.Event()
+    advance_finished = threading.Event()
+    advance_errors: list[BaseException] = []
+    durable_inside_guard: list[int] = []
+    advance_completed_inside_guard: list[bool] = []
+    contender_state = contender_seed._state  # noqa: SLF001 - race oracle
+    assert contender_state is not None
+    original_save = contender_state.save_member
+
+    def observed_save(member: dict[str, Any]) -> None:
+        save_entered.set()
+        original_save(member)
+
+    contender_state.save_member = observed_save  # type: ignore[method-assign]
+
+    def advance() -> None:
+        try:
+            contender_seed.advance_member_generation(
+                node_id=peer_id,
+                expected_generation=generation,
+                lifecycle_state="STOPPING",
+            )
+        except BaseException as exc:
+            advance_errors.append(exc)
+        finally:
+            advance_finished.set()
+
+    contender_thread = threading.Thread(target=advance, daemon=True)
+    original_guard = guarded_seed.member_authority_guard
+    armed_guard_calls = 0
+
+    @contextmanager
+    def observed_guard(**kwargs: Any):
+        nonlocal armed_guard_calls
+        with original_guard(**kwargs) as member:
+            armed_guard_calls += 1
+            if armed_guard_calls == 2:
+                contender_thread.start()
+                assert save_entered.wait(timeout=1)
+                advance_completed_inside_guard.append(
+                    advance_finished.wait(timeout=0.05)
+                )
+                durable_inside_guard.append(durable_generation(tmp_path, peer_id))
+            yield member
+
+    monkeypatch.setattr(guarded_seed, "member_authority_guard", observed_guard)
+    result = swarm.submit_result(
+        peer_id=peer_id,
+        session_token=token,
+        document=document,
+    )
+    assert result == completion
+    contender_thread.join(timeout=1)
+    assert not contender_thread.is_alive()
+    assert advance_finished.is_set()
+    assert advance_errors == []
+    assert advance_completed_inside_guard == [False]
+    assert durable_inside_guard == [generation]
+    assert durable_generation(tmp_path, peer_id) == generation + 1
+
+    if completion == "accepted":
+        dispatch_thread.join(timeout=1)
+        assert not dispatch_thread.is_alive()
+    assert len(dispatch_result) == 1
+    assert dispatch_result[0].output == ((1.0, 2.0),)
+
+
+def test_cross_instance_pre_advanced_generation_rejects_result(
+    tmp_path: Any,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    stale_seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=stale_seed,
+    )
+    peer_id, token = join(swarm)
+    current_seed = durable_seed(
+        tmp_path,
+        clock=clock,
+        signer=stale_seed.signer,
+        id_prefix="current-seed-message",
+    )
+    dispatch_errors: list[str] = []
+
+    def dispatch() -> None:
+        try:
+            swarm.dispatch(
+                request_id="cross-instance-pre-advanced",
+                hidden=[[1.0, 2.0]],
+                timeout_seconds=5,
+            )
+        except SwarmError as exc:
+            dispatch_errors.append(exc.code)
+
+    dispatch_thread = threading.Thread(target=dispatch, daemon=True)
+    dispatch_thread.start()
+    work = swarm.poll_work(
+        peer_id=peer_id,
+        session_token=token,
+        timeout_seconds=1,
+    )
+    assert work is not None
+    assert start_work(swarm, peer_id, token, work) is True
+    generation = stale_seed.member(peer_id)["generation"]
+    current_seed.advance_member_generation(
+        node_id=peer_id,
+        expected_generation=generation,
+        lifecycle_state="STOPPING",
+    )
+
+    with pytest.raises(SwarmError, match="peer_membership_generation_revoked"):
+        swarm.submit_result(
+            peer_id=peer_id,
+            session_token=token,
+            document=valid_result(work, [[1.0, 2.0]]),
+        )
+    assert durable_generation(tmp_path, peer_id) == generation + 1
+    assert swarm.cancel_request("cross-instance-pre-advanced") is True
+    dispatch_thread.join(timeout=1)
+    assert not dispatch_thread.is_alive()
+    assert dispatch_errors == ["request_cancelled"]
+
+
+def test_browser_member_is_evidence_member_but_activation_ineligible(
+    tmp_path: Any,
+) -> None:
+    clock = ManualClock()
+    clock.value = 2_000.0
+    seed = durable_seed(tmp_path, clock=clock)
+    swarm = coordinator(
+        clock=clock,
+        wall_clock=clock,
+        seed_coordinator=seed,
+    )
+    browser_id, _token = join(swarm)
+    member = seed.member(browser_id)
+
+    assert member["peer_class"] == "browser_http"
+    assert member["activation_eligible"] is False
+    with pytest.raises(
+        SeedCoordinatorError,
+        match="seed_member_activation_ineligible",
+    ):
+        seed.assignment_offer(
+            node_id=browser_id,
+            deployment_id="deployment-browser",
+            deployment_epoch=1,
+            assignment_id="activation-browser",
+            assignment_digest="sha256:" + "1" * 64,
+            stage_pack_digest="sha256:" + "2" * 64,
+            graph_digest="sha256:" + "3" * 64,
+            load_generation=1,
+            peer_node_ids=[],
+            placement_provenance="frozen_fixture",
+        )
 
 
 def test_invite_is_fragment_only_single_use_and_server_stores_no_raw_token() -> None:
@@ -141,7 +711,7 @@ def test_invite_expiry_and_origin_policy_fail_closed() -> None:
             swarm.create_invite(public_origin=origin)
 
 
-def test_invite_expiry_uses_wall_time_but_enforces_monotonic_deadline() -> None:
+def test_wall_time_authority_and_monotonic_session_deadlines_both_fail_closed() -> None:
     clock = ManualClock()
     wall_clock = ManualClock()
     wall_clock.value = 1_750_000_000.0
@@ -153,16 +723,22 @@ def test_invite_expiry_uses_wall_time_but_enforces_monotonic_deadline() -> None:
     assert grant.expires_at == 1_750_000_060.0
 
     wall_clock.value += 10_000.0
-    assert swarm.poll_work(
-        peer_id=grant.peer_id,
-        session_token=grant.session_token,
-        timeout_seconds=0,
-    ) is None
-    clock.value += 61.0
     with pytest.raises(SwarmError, match="peer_expired"):
         swarm.poll_work(
             peer_id=grant.peer_id,
             session_token=grant.session_token,
+            timeout_seconds=0,
+        )
+
+    next_invitation = swarm.create_invite(
+        public_origin="https://swarm.example.test"
+    )
+    next_grant = swarm.exchange_invite(next_invitation.token)
+    clock.value += 61.0
+    with pytest.raises(SwarmError, match="peer_expired"):
+        swarm.poll_work(
+            peer_id=next_grant.peer_id,
+            session_token=next_grant.session_token,
             timeout_seconds=0,
         )
 

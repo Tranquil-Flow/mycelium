@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 import hashlib
 import math
@@ -524,6 +525,158 @@ class SeedCoordinator:
                 raise SeedCoordinatorError("seed_member_unknown")
             projection = member.projection()
             projection.update(self._liveness_projection(member, now=self._now()))
+            return projection
+
+    def members(self, *, peer_class: str | None = None) -> tuple[dict[str, Any], ...]:
+        """Return detached, stable projections for transport adapters."""
+
+        if peer_class is not None:
+            peer_class = _segment(peer_class, "peer_class")
+        with self._lock:
+            now = self._now()
+            projections = []
+            for member in sorted(
+                self._members.values(),
+                key=lambda item: item.node_id,
+            ):
+                if peer_class is not None and member.peer_class != peer_class:
+                    continue
+                projection = member.projection()
+                projection.update(self._liveness_projection(member, now=now))
+                projections.append(projection)
+            return tuple(projections)
+
+    @contextmanager
+    def member_authority_guard(
+        self,
+        *,
+        node_id: str,
+        expected_generation: int,
+        expected_peer_class: str,
+        eligible_lifecycle_states: frozenset[str],
+    ) -> Iterator[dict[str, Any]]:
+        """Hold seed authority stable while an adapter commits accepted work."""
+
+        node_id = _segment(node_id, "node_id")
+        expected_peer_class = _segment(expected_peer_class, "expected_peer_class")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+            or expected_generation < 1
+        ):
+            raise ValueError("expected_generation is invalid")
+        if (
+            not isinstance(eligible_lifecycle_states, frozenset)
+            or not eligible_lifecycle_states
+        ):
+            raise ValueError("eligible_lifecycle_states is invalid")
+        try:
+            normalized_lifecycle_states = frozenset(
+                _segment(state, "eligible_lifecycle_state")
+                for state in eligible_lifecycle_states
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("eligible_lifecycle_states is invalid") from exc
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            durable_guard = (
+                nullcontext(member.projection())
+                if self._state is None
+                else self._state.member_authority_guard(node_id=node_id)
+            )
+            try:
+                # Lock order is adapter -> coordinator -> durable state. The
+                # transaction never calls back into either outer lock owner.
+                with durable_guard as persisted:
+                    identity_fields = (
+                        "node_id",
+                        "endpoint_id",
+                        "verification_key_digest",
+                        "incarnation",
+                    )
+                    if any(
+                        persisted[field] != getattr(member, field)
+                        for field in identity_fields
+                    ):
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["generation"] != member.generation:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["peer_class"] != member.peer_class:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["lease_expires_at"] != member.lease_expires_at:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if persisted["lifecycle_state"] != member.lifecycle_state:
+                        raise SeedCoordinatorError("seed_state_member_stale")
+                    if member.generation != expected_generation:
+                        raise SeedCoordinatorError(
+                            "seed_member_generation_stale"
+                        )
+                    if member.peer_class != expected_peer_class:
+                        raise SeedCoordinatorError(
+                            "seed_member_peer_class_mismatch"
+                        )
+                    now = self._now()
+                    if now >= member.lease_expires_at:
+                        raise SeedCoordinatorError("seed_member_lease_expired")
+                    if (
+                        member.lifecycle_state
+                        not in normalized_lifecycle_states
+                    ):
+                        raise SeedCoordinatorError(
+                            "seed_member_lifecycle_ineligible"
+                        )
+                    projection = member.projection()
+                    projection.update(
+                        self._liveness_projection(member, now=now)
+                    )
+                    yield projection
+            except SeedStateError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
+
+    def advance_member_generation(
+        self,
+        *,
+        node_id: str,
+        expected_generation: int,
+        lifecycle_state: str,
+    ) -> dict[str, Any]:
+        """Durably fence one adapter member without defining a second trust plane."""
+
+        node_id = _segment(node_id, "node_id")
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+            or expected_generation < 1
+        ):
+            raise ValueError("expected_generation is invalid")
+        if lifecycle_state not in {"STOPPING", "STOPPED"}:
+            raise ValueError("lifecycle_state is invalid")
+        with self._lock:
+            member = self._members.get(node_id)
+            if member is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            self._ensure_current_member(member)
+            if member.generation != expected_generation:
+                raise SeedCoordinatorError("seed_member_generation_stale")
+            now = self._now()
+            persisted = member.projection()
+            persisted.update(
+                generation=member.generation + 1,
+                last_liveness_at=now,
+                next_heartbeat_due_at=now,
+                active_requests=0,
+                lifecycle_state=lifecycle_state,
+            )
+            self._persist("save_member", persisted)
+            member.generation += 1
+            member.last_liveness_at = now
+            member.next_heartbeat_due_at = now
+            member.active_requests = 0
+            member.lifecycle_state = lifecycle_state
+            projection = member.projection()
+            projection.update(self._liveness_projection(member, now=now))
             return projection
 
     def compile_placement(self) -> PlacementDecision:

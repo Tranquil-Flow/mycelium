@@ -1,14 +1,42 @@
 # Open Questions and Blockers
 
-## Pre-existing claim-boundary failure (Phase 0 / Phase 4)
+## RESOLVED 2026-07-23: SwarmCoordinator convergence
 
-The authoritative plan identifies `tests/claims/test_claim_boundary_audit.py::test_current_checkout_and_runbook_preserve_claim_boundary` as pre-existing and explicitly says not to change the Device Lab or weaken the audit. The failing finding is:
+The operator selected **EXTEND**: there is one signed, durable seed membership
+plane, not a parallel browser membership system.
+
+`mycelium_seed` owns identity, signed admission, leases, generation fencing,
+durability, and activation eligibility. `mycelium_interactive.swarm` remains the
+`browser_http` adapter for invitations, origin policy, stage matrices,
+dispatch/results, cancellation, and status. Browser bearer tokens are transport
+credentials only and are not restart-persistent. On the production interactive
+runtime path, one `SeedCoordinator` is rooted at the runtime state root with a
+durable signer plus one shared invite/member SQLite database. Current seed peer
+class, generation, live lease, eligible lifecycle, and durable member binding
+are authoritative at browser operations and at the atomic result-completion
+fence. That fence is process-level: adapter condition → seed coordinator lock →
+dedicated SQLite `BEGIN IMMEDIATE` reservation, held from strict persisted-row
+comparison through accepted or identical-duplicate completion. A coordinator
+sharing the same protected database can advance generation only before guard
+acquisition (making the operation stale) or after guard release.
+
+Browser membership/evidence is admitted on the same plane as Mac membership,
+but browser peers remain activation-ineligible and all interactive claims remain
+`route_ready=false`.
+
+## RESOLVED 2026-07-23: stale claim-boundary blocker
+
+An earlier checkout recorded
+`tests/claims/test_claim_boundary_audit.py::test_current_checkout_and_runbook_preserve_claim_boundary`
+as blocked by this finding:
 
 - `ui/web/src/features/deviceLab/deviceLabClient.ts:281`
 - `observatory_ui_write_surface`
 - HTTP method: `POST`
 
-This remains deferred to Phase 4 / operator review.
+That observation no longer describes this checkout. The current
+`scripts/claim_boundary_audit.py --repo-root "$PWD"` run passes without changing
+the Device Lab or weakening the audit.
 
 ## Task 0.2 blocked by unrelated timing-test failure
 
