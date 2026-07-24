@@ -248,6 +248,73 @@ def build_execution_graph(
     return replace(graph, stages=signed_stages)
 
 
+def build_execution_graph_from_tranche(
+    tranche: dict[str, Any],
+    proofs: list[dict[str, Any]],
+    *,
+    manifest: dict[str, Any],
+    runtime_endpoints: dict[str, str],
+    topology_version: int,
+    token_envelope_bytes: int,
+) -> ExecutionGraph:
+    """Build a production execution graph from a control-plane tranche.
+
+    This is the *separate* delegation path that invokes the production
+    ``mycelium_router.layer_builder.build_execution_graph``.  The
+    existing two-assignment ``build_execution_graph`` remains untouched.
+    """
+    from mycelium_router.layer_builder import build_execution_graph as _production_builder
+
+    if not isinstance(tranche, dict):
+        raise PhysicalDeploymentError("tranche_invalid_not_dict")
+    required_tranche_keys = {"protocol", "evidence_bundle", "planner_snapshot", "route_plan", "assignments"}
+    if not required_tranche_keys.issubset(tranche.keys()):
+        raise PhysicalDeploymentError("tranche_invalid_missing_keys")
+
+    if not isinstance(topology_version, int) or topology_version <= 0:
+        raise PhysicalDeploymentError("topology_version_invalid")
+
+    if not isinstance(token_envelope_bytes, int) or token_envelope_bytes <= 0:
+        raise PhysicalDeploymentError("token_envelope_bytes_invalid")
+
+    if not isinstance(runtime_endpoints, dict):
+        raise PhysicalDeploymentError("runtime_endpoints_invalid")
+
+    if not isinstance(proofs, list):
+        raise PhysicalDeploymentError("proofs_invalid")
+
+    assignment_ids = {a["assignment_id"] for a in tranche["assignments"]}
+    proof_assignment_ids = {p["assignment_id"] for p in proofs}
+    if proof_assignment_ids != assignment_ids:
+        raise PhysicalDeploymentError("proof_assignment_mismatch")
+
+    endpoint_assignment_ids = set(runtime_endpoints.keys())
+    if endpoint_assignment_ids != assignment_ids:
+        raise PhysicalDeploymentError("runtime_endpoint_assignment_mismatch")
+
+    for proof in proofs:
+        if proof.get("route_ready", True):
+            raise PhysicalDeploymentError("proof_must_not_claim_route_ready")
+
+    evidence = tranche["evidence_bundle"]
+    expected_epoch = evidence.get("deployment", {}).get("deployment_epoch")
+    for proof in proofs:
+        proof_epoch = proof.get("deployment_epoch")
+        if proof_epoch is not None and expected_epoch is not None and proof_epoch != expected_epoch:
+            raise PhysicalDeploymentError("proof_epoch_mismatch")
+
+    return _production_builder(
+        assignments=tranche["assignments"],
+        proofs=proofs,
+        manifest=dict(manifest),
+        runtime_endpoints=dict(runtime_endpoints),
+        topology_version=topology_version,
+        token_envelope_bytes=token_envelope_bytes,
+        route_plan=tranche.get("route_plan"),
+        planner_snapshot=tranche.get("planner_snapshot"),
+    )
+
+
 def build_physical_device_states(graph: ExecutionGraph) -> dict[str, DeviceState]:
     """Create deterministic alive-state inputs for every graph participant."""
 
