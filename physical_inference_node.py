@@ -327,22 +327,29 @@ class NativeSidecarProcess:
         material = os.urandom(32)
         read_fd, write_fd = os.pipe()
         try:
-            os.write(write_fd, material)
-        finally:
-            os.close(write_fd)
-        command = self._argv(read_fd)
-        try:
-            process = subprocess.Popen(
-                command,
-                pass_fds=(read_fd,),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-            )
-        finally:
-            os.close(read_fd)
+            try:
+                os.write(write_fd, material)
+            finally:
+                os.close(write_fd)
+            command = self._argv(read_fd)
+            try:
+                process = subprocess.Popen(
+                    command,
+                    pass_fds=(read_fd,),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+            finally:
+                os.close(read_fd)
+        except BaseException:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+            raise
         self.process = process
         try:
             assert process.stdout is not None
@@ -376,19 +383,33 @@ class NativeSidecarProcess:
 
     def close(self) -> None:
         process = self.process
-        self.process = None
         if process is not None:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-            for stream in (process.stdout, process.stderr):
-                if stream is not None and not stream.closed:
-                    stream.close()
-        self._bootstrap_material = None
+            try:
+                if process.poll() is None:
+                    process.send_signal(signal.SIGINT)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            pass
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None and not stream.closed:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+            finally:
+                self.process = None
+                self._bootstrap_material = None
+        else:
+            self._bootstrap_material = None
 
 
 class PhysicalNodeService:
