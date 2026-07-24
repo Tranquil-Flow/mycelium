@@ -3008,6 +3008,198 @@ def test_working_directory_out_of_order_lease_stack_unwinds_to_origin(
         os.close(original)
 
 
+@pytest.mark.parametrize(
+    (
+        "level_count",
+        "failing_close_positions",
+        "restoration_fails",
+        "body_fails",
+    ),
+    (
+        pytest.param(2, (0,), False, False, id="two-first-cleanup-only"),
+        pytest.param(2, (1,), False, True, id="two-last-primary"),
+        pytest.param(2, (0, 1), True, False, id="two-all-restore-failure"),
+        pytest.param(3, (0,), False, False, id="three-first-cleanup-only"),
+        pytest.param(3, (1,), False, True, id="three-middle-primary"),
+        pytest.param(3, (2,), True, False, id="three-last-restore-failure"),
+        pytest.param(3, (0, 2), False, False, id="three-first-last"),
+        pytest.param(3, (0, 1, 2), True, True, id="three-all-primary"),
+    ),
+)
+def test_nested_working_directory_close_failures_are_aggregated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    level_count: int,
+    failing_close_positions: tuple[int, ...],
+    restoration_fails: bool,
+    body_fails: bool,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    safety = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    origin_identity = os.fstat(safety)[:2]
+    roots = [
+        tmp_path / f"close-failure-{level_count}-{index}"
+        for index in range(level_count)
+    ]
+    for root in roots:
+        root.mkdir(mode=0o700)
+    leases = [
+        process_module.private_directory_lease(root)
+        for root in roots
+    ]
+    contexts = [lease.working_directory() for lease in leases]
+    real_close = os.close
+    real_fchdir = os.fchdir
+    real_revalidate = process_module.PrivateDirectoryLease.revalidate
+    expected_descriptors: list[int] = []
+    successfully_closed: set[int] = set()
+    close_calls: list[int] = []
+    restore_calls: list[int] = []
+    primary = RuntimeError("authoritative-cwd-body")
+    try:
+        for context in contexts:
+            context.__enter__()
+        tokens = list(process_module._CWD_LEASE_STACK)
+        expected_descriptors = [
+            token.original_descriptor for token in reversed(tokens)
+        ]
+        assert all(
+            descriptor is not None for descriptor in expected_descriptors
+        )
+        descriptor_positions = {
+            descriptor: index
+            for index, descriptor in enumerate(expected_descriptors)
+        }
+
+        def controlled_close(descriptor: int) -> None:
+            position = descriptor_positions.get(descriptor)
+            if position is None:
+                real_close(descriptor)
+                return
+            close_calls.append(descriptor)
+            if position in failing_close_positions:
+                raise OSError(errno.EIO, "secret-close-value")
+            real_close(descriptor)
+            successfully_closed.add(descriptor)
+
+        def controlled_fchdir(descriptor: int) -> None:
+            restore_calls.append(descriptor)
+            if restoration_fails:
+                raise OSError(errno.EIO, "secret-restore-value")
+            real_fchdir(descriptor)
+
+        monkeypatch.setattr(os, "close", controlled_close)
+        monkeypatch.setattr(os, "fchdir", controlled_fchdir)
+        monkeypatch.setattr(
+            process_module.PrivateDirectoryLease,
+            "revalidate",
+            lambda _self: None,
+        )
+        for context in contexts[:-1]:
+            assert context.__exit__(None, None, None) is False
+
+        outcome: BaseException | None = None
+        try:
+            if body_fails:
+                suppress_primary = contexts[-1].__exit__(
+                    type(primary),
+                    primary,
+                    primary.__traceback__,
+                )
+                if not suppress_primary:
+                    raise primary
+            else:
+                contexts[-1].__exit__(None, None, None)
+        except BaseException as exc:
+            outcome = exc
+
+        cwd_restored = os.stat(".")[:2] == origin_identity
+        calls_before_repeat = list(close_calls)
+        restore_calls_before_repeat = list(restore_calls)
+        repeat_result = contexts[-1].__exit__(None, None, None)
+        observed = {
+            "close_positions": [
+                descriptor_positions[descriptor]
+                for descriptor in close_calls
+            ],
+            "detached": [
+                token.original_descriptor is None for token in tokens
+            ],
+            "stack_empty": process_module._CWD_LEASE_STACK == [],
+            "outcome_is_primary": outcome is primary,
+            "outcome_type": (
+                type(outcome).__name__ if outcome is not None else None
+            ),
+            "outcome_text": str(outcome) if outcome is not None else None,
+            "primary_notes": list(getattr(primary, "__notes__", ())),
+            "restore_call_count": len(restore_calls),
+            "cwd_restored": cwd_restored,
+            "repeat_result": repeat_result,
+            "repeat_close_free": close_calls == calls_before_repeat,
+            "repeat_restore_free": restore_calls == restore_calls_before_repeat,
+        }
+
+        monkeypatch.setattr(os, "close", real_close)
+        monkeypatch.setattr(os, "fchdir", real_fchdir)
+        monkeypatch.setattr(
+            process_module.PrivateDirectoryLease,
+            "revalidate",
+            real_revalidate,
+        )
+        real_fchdir(safety)
+        for descriptor in expected_descriptors:
+            if descriptor not in successfully_closed:
+                real_close(descriptor)
+                successfully_closed.add(descriptor)
+
+        with leases[0].working_directory():
+            assert os.stat(".")[:2] == os.fstat(leases[0]._descriptor)[:2]
+        assert os.stat(".")[:2] == origin_identity
+        assert process_module._CWD_LEASE_STACK == []
+
+        expected_outcome = (
+            {
+                "outcome_is_primary": True,
+                "outcome_type": "RuntimeError",
+                "outcome_text": "authoritative-cwd-body",
+                "primary_notes": ["working directory restoration failed"],
+            }
+            if body_fails
+            else {
+                "outcome_is_primary": False,
+                "outcome_type": "ValueError",
+                "outcome_text": "working directory restoration failed",
+                "primary_notes": [],
+            }
+        )
+        assert observed == {
+            "close_positions": list(range(level_count)),
+            "detached": [True] * level_count,
+            "stack_empty": True,
+            **expected_outcome,
+            "restore_call_count": 3 if restoration_fails else 1,
+            "cwd_restored": not restoration_fails,
+            "repeat_result": False,
+            "repeat_close_free": True,
+            "repeat_restore_free": True,
+        }
+    finally:
+        monkeypatch.setattr(os, "close", real_close)
+        monkeypatch.setattr(os, "fchdir", real_fchdir)
+        monkeypatch.setattr(
+            process_module.PrivateDirectoryLease,
+            "revalidate",
+            real_revalidate,
+        )
+        real_fchdir(safety)
+        for descriptor in expected_descriptors:
+            if descriptor not in successfully_closed:
+                real_close(descriptor)
+        for lease in leases:
+            lease.close()
+        real_close(safety)
+
+
 def test_out_of_order_cwd_restore_failure_notes_deferred_primary_and_reuses_lock(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
