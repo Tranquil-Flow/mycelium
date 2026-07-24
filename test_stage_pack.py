@@ -187,6 +187,51 @@ class _ArmedList(list[Any]):
         raise RuntimeError("PRIVATE-armed-container")
 
 
+class _ArmedTuple(tuple[Any, ...]):
+    def __new__(
+        cls,
+        value: tuple[Any, ...],
+        calls: list[str],
+    ) -> _ArmedTuple:
+        instance = super().__new__(cls, value)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-armed-container")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __iter__(self) -> Any:
+        return self._trip("iter")
+
+
+class _ArmedSequence:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-armed-sequence")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __iter__(self) -> Any:
+        return self._trip("iter")
+
+    def __len__(self) -> int:
+        return self._trip("len")
+
+
 class _BoolLike:
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
@@ -472,7 +517,14 @@ def _replace_collection_aliases(
 
 
 def _refresh_digest(pack: dict[str, Any]) -> None:
-    pack["stage_pack_digest"] = stage_pack_digest_for(pack)
+    try:
+        pack["stage_pack_digest"] = stage_pack_digest_for(pack)
+    except ValueError as exc:
+        if str(exc) != (
+            "stage pack must contain finite JSON-compatible values"
+        ):
+            raise
+        pack["stage_pack_digest"] = "sha256:" + "0" * 64
 
 
 def _refresh_joint_evidence_digests(
@@ -1920,6 +1972,45 @@ def test_assignment_canonicalizer_returns_plain_epoch_zero_snapshot(
 
 
 @pytest.mark.parametrize(
+    "root_kind",
+    (
+        "list",
+        "tuple",
+        "str",
+        "int",
+        "none",
+        "dict-subclass",
+        "list-subclass",
+        "tuple-subclass",
+        "str-subclass",
+        "int-subclass",
+    ),
+)
+def test_assignment_canonicalizer_rejects_non_dict_roots_stably(
+    root_kind: str,
+) -> None:
+    calls: list[str] = []
+    roots: dict[str, Any] = {
+        "list": [],
+        "tuple": (),
+        "str": "assignment",
+        "int": 7,
+        "none": None,
+        "dict-subclass": _ArmedDict({}, calls),
+        "list-subclass": _ArmedList([], calls),
+        "tuple-subclass": _ArmedTuple((), calls),
+        "str-subclass": _ArmedStr("assignment", calls),
+        "int-subclass": _ArmedInt(7, calls),
+    }
+
+    with pytest.raises(ValueError) as raised:
+        sp.canonicalize_stage_pack_assignment(roots[root_kind])
+
+    assert str(raised.value) == "stage pack assignment files are invalid"
+    assert calls == []
+
+
+@pytest.mark.parametrize(
     "field",
     (
         "components",
@@ -3261,6 +3352,91 @@ def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_record
         verify_stage_pack(pack, assignment=assignments[1], manifest=manifest)
 
 
+def _nested_digest_value(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "root-dict-subclass",
+        "deepcopy",
+        "dict-subclass",
+        "list-subclass",
+        "str-subclass",
+        "int-subclass",
+        "float-subclass",
+        "cycle",
+        "over-limit",
+        "python-recursion",
+        "nonfinite",
+    ),
+)
+def test_public_stage_pack_digest_rejects_hostile_json_without_callbacks(
+    mutation: str,
+) -> None:
+    calls: list[str] = []
+    pack: Any = {
+        "claim_boundary": "plain",
+        "nested": [1, {"finite": 1.5}],
+        "stage_pack_digest": "ignored",
+    }
+    if mutation == "root-dict-subclass":
+        pack = _ArmedDict(pack, calls)
+    elif mutation == "deepcopy":
+        pack["claim_boundary"] = _DeepcopyBomb(calls)
+    elif mutation == "dict-subclass":
+        pack["nested"][1] = _ArmedDict({"finite": 1.5}, calls)
+    elif mutation == "list-subclass":
+        pack["nested"] = _ArmedList(pack["nested"], calls)
+    elif mutation == "str-subclass":
+        pack["claim_boundary"] = _ArmedStr("plain", calls)
+    elif mutation == "int-subclass":
+        pack["nested"][0] = _ArmedInt(1, calls)
+    elif mutation == "float-subclass":
+        pack["nested"][1]["finite"] = _ArmedFloat(1.5, calls)
+    elif mutation == "cycle":
+        pack["nested"].append(pack)
+    elif mutation == "over-limit":
+        pack["nested"] = _nested_digest_value(64)
+    elif mutation == "python-recursion":
+        pack["nested"] = _nested_digest_value(2000)
+    else:
+        pack["nested"][1]["finite"] = float("nan")
+
+    with pytest.raises(ValueError) as raised:
+        stage_pack_digest_for(pack)
+
+    if mutation == "root-dict-subclass":
+        assert str(raised.value) == "stage pack must be an object"
+    else:
+        assert (
+            str(raised.value)
+            == "stage pack must contain finite JSON-compatible values"
+        )
+    assert "PRIVATE-" not in str(raised.value)
+    assert calls == []
+
+
+def test_public_stage_pack_digest_accepts_plain_semantically_invalid_document() -> None:
+    pack = {
+        "plain": [1, 2.5, True, None, {"text": "detached"}],
+        "stage_pack_digest": "not-a-semantic-stage-pack",
+    }
+    original = copy.deepcopy(pack)
+
+    first = stage_pack_digest_for(pack)
+    assert pack == original
+    second = stage_pack_digest_for(pack)
+
+    assert first == second
+    assert first.startswith("sha256:")
+    assert pack == original
+
+
 def _twelve_layer_case(
     tmp_path: Path,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -3957,6 +4133,195 @@ def test_collection_verifier_accepts_uniform_canonical_identities(
     )
 
 
+@pytest.mark.parametrize(
+    ("packs_container", "assignments_container"),
+    (
+        ("list", "list"),
+        ("list", "tuple"),
+        ("tuple", "list"),
+        ("tuple", "tuple"),
+    ),
+)
+def test_collection_accepts_exact_builtin_list_and_tuple_containers(
+    tmp_path: Path,
+    packs_container: str,
+    assignments_container: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    supplied_packs: Any = tuple(packs) if packs_container == "tuple" else packs
+    supplied_assignments: Any = (
+        tuple(assignments)
+        if assignments_container == "tuple"
+        else assignments
+    )
+
+    summary = sp.verify_stage_pack_collection(
+        supplied_packs,
+        assignments=supplied_assignments,
+        manifest=manifest,
+    )
+
+    assert summary["pack_count"] == 3
+    assert summary["exact_logical_coverage"] is True
+
+
+@pytest.mark.parametrize("surface", ("packs", "assignments"))
+@pytest.mark.parametrize(
+    "container_kind",
+    ("list-subclass", "tuple-subclass", "custom"),
+)
+def test_collection_rejects_non_exact_sequence_containers_before_callbacks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    container_kind: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    calls: list[str] = []
+    if container_kind == "list-subclass":
+        replacement: Any = _ArmedList(
+            packs if surface == "packs" else assignments,
+            calls,
+        )
+    elif container_kind == "tuple-subclass":
+        replacement = _ArmedTuple(
+            tuple(packs if surface == "packs" else assignments),
+            calls,
+        )
+    else:
+        replacement = _ArmedSequence(calls)
+    supplied_packs: Any = replacement if surface == "packs" else packs
+    supplied_assignments: Any = (
+        replacement if surface == "assignments" else assignments
+    )
+    effects = {"verify": 0, "file": 0, "physical": 0}
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"collection pre-entry reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(sp, "verify_stage_pack", reject("verify"))
+    monkeypatch.setattr(sp, "_open_beneath", reject("file"))
+    monkeypatch.setattr(sp, "_read_safetensors_header", reject("physical"))
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            supplied_packs,
+            assignments=supplied_assignments,
+            manifest=manifest,
+        )
+
+    assert (
+        str(raised.value)
+        == "stage pack collection must match a non-empty assignment set"
+    )
+    assert calls == []
+    assert effects == {"verify": 0, "file": 0, "physical": 0}
+
+
+@pytest.mark.parametrize(
+    ("surface", "mutation", "expected"),
+    (
+        ("pack", "scalar", "stage pack schema is invalid"),
+        ("pack", "nested", "stage pack schema is invalid"),
+        (
+            "assignment",
+            "root",
+            "stage pack assignment files are invalid",
+        ),
+        (
+            "assignment",
+            "files",
+            "stage pack assignment files are invalid",
+        ),
+        (
+            "assignment",
+            "nested",
+            "stage pack assignment files are invalid",
+        ),
+        ("manifest", "root", "manifest must be an object"),
+        (
+            "manifest",
+            "nested",
+            "manifest component aliases are invalid",
+        ),
+        (
+            "manifest",
+            "scalar",
+            "manifest component aliases are invalid",
+        ),
+    ),
+)
+def test_collection_rejects_hostile_values_before_callbacks_or_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+    mutation: str,
+    expected: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    calls: list[str] = []
+    supplied_manifest: Any = manifest
+    if surface == "pack" and mutation == "scalar":
+        packs[1] = _DeepcopyBomb(calls)
+    elif surface == "pack":
+        packs[1]["claim_boundary"] = _ArmedStr("claim", calls)
+    elif surface == "assignment" and mutation == "root":
+        assignments[1] = _DeepcopyBomb(calls)
+    elif surface == "assignment" and mutation == "files":
+        assignments[1]["files"] = _ArmedList(
+            assignments[1]["files"],
+            calls,
+        )
+    elif surface == "assignment":
+        assignments[1]["claim_boundary"] = _ArmedStr("claim", calls)
+    elif mutation == "root":
+        supplied_manifest = _ArmedDict(manifest, calls)
+    elif mutation == "scalar":
+        manifest["protocol"] = _ArmedStr(manifest["protocol"], calls)
+    else:
+        manifest["extra"] = _DeepcopyBomb(calls)
+    effects = {"verify": 0, "file": 0, "physical": 0}
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"collection pre-entry reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(sp, "verify_stage_pack", reject("verify"))
+    monkeypatch.setattr(sp, "_open_beneath", reject("file"))
+    monkeypatch.setattr(sp, "_read_safetensors_header", reject("physical"))
+
+    with pytest.raises(ValueError) as raised:
+        sp.verify_stage_pack_collection(
+            packs,
+            assignments=assignments,
+            manifest=supplied_manifest,
+        )
+
+    assert str(raised.value) == expected
+    assert "PRIVATE-" not in str(raised.value)
+    assert calls == []
+    assert effects == {"verify": 0, "file": 0, "physical": 0}
+
+
 def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3967,6 +4332,10 @@ def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
         for assignment, report in zip(assignments, reports, strict=True)
     ]
     authenticated_keys = copy.deepcopy(packs[1]["expected_tensor_keys"])
+    original_assignments = assignments
+    original_manifest = manifest
+    original_last_start = assignments[2]["range"]["start_layer"]
+    original_num_layers = manifest["num_layers"]
     actual_verify = sp.verify_stage_pack
     verification_count = 0
 
@@ -3982,6 +4351,9 @@ def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
             assignment=assignment,
             manifest=manifest,
         )
+        if verification_count == 0:
+            original_assignments[2]["range"]["start_layer"] = 99
+            original_manifest["num_layers"] = 99
         if assignment["node_id"] == "node-1":
             pack["expected_tensor_keys"].reverse()
         verification_count += 1
@@ -4000,6 +4372,10 @@ def test_collection_verifier_aggregates_only_authenticated_entry_snapshots(
     assert verification_count == len(packs)
     assert summary["exact_logical_coverage"] is True
     assert summary["logical_owned_tensor_keys"][1]["tensor_keys"] == authenticated_keys
+    assert assignments[2]["range"]["start_layer"] == 99
+    assert manifest["num_layers"] == 99
+    assignments[2]["range"]["start_layer"] = original_last_start
+    manifest["num_layers"] = original_num_layers
     with pytest.raises(ValueError, match=r"^stage pack digest mismatch$"):
         actual_verify(
             packs[1],

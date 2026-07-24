@@ -83,6 +83,91 @@ class _LoaderArmedStr(str):
     __hash__ = str.__hash__
 
 
+class _LoaderArmedList(list[Any]):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __iter__(self) -> Any:
+        return self._trip("iter")
+
+
+class _LoaderArmedTuple(tuple[Any, ...]):
+    def __new__(
+        cls,
+        calls: list[str],
+    ) -> _LoaderArmedTuple:
+        instance = super().__new__(cls)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __iter__(self) -> Any:
+        return self._trip("iter")
+
+
+class _LoaderArmedInt(int):
+    def __new__(
+        cls,
+        calls: list[str],
+    ) -> _LoaderArmedInt:
+        instance = super().__new__(cls, 7)
+        instance.calls = calls
+        return instance
+
+    def _trip(self, operation: str) -> Any:
+        self.calls.append(operation)
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __copy__(self) -> Any:
+        return self._trip("copy")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        return self._trip("deepcopy")
+
+    def __eq__(self, other: object) -> bool:
+        return self._trip("eq")
+
+    __hash__ = int.__hash__
+
+
+class _LoaderArmedDict(dict[Any, Any]):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    def __copy__(self) -> Any:
+        self.calls.append("copy")
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Any:
+        self.calls.append("deepcopy")
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+    def __iter__(self) -> Any:
+        self.calls.append("iter")
+        raise RuntimeError("PRIVATE-direct-loader-root")
+
+
 def _values(
     shape: tuple[int, ...], *, offset: int = 0, scale: float = 0.01
 ) -> mx.array:
@@ -608,6 +693,70 @@ def test_loader_rejects_excess_or_cyclic_assignment_values_stably(
         "stage-pack evidence rejected: "
         "stage pack assignment files are invalid"
     )
+    assert effects == {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
+
+
+@pytest.mark.parametrize(
+    "root_kind",
+    (
+        "list",
+        "tuple",
+        "str",
+        "int",
+        "none",
+        "dict-subclass",
+        "list-subclass",
+        "tuple-subclass",
+        "str-subclass",
+        "int-subclass",
+    ),
+)
+def test_loader_rejects_non_dict_assignment_roots_before_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    root_kind: str,
+) -> None:
+    _, report, _ = _case(tmp_path)
+    calls: list[str] = []
+    roots: dict[str, Any] = {
+        "list": [],
+        "tuple": (),
+        "str": "assignment",
+        "int": 7,
+        "none": None,
+        "dict-subclass": _LoaderArmedDict(calls),
+        "list-subclass": _LoaderArmedList(calls),
+        "tuple-subclass": _LoaderArmedTuple(calls),
+        "str-subclass": _LoaderArmedStr("assignment", calls),
+        "int-subclass": _LoaderArmedInt(calls),
+    }
+    effects = {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
+
+    def reject(name: str) -> Any:
+        def callback(*args: Any, **kwargs: Any) -> Any:
+            effects[name] += 1
+            raise AssertionError(f"assignment root reached {name}")
+
+        return callback
+
+    monkeypatch.setattr(runtime_loader, "validate_assignment_identity", reject("identity"))
+    monkeypatch.setattr(runtime_loader, "artifact_report_errors", reject("report"))
+    monkeypatch.setattr(runtime_loader, "_open_verified_artifact", reject("file"))
+    monkeypatch.setattr(runtime_loader, "_load_exact_tensors", reject("tensor"))
+    monkeypatch.setattr(runtime_loader, "_run_gpt2_probe", reject("probe"))
+
+    with pytest.raises(RuntimeLoadError) as raised:
+        load_assignment_stage(
+            roots[root_kind],
+            report,
+            load_generation=1,
+        )
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert calls == []
     assert effects == {"identity": 0, "report": 0, "file": 0, "tensor": 0, "probe": 0}
 
 

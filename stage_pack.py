@@ -354,6 +354,63 @@ def _digest(document: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical_json(document).encode("utf-8")).hexdigest()
 
 
+def _snapshot_exact_json(
+    value: Any,
+    *,
+    diagnostic: str,
+    max_depth: int | None = _MAX_ASSIGNMENT_JSON_DEPTH,
+) -> Any:
+    """Return a detached exact-built-in JSON snapshot without custom callbacks."""
+
+    active_containers: set[int] = set()
+
+    def snapshot(value: Any, depth: int) -> Any:
+        if max_depth is not None and depth > max_depth:
+            raise ValueError(diagnostic)
+        value_type = type(value)
+        if value_type is dict:
+            identifier = id(value)
+            if identifier in active_containers:
+                raise ValueError(diagnostic)
+            active_containers.add(identifier)
+            try:
+                for key in dict.__iter__(value):
+                    if type(key) is not str:
+                        raise ValueError(diagnostic)
+                result: dict[str, Any] = {}
+                for key, item in dict.items(value):
+                    result[key] = snapshot(item, depth + 1)
+                return result
+            finally:
+                active_containers.remove(identifier)
+        if value_type is list:
+            identifier = id(value)
+            if identifier in active_containers:
+                raise ValueError(diagnostic)
+            active_containers.add(identifier)
+            try:
+                return [
+                    snapshot(item, depth + 1)
+                    for item in list.__iter__(value)
+                ]
+            finally:
+                active_containers.remove(identifier)
+        if value_type is float:
+            if not math.isfinite(value):
+                raise ValueError(diagnostic)
+            return value
+        if (
+            value_type is str
+            or value_type is int
+            or value_type is bool
+            or value is None
+        ):
+            return value
+        raise ValueError(diagnostic)
+
+    return snapshot(value, 0)
+
+
 def _deployment_epoch_is_valid(value: Any) -> bool:
     return type(value) is int and value >= 0
 
@@ -411,9 +468,12 @@ def _canonical_optional_control_plane_binding(
 
 def stage_pack_digest_for(pack: dict[str, Any]) -> str:
     """Return the canonical digest of every stage-pack field except the digest."""
-    if not isinstance(pack, dict):
+    if type(pack) is not dict:
         raise ValueError("stage pack must be an object")
-    unsigned = copy.deepcopy(pack)
+    unsigned = _snapshot_exact_json(
+        pack,
+        diagnostic="stage pack must contain finite JSON-compatible values",
+    )
     unsigned.pop("stage_pack_digest", None)
     return _digest(unsigned)
 
@@ -655,6 +715,27 @@ def _validate_pack_schema_and_fields(pack: Any) -> None:
     _validate_pack_schema(pack)
 
 
+def _validate_collection_pack_schema(pack: Any) -> None:
+    try:
+        _validate_pack_schema_and_fields(pack)
+    except ValueError:
+        fields = _PACK_SCHEMA[1]
+        if (
+            type(pack) is dict
+            and not any(type(key) is not str for key in pack)
+            and set(pack) == _PACK_FIELDS
+            and all(
+                field == "control_plane_binding"
+                or _matches_exact_schema(pack[field], field_schema)
+                for field, field_schema in fields.items()
+            )
+        ):
+            raise ValueError(
+                "stage pack control-plane binding is invalid"
+            ) from None
+        raise
+
+
 def _validate_pack_schema_before_assignment(pack: Any, assignment: Any) -> None:
     try:
         _validate_pack_schema_and_fields(pack)
@@ -805,53 +886,12 @@ def canonicalize_stage_pack_assignment(
     """Return a bounded, detached exact-JSON assignment snapshot."""
 
     diagnostic = "stage pack assignment files are invalid"
-
-    active_containers: set[int] = set()
-
-    def snapshot_json(value: Any, depth: int) -> Any:
-        if depth > _MAX_ASSIGNMENT_JSON_DEPTH:
-            raise ValueError(diagnostic)
-        value_type = type(value)
-        if value_type is dict:
-            identifier = id(value)
-            if identifier in active_containers:
-                raise ValueError(diagnostic)
-            active_containers.add(identifier)
-            try:
-                result: dict[str, Any] = {}
-                for key, item in dict.items(value):
-                    if type(key) is not str:
-                        raise ValueError(diagnostic)
-                    result[key] = snapshot_json(item, depth + 1)
-                return result
-            finally:
-                active_containers.remove(identifier)
-        if value_type is list:
-            identifier = id(value)
-            if identifier in active_containers:
-                raise ValueError(diagnostic)
-            active_containers.add(identifier)
-            try:
-                return [
-                    snapshot_json(item, depth + 1)
-                    for item in list.__iter__(value)
-                ]
-            finally:
-                active_containers.remove(identifier)
-        if value_type is float:
-            if not math.isfinite(value):
-                raise ValueError(diagnostic)
-            return value
-        if (
-            value_type is str
-            or value_type is int
-            or value_type is bool
-            or value is None
-        ):
-            return value
+    if type(assignment) is not dict:
         raise ValueError(diagnostic)
-
-    snapshot = snapshot_json(assignment, 0)
+    snapshot = _snapshot_exact_json(
+        assignment,
+        diagnostic=diagnostic,
+    )
     files = _canonical_assignment_files(
         snapshot.get("files"),
         diagnostic=diagnostic,
@@ -1670,26 +1710,34 @@ def verify_stage_pack_collection(
     """Verify exact logical ownership across one ordered N-stage pack collection."""
 
     if (
-        not isinstance(packs, (list, tuple))
-        or not isinstance(assignments, (list, tuple))
+        type(packs) not in (list, tuple)
+        or type(assignments) not in (list, tuple)
         or not packs
         or len(packs) != len(assignments)
     ):
         raise ValueError("stage pack collection must match a non-empty assignment set")
-    if not isinstance(manifest, dict):
+    if type(manifest) is not dict:
         raise ValueError("manifest must be an object")
+
+    manifest = _snapshot_exact_json(
+        manifest,
+        diagnostic="manifest component aliases are invalid",
+    )
     _validate_manifest_component_aliases(manifest.get("component_aliases"))
 
-    entry_snapshot = copy.deepcopy(
-        {
-            "packs": list(packs),
-            "assignments": list(assignments),
-            "manifest": manifest,
-        }
-    )
-    packs = entry_snapshot["packs"]
-    assignments = entry_snapshot["assignments"]
-    manifest = entry_snapshot["manifest"]
+    for pack in packs:
+        _validate_collection_pack_schema(pack)
+    packs = [
+        _snapshot_exact_json(
+            pack,
+            diagnostic="stage pack schema is invalid",
+        )
+        for pack in packs
+    ]
+    assignments = [
+        canonicalize_stage_pack_assignment(assignment)
+        for assignment in assignments
+    ]
 
     for assignment in assignments:
         _canonical_optional_control_plane_binding(assignment)
