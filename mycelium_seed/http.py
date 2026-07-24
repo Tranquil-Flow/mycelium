@@ -52,6 +52,7 @@ _BASE_STATEMENT_FIELDS = frozenset(
     }
 )
 _HOST_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_REMOTE_ERROR_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _SERVER_CLOSE_SECONDS = 5.0
 
 
@@ -233,6 +234,28 @@ def _error_body(code: str) -> dict[str, Any]:
     }
 
 
+def _authoritative_remote_error_code(raw: bytes) -> str | None:
+    if not raw or len(raw) > MAX_HTTP_FRAME_BYTES:
+        return None
+    try:
+        value = _canonical_json_loads(raw)
+    except SeedHTTPError:
+        return None
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"protocol", "error"}
+        or value.get("protocol") != SEED_HTTP_ERROR_PROTOCOL
+    ):
+        return None
+    error = value.get("error")
+    if not isinstance(error, Mapping) or set(error) != {"code"}:
+        return None
+    code = error.get("code")
+    if not isinstance(code, str) or _REMOTE_ERROR_CODE_RE.fullmatch(code) is None:
+        return None
+    return code
+
+
 class _SeedRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "MyceliumSeed/1"
@@ -409,7 +432,9 @@ class SeedHTTPServer:
         self._serve_failed = threading.Event()
         self._stop = threading.Event()
         self._closed = False
+        self._close_requested = False
         self._server_closed = False
+        self._request_threads: tuple[Any, ...] = ()
 
     def _serve(self) -> None:
         self._started.set()
@@ -421,7 +446,7 @@ class SeedHTTPServer:
 
     def start(self) -> "SeedHTTPServer":
         with self._state_lock:
-            if self._closed:
+            if self._closed or self._close_requested:
                 raise RuntimeError("seed HTTP server is closed")
             if self._thread is not None:
                 return self
@@ -448,34 +473,59 @@ class SeedHTTPServer:
     def _close_socket(self) -> None:
         if self._server_closed:
             return
-        self._server.server_close()
+        try:
+            self._server.server_close()
+        except Exception:
+            raise RuntimeError("seed HTTP server cleanup failed") from None
         self._server_closed = True
 
     def close(self) -> None:
         with self._state_lock:
-            if self._closed and self._server_closed:
+            if self._closed:
                 return
-            self._closed = True
+            self._close_requested = True
             thread = self._thread
-            self._thread = None
             self._stop.set()
-        deadline = time.monotonic() + _SERVER_CLOSE_SECONDS
-        if thread is not None:
-            thread.join(timeout=max(0.0, deadline - time.monotonic()))
-        try:
-            request_threads = tuple(getattr(self._server, "_threads", ()))
-        except TypeError:
-            request_threads = ()
-        for request_thread in request_threads:
-            request_thread.join(timeout=max(0.0, deadline - time.monotonic()))
-        self._server.block_on_close = False
-        self._close_socket()
-        if (
-            thread is not None
-            and thread.is_alive()
-            or any(request_thread.is_alive() for request_thread in request_threads)
-        ):
-            raise RuntimeError("seed HTTP server cleanup failed")
+            deadline = time.monotonic() + _SERVER_CLOSE_SECONDS
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+            try:
+                observed_threads = tuple(getattr(self._server, "_threads", ()))
+            except TypeError:
+                observed_threads = ()
+            known_threads = {
+                id(request_thread): request_thread
+                for request_thread in self._request_threads
+            }
+            known_threads.update(
+                {
+                    id(request_thread): request_thread
+                    for request_thread in observed_threads
+                }
+            )
+            request_threads = tuple(known_threads.values())
+            self._request_threads = request_threads
+            current = threading.current_thread()
+            for request_thread in request_threads:
+                if request_thread is current:
+                    continue
+                request_thread.join(
+                    timeout=max(0.0, deadline - time.monotonic())
+                )
+            self._server.block_on_close = False
+            self._close_socket()
+            if (
+                thread is not None
+                and thread.is_alive()
+                or any(
+                    request_thread.is_alive()
+                    for request_thread in request_threads
+                )
+            ):
+                raise RuntimeError("seed HTTP server cleanup failed")
+            self._thread = None
+            self._request_threads = ()
+            self._closed = True
 
     def __enter__(self) -> "SeedHTTPServer":
         return self.start()
@@ -555,11 +605,10 @@ class SeedHTTPClient:
                 status = response.status
         except HTTPError as exc:
             response_body = exc.read(MAX_HTTP_FRAME_BYTES + 1)
-            try:
-                error = _canonical_json_loads(response_body)
-                code = error["error"]["code"]
-            except Exception:
-                code = "seed_http_remote_error"
+            code = (
+                _authoritative_remote_error_code(response_body)
+                or "seed_http_remote_error"
+            )
             raise SeedHTTPError(code, status=exc.code) from exc
         except (OSError, URLError) as exc:
             raise SeedHTTPError("seed_http_unreachable") from exc

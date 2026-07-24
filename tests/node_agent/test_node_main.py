@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
@@ -915,6 +916,7 @@ def test_process_verified_signal_refuses_changed_or_protected_identity(
     )
     supervised._process = FakePopen()
     supervised._launch_identity = launch
+    supervised.shutdown_timeout_seconds = 1.0
     sent: list[tuple[int, int]] = []
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append((pgid, sig)))
     monkeypatch.setattr(
@@ -929,7 +931,11 @@ def test_process_verified_signal_refuses_changed_or_protected_identity(
             executable=executable,
         ),
     )
-    monkeypatch.setattr(process_module, "_protected_process_groups", lambda: {9999})
+    monkeypatch.setattr(
+        process_module,
+        "_protected_process_groups",
+        lambda _deadline: {9999},
+    )
 
     assert supervised._signal_process_group(signal.SIGKILL) is False
     assert sent == []
@@ -938,7 +944,7 @@ def test_process_verified_signal_refuses_changed_or_protected_identity(
     monkeypatch.setattr(
         process_module,
         "_protected_process_groups",
-        lambda: {launch.process_group},
+        lambda _deadline: {launch.process_group},
     )
     assert supervised._signal_process_group(signal.SIGKILL) is False
     assert sent == []
@@ -1021,7 +1027,9 @@ def test_reader_thread_start_failure_reaps_launched_child(
     monkeypatch.setattr(process_module.threading, "Thread", FakeThread)
     monkeypatch.setattr(process_module, "_inventory_process", lambda _pid: identity)
     monkeypatch.setattr(
-        process_module, "_protected_process_groups", lambda: {os.getpgrp()}
+        process_module,
+        "_protected_process_groups",
+        lambda _deadline: {os.getpgrp()},
     )
     monkeypatch.setattr(os, "killpg", kill_group)
 
@@ -1150,3 +1158,315 @@ def test_temporary_root_cleanup_refuses_path_replacement(tmp_path: Path) -> None
     assert moved.is_dir()
     original.path.rmdir()
     moved.rmdir()
+
+
+def test_process_group_signal_reinventories_after_protected_group_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    executable = process_module._ExecutableIdentity(
+        path="/trusted/python",
+        device=1,
+        inode=2,
+        mode=stat.S_IFREG | 0o755,
+        uid=os.getuid(),
+        size=10,
+        mtime_ns=11,
+        ctime_ns=12,
+    )
+    launch = process_module._ProcessIdentity(
+        pid=4242,
+        parent_pid=3131,
+        process_group=4242,
+        session_id=4242,
+        start_token="launch",
+        executable=executable,
+    )
+    drifted = process_module._ProcessIdentity(
+        pid=4242,
+        parent_pid=3131,
+        process_group=4242,
+        session_id=4242,
+        start_token="reused-during-protected-discovery",
+        executable=executable,
+    )
+    calls: list[object] = []
+    current = [launch]
+    drift_on_discovery = [True]
+
+    class FakePopen:
+        pid = launch.pid
+
+        def poll(self) -> None:
+            calls.append("poll")
+            return None
+
+    def protected_groups(deadline: float | None = None) -> set[int]:
+        calls.append(("protected", deadline))
+        if drift_on_discovery[0]:
+            current[0] = drifted
+        return {9999}
+
+    def inventory(pid: int) -> Any:
+        calls.append(("inventory", pid))
+        return current[0]
+
+    def kill_group(pgid: int, signum: int) -> None:
+        calls.append(("killpg", pgid, signum))
+
+    supervised = process_module.PhysicalNodeProcess.__new__(
+        process_module.PhysicalNodeProcess
+    )
+    supervised._process = FakePopen()
+    supervised._launch_identity = launch
+    supervised.shutdown_timeout_seconds = 1.0
+    monkeypatch.setattr(
+        process_module,
+        "_protected_process_groups",
+        protected_groups,
+    )
+    monkeypatch.setattr(process_module, "_inventory_process", inventory)
+    monkeypatch.setattr(os, "killpg", kill_group)
+
+    assert supervised._signal_process_group(signal.SIGKILL) is False
+    assert calls[0] == "poll"
+    assert calls[1][0] == "protected"
+    assert isinstance(calls[1][1], float)
+    assert calls[2:] == [("inventory", launch.pid)]
+
+    calls.clear()
+    current[0] = launch
+    drift_on_discovery[0] = False
+    assert supervised._signal_process_group(signal.SIGKILL) is True
+    assert calls[0] == "poll"
+    assert calls[1][0] == "protected"
+    assert isinstance(calls[1][1], float)
+    assert calls[2:] == [
+        ("inventory", launch.pid),
+        "poll",
+        ("killpg", launch.process_group, signal.SIGKILL),
+    ]
+
+
+def test_seed_http_client_only_exposes_exact_authoritative_error_envelope() -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+    signer = generate_ed25519_signer(endpoint_id="seed-error-envelope")
+    client = SeedHTTPClient(
+        seed_url="http://seed.test:8765",
+        swarm_id="swarm-error-envelope",
+        seed_key_digest=signer.verification_key_digest,
+        seed_key_records=[signer.public_key_record()],
+    )
+
+    def rejected(raw: bytes) -> SeedHTTPError:
+        class ErrorOpener:
+            def open(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise HTTPError(
+                    "http://seed.test:8765/seed/join",
+                    400,
+                    "rejected",
+                    {},
+                    io.BytesIO(raw),
+                )
+
+        client._opener = ErrorOpener()
+        with pytest.raises(SeedHTTPError) as caught:
+            client._request("POST", "/seed/join", {})
+        return caught.value
+
+    authoritative = canonical_json_bytes(
+        {
+            "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+            "error": {"code": "seed_join_mismatch"},
+        }
+    )
+    exposed = rejected(authoritative)
+    assert (exposed.status, exposed.code) == (400, "seed_join_mismatch")
+    node_main = importlib.import_module("mycelium_node.__main__")
+    assert node_main._join_rejected(exposed) is True
+
+    malformed = [
+        canonical_json_bytes({"error": {"code": "seed_join_mismatch"}}),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {"code": "seed_join_mismatch"},
+                "extra": False,
+            }
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": "mycelium.seed.http_error.v2",
+                "error": {"code": "seed_join_mismatch"},
+            }
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": "seed_join_mismatch",
+            }
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {"code": "seed_join_mismatch", "extra": None},
+            }
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {},
+            }
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {"code": 3},
+            }
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {"code": "Seed_Join_Mismatch"},
+            }
+        ),
+        (
+            b'{"protocol": "mycelium.seed.http_error.v1",'
+            b'"error":{"code":"seed_join_mismatch"}}'
+        ),
+        canonical_json_bytes(
+            {
+                "protocol": seed_http.SEED_HTTP_ERROR_PROTOCOL,
+                "error": {"code": "a" * seed_http.MAX_HTTP_FRAME_BYTES},
+            }
+        ),
+    ]
+    for raw in malformed:
+        hidden = rejected(raw)
+        assert (hidden.status, hidden.code) == (400, "seed_http_remote_error")
+        assert node_main._join_rejected(hidden) is False
+
+
+def test_heartbeat_shape_validator_rejects_noncanonical_scheduled_shapes() -> None:
+    membership = importlib.import_module("mycelium_node.membership")
+    valid = {
+        "lifecycle_state": "NEW",
+        "active_requests": 0,
+        "route_ready": False,
+        "liveness_source": "scheduled_heartbeat",
+        "activity_receipt_digest": None,
+        "activity_peer_node_id": None,
+    }
+    membership.validate_heartbeat_shape(**valid)
+
+    invalid = [
+        {"lifecycle_state": "FAILED"},
+        {"active_requests": -1},
+        {"active_requests": True},
+        {"active_requests": 0.0},
+        {"route_ready": True},
+        {"route_ready": 0},
+        {"liveness_source": "activation_receipt"},
+        {"activity_receipt_digest": "sha256:" + "0" * 64},
+        {"activity_peer_node_id": "peer-node"},
+    ]
+    for change in invalid:
+        with pytest.raises(ValueError):
+            membership.validate_heartbeat_shape(**{**valid, **change})
+
+
+def test_heartbeat_validator_delegates_before_mutation_and_during_dry_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    membership = importlib.import_module("mycelium_node.membership")
+    node_main = importlib.import_module("mycelium_node.__main__")
+    calls: list[dict[str, Any]] = []
+    side_effects: list[str] = []
+
+    class ShapeObserved(RuntimeError):
+        pass
+
+    def stop_after_shape(**shape: Any) -> None:
+        calls.append(shape)
+        raise ShapeObserved
+
+    monkeypatch.setattr(membership, "validate_heartbeat_shape", stop_after_shape)
+    session = membership.NodeMembershipSession.__new__(
+        membership.NodeMembershipSession
+    )
+    session._now = lambda: side_effects.append("clock")
+    with pytest.raises(ShapeObserved):
+        session._emit_liveness(
+            lifecycle_state="NEW",
+            active_requests=0,
+            liveness_source="scheduled_heartbeat",
+            activity_receipt_digest=None,
+            activity_peer_node_id=None,
+        )
+    assert side_effects == []
+    assert calls == [
+        {
+            "lifecycle_state": "NEW",
+            "active_requests": 0,
+            "route_ready": False,
+            "liveness_source": "scheduled_heartbeat",
+            "activity_receipt_digest": None,
+            "activity_peer_node_id": None,
+        }
+    ]
+
+    original_validator = membership.validate_heartbeat_shape
+
+    def record_shape(**shape: Any) -> None:
+        calls.append(shape)
+        valid_shape = {
+            "lifecycle_state": "NEW",
+            "active_requests": 0,
+            "route_ready": False,
+            "liveness_source": "scheduled_heartbeat",
+            "activity_receipt_digest": None,
+            "activity_peer_node_id": None,
+        }
+        if shape != valid_shape:
+            raise AssertionError("unexpected preflight heartbeat shape")
+
+    monkeypatch.setattr(membership, "validate_heartbeat_shape", record_shape)
+    data_dir = tmp_path / "node-heartbeat-dry"
+    sidecar = tmp_path / "sidecar"
+    sidecar.write_text("#!/bin/sh\nexit 0\n")
+    sidecar.chmod(0o700)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-heartbeat-dry",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:9",
+        signer=generate_ed25519_signer(endpoint_id="seed-heartbeat-dry"),
+        invite_registry=SqliteInviteRegistry(
+            tmp_path / "seed-heartbeat-dry" / "state.sqlite3"
+        ),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    bundle_file = tmp_path / "heartbeat-dry-bundle.json"
+    _write_bundle(
+        bundle_file,
+        coordinator.mint_invite(nonce="heartbeat-dry", ttl_seconds=120),
+    )
+
+    assert (
+        node_main.run(
+            _node_command(
+                data_dir=data_dir,
+                node_id="node-heartbeat-dry",
+                sidecar=sidecar,
+                bundle_file=bundle_file,
+                dry_run=True,
+            )[3:]
+        )
+        == 0
+    )
+    assert len(calls) == 2
+    assert not data_dir.exists()
+    capsys.readouterr()
+    assert original_validator is stop_after_shape

@@ -509,3 +509,239 @@ def test_seed_server_close_before_start_never_calls_shutdown(
 
     assert server._server.shutdown_calls == 0
     assert server._server.close_calls == 1
+
+
+def test_state_root_lease_pins_original_during_signer_path_api(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    data_dir = tmp_path / "seed-bound-root"
+    moved = tmp_path / "seed-bound-root-original"
+    data_dir.mkdir(mode=0o700)
+
+    class FakeSigner:
+        endpoint_id = "seed-bound-root-endpoint"
+
+    def replace_during_signer(key_path: Path) -> FakeSigner:
+        data_dir.rename(moved)
+        data_dir.mkdir(mode=0o700)
+        key_path.parent.mkdir(mode=0o700, parents=True)
+        key_path.write_bytes(b"original-descriptor-only")
+        return FakeSigner()
+
+    def forbidden_registry(_path: Path) -> Any:
+        raise AssertionError("database setup followed a replaced state root")
+
+    monkeypatch.setattr(
+        seed_main,
+        "load_or_create_node_signer",
+        replace_during_signer,
+    )
+    monkeypatch.setattr(seed_main, "SqliteInviteRegistry", forbidden_registry)
+
+    with pytest.raises(seed_main._EntrypointFailure) as failed:
+        seed_main.run(["--data-dir", str(data_dir)])
+
+    assert failed.value.code == "seed_preflight_failed"
+    assert not (data_dir / "identity" / "seed.key").exists()
+    assert (
+        moved / "identity" / "seed.key"
+    ).read_bytes() == b"original-descriptor-only"
+
+
+def test_private_directory_lease_rejects_opened_final_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    state_root = tmp_path / "state"
+    moved = tmp_path / "state-original"
+    state_root.mkdir(mode=0o700)
+    real_open = os.open
+    replaced = False
+
+    def replace_after_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        nonlocal replaced
+        descriptor = real_open(path, flags, *args, **kwargs)
+        if (
+            not replaced
+            and path == state_root.name
+            and kwargs.get("dir_fd") is not None
+        ):
+            replaced = True
+            state_root.rename(moved)
+            state_root.mkdir(mode=0o700)
+        return descriptor
+
+    monkeypatch.setattr(os, "open", replace_after_open)
+    with pytest.raises(ValueError):
+        process_module.private_directory_lease(state_root)
+
+    assert state_root.is_dir()
+    assert moved.is_dir()
+
+
+@pytest.mark.parametrize("value", ["0", "1", "65535"])
+def test_seed_port_parser_accepts_only_canonical_decimal_range(value: str) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    args = seed_main._parser().parse_args(["--port", value, "--data-dir", "/unused"])
+    assert args.port == int(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "+1",
+        "-0",
+        "00",
+        "01",
+        "1_0",
+        " 1",
+        "1 ",
+        "１２",
+        "1e2",
+        "12x",
+        "-1",
+        "65536",
+    ],
+)
+def test_seed_port_parser_rejects_noncanonical_values_with_stable_error(
+    value: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seed_main = importlib.import_module("mycelium_seed.__main__")
+    with pytest.raises(SystemExit) as stopped:
+        seed_main._parser().parse_args(
+            ["--port", value, "--data-dir", "/unused"]
+        )
+
+    captured = capsys.readouterr()
+    assert stopped.value.code == 2
+    assert captured.out == ""
+    assert captured.err == "seed_preflight_failed\n"
+
+
+def test_seed_server_close_retries_until_live_request_thread_is_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+    class FakeRequestThread:
+        def __init__(self) -> None:
+            self.alive = True
+            self.join_calls = 0
+
+        def join(self, timeout: float | None = None) -> None:
+            assert timeout is not None
+            self.join_calls += 1
+
+        def is_alive(self) -> bool:
+            return self.alive
+
+    request_thread = FakeRequestThread()
+
+    class FakeHTTPServer:
+        server_address = ("127.0.0.1", 8765)
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self._threads = [request_thread]
+            self.close_calls = 0
+
+        def server_close(self) -> None:
+            self.close_calls += 1
+
+    monkeypatch.setattr(seed_http, "ThreadingHTTPServer", FakeHTTPServer)
+    server = seed_http.SeedHTTPServer(
+        FakeCoordinator(),
+        host="127.0.0.1",
+        port=8765,
+    )
+
+    with pytest.raises(RuntimeError, match="seed HTTP server cleanup failed"):
+        server.close()
+    assert server._closed is False
+    assert server._server.close_calls == 1
+    assert server._request_threads == (request_thread,)
+
+    with pytest.raises(RuntimeError, match="seed HTTP server cleanup failed"):
+        server.close()
+    assert server._server.close_calls == 1
+    assert request_thread.join_calls == 2
+
+    request_thread.alive = False
+    server.close()
+    server.close()
+    assert server._closed is True
+    assert server._server.close_calls == 1
+    assert server._request_threads == ()
+
+
+def test_concurrent_seed_server_close_calls_socket_close_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_http = importlib.import_module("mycelium_seed.http")
+
+    class FakeCoordinator:
+        def bind_seed_url(self, _url: str) -> None:
+            return None
+
+    calls_changed = threading.Condition()
+    release_close = threading.Event()
+
+    class FakeHTTPServer:
+        server_address = ("127.0.0.1", 8765)
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            self._threads: list[Any] = []
+            self.close_calls = 0
+
+        def server_close(self) -> None:
+            with calls_changed:
+                self.close_calls += 1
+                calls_changed.notify_all()
+            assert release_close.wait(1.0)
+
+    monkeypatch.setattr(seed_http, "ThreadingHTTPServer", FakeHTTPServer)
+    server = seed_http.SeedHTTPServer(
+        FakeCoordinator(),
+        host="127.0.0.1",
+        port=8765,
+    )
+    begin = threading.Barrier(3)
+    failures: list[BaseException] = []
+
+    def close_server() -> None:
+        begin.wait()
+        try:
+            server.close()
+        except BaseException as exc:
+            failures.append(exc)
+
+    closers = [
+        threading.Thread(target=close_server, daemon=False)
+        for _index in range(2)
+    ]
+    for closer in closers:
+        closer.start()
+    begin.wait()
+    with calls_changed:
+        assert calls_changed.wait_for(
+            lambda: server._server.close_calls >= 1,
+            timeout=1.0,
+        )
+        calls_changed.wait_for(
+            lambda: server._server.close_calls >= 2,
+            timeout=0.2,
+        )
+    release_close.set()
+    for closer in closers:
+        closer.join(timeout=1.0)
+
+    assert failures == []
+    assert all(not closer.is_alive() for closer in closers)
+    assert server._server.close_calls == 1

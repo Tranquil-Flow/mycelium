@@ -23,14 +23,17 @@ from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, _validate_endpoint_url
 
+from . import membership as membership_module
 from .identity import load_or_create_node_signer
 from .membership import NodeMembershipSession
 from .process import (
     _ExecutableIdentity,
     PhysicalNodeProcess,
+    PrivateDirectoryLease,
     build_physical_node_command,
     capture_executable_identity,
     physical_service_interpreter_identity,
+    private_directory_lease,
     private_directory_parent_fd,
     private_directory_path,
     validate_physical_node_launch_shape,
@@ -376,17 +379,21 @@ def _remove_temporary_root(root: _TemporaryRoot) -> None:
 def _preflight(
     args: argparse.Namespace,
 ) -> tuple[
-    Path,
+    PrivateDirectoryLease,
     dict[str, Any],
     dict[str, Any],
     SeedHTTPClient,
     Path,
     tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity],
 ]:
+    state_root: PrivateDirectoryLease | None = None
     try:
         if not math.isfinite(args.heartbeat_interval) or args.heartbeat_interval <= 0:
             raise ValueError("heartbeat interval is invalid")
-        data_dir = _private_directory(args.data_dir, create=not args.dry_run)
+        state_root = private_directory_lease(
+            args.data_dir,
+            create=not args.dry_run,
+        )
         if args.join_bundle_stdin:
             bundle = _stdin_document()
         else:
@@ -428,14 +435,28 @@ def _preflight(
             invite_nonce=verified["payload"]["nonce"],
             endpoint_addrs=advertised_endpoints,
         )
-        return data_dir, bundle, verified, client, sidecar, identities
+        membership_module.validate_heartbeat_shape(
+            lifecycle_state="NEW",
+            active_requests=0,
+            route_ready=False,
+            liveness_source="scheduled_heartbeat",
+            activity_receipt_digest=None,
+            activity_peer_node_id=None,
+        )
+        return state_root, bundle, verified, client, sidecar, identities
     except _EntrypointFailure:
         raise
     except Exception as exc:
+        failure = exc
+        if state_root is not None:
+            try:
+                state_root.close()
+            except Exception as close_exc:
+                failure = close_exc
         raise _EntrypointFailure(
             "node_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
-        ) from exc
+        ) from failure
 
 
 def _join_rejected(exc: SeedHTTPError) -> bool:
@@ -448,19 +469,19 @@ def _join_rejected(exc: SeedHTTPError) -> bool:
     return False
 
 
-def run(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    data_dir, bundle, verified, client, sidecar, identities = _preflight(args)
-    if args.dry_run:
-        _emit_status(
-            {
-                "protocol": _STATUS_PROTOCOL,
-                "event": "node_dry_run",
-                "route_ready": False,
-            }
-        )
-        return EXIT_SUCCESS
-
+def _run_bound(
+    args: argparse.Namespace,
+    state_root: PrivateDirectoryLease,
+    bundle: dict[str, Any],
+    verified: dict[str, Any],
+    client: SeedHTTPClient,
+    sidecar: Path,
+    identities: tuple[
+        _ExecutableIdentity,
+        _ExecutableIdentity,
+        _ExecutableIdentity,
+    ],
+) -> int:
     try:
         seed_identity = client.identity(now=time.time() + 1.0)
     except Exception as exc:
@@ -470,8 +491,11 @@ def run(argv: Sequence[str] | None = None) -> int:
         ) from exc
 
     temporary_root: _TemporaryRoot | None = None
+    artifact_root: PrivateDirectoryLease | None = None
     try:
-        signer = load_or_create_node_signer(data_dir / "identity" / "node.key")
+        state_root.revalidate()
+        signer = load_or_create_node_signer(Path("identity") / "node.key")
+        state_root.revalidate()
         session = NodeMembershipSession(
             node_id=args.node_id,
             swarm_id=verified["payload"]["swarm_id"],
@@ -482,7 +506,9 @@ def run(argv: Sequence[str] | None = None) -> int:
             peer_class="mac_mlx_iroh",
             runtime_capability=_DEFAULT_CAPABILITY,
         )
-        artifact_root = _private_directory(data_dir / "artifacts")
+        artifact_root = state_root.private_subdirectory("artifacts")
+        state_root.revalidate()
+        artifact_root.revalidate()
         temporary_root = _temporary_root()
         command = build_physical_node_command(
             python_executable=_service_interpreter(),
@@ -491,20 +517,31 @@ def run(argv: Sequence[str] | None = None) -> int:
             run_id=args.run_id,
             deployment_id=args.deployment_id,
             node_id=args.node_id,
-            artifact_root=artifact_root,
+            artifact_root=Path("artifacts"),
             socket_root=temporary_root.path,
             sidecar_binary=sidecar,
             sidecar_local_only=False,
+            descriptor_relative_artifact_root=True,
         )
+        state_root.revalidate()
+        artifact_root.revalidate()
     except Exception as exc:
+        cleanup_failed = False
         if temporary_root is not None:
             try:
                 _remove_temporary_root(temporary_root)
             except Exception:
-                raise _EntrypointFailure(
-                    "node_runtime_failed",
-                    EXIT_RUNTIME_FAILURE,
-                ) from None
+                cleanup_failed = True
+        if artifact_root is not None:
+            try:
+                artifact_root.close()
+            except Exception:
+                cleanup_failed = True
+        if cleanup_failed:
+            raise _EntrypointFailure(
+                "node_runtime_failed",
+                EXIT_RUNTIME_FAILURE,
+            ) from None
         raise _EntrypointFailure(
             "node_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
@@ -619,6 +656,14 @@ def run(argv: Sequence[str] | None = None) -> int:
                 "node_runtime_failed",
                 EXIT_RUNTIME_FAILURE,
             )
+        try:
+            assert artifact_root is not None
+            artifact_root.close()
+        except Exception:
+            failure = _EntrypointFailure(
+                "node_runtime_failed",
+                EXIT_RUNTIME_FAILURE,
+            )
         for signum in reversed(tuple(previous)):
             try:
                 signal.signal(signum, previous[signum])
@@ -630,6 +675,33 @@ def run(argv: Sequence[str] | None = None) -> int:
     if failure is not None:
         raise failure from None
     return EXIT_SUCCESS
+
+
+def run(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    state_root, bundle, verified, client, sidecar, identities = _preflight(args)
+    try:
+        if args.dry_run:
+            _emit_status(
+                {
+                    "protocol": _STATUS_PROTOCOL,
+                    "event": "node_dry_run",
+                    "route_ready": False,
+                }
+            )
+            return EXIT_SUCCESS
+        with state_root.working_directory():
+            return _run_bound(
+                args,
+                state_root,
+                bundle,
+                verified,
+                client,
+                sidecar,
+                identities,
+            )
+    finally:
+        state_root.close()
 
 
 def main() -> None:

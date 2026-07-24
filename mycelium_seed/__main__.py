@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 import signal
 import sys
 import threading
@@ -12,7 +13,11 @@ from typing import NoReturn, Sequence
 
 from mycelium_invite import SqliteInviteRegistry
 from mycelium_node.identity import load_or_create_node_signer
-from mycelium_node.process import private_directory_path
+from mycelium_node.process import (
+    PrivateDirectoryLease,
+    private_directory_lease,
+    private_directory_path,
+)
 from mycelium_qualification.evidence import canonical_json_bytes
 
 from .coordinator import SeedCoordinator, _segment
@@ -48,10 +53,22 @@ def _private_directory(value: str | Path, *, create: bool = True) -> Path:
     return private_directory_path(value, create=create)
 
 
+def _canonical_port(value: str) -> int:
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"(?:0|[1-9][0-9]{0,4})", value) is None
+    ):
+        raise argparse.ArgumentTypeError("port is invalid")
+    port = int(value)
+    if port > 65535:
+        raise argparse.ArgumentTypeError("port is invalid")
+    return port
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = _SafeArgumentParser(prog="python -m mycelium_seed")
     parser.add_argument("--bind", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=_canonical_port, default=8765)
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--advertised-url")
     parser.add_argument("--swarm-id", default="mycelium-swarm")
@@ -66,7 +83,8 @@ def _emit_status(status: dict[str, object]) -> None:
     sys.stdout.buffer.flush()
 
 
-def _preflight(args: argparse.Namespace) -> Path:
+def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
+    state_root: PrivateDirectoryLease | None = None
     try:
         _segment(args.swarm_id, "swarm_id")
         _segment(args.seed_node_id, "seed_node_id")
@@ -83,38 +101,45 @@ def _preflight(args: argparse.Namespace) -> Path:
                 expected_host=(None if args.bind in {"0.0.0.0", "::"} else args.bind),
                 expected_port=args.port,
             )
-        return _private_directory(args.data_dir, create=not args.dry_run)
+        state_root = private_directory_lease(
+            args.data_dir,
+            create=not args.dry_run,
+        )
+        return state_root
     except Exception as exc:
+        failure = exc
+        if state_root is not None:
+            try:
+                state_root.close()
+            except Exception as close_exc:
+                failure = close_exc
         raise _EntrypointFailure(
             "seed_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
-        ) from exc
+        ) from failure
 
 
-def run(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    data_dir = _preflight(args)
-    if args.dry_run:
-        _emit_status(
-            {
-                "protocol": _STATUS_PROTOCOL,
-                "event": "seed_dry_run",
-                "route_ready": False,
-            }
-        )
-        return EXIT_SUCCESS
-
+def _run_bound(
+    args: argparse.Namespace,
+    state_root: PrivateDirectoryLease,
+) -> int:
     try:
-        signer = load_or_create_node_signer(data_dir / "identity" / "seed.key")
-        database = data_dir / "state.sqlite3"
+        state_root.revalidate()
+        signer = load_or_create_node_signer(Path("identity") / "seed.key")
+        state_root.revalidate()
+        database = Path("state.sqlite3")
+        state_root.revalidate()
+        invite_registry = SqliteInviteRegistry(database)
+        state_root.revalidate()
         coordinator = SeedCoordinator(
             swarm_id=args.swarm_id,
             seed_node_id=args.seed_node_id,
             seed_url=None,
             signer=signer,
-            invite_registry=SqliteInviteRegistry(database),
+            invite_registry=invite_registry,
             incarnation=args.incarnation,
         )
+        state_root.revalidate()
     except Exception as exc:
         raise _EntrypointFailure(
             "seed_preflight_failed",
@@ -130,12 +155,14 @@ def run(argv: Sequence[str] | None = None) -> int:
     previous: dict[int, object] = {}
     failure: _EntrypointFailure | None = None
     try:
+        state_root.revalidate()
         server = SeedHTTPServer(
             coordinator,
             host=args.bind,
             port=args.port,
             advertised_url=args.advertised_url,
         )
+        state_root.revalidate()
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
         server.start()
@@ -177,6 +204,25 @@ def run(argv: Sequence[str] | None = None) -> int:
     if failure is not None:
         raise failure from None
     return EXIT_SUCCESS
+
+
+def run(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    state_root = _preflight(args)
+    try:
+        if args.dry_run:
+            _emit_status(
+                {
+                    "protocol": _STATUS_PROTOCOL,
+                    "event": "seed_dry_run",
+                    "route_ready": False,
+                }
+            )
+            return EXIT_SUCCESS
+        with state_root.working_directory():
+            return _run_bound(args, state_root)
+    finally:
+        state_root.close()
 
 
 def main() -> None:

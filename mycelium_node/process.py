@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 import ctypes
 from dataclasses import dataclass
 import json
@@ -19,7 +20,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Iterator
 import uuid
 
 from mycelium_qualification.evidence import canonical_json_bytes
@@ -40,6 +41,7 @@ _DIRECTORY_OPEN_FLAGS = (
 _FILE_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
+_CWD_LEASE_LOCK = threading.RLock()
 
 
 class NodeProcessError(RuntimeError):
@@ -112,12 +114,208 @@ def _descriptor_is_writable(metadata: os.stat_result) -> bool:
     return mode & 0o003 == 0o003
 
 
-def private_directory_path(
+class PrivateDirectoryLease:
+    """Live descriptor binding for one private directory used by an entrypoint."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        parent_descriptor: int,
+        descriptor: int | None,
+    ) -> None:
+        self.path = path
+        self._parent_descriptor = parent_descriptor
+        self._descriptor = descriptor
+        self._closed = False
+        if descriptor is None:
+            self._device = None
+            self._inode = None
+        else:
+            metadata = os.fstat(descriptor)
+            self._device = metadata.st_dev
+            self._inode = metadata.st_ino
+
+    @property
+    def exists(self) -> bool:
+        return self._descriptor is not None
+
+    def _require_open_descriptor(self) -> int:
+        if self._closed or self._descriptor is None:
+            raise ValueError("data directory is unavailable")
+        return self._descriptor
+
+    @staticmethod
+    def _same_directory(
+        left: os.stat_result,
+        right: os.stat_result,
+    ) -> bool:
+        return (
+            stat.S_ISDIR(left.st_mode)
+            and stat.S_ISDIR(right.st_mode)
+            and left.st_dev == right.st_dev
+            and left.st_ino == right.st_ino
+            and left.st_uid == right.st_uid == os.getuid()
+            and stat.S_IMODE(left.st_mode) == 0o700
+            and stat.S_IMODE(right.st_mode) == 0o700
+        )
+
+    def revalidate(self) -> None:
+        """Require the absolute path and retained parent to name the leased inode."""
+
+        descriptor = self._require_open_descriptor()
+        try:
+            retained = os.fstat(descriptor)
+            retained_parent = os.fstat(self._parent_descriptor)
+            retained_entry = os.stat(
+                self.path.name,
+                dir_fd=self._parent_descriptor,
+                follow_symlinks=False,
+            )
+            fresh_parent_descriptor = private_directory_parent_fd(self.path)
+            try:
+                fresh_parent = os.fstat(fresh_parent_descriptor)
+                fresh_entry = os.stat(
+                    self.path.name,
+                    dir_fd=fresh_parent_descriptor,
+                    follow_symlinks=False,
+                )
+            finally:
+                os.close(fresh_parent_descriptor)
+        except OSError as exc:
+            raise ValueError("data directory binding changed") from exc
+        if (
+            self._device is None
+            or self._inode is None
+            or not self._same_directory(retained, retained_entry)
+            or not self._same_directory(retained, fresh_entry)
+            or retained.st_dev != self._device
+            or retained.st_ino != self._inode
+            or retained_parent.st_dev != fresh_parent.st_dev
+            or retained_parent.st_ino != fresh_parent.st_ino
+        ):
+            raise ValueError("data directory binding changed")
+
+    @staticmethod
+    def _relative_component(value: str) -> str:
+        if not isinstance(value, str) or not value:
+            raise ValueError("data directory child is invalid")
+        candidate = Path(value)
+        if (
+            candidate.is_absolute()
+            or candidate.parts != (value,)
+            or value in {".", ".."}
+        ):
+            raise ValueError("data directory child is invalid")
+        return value
+
+    def private_subdirectory(self, name: str) -> "PrivateDirectoryLease":
+        """Create/open one private child relative to the retained directory fd."""
+
+        name = self._relative_component(name)
+        descriptor = self._require_open_descriptor()
+        self.revalidate()
+        child: int | None = None
+        parent_copy: int | None = None
+        try:
+            try:
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+            except FileExistsError:
+                pass
+            child = os.open(name, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            metadata = os.fstat(child)
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+            ):
+                raise ValueError("data directory is invalid")
+            parent_copy = os.dup(descriptor)
+            lease = PrivateDirectoryLease(
+                self.path / name,
+                parent_descriptor=parent_copy,
+                descriptor=child,
+            )
+            parent_copy = None
+            child = None
+            try:
+                self.revalidate()
+                lease.revalidate()
+            except BaseException:
+                lease.close()
+                raise
+            return lease
+        except OSError as exc:
+            raise ValueError("data directory is unavailable") from exc
+        finally:
+            if child is not None:
+                os.close(child)
+            if parent_copy is not None:
+                os.close(parent_copy)
+
+    @contextmanager
+    def working_directory(self) -> Iterator[None]:
+        """Pin relative downstream pathname APIs to this live directory fd."""
+
+        descriptor = self._require_open_descriptor()
+        with _CWD_LEASE_LOCK:
+            original = os.open(".", _DIRECTORY_OPEN_FLAGS)
+            body_failed = False
+            try:
+                self.revalidate()
+                os.fchdir(descriptor)
+                try:
+                    yield
+                except BaseException:
+                    body_failed = True
+                    raise
+            finally:
+                restore_failed = False
+                try:
+                    os.fchdir(original)
+                except OSError:
+                    restore_failed = True
+                finally:
+                    os.close(original)
+                if restore_failed:
+                    raise ValueError("working directory restoration failed")
+                try:
+                    self.revalidate()
+                except ValueError:
+                    if not body_failed:
+                        raise
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        failures: list[OSError] = []
+        for descriptor in (self._descriptor, self._parent_descriptor):
+            if descriptor is None:
+                continue
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                failures.append(exc)
+        self._descriptor = None
+        if failures:
+            raise ValueError("data directory close failed") from failures[0]
+
+    def __enter__(self) -> "PrivateDirectoryLease":
+        if self._closed:
+            raise ValueError("data directory is unavailable")
+        return self
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        self.close()
+
+
+def private_directory_lease(
     value: str | Path,
     *,
     create: bool = True,
-) -> Path:
-    """Validate or create a private directory using only verified directory fds."""
+) -> PrivateDirectoryLease:
+    """Open a private directory while retaining its parent and final descriptors."""
 
     if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0):
         raise ValueError("data directory is unavailable")
@@ -136,7 +334,13 @@ def private_directory_path(
                 if not create:
                     if not _descriptor_is_writable(os.fstat(descriptor)):
                         raise ValueError("data directory is unavailable")
-                    return path
+                    lease = PrivateDirectoryLease(
+                        path,
+                        parent_descriptor=descriptor,
+                        descriptor=None,
+                    )
+                    descriptor = -1
+                    return lease
                 created = False
                 try:
                     os.mkdir(component, mode=0o700, dir_fd=descriptor)
@@ -168,13 +372,41 @@ def private_directory_path(
                 except ValueError:
                     os.close(child)
                     raise
+            if final:
+                lease = PrivateDirectoryLease(
+                    path,
+                    parent_descriptor=descriptor,
+                    descriptor=child,
+                )
+                descriptor = -1
+                try:
+                    lease.revalidate()
+                except BaseException:
+                    lease.close()
+                    raise
+                return lease
             os.close(descriptor)
             descriptor = child
-        return path
+        raise ValueError("data directory is invalid")
     except OSError as exc:
         raise ValueError("data directory is unavailable") from exc
     finally:
-        os.close(descriptor)
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def private_directory_path(
+    value: str | Path,
+    *,
+    create: bool = True,
+) -> Path:
+    """Compatibility wrapper returning a path after descriptor-bound validation."""
+
+    lease = private_directory_lease(value, create=create)
+    try:
+        return lease.path
+    finally:
+        lease.close()
 
 
 def _identity_from_stat(path: Path, metadata: os.stat_result) -> _ExecutableIdentity:
@@ -428,22 +660,31 @@ def _inventory_process(pid: int) -> _ProcessIdentity:
     raise ProcessLookupError(pid)
 
 
-def _darwin_parent_and_group(pid: int) -> tuple[int, int]:
+def _deadline_remaining(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("process discovery deadline expired")
+    return remaining
+
+
+def _darwin_parent_and_group(pid: int, deadline: float) -> tuple[int, int]:
     output = subprocess.check_output(
         ["/bin/ps", "-o", "pid=,ppid=,pgid=", "-p", str(pid)],
         text=True,
-        timeout=1.0,
+        timeout=min(1.0, _deadline_remaining(deadline)),
     ).split()
     if len(output) != 3 or int(output[0]) != pid:
         raise ProcessLookupError(pid)
     return int(output[1]), int(output[2])
 
 
-def _protected_process_groups() -> set[int]:
+def _protected_process_groups(deadline: float) -> set[int]:
+    _deadline_remaining(deadline)
     groups = {os.getpgrp()}
     process_ids: set[int] = set()
     pid = os.getpid()
     while pid > 1:
+        _deadline_remaining(deadline)
         if pid in process_ids:
             raise ProcessLookupError(pid)
         process_ids.add(pid)
@@ -452,12 +693,13 @@ def _protected_process_groups() -> set[int]:
         except (OSError, subprocess.SubprocessError, ValueError):
             if sys.platform != "darwin":
                 raise
-            parent_pid, process_group = _darwin_parent_and_group(pid)
+            parent_pid, process_group = _darwin_parent_and_group(pid, deadline)
             groups.add(process_group)
             pid = parent_pid
         else:
             groups.add(identity.process_group)
             pid = identity.parent_pid
+        _deadline_remaining(deadline)
     if any(group <= 1 for group in groups):
         raise ProcessLookupError("protected process group is invalid")
     return groups
@@ -561,6 +803,7 @@ def build_physical_node_command(
     sidecar_binary: str | Path,
     sidecar_local_only: bool,
     command_timeout_seconds: float = 30.0,
+    descriptor_relative_artifact_root: bool = False,
 ) -> tuple[str, ...]:
     """Build an argv-only physical-node launch command with no secret material."""
 
@@ -577,6 +820,18 @@ def build_physical_node_command(
     timeout = _positive_seconds(command_timeout_seconds, "command_timeout_seconds")
     if not isinstance(sidecar_local_only, bool):
         raise ValueError("sidecar_local_only must be a boolean")
+    if not isinstance(descriptor_relative_artifact_root, bool):
+        raise ValueError("descriptor_relative_artifact_root must be a boolean")
+    artifact_argument = artifacts
+    if descriptor_relative_artifact_root:
+        supplied_artifacts = Path(artifact_root)
+        if (
+            supplied_artifacts.is_absolute()
+            or len(supplied_artifacts.parts) != 1
+            or supplied_artifacts.parts[0] in {"", ".", ".."}
+        ):
+            raise ValueError("artifact_root must be descriptor-relative")
+        artifact_argument = supplied_artifacts
 
     command = [
         str(python_path),
@@ -588,7 +843,7 @@ def build_physical_node_command(
         "--node-id",
         node_id,
         "--artifact-root",
-        str(artifacts),
+        str(artifact_argument),
         "--socket-root",
         str(sockets),
         "--sidecar-binary",
@@ -798,17 +1053,31 @@ class PhysicalNodeProcess:
         except (OSError, ValueError):
             return
 
-    def _signal_process_group(self, signum: int) -> bool:
+    def _signal_process_group(
+        self,
+        signum: int,
+        deadline: float | None = None,
+    ) -> bool:
         process = self._process
         launch = self._launch_identity
         if launch is None:
             return False
         if process.poll() is not None:
             return True
+        if deadline is None:
+            deadline = time.monotonic() + self.shutdown_timeout_seconds
         try:
+            protected_groups = _protected_process_groups(deadline)
+            _deadline_remaining(deadline)
             current = _inventory_process(process.pid)
-            protected_groups = _protected_process_groups()
-        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+            _deadline_remaining(deadline)
+        except (
+            OSError,
+            RuntimeError,
+            subprocess.SubprocessError,
+            TimeoutError,
+            ValueError,
+        ):
             return False
         if (
             current != launch
@@ -850,7 +1119,7 @@ class PhysicalNodeProcess:
         process = self._process
         if process.poll() is not None:
             return True
-        if not self._signal_process_group(signal.SIGKILL):
+        if not self._signal_process_group(signal.SIGKILL, deadline):
             return process.poll() is not None
         return self._wait_process(deadline)
 
