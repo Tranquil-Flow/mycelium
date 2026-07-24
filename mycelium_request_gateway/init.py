@@ -33,6 +33,7 @@ def create_request_gateway_application(
         router=router,
         codec=codec,
         clock=clock,
+        qualification_source=qualification_source,
     )
     service = RequestGatewayService(
         qualification_source=qualification_source,

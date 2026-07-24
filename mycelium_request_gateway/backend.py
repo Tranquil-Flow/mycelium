@@ -4,11 +4,16 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from mycelium_router.contracts import RequestContext
+from mycelium_qualification.contracts import RouteQualificationV1
+from mycelium_qualification.evidence import sha256_document
+from mycelium_router.contracts import ExecutionGraph, RequestContext
+from mycelium_router.serialization import execution_graph_to_dict
 
-from .contracts import AdmissionError, InferenceSubmission
+from .contracts import AdmissionError, InferenceSubmission, qualification_binding
+from .qualification import QualificationSource
 
 
 class PromptCodec(Protocol):
@@ -18,13 +23,28 @@ class PromptCodec(Protocol):
 
 
 class RouterPort(Protocol):
-    def admit(self, request: RequestContext, client_sink: object, **kwargs: object) -> str: ...
+    def current_deployment(self) -> ExecutionGraph: ...
+
+    def admit(
+        self,
+        request: RequestContext,
+        client_sink: object,
+        *,
+        pinned_deployment: ExecutionGraph | None = None,
+        **kwargs: object,
+    ) -> str: ...
 
     def decode_one(self, request_id: str) -> bool: ...
 
     def request_status(self, request_id: str) -> str: ...
 
     def cancel(self, request_id: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class _AdmissionDecision:
+    graph: ExecutionGraph | None
+    excluded_placements: frozenset[str]
 
 
 class _GatewayTokenSink:
@@ -57,6 +77,7 @@ class RouterSessionBackend:
         router: RouterPort,
         codec: PromptCodec,
         clock: Callable[[], float],
+        qualification_source: QualificationSource | None = None,
         excluded_placements: frozenset[str] = frozenset(),
         sampling_seed: int = 0,
     ) -> None:
@@ -69,10 +90,16 @@ class RouterSessionBackend:
         self._router = router
         self._codec = codec
         self._clock = clock
+        self._qualification_source = qualification_source
         self._excluded_placements = excluded_placements
         self._sampling_seed = sampling_seed
         self._lock = threading.RLock()
+        self._active: set[str] = set()
         self._cancelled: set[str] = set()
+        self._pending_cancelled: set[str] = set()
+        self._internally_cancelled: set[str] = set()
+        self._external_cancellation_observed: set[str] = set()
+        self._awaiting_cancel_ack: set[str] = set()
 
     def run(
         self,
@@ -81,11 +108,32 @@ class RouterSessionBackend:
         emit_token: Callable[[int, str], None],
         is_cancelled: Callable[[], bool],
     ) -> str:
+        with self._lock:
+            if request_id in self._active:
+                raise AdmissionError("duplicate_request_id")
+            self._awaiting_cancel_ack.discard(request_id)
+            self._external_cancellation_observed.discard(request_id)
+            self._active.add(request_id)
+            if request_id in self._pending_cancelled:
+                self._pending_cancelled.discard(request_id)
+                self._cancelled.add(request_id)
+        failed = True
         try:
-            return self._run(request_id, submission, emit_token, is_cancelled)
+            outcome = self._run(request_id, submission, emit_token, is_cancelled)
+            failed = False
+            return outcome
         finally:
             with self._lock:
+                needs_ack = failed or request_id in self._internally_cancelled
+                if (
+                    needs_ack
+                    and request_id not in self._external_cancellation_observed
+                ):
+                    self._awaiting_cancel_ack.add(request_id)
+                self._active.discard(request_id)
                 self._cancelled.discard(request_id)
+                self._internally_cancelled.discard(request_id)
+                self._external_cancellation_observed.discard(request_id)
 
     def _run(
         self,
@@ -96,6 +144,7 @@ class RouterSessionBackend:
     ) -> str:
         if is_cancelled() or self._is_cancelled(request_id):
             return "cancelled"
+        admission = self._require_current_deployment(submission)
         prompt_token_ids = self._codec.encode(submission.prompt)
         if not isinstance(prompt_token_ids, tuple) or not prompt_token_ids or not all(
             isinstance(item, int) and not isinstance(item, bool) and item >= 0
@@ -134,11 +183,19 @@ class RouterSessionBackend:
         try:
             if is_cancelled() or self._is_cancelled(request_id):
                 return "cancelled"
-            admitted_id = self._router.admit(
-                request,
-                sink,
-                excluded_placements=self._excluded_placements,
-            )
+            if admission.graph is None:
+                admitted_id = self._router.admit(
+                    request,
+                    sink,
+                    excluded_placements=admission.excluded_placements,
+                )
+            else:
+                admitted_id = self._router.admit(
+                    request,
+                    sink,
+                    excluded_placements=admission.excluded_placements,
+                    pinned_deployment=admission.graph,
+                )
             if admitted_id != request_id:
                 raise AdmissionError("router_request_id_mismatch")
             admitted = True
@@ -163,14 +220,175 @@ class RouterSessionBackend:
                 self._cancel_once(request_id)
             raise
 
-    def cancel(self, request_id: str) -> None:
-        self._cancel_once(request_id)
+    def _require_current_deployment(
+        self,
+        submission: InferenceSubmission,
+    ) -> _AdmissionDecision:
+        source = self._qualification_source
+        if source is None:
+            return _AdmissionDecision(
+                graph=None,
+                excluded_placements=self._excluded_placements,
+            )
+        try:
+            current = source.current()
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if current is None:
+            raise AdmissionError("route_dropped")
+        if not isinstance(current, RouteQualificationV1):
+            raise AdmissionError("qualification_unavailable")
+        if current.route_ready is not True:
+            raise AdmissionError("readiness_revoked")
+        try:
+            current_binding = qualification_binding(current)
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if current_binding != submission.qualification:
+            raise AdmissionError("qualification_mismatch")
+        try:
+            deployment_source = getattr(
+                self._router,
+                "current_deployment",
+                None,
+            )
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if not callable(deployment_source):
+            raise AdmissionError("qualification_unavailable")
+        try:
+            deployment = deployment_source()
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        if not isinstance(deployment, ExecutionGraph):
+            raise AdmissionError("qualification_unavailable")
+        try:
+            deployment_digest = sha256_document(
+                execution_graph_to_dict(deployment)
+            )
+        except Exception as exc:
+            raise AdmissionError("qualification_unavailable") from exc
+        live_identity = (
+            deployment.deployment_id,
+            deployment.deployment_epoch,
+            deployment.topology_version,
+            deployment.model_id,
+            deployment.resolved_commit,
+            deployment.manifest_digest,
+        )
+        qualified_identity = (
+            current.deployment_id,
+            current.deployment_epoch,
+            current.topology_version,
+            current.model_id,
+            current.resolved_commit,
+            current.manifest_digest,
+        )
+        if (
+            live_identity != qualified_identity
+            or deployment_digest != current.execution_graph_digest
+        ):
+            raise AdmissionError("qualification_mismatch")
+        selected_placements = self._qualified_placement_projection(
+            current,
+            deployment,
+        )
+        if selected_placements & self._excluded_placements:
+            raise AdmissionError("qualification_mismatch")
+        live_placements = frozenset(
+            placement.placement_id
+            for stage in deployment.stages
+            for placement in stage.placements
+        )
+        return _AdmissionDecision(
+            graph=deployment,
+            excluded_placements=live_placements - selected_placements,
+        )
 
-    def _cancel_once(self, request_id: str) -> None:
+    @staticmethod
+    def _qualified_placement_projection(
+        current: RouteQualificationV1,
+        deployment: ExecutionGraph,
+    ) -> frozenset[str]:
+        if len(current.stage_bindings) != len(deployment.stages):
+            raise AdmissionError("qualification_mismatch")
+        stages = {stage.stage_id: stage for stage in deployment.stages}
+        selected_by_stage: dict[str, str] = {}
+        selected_placements: set[str] = set()
+        for binding in current.stage_bindings:
+            if (
+                binding.stage_id in selected_by_stage
+                or binding.placement_id in selected_placements
+            ):
+                raise AdmissionError("qualification_mismatch")
+            stage = stages.get(binding.stage_id)
+            if stage is None:
+                raise AdmissionError("qualification_mismatch")
+            placement = next(
+                (
+                    candidate
+                    for candidate in stage.placements
+                    if candidate.placement_id == binding.placement_id
+                ),
+                None,
+            )
+            if (
+                placement is None
+                or placement.lifecycle_state != "ACTIVE"
+                or placement.node_id != binding.node_id
+                or placement.assignment_id != binding.assignment_id
+                or placement.stage_signature != binding.stage_signature
+                or placement.load_proof_digest != binding.load_proof_digest
+            ):
+                raise AdmissionError("qualification_mismatch")
+            selected_by_stage[binding.stage_id] = binding.placement_id
+            selected_placements.add(binding.placement_id)
+        if set(selected_by_stage) != set(stages):
+            raise AdmissionError("qualification_mismatch")
+        ordered = tuple(
+            selected_by_stage[stage.stage_id]
+            for stage in deployment.stages
+        )
+        legal_edges = {
+            (edge.from_placement_id, edge.to_placement_id)
+            for edge in deployment.edges
+        }
+        if any(
+            pair not in legal_edges
+            for pair in zip(ordered, ordered[1:])
+        ):
+            raise AdmissionError("qualification_mismatch")
+        legal_loopbacks = {
+            (edge.from_placement_id, edge.to_placement_id)
+            for edge in deployment.loopback_edges
+        }
+        if (ordered[-1], ordered[0]) not in legal_loopbacks:
+            raise AdmissionError("qualification_mismatch")
+        return frozenset(selected_placements)
+
+    def cancel(self, request_id: str) -> None:
+        self._cancel_once(request_id, external=True)
+
+    def _cancel_once(self, request_id: str, *, external: bool = False) -> None:
         with self._lock:
-            if request_id in self._cancelled:
+            if external and request_id in self._awaiting_cancel_ack:
+                self._awaiting_cancel_ack.discard(request_id)
                 return
-            self._cancelled.add(request_id)
+            if request_id not in self._active:
+                if not external or request_id in self._pending_cancelled:
+                    return
+                self._pending_cancelled.add(request_id)
+            elif request_id in self._cancelled:
+                if external:
+                    self._external_cancellation_observed.add(request_id)
+                    self._internally_cancelled.discard(request_id)
+                return
+            else:
+                self._cancelled.add(request_id)
+                if external:
+                    self._external_cancellation_observed.add(request_id)
+                else:
+                    self._internally_cancelled.add(request_id)
         self._router.cancel(request_id)
 
     def _is_cancelled(self, request_id: str) -> bool:

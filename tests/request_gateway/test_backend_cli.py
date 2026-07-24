@@ -4,7 +4,10 @@ Passing these tests is not distributed or physical-route evidence.
 """
 from __future__ import annotations
 
+import importlib.util
 from io import StringIO
+import json
+import sys
 
 import pytest
 
@@ -28,7 +31,8 @@ from mycelium_router.fakes import (
     SequenceIdSource,
 )
 from mycelium_router.router import Router
-from test_core import MutableQualificationSource, _synthetic_qualification
+from mycelium_router.serialization import execution_graph_from_dict
+from test_core import ROOT, MutableQualificationSource, _synthetic_qualification
 from test_router_contracts import graph_fixture
 from test_router_policy import state_table
 
@@ -47,12 +51,27 @@ class RecordingCodec:
         return f"<{token_id}>"
 
 
-def _runtime_stack():
-    graph = graph_fixture()
+def _synthetic_execution_graph():
+    spec = importlib.util.spec_from_file_location(
+        "request_gateway_execution_graph_fixture",
+        ROOT / "tests" / "qualification" / "conftest.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    files, _manifest = module.make_case().render()
+    return execution_graph_from_dict(
+        json.loads(files["router/execution-graph.json"])
+    )
+
+
+def _runtime_stack(*, graph=None, router_type=Router):
+    graph = graph or graph_fixture()
     clock = ManualClock()
     capacity = FakeCapacityPort(clock=clock)
     runtime = FakeRuntimePort(token_base=100)
-    router = Router(
+    router = router_type(
         node_id="entry-node",
         topology=FakeTopologyProvider(graph),
         device_states=FakeDeviceStateProvider(state_table()),
@@ -68,9 +87,16 @@ def _runtime_stack():
 
 def test_cli_streams_through_production_service_and_router_session_interface():
     qualification = _synthetic_qualification()
-    router, clock, capacity, runtime = _runtime_stack()
+    router, clock, capacity, runtime = _runtime_stack(
+        graph=_synthetic_execution_graph()
+    )
     codec = RecordingCodec()
-    backend = RouterSessionBackend(router=router, codec=codec, clock=clock.now)
+    backend = RouterSessionBackend(
+        router=router,
+        codec=codec,
+        clock=clock.now,
+        qualification_source=MutableQualificationSource(qualification),
+    )
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
@@ -99,13 +125,20 @@ def test_cli_streams_through_production_service_and_router_session_interface():
 
 def test_router_adapter_cancellation_releases_capacity_and_kv_once():
     qualification = _synthetic_qualification()
-    router, clock, capacity, runtime = _runtime_stack()
+    router, clock, capacity, runtime = _runtime_stack(
+        graph=_synthetic_execution_graph()
+    )
     codec = RecordingCodec()
 
     class CancelAfterFirstCodec(RecordingCodec):
         pass
 
-    backend = RouterSessionBackend(router=router, codec=codec, clock=clock.now)
+    backend = RouterSessionBackend(
+        router=router,
+        codec=codec,
+        clock=clock.now,
+        qualification_source=MutableQualificationSource(qualification),
+    )
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
@@ -143,6 +176,15 @@ def test_router_adapter_cancellation_releases_capacity_and_kv_once():
         assert len(capacity.release_calls) == 1
         assert len(runtime.cancel_calls) == 1
         assert service.terminal_event_count(request_id) == 1
+        session = service._get_session(request_id)
+        with session.condition:
+            assert session.condition.wait_for(lambda: session.worker_done, timeout=1)
+        assert backend._active == set()
+        assert backend._cancelled == set()
+        assert backend._pending_cancelled == set()
+        assert backend._internally_cancelled == set()
+        assert backend._external_cancellation_observed == set()
+        assert backend._awaiting_cancel_ack == set()
     finally:
         service.close()
 

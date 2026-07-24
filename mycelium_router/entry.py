@@ -91,17 +91,31 @@ class EntryCoordinator:
       request: RequestContext,
       client_sink,
       *,
+      pinned_deployment: ExecutionGraph | None = None,
       excluded_placements: frozenset[str] = frozenset(),
       excluded_edges: frozenset[str] = frozenset(),
       excluded_devices: frozenset[str] = frozenset(),
    ) -> str:
       if (
+         pinned_deployment is not None
+         and not isinstance(pinned_deployment, ExecutionGraph)
+      ):
+         raise TypeError("invalid_pinned_deployment")
+      if (
          request.request_id in self._requests
          or request.request_id in self._pending_prefills
       ):
          raise ValueError("duplicate_request_id")
+      graph = (
+         pinned_deployment
+         if pinned_deployment is not None
+         else self.topology.snapshot()
+      )
+      if not isinstance(graph, ExecutionGraph):
+         raise TypeError("invalid_deployment_snapshot")
       graph, manifest, build = self._build_path(
          request,
+         graph=graph,
          path_attempt=0,
          excluded_placements=excluded_placements,
          excluded_edges=excluded_edges,
@@ -728,6 +742,7 @@ class EntryCoordinator:
       try:
          graph, new_manifest, build = self._build_path(
             record.request,
+            graph=record.graph,
             path_attempt=new_attempt,
             excluded_placements=excluded_placements,
             excluded_edges=excluded_edges,
@@ -926,12 +941,12 @@ class EntryCoordinator:
       self,
       request: RequestContext,
       *,
+      graph: ExecutionGraph,
       path_attempt: int,
       excluded_placements: frozenset[str],
       excluded_edges: frozenset[str],
       excluded_devices: frozenset[str],
    ) -> tuple[ExecutionGraph, PathManifest, PathBuildState]:
-      graph = self.topology.snapshot()
       build = self.builder.start(
          request,
          graph,
