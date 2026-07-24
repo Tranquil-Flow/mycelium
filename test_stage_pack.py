@@ -62,6 +62,32 @@ class _AssignmentFileKey(str):
     __hash__ = str.__hash__
 
 
+class _ExactSchemaKey(str):
+    def __new__(cls, value: str) -> _ExactSchemaKey:
+        instance = super().__new__(cls, value)
+        instance.armed = False
+        instance.equality_calls = 0
+        return instance
+
+    def __eq__(self, other: object) -> bool:
+        self.equality_calls += 1
+        if self.armed:
+            raise RuntimeError("exact schema key equality was invoked")
+        return super().__eq__(other)
+
+    __hash__ = str.__hash__
+
+
+def _replace_with_exact_schema_key(
+    mapping: dict[str, Any],
+    field: str,
+) -> _ExactSchemaKey:
+    value = mapping.pop(field)
+    key = _ExactSchemaKey(field)
+    mapping[key] = value
+    return key
+
+
 def _write_safetensors(path: Path, tensor_names: list[str]) -> None:
     header: dict[str, Any] = {}
     payload = bytearray()
@@ -1617,6 +1643,116 @@ def test_direct_loader_rejects_assignment_dot_path_before_file_access(
     assert file_accesses == []
 
 
+@pytest.mark.parametrize(
+    "key_location",
+    (
+        "outer-protocol",
+        "file-path",
+        "file-size-bytes",
+        "file-content-digest",
+    ),
+    ids=lambda key_location: key_location,
+)
+@pytest.mark.parametrize("armed", (False, True), ids=("benign", "armed"))
+def test_direct_loader_canonicalizes_assignment_before_other_entry_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    armed: bool,
+    key_location: str,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    import runtime_loader as rl
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    assignment = copy.deepcopy(prepared.assignments[0])
+    report = copy.deepcopy(prepared.reports[0])
+    pack = report["stage_pack"]
+    verification = report["stage_pack_verification"]
+
+    if key_location == "outer-protocol":
+        key = _replace_with_exact_schema_key(assignment, "protocol")
+    else:
+        field = key_location.removeprefix("file-").replace("-", "_")
+        key = _replace_with_exact_schema_key(assignment["files"][0], field)
+    _rebind_assignment_file_evidence(
+        assignment,
+        pack,
+        verification,
+        report,
+    )
+    report["stage_pack_digest"] = pack["stage_pack_digest"]
+    report["stage_pack_verification_digest"] = verification[
+        "stage_pack_verification_digest"
+    ]
+    key.equality_calls = 0
+    key.armed = armed
+
+    entry_calls = {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+    }
+    original_identity = rl.validate_assignment_identity
+    original_report_validation = rl.artifact_report_errors
+    original_file_open = rl._open_verified_artifact
+
+    def record_identity(*args: Any, **kwargs: Any) -> Any:
+        entry_calls["identity"] += 1
+        return original_identity(*args, **kwargs)
+
+    def record_report(*args: Any, **kwargs: Any) -> Any:
+        entry_calls["report"] += 1
+        return original_report_validation(*args, **kwargs)
+
+    def record_file(*args: Any, **kwargs: Any) -> Any:
+        entry_calls["file"] += 1
+        return original_file_open(*args, **kwargs)
+
+    monkeypatch.setattr(rl, "validate_assignment_identity", record_identity)
+    monkeypatch.setattr(rl, "artifact_report_errors", record_report)
+    monkeypatch.setattr(rl, "_open_verified_artifact", record_file)
+
+    with pytest.raises(rl.RuntimeLoadError) as raised:
+        rl.load_assignment_stage(
+            assignment,
+            report,
+            load_generation=17,
+        )
+
+    assert str(raised.value) == (
+        "stage-pack evidence rejected: "
+        "stage pack assignment files are invalid"
+    )
+    assert key.equality_calls == 0
+    assert entry_calls == {
+        "identity": 0,
+        "report": 0,
+        "file": 0,
+    }
+
+
+def test_assignment_canonicalizer_returns_plain_epoch_zero_snapshot(
+    tmp_path: Path,
+) -> None:
+    _, assignments, _, _ = _case(tmp_path, deployment_epoch=0)
+    assignment = assignments[1]
+
+    snapshot = sp.canonicalize_stage_pack_assignment(assignment)
+
+    assert snapshot == assignment
+    assert snapshot is not assignment
+    assert type(snapshot) is dict
+    assert snapshot["deployment_epoch"] == 0
+    assert snapshot["files"] is not assignment["files"]
+    assert all(
+        type(record) is dict
+        and all(type(key) is str for key in record)
+        for record in snapshot["files"]
+    )
+
+
 @pytest.mark.parametrize("validation_path", ("compile", "verify", "evidence"))
 def test_authoritative_assignment_file_schema_valid_epoch_zero_control(
     tmp_path: Path,
@@ -1972,6 +2108,115 @@ def test_redigested_verification_rejects_exact_type_collisions(
             assignment=assignment,
             manifest=manifest,
         )
+
+
+@pytest.mark.parametrize(
+    ("document", "key_location", "validation_path"),
+    (
+        ("pack", "top", "verify"),
+        ("pack", "range", "evidence"),
+        ("pack", "runtime", "adapter"),
+        ("pack", "component-tensor-keys", "verify"),
+        ("pack", "artifact-record", "evidence"),
+        ("pack", "runtime-model-config", "adapter"),
+        ("verification", "top", "evidence"),
+        ("verification", "top", "adapter"),
+        ("verification", "range", "evidence"),
+        ("verification", "runtime", "adapter"),
+        ("verification", "verified-file-record", "evidence"),
+        ("verification", "tensor-file-map", "adapter"),
+        ("verification", "runtime-model-config", "evidence"),
+    ),
+    ids=lambda value: value,
+)
+@pytest.mark.parametrize("armed", (False, True), ids=("benign", "armed"))
+def test_recursive_schema_keys_are_exact_before_comparison_or_file_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    armed: bool,
+    document: str,
+    key_location: str,
+    validation_path: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    if key_location == "runtime-model-config":
+        _rebind_assignment_pack(
+            assignment,
+            pack,
+            runtime=_mlx_runtime(),
+        )
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+
+    target = pack if document == "pack" else verification
+    if key_location == "top":
+        key = _replace_with_exact_schema_key(target, "range")
+    elif key_location == "range":
+        key = _replace_with_exact_schema_key(target["range"], "start_layer")
+    elif key_location == "runtime":
+        key = _replace_with_exact_schema_key(target["runtime"], "backend")
+    elif key_location == "runtime-model-config":
+        key = _replace_with_exact_schema_key(
+            target["runtime"]["model_config"],
+            "n_layer",
+        )
+    elif key_location == "component-tensor-keys":
+        component = next(iter(target["component_tensor_keys"]))
+        key = _replace_with_exact_schema_key(
+            target["component_tensor_keys"],
+            component,
+        )
+    elif key_location == "artifact-record":
+        key = _replace_with_exact_schema_key(
+            target["artifacts"][0],
+            "upstream_path",
+        )
+    elif key_location == "verified-file-record":
+        key = _replace_with_exact_schema_key(
+            target["verified_files"][0],
+            "path",
+        )
+    else:
+        tensor_key = next(iter(target["tensor_file_map"]))
+        key = _replace_with_exact_schema_key(
+            target["tensor_file_map"],
+            tensor_key,
+        )
+
+    _refresh_joint_evidence_digests(pack, verification)
+    key.equality_calls = 0
+    key.armed = armed
+    file_accesses: list[tuple[Any, ...]] = []
+
+    def reject_file_access(*args: Any, **kwargs: Any) -> Any:
+        file_accesses.append((*args, kwargs))
+        raise AssertionError("recursive schema validation reached file access")
+
+    monkeypatch.setattr(sp, "_open_beneath", reject_file_access)
+
+    with pytest.raises(ValueError) as raised:
+        _exercise_assignment_file_boundary(
+            validation_path,
+            assignment=assignment,
+            manifest=manifest,
+            report=reports[1],
+            pack=pack,
+            verification=verification,
+        )
+
+    expected = (
+        "stage pack schema is invalid"
+        if document == "pack"
+        else "stage pack verification schema is invalid"
+    )
+    assert str(raised.value) == expected
+    assert key.equality_calls == 0
+    assert file_accesses == []
 
 
 @pytest.mark.parametrize(

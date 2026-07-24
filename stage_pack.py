@@ -217,6 +217,123 @@ _TOLERANCE_FIELDS = frozenset(
 )
 _TOLERANCE_CHECKS = frozenset({"activations", "logits", "token_ids"})
 _MAX_TOLERANCE_BYTES = 64 * 1024
+_ANY_SCHEMA = ("any",)
+_PACK_RUNTIME_SCHEMA: tuple[str, Any] = (
+    "one_of",
+    (
+        (
+            "map",
+            {
+                "backend": _ANY_SCHEMA,
+                "dtype": _ANY_SCHEMA,
+                "quantization": _ANY_SCHEMA,
+            },
+        ),
+        (
+            "map",
+            {
+                "backend": _ANY_SCHEMA,
+                "dtype": _ANY_SCHEMA,
+                "quantization": _ANY_SCHEMA,
+                "architecture": _ANY_SCHEMA,
+                "model_config": (
+                    "map",
+                    {
+                        "n_layer": _ANY_SCHEMA,
+                        "n_embd": _ANY_SCHEMA,
+                        "n_head": _ANY_SCHEMA,
+                        "n_inner": _ANY_SCHEMA,
+                        "vocab_size": _ANY_SCHEMA,
+                        "n_positions": _ANY_SCHEMA,
+                        "layer_norm_epsilon": _ANY_SCHEMA,
+                        "activation_function": _ANY_SCHEMA,
+                        "scale_attn_weights": _ANY_SCHEMA,
+                        "scale_attn_by_inverse_layer_idx": _ANY_SCHEMA,
+                        "reorder_and_upcast_attn": _ANY_SCHEMA,
+                        "add_cross_attention": _ANY_SCHEMA,
+                    },
+                ),
+            },
+        ),
+    ),
+)
+_PACK_SCHEMA: tuple[str, Any] = (
+    "map",
+    {
+        "protocol": _ANY_SCHEMA,
+        "assignment_id": _ANY_SCHEMA,
+        "deployment_id": _ANY_SCHEMA,
+        "deployment_epoch": _ANY_SCHEMA,
+        "node_id": _ANY_SCHEMA,
+        "model_id": _ANY_SCHEMA,
+        "resolved_commit": _ANY_SCHEMA,
+        "manifest_digest": _ANY_SCHEMA,
+        "range": (
+            "map",
+            {
+                "start_layer": _ANY_SCHEMA,
+                "end_layer_exclusive": _ANY_SCHEMA,
+                "layer_count": _ANY_SCHEMA,
+            },
+        ),
+        "components": ("list", _ANY_SCHEMA),
+        "component_tensor_keys": (
+            "map_of",
+            str,
+            ("list", _ANY_SCHEMA),
+        ),
+        "component_aliases": ("map_of", str, _ANY_SCHEMA),
+        "expected_tensor_prefixes": ("list", _ANY_SCHEMA),
+        "expected_tensor_keys": ("list", _ANY_SCHEMA),
+        "upstream_files": (
+            "list",
+            (
+                "map",
+                {
+                    "path": _ANY_SCHEMA,
+                    "size_bytes": _ANY_SCHEMA,
+                    "content_digest": _ANY_SCHEMA,
+                },
+            ),
+        ),
+        "artifact_root": _ANY_SCHEMA,
+        "artifacts": (
+            "list",
+            (
+                "map",
+                {
+                    "upstream_path": _ANY_SCHEMA,
+                    "relative_path": _ANY_SCHEMA,
+                    "size_bytes": _ANY_SCHEMA,
+                    "content_digest": _ANY_SCHEMA,
+                    "tensor_keys": ("list", _ANY_SCHEMA),
+                },
+            ),
+        ),
+        "runtime": _PACK_RUNTIME_SCHEMA,
+        "control_plane_binding": (
+            "one_of",
+            (
+                type(None),
+                (
+                    "map",
+                    {
+                        "protocol": _ANY_SCHEMA,
+                        "evidence_bundle_digest": _ANY_SCHEMA,
+                        "planner_snapshot_digest": _ANY_SCHEMA,
+                        "snapshot_generation": _ANY_SCHEMA,
+                        "swarm_id": _ANY_SCHEMA,
+                        "deployment_id": _ANY_SCHEMA,
+                        "deployment_epoch": _ANY_SCHEMA,
+                    },
+                ),
+            ),
+        ),
+        "route_ready": _ANY_SCHEMA,
+        "claim_boundary": _ANY_SCHEMA,
+        "stage_pack_digest": _ANY_SCHEMA,
+    },
+)
 
 
 def _canonical_json(document: Any) -> str:
@@ -470,34 +587,63 @@ def _matches_exact_schema(value: Any, schema: Any) -> bool:
     if isinstance(schema, type):
         return type(value) is schema
     kind = schema[0]
+    if kind == "any":
+        return True
     if kind == "map":
         fields = schema[1]
-        return (
-            type(value) is dict
-            and set(value) == set(fields)
-            and all(
-                _matches_exact_schema(value[field], field_schema)
-                for field, field_schema in fields.items()
-            )
+        if type(value) is not dict:
+            return False
+        if any(type(key) is not str for key in value):
+            return False
+        if set(value) != set(fields):
+            return False
+        return all(
+            _matches_exact_schema(value[field], field_schema)
+            for field, field_schema in fields.items()
         )
     if kind == "list":
         return type(value) is list and all(
             _matches_exact_schema(item, schema[1]) for item in value
         )
     if kind == "map_of":
-        return type(value) is dict and all(
-            _matches_exact_schema(key, schema[1])
-            and _matches_exact_schema(item, schema[2])
-            for key, item in value.items()
+        return (
+            type(value) is dict
+            and not any(type(key) is not str for key in value)
+            and all(
+                _matches_exact_schema(key, schema[1])
+                and _matches_exact_schema(item, schema[2])
+                for key, item in value.items()
+            )
         )
     if kind == "one_of":
         return any(_matches_exact_schema(value, option) for option in schema[1])
     return False
 
 
+def _validate_exact_schema(
+    value: Any,
+    schema: Any,
+    *,
+    diagnostic: str,
+) -> None:
+    if not _matches_exact_schema(value, schema):
+        raise ValueError(diagnostic)
+
+
+def _validate_pack_schema(pack: Any) -> None:
+    _validate_exact_schema(
+        pack,
+        _PACK_SCHEMA,
+        diagnostic="stage pack schema is invalid",
+    )
+
+
 def _validate_verification_schema(verification: Any) -> None:
-    if not _matches_exact_schema(verification, _VERIFICATION_SCHEMA):
-        raise ValueError("stage pack verification schema is invalid")
+    _validate_exact_schema(
+        verification,
+        _VERIFICATION_SCHEMA,
+        diagnostic="stage pack verification schema is invalid",
+    )
 
 
 def _validate_verification_scalar_semantics(
@@ -628,6 +774,26 @@ def _canonical_assignment_files(
     return normalized
 
 
+def canonicalize_stage_pack_assignment(
+    assignment: Any,
+) -> dict[str, Any]:
+    """Snapshot an assignment after exact stage-pack file-key validation."""
+
+    diagnostic = "stage pack assignment files are invalid"
+    if (
+        type(assignment) is not dict
+        or any(type(key) is not str for key in assignment)
+    ):
+        raise ValueError(diagnostic)
+    files = _canonical_assignment_files(
+        assignment.get("files"),
+        diagnostic=diagnostic,
+    )
+    snapshot = copy.deepcopy(assignment)
+    snapshot["files"] = files
+    return snapshot
+
+
 def _normalize_runtime(runtime: Any) -> dict[str, Any]:
     if not isinstance(runtime, dict):
         raise ValueError("stage pack runtime identity must be an object")
@@ -693,9 +859,8 @@ def _validate_manifest_component_aliases(aliases: Any) -> None:
 def _validate_authoritative_assignment(
     assignment: dict[str, Any], manifest: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    if not isinstance(assignment, dict):
-        raise ValueError("assignment must be an object")
-    assignment_files = _canonical_assignment_files(assignment.get("files"))
+    assignment = canonicalize_stage_pack_assignment(assignment)
+    assignment_files = assignment["files"]
     _validate_manifest_component_aliases(manifest.get("component_aliases"))
     try:
         _validate_manifest_component_aliases(assignment.get("component_aliases"))
@@ -935,8 +1100,11 @@ def compile_stage_pack(
 
 
 def _validate_pack_shape(pack: dict[str, Any]) -> list[dict[str, Any]]:
+    if type(pack) is not dict or any(type(key) is not str for key in pack):
+        raise ValueError("stage pack schema is invalid")
     if set(pack) != _PACK_FIELDS:
         raise ValueError("stage pack fields do not match the v1 contract")
+    _validate_pack_schema(pack)
     if pack.get("protocol") != STAGE_PACK_PROTOCOL:
         raise ValueError("unsupported stage pack protocol")
     if pack.get("route_ready") is not False:
