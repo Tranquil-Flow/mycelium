@@ -1049,6 +1049,66 @@ def test_collection_rejects_invalid_alias_schema_without_raw_type_errors(
 
 
 @pytest.mark.parametrize(
+    "aliases",
+    (
+        {1: "input_embedding", "classifier": "input_embedding"},
+        {"classifier": 1, "pooler": "input_embedding"},
+        {_StrictStrCollision("classifier"): "input_embedding"},
+        {"classifier": _StrictStrCollision("input_embedding")},
+        {"": "input_embedding"},
+        {"classifier": ""},
+        {"classifier": "pooler", "pooler": "input_embedding"},
+        {"classifier": "pooler", "pooler": "classifier"},
+        {"classifier": "classifier"},
+    ),
+    ids=(
+        "mixed-non-string-source",
+        "mixed-non-string-target",
+        "source-str-subclass",
+        "target-str-subclass",
+        "empty-source",
+        "empty-target",
+        "alias-chain",
+        "alias-cycle",
+        "self-alias",
+    ),
+)
+@pytest.mark.parametrize(
+    "validation_path",
+    ("compile", "verify", "collection"),
+)
+def test_alias_schema_is_validated_before_digest_or_ordering_operations(
+    tmp_path: Path,
+    aliases: dict[Any, Any],
+    validation_path: str,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    packs = [
+        compile_stage_pack(assignment, manifest, report)
+        for assignment, report in zip(assignments, reports, strict=True)
+    ]
+    manifest["component_aliases"] = copy.deepcopy(aliases)
+
+    with pytest.raises(ValueError) as raised:
+        if validation_path == "compile":
+            compile_stage_pack(assignments[0], manifest, reports[0])
+        elif validation_path == "verify":
+            verify_stage_pack(
+                packs[0],
+                assignment=assignments[0],
+                manifest=manifest,
+            )
+        else:
+            sp.verify_stage_pack_collection(
+                packs,
+                assignments=assignments,
+                manifest=manifest,
+            )
+
+    assert str(raised.value) == "manifest component aliases are invalid"
+
+
+@pytest.mark.parametrize(
     ("mutation", "error"),
     [
         (lambda pack: pack.__setitem__("deployment_epoch", 8), "assignment"),
@@ -1177,9 +1237,13 @@ def test_verifier_rejects_missing_assigned_tensor_even_with_matching_file_digest
     assignment = copy.deepcopy(assignments[1])
     artifact_record = pack["artifacts"][1]
     artifact = Path(pack["artifact_root"]) / artifact_record["relative_path"]
-    _write_safetensors(artifact, ["bert.encoder.layer.2.attention.self.query.weight"])
+    replacement_tensor_keys = [
+        "bert.encoder.layer.2.attention.self.query.weight"
+    ]
+    _write_safetensors(artifact, replacement_tensor_keys)
     artifact_record["size_bytes"] = artifact.stat().st_size
     artifact_record["content_digest"] = "sha256:" + _sha(artifact)
+    artifact_record["tensor_keys"] = replacement_tensor_keys
     for manifest_file in manifest["files"]:
         if manifest_file["path"] == artifact_record["upstream_path"]:
             manifest_file["size_bytes"] = artifact_record["size_bytes"]
@@ -1294,6 +1358,9 @@ def test_loader_report_is_bound_to_pack_and_assignment(tmp_path: Path) -> None:
         "verified-file-relative-path-str-subclass",
         "verified-file-digest-str-subclass",
         "verified-file-size-float",
+        "verified-file-tensor-keys-list-subclass",
+        "verified-file-tensor-key-str-subclass",
+        "verified-file-tensor-count-float",
         "verified-tensor-keys-list-subclass",
         "verified-tensor-key-str-subclass",
         "tensor-file-map-subclass",
@@ -1367,6 +1434,15 @@ def test_redigested_verification_rejects_exact_type_collisions(
     elif collision == "verified-file-size-float":
         record = verification["verified_files"][0]
         record["size_bytes"] = float(record["size_bytes"])
+    elif collision == "verified-file-tensor-keys-list-subclass":
+        record = verification["verified_files"][0]
+        record["tensor_keys"] = _StrictListCollision(record["tensor_keys"])
+    elif collision == "verified-file-tensor-key-str-subclass":
+        record = verification["verified_files"][0]
+        record["tensor_keys"][0] = _StrictStrCollision(record["tensor_keys"][0])
+    elif collision == "verified-file-tensor-count-float":
+        record = verification["verified_files"][0]
+        record["tensor_count"] = float(record["tensor_count"])
     elif collision == "verified-tensor-keys-list-subclass":
         verification["verified_tensor_keys"] = _StrictListCollision(
             verification["verified_tensor_keys"]
@@ -1448,6 +1524,130 @@ def test_redigested_verification_rejects_semantic_cross_link_drift(
     )
 
     with pytest.raises(ValueError, match=r"^stage pack verification evidence is invalid$"):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+def test_redigested_verification_rejects_exact_tensor_file_ownership_swap(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    owners = verification["tensor_file_map"]
+    left = next(key for key, path in owners.items() if path == "a.safetensors")
+    right = next(key for key, path in owners.items() if path == "b.safetensors")
+    owners[left], owners[right] = owners[right], owners[left]
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification evidence is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+def test_redigested_verification_rejects_balanced_file_count_redistribution(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    left, right = verification["verified_files"]
+    left["tensor_count"] -= 1
+    right["tensor_count"] += 1
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification evidence is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+def test_redigested_verification_rejects_file_count_and_overfetch_inflation(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    verification["verified_files"][0]["tensor_count"] += 1
+    verification["overfetched_tensor_count"] += 1
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification evidence is invalid$",
+    ):
+        sp.validate_stage_pack_evidence(
+            pack,
+            verification,
+            assignment=assignment,
+            manifest=manifest,
+        )
+
+
+def test_redigested_verification_rejects_verified_file_tensor_key_drift(
+    tmp_path: Path,
+) -> None:
+    manifest, assignments, reports, _ = _case(tmp_path)
+    assignment = assignments[1]
+    pack = compile_stage_pack(assignment, manifest, reports[1])
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    left, right = verification["verified_files"]
+    left["tensor_keys"][0], right["tensor_keys"][0] = (
+        right["tensor_keys"][0],
+        left["tensor_keys"][0],
+    )
+    left["tensor_keys"].sort()
+    right["tensor_keys"].sort()
+    verification["stage_pack_verification_digest"] = sp._verification_digest_for(
+        verification
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^stage pack verification file evidence is invalid$",
+    ):
         sp.validate_stage_pack_evidence(
             pack,
             verification,
@@ -1543,6 +1743,91 @@ def test_flat_local_adapter_report_loads_through_runtime_contract(
     ] == [
         pack["stage_pack_digest"] for pack in prepared.stage_packs
     ]
+
+
+def test_coherent_nested_upstream_path_loads_through_runtime_contract(
+    tmp_path: Path,
+) -> None:
+    from mycelium_qualification.physical_deployment import (
+        prepare_assignment_artifacts,
+    )
+    from runtime_loader import load_assignment_stage
+
+    prepared = prepare_assignment_artifacts(tmp_path)
+    manifest = copy.deepcopy(prepared.manifest)
+    assignment = copy.deepcopy(prepared.assignments[0])
+    upstream_report = copy.deepcopy(prepared.reports[0])
+    report_record = upstream_report["verified_files"][0]
+    actual_local_path = Path(report_record["local_path"])
+    old_upstream_path = report_record["path"]
+    nested_upstream_path = f"nested/snapshot/{old_upstream_path}"
+    nested_local_path = actual_local_path.parent / nested_upstream_path
+    nested_local_path.parent.mkdir(parents=True)
+    actual_local_path.replace(nested_local_path)
+
+    for record in manifest["files"]:
+        if record["path"] == old_upstream_path:
+            record["path"] = nested_upstream_path
+    for files in (
+        *manifest["layer_files"].values(),
+        *manifest["component_files"].values(),
+    ):
+        files[:] = [
+            nested_upstream_path if path == old_upstream_path else path
+            for path in files
+        ]
+    _refresh_manifest_digest(manifest)
+    manifest_digest = mm.manifest_digest_ref(manifest)
+
+    assignment["manifest_digest"] = manifest_digest
+    assignment["files"][0]["path"] = nested_upstream_path
+    assignment["assignment_id"] = la.assignment_id_for(assignment)
+
+    upstream_report["assignment_id"] = assignment["assignment_id"]
+    upstream_report["manifest_digest"] = manifest_digest
+    report_record["path"] = nested_upstream_path
+    report_record["local_path"] = str(nested_local_path)
+    for field in (
+        "stage_pack",
+        "stage_pack_manifest",
+        "stage_pack_verification",
+        "stage_pack_digest",
+        "stage_pack_verification_digest",
+    ):
+        upstream_report.pop(field)
+
+    pack = compile_stage_pack(assignment, manifest, upstream_report)
+    verification = verify_stage_pack(
+        pack,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    loader_report = artifact_report_for_loader(
+        pack,
+        verification,
+        assignment=assignment,
+        manifest=manifest,
+    )
+    loaded = load_assignment_stage(
+        assignment,
+        loader_report,
+        load_generation=23,
+    )
+
+    assert assignment["files"][0]["path"] == nested_upstream_path
+    assert pack["artifacts"][0]["upstream_path"] == nested_upstream_path
+    assert pack["artifacts"][0]["relative_path"] == nested_upstream_path
+    assert verification["verified_files"][0]["path"] == nested_upstream_path
+    assert loader_report["verified_files"][0] == {
+        "path": nested_upstream_path,
+        "local_path": str(nested_local_path),
+        "size_bytes": report_record["size_bytes"],
+        "content_digest": report_record["content_digest"],
+        "cache_hit": True,
+        "tensor_count": report_record["tensor_count"],
+    }
+    assert loaded.proof["stage_pack_digest"] == pack["stage_pack_digest"]
+    assert loaded.proof["route_ready"] is False
 
 
 def test_stage_pack_digest_rejects_unknown_fields_nonfinite_and_duplicate_records(

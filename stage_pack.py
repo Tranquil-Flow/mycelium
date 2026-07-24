@@ -149,6 +149,7 @@ _VERIFICATION_SCHEMA: tuple[str, Any] = (
                     "relative_path": str,
                     "size_bytes": int,
                     "content_digest": str,
+                    "tensor_keys": ("list", str),
                     "tensor_count": int,
                 },
             ),
@@ -629,6 +630,10 @@ def _validate_manifest_component_aliases(aliases: Any) -> None:
             or not target
             for source, target in aliases.items()
         )
+        or any(
+            source == target or target in aliases
+            for source, target in aliases.items()
+        )
     ):
         raise ValueError("manifest component aliases are invalid")
 
@@ -636,6 +641,13 @@ def _validate_manifest_component_aliases(aliases: Any) -> None:
 def _validate_authoritative_assignment(
     assignment: dict[str, Any], manifest: dict[str, Any]
 ) -> None:
+    _validate_manifest_component_aliases(manifest.get("component_aliases"))
+    if not isinstance(assignment, dict):
+        raise ValueError("assignment must be an object")
+    try:
+        _validate_manifest_component_aliases(assignment.get("component_aliases"))
+    except ValueError:
+        raise ValueError("stage pack assignment ownership is invalid") from None
     _validate_deployment_epoch(assignment.get("deployment_epoch"))
     _canonical_optional_control_plane_binding(assignment)
     try:
@@ -813,13 +825,24 @@ def compile_stage_pack(
         except ValueError as exc:
             raise ValueError(f"verified local path escapes artifact root: {path}") from exc
         relative_posix = relative.as_posix()
-        _safe_relative_path(relative_posix)
+        relative_path = _safe_relative_path(relative_posix)
+        handle = _open_beneath(root, relative_path)
+        try:
+            tensor_keys = sorted(_read_safetensors_header(handle, path))
+        finally:
+            handle.close()
+        if (
+            type(record.get("tensor_count")) is not int
+            or record["tensor_count"] != len(tensor_keys)
+        ):
+            raise ValueError("artifact report verified tensor count is invalid")
         artifacts.append(
             {
                 "upstream_path": path,
                 "relative_path": relative_posix,
                 "size_bytes": upstream["size_bytes"],
                 "content_digest": upstream["content_digest"],
+                "tensor_keys": tensor_keys,
             }
         )
 
@@ -865,6 +888,10 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
     if pack.get("route_ready") is not False:
         raise ValueError("stage pack cannot claim route readiness")
     _validate_deployment_epoch(pack.get("deployment_epoch"))
+    try:
+        _validate_manifest_component_aliases(pack.get("component_aliases"))
+    except ValueError:
+        raise ValueError("stage pack assignment ownership is invalid") from None
     supplied = pack.get("stage_pack_digest")
     if not _SHA256_REF_RE.fullmatch(str(supplied or "")):
         raise ValueError("stage pack digest is invalid")
@@ -898,7 +925,6 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         raise ValueError("stage pack range is invalid")
     components = pack.get("components")
     component_keys = pack.get("component_tensor_keys")
-    component_aliases = pack.get("component_aliases")
     expected_keys = pack.get("expected_tensor_keys")
     prefixes = pack.get("expected_tensor_prefixes")
     if (
@@ -909,14 +935,6 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         or not all(isinstance(item, str) and item for item in components)
         or not isinstance(component_keys, dict)
         or set(component_keys) != set(components)
-        or type(component_aliases) is not dict
-        or any(
-            type(source) is not str
-            or not source
-            or type(target) is not str
-            or not target
-            for source, target in component_aliases.items()
-        )
         or not isinstance(expected_keys, list)
         or not expected_keys
         or expected_keys != sorted(expected_keys)
@@ -940,6 +958,56 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         owned.extend(keys)
     if sorted(set(owned)) != expected_keys:
         raise ValueError("stage pack assigned tensor keys are inconsistent")
+    artifacts = pack.get("artifacts")
+    if type(artifacts) is not list or not artifacts:
+        raise ValueError("stage pack artifact tensor ownership is invalid")
+    upstream_paths: set[str] = set()
+    relative_paths: set[str] = set()
+    artifact_tensor_keys: set[str] = set()
+    for artifact in artifacts:
+        upstream_path = (
+            artifact.get("upstream_path")
+            if type(artifact) is dict
+            else None
+        )
+        if type(upstream_path) is str and upstream_path in upstream_paths:
+            raise ValueError("duplicate artifact")
+        if (
+            type(artifact) is not dict
+            or set(artifact)
+            != {
+                "upstream_path",
+                "relative_path",
+                "size_bytes",
+                "content_digest",
+                "tensor_keys",
+            }
+            or type(artifact["upstream_path"]) is not str
+            or not artifact["upstream_path"]
+            or type(artifact["relative_path"]) is not str
+            or not artifact["relative_path"]
+            or type(artifact["size_bytes"]) is not int
+            or artifact["size_bytes"] <= 0
+            or type(artifact["content_digest"]) is not str
+            or _SHA256_REF_RE.fullmatch(artifact["content_digest"]) is None
+            or type(artifact["tensor_keys"]) is not list
+            or not artifact["tensor_keys"]
+            or artifact["tensor_keys"] != sorted(artifact["tensor_keys"])
+            or len(artifact["tensor_keys"]) != len(set(artifact["tensor_keys"]))
+            or any(
+                type(tensor_key) is not str or not tensor_key
+                for tensor_key in artifact["tensor_keys"]
+            )
+            or artifact["relative_path"] in relative_paths
+            or any(
+                tensor_key in artifact_tensor_keys
+                for tensor_key in artifact["tensor_keys"]
+            )
+        ):
+            raise ValueError("stage pack artifact tensor ownership is invalid")
+        upstream_paths.add(artifact["upstream_path"])
+        relative_paths.add(artifact["relative_path"])
+        artifact_tensor_keys.update(artifact["tensor_keys"])
 
 
 def _validate_against_assignment(pack: dict[str, Any], assignment: dict[str, Any]) -> None:
@@ -1190,6 +1258,7 @@ def verify_stage_pack(
             "relative_path",
             "size_bytes",
             "content_digest",
+            "tensor_keys",
         }:
             raise ValueError("stage pack artifact record is invalid")
         upstream_path = artifact.get("upstream_path")
@@ -1203,11 +1272,14 @@ def verify_stage_pack(
             raise ValueError(f"stage pack artifact does not match upstream file: {upstream_path}")
         size = artifact.get("size_bytes")
         digest = artifact.get("content_digest")
+        immutable_tensor_keys = artifact.get("tensor_keys")
         if (
             not isinstance(size, int)
             or isinstance(size, bool)
             or size <= 0
             or not _SHA256_REF_RE.fullmatch(str(digest or ""))
+            or type(immutable_tensor_keys) is not list
+            or not immutable_tensor_keys
         ):
             raise ValueError(f"stage pack artifact metadata is invalid: {upstream_path}")
         relative = _safe_relative_path(artifact.get("relative_path"))
@@ -1236,6 +1308,8 @@ def verify_stage_pack(
                 )
         finally:
             handle.close()
+        if sorted(names) != immutable_tensor_keys:
+            raise ValueError("stage pack artifact tensor ownership mismatch")
         total_header_names += len(names)
         for name in names:
             if name in all_tensor_files:
@@ -1247,6 +1321,7 @@ def verify_stage_pack(
                 "relative_path": str(relative),
                 "size_bytes": size,
                 "content_digest": digest,
+                "tensor_keys": sorted(names),
                 "tensor_count": len(names),
             }
         )
@@ -1316,6 +1391,7 @@ def verify_stage_pack_collection(
         raise ValueError("stage pack collection must match a non-empty assignment set")
     if not isinstance(manifest, dict):
         raise ValueError("manifest must be an object")
+    _validate_manifest_component_aliases(manifest.get("component_aliases"))
 
     entry_snapshot = copy.deepcopy(
         {
@@ -1555,6 +1631,7 @@ def _validate_verification_evidence(
             "relative_path": item["relative_path"],
             "size_bytes": item["size_bytes"],
             "content_digest": item["content_digest"],
+            "tensor_keys": item["tensor_keys"],
         }
         for item in pack["artifacts"]
     }
@@ -1565,7 +1642,12 @@ def _validate_verification_evidence(
             record["path"] not in expected_paths
             or {
                 field: record[field]
-                for field in ("relative_path", "size_bytes", "content_digest")
+                for field in (
+                    "relative_path",
+                    "size_bytes",
+                    "content_digest",
+                    "tensor_keys",
+                )
             }
             != expected_files.get(record["path"])
             for record in verified_files
@@ -1575,36 +1657,43 @@ def _validate_verification_evidence(
         raise ValueError("stage pack verification file evidence is invalid")
     tensor_map = verification.get("tensor_file_map")
     overfetch = verification.get("overfetched_tensor_count")
-    tensor_counts = {
-        record["path"]: record["tensor_count"] for record in verified_files
+    verified_by_relative = {
+        record["relative_path"]: record for record in verified_files
     }
-    mapped_counts = {
-        path: sum(mapped_path == path for mapped_path in tensor_map.values())
-        for path in expected_paths
+    expected_tensor_map: dict[str, str] = {}
+    for artifact in pack["artifacts"]:
+        record = verified_by_relative.get(artifact["relative_path"])
+        if record is None:
+            raise ValueError("stage pack verification evidence is invalid")
+        expected_tensor_map.update(
+            {tensor_key: record["path"] for tensor_key in artifact["tensor_keys"]}
+        )
+    selected_tensor_keys = {
+        tensor_key
+        for component_keys in pack["component_tensor_keys"].values()
+        for tensor_key in component_keys
     }
-    allowed_files_by_tensor: dict[str, set[str]] = {}
     try:
-        for layer, keys in manifest["tensor_keys_by_layer"].items():
-            layer_files = set(manifest["layer_files"][layer])
-            for key in keys:
-                allowed_files_by_tensor.setdefault(key, set()).update(layer_files)
-        for component, keys in manifest["component_tensor_keys"].items():
-            component_files = set(manifest["component_files"][component])
-            for key in keys:
-                allowed_files_by_tensor.setdefault(key, set()).update(component_files)
-    except (KeyError, TypeError):
+        expected_selected_map = {
+            tensor_key: expected_tensor_map[tensor_key]
+            for tensor_key in pack["expected_tensor_keys"]
+        }
+    except KeyError:
         raise ValueError("stage pack verification evidence is invalid") from None
+    derived_tensor_count = len(expected_tensor_map)
+    derived_overfetch = derived_tensor_count - len(selected_tensor_keys)
     if (
-        set(tensor_map) != set(pack["expected_tensor_keys"])
+        selected_tensor_keys != set(pack["expected_tensor_keys"])
+        or tensor_map != expected_selected_map
         or any(
-            path not in expected_paths
-            or path not in allowed_files_by_tensor.get(key, set())
-            for key, path in tensor_map.items()
+            record["tensor_count"] != len(record["tensor_keys"])
+            for record in verified_files
         )
-        or any(
-            mapped_counts[path] > tensor_counts[path] for path in expected_paths
-        )
-        or sum(tensor_counts.values())
+        or sum(record["tensor_count"] for record in verified_files)
+        != derived_tensor_count
+        or derived_overfetch < 0
+        or overfetch != derived_overfetch
+        or derived_tensor_count
         != verification["verified_tensor_count"] + overfetch
         or sum(record["size_bytes"] for record in verified_files)
         != verification["expected_bytes"]
