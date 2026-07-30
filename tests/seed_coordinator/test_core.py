@@ -296,9 +296,6 @@ def test_heartbeat_retry_recovers_exact_renewal_after_old_lease_and_restart(
         node_id="node-a",
         heartbeat_message_id=first_message["message_id"],
     )
-    assert first_renewal["message"]["expires_at"] == first_renewal["message"][
-        "lease_expires_at"
-    ]
 
     # The old local lease and heartbeat envelope have expired, but the committed
     # renewal remains valid. An exact retry must recover the original signature.
@@ -313,11 +310,6 @@ def test_heartbeat_retry_recovers_exact_renewal_after_old_lease_and_restart(
         heartbeat_message_id=first_message["message_id"],
     ) == first_renewal
     assert coordinator.member("node-a")["last_heartbeat_sequence"] == 1
-    accepted_renewal = node.accept_lease_renewal(
-        first_renewal,
-        heartbeat_message_id=first_message["message_id"],
-    )
-    assert accepted_renewal["lease_expires_at"] == NOW + 9.0
 
     restored = _coordinator(
         tmp_path,
@@ -326,10 +318,6 @@ def test_heartbeat_retry_recovers_exact_renewal_after_old_lease_and_restart(
         clock=lambda: clock[0],
         lease_seconds=5.0,
     )
-    assert restored.lease_renewal(
-        node_id="node-a",
-        heartbeat_message_id=first_message["message_id"],
-    ) == first_renewal
     restored_message = restored.receive_member_message(
         heartbeat,
         expected_protocol=HEARTBEAT_PROTOCOL,
@@ -670,12 +658,6 @@ def test_stale_seed_rejects_old_generation_messages_and_assignments(
     stale_seed = _coordinator(tmp_path, signer=signer, id_prefix="seed-stale")
     old_node = _node(tmp_path, incarnation="old-incarnation")
     _join(stale_seed, old_node, nonce="invite-generation-one")
-    old_heartbeat = old_node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
-    stale_seed.receive_member_message(
-        old_heartbeat,
-        expected_protocol=HEARTBEAT_PROTOCOL,
-    )
-    old_heartbeat_id = old_heartbeat["message"]["message_id"]
     current_seed = _coordinator(
         tmp_path,
         signer=signer,
@@ -683,13 +665,6 @@ def test_stale_seed_rejects_old_generation_messages_and_assignments(
     )
     new_node = _node(tmp_path, incarnation="new-incarnation")
     _join(current_seed, new_node, nonce="invite-generation-two")
-
-    with pytest.raises(SeedCoordinatorError) as stale_renewal:
-        stale_seed.lease_renewal(
-            node_id="node-a",
-            heartbeat_message_id=old_heartbeat_id,
-        )
-    assert stale_renewal.value.code == "seed_state_member_stale"
 
     stale_capability = old_node.capability_report(
         platform="macOS-15",

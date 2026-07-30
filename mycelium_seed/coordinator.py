@@ -537,9 +537,6 @@ class SeedCoordinator:
                 try:
                     committed = self._state.load_heartbeat_renewal(
                         node_id=member.node_id,
-                        endpoint_id=member.endpoint_id,
-                        verification_key_digest=member.verification_key_digest,
-                        incarnation=member.incarnation,
                         generation=member.generation,
                         heartbeat_message_id=message["message_id"],
                         request_envelope_digest=request_digest,
@@ -580,8 +577,7 @@ class SeedCoordinator:
                 if now >= member.lease_expires_at:
                     raise SeedCoordinatorError("seed_member_lease_expired")
 
-            if expected_protocol != HEARTBEAT_PROTOCOL:
-                self._ensure_not_replayed(member, message["message_id"])
+            self._ensure_not_replayed(member, message["message_id"])
             if expected_protocol == HEARTBEAT_PROTOCOL:
                 sequence = int(message["heartbeat_sequence"])
                 if sequence <= member.last_heartbeat_sequence:
@@ -685,7 +681,6 @@ class SeedCoordinator:
             member = self._members.get(node_id)
             if member is None:
                 raise SeedCoordinatorError("seed_member_unknown")
-            self._ensure_current_member(member)
             envelope = member.latest_messages.get(LEASE_RENEWAL_PROTOCOL)
             if (
                 envelope is None

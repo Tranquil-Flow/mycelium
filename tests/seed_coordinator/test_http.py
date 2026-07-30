@@ -10,7 +10,7 @@ import threading
 import pytest
 
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
-from mycelium_membership import LEASE_RENEWAL_PROTOCOL
+from mycelium_membership import CAPABILITY_REPORT_PROTOCOL, LEASE_RENEWAL_PROTOCOL
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator

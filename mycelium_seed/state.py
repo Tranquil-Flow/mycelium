@@ -311,38 +311,22 @@ class SqliteSeedState:
         self,
         *,
         node_id: str,
-        endpoint_id: str,
-        verification_key_digest: str,
-        incarnation: str,
         generation: int,
         heartbeat_message_id: str,
         request_envelope_digest: str,
     ) -> dict[str, Any] | None:
-        """Return an exact committed renewal for the current bound member."""
+        """Return an exact committed renewal or reject changed retry bytes."""
 
         connection = self._connect()
         try:
             row = connection.execute(
                 """
-                SELECT renewal.request_envelope_digest, renewal.renewal_json
-                FROM seed_heartbeat_renewals AS renewal
-                JOIN seed_members AS member
-                  ON member.node_id = renewal.node_id
-                 AND member.generation = renewal.generation
-                WHERE renewal.node_id = ? AND renewal.generation = ?
-                  AND renewal.heartbeat_message_id = ?
-                  AND member.endpoint_id = ?
-                  AND member.verification_key_digest = ?
-                  AND member.incarnation = ?
+                SELECT request_envelope_digest, renewal_json
+                FROM seed_heartbeat_renewals
+                WHERE node_id = ? AND generation = ?
+                  AND heartbeat_message_id = ?
                 """,
-                (
-                    node_id,
-                    generation,
-                    heartbeat_message_id,
-                    endpoint_id,
-                    verification_key_digest,
-                    incarnation,
-                ),
+                (node_id, generation, heartbeat_message_id),
             ).fetchone()
             if row is None:
                 return None
@@ -369,13 +353,9 @@ class SqliteSeedState:
         try:
             row = connection.execute(
                 """
-                SELECT renewal.renewal_json
-                FROM seed_heartbeat_renewals AS renewal
-                JOIN seed_members AS member
-                  ON member.node_id = renewal.node_id
-                 AND member.generation = renewal.generation
-                WHERE renewal.node_id = ? AND renewal.generation = ?
-                  AND renewal.heartbeat_message_id = ?
+                SELECT renewal_json FROM seed_heartbeat_renewals
+                WHERE node_id = ? AND generation = ?
+                  AND heartbeat_message_id = ?
                 """,
                 (node_id, generation, heartbeat_message_id),
             ).fetchone()
@@ -412,6 +392,21 @@ class SqliteSeedState:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT request_envelope_digest, renewal_json
+                FROM seed_heartbeat_renewals
+                WHERE node_id = ? AND generation = ?
+                  AND heartbeat_message_id = ?
+                """,
+                (node_id, generation, heartbeat_message_id),
+            ).fetchone()
+            if existing is not None:
+                if existing["request_envelope_digest"] != request_envelope_digest:
+                    raise SeedStateError("seed_heartbeat_retry_mismatch")
+                connection.commit()
+                return self._decode_acceptance(existing["renewal_json"])
+
             current = connection.execute(
                 """
                 SELECT endpoint_id, verification_key_digest, incarnation,
@@ -429,21 +424,6 @@ class SqliteSeedState:
                 or int(current["generation"]) != generation
             ):
                 raise SeedStateError("seed_state_member_stale")
-
-            existing = connection.execute(
-                """
-                SELECT request_envelope_digest, renewal_json
-                FROM seed_heartbeat_renewals
-                WHERE node_id = ? AND generation = ?
-                  AND heartbeat_message_id = ?
-                """,
-                (node_id, generation, heartbeat_message_id),
-            ).fetchone()
-            if existing is not None:
-                if existing["request_envelope_digest"] != request_envelope_digest:
-                    raise SeedStateError("seed_heartbeat_retry_mismatch")
-                connection.commit()
-                return self._decode_acceptance(existing["renewal_json"])
             if heartbeat_sequence <= int(current["last_heartbeat_sequence"]):
                 raise SeedStateError("seed_state_member_conflict")
 
