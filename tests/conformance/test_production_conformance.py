@@ -17,6 +17,7 @@ from mycelium_conformance.trace_generator import (
 from mycelium_router.contracts import (
     FailureReport,
     HopHeader,
+    ManifestLocked,
     RouterConfig,
     TokenEvent,
 )
@@ -32,6 +33,7 @@ from mycelium_router.fakes import (
     SequenceIdSource,
 )
 from mycelium_router.idempotency import hop_idempotency_key
+from mycelium_router.payloads import decode_token_ids
 from mycelium_router.router import Router
 from test_router_contracts import graph_fixture
 from test_router_inprocess_mesh import three_device_graph
@@ -92,7 +94,7 @@ class ProductionTraceDriver:
         self.clock = ManualClock()
         self.capacity = FakeCapacityPort(clock=self.clock)
         self.runtime = FakeRuntimePort()
-        self.transport = FakeTransportPort()
+        self.mesh = InProcessMesh()
         self.sink = InMemoryClientSink()
         self.request = request_fixture(
             request_id=REQUEST_ID,
@@ -100,17 +102,33 @@ class ProductionTraceDriver:
             max_new_tokens=2,
             expected_new_tokens=2,
         )
-        self.router = Router(
-            node_id="node-a",
-            topology=FakeTopologyProvider(self.graph),
-            device_states=FakeDeviceStateProvider(state_table()),
-            capacity=self.capacity,
-            runtime=self.runtime,
-            transport=self.transport,
-            clock=self.clock,
-            id_source=SequenceIdSource(),
-            config=RouterConfig(maximum_recovery_attempts=1),
+        node_ids = sorted(
+            {
+                placement.node_id
+                for stage in self.graph.stages
+                for placement in stage.placements
+            }
         )
+        self.routers: dict[str, Router] = {}
+        self.runtimes: dict[str, FakeRuntimePort] = {}
+        for node_id in node_ids:
+            node_runtime = self.runtime if node_id == "node-a" else FakeRuntimePort()
+            self.runtimes[node_id] = node_runtime
+            router = Router(
+                node_id=node_id,
+                topology=FakeTopologyProvider(self.graph),
+                device_states=FakeDeviceStateProvider(state_table()),
+                capacity=self.capacity,
+                runtime=node_runtime,
+                transport=self.mesh.transport_for(node_id),
+                clock=self.clock,
+                id_source=SequenceIdSource(),
+                config=RouterConfig(maximum_recovery_attempts=1),
+            )
+            self.mesh.register_router(node_id, router)
+            self.routers[node_id] = router
+        self.router = self.routers["node-a"]
+        self.transport = self.mesh.transport_for("node-a")
         self.manifests: dict[int, object] = {}
 
     def apply(
@@ -135,7 +153,7 @@ class ProductionTraceDriver:
 
     def _admit(self) -> None:
         try:
-            self.router.admit(
+            self.router.start_distributed_prefill(
                 self.request,
                 self.sink,
                 excluded_placements=frozenset({"node-b-stage-000"}),
@@ -504,8 +522,70 @@ def test_recovery_runtime_receives_prompt_plus_tokens_as_explicit_prefill():
         item for item in driver.runtime.executed if item.phase == "RECOVERY_PREFILL"
     ]
     assert recovery_items
-    assert recovery_items[0].payload == (11, 12, 101)
+    assert decode_token_ids(recovery_items[0].payload) == (11, 12, 101)
     assert driver.router.get_request(REQUEST_ID).manifest.path_attempt == 1
+
+
+def test_failed_recovery_manifest_registration_cleans_up_once_per_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver = ProductionTraceDriver()
+    driver._admit()
+    record = driver.router.get_request(REQUEST_ID)
+    failed_manifest = record.manifest
+    failed_hop = failed_manifest.ordered_hops[1]
+
+    driver.capacity.release(
+        tuple(hop.reservation_id for hop in failed_manifest.ordered_hops)
+    )
+    driver.router.entry.relay.release_path(
+        failed_manifest.path_id,
+        path_attempt=failed_manifest.path_attempt,
+    )
+    record.state_machine.begin_recovery(path_attempt=1)
+    new_graph, new_manifest, recovery_build = driver.router.entry._build_path(
+        record.request,
+        path_attempt=1,
+        excluded_placements=frozenset({failed_hop.placement_id}),
+        excluded_edges=frozenset(),
+        excluded_devices=frozenset(),
+    )
+    with record.lock:
+        record.graph = new_graph
+        record.manifest = new_manifest
+        record.cleaned_up = False
+
+    final_placement = new_manifest.ordered_hops[-1].placement_id
+    final_node_id = next(
+        placement.node_id
+        for stage in new_graph.stages
+        for placement in stage.placements
+        if placement.placement_id == final_placement
+    )
+    monkeypatch.setattr(
+        driver.router.entry.relay,
+        "register_path_with_generation",
+        lambda *_args, **_kwargs: None,
+    )
+
+    accepted = driver.router.receive_manifest_locked(
+        ManifestLocked(
+            request_id=REQUEST_ID,
+            path_id=new_manifest.path_id,
+            path_attempt=new_manifest.path_attempt,
+            manifest=new_manifest,
+            build=recovery_build,
+        ),
+        source_node_id=final_node_id,
+    )
+
+    assert accepted is False
+    failed = driver.router.get_request(REQUEST_ID)
+    assert failed.status == "FAILED"
+    assert failed.cleaned_up is True
+    assert failed.last_failure_reason == "recovery_manifest_registration_failed"
+    assert driver.runtime.cancel_calls == ["path-1", "path-2"]
+    assert len(driver.capacity.release_calls) == 2
 
 
 def _registered_hop_fixture(*, runtime=None):

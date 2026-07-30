@@ -32,7 +32,9 @@ from mycelium_request_gateway.backend import RouterSessionBackend
 from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
 from mycelium_request_gateway.service import RequestGatewayService
 from mycelium_router.contracts import (
+    FailureReport,
     HopWorkItem,
+    RequestContext,
     RouterConfig,
     RuntimeBatch,
     RuntimeResult,
@@ -222,6 +224,27 @@ class GenerationRotationEvidence:
     error_code: str
     old_generation: int
     new_generation: int
+    pending_deliveries: int
+    local_evidence_only: bool = LOCAL_EVIDENCE_ONLY
+    route_ready: bool = ROUTE_READY
+
+
+@dataclass(frozen=True)
+class RecoveryEvidence:
+    old_process_id: int
+    new_process_id: int
+    old_endpoint_id: str
+    new_endpoint_id: str
+    old_peer_generation: int
+    new_peer_generation: int
+    old_process_exited: bool
+    replacement_process_started: bool
+    stale_generation_rejected: bool
+    recovery_phase: str
+    recovery_prefill_observed: bool
+    generated_token_ids_before_failure: tuple[int, ...]
+    generated_token_ids_after_recovery: tuple[int, ...]
+    final_token_ids: tuple[int, ...]
     pending_deliveries: int
     local_evidence_only: bool = LOCAL_EVIDENCE_ONLY
     route_ready: bool = ROUTE_READY
@@ -573,6 +596,16 @@ class _PausedAfterNativeReceive(IrohTransport):
         return delivery
 
 
+class _CaptureSink:
+    def __init__(self) -> None:
+        self.token_ids: list[int] = []
+        self.token_indexes: list[int] = []
+
+    def emit(self, token_index: int, token_id: int) -> None:
+        self.token_indexes.append(token_index)
+        self.token_ids.append(token_id)
+
+
 class _TokenProbe:
     def __init__(self) -> None:
         self.tokens: list[TokenEvent] = []
@@ -605,6 +638,56 @@ def _local_three_stage_graph():
     )
 
 
+def _replacement_graph(graph):
+    old = next(
+        placement
+        for placement in graph.stages[1].placements
+        if placement.node_id == "node-c"
+    )
+    replacement = replace(
+        old,
+        placement_id=f"{old.placement_id}-replacement",
+        assignment_id=f"{old.assignment_id}-replacement",
+        load_proof_digest=f"{old.load_proof_digest}-replacement",
+        runtime_endpoint=f"{old.runtime_endpoint}-replacement",
+    )
+    replacement_stage = replace(
+        graph.stages[1],
+        placements=tuple(
+            placement
+            for placement in graph.stages[1].placements
+            if placement.placement_id != old.placement_id
+        )
+        + (replacement,),
+    )
+    replacement_edges = tuple(
+        replace(
+            edge,
+            edge_id=f"{edge.edge_id}-replacement",
+            from_placement_id=(
+                replacement.placement_id
+                if edge.from_placement_id == old.placement_id
+                else edge.from_placement_id
+            ),
+            to_placement_id=(
+                replacement.placement_id
+                if edge.to_placement_id == old.placement_id
+                else edge.to_placement_id
+            ),
+        )
+        if old.placement_id
+        in {edge.from_placement_id, edge.to_placement_id}
+        else edge
+        for edge in graph.edges
+    )
+    return replace(
+        graph,
+        topology_version=graph.topology_version + 1,
+        stages=(graph.stages[0], replacement_stage, graph.stages[2]),
+        edges=replacement_edges,
+    )
+
+
 def _binding(node_id: str, sidecar: _RunningSidecar, *, generation: int = 1):
     return PeerBinding(
         node_id=node_id,
@@ -621,12 +704,13 @@ def _make_transport(
     peer: _RunningSidecar,
     *,
     transport_type: type[IrohTransport] = IrohTransport,
+    peer_generation: int = 1,
 ):
     return transport_type(
         node_id=node_id,
         socket_path=sidecar.socket_path,
         bootstrap_secret=sidecar.secret,
-        peer=_binding(peer_node_id, peer),
+        peer=_binding(peer_node_id, peer, generation=peer_generation),
         expected_endpoint_id=sidecar.ready["endpoint_id"],
         delivery_timeout_seconds=3.0,
         poll_interval_seconds=0.02,
@@ -895,6 +979,238 @@ def run_cancellation_probe(native_binary: Path) -> CancellationEvidence:
                 service.close()
         finally:
             topology.close()
+
+
+def _wait_for_token_count(sink: _CaptureSink, expected: int, label: str) -> None:
+    deadline = time.monotonic() + 5.0
+    while len(sink.token_ids) < expected and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if len(sink.token_ids) < expected:
+        raise AssertionError(f"{label}_token_timeout")
+
+
+def run_recovery_probe(native_binary: Path) -> RecoveryEvidence:
+    topology = _Topology(native_binary)
+    replacement_sidecar: _RunningSidecar | None = None
+    replacement_transport: IrohTransport | None = None
+    decode_thread: threading.Thread | None = None
+    try:
+        request = RequestContext(
+            request_id=REQUEST_ID,
+            prompt_token_ids=(11, 12, 13, 14),
+            max_new_tokens=5,
+            expected_new_tokens=5,
+            qos_class="interactive",
+            admitted_at=0.0,
+            target_ttft_ms=1_000.0,
+            target_tpot_ms=1_000.0,
+            target_tokens_per_second=1.0,
+            sampling_seed=0,
+            generation_config_digest="sha256:" + "a" * 64,
+        )
+        sink = _CaptureSink()
+        request_id = topology.router_a.start_distributed_prefill(
+            request,
+            sink,
+            excluded_placements=frozenset({"node-b-stage-000"}),
+        )
+        if request_id != REQUEST_ID:
+            raise AssertionError("recovery_request_id_changed")
+        _wait_for_token_count(sink, 1, "recovery_prefill")
+        if not topology.router_a.decode_one_distributed(request_id):
+            raise AssertionError("initial_decode_not_dispatched")
+        _wait_for_token_count(sink, 2, "initial_decode")
+
+        old_manifest = topology.router_a.get_request(request_id).manifest
+        old_remote_hop = next(
+            hop
+            for hop in old_manifest.ordered_hops
+            if hop.placement_id.startswith("node-c-stage-001")
+        )
+        before = tuple(sink.token_ids)
+        old_process_id = topology.second_sidecar.pid
+        old_endpoint_id = topology.second_sidecar.ready["endpoint_id"]
+        old_generation = topology.first.peer_binding.generation
+        topology.second_sidecar.stop()
+        old_process_exited = topology.second_sidecar.process.poll() is not None
+
+        dispatch_outcome: list[BaseException | bool] = []
+
+        def dispatch_to_dead_peer() -> None:
+            try:
+                dispatch_outcome.append(
+                    topology.router_a.decode_one_distributed(request_id)
+                )
+            except BaseException as error:
+                dispatch_outcome.append(error)
+
+        decode_thread = threading.Thread(
+            target=dispatch_to_dead_peer,
+            name="request-iroh-recovery-dead-peer",
+        )
+        decode_thread.start()
+        deadline = time.monotonic() + 2.0
+        while not topology.first._pending and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if not topology.first._pending:
+            raise AssertionError("dead_peer_delivery_not_observed")
+
+        updated_graph = _replacement_graph(topology.graph)
+        replacement_sidecar = _RunningSidecar(
+            topology.root / "second-replacement",
+            bytes(range(64, 96)),
+        )
+        replacement_stage_map = {
+            placement.placement_id: stage_index
+            for stage_index, stage in enumerate(updated_graph.stages)
+            for placement in stage.placements
+        }
+        replacement_runtime = _DeterministicStageRuntime(
+            stage_by_placement=replacement_stage_map,
+            final_stage_index=2,
+            executions=topology.executions,
+        )
+        replacement_transport = _make_transport(
+            "node-c",
+            replacement_sidecar,
+            "node-a",
+            topology.first_sidecar,
+            peer_generation=old_generation + 1,
+        )
+        replacement_router = Router(
+            node_id="node-c",
+            topology=FakeTopologyProvider(updated_graph),
+            device_states=FakeDeviceStateProvider(
+                state_table(slow_b_bandwidth=True)
+            ),
+            capacity=topology.capacity,
+            runtime=replacement_runtime,
+            transport=replacement_transport,
+            clock=topology.clock,
+            id_source=SequenceIdSource(),
+            config=RouterConfig(),
+        )
+        replacement_transport.bind_router(replacement_router)
+        replacement_transport.start()
+        replacement_binding = _binding(
+            "node-c",
+            replacement_sidecar,
+            generation=old_generation + 1,
+        )
+        topology.first.rotate_peer(replacement_binding)
+        decode_thread.join(timeout=5.0)
+        if decode_thread.is_alive():
+            raise AssertionError("stale_delivery_did_not_finish_after_rotation")
+        stale_generation_rejected = bool(
+            dispatch_outcome
+            and isinstance(dispatch_outcome[0], IrohTransportError)
+            and (
+                dispatch_outcome[0].code == "peer_rotated"
+                or (
+                    dispatch_outcome[0].code == "delivery_not_confirmed"
+                    and dispatch_outcome[0].detail == "peer_rotated"
+                )
+            )
+        )
+        if not stale_generation_rejected:
+            raise AssertionError(f"stale_delivery_not_rejected:{dispatch_outcome!r}")
+
+        topology.second.close()
+        topology.router_a.entry.topology.set(updated_graph)
+        topology.router_a.entry.device_states.set(
+            state_table(slow_b_bandwidth=True)
+        )
+        failure = FailureReport(
+            request_id=request_id,
+            path_id=old_manifest.path_id,
+            path_attempt=old_manifest.path_attempt,
+            token_index=len(before),
+            scope="PLACEMENT",
+            reason="peer_process_exited",
+            placement_id=old_remote_hop.placement_id,
+            node_id="node-c",
+        )
+        if not topology.router_a.receive_failure_report(failure):
+            failed_record = topology.router_a.get_request(request_id)
+            raise AssertionError(
+                "router_recovery_rejected:"
+                + repr(
+                    {
+                        "status": failed_record.status,
+                        "last_failure_reason": failed_record.last_failure_reason,
+                        "path_attempt": failed_record.manifest.path_attempt,
+                        "hops": tuple(
+                            hop.placement_id
+                            for hop in failed_record.manifest.ordered_hops
+                        ),
+                        "entry_fatal": (
+                            None
+                            if topology.first.fatal_error is None
+                            else topology.first.fatal_error.code
+                        ),
+                        "replacement_fatal": (
+                            None
+                            if replacement_transport.fatal_error is None
+                            else replacement_transport.fatal_error.code
+                        ),
+                        "entry_trace": topology.first.outbound_trace,
+                        "replacement_trace": replacement_transport.outbound_trace,
+                        "phases": tuple(
+                            item.phase for item in topology.executions.snapshot()
+                        ),
+                    }
+                )
+            )
+        _wait_for_token_count(sink, len(before) + 1, "recovery")
+
+        topology.graph = updated_graph
+        topology.runtime_c = replacement_runtime
+        topology.router_c = replacement_router
+        topology.second = replacement_transport
+        topology.second_sidecar = replacement_sidecar
+        replacement_transport = None
+        replacement_sidecar = None
+
+        while len(sink.token_ids) < request.max_new_tokens:
+            previous = len(sink.token_ids)
+            if not topology.router_a.decode_one_distributed(request_id):
+                raise AssertionError("post_recovery_decode_not_dispatched")
+            _wait_for_token_count(sink, previous + 1, "post_recovery_decode")
+
+        executions = topology.executions.snapshot()
+        recovery_prefills = tuple(
+            item for item in executions if item.phase == "RECOVERY_PREFILL"
+        )
+        final = tuple(sink.token_ids)
+        after = final[len(before) :]
+        return RecoveryEvidence(
+            old_process_id=old_process_id,
+            new_process_id=topology.second_sidecar.pid,
+            old_endpoint_id=old_endpoint_id,
+            new_endpoint_id=topology.second_sidecar.ready["endpoint_id"],
+            old_peer_generation=old_generation,
+            new_peer_generation=topology.first.peer_binding.generation,
+            old_process_exited=old_process_exited,
+            replacement_process_started=topology.second_sidecar.process.poll()
+            is None,
+            stale_generation_rejected=stale_generation_rejected,
+            recovery_phase="RECOVERY_PREFILL",
+            recovery_prefill_observed=bool(recovery_prefills),
+            generated_token_ids_before_failure=before,
+            generated_token_ids_after_recovery=after,
+            final_token_ids=final,
+            pending_deliveries=(
+                len(topology.first._pending) + len(topology.second._pending)
+            ),
+        )
+    finally:
+        if decode_thread is not None and decode_thread.is_alive():
+            decode_thread.join(timeout=5.0)
+        if replacement_transport is not None:
+            replacement_transport.close()
+        if replacement_sidecar is not None:
+            replacement_sidecar.stop()
+        topology.close()
 
 
 def run_generation_rotation_probe(native_binary: Path) -> GenerationRotationEvidence:

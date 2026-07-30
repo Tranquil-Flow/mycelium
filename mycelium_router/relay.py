@@ -568,7 +568,7 @@ class RelayEngine:
          return ProgressivePrefillResult("REJECTED", "invalid_idempotency_key")
       build = context.build
       if (
-         header.phase != "PREFILL"
+         header.phase not in {"PREFILL", "RECOVERY_PREFILL"}
          or header.request_id != context.request.request_id
          or header.path_id != build.path_id
          or header.path_attempt != build.path_attempt
@@ -639,8 +639,8 @@ class RelayEngine:
          request_id=context.request.request_id,
          path_id=build.path_id,
          path_attempt=build.path_attempt,
-         phase="PREFILL",
-         token_index=-1,
+         phase=header.phase,
+         token_index=header.token_index,
          hop_index=header.hop_index,
          placement_id=hop.placement_id,
          qos_class=context.request.qos_class,
@@ -650,12 +650,16 @@ class RelayEngine:
          payload=accepted_payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
          position=0,
-         terminal=self._is_terminal(context.request, "PREFILL", -1),
+         terminal=self._is_terminal(
+            context.request,
+            header.phase,
+            header.token_index,
+         ),
          lease_expires_at=hop.reservation_expires_at,
          batch_key=self._runtime_batch_key(
             graph=context.graph,
             placement=placement,
-            phase="PREFILL",
+            phase=header.phase,
             token_span=header.prefill_chunk_token_count,
          ),
       )
@@ -698,7 +702,7 @@ class RelayEngine:
             request_id=context.request.request_id,
             path_id=build.path_id,
             path_attempt=build.path_attempt,
-            token_index=-1,
+            token_index=header.token_index,
             scope=runtime_result.failure_scope or "PLACEMENT",
             reason=runtime_result.failure_reason or "runtime_failure",
             placement_id=hop.placement_id,
@@ -729,7 +733,7 @@ class RelayEngine:
                request_id=context.request.request_id,
                path_id=build.path_id,
                path_attempt=build.path_attempt,
-               token_index=-1,
+               token_index=header.token_index,
                scope="PLACEMENT",
                reason=f"manifest_lock_failed:{error}",
                placement_id=hop.placement_id,
@@ -774,7 +778,7 @@ class RelayEngine:
                request_id=context.request.request_id,
                path_id=build.path_id,
                path_attempt=build.path_attempt,
-               token_index=-1,
+               token_index=header.token_index,
                scope="PLACEMENT",
                reason="final_stage_missing_token",
                placement_id=hop.placement_id,
@@ -800,9 +804,17 @@ class RelayEngine:
                request_id=context.request.request_id,
                path_id=build.path_id,
                path_attempt=build.path_attempt,
-               token_index=0,
+               token_index=(
+                  header.token_index
+                  if header.phase == "RECOVERY_PREFILL"
+                  else 0
+               ),
                token_id=runtime_result.token_id,
-               sampling_counter=1,
+               sampling_counter=(
+                  header.token_index + 1
+                  if header.phase == "RECOVERY_PREFILL"
+                  else 1
+               ),
             )
             if runtime_result.token_id is not None
             else None
@@ -840,7 +852,7 @@ class RelayEngine:
             request_id=context.request.request_id,
             path_id=build.path_id,
             path_attempt=build.path_attempt,
-            token_index=-1,
+            token_index=header.token_index,
             scope="PLACEMENT",
             reason=f"route_extension_failed:{error}",
             placement_id=hop.placement_id,
@@ -874,8 +886,8 @@ class RelayEngine:
          request_id=context.request.request_id,
          path_id=updated.path_id,
          path_attempt=updated.path_attempt,
-         phase="PREFILL",
-         token_index=-1,
+         phase=header.phase,
+         token_index=header.token_index,
          hop_index=next_index,
          source_placement_id=hop.placement_id,
          destination_placement_id=next_hop.placement_id,
@@ -884,8 +896,8 @@ class RelayEngine:
             request_id=context.request.request_id,
             path_id=updated.path_id,
             path_attempt=updated.path_attempt,
-            phase="PREFILL",
-            token_index=-1,
+            phase=header.phase,
+            token_index=header.token_index,
             hop_index=next_index,
          ),
          prefill_chunk_token_count=header.prefill_chunk_token_count,
@@ -2089,11 +2101,14 @@ class RelayEngine:
          if path_attempt is not None and path_attempt != provisional_attempt:
             return False
          path_attempt = provisional_attempt
+      already_cancelled = (
+         path_attempt is not None
+         and self._was_cancelled_attempt_locked(path_id, path_attempt)
+      )
       known_path = (
          registered is not None
          or provisional is not None
-         or path_attempt is not None
-         or path_id in self._path_generations
+         or (path_attempt is not None and not already_cancelled)
       )
       if path_attempt is not None:
          self._mark_cancelled_attempt_locked(path_id, path_attempt)

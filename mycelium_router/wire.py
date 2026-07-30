@@ -336,7 +336,7 @@ def _validate_message(message: object) -> None:
       header = message.header
       _validate_message(header)
       if (
-         header.phase != "PREFILL"
+         header.phase not in {"PREFILL", "RECOVERY_PREFILL"}
          or message.request.request_id != header.request_id
          or message.graph.topology_version != header.topology_version
          or len(message.ordered_hops) != header.hop_index + 1

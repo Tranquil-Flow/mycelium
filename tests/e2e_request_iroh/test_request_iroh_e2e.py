@@ -11,9 +11,11 @@ from tests.e2e_request_iroh.harness import (
     CancellationEvidence,
     CompleteRequestEvidence,
     GenerationRotationEvidence,
+    RecoveryEvidence,
     run_cancellation_probe,
     run_complete_request,
     run_generation_rotation_probe,
+    run_recovery_probe,
 )
 
 
@@ -90,6 +92,32 @@ def test_endpoint_rotation_rejects_stale_in_flight_delivery(
     assert evidence.error_code == "peer_rotated"
     assert evidence.old_generation == 1
     assert evidence.new_generation == 2
+    assert evidence.pending_deliveries == 0
+    assert evidence.local_evidence_only is True
+    assert evidence.route_ready is False
+
+
+def test_sidecar_process_rebirth_recovers_same_request_with_fresh_generation(
+    native_iroh_sidecar_binary: Path,
+) -> None:
+    evidence: RecoveryEvidence = run_recovery_probe(native_iroh_sidecar_binary)
+
+    assert evidence.old_process_exited is True
+    assert evidence.replacement_process_started is True
+    assert evidence.old_process_id != evidence.new_process_id
+    assert evidence.old_endpoint_id != evidence.new_endpoint_id
+    assert evidence.old_peer_generation == 1
+    assert evidence.new_peer_generation == 2
+    assert evidence.stale_generation_rejected is True
+    assert evidence.recovery_phase == "RECOVERY_PREFILL"
+    assert evidence.recovery_prefill_observed is True
+    assert evidence.generated_token_ids_before_failure
+    assert evidence.generated_token_ids_after_recovery
+    assert (
+        evidence.generated_token_ids_before_failure
+        + evidence.generated_token_ids_after_recovery
+        == evidence.final_token_ids
+    )
     assert evidence.pending_deliveries == 0
     assert evidence.local_evidence_only is True
     assert evidence.route_ready is False
