@@ -24,6 +24,8 @@
 | 2026-07-22 ~18:45 | **Swarm-tactics pass.** Added §7.1 — parallel-subagent execution strategy: the file-disjointness test, a lane table naming four tasks safe to fan out *right now* (2R.5, 2R.6, 3B.5 steps 1–3, 3.2 skeleton) alongside in-flight 2R.4, what each subagent must be handed, what subagents must never do (no physical hardware, no `integration/*` pushes, no contract edits without owning the contract, no evidence writes, **no plan edits**), and merge discipline. Operator direction: parallelize aggressively. No other section touched — 2R.4's write surface deliberately left alone. |
 | 2026-07-22 ~14:00 | **As-built reconciliation + operator decisions.** Tasks 0.1–0.2, 2.1A, 2.1B, 2.2A, 2.2B, 2.3A and most of 3.1 **landed** on a branch this plan did not name. Added §1.4 (as-built path map — the plan's `Files:` lists were wrong and would have caused duplicate modules), rewrote §2 baseline, marked landed tasks, added **Phase 2R** (seven carry-forward gaps the as-built code does not yet satisfy). Recorded four operator decisions: Task 2.4 = **extend**, target = **genuinely heterogeneous**, device roster, frozen-first confirmed. Added §6.13 (the MLX/Linux blocker this creates) and promoted Task 4.5 out of Phase 4. Marked **[2026-07-22 as-built pass]**. |
 | 2026-07-22 ~22:15 | **Execution closure for parallel-safe lanes.** Phase 2R plus canonical local E2E landed through `132e7c3`; Task 3B.5 steps 1–3 landed as `4fbe48f`; the fail-closed Task 3.2 controller skeleton landed as `b317566`. Final Main-native gate: **2031 passed / 3 skipped / 121 subtests** plus contract, fixture, manifest, claim-boundary, compile, Ruff, and diff checks. All delegated workers returned HTTP 402 before editing, so the primary driver completed the lanes. Physical launch/seal remains blocked and `route_ready=false`. Pixel 8 Pro is tailnet `100.126.233.4` but offline; ADB/bridge unavailable. |
+| 2026-07-23 ~10:50 | **Task-heading status reconciliation.** Audited every task heading against the preserved integration tip `b317566` and commit diffs. Added LANDED markers for Tasks 0.1–0.3, 2R.2, and 2R.4; recorded partial coverage and named gaps for Tasks 2.3B, 2R.5, 2R.6, 3.1, 3.2, and 3B.5. All other task-heading statuses were verified unchanged; no task scope, RED case, gate, or source file changed. |
+| 2026-07-23 ~17:19 | **Orchestrator status reconciliation.** Recorded local-only 2R.5 closure (`ab668bac`) and reviewed device-free 3.2 completion (`c3dd159` + `f04e438`) as not yet integrated or physically proven; marked A7, 2R.6 closure, and A3 continuation lanes active. No task substance, RED case, gate, or claim boundary changed. |
 
 ---
 
@@ -620,7 +622,7 @@ Merge order is the driver's decision, not first-to-finish. After each merge run 
 
 # Phase 0 — Restore an honest green baseline
 
-### Task 0.1: Replace the private-plan presence test with a public contract test
+### Task 0.1: Replace the private-plan presence test with a public contract test — ✅ LANDED (`debb4f4`)
 
 **Before starting:** run `git log --oneline -5 integration/mycelium-membership-contracts-mac` and diff it against the current live-demo HEAD. Commit `debb4f4` on that branch already rewrites `test_router_docs.py` to point at `docs/request-streaming-session-lifecycle.md`. If that branch has not diverged further in a conflicting way, cherry-pick or merge that commit instead of re-authoring the fix, then verify it still satisfies the RED/GREEN criteria below. (As of 2026-07-22 13:00 that branch is still exactly one commit ahead — 5 files, +86/−3 — so a clean cherry-pick is expected.)
 
@@ -645,7 +647,7 @@ Expected before repair: `FileNotFoundError` for `docs/plans/2026-07-16-request-s
 
 **Commit:** `test: remove private plan dependency from router docs gate`
 
-### Task 0.2: Classify Device Lab as an exact product-action client
+### Task 0.2: Classify Device Lab as an exact product-action client — ✅ LANDED (`debb4f4`)
 
 **Before starting:** commit `debb4f4` on `integration/mycelium-membership-contracts-mac` already adds `ui/web/src/features/deviceLab/deviceLabClient.ts` to `_ALLOWED_PRODUCT_ACTION_CLIENTS` and extends the audit test with a negative-control `arbitraryClient.ts` case. Reconcile from that commit rather than re-deriving the allowlist entry independently — but still verify no directory/pattern broadening slipped in, per the GREEN criteria below.
 
@@ -670,7 +672,7 @@ Expected: tests pass; checker exits 0 with `ok=true`, `route_ready=false`, `rele
 
 **Commit:** `test: classify device lab product actions in claim audit`
 
-### Task 0.3: Freeze baseline before feature work
+### Task 0.3: Freeze baseline before feature work — ✅ LANDED (`5dfef7b`)
 
 ```bash
 python3.14 -m pytest -q
@@ -859,7 +861,7 @@ Dynamic optimization is not the first target — but the *seam* for it is, and i
 
 **Commit:** `feat: add signed seed coordinator`
 
-### Task 2.3B: Prove localhost control-plane E2E with real dependencies — ⚠️ PARTIAL as `tests/seed_coordinator/test_local_two_node.py`
+### Task 2.3B: Prove localhost control-plane E2E with real dependencies — ⚠️ PARTIAL (`132e7c3` integrated); gap: seed/node agents remain in-process and distinct agent/service/sidecar PIDs are not asserted; 🔄 ACTIVE local A7 continuation on `ab668bac` remains uncommitted
 
 **Objective:** Exercise seed + two node agents + two physical-node subprocesses + SQLite + native Iroh on one host while preserving `route_ready=false`.
 
@@ -931,7 +933,7 @@ This is why it went unnoticed: every focused lane passes (`133 passed`), and the
 
 **Commit:** `feat: issue signed epoch-scoped peer endpoint records in assignment offers`
 
-### Task 2R.2: Add the `PlacementSource` seam (unblocks Task 3B.1 / G4b)
+### Task 2R.2: Add the `PlacementSource` seam (unblocks Task 3B.1 / G4b) — ✅ LANDED (`f5322db`)
 
 **The gap.** `assignment_offer(...)` takes `assignment_id`/`assignment_digest` as **parameters** — placement is decided entirely outside the seed, by whoever calls it. That is not wrong, but it means there is no named seam, so Task 3B.1 has nowhere to insert planner placement without editing call sites across the controller and tests. §6.8 and Task 2.3A required this explicitly and it was not built.
 
@@ -951,7 +953,7 @@ Implement exactly the protocol in Task 2.3A: `PlacementSource.compile(members) -
 
 **Commit:** `feat: bind placement provenance through membership and qualification`
 
-### Task 2R.4: Implement the §6.7 liveness semantics
+### Task 2R.4: Implement the §6.7 liveness semantics — ✅ LANDED (`1dca9ba`)
 
 **The gap.** The as-built heartbeat is a **lease renewal** — monotonic sequence, replay-protected, durably recovered (`seed_heartbeat_renewals`, keyed `(node_id, generation, heartbeat_message_id)`). That is good and keeps its tests. But grep for `idle`, `liveness`, `suppress`, `receipt` in `mycelium_membership/contracts.py` returns **nothing**. None of §6.7's three locked policies exist: activation/receipt traffic does not suppress heartbeats; there is no idle-vs-in-flight distinction; nothing prevents one missed beat from reading as death. Task 3.6's second scenario and handover Gate H are unsatisfiable as built.
 
@@ -961,7 +963,7 @@ Implement exactly the protocol in Task 2.3A: `PlacementSource.compile(members) -
 
 **Commit:** `feat: scope idle peer liveness separately from lease renewal`
 
-### Task 2R.5: Add runnable `__main__` entrypoints for seed and node
+### Task 2R.5: Add runnable `__main__` entrypoints for seed and node — ⚠️ PARTIAL (`634b19f` integrated); gap: required dry-run/stdin-bundle behavior and distinct operational exit codes are absent on integration; local-only closure `ab668bac` is complete but not integrated
 
 **The gap.** Neither `mycelium_seed/__main__.py` nor `mycelium_node/__main__.py` exists. Both are libraries. The CLI in Task 2.2B (`python3.14 -m mycelium_node_agent --join-bundle-file ...`) does not run. Tasks 3.3–3.4 launch these as real processes on real hosts over SSH — impossible today, and this is the single hardest blocker to *starting* Phase 3.
 
@@ -971,7 +973,7 @@ Implement exactly the protocol in Task 2.3A: `PlacementSource.compile(members) -
 
 **Commit:** `feat: add seed and node process entrypoints`
 
-### Task 2R.6: Freeze the numeric tolerance and prove N-way stage packs
+### Task 2R.6: Freeze the numeric tolerance and prove N-way stage packs — ⚠️ PARTIAL (`dcfc7e2`); gap: N-way gates do not assert exact full tensor-set union with no overlap or omission; 🔄 ACTIVE closure lane must also prove pack-based parity
 
 **The gap.** `stage_pack.py` (1,030 lines) and `test_stage_pack.py` (591 lines) are substantial and cover ownership, tamper, traversal, symlink, corruption, tied-alias, and concurrent-mutation cases well. Two plan requirements are missing: no `tolerances/` file exists (§3 item 10 requires the tolerance frozen *before* the physical run; Task 3.1 assigned it here), and I found no test proving a **3-way or 5-way** split's packs union to exactly the source tensor set — the check that keeps the packer from being quietly 2-node-shaped before Task 3B.2 adds a third member.
 
@@ -1025,7 +1027,7 @@ Implement exactly the protocol in Task 2.3A: `PlacementSource.compile(members) -
 
 # Phase 3 — Physical multi-machine inference
 
-### Task 3.1: Compile assignment-local Safetensors stage packs — ✅ MOSTLY LANDED (`0f468b4`, `ad370ea`) as top-level `stage_pack.py`; gaps → Task 2R.6
+### Task 3.1: Compile assignment-local Safetensors stage packs — ⚠️ PARTIAL (`0f468b4`, `ad370ea`, `132e7c3`, `dcfc7e2`); gap: 3- and 5-worker pack-based logits/token parity gates remain
 
 **Objective:** Transfer only tensors owned by each assignment instead of copying a monolithic checkpoint to every node.
 
@@ -1051,7 +1053,7 @@ python3.14 -m pytest -q tests/model/test_distributed_dialogpt_decode.py
 
 **Commit:** `feat: compile assignment-local model stage packs`
 
-### Task 3.2: Build the physical qualification controller
+### Task 3.2: Build the physical qualification controller — ⚠️ PARTIAL on integration (`b317566`); gap: physical prepare/run/recover/seal execution remains deliberately unimplemented; device-free local-only completion `c3dd159` + `f04e438` is reviewed but not integrated or physically proven
 
 **Objective:** Orchestrate two physical Macs without letting SSH become the inference transport or evidence authority.
 
@@ -1398,7 +1400,7 @@ Request the same two independent reviews, plus a third: **placement provenance a
 
 **Commit:** `feat: serve the physical swarm through the request gateway`
 
-### Task 3B.5: Select and integrate a second runtime so a non-Apple device can execute **[promoted from Task 4.5 by §6.13]**
+### Task 3B.5: Select and integrate a second runtime so a non-Apple device can execute **[promoted from Task 4.5 by §6.13]** — ⚠️ PARTIAL (`4fbe48f`); gap: stage parity, swarm integration, mixed physical execution, and measured planner feedback remain; 🔄 ACTIVE local A3 continuation has RED coverage but remains uncommitted
 
 **Objective:** Make at least one non-MLX device class execute a real assigned layer through production Router transport, so "heterogeneous" describes execution and not only membership.
 

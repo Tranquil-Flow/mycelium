@@ -1,0 +1,71 @@
+# A8 Security & Quality Review — Verdict: **APPROVED**
+
+## Subject
+- Commit: `f04e4381bd7c10956f5276907b4b5801dad95ba2` (`feat: add N-way physical qualification orchestration`)
+- Base: `b317566`, prerequisite `c3dd159`, working tree clean
+- Diff: 5 files, +2931/-34 lines
+  - `native/iroh_transport/src/bin/mycelium-iroh-sidecar.rs` (+13)
+  - `native/iroh_transport/src/sidecar.rs` (+108/-12)
+  - `physical_inference_qualification.py` (+1549/-13)
+  - `tests/physical_qualification/test_controller.py` (+1119/-28)
+  - `tests/physical_qualification/test_process_session.py` (+118 new)
+
+## Focused checks executed (read-only)
+- `pytest tests/physical_qualification/test_controller.py -x -q` → **53 passed**
+- `pytest tests/physical_qualification/test_process_session.py -x -q` → **4 passed**
+- Module import via `/opt/homebrew/bin/python3.14`; confirmed regex constants (`_SSH_TARGET_RE`, `_SEGMENT_RE`, `_FORBIDDEN_PATH_PARTS`, `_FORBIDDEN_NAME_RE`).
+- Did not run full suite, no hardware, no evidence, no staging — read-only.
+
+## Severity-ranked findings
+
+### Critical / High
+**None.** Command-injection surface, secret exposure, and trust-boundary surfaces all have hard fail-closed validation.
+
+### Medium
+**None blocking.**
+
+### Low / Informational
+
+| # | Severity | Area | File:line | Notes |
+|---|----------|------|-----------|-------|
+| L1 | LOW | Process-group cleanup on Ctrl-C | `physical_inference_qualification.py:1500-1517` (orchestrator try/except) and `:161-176` (Popen) | `_run_physical` wraps the orchestration in `try/except BaseException` so KeyboardInterrupt triggers the cleanup loop. No global `atexit`/signal handler though — if the Python process is `SIGKILL`'d, `NodeProcessSession.close()` does not run and the local ssh child could orphan. Bounded by `BatchMode=yes` ConnectTimeout=15s and remote timeout=45s. Acceptable for this tranche but worth a follow-up. |
+| L2 | LOW | SSH host-key policy | `physical_inference_qualification.py:77-84`, `:194-200` | Uses only `BatchMode=yes` + `ConnectTimeout=15`. Default `StrictHostKeyChecking` is `ask`, which BatchMode turns into immediate failure — that is the secure default, but operators must pre-populate `known_hosts`. Consider adding `-o StrictHostKeyChecking=yes` explicitly to remove ambiguity across forks. |
+| L3 | LOW | Recovery re-uses previously staged archive | `physical_inference_qualification.py:1313-1509` | Recovery spawns a fresh ssh+node process but does not re-stage; relies on the already-verified archive from `prepare`. Acceptable because archive digest was bound at prepare-time, but a paranoid re-staging is not done. |
+| L4 | LOW | `restart_attempts` is a misnomer | `physical_inference_qualification.py:46, :57, :153-156` | Variable name implies a counter; only set to 1. Code path is single-attempt only; exhaustive recovery is signalled by `physical_recovery_exhausted`. |
+| L5 | LOW | `daemon=True` stderr drain thread | `physical_inference_qualification.py:171-176, :505-525` | Thread is bounded by buffer cap (1 MiB) and `terminate()` on overflow; `close()` joins with 2.0s timeout. Daemon status means it can be GC'd at interpreter shutdown — accepted. |
+| L6 | INFO | Canonical-bytes ascii mismatch (theoretical) | `physical_inference_qualification.py:152-165, :75-80` | Controller uses `ensure_ascii=False` in `_canonical_bytes`; the embedded `_REMOTE_STAGE_SCRIPT` / `_REMOTE_CLEANUP_SCRIPT` use `json.dumps` defaults (ensure_ascii=True). All acks flow through ASCII, so byte-equality holds. No bug today; would bite if non-ASCII strings ever entered ack paths. |
+| L7 | INFO | Endpoint-secret path not re-validated by Rust at every sidecar start | `native/iroh_transport/src/sidecar.rs:94-125` | Re-validates uid/0o600/len==32 every launch via `metadata()` post-open. Good. No follow-up. |
+
+## Audit-axis coverage
+
+| Axis | Result |
+|------|--------|
+| Command injection (argv) | All Popen uses `shell=False` + tuple-of-strings validation in `SubprocessRunner.run` and `NodeProcessSession.__init__`. Remote commands built via `shlex.join(...)` of pre-validated fields. `--` separator placed before `peer.ssh_target`. ✓ |
+| argv secret exposure | No bootstrap/endpoint secrets appear in argv; only paths. Stderr/stdout bound by `_MAX_RUNNER_OUTPUT_BYTES=1 MiB`. ✓ |
+| Traversal / symlinks / TOCTOU | `_safe_transfer_path` rejects `..`/`.`/empty parts; `_read_verified_transfer_file` does per-part lstat + O_NOFOLLOW + nlink=1 + before/after fstat fingerprint. `build_transfer_archive` rejects symlink root. Remote script rejects symlinked dir parts, requires exclusive create (`"xb"`), mode 0o600 on extracted files. ✓ |
+| Owner-only / exact permission bits | Rust: `metadata.mode() & 0o7777 != 0o600` with uid==geteuid; `bind_secure_uds` parent 0o700 owned by uid. Python: marker 0o600, files 0o600, manifest/parent `& 0o222 == 0`. ✓ |
+| Transfer confinement | 256-MiB max, ≤256 tar members, sorted/unique names, no absolute/relative-escape members, digest bound at prepare and stage. ✓ |
+| SSH host-key | Defaults to secure (BatchMode+StrictHostKeyChecking=ask → fail); see L2 for explicit-policy suggestion. |
+| Process-group / interrupt cleanup | Inner try/except BaseException runs cleanup. See L1. |
+| PID reuse / liveness | New `process_id` from fresh hello on recovery; rotate increments `peer_generation` and the rotated observation is validated. Test `test_physical_recover_rejects_stale_generation_and_cleans` covers spoof. ✓ |
+| Timeout bounds | `0 < t ≤ 300` enforced for runner & session. Per-call: prepare=120s, cleanup=30s, node=45s, per-line deadline inside `_read_line`. ✓ |
+| Command replay / correlation | `_request_lock` serializes writes; `command_id` echoed by node or rejected; canonical-bytes comparison on response; duplicate-key rejection via `object_pairs_hook`. ✓ |
+| Evidence-writer shutdown | Double-lstat + re-read in `_seal_physical` after qualifier invocation; `qualifier_invocations=1` enforced. ✓ |
+| Immutable-manifest checks | Symlink-rejected, regular file, parent no-write-bit, raw == canonical, `evidence_class=="physical_qualification"`, recomputed digest == `manifest_digest`. ✓ |
+| Qualifier spoofing / duplication | `accepted ⇒ qualified_by == QUALIFIER_AUTHORITY and reason_codes == []`; `not accepted ⇒ qualified_by is None and reason_codes non-empty`. `route_ready = bool(accepted and qualification["route_ready"])`. ✓ |
+| Readiness / claim overreach | `_run_physical` always returns `route_ready=False, release_ready=False`. `_seal_physical` only path that can produce True, only via qualified authority. `release_ready` hard-coded False everywhere. `claim_boundary` strings describe what's NOT claimed. ✓ |
+| Rust sidecar protocol | `endpoint_secret_file` opened with `O_NOFOLLOW`, owner==euid, mode==0o600, len==32. `local_only` disables relays + binds IPv4 loopback only. `SocketCleanup` Drop removes UDS. ALPN unchanged (`mycelium.iroh.sidecar.v1`). ✓ |
+
+## What I did
+- SSH-verified exact tip `f04e4381`, base `b317566`, prerequisite `c3dd159`, clean working tree.
+- Pulled the full 3311-line diff (`b317566..f04e4381`) and read it end-to-end across 6 chunks.
+- Pulled complete file bodies (`physical_inference_qualification.py` 2114 lines, `sidecar.rs` 1676 lines, sidecar bin, tests) into local cache for thorough cross-reference.
+- Confirmed constants/regexes (ASCII-only ssh targets, segment regex, forbidden path parts, forbidden name regex).
+- Ran the two new test modules (`test_controller.py`, `test_process_session.py`) — 57 tests passed, 0 failures.
+- Did **not** edit/stage/commit/push, did not run the full suite, did not touch hardware or evidence.
+
+## Files created/modified
+None — read-only audit only.
+
+## Verdict
+**APPROVED.** The tranche is fail-closed end-to-end, with rigorous type/shape/digest/permission/signature validation on every trust-boundary crossing. Findings are LOW/INFO and require no changes for merge.

@@ -1,0 +1,50 @@
+## A8 Task 3.2 Specification-Compliance Review
+
+**Verdict: PASS** — the committed diff at `f04e4381bd7c10956f5276907b4b5801dad95ba2` on `feat/session-3.2-qualification-controller` (ahead 2 over base `b317566`, prerequisite `c3dd159` honored) is fully device-free, fail-closed, and specification-aligned. The implementation deliberately returns no route/release readiness — physical `run/cancel/recover/seal` remains unperformed under A8 (G4/G5/G6 untouched).
+
+### Evidence collection
+- SSH read-only to `m4`; no edits, no staging, no process kills, no evidence writes
+- Ran focused tests: **`tests/physical_qualification/test_controller.py` + `test_process_session.py` → 57 passed** in 1.15s (Python 3.14.2 at `/opt/homebrew/bin/python3.14`)
+- Ran `cargo test --lib sidecar` in `native/iroh_transport` → **6 passed, 0 failed** (including the 2 new secret-file tests)
+- Live CLI: `python3.14 physical_inference_qualification.py preflight --dry-run` → emits canonical JSON, no SSH, `route_ready=false`, exit 0
+- Python compile (`py_compile`) clean for all three new/modified files
+
+### Files reviewed (in-scope, all read)
+- `physical_inference_qualification.py` (2114 lines)
+- `tests/physical_qualification/test_controller.py` (1441 lines)
+- `tests/physical_qualification/test_process_session.py` (118 lines, new)
+- `native/iroh_transport/src/sidecar.rs` (new `read_endpoint_secret`, 2 new tests)
+- `native/iroh_transport/src/bin/mycelium-iroh-sidecar.rs` (new `--endpoint-secret-file` flag, fail-closed)
+
+### Spec compliance (command-by-command, RED-by-RED)
+| Spec requirement | Implementation evidence | Status |
+|---|---|---|
+| arbitrary N peers (no exactly-two branch) | `_controller(count=…)` parametrize `[1, 3, 5]` in `test_every_dry_run_command_is_n_way_inert_and_route_false`; cycle ordering `test_physical_run_orchestrates_every_declared_peer_in_n_way_cycle` `[3, 5]`; controller's peer list is a `tuple`, deduped by node_id & staging_root | ✓ |
+| signed endpoint membership (per §6.6) — no operator `expected_endpoint_id` fallback | `_validate_membership` (lines 779–848) calls `verify_membership_message` with `expected_key_digest`, `expected_protocol=ASSIGNMENT_OFFER_PROTOCOL`, `expected_swarm_id`, `expected_recipient_node_id`, validates deployment_id/epoch, and peer-set integrity. CLI parser has no `--expected-endpoint-id` flag; `test_cli_rejects_operator_supplied_endpoint_identity` covers it. Endpoints are derived only from the seed-signed membership snapshot. | ✓ |
+| transfer allowlist + digest confinement | `_safe_transfer_path` (line 487) rejects abs/`.`/`..`/forbidden parts (`.cache .git .gnupg .ssh models model-cache huggingface`) and credential-name regex; `build_transfer_archive` is deterministic tar USTAR, members `0o600`, `uid=gid=mtime=0` | ✓ |
+| bounded argv-only control (no shell) | `SubprocessRunner.run` uses `shell=False` (line 296); `SubprocessRunner` rejects empty/non-string/over-300s args; `_MAX_RUNNER_OUTPUT_BYTES=1_048_576`; `test_subprocess_runner_is_argv_only_and_separates_output_streams` proves shell-injection attempt fails | ✓ |
+| stdout/stderr separation | subprocess captures `PIPE` for both streams, returned as separate bytes fields | ✓ |
+| cleanup every failure path | `_prepare_physical` rolls back attempted peers on stage failure (`test_physical_prepare_cleans_attempted_peers_when_staging_fails`); `_run_physical` `except BaseException` block (line 1548) sends `stop` to unstopped sessions, closes every session, runs `_cleanup_peer` per peer; `test_physical_prepare_cleans_attempted_peers…`, `test_physical_recover_bounds_restart_and_cleans_every_session`, `test_physical_recover_rejects_stale_generation_and_cleans` | ✓ |
+| prepare / run / cancel / recover / seal / cleanup commands | `execute()` dispatches all six with proper `_prepare_physical`, `_run_physical` (operation parameter), `_cleanup_physical`, `_seal_physical` | ✓ |
+| stale generation rejection | `_verified_observation` validates `peer_generation`; recovery path enforces `rotated_observation["peer_generation"] == recovery_generation` (line 1530), rejects with `recovery_generation_stale`; `test_physical_recover_rejects_stale_generation_and_cleans` | ✓ |
+| immutable manifest | `_seal_physical` requires `evidence-manifest.json`, `st_mode & 0o222 == 0` (file and parent dir), recanonicalises raw bytes, verifies digest; `test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once` | ✓ |
+| exactly-once sole qualifier | `_qualifier_adapter` invoked once per `seal`; `qualifier_invocations` field = 1; `accepted=True` requires `qualified_by == QUALIFIER_AUTHORITY`; `test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once` (1 invocation), `test_qualification_from_non_authority_cannot_promote_controller_readiness` | ✓ |
+| fail-closed readiness | All result envelopes carry `route_ready: False`, `release_ready: False`; only mirror is `accepted and route_ready` from qualifier; non-authority, rejected, mutated, or non-canonical qualification → `route_ready=False` | ✓ |
+| short socket roots (staging starts with `mycelium`) | `_REMOTE_STAGE_SCRIPT` requires `len(root.parts) >= 4` and `any(part.startswith("mycelium") for part in root.parts)`; cleanup script mirrors; `PeerIdentity.__post_init__` and `_REMOTE_CLEANUP_SCRIPT` enforce similar | ✓ |
+| distinct host + boot identities in physical mode | `_validate_physical_distinctness` (line 849) requires unique hosts and boots; `test_physical_mode_requires_distinct_host_and_boot_then_requires_run_plan` | ✓ |
+
+### Diff size & shape
+- `physical_inference_qualification.py` +1541 lines (skeleton landed at `b317566`, full N-way + recover added at `f04e4381`)
+- `tests/physical_qualification/test_controller.py` +1129 lines
+- `tests/physical_qualification/test_process_session.py` +118 lines (new — covers `NodeProcessSession` correlation/reject-route-ready/non-canonical response)
+- `sidecar.rs` +`read_endpoint_secret` (O_NOFOLLOW, uid-equal, mode 0o600, exactly 32 bytes) + bin accepts `--endpoint-secret-file` and rejects on `SidecarError::EndpointSecretSecurity`
+
+### Gaps found
+**None.** The diff is an inert, fail-closed, N-way controller with exactly-once qualification authority; physical `run/cancel/recover/seal` is correctly deferred to G4/G5/G6 (the controller returns `route_ready=false` and `release_ready=false` unconditionally for those commands). The prerequisite commit `c3dd159` (`fix: support inert bare preflight dry run`) is honored — `preflight --dry-run` with all required args unset performs no SSH and emits the inert canonical envelope.
+
+### Notes (informational, not gaps)
+- Bare `preflight --dry-run` path lives in `main()` rather than `QualificationController.execute()` — consistent with `c3dd159` and still fail-closed
+- `test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once` asserts `manifest_path.stat().st_mode & 0o222 == 0`, so immutable-manifest requirement is verified at the file-system level
+- Iroh sidecar now requires a 32-byte owned mode-0600 file for endpoint identity; this stabilizes `EndpointId` across restarts (per `explicit_endpoint_secret_stabilizes_endpoint_identity` test) — useful for the follow-on `rotate`/`peer_rotated` generation flow when a node dies and is replaced
+
+**Recommendation: ship-ready.** A8 (Task 3.2 controller skeleton) closes cleanly; B1/B2 can begin as soon as two physical Macs are online.
