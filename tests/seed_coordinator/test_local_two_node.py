@@ -4,9 +4,12 @@ from dataclasses import asdict
 import hashlib
 from itertools import count
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
+import time
 from typing import Any
 import uuid
 
@@ -143,6 +146,41 @@ def _inference_request(request_id: str) -> dict[str, Any]:
     }
 
 
+def _native_sidecar_pid(service_pid: int) -> int:
+    result = subprocess.run(
+        ["ps", "-axo", "pid=,ppid="],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    child_pids: set[int] = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) == 2 and int(fields[1]) == service_pid:
+            child_pids.add(int(fields[0]))
+    assert len(child_pids) == 1, (
+        f"service process {service_pid} has unexpected children {sorted(child_pids)}"
+    )
+    return next(iter(child_pids))
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def _pids_still_running(pids: set[int], *, timeout: float) -> set[int]:
+    deadline = time.monotonic() + timeout
+    remaining = {pid for pid in pids if _pid_exists(pid)}
+    while remaining and time.monotonic() < deadline:
+        time.sleep(0.02)
+        remaining = {pid for pid in remaining if _pid_exists(pid)}
+    return remaining
+
+
 def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     tmp_path: Path,
     local_control_sidecar_binary: Path,  # noqa: F811
@@ -201,6 +239,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
     node_processes: dict[str, _NodeClient] = {}
     configured: dict[str, dict[str, Any]] = {}
     accepted_offers: dict[str, dict[str, Any]] = {}
+    sidecar_pids: dict[str, int] = {}
     socket_root = Path(tempfile.mkdtemp(prefix="myc-seed-e2e-", dir="/tmp"))
     run_id = str(uuid.uuid4())
     seed_port: int | None = None
@@ -228,6 +267,7 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
             )
             assert result["observation"]["event"] == "configured"
             configured[node_id] = result["observation"]["details"]
+            sidecar_pids[node_id] = _native_sidecar_pid(process.process.pid)
 
         with SeedHTTPServer(coordinator, host="127.0.0.1", port=0) as seed_server:
             seed_port = int(seed_server.base_url.rsplit(":", 1)[1])
@@ -317,6 +357,15 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
 
             for node_id in NODE_IDS:
                 details = configured[node_id]
+                assignment_index = NODE_IDS.index(node_id)
+                assert details["stage_pack_digest"] == deployment.stage_packs[
+                    assignment_index
+                ]["stage_pack_digest"]
+                assert details["stage_pack_verification_digest"] == (
+                    deployment.stage_pack_verifications[assignment_index][
+                        "stage_pack_verification_digest"
+                    ]
+                )
                 result = sessions[node_id].assignment_result(
                     assignment_id=details["assignment_id"],
                     accepted=True,
@@ -386,10 +435,21 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
                     now=NOW,
                 )
 
+            assert node_observations[NODE_IDS[0]]["details"]["transport"][
+                "remote_frames_sent"
+            ] > 0
+            assert node_observations[NODE_IDS[1]]["details"]["transport"][
+                "remote_frames_received"
+            ] > 0
             assert len({item["process_id"] for item in node_observations.values()}) == 2
             assert {
                 item["process_id"] for item in node_observations.values()
             } == {process.process.pid for process in node_processes.values()}
+            assert len(set(sidecar_pids.values())) == len(NODE_IDS)
+            assert set(sidecar_pids.values()).isdisjoint(
+                {process.process.pid for process in node_processes.values()}
+            )
+            assert os.getpid() not in sidecar_pids.values()
             host_ids = {item["host_id"] for item in node_observations.values()}
             assert len(host_ids) == 1
 
@@ -428,6 +488,12 @@ def test_seed_two_memberships_assign_and_run_native_iroh_inference(
 
     assert node_processes
     assert all(process.process.returncode == 0 for process in node_processes.values())
+    tracked_pids = {
+        *(process.process.pid for process in node_processes.values()),
+        *sidecar_pids.values(),
+    }
+    leaked_pids = _pids_still_running(tracked_pids, timeout=5.0)
+    assert leaked_pids == set()
 
     restarted = _coordinator(
         database,
