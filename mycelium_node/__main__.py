@@ -4,26 +4,46 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import math
 import os
 from pathlib import Path
-import shutil
 import signal
 import stat
 import sys
 import tempfile
 import threading
 import time
-from typing import Any, Sequence
+from typing import Any, NoReturn, Sequence
+from urllib.parse import urlsplit
 
 from mycelium_invite import verify_invite_bundle
 from mycelium_qualification.evidence import canonical_json_bytes
-from mycelium_seed.http import SeedHTTPClient
+from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_seed.http import (
+    JOIN_ROUTE_ERROR_STATUSES,
+    SeedHTTPClient,
+    SeedHTTPError,
+    _error_status,
+    _validate_endpoint_url,
+)
 
+from . import membership as membership_module
 from .identity import load_or_create_node_signer
 from .membership import NodeMembershipSession
-from .process import PhysicalNodeProcess, build_physical_node_command
+from .process import (
+    _ExecutableIdentity,
+    PhysicalNodeProcess,
+    PrivateDirectoryLease,
+    build_physical_node_command,
+    capture_executable_identity,
+    physical_service_interpreter_identity,
+    private_directory_lease,
+    private_directory_parent_fd,
+    private_directory_path,
+    validate_physical_node_launch_shape,
+)
 
 
 _STATUS_PROTOCOL = "mycelium.node_main_status.v1"
@@ -32,26 +52,72 @@ _DEFAULT_CAPABILITY = {
     "transport": "iroh",
     "activation_protocol": "mycelium.router_wire.v1",
 }
+_MAX_JOIN_BUNDLE_BYTES = 1024 * 1024
+_DIRECTORY_OPEN_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+
+# Stable process contract shared with the seed entrypoint.
+EXIT_SUCCESS = 0
+EXIT_PREFLIGHT_FAILURE = 2
+EXIT_JOIN_REJECTION = 3
+EXIT_RUNTIME_FAILURE = 4
 
 
-def _private_directory(value: str | Path) -> Path:
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    path = Path(os.path.abspath(path))
+class _EntrypointFailure(RuntimeError):
+    def __init__(self, code: str, exit_status: int) -> None:
+        self.code = code
+        self.exit_status = exit_status
+        super().__init__(code)
+
+
+def _aggregate_cleanup_failures(
+    failure: _EntrypointFailure | None,
+    phases: Sequence[str],
+) -> _EntrypointFailure:
+    if failure is None:
+        failure = _EntrypointFailure(
+            "node_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
+    prior_phases = tuple(getattr(failure, "_cleanup_phases", ()))
+    all_phases = (*prior_phases, *phases)
+    failure._cleanup_phases = all_phases
+    retained_notes = [
+        note
+        for note in getattr(failure, "__notes__", ())
+        if not note.startswith(("cleanup_phase=", "cleanup_failure_count="))
+    ]
+    cleanup_notes = [
+        *(f"cleanup_phase={phase}" for phase in all_phases),
+        f"cleanup_failure_count={len(all_phases)}",
+    ]
+    failure.__notes__ = [*retained_notes, *cleanup_notes]
+    return failure
+
+
+class _SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, _message: str) -> NoReturn:
+        self.exit(EXIT_PREFLIGHT_FAILURE, "node_preflight_failed\n")
+
+
+def _private_directory(value: str | Path, *, create: bool = True) -> Path:
+    return private_directory_path(value, create=create)
+
+
+def _canonical_document_bytes(raw: bytes) -> dict[str, Any]:
+    if not raw or len(raw) > _MAX_JOIN_BUNDLE_BYTES:
+        raise ValueError("join bundle is invalid")
     try:
-        if path.exists() or path.is_symlink():
-            metadata = path.lstat()
-            if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
-                raise ValueError("data directory is invalid")
-            if metadata.st_uid != os.getuid():
-                raise ValueError("data directory owner is invalid")
-        else:
-            path.mkdir(mode=0o700, parents=True)
-        path.chmod(0o700)
-    except OSError as exc:
-        raise ValueError("data directory is unavailable") from exc
-    return path
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("join bundle is invalid") from exc
+    if not isinstance(document, dict) or canonical_json_bytes(document) != raw:
+        raise ValueError("join bundle is invalid")
+    return document
 
 
 def _canonical_document(path_value: str | Path) -> dict[str, Any]:
@@ -59,51 +125,141 @@ def _canonical_document(path_value: str | Path) -> dict[str, Any]:
     if not path.is_absolute():
         path = Path.cwd() / path
     path = Path(os.path.abspath(path))
+    descriptor: int | None = None
+    parent: int | None = None
     try:
-        metadata = path.lstat()
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        parent = private_directory_parent_fd(path)
+        descriptor = os.open(path.name, flags, dir_fd=parent)
+        before = os.fstat(descriptor)
         if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_ISLNK(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) & 0o077
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or before.st_uid != os.getuid()
+            or stat.S_IMODE(before.st_mode) & 0o077
+            or before.st_size <= 0
+            or before.st_size > _MAX_JOIN_BUNDLE_BYTES
         ):
-            raise ValueError("seed invite file is invalid")
-        raw = path.read_bytes()
-        document = json.loads(raw.decode("utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("seed invite file is invalid") from exc
-    if not isinstance(document, dict) or canonical_json_bytes(document) != raw:
-        raise ValueError("seed invite file is invalid")
-    return document
+            raise ValueError("join bundle file is invalid")
+        chunks: list[bytes] = []
+        remaining = _MAX_JOIN_BUNDLE_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+        stable_fields = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_nlink",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        if (
+            len(raw) != before.st_size
+            or len(raw) > _MAX_JOIN_BUNDLE_BYTES
+            or any(
+                getattr(before, field) != getattr(after, field)
+                for field in stable_fields
+            )
+        ):
+            raise ValueError("join bundle file is invalid")
+    except OSError as exc:
+        raise ValueError("join bundle file is invalid") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if parent is not None:
+            os.close(parent)
+    return _canonical_document_bytes(raw)
+
+
+def _stdin_document() -> dict[str, Any]:
+    try:
+        raw = sys.stdin.buffer.read(_MAX_JOIN_BUNDLE_BYTES + 1)
+    except OSError as exc:
+        raise ValueError("join bundle stdin is invalid") from exc
+    return _canonical_document_bytes(raw)
 
 
 def _sidecar_path(value: str | None) -> Path:
     if value is not None:
-        candidates = [Path(value).expanduser()]
+        supplied = Path(value).expanduser()
+        if not supplied.is_absolute() or supplied != Path(os.path.abspath(supplied)):
+            raise ValueError("sidecar binary is unavailable")
+        candidates = [supplied]
     else:
         root = Path(__file__).resolve().parents[1]
         candidates = [
-            root / "native" / "iroh_transport" / "target" / "release" / "mycelium-iroh-sidecar",
-            root / "native" / "iroh_transport" / "target" / "debug" / "mycelium-iroh-sidecar",
+            root
+            / "native"
+            / "iroh_transport"
+            / "target"
+            / "release"
+            / "mycelium-iroh-sidecar",
+            root
+            / "native"
+            / "iroh_transport"
+            / "target"
+            / "debug"
+            / "mycelium-iroh-sidecar",
         ]
-        discovered = shutil.which("mycelium-iroh-sidecar")
-        if discovered is not None:
-            candidates.append(Path(discovered))
     for candidate in candidates:
         try:
-            resolved = candidate.resolve(strict=True)
-        except OSError:
+            identity = capture_executable_identity(
+                candidate,
+                require_canonical=True,
+                require_private_owner=True,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
             continue
-        if resolved.is_file():
-            return resolved
+        return Path(identity.path)
     raise ValueError("sidecar binary is unavailable")
 
 
+def _service_interpreter() -> Path:
+    return Path(physical_service_interpreter_identity().path)
+
+
+def _validate_advertised_endpoint(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or "\\" in value
+    ):
+        raise ValueError("advertised endpoint is invalid")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+        or (parsed.path and not parsed.path.startswith("/"))
+    ):
+        raise ValueError("advertised endpoint is invalid")
+    origin = _validate_endpoint_url(f"{parsed.scheme}://{parsed.netloc}")
+    if value != origin + parsed.path:
+        raise ValueError("advertised endpoint is invalid")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m mycelium_node")
+    parser = _SafeArgumentParser(prog="python -m mycelium_node")
     parser.add_argument("--data-dir", required=True)
-    parser.add_argument("--seed-invite", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--join-bundle-file",
+        "--seed-invite",
+        dest="join_bundle_file",
+    )
+    source.add_argument("--join-bundle-stdin", action="store_true")
     parser.add_argument("--node-id", required=True)
     parser.add_argument("--advertise", action="append", required=True)
     parser.add_argument("--sidecar-path")
@@ -111,121 +267,448 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--deployment-id", default="node-main-unassigned")
     parser.add_argument("--incarnation", default="node-main")
     parser.add_argument("--heartbeat-interval", type=float, default=30.0)
+    parser.add_argument("--dry-run", action="store_true")
     return parser
 
 
-def run(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    if (
-        not math.isfinite(args.heartbeat_interval)
-        or args.heartbeat_interval <= 0
-    ):
-        raise ValueError("heartbeat interval is invalid")
-    data_dir = _private_directory(args.data_dir)
-    bundle = _canonical_document(args.seed_invite)
-    now = time.time()
-    verified = verify_invite_bundle(bundle, now=now)
-    client = SeedHTTPClient.from_invite_bundle(bundle, now=now)
-    seed_identity = client.identity(now=time.time() + 1.0)
-    signer = load_or_create_node_signer(data_dir / "identity" / "node.key")
-    session = NodeMembershipSession(
-        node_id=args.node_id,
-        swarm_id=verified["payload"]["swarm_id"],
-        seed_node_id=seed_identity["seed_node_id"],
-        signer=signer,
-        incarnation=args.incarnation,
-        software_version="mycelium-node-main",
-        peer_class="mac_mlx_iroh",
-        runtime_capability=_DEFAULT_CAPABILITY,
+def _emit_status(status: dict[str, object]) -> None:
+    sys.stdout.buffer.write(canonical_json_bytes(status) + b"\n")
+    sys.stdout.buffer.flush()
+
+
+@dataclass(frozen=True)
+class _TemporaryRoot:
+    path: Path
+    device: int
+    inode: int
+
+
+def _temporary_root() -> _TemporaryRoot:
+    trusted_root = Path(tempfile.gettempdir()).resolve(strict=True)
+    path = Path(tempfile.mkdtemp(prefix="myc-node-", dir=trusted_root))
+    parent = private_directory_parent_fd(path)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(path.name, _DIRECTORY_OPEN_FLAGS, dir_fd=parent)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise ValueError("temporary root is invalid")
+        return _TemporaryRoot(path, metadata.st_dev, metadata.st_ino)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def _clear_directory(descriptor: int) -> None:
+    for name in os.listdir(descriptor):
+        metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        if stat.S_ISDIR(metadata.st_mode) and not stat.S_ISLNK(metadata.st_mode):
+            child = os.open(name, _DIRECTORY_OPEN_FLAGS, dir_fd=descriptor)
+            try:
+                opened = os.fstat(child)
+                if (opened.st_dev, opened.st_ino) != (
+                    metadata.st_dev,
+                    metadata.st_ino,
+                ):
+                    raise RuntimeError("temporary root cleanup failed")
+                _clear_directory(child)
+            finally:
+                os.close(child)
+            current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != (
+                metadata.st_dev,
+                metadata.st_ino,
+            ):
+                raise RuntimeError("temporary root cleanup failed")
+            os.rmdir(name, dir_fd=descriptor)
+        else:
+            os.unlink(name, dir_fd=descriptor)
+
+
+def _remove_temporary_root(root: _TemporaryRoot) -> None:
+    parent = private_directory_parent_fd(root.path)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(root.path.name, _DIRECTORY_OPEN_FLAGS, dir_fd=parent)
+        metadata = os.fstat(descriptor)
+        if (metadata.st_dev, metadata.st_ino) != (root.device, root.inode):
+            raise RuntimeError("temporary root cleanup failed")
+        _clear_directory(descriptor)
+        current = os.stat(
+            root.path.name,
+            dir_fd=parent,
+            follow_symlinks=False,
+        )
+        if (current.st_dev, current.st_ino) != (root.device, root.inode):
+            raise RuntimeError("temporary root cleanup failed")
+        os.rmdir(root.path.name, dir_fd=parent)
+    except FileNotFoundError:
+        raise RuntimeError("temporary root cleanup failed") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        os.close(parent)
+
+
+def _preflight(
+    args: argparse.Namespace,
+) -> tuple[
+    PrivateDirectoryLease,
+    dict[str, Any],
+    dict[str, Any],
+    SeedHTTPClient,
+    Path,
+    tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity],
+]:
+    state_root: PrivateDirectoryLease | None = None
+    try:
+        if not math.isfinite(args.heartbeat_interval) or args.heartbeat_interval <= 0:
+            raise ValueError("heartbeat interval is invalid")
+        state_root = private_directory_lease(
+            args.data_dir,
+            create=not args.dry_run,
+        )
+        if args.join_bundle_stdin:
+            bundle = _stdin_document()
+        else:
+            bundle = _canonical_document(args.join_bundle_file)
+        now = time.time()
+        verified = verify_invite_bundle(bundle, now=now)
+        client = SeedHTTPClient.from_invite_bundle(bundle, now=now)
+        sidecar = _sidecar_path(args.sidecar_path)
+        advertised_endpoints = [
+            _validate_advertised_endpoint(value) for value in args.advertise
+        ]
+        service_script = (
+            Path(__file__).resolve().parents[1] / "physical_inference_node.py"
+        )
+        interpreter = _service_interpreter()
+        identities = validate_physical_node_launch_shape(
+            python_executable=interpreter,
+            service_script=service_script,
+            run_id=args.run_id,
+            deployment_id=args.deployment_id,
+            node_id=args.node_id,
+            sidecar_binary=sidecar,
+            sidecar_local_only=False,
+        )
+        validation_signer = generate_ed25519_signer(
+            endpoint_id="node-preflight-endpoint"
+        )
+        validation_session = NodeMembershipSession(
+            node_id=args.node_id,
+            swarm_id=verified["payload"]["swarm_id"],
+            seed_node_id="seed-preflight-node",
+            signer=validation_signer,
+            incarnation=args.incarnation,
+            software_version="mycelium-node-main",
+            peer_class="mac_mlx_iroh",
+            runtime_capability=_DEFAULT_CAPABILITY,
+        )
+        validation_session.join_request(
+            invite_nonce=verified["payload"]["nonce"],
+            endpoint_addrs=advertised_endpoints,
+        )
+        membership_module.validate_heartbeat_shape(
+            lifecycle_state="NEW",
+            active_requests=0,
+            route_ready=False,
+            liveness_source="scheduled_heartbeat",
+            activity_receipt_digest=None,
+            activity_peer_node_id=None,
+        )
+        return state_root, bundle, verified, client, sidecar, identities
+    except _EntrypointFailure as failure:
+        cleanup_phases: list[str] = []
+        if state_root is not None:
+            try:
+                state_root.close()
+            except Exception:
+                cleanup_phases.append("state_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise
+    except Exception as exc:
+        failure = _EntrypointFailure(
+            "node_preflight_failed",
+            EXIT_PREFLIGHT_FAILURE,
+        )
+        cleanup_phases: list[str] = []
+        if state_root is not None:
+            try:
+                state_root.close()
+            except Exception:
+                cleanup_phases.append("state_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise failure from exc
+
+
+def _join_rejected(exc: SeedHTTPError) -> bool:
+    authoritative_status = JOIN_ROUTE_ERROR_STATUSES.get(exc.code)
+    return (
+        authoritative_status is not None
+        and exc.status == authoritative_status
+        and exc.status == _error_status(exc.code)
     )
 
-    artifact_root = data_dir / "artifacts"
-    artifact_root.mkdir(mode=0o700, exist_ok=True)
-    socket_root = Path(tempfile.mkdtemp(prefix="myc-node-", dir="/tmp"))
-    command = build_physical_node_command(
-        python_executable=Path(sys.executable),
-        service_script=Path(__file__).resolve().parents[1] / "physical_inference_node.py",
-        run_id=args.run_id,
-        deployment_id=args.deployment_id,
-        node_id=args.node_id,
-        artifact_root=artifact_root,
-        socket_root=socket_root,
-        sidecar_binary=_sidecar_path(args.sidecar_path),
-        sidecar_local_only=False,
-    )
+
+def _run_bound(
+    args: argparse.Namespace,
+    state_root: PrivateDirectoryLease,
+    bundle: dict[str, Any],
+    verified: dict[str, Any],
+    client: SeedHTTPClient,
+    sidecar: Path,
+    identities: tuple[
+        _ExecutableIdentity,
+        _ExecutableIdentity,
+        _ExecutableIdentity,
+    ],
+) -> int:
+    try:
+        seed_identity = client.identity(now=time.time() + 1.0)
+    except Exception as exc:
+        raise _EntrypointFailure(
+            "node_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        ) from exc
+
+    temporary_root: _TemporaryRoot | None = None
+    artifact_root: PrivateDirectoryLease | None = None
+    try:
+        state_root.revalidate()
+        signer = load_or_create_node_signer(Path("identity") / "node.key")
+        state_root.revalidate()
+        session = NodeMembershipSession(
+            node_id=args.node_id,
+            swarm_id=verified["payload"]["swarm_id"],
+            seed_node_id=seed_identity["seed_node_id"],
+            signer=signer,
+            incarnation=args.incarnation,
+            software_version="mycelium-node-main",
+            peer_class="mac_mlx_iroh",
+            runtime_capability=_DEFAULT_CAPABILITY,
+        )
+        artifact_root = state_root.private_subdirectory("artifacts")
+        state_root.revalidate()
+        artifact_root.revalidate()
+        temporary_root = _temporary_root()
+        command = build_physical_node_command(
+            python_executable=_service_interpreter(),
+            service_script=Path(__file__).resolve().parents[1]
+            / "physical_inference_node.py",
+            run_id=args.run_id,
+            deployment_id=args.deployment_id,
+            node_id=args.node_id,
+            artifact_root=Path("artifacts"),
+            socket_root=temporary_root.path,
+            sidecar_binary=sidecar,
+            sidecar_local_only=False,
+            descriptor_relative_artifact_root=True,
+        )
+        state_root.revalidate()
+        artifact_root.revalidate()
+    except Exception as exc:
+        failure = _EntrypointFailure(
+            "node_preflight_failed",
+            EXIT_PREFLIGHT_FAILURE,
+        )
+        cleanup_phases: list[str] = []
+        if temporary_root is not None:
+            try:
+                _remove_temporary_root(temporary_root)
+            except Exception:
+                cleanup_phases.append("temporary_root")
+        if artifact_root is not None:
+            try:
+                artifact_root.close()
+            except Exception:
+                cleanup_phases.append("artifact_root")
+        if cleanup_phases:
+            _aggregate_cleanup_failures(failure, cleanup_phases)
+        raise failure from exc
+
     process: PhysicalNodeProcess | None = None
     stopping = threading.Event()
+    previous: dict[int, object] = {}
+    failure: _EntrypointFailure | None = None
 
     def request_stop(_signum: int, _frame: object) -> None:
         stopping.set()
 
-    previous = {
-        signum: signal.signal(signum, request_stop)
-        for signum in (signal.SIGINT, signal.SIGTERM)
-    }
     try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.signal(signum, request_stop)
         process = PhysicalNodeProcess(
             command=command,
             node_id=args.node_id,
             run_id=args.run_id,
             deployment_id=args.deployment_id,
+            expected_executables=identities,
         )
         hello = process.command("hello")
-        if hello.get("route_ready") is not False:
-            raise RuntimeError("node_main_child_claim_invalid")
+        if not isinstance(hello, dict) or hello.get("route_ready") is not False:
+            raise RuntimeError("node child claim is invalid")
+
         request = session.join_request(
             invite_nonce=verified["payload"]["nonce"],
             endpoint_addrs=args.advertise,
         )
-        acceptance = client.join(
-            invite_token=bundle["token"],
-            join_envelope=request,
-        )
-        session.accept_join(
-            acceptance,
-            seed_key_digest=verified["seed_key_digest"],
-        )
+        try:
+            acceptance = client.join(
+                invite_token=bundle["token"],
+                join_envelope=request,
+            )
+            session.accept_join(
+                acceptance,
+                seed_key_digest=verified["seed_key_digest"],
+            )
+        except SeedHTTPError as exc:
+            if _join_rejected(exc):
+                raise _EntrypointFailure(
+                    "node_join_rejected",
+                    EXIT_JOIN_REJECTION,
+                ) from exc
+            raise _EntrypointFailure(
+                "node_runtime_failed",
+                EXIT_RUNTIME_FAILURE,
+            ) from exc
+        except Exception as exc:
+            raise _EntrypointFailure(
+                "node_runtime_failed",
+                EXIT_RUNTIME_FAILURE,
+            ) from exc
+
         heartbeat = session.heartbeat(lifecycle_state="NEW", active_requests=0)
-        renewal = client.send_member_message(heartbeat, now=time.time() + 1.0)
+        renewal = client.send_member_message(
+            heartbeat,
+            now=time.time() + 1.0,
+        )
         session.accept_lease_renewal(
             renewal,
             heartbeat_message_id=heartbeat["message"]["message_id"],
         )
-        status = {
-            "protocol": _STATUS_PROTOCOL,
-            "event": "node_started",
-            "node_id": args.node_id,
-            "node_endpoint_id": signer.endpoint_id,
-            "membership_generation": session.generation,
-            "seed_url": verified["payload"]["seed_url"],
-            "node_process_pid": process.pid,
-            "route_ready": False,
-        }
-        sys.stdout.buffer.write(canonical_json_bytes(status) + b"\n")
-        sys.stdout.buffer.flush()
+        _emit_status(
+            {
+                "protocol": _STATUS_PROTOCOL,
+                "event": "node_started",
+                "node_id": args.node_id,
+                "node_endpoint_id": signer.endpoint_id,
+                "membership_generation": session.generation,
+                "seed_url": verified["payload"]["seed_url"],
+                "node_process_pid": process.pid,
+                "route_ready": False,
+            }
+        )
         while not stopping.wait(args.heartbeat_interval):
-            heartbeat = session.heartbeat(lifecycle_state="NEW", active_requests=0)
-            renewal = client.send_member_message(heartbeat, now=time.time() + 1.0)
+            heartbeat = session.heartbeat(
+                lifecycle_state="NEW",
+                active_requests=0,
+            )
+            renewal = client.send_member_message(
+                heartbeat,
+                now=time.time() + 1.0,
+            )
             session.accept_lease_renewal(
                 renewal,
                 heartbeat_message_id=heartbeat["message"]["message_id"],
             )
+    except _EntrypointFailure as exc:
+        failure = exc
+    except Exception:
+        failure = _EntrypointFailure(
+            "node_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
     finally:
+        cleanup_phases = []
         if process is not None:
-            process.close()
-        shutil.rmtree(socket_root, ignore_errors=True)
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
-    return 0
+            try:
+                process.close()
+            except Exception:
+                cleanup_phases.append("process")
+        try:
+            assert temporary_root is not None
+            _remove_temporary_root(temporary_root)
+        except Exception:
+            cleanup_phases.append("temporary_root")
+        try:
+            assert artifact_root is not None
+            artifact_root.close()
+        except Exception:
+            cleanup_phases.append("artifact_root")
+        for signum in reversed(tuple(previous)):
+            try:
+                signal.signal(signum, previous[signum])
+            except Exception:
+                cleanup_phases.append("signal_restoration")
+        if cleanup_phases:
+            failure = _aggregate_cleanup_failures(failure, cleanup_phases)
+    if failure is not None:
+        raise failure from None
+    return EXIT_SUCCESS
+
+
+def run(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    state_root, bundle, verified, client, sidecar, identities = _preflight(args)
+    failure: _EntrypointFailure | None = None
+    result = EXIT_SUCCESS
+    try:
+        if args.dry_run:
+            _emit_status(
+                {
+                    "protocol": _STATUS_PROTOCOL,
+                    "event": "node_dry_run",
+                    "route_ready": False,
+                }
+            )
+        else:
+            with state_root.working_directory():
+                result = _run_bound(
+                    args,
+                    state_root,
+                    bundle,
+                    verified,
+                    client,
+                    sidecar,
+                    identities,
+                )
+    except _EntrypointFailure as exc:
+        failure = exc
+    except Exception:
+        failure = _EntrypointFailure(
+            "node_runtime_failed",
+            EXIT_RUNTIME_FAILURE,
+        )
+    finally:
+        try:
+            state_root.close()
+        except Exception:
+            failure = _aggregate_cleanup_failures(
+                failure,
+                ("state_root",),
+            )
+    if failure is not None:
+        raise failure from None
+    return result
 
 
 def main() -> None:
     try:
         raise SystemExit(run())
-    except (OSError, RuntimeError, ValueError) as exc:
-        code = getattr(exc, "code", "node_main_start_failed")
-        print(str(code), file=sys.stderr)
-        raise SystemExit(2) from None
+    except _EntrypointFailure as exc:
+        print(exc.code, file=sys.stderr)
+        raise SystemExit(exc.exit_status) from None
+    except Exception:
+        print("node_runtime_failed", file=sys.stderr)
+        raise SystemExit(EXIT_RUNTIME_FAILURE) from None
 
 
 if __name__ == "__main__":

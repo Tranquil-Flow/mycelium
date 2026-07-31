@@ -1493,6 +1493,15 @@ def load_assignment_stage(
     deliberately keeps ``route_ready`` false pending a separate route challenge.
     """
     try:
+        from stage_pack import canonicalize_stage_pack_assignment
+
+        try:
+            assignment = canonicalize_stage_pack_assignment(assignment)
+        except ValueError:
+            raise _fail(
+                "stage-pack evidence rejected: "
+                "stage pack assignment files are invalid"
+            ) from None
         (
             runtime,
             runtime_dtype,

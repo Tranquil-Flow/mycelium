@@ -17,10 +17,11 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import struct
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Sequence
 
 import model_manifest as mm
 from layer_assignment import validate_assignment_identity
+from planner_assignment import CONTROL_PLANE_BINDING_PROTOCOL
 from runtime_contracts import MLX_RUNTIME_BASE_FIELDS, validate_normalized_mlx_runtime
 from weight_provisioning import artifact_report_errors
 
@@ -31,6 +32,8 @@ _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SAFE_PATH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
+_MAX_ASSIGNMENT_JSON_DEPTH = 64
+_MAX_EXACT_JSON_NODES = 65_536
 _DTYPE_BYTES = {
     "BOOL": 1,
     "U8": 1,
@@ -74,33 +77,100 @@ _PACK_FIELDS = frozenset(
         "stage_pack_digest",
     }
 )
-_VERIFICATION_FIELDS = frozenset(
+_VERIFICATION_CLAIM_BOUNDARY = (
+    "assignment-bound stage-pack files, digests, strict Safetensors headers, "
+    "and exact tensor coverage verified; layers not loaded or probed"
+)
+_STAGE_PACK_CLAIM_BOUNDARY = (
+    "assignment-derived local artifact pack; files and tensor coverage "
+    "not yet reverified, layers not loaded"
+)
+_VERIFICATION_SCHEMA: tuple[str, Any] = (
+    "map",
     {
-        "protocol",
-        "stage_pack_digest",
-        "assignment_id",
-        "deployment_id",
-        "deployment_epoch",
-        "node_id",
-        "model_id",
-        "resolved_commit",
-        "manifest_digest",
-        "range",
-        "components",
-        "runtime",
-        "artifact_root",
-        "verified_files",
-        "verified_tensor_prefixes",
-        "verified_tensor_keys",
-        "tensor_file_map",
-        "verified_tensor_count",
-        "expected_bytes",
-        "overfetched_tensor_count",
-        "ready_for_load",
-        "route_ready",
-        "claim_boundary",
-        "stage_pack_verification_digest",
-    }
+        "protocol": str,
+        "stage_pack_digest": str,
+        "assignment_id": str,
+        "deployment_id": str,
+        "deployment_epoch": int,
+        "node_id": str,
+        "model_id": str,
+        "resolved_commit": str,
+        "manifest_digest": str,
+        "range": (
+            "map",
+            {
+                "start_layer": int,
+                "end_layer_exclusive": int,
+                "layer_count": int,
+            },
+        ),
+        "components": ("list", str),
+        "runtime": (
+            "one_of",
+            (
+                (
+                    "map",
+                    {
+                        "backend": str,
+                        "dtype": str,
+                        "quantization": str,
+                    },
+                ),
+                (
+                    "map",
+                    {
+                        "backend": str,
+                        "dtype": str,
+                        "quantization": str,
+                        "architecture": str,
+                        "model_config": (
+                            "map",
+                            {
+                                "n_layer": int,
+                                "n_embd": int,
+                                "n_head": int,
+                                "n_inner": int,
+                                "vocab_size": int,
+                                "n_positions": int,
+                                "layer_norm_epsilon": float,
+                                "activation_function": str,
+                                "scale_attn_weights": bool,
+                                "scale_attn_by_inverse_layer_idx": bool,
+                                "reorder_and_upcast_attn": bool,
+                                "add_cross_attention": bool,
+                            },
+                        ),
+                    },
+                ),
+            ),
+        ),
+        "artifact_root": str,
+        "verified_files": (
+            "list",
+            (
+                "map",
+                {
+                    "path": str,
+                    "relative_path": str,
+                    "size_bytes": int,
+                    "content_digest": str,
+                    "tensor_keys": ("list", str),
+                    "tensor_count": int,
+                },
+            ),
+        ),
+        "verified_tensor_prefixes": ("list", str),
+        "verified_tensor_keys": ("list", str),
+        "tensor_file_map": ("map_of", str, str),
+        "verified_tensor_count": int,
+        "expected_bytes": int,
+        "overfetched_tensor_count": int,
+        "ready_for_load": bool,
+        "route_ready": bool,
+        "claim_boundary": str,
+        "stage_pack_verification_digest": str,
+    },
 )
 _ASSIGNMENT_PACK_FIELDS = (
     "assignment_id",
@@ -119,6 +189,24 @@ _ASSIGNMENT_PACK_FIELDS = (
     "runtime",
     "control_plane_binding",
 )
+_CONTROL_PLANE_BINDING_FIELDS = frozenset(
+    {
+        "protocol",
+        "evidence_bundle_digest",
+        "planner_snapshot_digest",
+        "snapshot_generation",
+        "swarm_id",
+        "deployment_id",
+        "deployment_epoch",
+    }
+)
+_ASSIGNMENT_FILE_FIELDS = frozenset(
+    {
+        "path",
+        "size_bytes",
+        "content_digest",
+    }
+)
 _TOLERANCE_FIELDS = frozenset(
     {
         "protocol",
@@ -135,6 +223,123 @@ _TOLERANCE_FIELDS = frozenset(
 )
 _TOLERANCE_CHECKS = frozenset({"activations", "logits", "token_ids"})
 _MAX_TOLERANCE_BYTES = 64 * 1024
+_ANY_SCHEMA = ("any",)
+_PACK_RUNTIME_SCHEMA: tuple[str, Any] = (
+    "one_of",
+    (
+        (
+            "map",
+            {
+                "backend": _ANY_SCHEMA,
+                "dtype": _ANY_SCHEMA,
+                "quantization": _ANY_SCHEMA,
+            },
+        ),
+        (
+            "map",
+            {
+                "backend": _ANY_SCHEMA,
+                "dtype": _ANY_SCHEMA,
+                "quantization": _ANY_SCHEMA,
+                "architecture": _ANY_SCHEMA,
+                "model_config": (
+                    "map",
+                    {
+                        "n_layer": _ANY_SCHEMA,
+                        "n_embd": _ANY_SCHEMA,
+                        "n_head": _ANY_SCHEMA,
+                        "n_inner": _ANY_SCHEMA,
+                        "vocab_size": _ANY_SCHEMA,
+                        "n_positions": _ANY_SCHEMA,
+                        "layer_norm_epsilon": _ANY_SCHEMA,
+                        "activation_function": _ANY_SCHEMA,
+                        "scale_attn_weights": _ANY_SCHEMA,
+                        "scale_attn_by_inverse_layer_idx": _ANY_SCHEMA,
+                        "reorder_and_upcast_attn": _ANY_SCHEMA,
+                        "add_cross_attention": _ANY_SCHEMA,
+                    },
+                ),
+            },
+        ),
+    ),
+)
+_PACK_SCHEMA: tuple[str, Any] = (
+    "map",
+    {
+        "protocol": _ANY_SCHEMA,
+        "assignment_id": _ANY_SCHEMA,
+        "deployment_id": _ANY_SCHEMA,
+        "deployment_epoch": _ANY_SCHEMA,
+        "node_id": _ANY_SCHEMA,
+        "model_id": _ANY_SCHEMA,
+        "resolved_commit": _ANY_SCHEMA,
+        "manifest_digest": _ANY_SCHEMA,
+        "range": (
+            "map",
+            {
+                "start_layer": _ANY_SCHEMA,
+                "end_layer_exclusive": _ANY_SCHEMA,
+                "layer_count": _ANY_SCHEMA,
+            },
+        ),
+        "components": ("list", _ANY_SCHEMA),
+        "component_tensor_keys": (
+            "map_of",
+            str,
+            ("list", _ANY_SCHEMA),
+        ),
+        "component_aliases": ("map_of", str, _ANY_SCHEMA),
+        "expected_tensor_prefixes": ("list", _ANY_SCHEMA),
+        "expected_tensor_keys": ("list", _ANY_SCHEMA),
+        "upstream_files": (
+            "list",
+            (
+                "map",
+                {
+                    "path": _ANY_SCHEMA,
+                    "size_bytes": _ANY_SCHEMA,
+                    "content_digest": _ANY_SCHEMA,
+                },
+            ),
+        ),
+        "artifact_root": _ANY_SCHEMA,
+        "artifacts": (
+            "list",
+            (
+                "map",
+                {
+                    "upstream_path": _ANY_SCHEMA,
+                    "relative_path": _ANY_SCHEMA,
+                    "size_bytes": _ANY_SCHEMA,
+                    "content_digest": _ANY_SCHEMA,
+                    "tensor_keys": ("list", _ANY_SCHEMA),
+                },
+            ),
+        ),
+        "runtime": _PACK_RUNTIME_SCHEMA,
+        "control_plane_binding": (
+            "one_of",
+            (
+                type(None),
+                (
+                    "map",
+                    {
+                        "protocol": _ANY_SCHEMA,
+                        "evidence_bundle_digest": _ANY_SCHEMA,
+                        "planner_snapshot_digest": _ANY_SCHEMA,
+                        "snapshot_generation": _ANY_SCHEMA,
+                        "swarm_id": _ANY_SCHEMA,
+                        "deployment_id": _ANY_SCHEMA,
+                        "deployment_epoch": _ANY_SCHEMA,
+                    },
+                ),
+            ),
+        ),
+        "route_ready": _ANY_SCHEMA,
+        "claim_boundary": _ANY_SCHEMA,
+        "stage_pack_digest": _ANY_SCHEMA,
+    },
+)
 
 
 def _canonical_json(document: Any) -> str:
@@ -154,11 +359,132 @@ def _digest(document: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical_json(document).encode("utf-8")).hexdigest()
 
 
+def _snapshot_exact_json(
+    value: Any,
+    *,
+    diagnostic: str,
+    max_depth: int | None = _MAX_ASSIGNMENT_JSON_DEPTH,
+    max_nodes: int | None = _MAX_EXACT_JSON_NODES,
+) -> Any:
+    """Return a detached exact-built-in JSON snapshot without custom callbacks."""
+
+    active_containers: set[int] = set()
+    emitted_nodes = 0
+
+    def snapshot(value: Any, depth: int) -> Any:
+        nonlocal emitted_nodes
+        if max_depth is not None and depth > max_depth:
+            raise ValueError(diagnostic)
+        if max_nodes is not None and emitted_nodes >= max_nodes:
+            raise ValueError(diagnostic)
+        emitted_nodes += 1
+        value_type = type(value)
+        if value_type is dict:
+            identifier = id(value)
+            if identifier in active_containers:
+                raise ValueError(diagnostic)
+            active_containers.add(identifier)
+            try:
+                for key in dict.__iter__(value):
+                    if type(key) is not str:
+                        raise ValueError(diagnostic)
+                result: dict[str, Any] = {}
+                for key, item in dict.items(value):
+                    result[key] = snapshot(item, depth + 1)
+                return result
+            finally:
+                active_containers.remove(identifier)
+        if value_type is list:
+            identifier = id(value)
+            if identifier in active_containers:
+                raise ValueError(diagnostic)
+            active_containers.add(identifier)
+            try:
+                return [
+                    snapshot(item, depth + 1)
+                    for item in list.__iter__(value)
+                ]
+            finally:
+                active_containers.remove(identifier)
+        if value_type is float:
+            if not math.isfinite(value):
+                raise ValueError(diagnostic)
+            return value
+        if (
+            value_type is str
+            or value_type is int
+            or value_type is bool
+            or value is None
+        ):
+            return value
+        raise ValueError(diagnostic)
+
+    return snapshot(value, 0)
+
+
+def _deployment_epoch_is_valid(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _validate_deployment_epoch(value: Any) -> None:
+    if not _deployment_epoch_is_valid(value):
+        raise ValueError("stage pack deployment epoch is invalid")
+
+
+def _canonical_control_plane_binding(
+    binding: Any,
+    *,
+    deployment_id: Any,
+    deployment_epoch: Any,
+) -> bytes:
+    if (
+        not isinstance(binding, dict)
+        or set(binding) != _CONTROL_PLANE_BINDING_FIELDS
+        or type(binding.get("protocol")) is not str
+        or binding["protocol"] != CONTROL_PLANE_BINDING_PROTOCOL
+    ):
+        raise ValueError("stage pack control-plane binding is invalid")
+    for field in ("evidence_bundle_digest", "planner_snapshot_digest"):
+        value = binding.get(field)
+        if type(value) is not str or _SHA256_REF_RE.fullmatch(value) is None:
+            raise ValueError("stage pack control-plane binding is invalid")
+    snapshot_generation = binding.get("snapshot_generation")
+    if type(snapshot_generation) is not int or snapshot_generation < 0:
+        raise ValueError("stage pack control-plane binding is invalid")
+    if not _deployment_epoch_is_valid(binding.get("deployment_epoch")):
+        raise ValueError("stage pack control-plane binding is invalid")
+    for field in ("swarm_id", "deployment_id"):
+        value = binding.get(field)
+        if type(value) is not str or not value:
+            raise ValueError("stage pack control-plane binding is invalid")
+    if (
+        binding["deployment_id"] != deployment_id
+        or binding["deployment_epoch"] != deployment_epoch
+    ):
+        raise ValueError("stage pack control-plane binding is invalid")
+    return _canonical_json(binding).encode("utf-8")
+
+
+def _canonical_optional_control_plane_binding(
+    assignment: dict[str, Any],
+) -> bytes | None:
+    if "control_plane_binding" not in assignment:
+        return None
+    return _canonical_control_plane_binding(
+        assignment["control_plane_binding"],
+        deployment_id=assignment.get("deployment_id"),
+        deployment_epoch=assignment.get("deployment_epoch"),
+    )
+
+
 def stage_pack_digest_for(pack: dict[str, Any]) -> str:
     """Return the canonical digest of every stage-pack field except the digest."""
-    if not isinstance(pack, dict):
+    if type(pack) is not dict:
         raise ValueError("stage pack must be an object")
-    unsigned = copy.deepcopy(pack)
+    unsigned = _snapshot_exact_json(
+        pack,
+        diagnostic="stage pack must contain finite JSON-compatible values",
+    )
     unsigned.pop("stage_pack_digest", None)
     return _digest(unsigned)
 
@@ -329,6 +655,186 @@ def _verification_digest_for(verification: dict[str, Any]) -> str:
     return _digest(unsigned)
 
 
+def _matches_exact_schema(value: Any, schema: Any) -> bool:
+    if isinstance(schema, type):
+        return type(value) is schema
+    kind = schema[0]
+    if kind == "any":
+        value_type = type(value)
+        if value_type is float:
+            return math.isfinite(value)
+        return (
+            value_type is str
+            or value_type is int
+            or value_type is bool
+            or value is None
+        )
+    if kind == "map":
+        fields = schema[1]
+        if type(value) is not dict:
+            return False
+        if any(type(key) is not str for key in value):
+            return False
+        if set(value) != set(fields):
+            return False
+        return all(
+            _matches_exact_schema(value[field], field_schema)
+            for field, field_schema in fields.items()
+        )
+    if kind == "list":
+        return type(value) is list and all(
+            _matches_exact_schema(item, schema[1]) for item in value
+        )
+    if kind == "map_of":
+        return (
+            type(value) is dict
+            and not any(type(key) is not str for key in value)
+            and all(
+                _matches_exact_schema(key, schema[1])
+                and _matches_exact_schema(item, schema[2])
+                for key, item in value.items()
+            )
+        )
+    if kind == "one_of":
+        return any(_matches_exact_schema(value, option) for option in schema[1])
+    return False
+
+
+def _validate_exact_schema(
+    value: Any,
+    schema: Any,
+    *,
+    diagnostic: str,
+) -> None:
+    if not _matches_exact_schema(value, schema):
+        raise ValueError(diagnostic)
+
+
+def _validate_pack_schema(pack: Any) -> None:
+    _validate_exact_schema(
+        pack,
+        _PACK_SCHEMA,
+        diagnostic="stage pack schema is invalid",
+    )
+
+
+def _validate_pack_schema_and_fields(pack: Any) -> None:
+    if type(pack) is not dict or any(type(key) is not str for key in pack):
+        raise ValueError("stage pack schema is invalid")
+    if set(pack) != _PACK_FIELDS:
+        raise ValueError("stage pack fields do not match the v1 contract")
+    _validate_pack_schema(pack)
+    if pack["claim_boundary"] != _STAGE_PACK_CLAIM_BOUNDARY:
+        raise ValueError("stage pack claim boundary is invalid")
+
+
+def _validate_collection_pack_schema(pack: Any) -> None:
+    try:
+        _validate_pack_schema_and_fields(pack)
+    except ValueError:
+        fields = _PACK_SCHEMA[1]
+        if (
+            type(pack) is dict
+            and not any(type(key) is not str for key in pack)
+            and set(pack) == _PACK_FIELDS
+            and not _matches_exact_schema(
+                pack["control_plane_binding"],
+                fields["control_plane_binding"],
+            )
+            and all(
+                field == "control_plane_binding"
+                or _matches_exact_schema(pack[field], field_schema)
+                for field, field_schema in fields.items()
+            )
+        ):
+            raise ValueError(
+                "stage pack control-plane binding is invalid"
+            ) from None
+        raise
+
+
+def _validate_pack_schema_before_assignment(pack: Any, assignment: Any) -> None:
+    try:
+        _validate_pack_schema_and_fields(pack)
+    except ValueError as exc:
+        if str(exc) == "stage pack claim boundary is invalid":
+            raise
+        canonicalize_stage_pack_assignment(assignment)
+        raise
+
+
+def _validate_verification_schema(verification: Any) -> None:
+    _validate_exact_schema(
+        verification,
+        _VERIFICATION_SCHEMA,
+        diagnostic="stage pack verification schema is invalid",
+    )
+
+
+def _validate_verification_scalar_semantics(
+    verification: dict[str, Any],
+) -> None:
+    layer_range = verification["range"]
+    start = layer_range["start_layer"]
+    end = layer_range["end_layer_exclusive"]
+    count = layer_range["layer_count"]
+    verified_files = verification["verified_files"]
+    string_fields = (
+        "assignment_id",
+        "deployment_id",
+        "node_id",
+        "model_id",
+        "artifact_root",
+    )
+    if (
+        verification["protocol"] != STAGE_PACK_VERIFICATION_PROTOCOL
+        or verification["claim_boundary"] != _VERIFICATION_CLAIM_BOUNDARY
+        or any(not verification[field] for field in string_fields)
+        or _SHA256_REF_RE.fullmatch(verification["stage_pack_digest"]) is None
+        or _SHA256_REF_RE.fullmatch(verification["manifest_digest"]) is None
+        or _SHA256_REF_RE.fullmatch(
+            verification["stage_pack_verification_digest"]
+        )
+        is None
+        or _COMMIT_RE.fullmatch(verification["resolved_commit"]) is None
+        or verification["deployment_epoch"] < 0
+        or start < 0
+        or end <= start
+        or count != end - start
+        or not verification["components"]
+        or len(verification["components"]) != len(set(verification["components"]))
+        or any(not component for component in verification["components"])
+        or any(
+            not prefix for prefix in verification["verified_tensor_prefixes"]
+        )
+        or any(not key for key in verification["verified_tensor_keys"])
+        or len(verification["verified_tensor_keys"])
+        != len(set(verification["verified_tensor_keys"]))
+        or any(
+            not key or not path
+            for key, path in verification["tensor_file_map"].items()
+        )
+        or verification["verified_tensor_count"] < 0
+        or verification["expected_bytes"] < 0
+        or verification["overfetched_tensor_count"] < 0
+        or verification["ready_for_load"] is not True
+        or verification["route_ready"] is not False
+        or any(
+            not record["path"]
+            or not record["relative_path"]
+            or record["size_bytes"] <= 0
+            or record["tensor_count"] <= 0
+            or _SHA256_REF_RE.fullmatch(record["content_digest"]) is None
+            for record in verified_files
+        )
+    ):
+        raise ValueError("stage pack verification evidence is invalid")
+    try:
+        _normalize_runtime(verification["runtime"])
+    except ValueError:
+        raise ValueError("stage pack verification evidence is invalid") from None
+
+
 def _safe_relative_path(value: Any) -> PurePosixPath:
     if (
         not isinstance(value, str)
@@ -340,12 +846,77 @@ def _safe_relative_path(value: Any) -> PurePosixPath:
     path = PurePosixPath(value)
     if (
         path.is_absolute()
+        or not path.parts
         or len(path.parts) > 32
         or any(part in {"", ".", ".."} for part in path.parts)
         or str(path) != value
     ):
         raise ValueError(f"unsafe artifact path: {value!r}")
     return path
+
+
+def _canonical_assignment_files(
+    files: Any,
+    *,
+    diagnostic: str = "stage pack assignment files are invalid",
+) -> list[dict[str, Any]]:
+    if type(files) is not list or not files:
+        raise ValueError(diagnostic)
+    normalized: list[dict[str, Any]] = []
+    for record in files:
+        if type(record) is not dict:
+            raise ValueError(diagnostic)
+        if (
+            any(type(key) is not str for key in record)
+            or set(record) != _ASSIGNMENT_FILE_FIELDS
+        ):
+            raise ValueError(diagnostic)
+        path = record["path"]
+        size = record["size_bytes"]
+        digest = record["content_digest"]
+        if (
+            type(path) is not str
+            or type(size) is not int
+            or size <= 0
+            or type(digest) is not str
+            or _SHA256_REF_RE.fullmatch(digest) is None
+        ):
+            raise ValueError(diagnostic)
+        try:
+            _safe_relative_path(path)
+        except ValueError:
+            raise ValueError(diagnostic) from None
+        normalized.append(
+            {
+                "path": path,
+                "size_bytes": size,
+                "content_digest": digest,
+            }
+        )
+    paths = [record["path"] for record in normalized]
+    if len(paths) != len(set(paths)):
+        raise ValueError(diagnostic)
+    return normalized
+
+
+def canonicalize_stage_pack_assignment(
+    assignment: Any,
+) -> dict[str, Any]:
+    """Return a bounded, detached exact-JSON assignment snapshot."""
+
+    diagnostic = "stage pack assignment files are invalid"
+    if type(assignment) is not dict:
+        raise ValueError(diagnostic)
+    snapshot = _snapshot_exact_json(
+        assignment,
+        diagnostic=diagnostic,
+    )
+    files = _canonical_assignment_files(
+        snapshot.get("files"),
+        diagnostic=diagnostic,
+    )
+    snapshot["files"] = files
+    return snapshot
 
 
 def _normalize_runtime(runtime: Any) -> dict[str, Any]:
@@ -392,9 +963,36 @@ def _manifest_file_records(manifest: dict[str, Any]) -> dict[str, dict[str, Any]
     return result
 
 
+def _validate_manifest_component_aliases(aliases: Any) -> None:
+    if (
+        type(aliases) is not dict
+        or any(
+            type(source) is not str
+            or not source
+            or type(target) is not str
+            or not target
+            for source, target in aliases.items()
+        )
+        or any(
+            source == target or target in aliases
+            for source, target in aliases.items()
+        )
+    ):
+        raise ValueError("manifest component aliases are invalid")
+
+
 def _validate_authoritative_assignment(
     assignment: dict[str, Any], manifest: dict[str, Any]
-) -> None:
+) -> list[dict[str, Any]]:
+    assignment = canonicalize_stage_pack_assignment(assignment)
+    assignment_files = assignment["files"]
+    _validate_manifest_component_aliases(manifest.get("component_aliases"))
+    try:
+        _validate_manifest_component_aliases(assignment.get("component_aliases"))
+    except ValueError:
+        raise ValueError("stage pack assignment ownership is invalid") from None
+    _validate_deployment_epoch(assignment.get("deployment_epoch"))
+    _canonical_optional_control_plane_binding(assignment)
     try:
         validate_assignment_identity(assignment)
     except (KeyError, TypeError, ValueError) as exc:
@@ -444,11 +1042,19 @@ def _validate_authoritative_assignment(
     layer_keys = manifest.get("tensor_keys_by_layer")
     layer_files = manifest.get("layer_files")
     component_files = manifest.get("component_files")
+    aliases = manifest.get("component_aliases")
     if not all(
         isinstance(value, dict)
-        for value in (static_keys, layer_keys, layer_files, component_files)
+        for value in (
+            static_keys,
+            layer_keys,
+            layer_files,
+            component_files,
+            aliases,
+        )
     ):
         raise ValueError("manifest ownership maps are invalid")
+    _validate_manifest_component_aliases(aliases)
     for layer in range(start, end):
         keys = layer_keys.get(str(layer))
         files = layer_files.get(str(layer))
@@ -480,7 +1086,7 @@ def _validate_authoritative_assignment(
         raise ValueError("assignment component tensor keys do not match manifest")
     expected_aliases = {
         source: target
-        for source, target in manifest.get("component_aliases", {}).items()
+        for source, target in aliases.items()
         if source in components
     }
     if assignment.get("component_aliases") != expected_aliases:
@@ -511,9 +1117,10 @@ def _validate_authoritative_assignment(
         expected_files = [manifest_files[path] for path in sorted(paths)]
     except KeyError as exc:
         raise ValueError(f"manifest covering file missing: {exc.args[0]}") from exc
-    if assignment.get("files") != expected_files:
+    if assignment_files != expected_files:
         raise ValueError("assignment does not contain the minimal covering files")
     _normalize_runtime(assignment.get("runtime"))
+    return assignment_files
 
 
 def compile_stage_pack(
@@ -524,7 +1131,7 @@ def compile_stage_pack(
     """Compile one canonical local pack from authoritative assignment evidence."""
     if not isinstance(assignment, dict) or not isinstance(manifest, dict):
         raise ValueError("assignment and manifest must be objects")
-    _validate_authoritative_assignment(assignment, manifest)
+    assignment_files = _validate_authoritative_assignment(assignment, manifest)
     errors = artifact_report_errors(assignment, artifact_report)
     if errors:
         raise ValueError("artifact report rejected: " + "; ".join(errors))
@@ -550,7 +1157,7 @@ def compile_stage_pack(
         by_path[record["path"]] = record
 
     artifacts = []
-    for upstream in assignment["files"]:
+    for upstream in assignment_files:
         path = upstream["path"]
         record = by_path[path]
         local_raw = record.get("local_path")
@@ -562,13 +1169,24 @@ def compile_stage_pack(
         except ValueError as exc:
             raise ValueError(f"verified local path escapes artifact root: {path}") from exc
         relative_posix = relative.as_posix()
-        _safe_relative_path(relative_posix)
+        relative_path = _safe_relative_path(relative_posix)
+        handle = _open_beneath(root, relative_path)
+        try:
+            tensor_keys = sorted(_read_safetensors_header(handle, path))
+        finally:
+            handle.close()
+        if (
+            type(record.get("tensor_count")) is not int
+            or record["tensor_count"] != len(tensor_keys)
+        ):
+            raise ValueError("artifact report verified tensor count is invalid")
         artifacts.append(
             {
                 "upstream_path": path,
                 "relative_path": relative_posix,
                 "size_bytes": upstream["size_bytes"],
                 "content_digest": upstream["content_digest"],
+                "tensor_keys": tensor_keys,
             }
         )
 
@@ -589,7 +1207,7 @@ def compile_stage_pack(
             assignment["expected_tensor_prefixes"]
         ),
         "expected_tensor_keys": copy.deepcopy(assignment["expected_tensor_keys"]),
-        "upstream_files": copy.deepcopy(assignment["files"]),
+        "upstream_files": copy.deepcopy(assignment_files),
         "artifact_root": str(root),
         "artifacts": artifacts,
         "runtime": copy.deepcopy(assignment["runtime"]),
@@ -597,27 +1215,39 @@ def compile_stage_pack(
             assignment.get("control_plane_binding")
         ),
         "route_ready": False,
-        "claim_boundary": (
-            "assignment-derived local artifact pack; files and tensor coverage "
-            "not yet reverified, layers not loaded"
-        ),
+        "claim_boundary": _STAGE_PACK_CLAIM_BOUNDARY,
     }
     pack["stage_pack_digest"] = stage_pack_digest_for(pack)
     return pack
 
 
-def _validate_pack_shape(pack: dict[str, Any]) -> None:
-    if set(pack) != _PACK_FIELDS:
-        raise ValueError("stage pack fields do not match the v1 contract")
+def _validate_pack_shape(pack: dict[str, Any]) -> list[dict[str, Any]]:
+    _validate_pack_schema_and_fields(pack)
     if pack.get("protocol") != STAGE_PACK_PROTOCOL:
         raise ValueError("unsupported stage pack protocol")
     if pack.get("route_ready") is not False:
         raise ValueError("stage pack cannot claim route readiness")
+    upstream_files = _canonical_assignment_files(
+        pack.get("upstream_files"),
+        diagnostic="stage pack upstream files are invalid",
+    )
+    _validate_deployment_epoch(pack.get("deployment_epoch"))
+    try:
+        _validate_manifest_component_aliases(pack.get("component_aliases"))
+    except ValueError:
+        raise ValueError("stage pack assignment ownership is invalid") from None
     supplied = pack.get("stage_pack_digest")
     if not _SHA256_REF_RE.fullmatch(str(supplied or "")):
         raise ValueError("stage pack digest is invalid")
     if supplied != stage_pack_digest_for(pack):
         raise ValueError("stage pack digest mismatch")
+    binding = pack.get("control_plane_binding")
+    if binding is not None:
+        _canonical_control_plane_binding(
+            binding,
+            deployment_id=pack.get("deployment_id"),
+            deployment_epoch=pack.get("deployment_epoch"),
+        )
     _normalize_runtime(pack.get("runtime"))
     layer_range = pack.get("range")
     if not isinstance(layer_range, dict):
@@ -672,9 +1302,66 @@ def _validate_pack_shape(pack: dict[str, Any]) -> None:
         owned.extend(keys)
     if sorted(set(owned)) != expected_keys:
         raise ValueError("stage pack assigned tensor keys are inconsistent")
+    artifacts = pack.get("artifacts")
+    if type(artifacts) is not list or not artifacts:
+        raise ValueError("stage pack artifact tensor ownership is invalid")
+    upstream_paths: set[str] = set()
+    relative_paths: set[str] = set()
+    artifact_tensor_keys: set[str] = set()
+    for artifact in artifacts:
+        upstream_path = (
+            artifact.get("upstream_path")
+            if type(artifact) is dict
+            else None
+        )
+        if type(upstream_path) is str and upstream_path in upstream_paths:
+            raise ValueError("duplicate artifact")
+        if (
+            type(artifact) is not dict
+            or set(artifact)
+            != {
+                "upstream_path",
+                "relative_path",
+                "size_bytes",
+                "content_digest",
+                "tensor_keys",
+            }
+            or type(artifact["upstream_path"]) is not str
+            or not artifact["upstream_path"]
+            or type(artifact["relative_path"]) is not str
+            or not artifact["relative_path"]
+            or type(artifact["size_bytes"]) is not int
+            or artifact["size_bytes"] <= 0
+            or type(artifact["content_digest"]) is not str
+            or _SHA256_REF_RE.fullmatch(artifact["content_digest"]) is None
+            or type(artifact["tensor_keys"]) is not list
+            or not artifact["tensor_keys"]
+            or artifact["tensor_keys"] != sorted(artifact["tensor_keys"])
+            or len(artifact["tensor_keys"]) != len(set(artifact["tensor_keys"]))
+            or any(
+                type(tensor_key) is not str or not tensor_key
+                for tensor_key in artifact["tensor_keys"]
+            )
+            or artifact["relative_path"] in relative_paths
+            or any(
+                tensor_key in artifact_tensor_keys
+                for tensor_key in artifact["tensor_keys"]
+            )
+        ):
+            raise ValueError("stage pack artifact tensor ownership is invalid")
+        upstream_paths.add(artifact["upstream_path"])
+        relative_paths.add(artifact["relative_path"])
+        artifact_tensor_keys.update(artifact["tensor_keys"])
+    return upstream_files
 
 
-def _validate_against_assignment(pack: dict[str, Any], assignment: dict[str, Any]) -> None:
+def _validate_against_assignment(
+    pack: dict[str, Any],
+    assignment: dict[str, Any],
+    *,
+    assignment_files: list[dict[str, Any]],
+    upstream_files: list[dict[str, Any]],
+) -> None:
     try:
         validate_assignment_identity(assignment)
     except (KeyError, TypeError, ValueError) as exc:
@@ -682,7 +1369,7 @@ def _validate_against_assignment(pack: dict[str, Any], assignment: dict[str, Any
     for field in _ASSIGNMENT_PACK_FIELDS:
         if pack.get(field) != assignment.get(field):
             raise ValueError(f"stage pack assignment mismatch: {field}")
-    if pack.get("upstream_files") != assignment.get("files"):
+    if upstream_files != assignment_files:
         raise ValueError("stage pack assignment mismatch: files")
 
 
@@ -875,9 +1562,15 @@ def verify_stage_pack(
         raise ValueError("assignment must be an object")
     if not isinstance(manifest, dict):
         raise ValueError("manifest must be an object")
-    _validate_authoritative_assignment(assignment, manifest)
-    _validate_pack_shape(pack)
-    _validate_against_assignment(pack, assignment)
+    _validate_pack_schema_before_assignment(pack, assignment)
+    assignment_files = _validate_authoritative_assignment(assignment, manifest)
+    upstream_files = _validate_pack_shape(pack)
+    _validate_against_assignment(
+        pack,
+        assignment,
+        assignment_files=assignment_files,
+        upstream_files=upstream_files,
+    )
 
     root_raw = pack.get("artifact_root")
     if not isinstance(root_raw, str) or not Path(root_raw).is_absolute():
@@ -892,24 +1585,10 @@ def verify_stage_pack(
     if str(resolved_root) != root_raw or not resolved_root.is_dir():
         raise ValueError("stage pack artifact root must be exact and canonical")
 
-    upstream_raw = pack.get("upstream_files")
     artifacts_raw = pack.get("artifacts")
-    if not isinstance(upstream_raw, list) or not upstream_raw:
-        raise ValueError("stage pack upstream files are invalid")
     if not isinstance(artifacts_raw, list) or not artifacts_raw:
         raise ValueError("stage pack artifacts are invalid")
-    upstream: dict[str, dict[str, Any]] = {}
-    for record in upstream_raw:
-        if not isinstance(record, dict) or set(record) != {
-            "path",
-            "size_bytes",
-            "content_digest",
-        }:
-            raise ValueError("stage pack upstream file record is invalid")
-        path = record.get("path")
-        if not isinstance(path, str) or path in upstream:
-            raise ValueError(f"duplicate upstream artifact: {path}")
-        upstream[path] = record
+    upstream = {record["path"]: record for record in upstream_files}
 
     seen_artifacts: set[str] = set()
     all_tensor_files: dict[str, str] = {}
@@ -922,6 +1601,7 @@ def verify_stage_pack(
             "relative_path",
             "size_bytes",
             "content_digest",
+            "tensor_keys",
         }:
             raise ValueError("stage pack artifact record is invalid")
         upstream_path = artifact.get("upstream_path")
@@ -935,11 +1615,14 @@ def verify_stage_pack(
             raise ValueError(f"stage pack artifact does not match upstream file: {upstream_path}")
         size = artifact.get("size_bytes")
         digest = artifact.get("content_digest")
+        immutable_tensor_keys = artifact.get("tensor_keys")
         if (
             not isinstance(size, int)
             or isinstance(size, bool)
             or size <= 0
             or not _SHA256_REF_RE.fullmatch(str(digest or ""))
+            or type(immutable_tensor_keys) is not list
+            or not immutable_tensor_keys
         ):
             raise ValueError(f"stage pack artifact metadata is invalid: {upstream_path}")
         relative = _safe_relative_path(artifact.get("relative_path"))
@@ -968,6 +1651,8 @@ def verify_stage_pack(
                 )
         finally:
             handle.close()
+        if sorted(names) != immutable_tensor_keys:
+            raise ValueError("stage pack artifact tensor ownership mismatch")
         total_header_names += len(names)
         for name in names:
             if name in all_tensor_files:
@@ -979,6 +1664,7 @@ def verify_stage_pack(
                 "relative_path": str(relative),
                 "size_bytes": size,
                 "content_digest": digest,
+                "tensor_keys": sorted(names),
                 "tensor_count": len(names),
             }
         )
@@ -1023,10 +1709,7 @@ def verify_stage_pack(
         "overfetched_tensor_count": total_header_names - len(expected_keys),
         "ready_for_load": True,
         "route_ready": False,
-        "claim_boundary": (
-            "assignment-bound stage-pack files, digests, strict Safetensors headers, "
-            "and exact tensor coverage verified; layers not loaded or probed"
-        ),
+        "claim_boundary": _VERIFICATION_CLAIM_BOUNDARY,
     }
     verification["stage_pack_verification_digest"] = _verification_digest_for(
         verification
@@ -1034,21 +1717,269 @@ def verify_stage_pack(
     return verification
 
 
+def verify_stage_pack_collection(
+    packs: Sequence[dict[str, Any]],
+    *,
+    assignments: Sequence[dict[str, Any]],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify exact logical ownership across one ordered N-stage pack collection."""
+
+    if (
+        type(packs) not in (list, tuple)
+        or type(assignments) not in (list, tuple)
+        or not packs
+        or len(packs) != len(assignments)
+    ):
+        raise ValueError("stage pack collection must match a non-empty assignment set")
+    if type(manifest) is not dict:
+        raise ValueError("manifest must be an object")
+
+    manifest = _snapshot_exact_json(
+        manifest,
+        diagnostic="manifest component aliases are invalid",
+    )
+    _validate_manifest_component_aliases(manifest.get("component_aliases"))
+
+    for pack in packs:
+        _validate_collection_pack_schema(pack)
+    packs = [
+        _snapshot_exact_json(
+            pack,
+            diagnostic="stage pack schema is invalid",
+        )
+        for pack in packs
+    ]
+    assignments = [
+        canonicalize_stage_pack_assignment(assignment)
+        for assignment in assignments
+    ]
+
+    for assignment in assignments:
+        _canonical_optional_control_plane_binding(assignment)
+
+    pack_verifications = [
+        verify_stage_pack(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+        for pack, assignment in zip(packs, assignments, strict=True)
+    ]
+    assignment_ids = [assignment["assignment_id"] for assignment in assignments]
+    node_ids = [assignment["node_id"] for assignment in assignments]
+    if len(assignment_ids) != len(set(assignment_ids)):
+        raise ValueError("stage pack collection has duplicate assignments")
+    if len(node_ids) != len(set(node_ids)):
+        raise ValueError("stage pack collection has duplicate nodes")
+
+    first = assignments[0]
+    canonical_runtime = _normalize_runtime(first.get("runtime"))
+    canonical_control_plane_bindings = [
+        _canonical_optional_control_plane_binding(assignment)
+        for assignment in assignments
+    ]
+    canonical_control_plane_binding = canonical_control_plane_bindings[0]
+    if any(
+        binding != canonical_control_plane_binding
+        for binding in canonical_control_plane_bindings[1:]
+    ):
+        raise ValueError(
+            "stage pack collection control-plane binding identity mismatch"
+        )
+    for assignment in assignments[1:]:
+        if (
+            assignment["deployment_id"],
+            assignment["deployment_epoch"],
+        ) != (
+            first["deployment_id"],
+            first["deployment_epoch"],
+        ):
+            raise ValueError("stage pack collection identity mismatch")
+        if _normalize_runtime(assignment.get("runtime")) != canonical_runtime:
+            raise ValueError("stage pack collection runtime identity mismatch")
+
+    expected_start = 0
+    for assignment in assignments:
+        layer_range = assignment["range"]
+        if layer_range["start_layer"] != expected_start:
+            raise ValueError("stage pack collection ranges overlap or contain a gap")
+        expected_start = layer_range["end_layer_exclusive"]
+    if expected_start != manifest.get("num_layers"):
+        raise ValueError("stage pack collection does not cover every model layer")
+
+    layer_keys = manifest["tensor_keys_by_layer"]
+    component_keys = manifest["component_tensor_keys"]
+    aliases = manifest["component_aliases"]
+    source_tensor_keys = {
+        key
+        for keys in (*layer_keys.values(), *component_keys.values())
+        for key in keys
+    }
+    verified_tensor_keys = [
+        verification["verified_tensor_keys"]
+        for verification in pack_verifications
+    ]
+    owned_sets = [set(keys) for keys in verified_tensor_keys]
+    owned_union = set().union(*owned_sets)
+    if owned_union != source_tensor_keys:
+        raise ValueError(
+            "stage pack collection logical tensor ownership mismatch"
+        )
+
+    component_owners = [
+        {
+            key: {
+                component
+                for component, keys in assignment[
+                    "component_tensor_keys"
+                ].items()
+                if key in keys
+            }
+            for key in keys
+        }
+        for assignment, keys in zip(
+            assignments,
+            verified_tensor_keys,
+            strict=True,
+        )
+    ]
+    tied_aliases: list[dict[str, Any]] = []
+    for left_index, left_keys in enumerate(owned_sets):
+        for right_index in range(left_index + 1, len(owned_sets)):
+            for key in sorted(left_keys & owned_sets[right_index]):
+                alias_matches: set[tuple[int, str, int, str]] = set()
+                for alias_component, target_component in aliases.items():
+                    if (
+                        alias_component in component_owners[left_index][key]
+                        and target_component in component_owners[right_index][key]
+                    ):
+                        alias_matches.add(
+                            (
+                                left_index,
+                                alias_component,
+                                right_index,
+                                target_component,
+                            )
+                        )
+                    elif (
+                        target_component in component_owners[left_index][key]
+                        and alias_component in component_owners[right_index][key]
+                    ):
+                        alias_matches.add(
+                            (
+                                right_index,
+                                alias_component,
+                                left_index,
+                                target_component,
+                            )
+                        )
+                if not alias_matches:
+                    raise ValueError(
+                        "stage pack collection has duplicate logical tensor ownership"
+                    )
+                if len(alias_matches) != 1:
+                    raise ValueError(
+                        "stage pack collection tied alias ownership is ambiguous"
+                    )
+                alias_index, alias_component, target_index, target_component = (
+                    next(iter(alias_matches))
+                )
+                tied_aliases.append(
+                    {
+                        "tensor_key": key,
+                        "alias_component": alias_component,
+                        "alias_assignment_id": assignment_ids[alias_index],
+                        "alias_node_id": node_ids[alias_index],
+                        "target_component": target_component,
+                        "target_assignment_id": assignment_ids[target_index],
+                        "target_node_id": node_ids[target_index],
+                    }
+                )
+
+    artifact_owners: dict[str, list[int]] = {}
+    for index, pack in enumerate(packs):
+        for artifact in pack["artifacts"]:
+            artifact_owners.setdefault(artifact["upstream_path"], []).append(index)
+    shared_backing_artifacts = [
+        {
+            "upstream_path": path,
+            "assignment_ids": [assignment_ids[index] for index in owner_indexes],
+            "node_ids": [node_ids[index] for index in owner_indexes],
+        }
+        for path, owner_indexes in sorted(artifact_owners.items())
+        if len(owner_indexes) > 1
+    ]
+
+    return {
+        "protocol": "mycelium.stage_pack_collection_verification.v1",
+        "manifest_digest": first["manifest_digest"],
+        "pack_count": len(packs),
+        "logical_source_tensor_keys": sorted(source_tensor_keys),
+        "logical_owned_tensor_keys": [
+            {
+                "assignment_id": assignment_id,
+                "node_id": node_id,
+                "tensor_keys": list(keys),
+            }
+            for assignment_id, node_id, keys in zip(
+                assignment_ids,
+                node_ids,
+                verified_tensor_keys,
+                strict=True,
+            )
+        ],
+        "tied_aliases": tied_aliases,
+        "shared_backing_artifacts": shared_backing_artifacts,
+        "pack_verifications": pack_verifications,
+        "exact_logical_coverage": True,
+        "route_ready": False,
+        "claim_boundary": (
+            "ordered assignment-bound stage packs have exact logical tensor "
+            "coverage; shared authenticated backing artifacts are not duplicate "
+            "logical ownership; layers are not loaded or physically qualified"
+        ),
+    }
+
+
 def _validate_verification_evidence(
     pack: dict[str, Any],
     verification: dict[str, Any],
     assignment: dict[str, Any],
+    manifest: dict[str, Any],
+    assignment_files: list[dict[str, Any]],
 ) -> None:
-    _validate_pack_shape(pack)
-    _validate_against_assignment(pack, assignment)
-    if not isinstance(verification, dict) or set(verification) != _VERIFICATION_FIELDS:
-        raise ValueError("stage pack verification fields do not match the v1 contract")
-    supplied = verification.get("stage_pack_verification_digest")
-    if (
-        not _SHA256_REF_RE.fullmatch(str(supplied or ""))
-        or supplied != _verification_digest_for(verification)
-    ):
+    upstream_files = _validate_pack_shape(pack)
+    _validate_against_assignment(
+        pack,
+        assignment,
+        assignment_files=assignment_files,
+        upstream_files=upstream_files,
+    )
+    _validate_verification_schema(verification)
+    _validate_verification_scalar_semantics(verification)
+    supplied = verification["stage_pack_verification_digest"]
+    if supplied != _verification_digest_for(verification):
         raise ValueError("stage pack verification digest mismatch")
+    authoritative_files = {
+        record["path"]: record for record in assignment_files
+    }
+    artifacts_by_path = {
+        record["upstream_path"]: record for record in pack["artifacts"]
+    }
+    if (
+        set(artifacts_by_path) != set(authoritative_files)
+        or any(
+            artifact["size_bytes"] != authoritative_files[path]["size_bytes"]
+            or artifact["content_digest"]
+            != authoritative_files[path]["content_digest"]
+            for path, artifact in artifacts_by_path.items()
+        )
+    ):
+        raise ValueError("stage pack verification file evidence is invalid")
+    authoritative_expected_bytes = sum(
+        record["size_bytes"] for record in authoritative_files.values()
+    )
     expected_bindings = {
         "protocol": STAGE_PACK_VERIFICATION_PROTOCOL,
         "stage_pack_digest": pack["stage_pack_digest"],
@@ -1066,7 +1997,7 @@ def _validate_verification_evidence(
         "verified_tensor_prefixes": pack["expected_tensor_prefixes"],
         "verified_tensor_keys": pack["expected_tensor_keys"],
         "verified_tensor_count": len(pack["expected_tensor_keys"]),
-        "expected_bytes": sum(item["size_bytes"] for item in pack["artifacts"]),
+        "expected_bytes": authoritative_expected_bytes,
         "ready_for_load": True,
         "route_ready": False,
     }
@@ -1077,34 +2008,31 @@ def _validate_verification_evidence(
     expected_files = {
         item["upstream_path"]: {
             "relative_path": item["relative_path"],
-            "size_bytes": item["size_bytes"],
-            "content_digest": item["content_digest"],
+            "size_bytes": authoritative_files[item["upstream_path"]][
+                "size_bytes"
+            ],
+            "content_digest": authoritative_files[item["upstream_path"]][
+                "content_digest"
+            ],
+            "tensor_keys": item["tensor_keys"],
         }
         for item in pack["artifacts"]
     }
     expected_paths = set(expected_files)
     if (
-        not isinstance(verified_files, list)
-        or len(verified_files) != len(expected_paths)
+        len(verified_files) != len(expected_paths)
         or any(
-            not isinstance(record, dict)
-            or set(record)
-            != {
-                "path",
-                "relative_path",
-                "size_bytes",
-                "content_digest",
-                "tensor_count",
-            }
-            or record.get("path") not in expected_paths
+            record["path"] not in expected_paths
             or {
-                field: record.get(field)
-                for field in ("relative_path", "size_bytes", "content_digest")
+                field: record[field]
+                for field in (
+                    "relative_path",
+                    "size_bytes",
+                    "content_digest",
+                    "tensor_keys",
+                )
             }
-            != expected_files.get(record.get("path"))
-            or not isinstance(record.get("tensor_count"), int)
-            or isinstance(record.get("tensor_count"), bool)
-            or record["tensor_count"] <= 0
+            != expected_files.get(record["path"])
             for record in verified_files
         )
         or {record["path"] for record in verified_files} != expected_paths
@@ -1112,15 +2040,68 @@ def _validate_verification_evidence(
         raise ValueError("stage pack verification file evidence is invalid")
     tensor_map = verification.get("tensor_file_map")
     overfetch = verification.get("overfetched_tensor_count")
+    verified_by_relative = {
+        record["relative_path"]: record for record in verified_files
+    }
+    expected_tensor_map: dict[str, str] = {}
+    for artifact in pack["artifacts"]:
+        record = verified_by_relative.get(artifact["relative_path"])
+        if record is None:
+            raise ValueError("stage pack verification evidence is invalid")
+        expected_tensor_map.update(
+            {tensor_key: record["path"] for tensor_key in artifact["tensor_keys"]}
+        )
+    selected_tensor_keys = {
+        tensor_key
+        for component_keys in pack["component_tensor_keys"].values()
+        for tensor_key in component_keys
+    }
+    try:
+        expected_selected_map = {
+            tensor_key: expected_tensor_map[tensor_key]
+            for tensor_key in pack["expected_tensor_keys"]
+        }
+    except KeyError:
+        raise ValueError("stage pack verification evidence is invalid") from None
+    derived_tensor_count = len(expected_tensor_map)
+    derived_overfetch = derived_tensor_count - len(selected_tensor_keys)
     if (
-        not isinstance(tensor_map, dict)
-        or set(tensor_map) != set(pack["expected_tensor_keys"])
-        or any(path not in expected_paths for path in tensor_map.values())
-        or not isinstance(overfetch, int)
-        or isinstance(overfetch, bool)
-        or overfetch < 0
+        selected_tensor_keys != set(pack["expected_tensor_keys"])
+        or tensor_map != expected_selected_map
+        or any(
+            record["tensor_count"] != len(record["tensor_keys"])
+            for record in verified_files
+        )
+        or sum(record["tensor_count"] for record in verified_files)
+        != derived_tensor_count
+        or derived_overfetch < 0
+        or overfetch != derived_overfetch
+        or derived_tensor_count
+        != verification["verified_tensor_count"] + overfetch
+        or sum(record["size_bytes"] for record in verified_files)
+        != verification["expected_bytes"]
     ):
-        raise ValueError("stage pack verification tensor evidence is invalid")
+        raise ValueError("stage pack verification evidence is invalid")
+    layer_range = assignment["range"]
+    for layer in range(
+        layer_range["start_layer"],
+        layer_range["end_layer_exclusive"],
+    ):
+        allowed_files = set(manifest["layer_files"][str(layer)])
+        if any(
+            tensor_map[tensor_key] not in allowed_files
+            for tensor_key in manifest["tensor_keys_by_layer"][str(layer)]
+        ):
+            raise ValueError("stage pack verification evidence is invalid")
+    for component in assignment["components"]:
+        if component == "decoder":
+            continue
+        allowed_files = set(manifest["component_files"][component])
+        if any(
+            tensor_map[tensor_key] not in allowed_files
+            for tensor_key in manifest["component_tensor_keys"][component]
+        ):
+            raise ValueError("stage pack verification evidence is invalid")
 
 
 def validate_stage_pack_evidence(
@@ -1130,14 +2111,78 @@ def validate_stage_pack_evidence(
     assignment: dict[str, Any],
     manifest: dict[str, Any],
 ) -> tuple[str, str]:
-    """Validate canonical pack evidence without rereading already verified files."""
+    """Validate canonical pack evidence and physically reproduce its verification."""
 
-    _validate_authoritative_assignment(assignment, manifest)
-    _validate_verification_evidence(pack, verification, assignment)
+    _validate_pack_schema_before_assignment(pack, assignment)
+    assignment_files = _validate_authoritative_assignment(assignment, manifest)
+    _validate_verification_evidence(
+        pack,
+        verification,
+        assignment,
+        manifest,
+        assignment_files,
+    )
+    try:
+        reproduced = verify_stage_pack(
+            pack,
+            assignment=assignment,
+            manifest=manifest,
+        )
+    except ValueError:
+        raise ValueError(
+            "stage pack physical verification evidence is invalid"
+        ) from None
+    if _canonical_json(reproduced) != _canonical_json(verification):
+        raise ValueError("stage pack verification evidence is invalid")
     return (
         pack["stage_pack_digest"],
         verification["stage_pack_verification_digest"],
     )
+
+
+def _loader_compatible_artifact_root(
+    pack: dict[str, Any],
+    assignment: dict[str, Any],
+) -> Path:
+    pack_root_raw = pack.get("artifact_root")
+    assignment_root_raw = assignment.get("artifact_cache_root")
+    try:
+        if (
+            type(pack_root_raw) is not str
+            or type(assignment_root_raw) is not str
+            or not Path(pack_root_raw).is_absolute()
+            or not Path(assignment_root_raw).is_absolute()
+        ):
+            raise ValueError
+        pack_root = Path(pack_root_raw)
+        assignment_root = Path(assignment_root_raw)
+        resolved_pack_root = pack_root.resolve(strict=True)
+        resolved_assignment_root = assignment_root.resolve(strict=True)
+        root_metadata = os.stat(resolved_pack_root, follow_symlinks=False)
+        if (
+            pack_root.is_symlink()
+            or assignment_root.is_symlink()
+            or str(resolved_pack_root) != pack_root_raw
+            or str(resolved_assignment_root) != assignment_root_raw
+            or resolved_pack_root != resolved_assignment_root
+            or not stat.S_ISDIR(root_metadata.st_mode)
+        ):
+            raise ValueError
+        for artifact in pack["artifacts"]:
+            upstream = _safe_relative_path(artifact.get("upstream_path"))
+            relative = _safe_relative_path(artifact.get("relative_path"))
+            if relative != upstream:
+                raise ValueError
+            handle = _open_beneath(resolved_pack_root, upstream)
+            try:
+                metadata = os.fstat(handle.fileno())
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    raise ValueError
+            finally:
+                handle.close()
+    except (OSError, RuntimeError, ValueError):
+        raise ValueError("stage pack artifacts are not loader-compatible") from None
+    return resolved_pack_root
 
 
 def artifact_report_for_loader(
@@ -1154,7 +2199,7 @@ def artifact_report_for_loader(
         assignment=assignment,
         manifest=manifest,
     )
-    root = Path(pack["artifact_root"])
+    root = _loader_compatible_artifact_root(pack, assignment)
     by_path = {record["path"]: record for record in verification["verified_files"]}
     verified_files = []
     for artifact in pack["artifacts"]:
@@ -1162,7 +2207,7 @@ def artifact_report_for_loader(
         verified_files.append(
             {
                 "path": artifact["upstream_path"],
-                "local_path": str(root / artifact["relative_path"]),
+                "local_path": str(root / artifact["upstream_path"]),
                 "size_bytes": artifact["size_bytes"],
                 "content_digest": artifact["content_digest"],
                 "cache_hit": True,

@@ -11,8 +11,9 @@ simultaneous loss of both sidecars is not durable exactly-once delivery.
 from __future__ import annotations
 
 from collections import OrderedDict, deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 import hashlib
+import json
 from pathlib import Path
 from queue import Empty, Full, Queue
 import threading
@@ -55,6 +56,8 @@ PROCESS_LIFETIME_LIMITATION = (
    "simultaneous sidecar process loss"
 )
 _SEEN_LIMIT = 4096
+_TRACE_ID_BYTES = 128
+_TRACE_ENTRY_BYTES = 512
 
 
 class IrohTransportError(RuntimeError):
@@ -66,6 +69,164 @@ class IrohTransportError(RuntimeError):
       super().__init__(code if not detail else f"{code}:{detail}")
 
 
+def _bounded_trace_identity(
+   message: object,
+   *,
+   max_bytes: int = _TRACE_ENTRY_BYTES,
+   delivery_message_id: bytes | None = None,
+) -> str:
+   if type(max_bytes) is not int or max_bytes < 2:
+      raise IrohTransportError("trace_identity_budget_invalid")
+
+   def render(candidate: Mapping[str, Any]) -> str:
+      return json.dumps(candidate, sort_keys=True, separators=(",", ":"))
+
+   def fits(candidate: Mapping[str, Any]) -> bool:
+      return len(render(candidate).encode("utf-8")) <= max_bytes
+
+   header = getattr(message, "header", None)
+   request_id = getattr(message, "request_id", None)
+   if request_id is None and header is not None:
+      request_id = getattr(header, "request_id", None)
+   identity: dict[str, Any] = {}
+   encoded_request = request_id.encode("utf-8") if isinstance(request_id, str) else b""
+   if encoded_request:
+      public_request = {"request_id": request_id}
+      if len(encoded_request) <= _TRACE_ID_BYTES and fits(public_request):
+         identity.update(public_request)
+      else:
+         request_digest = {
+            "request_id_sha256": hashlib.sha256(encoded_request).hexdigest()
+         }
+         if not fits(request_digest):
+            raise IrohTransportError("trace_identity_budget_exhausted")
+         identity.update(request_digest)
+   source = header if header is not None else message
+   phase = getattr(source, "phase", None)
+   if isinstance(phase, str) and len(phase.encode("utf-8")) <= _TRACE_ID_BYTES:
+      candidate = {**identity, "phase": phase}
+      if fits(candidate):
+         identity = candidate
+   token_index = getattr(source, "token_index", None)
+   if (
+      type(token_index) is int
+      and -(2**63) <= token_index < 2**63
+   ):
+      candidate = {**identity, "token_index": token_index}
+      if fits(candidate):
+         identity = candidate
+   request = getattr(message, "request", None)
+   graph = getattr(message, "graph", None)
+   build = getattr(message, "build", None)
+   if request is None and build is not None:
+      request = getattr(build, "request", None)
+   if graph is None and build is not None:
+      graph = getattr(build, "graph", None)
+   if request is not None and is_dataclass(request):
+      request_input = asdict(request)
+      request_input.pop("admitted_at", None)
+      encoded_request_input = json.dumps(
+         request_input,
+         sort_keys=True,
+         separators=(",", ":"),
+      ).encode()
+      candidate = {
+         **identity,
+         "request_input_sha256": (
+            "sha256:" + hashlib.sha256(encoded_request_input).hexdigest()
+         ),
+      }
+      if fits(candidate):
+         identity = candidate
+   deployment_id = getattr(graph, "deployment_id", None)
+   if (
+      isinstance(deployment_id, str)
+      and len(deployment_id.encode("utf-8")) <= _TRACE_ID_BYTES
+   ):
+      candidate = {**identity, "deployment_id": deployment_id}
+      if fits(candidate):
+         identity = candidate
+   deployment_epoch = getattr(graph, "deployment_epoch", None)
+   if type(deployment_epoch) is int and 0 < deployment_epoch < 2**63:
+      candidate = {**identity, "deployment_epoch": deployment_epoch}
+      if fits(candidate):
+         identity = candidate
+   stages = getattr(graph, "stages", None)
+   if stages:
+      cuts = [
+         {
+            "end_layer_exclusive": stage.layer_range.end_layer_exclusive,
+            "node_ids": [
+               placement.node_id for placement in stage.placements
+            ],
+            "placement_ids": [
+               placement.placement_id for placement in stage.placements
+            ],
+            "stage_id": stage.stage_id,
+            "start_layer": stage.layer_range.start_layer,
+         }
+         for stage in stages
+      ]
+      encoded_cuts = json.dumps(
+         cuts,
+         sort_keys=True,
+         separators=(",", ":"),
+      ).encode()
+      candidate = {
+         **identity,
+         "planner_stage_cuts_sha256": (
+            "sha256:" + hashlib.sha256(encoded_cuts).hexdigest()
+         ),
+      }
+      if fits(candidate):
+         identity = candidate
+   if isinstance(delivery_message_id, bytes) and len(delivery_message_id) == 16:
+      candidate = {
+         **identity,
+         "delivery_message_id": delivery_message_id.hex(),
+      }
+      if fits(candidate):
+         identity = candidate
+   rendered = render(identity)
+   if len(rendered.encode("utf-8")) > max_bytes:
+      raise IrohTransportError("trace_identity_too_large")
+   return rendered
+
+
+def _delivery_receipt_document(receipt: "DeliveryReceipt") -> dict[str, Any]:
+   return {
+      "message_id": receipt.message_id.hex(),
+      "peer_endpoint_id": receipt.peer_endpoint_id,
+      "peer_generation": receipt.peer_generation,
+      "router_protocol": receipt.router_protocol,
+      "semantics": receipt.semantics,
+   }
+
+
+def _delivery_receipt_digest(receipt: "DeliveryReceipt") -> str:
+   encoded = json.dumps(
+      _delivery_receipt_document(receipt),
+      sort_keys=True,
+      separators=(",", ":"),
+   ).encode()
+   return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _bounded_delivery_receipt_identity(
+   receipt: "DeliveryReceipt",
+   *,
+   max_bytes: int,
+) -> str:
+   identity = {
+      **_delivery_receipt_document(receipt),
+      "delivery_receipt_sha256": _delivery_receipt_digest(receipt),
+   }
+   rendered = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+   if len(rendered.encode()) > max_bytes:
+      raise IrohTransportError("delivery_receipt_trace_too_large")
+   return rendered
+
+
 @dataclass(frozen=True)
 class PeerBinding:
    node_id: str
@@ -74,12 +235,70 @@ class PeerBinding:
    generation: int
 
    def __post_init__(self) -> None:
-      if not self.node_id or not self.endpoint_id:
+      if type(self.node_id) is not str or not self.node_id:
+         raise ValueError("peer node and endpoint ids must not be empty")
+      if type(self.endpoint_id) is not str or not self.endpoint_id:
          raise ValueError("peer node and endpoint ids must not be empty")
       if self.endpoint_addr.get("id") != self.endpoint_id:
          raise ValueError("endpoint_addr id must match endpoint_id")
-      if self.generation <= 0:
+      if type(self.generation) is not int or isinstance(self.generation, bool) or self.generation <= 0:
          raise ValueError("peer generation must be positive")
+
+
+def _canonical_endpoint_document(
+   endpoint_addr: Mapping[str, Any],
+) -> dict[str, Any]:
+   try:
+      pairs = list(endpoint_addr.items())
+   except Exception:
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   for key in (pair[0] for pair in pairs):
+      if type(key) is not str:
+         raise ValueError("endpoint_addr must be valid JSON data") from None
+   try:
+      encoded = json.dumps(
+         dict(pairs),
+         allow_nan=False,
+         sort_keys=True,
+         separators=(",", ":"),
+      )
+   except Exception:
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   try:
+      document = json.loads(encoded)
+   except Exception:
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   if not isinstance(document, dict):
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   if len(document) != len(pairs):
+      raise ValueError("endpoint_addr must be valid JSON data") from None
+   return document
+
+
+def _canonical_peer_binding(binding: PeerBinding) -> PeerBinding:
+   return PeerBinding(
+      node_id=str(binding.node_id),
+      endpoint_id=str(binding.endpoint_id),
+      endpoint_addr=_canonical_endpoint_document(binding.endpoint_addr),
+      generation=int(binding.generation),
+   )
+
+
+def _peer_binding_snapshot(
+   binding: PeerBinding,
+) -> tuple[str, str, str, int]:
+   endpoint_document = _canonical_endpoint_document(binding.endpoint_addr)
+   return (
+      str(binding.node_id),
+      str(binding.endpoint_id),
+      json.dumps(
+         endpoint_document,
+         allow_nan=False,
+         sort_keys=True,
+         separators=(",", ":"),
+      ),
+      int(binding.generation),
+   )
 
 
 @dataclass(frozen=True)
@@ -163,7 +382,7 @@ class IrohTransport:
       self.node_id = node_id
       self.socket_path = Path(socket_path)
       self._bootstrap_secret = bytes(bootstrap_secret)
-      self._peer = peer
+      self._peer = _canonical_peer_binding(peer)
       self.expected_endpoint_id = expected_endpoint_id
       self.delivery_timeout_seconds = delivery_timeout_seconds
       self.poll_interval_seconds = poll_interval_seconds
@@ -172,6 +391,7 @@ class IrohTransport:
       self._cancellation_slots = threading.BoundedSemaphore(queue_capacity)
       self._manifest_delta_capacity = queue_capacity
       self._state_lock = threading.RLock()
+      self._receipt_trace_condition = threading.Condition(self._state_lock)
       self._lifecycle_lock = threading.Lock()
       self._rotation_lock = threading.Lock()
       self._router: Any | None = None
@@ -185,6 +405,7 @@ class IrohTransport:
       ] = Queue(maxsize=queue_capacity)
       self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
+      self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
       self._stop = threading.Event()
       self._running = False
       self._closed = False
@@ -194,6 +415,7 @@ class IrohTransport:
       self._inflight_received: dict[bytes, bytes] = {}
       self._dispatcher_phase = "idle"
       self._outbound_trace: deque[str] = deque(maxlen=256)
+      self._inflight_receipt_trace_commits = 0
       self._remote_frames_sent = 0
       self._remote_frames_received = 0
       self._router_frames_dispatched = 0
@@ -206,7 +428,7 @@ class IrohTransport:
    @property
    def peer_binding(self) -> PeerBinding:
       with self._state_lock:
-         return self._peer
+         return _canonical_peer_binding(self._peer)
 
    @property
    def fatal_error(self) -> IrohTransportError | None:
@@ -220,7 +442,13 @@ class IrohTransport:
 
    @property
    def worker_threads_alive(self) -> int:
-      threads = (self._receiver_thread, self._dispatcher_thread)
+      with self._state_lock:
+         threads = (
+            self._receiver_thread,
+            self._dispatcher_thread,
+            *self._cancellation_threads.values(),
+            *self._delivery_cancel_threads.values(),
+         )
       return sum(
          int(thread is not None and thread.is_alive()) for thread in threads
       )
@@ -334,7 +562,7 @@ class IrohTransport:
    ) -> None:
       client.configure_peer(
          binding.endpoint_id,
-         dict(binding.endpoint_addr),
+         _canonical_endpoint_document(binding.endpoint_addr),
          generation=binding.generation,
          timeout=timeout,
       )
@@ -346,40 +574,59 @@ class IrohTransport:
    def _rotate_peer(self, replacement: PeerBinding) -> None:
       with self._state_lock:
          self._require_running()
-         current = self._peer
-         if replacement.node_id != current.node_id:
+         current_snapshot = _peer_binding_snapshot(self._peer)
+         candidate = _canonical_peer_binding(replacement)
+         if candidate.node_id != self._peer.node_id:
             raise IrohTransportError("peer_node_mismatch")
-         if replacement.generation <= current.generation:
+         if candidate.generation <= self._peer.generation:
             raise IrohTransportError("stale_peer_generation")
          control = self._control_client
-      assert control is not None
+      if control is None:
+         raise IrohTransportError("transport_control_unavailable")
       try:
-         self._configure_peer(control, replacement)
+         self._configure_peer(control, candidate)
       except BaseException as error:
          raise self._map_sidecar_error("peer_rotation_failed", error) from error
 
       with self._state_lock:
-         self._peer = replacement
-         stale = [
-            (message_id, pending)
-            for message_id, pending in self._pending.items()
-            if pending.generation < replacement.generation
-         ]
-         for _, pending in stale:
-            pending.cancelled = True
-            pending.reason = "peer_rotated"
-      for message_id, _ in stale:
-         self._cancel(message_id)
+         self._require_running()
+         if self._control_client is not control:
+            raise IrohTransportError("transport_control_changed")
+         try:
+            refreshed_snapshot = _peer_binding_snapshot(self._peer)
+         except ValueError:
+            raise IrohTransportError("peer_rotated") from None
+         if refreshed_snapshot != current_snapshot:
+            raise IrohTransportError("peer_rotated")
+         self._peer = candidate
+         for message_id, pending in self._pending.items():
+            if pending.generation >= candidate.generation:
+               continue
+            reserved, cancellation_client = (
+               self._reserve_pending_cancellation_locked(
+                  message_id,
+                  pending,
+                  "peer_rotated",
+               )
+            )
+            if reserved:
+               self._start_delivery_cancel_locked(
+                  cancellation_client,
+                  message_id,
+               )
 
    def send_router_frame(
       self,
       frame: bytes,
       *,
       destination_node_id: str,
+      _trace_peer_binding: PeerBinding | None = None,
    ) -> DeliveryReceipt:
       with self._state_lock:
          self._require_running()
          peer = self._peer
+         if _trace_peer_binding is not None and peer != _trace_peer_binding:
+            raise IrohTransportError("peer_rotated")
       if destination_node_id != peer.node_id:
          raise IrohTransportError("destination_binding_mismatch")
       try:
@@ -400,6 +647,8 @@ class IrohTransport:
          with self._state_lock:
             self._require_running()
             peer = self._peer
+            if _trace_peer_binding is not None and peer != _trace_peer_binding:
+               raise IrohTransportError("peer_rotated")
             if destination_node_id != peer.node_id:
                raise IrohTransportError("destination_binding_mismatch")
             pending = _PendingSend(peer.generation)
@@ -454,7 +703,8 @@ class IrohTransport:
                   if pending.cancelled or current.generation != pending.generation:
                      raise IrohTransportError(pending.reason or "peer_rotated")
                   client = self._send_client
-               assert client is not None
+               if client is None:
+                  raise IrohTransportError("transport_not_running")
                self._send_confirmed(
                   client,
                   frame,
@@ -580,36 +830,77 @@ class IrohTransport:
       reason: str,
    ) -> None:
       with self._state_lock:
-         if (
-            self._pending.get(message_id) is not pending
-            or pending.completed
-            or pending.cancel_started
-         ):
-            return
-         pending.cancelled = True
-         pending.reason = reason
-         pending.cancel_started = True
-         control = self._control_client
+         reserved, control = self._reserve_pending_cancellation_locked(
+            message_id,
+            pending,
+            reason,
+         )
+         if reserved:
+            self._start_delivery_cancel_locked(control, message_id)
+
+   def _reserve_pending_cancellation_locked(
+      self,
+      message_id: bytes,
+      pending: _PendingSend,
+      reason: str,
+   ) -> tuple[bool, Any | None]:
+      if (
+         self._pending.get(message_id) is not pending
+         or pending.completed
+         or pending.cancel_started
+      ):
+         return False, None
+      pending.cancelled = True
+      pending.reason = reason
+      pending.cancel_started = True
+      return True, self._control_client
+
+   def _start_delivery_cancel_locked(
+      self,
+      control: Any | None,
+      message_id: bytes,
+   ) -> None:
+      if message_id in self._delivery_cancel_threads:
+         raise IrohTransportError("delivery_cancel_worker_collision")
       thread = threading.Thread(
-         target=self._cancel_with_client,
+         target=self._delivery_cancel_worker,
          args=(control, message_id),
-         kwargs={"timeout": self.poll_interval_seconds},
          name=f"mycelium-iroh-cancel-{message_id.hex()}",
          daemon=True,
       )
-      thread.start()
+      try:
+         thread.start()
+      except BaseException:
+         thread = None
+         raise
+      self._delivery_cancel_threads[message_id] = thread
 
-   def _cancel(self, message_id: bytes) -> None:
-      with self._state_lock:
-         control = self._control_client
-      self._cancel_with_client(control, message_id)
+   def _delivery_cancel_worker(
+      self,
+      control: Any | None,
+      message_id: bytes,
+   ) -> None:
+      try:
+         self._cancel_with_client(
+            control,
+            message_id,
+            timeout=min(
+               self.poll_interval_seconds,
+               self.delivery_timeout_seconds,
+            ),
+         )
+      finally:
+         current = threading.current_thread()
+         with self._state_lock:
+            if self._delivery_cancel_threads.get(message_id) is current:
+               self._delivery_cancel_threads.pop(message_id, None)
 
    @staticmethod
    def _cancel_with_client(
       control: Any | None,
       message_id: bytes,
       *,
-      timeout: float | None = None,
+      timeout: float,
    ) -> None:
       if control is None:
          return
@@ -809,7 +1100,7 @@ class IrohTransport:
       except TypeError as error:
          if "wait_seconds" not in str(error):
             raise
-         return receive(timeout=max(self.poll_interval_seconds, 0.5))
+         return receive(timeout=self.poll_interval_seconds)
 
    def _reconnect_receive_client(self) -> None:
       replacement = self._new_client()
@@ -1097,21 +1388,88 @@ class IrohTransport:
 
    def _send_or_dispatch(self, destination: str, frame: bytes) -> None:
       decoded = decode_frame(frame)
-      detail = (
-         f":{decoded.message.reason}"
-         if isinstance(decoded.message, FailureReport)
-         else ""
+      remote = destination != self.node_id
+      trace_prefix = (
+         f"{type(decoded.message).__name__}->"
+         f"{'peer:remote' if remote else 'self:local'}:"
       )
       with self._state_lock:
          self._require_running()
-         self._outbound_trace.append(
-            f"{type(decoded.message).__name__}->{destination}:"
-            f"{'local' if destination == self.node_id else 'remote'}{detail}"
-         )
       if destination == self.node_id:
+         identity_budget = _TRACE_ENTRY_BYTES - len(
+            trace_prefix.encode("utf-8")
+         )
+         trace = trace_prefix + _bounded_trace_identity(
+            decoded.message,
+            max_bytes=identity_budget,
+         )
+         if len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES:
+            raise IrohTransportError("trace_entry_too_large")
+         with self._state_lock:
+            self._require_running()
+            self._outbound_trace.append(trace)
          self._dispatch(decoded, source_node_id=self.node_id)
          return
-      self.send_router_frame(frame, destination_node_id=destination)
+
+      with self._receipt_trace_condition:
+         self._require_running()
+         trace_peer = self._peer
+         self._inflight_receipt_trace_commits += 1
+      try:
+         placeholder_receipt = DeliveryReceipt(
+            message_id=b"\0" * 16,
+            peer_endpoint_id=trace_peer.endpoint_id,
+            peer_generation=trace_peer.generation,
+         )
+         self._remote_trace_entries(
+            decoded.message,
+            trace_prefix,
+            placeholder_receipt,
+         )
+         receipt = self.send_router_frame(
+            frame,
+            destination_node_id=destination,
+            _trace_peer_binding=trace_peer,
+         )
+         trace, receipt_trace = self._remote_trace_entries(
+            decoded.message,
+            trace_prefix,
+            receipt,
+         )
+         with self._state_lock:
+            self._outbound_trace.extend((trace, receipt_trace))
+      finally:
+         with self._receipt_trace_condition:
+            self._inflight_receipt_trace_commits -= 1
+            self._receipt_trace_condition.notify_all()
+
+   @staticmethod
+   def _remote_trace_entries(
+      message: object,
+      trace_prefix: str,
+      receipt: DeliveryReceipt,
+   ) -> tuple[str, str]:
+      identity_budget = _TRACE_ENTRY_BYTES - len(
+         trace_prefix.encode("utf-8")
+      )
+      trace = trace_prefix + _bounded_trace_identity(
+         message,
+         max_bytes=identity_budget,
+         delivery_message_id=receipt.message_id,
+      )
+      receipt_prefix = "DeliveryReceipt->peer:remote:"
+      receipt_trace = receipt_prefix + _bounded_delivery_receipt_identity(
+         receipt,
+         max_bytes=(
+            _TRACE_ENTRY_BYTES - len(receipt_prefix.encode("utf-8"))
+         ),
+      )
+      if (
+         len(trace.encode("utf-8")) > _TRACE_ENTRY_BYTES
+         or len(receipt_trace.encode("utf-8")) > _TRACE_ENTRY_BYTES
+      ):
+         raise IrohTransportError("trace_entry_too_large")
+      return trace, receipt_trace
 
    def _entry_node(self, request_id: str) -> str:
       node_id = self._entry_nodes.get(request_id)
@@ -1160,32 +1518,38 @@ class IrohTransport:
    def _close(self) -> None:
       with self._state_lock:
          if self._closed:
-            pending_ids: tuple[bytes, ...] = ()
             clients: tuple[Any | None, ...] = ()
-            control = None
          else:
             self._closed = True
             self._running = False
             self._stop.set()
-            for pending in self._pending.values():
-               pending.cancelled = True
-               pending.reason = "transport_closed"
-               pending.cancel_started = True
-            pending_ids = tuple(self._pending)
+            for message_id, pending in self._pending.items():
+               reserved, cancellation_client = (
+                  self._reserve_pending_cancellation_locked(
+                     message_id,
+                     pending,
+                     "transport_closed",
+                  )
+               )
+               if reserved:
+                  self._start_delivery_cancel_locked(
+                     cancellation_client,
+                     message_id,
+                  )
             clients = (
                self._receive_client,
                self._send_client,
                self._control_client,
             )
-            control = self._control_client
             self._receive_client = None
             self._send_client = None
             self._control_client = None
          thread = self._receiver_thread
          dispatcher_thread = self._dispatcher_thread
          cancellation_threads = tuple(self._cancellation_threads.values())
-      for message_id in pending_ids:
-         self._cancel_with_client(control, message_id)
+         delivery_cancel_threads = tuple(
+            self._delivery_cancel_threads.values()
+         )
       for client in clients:
          if client is None:
             continue
@@ -1199,6 +1563,17 @@ class IrohTransport:
             client.close()
          except BaseException:
             pass
+      receipt_trace_deadline = (
+         time.monotonic() + self.delivery_timeout_seconds
+      )
+      with self._receipt_trace_condition:
+         while self._inflight_receipt_trace_commits:
+            remaining = receipt_trace_deadline - time.monotonic()
+            if remaining <= 0:
+               raise IrohTransportError(
+                  "receipt_trace_commit_shutdown_timeout"
+               )
+            self._receipt_trace_condition.wait(remaining)
       if thread is not None and thread is not threading.current_thread():
          thread.join(timeout=max(1.0, self.poll_interval_seconds * 4))
          if thread.is_alive():
@@ -1222,6 +1597,22 @@ class IrohTransport:
          )
          if cancellation_thread.is_alive():
             error = IrohTransportError("path_cancellation_shutdown_timeout")
+            self._set_fatal(error)
+            raise error
+      for delivery_cancel_thread in delivery_cancel_threads:
+         if delivery_cancel_thread is None:
+            continue
+         if delivery_cancel_thread is threading.current_thread():
+            continue
+         if not delivery_cancel_thread.is_alive():
+            continue
+         delivery_cancel_thread.join(
+            timeout=max(0.05, self.poll_interval_seconds * 4)
+         )
+         if delivery_cancel_thread.is_alive():
+            error = IrohTransportError(
+               "delivery_cancellation_shutdown_timeout"
+            )
             self._set_fatal(error)
             raise error
       with self._state_lock:
