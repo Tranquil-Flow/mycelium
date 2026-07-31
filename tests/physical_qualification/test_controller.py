@@ -366,6 +366,7 @@ def _physical_run_plan(
         "nodes": [
             {
                 "node_id": peer.node_id,
+                "python_executable": f"/opt/mycelium/python-{index}/bin/python3",
                 "socket_root": f"/tmp/mycelium-run/socket-{index}",
                 "sidecar_binary": "/opt/mycelium/bin/mycelium-iroh-sidecar",
                 "endpoint_secret_file": f"{identity_root}/{peer.node_id}.key",
@@ -646,6 +647,7 @@ def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledg
     ):
         assert argv[0] == "ssh"
         assert peer.ssh_target in argv
+        assert shlex.split(argv[-1])[0] == "python3"
         assert peer.staging_root in argv[-1]
         assert archive_digest in argv[-1]
         assert timeout_seconds == 120.0
@@ -786,6 +788,8 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
     assert set(sessions) == {peer.node_id for peer in peers}
     for peer in peers:
         remote_argv = shlex.split(sessions[peer.node_id].argv[-1])
+        node_index = peers.index(peer)
+        assert remote_argv[0] == f"/opt/mycelium/python-{node_index}/bin/python3"
         key_flag = remote_argv.index("--endpoint-secret-file")
         assert remote_argv[key_flag + 1] == (
             f"/var/lib/mycelium/identities/{peer.node_id}.key"
@@ -1269,6 +1273,39 @@ def test_physical_run_rejects_endpoint_secret_outside_identity_root(
     with pytest.raises(
         ControllerError,
         match="run_plan_endpoint_secret_file_invalid",
+    ):
+        controller.execute("run")
+
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "python_executable",
+    ["python3", "/opt/mycelium/../python3", "/opt/mycelium/python3\n"],
+)
+def test_physical_run_rejects_unsafe_python_executable(
+    tmp_path: Path,
+    python_executable: str,
+) -> None:
+    peers = _peers(2)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner([])
+    run_plan = _physical_run_plan(peers)
+    run_plan["nodes"][0]["python_executable"] = python_executable
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=run_plan,
+    )
+
+    with pytest.raises(
+        ControllerError,
+        match="run_plan_python_executable_invalid",
     ):
         controller.execute("run")
 

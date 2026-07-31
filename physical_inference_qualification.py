@@ -893,6 +893,7 @@ class QualificationController:
             _reject("run_plan_nodes_invalid")
         expected_node_fields = {
             "node_id",
+            "python_executable",
             "socket_root",
             "sidecar_binary",
             "endpoint_secret_file",
@@ -905,9 +906,11 @@ class QualificationController:
                 _reject("run_plan_node_invalid")
             node_id = record.get("node_id")
             actual_node_ids.append(node_id)
+            python_executable = record.get("python_executable")
             socket_root = record.get("socket_root")
             sidecar_binary = record.get("sidecar_binary")
             for value, code, require_marker in (
+                (python_executable, "run_plan_python_executable_invalid", False),
                 (socket_root, "run_plan_socket_root_invalid", True),
                 (sidecar_binary, "run_plan_sidecar_binary_invalid", False),
             ):
@@ -946,6 +949,7 @@ class QualificationController:
             normalized_nodes.append(
                 {
                     "node_id": node_id,
+                    "python_executable": python_executable,
                     "socket_root": socket_root,
                     "sidecar_binary": sidecar_binary,
                     "endpoint_secret_file": endpoint_secret_file,
@@ -1151,7 +1155,7 @@ class QualificationController:
                 node_script = f"{peer.staging_root}/physical_inference_node.py"
                 remote_command = shlex.join(
                     (
-                        "python3.14",
+                        node_plan["python_executable"],
                         node_script,
                         "--run-id",
                         plan["run_id"],
@@ -1358,7 +1362,7 @@ class QualificationController:
                     node_script = f"{peer.staging_root}/physical_inference_node.py"
                     remote_command = shlex.join(
                         (
-                            "python3.14",
+                            node_plan["python_executable"],
                             node_script,
                             "--run-id",
                             plan["run_id"],
@@ -1881,7 +1885,7 @@ class QualificationController:
                 attempted.append(peer)
                 remote_command = shlex.join(
                     (
-                        "python3.14",
+                        "python3",
                         "-c",
                         _REMOTE_STAGE_SCRIPT,
                         peer.staging_root,
