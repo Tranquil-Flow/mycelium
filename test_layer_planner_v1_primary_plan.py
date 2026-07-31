@@ -23,24 +23,32 @@ def graph(nodes, policy):
 
 
 class PrimaryPlanTests(unittest.TestCase):
-    def test_tiny_joint_search_can_drop_slow_node(self):
+    def test_admitted_slow_node_is_not_dropped_by_ordering(self):
         policy = PlanningPolicy(memory_reserve_fraction=0)
         nodes = [node("fast-a"), node("slow", 10), node("fast-b")]
         result = plan_primary(graph(nodes, policy), model(6), empirical_interactive_chat(concurrency_points=(1, 4)), policy)
-        self.assertNotIn("slow", result.order)
-        self.assertIn("slow", result.unplaced_node_ids)
+        self.assertIn("slow", result.order)
+        self.assertEqual(result.unplaced_node_ids, ())
+        self.assertTrue(
+            any(stage.node_id == "slow" and stage.layer_range.count >= 1 for stage in result.allocation.stages)
+        )
         self.assertTrue(result.provenance.globally_exact)
 
     def test_fleet_strategy_uses_candidate_count_without_candidate_truncation(self):
-        expected = {8: "held_karp", 13: "multi_start_insertion", 33: "clustered_refinement", 129: "hierarchical_refinement"}
-        for count, mode in expected.items():
+        expected = {
+            8: ("held_karp", True),
+            13: ("multi_start_insertion", False),
+            33: ("clustered_refinement", False),
+            129: ("hierarchical_refinement", False),
+        }
+        for count, (mode, globally_exact) in expected.items():
             policy = PlanningPolicy(memory_reserve_fraction=0)
             nodes = [node(f"n{i:03}") for i in range(count)]
-            result = plan_primary(graph(nodes, policy), model(4), empirical_interactive_chat(concurrency_points=(1,)), policy)
+            result = plan_primary(graph(nodes, policy), model(count), empirical_interactive_chat(concurrency_points=(1,)), policy)
             self.assertEqual(result.provenance.mode, mode)
             self.assertEqual(result.provenance.candidate_node_count, count)
-            self.assertLessEqual(len(result.order), 4)
-            self.assertFalse(result.provenance.globally_exact)
+            self.assertEqual(len(result.order), count)
+            self.assertEqual(result.provenance.globally_exact, globally_exact)
 
     def test_primary_order_is_frozen_contract(self):
         policy = PlanningPolicy(memory_reserve_fraction=0)
@@ -62,13 +70,13 @@ class PrimaryPlanTests(unittest.TestCase):
         nodes = [node("a"), node("b")]
         one_way = [DirectedLinkObservation("a", "b", 2, 0, 100_000_000)]
         partial_graph = build_physical_graph(nodes, one_way, policy)
-        result = plan_primary(
-            partial_graph,
-            model(6),
-            empirical_interactive_chat(concurrency_points=(1,)),
-            policy,
-        )
-        self.assertTrue(any("disconnected directed cycle" in item for item in result.diagnostics))
+        with self.assertRaisesRegex(ValueError, "no feasible directed topology cycle"):
+            plan_primary(
+                partial_graph,
+                model(6),
+                empirical_interactive_chat(concurrency_points=(1,)),
+                policy,
+            )
 
 
 if __name__ == "__main__":

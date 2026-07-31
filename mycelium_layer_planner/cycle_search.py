@@ -88,7 +88,7 @@ def held_karp_cycle(nodes: Iterable[str], cost_fn: EdgeCostFunction) -> CycleRes
     if not canonical:
         raise ValueError("cycle requires at least one node")
     if len(canonical) == 1:
-        return CycleResult(canonical, 0.0, "held_karp", False, 1)
+        return CycleResult(canonical, 0.0, "held_karp", True, 1)
     start = canonical[0]
     others = canonical[1:]
     dp: dict[tuple[int, int], tuple[float, tuple[str, ...]]] = {}
@@ -128,7 +128,7 @@ def held_karp_cycle(nodes: Iterable[str], cost_fn: EdgeCostFunction) -> CycleRes
             best_cycle = candidate
     if best_cycle is None:
         raise ValueError("no feasible directed cycle")
-    return CycleResult(best_cycle[1], best_cycle[0], "held_karp", False, explored)
+    return CycleResult(best_cycle[1], best_cycle[0], "held_karp", True, explored)
 
 
 def _nearest_neighbor(nodes: tuple[str, ...], cost_fn: EdgeCostFunction, start: str) -> tuple[str, ...] | None:

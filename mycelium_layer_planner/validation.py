@@ -90,5 +90,9 @@ def validate_route_plan(plan: RoutePlanV2) -> None:
         dst_group = group_by_placement[loop.dst_placement_id]
         if src_group != group_order[-1] or dst_group != group_order[0]:
             raise ValueError("loopback must connect final group to first group")
-    if plan.provenance.globally_exact and plan.provenance.mode != "exact_joint_enumeration":
+    if plan.provenance.globally_exact and plan.provenance.mode not in {
+        "exact_joint_enumeration",  # accepted for archived v2 plans
+        "exact_topology_enumeration",
+        "held_karp",
+    }:
         raise ValueError("unknown global optimality claim")

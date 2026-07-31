@@ -36,6 +36,27 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_route_plan(replace(plan, diagnostics={**plan.diagnostics, "loaded": True}))
 
+    def test_exact_held_karp_topology_provenance_is_accepted(self):
+        plan = plan_snapshot(snapshot())
+        provenance = replace(
+            plan.provenance,
+            mode="held_karp",
+            globally_exact=True,
+        )
+
+        validate_route_plan(replace(plan, provenance=provenance))
+
+    def test_unknown_global_topology_provenance_is_rejected(self):
+        plan = plan_snapshot(snapshot())
+        provenance = replace(
+            plan.provenance,
+            mode="unknown_exact_search",
+            globally_exact=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "unknown global optimality claim"):
+            validate_route_plan(replace(plan, provenance=provenance))
+
 
 if __name__ == "__main__":
     unittest.main()

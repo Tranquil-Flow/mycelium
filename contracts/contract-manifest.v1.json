@@ -24,8 +24,8 @@
     {
       "fixture": {
         "path": "contracts/compatibility-fixtures/control-plane-tranche-v1.json",
-        "sha256": "45de69c869400e45267ea3df64955097ee41af039c90626d9db9500038871897",
-        "size_bytes": 34370
+        "sha256": "3282391c2e05e95f36064a6b4e58d73ae59bf3377171a2d67e45f164821defa0",
+        "size_bytes": 34497
       },
       "owner_sources": [
         {
@@ -200,8 +200,8 @@
         },
         {
           "path": "mycelium_layer_planner/planner.py",
-          "sha256": "7ca32af5c598ca5a2117ad06c777638ea09ba106a39e780a96f7b282b34b377c",
-          "size_bytes": 7802
+          "sha256": "52b615847346a787698117f226c2248101d85f6177e1edfb41765b87206fb1a9",
+          "size_bytes": 8621
         },
         {
           "path": "mycelium_layer_planner/contracts.py",
@@ -284,8 +284,8 @@
     {
       "fixture": {
         "path": "contracts/compatibility-fixtures/route-plan-v2.json",
-        "sha256": "363b66e4d5d2eb3b337182bcb02ec38290539962820dbad40f4afe142caccdf6",
-        "size_bytes": 3747
+        "sha256": "7ede2495213845f7bd9fce00a006ee4fa971201a201fb1afca7c930586b013f7",
+        "size_bytes": 3864
       },
       "owner_sources": [
         {
@@ -300,8 +300,8 @@
         },
         {
           "path": "mycelium_layer_planner/validation.py",
-          "sha256": "30e079ce1eee0b867490fee6793e33ef80fa5cf0cedac1460fab050ec203f891",
-          "size_bytes": 4892
+          "sha256": "84f688f4e3fbb12ec109c782352cb12b5baa199225fac9a6b46edaad09e775e3",
+          "size_bytes": 5006
         }
       ],
       "protocol": "mycelium.route_plan.v2"

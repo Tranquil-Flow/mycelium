@@ -189,6 +189,136 @@ class PlacementSource(Protocol):
     def compile(self, members: Sequence[MemberRecord]) -> PlacementDecision: ...
 
 
+def _member_index(members: Sequence[MemberRecord]) -> dict[str, MemberRecord]:
+    if isinstance(members, (str, bytes)) or not isinstance(members, Sequence):
+        raise PlacementError("placement_members_invalid")
+    member_by_id: dict[str, MemberRecord] = {}
+    for member in members:
+        if not isinstance(member, MemberRecord):
+            raise PlacementError("placement_member_invalid")
+        if member.node_id in member_by_id:
+            raise PlacementError("placement_member_duplicate")
+        member_by_id[member.node_id] = member
+    return member_by_id
+
+
+class PlannerPlacementSource:
+    """Compile planner-v2 placement from one immutable evidence snapshot.
+
+    Membership records prove that snapshot-selected nodes still exist and remain
+    activation eligible. Compute and link measurements come only from the pinned
+    planner snapshot; sparse membership metadata is never promoted into invented
+    planner evidence.
+    """
+
+    def __init__(self, snapshot: Mapping[str, Any]) -> None:
+        if not isinstance(snapshot, Mapping):
+            raise PlacementError("placement_planner_snapshot_invalid")
+        try:
+            canonical = json.dumps(
+                dict(snapshot),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            if len(canonical.encode("utf-8")) > _MAX_FIXTURE_BYTES:
+                raise PlacementError("placement_planner_snapshot_too_large")
+            copied = json.loads(canonical)
+        except PlacementError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise PlacementError("placement_planner_snapshot_invalid") from exc
+        nodes = copied.get("nodes")
+        if not isinstance(nodes, list) or not nodes:
+            raise PlacementError("placement_planner_snapshot_invalid")
+        if len(nodes) > _MAX_ASSIGNMENTS:
+            raise PlacementError("placement_planner_snapshot_too_large")
+        evidence_node_ids: list[str] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise PlacementError("placement_planner_snapshot_invalid")
+            evidence_node_ids.append(
+                _segment(
+                    node.get("node_id"),
+                    code="placement_planner_snapshot_invalid",
+                )
+            )
+        if len(set(evidence_node_ids)) != len(evidence_node_ids):
+            raise PlacementError("placement_planner_snapshot_invalid")
+        admitted = copied.get("admitted_node_ids")
+        if admitted is None:
+            raise PlacementError("placement_planner_admission_required")
+        if (
+            not isinstance(admitted, list)
+            or not admitted
+            or len(admitted) > _MAX_ASSIGNMENTS
+            or any(not isinstance(node_id, str) for node_id in admitted)
+            or len(set(admitted)) != len(admitted)
+            or not set(admitted).issubset(evidence_node_ids)
+        ):
+            raise PlacementError("placement_planner_admission_invalid")
+        for node_id in admitted:
+            _segment(node_id, code="placement_planner_admission_invalid")
+        self._snapshot = copied
+        self._expected_node_ids = frozenset(admitted)
+        self._source_digest = "sha256:" + hashlib.sha256(
+            canonical.encode("utf-8")
+        ).hexdigest()
+
+    @property
+    def source_digest(self) -> str:
+        return self._source_digest
+
+    def compile(self, members: Sequence[MemberRecord]) -> PlacementDecision:
+        member_by_id = _member_index(members)
+        try:
+            from mycelium_layer_planner.planner import plan_snapshot
+
+            plan = plan_snapshot(self._snapshot)
+        except (ImportError, AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise PlacementError("placement_planner_snapshot_invalid") from exc
+
+        primary = sorted(
+            (placement for placement in plan.placements if placement.primary),
+            key=lambda placement: (
+                placement.layer_range.start,
+                placement.layer_range.end,
+                placement.node_id,
+            ),
+        )
+        primary_node_ids = tuple(placement.node_id for placement in primary)
+        if (
+            not primary
+            or primary_node_ids != tuple(plan.diagnostics.get("primary_order", ()))
+            or set(primary_node_ids) != self._expected_node_ids
+        ):
+            raise PlacementError("placement_planner_output_invalid")
+        for node_id in primary_node_ids:
+            member = member_by_id.get(node_id)
+            if member is None:
+                raise PlacementError("placement_planner_member_set_mismatch")
+            if not member.activation_eligible:
+                raise PlacementError("placement_member_activation_ineligible")
+
+        digest_suffix = self._source_digest.removeprefix("sha256:")
+        assignments = tuple(
+            {
+                "node_id": placement.node_id,
+                "assignment_id": f"planner-stage-{index:03}-{digest_suffix[:12]}",
+                "start_layer": placement.layer_range.start,
+                "end_layer_exclusive": placement.layer_range.end,
+            }
+            for index, placement in enumerate(primary)
+        )
+        return PlacementDecision(
+            placement_provenance="planner_v2",
+            placement_id=f"planner-{digest_suffix[:24]}",
+            assignments=assignments,
+            source_digest=self._source_digest,
+        )
+
+
 class FrozenPlacementSource:
     """Load and pin a checked-in fixture with frozen-fixture provenance."""
 

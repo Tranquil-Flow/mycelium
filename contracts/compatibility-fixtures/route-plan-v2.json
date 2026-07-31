@@ -1,6 +1,10 @@
 {
   "diagnostics": {
     "accepted_replica_nodes": [],
+    "admitted_node_ids": [
+      "node-a",
+      "node-b"
+    ],
     "candidate_node_ids": [
       "node-a",
       "node-b"
@@ -16,7 +20,9 @@
       "node-b"
     ],
     "primary_search": [
-      "allocation: no feasible contiguous allocation: 2 candidate order(s) rejected"
+      "primary order frozen from directed latency and jitter only",
+      "admitted_node_count=2",
+      "topology_cycle_cost_ms=1.2"
     ],
     "speculative": {
       "enabled": false,
@@ -130,9 +136,9 @@
     "budget_exhausted": false,
     "candidate_budget": 100000,
     "candidate_node_count": 2,
-    "explored_candidates": 4,
+    "explored_candidates": 1,
     "globally_exact": true,
-    "mode": "exact_joint_enumeration"
+    "mode": "exact_topology_enumeration"
   },
   "snapshot_digest": "sha256:3d0fd58d7d5d7f0bbd43974a9af026a3c3853d1c1828da8bfcbda7353543bfb0",
   "workload_name": "interactive_chat_v1"

@@ -17,6 +17,7 @@ from mycelium_seed.placement import (
     MemberRecord,
     PlacementDecision,
     PlacementError,
+    PlannerPlacementSource,
 )
 
 
@@ -77,6 +78,46 @@ def _fixture_bytes(*, node_id: str = "node-a", end_layer: int = 6) -> bytes:
         ).encode("utf-8")
         + b"\n"
     )
+
+
+def _planner_snapshot() -> dict:
+    return {
+        "admitted_node_ids": ["node-a"],
+        "model": {
+            "model_id": "org/model",
+            "revision": "immutable-revision",
+            "weight_digest": "sha256:" + "a" * 64,
+            "architecture": "Decoder",
+            "num_layers": 4,
+            "hidden_size": 128,
+            "dtype_bytes": 2,
+            "kv_heads": 2,
+            "head_dim": 32,
+            "weight_bytes": 4_000,
+        },
+        "nodes": [
+            {
+                "node_id": "node-a",
+                "prefill_ms_per_layer_token": 0.001,
+                "decode_ms_per_layer_token": 0.001,
+                "fast_memory_bytes": 100_000_000,
+                "total_memory_bytes": 200_000_000,
+                "memory_bandwidth_Bps": 1_000_000_000,
+                "spill_bandwidth_Bps": 1_000_000_000,
+            }
+        ],
+        "links": [],
+        "workload": {
+            "preset": "interactive_chat_v1",
+            "concurrency_points": [1],
+        },
+        "policy": {
+            "memory_reserve_fraction": 0,
+            "replica_budget": 0,
+            "ttft_slo_ms": 1_000_000,
+            "tpot_slo_ms": 1_000_000,
+        },
+    }
 
 
 def _coordinator(root: Path, placement_source) -> SeedCoordinator:
@@ -212,3 +253,20 @@ def test_seed_uses_constructor_injected_source_without_callsite_changes(
     assert [member.node_id for member in first_source.seen] == ["node-a"]
     assert second_source.seen is not None
     assert [member.node_id for member in second_source.seen] == ["node-a"]
+
+
+def test_seed_compiles_concrete_planner_source_without_callsite_changes(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(
+        tmp_path / "planner",
+        PlannerPlacementSource(_planner_snapshot()),
+    )
+    _join(coordinator, tmp_path / "planner", node_id="node-a")
+
+    decision = coordinator.compile_placement()
+
+    assert decision.placement_provenance == "planner_v2"
+    assert tuple(item["node_id"] for item in decision.assignments) == ("node-a",)
+    assert decision.assignments[0]["start_layer"] == 0
+    assert decision.assignments[0]["end_layer_exclusive"] == 4

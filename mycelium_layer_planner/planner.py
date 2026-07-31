@@ -18,7 +18,7 @@ from .contracts import (
     WorkloadScenario,
 )
 from .physical_graph import build_physical_graph
-from .primary_plan import plan_primary
+from .primary_plan import admit_primary_nodes, plan_primary
 from .replication import replicate_stages
 from .speculative import score_speculative
 from .workload import WorkloadProfile, empirical_interactive_chat, mlperf_qa_stress
@@ -85,7 +85,26 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
     except KeyError as exc:
         raise ValueError(f"snapshot missing required field: {exc.args[0]}") from exc
     graph = build_physical_graph(nodes, links, policy)
-    primary = plan_primary(graph, model, profile, policy)
+    explicit_admission = snapshot.get("admitted_node_ids")
+    if explicit_admission is None:
+        # Compatibility path for research fixtures that predate explicit admission.
+        admitted_node_ids = admit_primary_nodes(graph, model, profile, policy)
+    else:
+        if (
+            not isinstance(explicit_admission, (list, tuple))
+            or not explicit_admission
+            or any(not isinstance(node_id, str) for node_id in explicit_admission)
+            or len(set(explicit_admission)) != len(explicit_admission)
+        ):
+            raise ValueError("admitted_node_ids is invalid")
+        admitted_node_ids = tuple(explicit_admission)
+    primary = plan_primary(
+        graph,
+        model,
+        profile,
+        policy,
+        admitted_node_ids=admitted_node_ids,
+    )
     representative = max(
         profile.scenarios,
         key=lambda scenario: (scenario.total_context_tokens * scenario.concurrency, scenario.name),
@@ -154,6 +173,7 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
         "primary_order": list(primary.order),
         "frozen_primary_order": list(primary.frozen_primary_order),
         "candidate_node_ids": list(primary.candidate_node_ids),
+        "admitted_node_ids": list(admitted_node_ids),
         "unplaced_node_ids": list(primary.unplaced_node_ids),
         "accepted_replica_nodes": list(replicated.accepted_replica_nodes),
         "excluded_nodes": dict(graph.exclusions),
