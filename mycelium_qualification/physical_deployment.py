@@ -392,6 +392,14 @@ def _validate_runtime_dtype(runtime_dtype: str) -> str:
     return runtime_dtype
 
 
+def _validate_runtime_backend(runtime_backend: str, runtime_dtype: str) -> str:
+    if runtime_backend not in {"mlx", "numpy"}:
+        raise PhysicalDeploymentError("invalid_runtime_backend")
+    if runtime_backend == "numpy" and runtime_dtype != "float32":
+        raise PhysicalDeploymentError("numpy_runtime_requires_float32")
+    return runtime_backend
+
+
 def _safe_local_relative_path(value: Any, *, field: str) -> PurePosixPath:
     if (
         not isinstance(value, str)
@@ -1065,11 +1073,13 @@ def prepare_assignment_artifacts(
     node_ids: tuple[str, ...] = ("node-a", "node-b"),
     model_source: LocalModelSource | None = None,
     runtime_dtype: str = "float32",
+    runtime_backend: str = "mlx",
 ) -> _PreparedAssignments:
     """Build, compile, provision, and verify exact offline assignments."""
 
     _validate_nodes(node_ids)
     runtime_dtype = _validate_runtime_dtype(runtime_dtype)
+    runtime_backend = _validate_runtime_backend(runtime_backend, runtime_dtype)
     prepared_root = _prepare_root(Path(root))
     try:
         source_metadata: dict[str, Any] | None = None
@@ -1100,7 +1110,7 @@ def prepare_assignment_artifacts(
             cache_roots={node: str(prepared_root) for node in route["node_order"]},
             runtime_by_node={
                 node: {
-                    "backend": "mlx",
+                    "backend": runtime_backend,
                     "dtype": runtime_dtype,
                     "quantization": "none",
                 }
@@ -1239,6 +1249,7 @@ def prepare_physical_deployment(
     node_ids: tuple[str, ...] = ("node-a", "node-b"),
     model_source: LocalModelSource | None = None,
     runtime_dtype: str = "float32",
+    runtime_backend: str = "mlx",
 ) -> PhysicalDeployment:
     """Prepare exact stage assignments plus an independent reference stage."""
 
@@ -1247,6 +1258,7 @@ def prepare_physical_deployment(
         node_ids=node_ids,
         model_source=model_source,
         runtime_dtype=runtime_dtype,
+        runtime_backend=runtime_backend,
     )
     try:
         reference_assignment, reference_report = prepare_monolithic_reference(

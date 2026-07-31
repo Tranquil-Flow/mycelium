@@ -44,7 +44,6 @@ from mycelium_router.live_ports import (
     PublishedTopologyProvider,
 )
 from mycelium_router.layer_builder import layer_load_proof_digest
-from mycelium_router.mlx_runtime import MLXRuntimePort
 from mycelium_router.router import Router
 from mycelium_router.transports.iroh import IrohTransport, PeerBinding
 from mycelium_router.validation import validate_execution_graph
@@ -452,7 +451,7 @@ class PhysicalNodeService:
         self.topology: PublishedTopologyProvider | None = None
         self.device_states: PublishedDeviceStateProvider | None = None
         self.capacity: SQLiteQualificationCapacityPort | None = None
-        self.runtime: MLXRuntimePort | None = None
+        self.runtime: Any = None
         self.sidecar: NativeSidecarProcess | None = None
         self.transport: IrohTransport | None = None
         self.router: Router | None = None
@@ -598,6 +597,42 @@ class PhysicalNodeService:
             endpoint_secret_file=self.endpoint_secret_file,
         )
 
+    def _build_runtime_port(
+        self,
+        placement: Placement,
+        graph: ExecutionGraph,
+        loaded: Any,
+    ) -> Any:
+        """Lazily import and instantiate the placement's declared runtime port.
+
+        The placement record selects the backend at runtime so that, for
+        example, Linux nodes never import the Apple-only MLX backend and macOS
+        Apple-Silicon nodes still receive the optimized path.  Both backends
+        expose the RuntimePort protocol used by the Router.
+        """
+        backend = placement.runtime_backend
+        clock = self._clock.now
+        loaded_stages = {placement.placement_id: loaded}
+        if backend == "numpy":
+            from mycelium_router.numpy_runtime import NumpyRuntimePort
+
+            return NumpyRuntimePort(
+                self.node_id,
+                graph,
+                loaded_stages,
+                clock=clock,
+            )
+        if backend == "mlx":
+            from mycelium_router.mlx_runtime import MLXRuntimePort
+
+            return MLXRuntimePort(
+                self.node_id,
+                graph,
+                loaded_stages,
+                clock=clock,
+            )
+        raise NodeCommandError("unsupported_runtime_backend")
+
     def _configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "NEW", "invalid_state_for_configure")
         legacy_fields = {
@@ -686,12 +721,7 @@ class PhysicalNodeService:
             clock=self._clock,
             id_source=self._ids,
         )
-        runtime = MLXRuntimePort(
-            self.node_id,
-            graph,
-            {placement.placement_id: loaded},
-            clock=self._clock.now,
-        )
+        runtime = self._build_runtime_port(placement, graph, loaded)
         sidecar = self._new_sidecar_process()
         try:
             ready = sidecar.start()

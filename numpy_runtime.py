@@ -336,16 +336,20 @@ def _stage_shapes(
             shapes[stage_key(canonical)] = all_shapes[canonical]
     if "lm_head" in components:
         alias = aliases.get("lm_head")
-        if not isinstance(alias, Mapping):
-            _reject("invalid_loaded_stage_aliases")
-        head_keys = alias.get("tensor_keys")
-        if (
-            not isinstance(head_keys, (list, tuple))
-            or len(head_keys) != 1
-            or not isinstance(head_keys[0], str)
-        ):
-            _reject("invalid_loaded_stage_aliases")
-        shapes[head_keys[0]] = (int(config["vocab_size"]), hidden)
+        if alias is None:
+            head_key = "lm_head.weight"
+        else:
+            if not isinstance(alias, Mapping):
+                _reject("invalid_loaded_stage_aliases")
+            head_keys = alias.get("tensor_keys")
+            if (
+                not isinstance(head_keys, (list, tuple))
+                or len(head_keys) != 1
+                or not isinstance(head_keys[0], str)
+            ):
+                _reject("invalid_loaded_stage_aliases")
+            head_key = head_keys[0]
+        shapes[head_key] = (int(config["vocab_size"]), hidden)
     return shapes
 
 
@@ -584,7 +588,12 @@ def execute_loaded_stage(
             epsilon,
         )
     if "lm_head" in components:
-        head_key = aliases["lm_head"]["tensor_keys"][0]
+        alias = aliases.get("lm_head")
+        head_key = (
+            alias["tensor_keys"][0]
+            if isinstance(alias, Mapping)
+            else "lm_head.weight"
+        )
         hidden = np.matmul(hidden, tensors[head_key].transpose(1, 0))
     if not np.isfinite(hidden).all():
         _reject("nonfinite_stage_output")

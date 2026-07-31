@@ -25,6 +25,7 @@ from mycelium_router.contracts import (
    Stage,
    StageCost,
 )
+from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.mlx_runtime import MLXRuntimeError, MLXRuntimePort, _stage_signature
 from mycelium_router.payloads import decode_activation, encode_activation, encode_token_ids
@@ -248,7 +249,7 @@ def _reference_token(case, token_ids):
    tokens = mx.array((token_ids,), dtype=mx.uint32)
    hidden = execute_loaded_stage(case.loaded[0], token_ids=tokens)
    logits = execute_loaded_stage(case.loaded[1], hidden_states=hidden)
-   return hidden, int(mx.argmax(logits[0, -1, :]).item())
+   return hidden, quantized_greedy_token_id(logits[0, -1, :].tolist())
 
 
 def _run_two_stage(

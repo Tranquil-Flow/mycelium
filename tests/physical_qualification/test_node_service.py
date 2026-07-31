@@ -17,6 +17,7 @@ import uuid
 import mlx.core as mx
 import pytest
 
+from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.physical_deployment import (
     build_execution_graph,
@@ -1222,11 +1223,16 @@ def test_node_subprocess_binds_every_command_and_never_serializes_secrets(
         )
 
 
+@pytest.mark.parametrize("runtime_backend", ("mlx", "numpy"))
 def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
     tmp_path: Path,
+    runtime_backend: str,
 ) -> None:
     assert SIDECAR_BINARY.is_file()
-    deployment = prepare_physical_deployment(tmp_path / "deployment")
+    deployment = prepare_physical_deployment(
+        tmp_path / "deployment",
+        runtime_backend=runtime_backend,
+    )
     loaded = [
         load_assignment_stage(assignment, report, load_generation=7)
         for assignment, report in zip(
@@ -1354,7 +1360,7 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
                 token_ids=mx.array((tuple(context),), dtype=mx.uint32),
             )
             mx.eval(logits)
-            next_token = int(mx.argmax(logits[0, -1, :]).item())
+            next_token = quantized_greedy_token_id(logits[0, -1, :].tolist())
             expected_tokens.append(next_token)
             context.append(next_token)
         assert decode_details["output"]["token_ids"] == expected_tokens

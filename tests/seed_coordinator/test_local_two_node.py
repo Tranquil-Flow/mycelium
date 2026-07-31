@@ -21,6 +21,7 @@ from unittest.mock import Mock
 import uuid
 import mlx.core as mx
 import pytest
+from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.authority import QualificationAuthority
@@ -2405,10 +2406,10 @@ def test_local_two_node_native_process_e2e(
                         ),
                     )
                     mx.eval(logits)
-                    token = int(mx.argmax(logits[0, -1, :]).item())
+                    token = quantized_greedy_token_id(logits[0, -1, :].tolist())
                     expected_tokens.append(token)
                     context.append(token)
-                assert expected_tokens == [6, 6, 6]
+                assert expected_tokens == [0, 0, 0]
                 assert decoded["output"]["token_ids"] == expected_tokens
                 node_observations = {}
                 for node_id in NODE_IDS:

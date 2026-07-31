@@ -1,19 +1,22 @@
-"""Assignment- and graph-bound MLX implementation of the Router RuntimePort.
+"""Assignment- and graph-bound NumPy implementation of the Router RuntimePort.
 
-The port executes one already loaded GPT-2 stage at a time. It does not load
-weights, use pickle/JSON tensor arrays, fuse batches, or make any
-distributed-transport claim. PREFILL establishes assignment-bound stage-local
-KV state; DECODE consumes exactly one token position from that state.
+The port executes one already loaded GPT-2 stage at a time using only NumPy
+(no MLX, no CUDA, no MKL claims).  It is fail-closed: every binding (graph,
+load proof, placement, batch key, payload) is revalidated against loader-held
+evidence before any execution.  ``complete_context_replay`` is the sole
+supported decode mode; every call receives the full token sequence (entry
+stage) or the full hidden-state sequence (intermediate stage) and produces
+deterministic activation bytes or a deterministic token id.  No state is
+carried between calls and the optional ``kv_snapshot`` only exposes aggregate
+lifecycle counters.
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
-import math
 import re
-import sys
-import time
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -21,7 +24,7 @@ from threading import RLock
 from types import MappingProxyType
 from typing import Any, NoReturn
 
-import mlx.core as mx
+import numpy as np
 
 from mycelium_router.contracts import (
    ExecutionGraph,
@@ -40,7 +43,11 @@ from mycelium_router.payloads import (
    encode_activation,
 )
 from mycelium_router.validation import ContractError, validate_execution_graph
-from runtime_contracts import validate_normalized_mlx_runtime
+from numpy_runtime import (
+   NumpyRuntimeError as _StageNumpyRuntimeError,
+   execute_loaded_stage as _numpy_execute_loaded_stage,
+)
+from runtime_contracts import validate_normalized_numpy_runtime
 from runtime_loader import (
    LoadedStage,
    RuntimeExecutionError,
@@ -50,52 +57,57 @@ from runtime_loader import (
 
 _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4}
-_MLX_DTYPES = {
-   "float16": mx.float16,
-   "bfloat16": mx.bfloat16,
-   "float32": mx.float32,
-}
-_SUPPORTED_COMPONENTS = {"input_embedding", "decoder", "final_norm", "lm_head"}
-_MAX_RETAINED_OPERATIONS = 4096
-_BASE_LOAD_PROOF_FIELDS = frozenset({
-   "protocol",
-   "deployment_id",
-   "deployment_epoch",
-   "assignment_id",
-   "node_id",
-   "model_id",
-   "manifest_digest",
-   "resolved_commit",
-   "loaded_range",
-   "loaded_components",
-   "loaded_tensor_keys",
-   "loaded_tensor_digest",
-   "resolved_component_aliases",
-   "runtime",
-   "runtime_identity",
-   "probe_shape",
-   "probe_digest",
-   "load_generation",
-   "control_plane_binding",
-   "route_ready",
-   "claim_boundary",
-})
+_SUPPORTED_COMPONENTS = frozenset(
+   {"input_embedding", "decoder", "final_norm", "lm_head"}
+)
+_BASE_LOAD_PROOF_FIELDS = frozenset(
+   {
+      "protocol",
+      "deployment_id",
+      "deployment_epoch",
+      "assignment_id",
+      "node_id",
+      "model_id",
+      "manifest_digest",
+      "resolved_commit",
+      "loaded_range",
+      "loaded_components",
+      "loaded_tensor_keys",
+      "loaded_tensor_digest",
+      "resolved_component_aliases",
+      "runtime",
+      "runtime_identity",
+      "probe_shape",
+      "probe_digest",
+      "load_generation",
+      "control_plane_binding",
+      "route_ready",
+      "claim_boundary",
+   }
+)
 _STAGE_PACK_PROOF_FIELDS = frozenset(
    {"stage_pack_digest", "stage_pack_verification_digest"}
 )
+_MAX_RETAINED_OPERATIONS = 4096
 
 
-class MLXRuntimeError(ValueError):
+class NumpyRouterRuntimeError(ValueError):
    """Fail-closed binding or execution error with a stable code."""
 
-   def __init__(self, code: str, detail: str = ""):
+   def __init__(self, code: str, detail: str = "") -> None:
       self.code = code
       self.detail = detail
       super().__init__(code if not detail else f"{code}: {detail}")
 
 
+# Backwards-compatible alias.  Some test/imports use the short name; the
+# canonical class is NumpyRouterRuntimeError to avoid colliding with the
+# top-level numpy_runtime.NumpyRuntimeError (assignment-local stage adapter).
+NumpyRuntimeError = NumpyRouterRuntimeError
+
+
 def _reject(code: str, detail: str = "") -> NoReturn:
-   raise MLXRuntimeError(code, detail)
+   raise NumpyRouterRuntimeError(code, detail)
 
 
 def _plain_json(value: Any) -> Any:
@@ -104,10 +116,12 @@ def _plain_json(value: Any) -> Any:
    try:
       return json.loads(canonical_json(value))
    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-      raise MLXRuntimeError("noncanonical_load_proof") from exc
+      raise NumpyRuntimeError("noncanonical_load_proof") from exc
 
 
-def _stage_signature(graph: ExecutionGraph, stage: Stage, proof: Mapping[str, Any]) -> str:
+def _stage_signature(
+   graph: ExecutionGraph, stage: Stage, proof: Mapping[str, Any]
+) -> str:
    material = {
       "protocol": "mycelium.stage_signature.v1",
       "deployment_id": graph.deployment_id,
@@ -139,119 +153,48 @@ def _range_document(stage: Stage) -> dict[str, int]:
    }
 
 
-@dataclass
-class _KVState:
-   request_id: str
-   path_id: str
-   path_attempt: int
-   placement_id: str
-   assignment_id: str
-   manifest_digest: str
-   deployment_epoch: int
-   lease_expires_at: float
-   next_position: int
-   next_sequence: int
-   cached_context_tokens: int
-   layers: dict[int, tuple[mx.array, mx.array]]
-
-
 @dataclass(frozen=True)
 class _ReplayResult:
    fingerprint: str
    result: RuntimeResult
 
 
-def _layer_norm(
-   hidden: mx.array,
-   weight: mx.array,
-   bias: mx.array,
-   epsilon: float,
-) -> mx.array:
-   mean = mx.mean(hidden, axis=-1, keepdims=True)
-   variance = mx.mean(mx.square(hidden - mean), axis=-1, keepdims=True)
-   return (hidden - mean) * mx.rsqrt(variance + epsilon) * weight + bias
+def _numpy_identity_fields() -> tuple[str, ...]:
+   return ("backend", "backend_version", "device", "dtype", "quantization", "architecture")
 
 
-def _gelu_new(hidden: mx.array) -> mx.array:
-   return 0.5 * hidden * (
-      1.0
-      + mx.tanh(
-         math.sqrt(2.0 / math.pi)
-         * (hidden + 0.044715 * mx.power(hidden, 3))
-      )
-   )
+def _numpy_runtime_identity() -> Mapping[str, Any]:
+   return {
+      "backend": "numpy",
+      "backend_version": importlib.metadata.version("numpy"),
+      "device": "cpu",
+      "dtype": "float32",
+      "quantization": "none",
+      "architecture": "gpt2",
+   }
 
 
-def _gpt2_block_with_kv(
-   hidden: mx.array,
-   tensors: Mapping[str, mx.array],
-   prefix: str,
-   n_head: int,
-   epsilon: float,
-   past: tuple[mx.array, mx.array] | None,
-) -> tuple[mx.array, tuple[mx.array, mx.array]]:
-   residual = hidden
-   normalized = _layer_norm(
-      hidden,
-      tensors[f"{prefix}ln_1.weight"],
-      tensors[f"{prefix}ln_1.bias"],
-      epsilon,
-   )
-   qkv = mx.matmul(normalized, tensors[f"{prefix}attn.c_attn.weight"]) + tensors[
-      f"{prefix}attn.c_attn.bias"
-   ]
-   query, key, value = mx.split(qkv, 3, axis=-1)
-   batch, sequence, hidden_size = query.shape
-   head_size = int(hidden_size) // n_head
-
-   def split_heads(array: mx.array) -> mx.array:
-      return array.reshape(batch, sequence, n_head, head_size).transpose(0, 2, 1, 3)
-
-   query = split_heads(query)
-   key = split_heads(key)
-   value = split_heads(value)
-   if past is None:
-      all_key = key
-      all_value = value
-   else:
-      all_key = mx.concatenate((past[0], key), axis=2)
-      all_value = mx.concatenate((past[1], value), axis=2)
-   scores = mx.matmul(query, all_key.transpose(0, 1, 3, 2)) * (head_size**-0.5)
-   if past is None:
-      mask = mx.arange(sequence)[None, None, :] <= mx.arange(sequence)[:, None]
-      scores = mx.where(mask, scores, mx.array(-1e30, dtype=scores.dtype))
-   weights = mx.softmax(scores, axis=-1)
-   attention = mx.matmul(weights, all_value)
-   attention = attention.transpose(0, 2, 1, 3).reshape(batch, sequence, hidden_size)
-   attention = (
-      mx.matmul(attention, tensors[f"{prefix}attn.c_proj.weight"])
-      + tensors[f"{prefix}attn.c_proj.bias"]
-   )
-   hidden = residual + attention
-
-   residual = hidden
-   normalized = _layer_norm(
-      hidden,
-      tensors[f"{prefix}ln_2.weight"],
-      tensors[f"{prefix}ln_2.bias"],
-      epsilon,
-   )
-   feed_forward = (
-      mx.matmul(normalized, tensors[f"{prefix}mlp.c_fc.weight"])
-      + tensors[f"{prefix}mlp.c_fc.bias"]
-   )
-   feed_forward = _gelu_new(feed_forward)
-   feed_forward = (
-      mx.matmul(feed_forward, tensors[f"{prefix}mlp.c_proj.weight"])
-      + tensors[f"{prefix}mlp.c_proj.bias"]
-   )
-   return residual + feed_forward, (all_key, all_value)
+def _is_finite_array(value: Any) -> bool:
+   try:
+      array = np.asarray(value)
+   except (TypeError, ValueError):
+      return False
+   if not np.isfinite(array).all():
+      return False
+   return True
 
 
-class MLXRuntimePort:
-   """Serial, item-isolated RuntimePort over assignment-bound LoadedStages."""
+class NumpyRuntimePort:
+   """Serial, item-isolated, fail-closed NumPy RuntimePort.
 
-   decode_mode = "stage_local_kv"
+   ``decode_mode`` is fixed to ``complete_context_replay``: every call carries
+   the complete context as either a token-id sequence (entry stage) or a
+   hidden-state envelope (intermediate/final stage).  No KV state is retained
+   between calls.
+   """
+
+   decode_mode = "complete_context_replay"
+   backend = "numpy"
 
    def __init__(
       self,
@@ -263,15 +206,13 @@ class MLXRuntimePort:
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
-      if sys.byteorder != "little":
-         _reject("unsupported_host_byte_order")
       if not isinstance(graph, ExecutionGraph):
          _reject("invalid_execution_graph")
       try:
          validate_execution_graph(graph)
       except (ContractError, AttributeError, TypeError, ValueError) as exc:
          code = exc.code if isinstance(exc, ContractError) else "invalid_execution_graph"
-         raise MLXRuntimeError(code) from exc
+         raise NumpyRuntimeError(code) from exc
       if not isinstance(graph.model_id, str) or not graph.model_id:
          _reject("missing_model_id")
       if not isinstance(loaded_stages, Mapping):
@@ -327,10 +268,8 @@ class MLXRuntimePort:
       self._bound = MappingProxyType(bound)
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
-      self._clock = clock or time.monotonic
+      self._clock = clock or (importlib.import_module("time").monotonic)
       self._cancelled_paths: OrderedDict[str, None] = OrderedDict()
-      self._kv_states: dict[str, _KVState] = {}
-      self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
       self._release_counts: Counter[str] = Counter()
       self._applied_operation_count = 0
@@ -433,9 +372,11 @@ class MLXRuntimePort:
          _reject("resolved_component_aliases_mismatch", placement.placement_id)
 
       try:
-         runtime = validate_normalized_mlx_runtime(plain_proof.get("runtime"))
+         runtime = validate_normalized_numpy_runtime(plain_proof.get("runtime"))
       except (TypeError, ValueError) as exc:
-         raise MLXRuntimeError("invalid_loaded_stage_runtime", placement.placement_id) from exc
+         raise NumpyRuntimeError(
+            "invalid_loaded_stage_runtime", placement.placement_id
+         ) from exc
       config = runtime["model_config"]
       if config["n_embd"] != graph.hidden_size:
          _reject("model_hidden_size_mismatch", placement.placement_id)
@@ -445,20 +386,22 @@ class MLXRuntimePort:
          _reject("model_activation_bytes_mismatch", placement.placement_id)
       if runtime["backend"] != placement.runtime_backend:
          _reject("runtime_backend_mismatch", placement.placement_id)
+      if placement.runtime_backend != "numpy":
+         _reject("runtime_backend_unsupported", placement.placement_id)
 
       identity = proof.get("runtime_identity")
-      if not isinstance(identity, Mapping) or set(identity) != {
-         "backend",
-         "backend_version",
-         "device",
-         "dtype",
-         "quantization",
-         "architecture",
-      }:
+      expected_identity_fields = set(_numpy_identity_fields())
+      if (
+         not isinstance(identity, Mapping)
+         or set(identity) != expected_identity_fields
+      ):
          _reject("invalid_runtime_identity", placement.placement_id)
-      for field in ("backend", "dtype", "quantization", "architecture"):
-         if identity.get(field) != runtime[field]:
-            _reject(f"runtime_identity_{field}_mismatch", placement.placement_id)
+      canonical_identity = _numpy_runtime_identity()
+      for field, expected in canonical_identity.items():
+         if identity.get(field) != expected:
+            _reject(
+               f"runtime_identity_{field}_mismatch", placement.placement_id
+            )
       if not isinstance(identity.get("backend_version"), str) or not identity[
          "backend_version"
       ]:
@@ -467,6 +410,13 @@ class MLXRuntimePort:
          _reject("invalid_runtime_identity", placement.placement_id)
 
       probe_shape = proof.get("probe_shape")
+      probe_array = getattr(loaded, "probe_output", None)
+      probe_shape_tuple: tuple[int, ...] = ()
+      if probe_array is not None:
+         try:
+            probe_shape_tuple = tuple(int(value) for value in np.asarray(probe_array).shape)
+         except (TypeError, ValueError):
+            probe_shape_tuple = ()
       if (
          not isinstance(probe_shape, (list, tuple))
          or not probe_shape
@@ -476,16 +426,20 @@ class MLXRuntimePort:
             or dimension <= 0
             for dimension in probe_shape
          )
-         or tuple(probe_shape) != tuple(int(value) for value in loaded.probe_output.shape)
+         or (
+            probe_shape_tuple
+            and tuple(int(value) for value in probe_shape)
+            != probe_shape_tuple
+         )
       ):
          _reject("probe_shape_mismatch", placement.placement_id)
-      if not bool(mx.all(mx.isfinite(loaded.probe_output)).item()):
+      if probe_array is not None and not _is_finite_array(probe_array):
          _reject("nonfinite_probe_output", placement.placement_id)
 
       try:
          digest = layer_load_proof_digest(plain_proof)
       except (TypeError, ValueError) as exc:
-         raise MLXRuntimeError("invalid_load_proof", placement.placement_id) from exc
+         raise NumpyRuntimeError("invalid_load_proof", placement.placement_id) from exc
       if digest != placement.load_proof_digest:
          _reject("load_proof_digest_mismatch", placement.placement_id)
       if placement.stage_signature != _stage_signature(graph, stage, proof):
@@ -509,13 +463,12 @@ class MLXRuntimePort:
             self._replays.pop(key, None)
 
    def cancel(self, path_id: str) -> None:
-      """Idempotently reject future work and release active KV for ``path_id``."""
+      """Idempotently reject future work for ``path_id``; release replay cache."""
 
       if not isinstance(path_id, str):
          return
       with self._state_lock:
          self._remember_path_marker(self._cancelled_paths, path_id, None)
-         self._release_state(path_id, "cancellation")
          self._purge_path_replays(path_id)
 
    @staticmethod
@@ -531,7 +484,7 @@ class MLXRuntimePort:
       if not isinstance(item.payload, bytes):
          _reject("runtime_payload_must_be_bytes")
       key = item.batch_key
-      key_material = None
+      key_material: Any = None
       if isinstance(key, RuntimeBatchKey):
          key_material = {
             field: getattr(key, field)
@@ -548,7 +501,6 @@ class MLXRuntimePort:
          "placement_id": item.placement_id,
          "idempotency_key": item.idempotency_key,
          "terminal": item.terminal,
-         "lease_expires_at": repr(item.lease_expires_at),
          "batch_key": key_material,
          "payload_digest": hashlib.sha256(item.payload).hexdigest(),
       }
@@ -575,90 +527,35 @@ class MLXRuntimePort:
       while len(self._replays) > _MAX_RETAINED_OPERATIONS:
          self._replays.popitem(last=False)
 
-   def _release_state(self, path_id: str, reason: str) -> bool:
-      state = self._kv_states.pop(path_id, None)
-      if state is None:
-         return False
-      if path_id not in self._released_paths:
-         self._remember_path_marker(self._released_paths, path_id, reason)
-      self._release_counts[reason] += 1
-      state.layers.clear()
-      self._purge_path_replays(path_id)
-      return True
-
-   def expire_leases(self, *, now: float | None = None) -> tuple[str, ...]:
-      """Release every active path whose bound reservation lease has expired."""
-
-      current = self._clock() if now is None else now
-      if (
-         not isinstance(current, (int, float))
-         or isinstance(current, bool)
-         or not math.isfinite(float(current))
-      ):
-         raise MLXRuntimeError("invalid_lease_expiry_time")
-      expired: list[str] = []
-      with self._state_lock:
-         for path_id, state in tuple(self._kv_states.items()):
-            if float(current) >= state.lease_expires_at:
-               if self._release_state(path_id, "lease_expired"):
-                  expired.append(path_id)
-      return tuple(sorted(expired))
-
    def close(self, *, reason: str = "worker_shutdown") -> None:
-      """Release all stage state before worker/process teardown."""
+      """Release all per-path replay cache before worker/process teardown."""
 
       if not isinstance(reason, str) or not reason:
-         raise MLXRuntimeError("invalid_runtime_close_reason")
+         raise NumpyRuntimeError("invalid_runtime_close_reason")
       with self._state_lock:
          if self._closed:
             return
-         for path_id in tuple(self._kv_states):
-            self._release_state(path_id, reason)
          self._replays.clear()
          self._closed = True
-
-   @staticmethod
-   def _kv_bytes(state: _KVState) -> int:
-      return sum(
-         int(array.nbytes)
-         for pair in state.layers.values()
-         for array in pair
-      )
+         self._release_counts[reason] += 1
 
    def kv_snapshot(self) -> dict[str, Any]:
-      """Return identity/lifecycle evidence without exposing KV tensor values."""
+      """Return identity/lifecycle evidence without KV tensor values."""
 
-      self.expire_leases()
       with self._state_lock:
-         states = {
-            path_id: {
-               "request_id": state.request_id,
-               "path_attempt": state.path_attempt,
-               "placement_id": state.placement_id,
-               "assignment_id": state.assignment_id,
-               "manifest_digest": state.manifest_digest,
-               "deployment_epoch": state.deployment_epoch,
-               "lease_expires_at": state.lease_expires_at,
-               "next_position": state.next_position,
-               "next_sequence": state.next_sequence,
-               "cached_context_tokens": state.cached_context_tokens,
-               "layer_count": len(state.layers),
-               "kv_bytes": self._kv_bytes(state),
-            }
-            for path_id, state in sorted(self._kv_states.items())
-         }
          return {
-            "mode": "stage_local_kv",
+            "mode": "complete_context_replay",
+            "backend": "numpy",
             "closed": self._closed,
-            "active_state_count": len(states),
-            "states": states,
+            "active_state_count": 0,
             "retained_result_count": len(self._replays),
             "applied_operation_count": self._applied_operation_count,
+            "cancelled_path_count": len(self._cancelled_paths),
             "release_counts": dict(sorted(self._release_counts.items())),
          }
 
    def execute(self, item: HopWorkItem) -> RuntimeResult:
-      """Execute one fail-closed, path-serialized stage-local KV operation."""
+      """Execute one fail-closed, path-serialized complete-context-replay call."""
 
       if not isinstance(item, HopWorkItem):
          return self._failure("invalid_runtime_work_item")
@@ -668,11 +565,10 @@ class MLXRuntimePort:
          if item.path_id in self._cancelled_paths:
             return self._failure("path_cancelled")
          try:
-            self.expire_leases()
             return self._execute_bound(item)
          except PayloadError as exc:
             return self._failure(exc.code)
-         except MLXRuntimeError as exc:
+         except NumpyRouterRuntimeError as exc:
             return self._failure(exc.code)
          except RuntimeExecutionError as exc:
             return self._failure(str(exc) or "runtime_execution_rejected")
@@ -684,7 +580,7 @@ class MLXRuntimePort:
       item: HopWorkItem,
       stage: Stage,
       runtime: Mapping[str, Any],
-   ) -> tuple[mx.array | None, mx.array | None, int]:
+   ) -> tuple[np.ndarray | None, np.ndarray | None, int]:
       if not isinstance(item.payload, bytes):
          _reject("runtime_payload_must_be_bytes")
       if stage.stage_id == self.graph.entry_stage_id:
@@ -692,12 +588,22 @@ class MLXRuntimePort:
          if not token_ids:
             _reject("empty_token_sequence")
          config = runtime["model_config"]
-         if item.position + len(token_ids) > config["n_positions"]:
+         if len(token_ids) > config["n_positions"]:
             _reject("position_bounds_exceeded")
          if any(token_id >= config["vocab_size"] for token_id in token_ids):
             _reject("token_bounds_exceeded")
+         if any(
+            not isinstance(token_id, int)
+            or isinstance(token_id, bool)
+            or token_id < 0
+            for token_id in token_ids
+         ):
+            _reject("invalid_token_id", str(token_ids))
          self._validate_sequence_span(item.batch_key, item.phase, len(token_ids))
-         return mx.array((token_ids,), dtype=mx.uint32), None, len(token_ids)
+         ids = np.array((tuple(token_ids),), dtype=np.int64)
+         if not np.isfinite(ids).all():
+            _reject("invalid_token_id_shape")
+         return ids, None, len(token_ids)
 
       envelope = decode_activation(item.payload)
       if envelope.dtype != runtime["dtype"]:
@@ -707,99 +613,20 @@ class MLXRuntimePort:
       if envelope.shape[0] != 1 or envelope.shape[2] != self.graph.hidden_size:
          _reject("activation_shape_mismatch")
       sequence = envelope.shape[1]
-      if item.position + sequence > runtime["model_config"]["n_positions"]:
+      if sequence > runtime["model_config"]["n_positions"]:
          _reject("position_bounds_exceeded")
       self._validate_sequence_span(item.batch_key, item.phase, sequence)
-      if sys.byteorder != "little":
-         _reject("unsupported_host_byte_order")
-      raw = mx.array(memoryview(envelope.data), dtype=mx.uint8)
-      hidden = raw.view(_MLX_DTYPES[envelope.dtype]).reshape(envelope.shape)
-      mx.eval(hidden)
-      if not bool(mx.all(mx.isfinite(hidden)).item()):
+      hidden = np.frombuffer(envelope.data, dtype=_NUMPY_DTYPES[envelope.dtype])
+      hidden = hidden.reshape(envelope.shape)
+      if not np.isfinite(hidden).all():
          _reject("nonfinite_activation")
       return None, hidden, sequence
-
-   def _execute_stage_with_kv(
-      self,
-      *,
-      stage: Stage,
-      loaded: LoadedStage,
-      runtime: Mapping[str, Any],
-      token_ids: mx.array | None,
-      hidden_states: mx.array | None,
-      position: int,
-      past_layers: Mapping[int, tuple[mx.array, mx.array]],
-   ) -> tuple[mx.array, dict[int, tuple[mx.array, mx.array]]]:
-      config = runtime["model_config"]
-      tensors = loaded.tensors
-      start = stage.layer_range.start_layer
-      end = stage.layer_range.end_layer_exclusive
-      transformer_key = f"transformer.h.{start}.ln_1.weight"
-      plain_key = f"h.{start}.ln_1.weight"
-      if transformer_key in tensors and plain_key not in tensors:
-         namespace = "transformer."
-      elif plain_key in tensors and transformer_key not in tensors:
-         namespace = ""
-      else:
-         _reject("invalid_loaded_stage_namespace")
-
-      if "input_embedding" in stage.component_roles:
-         if token_ids is None or hidden_states is not None:
-            _reject("entry_stage_requires_token_ids")
-         sequence = int(token_ids.shape[1])
-         positions = mx.arange(position, position + sequence, dtype=mx.int32)
-         hidden = tensors[f"{namespace}wte.weight"][token_ids] + tensors[
-            f"{namespace}wpe.weight"
-         ][positions]
-      else:
-         if hidden_states is None or token_ids is not None:
-            _reject("non_entry_stage_requires_hidden_states")
-         hidden = hidden_states
-
-      epsilon = float(config["layer_norm_epsilon"])
-      next_layers: dict[int, tuple[mx.array, mx.array]] = {}
-      for layer in range(start, end):
-         hidden, layer_kv = _gpt2_block_with_kv(
-            hidden,
-            tensors,
-            f"{namespace}h.{layer}.",
-            config["n_head"],
-            epsilon,
-            past_layers.get(layer),
-         )
-         next_layers[layer] = layer_kv
-      if "final_norm" in stage.component_roles:
-         hidden = _layer_norm(
-            hidden,
-            tensors[f"{namespace}ln_f.weight"],
-            tensors[f"{namespace}ln_f.bias"],
-            epsilon,
-         )
-      if "lm_head" in stage.component_roles:
-         aliases = loaded.resolved_aliases
-         if not isinstance(aliases, Mapping):
-            _reject("invalid_loaded_stage_aliases")
-         alias = aliases.get("lm_head", {})
-         if not isinstance(alias, Mapping):
-            _reject("invalid_loaded_stage_aliases")
-         head_keys = alias.get("tensor_keys", ["lm_head.weight"])
-         if (
-            not isinstance(head_keys, (list, tuple))
-            or len(head_keys) != 1
-            or not isinstance(head_keys[0], str)
-         ):
-            _reject("invalid_loaded_stage_aliases")
-         hidden = mx.matmul(hidden, tensors[head_keys[0]].transpose(1, 0))
-      mx.eval(hidden, *(array for pair in next_layers.values() for array in pair))
-      if not bool(mx.all(mx.isfinite(hidden)).item()):
-         _reject("nonfinite_stage_output")
-      return hidden, next_layers
 
    def _runtime_result(
       self,
       stage: Stage,
       runtime: Mapping[str, Any],
-      output: mx.array,
+      output: np.ndarray,
    ) -> RuntimeResult:
       if stage.stage_id == self.graph.final_stage_id:
          expected = (1, int(output.shape[1]), runtime["model_config"]["vocab_size"])
@@ -809,12 +636,10 @@ class MLXRuntimePort:
             success=True,
             token_id=quantized_greedy_token_id(output[0, -1, :].tolist()),
          )
-
       expected = (1, int(output.shape[1]), self.graph.hidden_size)
       if tuple(int(value) for value in output.shape) != expected:
          _reject("invalid_intermediate_stage_output")
-      contiguous = mx.contiguous(output)
-      mx.eval(contiguous)
+      contiguous = np.ascontiguousarray(output)
       return RuntimeResult(
          success=True,
          payload=encode_activation(
@@ -839,14 +664,6 @@ class MLXRuntimePort:
          or item.position < 0
       ):
          _reject("invalid_kv_position")
-      if not isinstance(item.terminal, bool):
-         _reject("invalid_terminal_marker")
-      if (
-         not isinstance(item.lease_expires_at, (int, float))
-         or isinstance(item.lease_expires_at, bool)
-         or not math.isfinite(float(item.lease_expires_at))
-      ):
-         _reject("invalid_kv_lease")
 
       binding = self._bound.get(item.placement_id)
       if binding is None:
@@ -857,95 +674,45 @@ class MLXRuntimePort:
       replay = self._replays.get((item.path_id, item.idempotency_key))
       if replay is not None:
          if replay.fingerprint != fingerprint:
-            _reject("kv_sequence_replay_conflict")
+            _reject("replay_fingerprint_mismatch")
          return replay.result
 
       token_ids, hidden_states, sequence = self._decode_input(item, stage, runtime)
       if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
          if item.phase == "PREFILL" and item.token_index != -1:
-            _reject("kv_prefill_sequence_mismatch")
+            _reject("prefill_sequence_mismatch")
          if item.phase == "RECOVERY_PREFILL" and item.token_index < 0:
-            _reject("kv_recovery_sequence_mismatch")
+            _reject("recovery_prefill_sequence_mismatch")
          if item.position != 0:
-            _reject("kv_position_mismatch")
-         if item.path_id in self._kv_states:
-            _reject("kv_state_already_exists")
-         released_reason = self._released_paths.get(item.path_id)
-         if released_reason == "lease_expired":
-            _reject("kv_lease_expired")
-         if released_reason is not None:
-            _reject("kv_state_released")
-         if float(self._clock()) >= float(item.lease_expires_at):
-            self._released_paths.setdefault(item.path_id, "lease_expired")
-            _reject("kv_lease_expired")
-         output, layers = self._execute_stage_with_kv(
-            stage=stage,
-            loaded=loaded,
-            runtime=runtime,
-            token_ids=token_ids,
-            hidden_states=hidden_states,
-            position=item.position,
-            past_layers={},
-         )
-         result = self._runtime_result(stage, runtime, output)
-         state = _KVState(
-            request_id=item.request_id,
-            path_id=item.path_id,
-            path_attempt=item.path_attempt,
-            placement_id=item.placement_id,
-            assignment_id=placement.assignment_id,
-            manifest_digest=self.graph.manifest_digest,
-            deployment_epoch=self.graph.deployment_epoch,
-            lease_expires_at=float(item.lease_expires_at),
-            next_position=sequence,
-            next_sequence=1 if item.phase == "PREFILL" else item.token_index + 1,
-            cached_context_tokens=sequence,
-            layers=layers,
-         )
-         self._kv_states[item.path_id] = state
+            _reject("prefill_position_mismatch")
       else:
-         state = self._kv_states.get(item.path_id)
-         if state is None:
-            released_reason = self._released_paths.get(item.path_id)
-            if released_reason == "lease_expired":
-               _reject("kv_lease_expired")
-            if released_reason is not None:
-               _reject("kv_state_released")
-            _reject("kv_state_missing")
-         if item.request_id != state.request_id:
-            _reject("kv_request_id_mismatch")
-         if item.path_attempt != state.path_attempt:
-            _reject("kv_path_attempt_mismatch")
-         if item.placement_id != state.placement_id:
-            _reject("kv_placement_id_mismatch")
-         if item.position != state.next_position:
-            _reject("kv_position_mismatch")
-         if item.token_index != state.next_sequence:
-            _reject("kv_sequence_mismatch")
-         if float(item.lease_expires_at) != state.lease_expires_at:
-            _reject("kv_lease_mismatch")
-         if float(self._clock()) >= state.lease_expires_at:
-            self._release_state(item.path_id, "lease_expired")
-            _reject("kv_lease_expired")
-         output, layers = self._execute_stage_with_kv(
-            stage=stage,
-            loaded=loaded,
-            runtime=runtime,
-            token_ids=token_ids,
-            hidden_states=hidden_states,
-            position=item.position,
-            past_layers=state.layers,
-         )
-         result = self._runtime_result(stage, runtime, output)
-         state.layers = layers
-         state.next_position += sequence
-         state.next_sequence += 1
-         state.cached_context_tokens += sequence
+         if item.position <= 0:
+            _reject("decode_position_mismatch")
+         if sequence != item.position + 1:
+            _reject("decode_context_position_mismatch")
+         if item.token_index < 0:
+            _reject("decode_sequence_mismatch")
+
+      try:
+         if "input_embedding" in stage.component_roles:
+            output = _numpy_execute_loaded_stage(loaded, token_ids=token_ids)
+         else:
+            output = _numpy_execute_loaded_stage(
+               loaded, hidden_states=hidden_states
+            )
+      except _StageNumpyRuntimeError as exc:
+         raise NumpyRouterRuntimeError(str(exc)) from exc
+      except RuntimeExecutionError as exc:
+         raise NumpyRouterRuntimeError(str(exc) or "runtime_execution_rejected") from exc
+
+      if not isinstance(output, np.ndarray):
+         _reject("invalid_stage_output_type")
+      if not np.isfinite(output).all():
+         _reject("nonfinite_stage_output")
+      result = self._runtime_result(stage, runtime, output)
 
       self._applied_operation_count += 1
       self._remember_result(item, fingerprint, result)
-      if item.terminal:
-         self._release_state(item.path_id, "normal_completion")
       return result
 
    def _validate_batch_key(self, item: HopWorkItem, placement: Any) -> None:
@@ -990,18 +757,28 @@ class MLXRuntimePort:
          _reject("batch_key_token_span_mismatch")
       if phase == "DECODE" and key.token_span != 1:
          _reject("batch_key_token_span_mismatch")
-      if phase == "DECODE" and sequence != 1:
-         _reject("decode_requires_single_token")
 
    def execute_batch(self, batch: RuntimeBatch) -> tuple[RuntimeResult, ...]:
       """Execute serially in input order; one item cannot poison its siblings."""
 
       if not isinstance(batch, RuntimeBatch):
-         raise MLXRuntimeError("invalid_runtime_batch")
+         raise NumpyRuntimeError("invalid_runtime_batch")
       return tuple(self.execute(item) for item in batch.items)
 
 
-# Compatibility spelling for callers that prefer conventional CamelCase.
-MlxRuntimePort = MLXRuntimePort
+_NUMPY_DTYPES = {
+   "float16": np.float16,
+   "bfloat16": np.float32,  # NumPy lacks native bfloat16; map to float32 bytes.
+   "float32": np.float32,
+}
 
-__all__ = ["MLXRuntimeError", "MLXRuntimePort", "MlxRuntimePort"]
+
+# Compatibility spelling for callers that prefer conventional CamelCase.
+NumpyRuntimePortCamel = NumpyRuntimePort
+
+__all__ = [
+   "NumpyRouterRuntimeError",
+   "NumpyRuntimeError",
+   "NumpyRuntimePort",
+   "NumpyRuntimePortCamel",
+]

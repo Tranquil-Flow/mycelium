@@ -22,7 +22,11 @@ from typing import Any, BinaryIO, Sequence
 import model_manifest as mm
 from layer_assignment import validate_assignment_identity
 from planner_assignment import CONTROL_PLANE_BINDING_PROTOCOL
-from runtime_contracts import MLX_RUNTIME_BASE_FIELDS, validate_normalized_mlx_runtime
+from runtime_contracts import (
+    MLX_RUNTIME_BASE_FIELDS,
+    validate_normalized_mlx_runtime,
+    validate_normalized_numpy_runtime,
+)
 from weight_provisioning import artifact_report_errors
 
 STAGE_PACK_PROTOCOL = "mycelium.assignment_stage_pack.v1"
@@ -925,6 +929,8 @@ def _normalize_runtime(runtime: Any) -> dict[str, Any]:
     backend = runtime.get("backend")
     if backend == "mlx":
         return validate_normalized_mlx_runtime(runtime)
+    if backend == "numpy":
+        return validate_normalized_numpy_runtime(runtime)
     if backend == "artifact_verifier":
         if set(runtime) != MLX_RUNTIME_BASE_FIELDS:
             raise ValueError("artifact_verifier runtime fields are invalid")

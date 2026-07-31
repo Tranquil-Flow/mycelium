@@ -47,6 +47,7 @@ from mycelium_router.contracts import (
     RuntimeBatch,
     RuntimeResult,
 )
+from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.live_ports import (
     InProcessLeaseCapacityPort,
@@ -974,8 +975,10 @@ def _reference_execution(
     activation = hidden[:, -1:, :] if last_position_only else hidden
     contiguous = mx.contiguous(activation)
     mx.eval(contiguous, split_logits, monolithic_logits)
-    split_token = int(mx.argmax(split_logits[0, -1, :]).item())
-    monolithic_token = int(mx.argmax(monolithic_logits[0, -1, :]).item())
+    split_token = quantized_greedy_token_id(split_logits[0, -1, :].tolist())
+    monolithic_token = quantized_greedy_token_id(
+        monolithic_logits[0, -1, :].tolist()
+    )
     _require_parity(split_token, monolithic_token, "concatenated and monolithic reference")
     hidden_bytes = bytes(contiguous)
     activation_payload = encode_activation(
