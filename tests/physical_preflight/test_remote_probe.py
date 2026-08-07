@@ -11,7 +11,10 @@ def _digest(path: Path) -> str:
 
 
 def test_remote_probe_measures_staged_artifacts_and_private_runtime_state(tmp_path: Path) -> None:
-    from mycelium_physical_runner.remote_probe import probe_request
+    from mycelium_physical_runner.remote_probe import (
+        derive_run_scoped_identity,
+        probe_request,
+    )
 
     run_id = "run-w8-001"
     root = tmp_path / "mycelium-physical-run" / run_id
@@ -74,8 +77,13 @@ def test_remote_probe_measures_staged_artifacts_and_private_runtime_state(tmp_pa
     assert result["protocol"] == "mycelium.physical_runner_live_probe.v1"
     assert result["host_alias"] == "m4pro"
     assert result["node_id"] == "node-0"
-    assert result["host_id"] == "host-m4pro"
-    assert result["boot_id"] == "boot-m4pro"
+    expected_host_id, expected_boot_id = derive_run_scoped_identity(
+        run_id=run_id,
+        observed_host_id="host-m4pro",
+        observed_boot_id="boot-m4pro",
+    )
+    assert result["host_id"] == expected_host_id
+    assert result["boot_id"] == expected_boot_id
     assert result["unknowns"] == []
     assert result["route_ready"] is False
     assert result["public_network_required"] is False
@@ -96,6 +104,37 @@ def test_remote_probe_measures_staged_artifacts_and_private_runtime_state(tmp_pa
     assert result["sidecar"]["identity"] == "mycelium-iroh-sidecar"
     assert result["dependencies"] == {"digest": request["dependencies"]["digest"]}
     assert "private-key-material" not in repr(result)
+    assert "host-m4pro" not in repr(result)
+    assert "boot-m4pro" not in repr(result)
+
+
+def test_run_scoped_host_identity_is_deterministic_but_not_cross_run_linkable() -> None:
+    from mycelium_physical_runner.remote_probe import derive_run_scoped_identity
+
+    observed_host_id = "raw-platform-uuid"
+    observed_boot_id = "raw-boot-identity"
+    first = derive_run_scoped_identity(
+        run_id="run-w8-001",
+        observed_host_id=observed_host_id,
+        observed_boot_id=observed_boot_id,
+    )
+    repeated = derive_run_scoped_identity(
+        run_id="run-w8-001",
+        observed_host_id=observed_host_id,
+        observed_boot_id=observed_boot_id,
+    )
+    next_run = derive_run_scoped_identity(
+        run_id="run-w8-002",
+        observed_host_id=observed_host_id,
+        observed_boot_id=observed_boot_id,
+    )
+
+    assert first == repeated
+    assert first != next_run
+    assert first[0].startswith("host-")
+    assert first[1].startswith("boot-")
+    assert observed_host_id not in repr(first)
+    assert observed_boot_id not in repr(first)
 
 
 def test_remote_probe_rejects_path_traversal_aliases(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ import copy
 import importlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 import pytest
@@ -27,6 +28,10 @@ SHA_MODEL_BLOB = _sha("c")
 SHA_TOKENIZER = _sha("d")
 SHA_SIDECAR = _sha("e")
 SHA_DEPENDENCIES = _sha("f")
+HOST_M4PRO = "host-" + "1" * 32
+BOOT_M4PRO = "boot-" + "2" * 32
+HOST_LAPTOP = "host-" + "3" * 32
+BOOT_LAPTOP = "boot-" + "4" * 32
 SECRET_VALUE = "sk-" + "S" * 36
 PRIVATE_CACHE = "/Users/operator/Library/Caches/huggingface/hub/private-snapshot"
 PRIVATE_SSH_IDENTITY = "/Users/operator/.ssh/id_ed25519_mycelium"
@@ -55,7 +60,7 @@ class RecordingRunner:
 
     def __init__(self, payloads: list[dict[str, Any]]) -> None:
         self.payloads = list(payloads)
-        self.calls: list[tuple[tuple[str, ...], float, bytes | None]] = []
+        self.calls: list[tuple[tuple[str, ...], float, bytes | None, Path | None]] = []
 
     def run(
         self,
@@ -63,6 +68,7 @@ class RecordingRunner:
         *,
         timeout_seconds: float,
         stdin_bytes: bytes | None = None,
+        cwd: Path | None = None,
     ) -> FakeCommandCapture:
         assert type(argv) is tuple, "live preflight must pass an argv tuple, not a shell string"
         assert argv and all(type(arg) is str and arg for arg in argv)
@@ -72,7 +78,7 @@ class RecordingRunner:
         request = json.loads(stdin_bytes)
         assert request["protocol"] == "mycelium.physical_runner_remote_probe_request.v1"
         payload = self.payloads.pop(0)
-        self.calls.append((argv, float(timeout_seconds), stdin_bytes))
+        self.calls.append((argv, float(timeout_seconds), stdin_bytes, cwd))
         return FakeCommandCapture(
             argv=argv,
             returncode=0,
@@ -137,8 +143,9 @@ def _safe_plan() -> dict[str, Any]:
                 "node_id": "node-0",
                 "ssh_target": "operator@m4pro.example",
                 "ssh_user": "operator",
-                "host_id": "host-m4pro",
-                "boot_id": "boot-m4pro",
+                "probe_transport": "local",
+                "host_id": HOST_M4PRO,
+                "boot_id": BOOT_M4PRO,
                 "runtime": "mlx-mac-arm64",
                 "coordinator_port": 43127,
                 "credential_path_alias": "node-0-endpoint-key",
@@ -150,8 +157,9 @@ def _safe_plan() -> dict[str, Any]:
                 "node_id": "node-1",
                 "ssh_target": "operator@laptop.example",
                 "ssh_user": "operator",
-                "host_id": "host-laptop",
-                "boot_id": "boot-laptop",
+                "probe_transport": "ssh",
+                "host_id": HOST_LAPTOP,
+                "boot_id": BOOT_LAPTOP,
                 "runtime": "mlx-mac-arm64",
                 "coordinator_port": 43128,
                 "credential_path_alias": "node-1-endpoint-key",
@@ -235,7 +243,7 @@ def _blocker_codes(result: dict[str, Any]) -> set[str]:
     }
 
 
-def test_live_preflight_uses_bounded_strict_ssh_argv_and_never_claims_route_ready() -> None:
+def test_live_preflight_uses_local_probe_for_controller_and_bounded_strict_ssh_for_peer() -> None:
     plan = _safe_plan()
     result, runner = _run_bridge(plan, _payloads_for(plan))
 
@@ -246,11 +254,9 @@ def test_live_preflight_uses_bounded_strict_ssh_argv_and_never_claims_route_read
     assert runner.payloads == []
     assert len(runner.calls) == len(plan["hosts"])
 
-    for host, (argv, timeout_seconds, stdin_bytes) in zip(
+    for host, (argv, timeout_seconds, stdin_bytes, cwd) in zip(
         plan["hosts"], runner.calls, strict=True
     ):
-        assert argv[0] == "ssh"
-        assert host["ssh_target"] in argv
         assert isinstance(stdin_bytes, bytes)
         request = json.loads(stdin_bytes)
         assert request["protocol"] == "mycelium.physical_runner_remote_probe_request.v1"
@@ -259,19 +265,32 @@ def test_live_preflight_uses_bounded_strict_ssh_argv_and_never_claims_route_read
         assert PRIVATE_SSH_IDENTITY not in stdin_bytes.decode("utf-8")
         assert SECRET_VALUE not in stdin_bytes.decode("utf-8")
         assert 0.0 < timeout_seconds <= 30.0
-        assert "BatchMode=yes" in argv
-        assert "IdentitiesOnly=yes" in argv
-        assert "StrictHostKeyChecking=yes" in argv
-        assert "-i" in argv
-        assert argv[argv.index("-i") + 1] == PRIVATE_SSH_IDENTITY
-        assert any(value.startswith("ConnectTimeout=") for value in argv)
-        assert "--" in argv
-        assert argv[-1] == (
-            'cd "$HOME/mycelium-physical-run/run-w8-001/source" && '
-            "exec /opt/homebrew/bin/python3.14 -m "
-            "mycelium_physical_runner.remote_probe --canonical-json"
-        )
         assert SECRET_VALUE not in "\x00".join(argv)
+
+        if host["probe_transport"] == "local":
+            assert argv == (
+                "/opt/homebrew/bin/python3.14",
+                "-m",
+                "mycelium_physical_runner.remote_probe",
+                "--canonical-json",
+            )
+            assert cwd == Path.home() / "mycelium-physical-run/run-w8-001/source"
+        else:
+            assert cwd is None
+            assert argv[0] == "ssh"
+            assert host["ssh_target"] in argv
+            assert "BatchMode=yes" in argv
+            assert "IdentitiesOnly=yes" in argv
+            assert "StrictHostKeyChecking=yes" in argv
+            assert "-i" in argv
+            assert argv[argv.index("-i") + 1] == PRIVATE_SSH_IDENTITY
+            assert any(value.startswith("ConnectTimeout=") for value in argv)
+            assert "--" in argv
+            assert argv[-1] == (
+                'cd "$HOME/mycelium-physical-run/run-w8-001/source" && '
+                "exec /opt/homebrew/bin/python3.14 -m "
+                "mycelium_physical_runner.remote_probe --canonical-json"
+            )
 
     rendered = _canonical_bytes(result)
     assert PRIVATE_CACHE.encode("utf-8") not in rendered
@@ -279,7 +298,7 @@ def test_live_preflight_uses_bounded_strict_ssh_argv_and_never_claims_route_read
     assert SECRET_VALUE.encode("utf-8") not in rendered
 
 
-@pytest.mark.parametrize("field", ["alias", "node_id", "ssh_target"])
+@pytest.mark.parametrize("field", ["alias", "node_id", "ssh_target", "probe_transport"])
 def test_live_preflight_rejects_tampered_shell_bearing_host_identity_before_output(field: str) -> None:
     plan = _safe_plan()
     plan["hosts"][0][field] = "safe; printf secret"
@@ -297,6 +316,23 @@ def test_live_preflight_rejects_wrong_but_unique_physical_identity(field: str) -
     result, _runner = _run_bridge(plan, payloads)
     assert "remote_probe_identity_mismatch" in _blocker_codes(result)
     assert result["preflight_ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("host_id", "raw-platform-uuid"), ("boot_id", "raw-boot-identity")],
+)
+def test_live_preflight_rejects_non_run_scoped_plan_identity_before_remote_calls(
+    field: str,
+    value: str,
+) -> None:
+    plan = _safe_plan()
+    plan["hosts"][0][field] = value
+
+    with pytest.raises(Exception) as caught:
+        _run_bridge(plan, _payloads_for(_safe_plan()))
+
+    assert getattr(caught.value, "code", None) == "live_preflight_plan_invalid"
 
 
 def test_live_preflight_rejects_boolean_public_network_byte_counts() -> None:

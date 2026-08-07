@@ -12,6 +12,8 @@ _INVENTORY_PROTOCOL = "mycelium.physical_runner_inventory.v1"
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PUBLIC_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$")
+_RUN_SCOPED_HOST_RE = re.compile(r"^host-[0-9a-f]{32}$")
+_RUN_SCOPED_BOOT_RE = re.compile(r"^boot-[0-9a-f]{32}$")
 
 
 class PlanBuildError(ValueError):
@@ -206,8 +208,15 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
         alias = _segment(host.get("alias"), "host_invalid")
         node_id = _segment(host.get("node_id"), "host_invalid")
         ssh_user = _segment(host.get("ssh_user"), "host_invalid")
+        probe_transport = host.get("probe_transport")
+        if probe_transport not in {"local", "ssh"}:
+            _fail("host_invalid")
         host_id = _segment(host.get("host_id"), "host_invalid")
         boot_id = _segment(host.get("boot_id"), "host_invalid")
+        if _RUN_SCOPED_HOST_RE.fullmatch(host_id) is None:
+            _fail("host_invalid")
+        if _RUN_SCOPED_BOOT_RE.fullmatch(boot_id) is None:
+            _fail("host_invalid")
         if host_id in host_ids:
             _fail("duplicate_host_id")
         if boot_id in boot_ids:
@@ -240,6 +249,7 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
                 "node_id": node_id,
                 "ssh_target": host.get("ssh_target"),
                 "ssh_user": ssh_user,
+                "probe_transport": probe_transport,
                 "host_id": host_id,
                 "boot_id": boot_id,
                 "runtime": runtime,

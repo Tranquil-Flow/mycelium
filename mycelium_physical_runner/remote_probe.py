@@ -128,6 +128,39 @@ def _boot_identity(host_id: str) -> str:
     return "boot-" + hashlib.sha256(f"{host_id}\x00{source}".encode()).hexdigest()[:32]
 
 
+def derive_run_scoped_identity(
+    *,
+    run_id: str,
+    observed_host_id: str,
+    observed_boot_id: str,
+) -> tuple[str, str]:
+    """Derive unlinkable run-scoped aliases from local host observations."""
+
+    run_id = _segment(run_id)
+    observations = (observed_host_id, observed_boot_id)
+    if any(
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > 1024
+        or any(character in value for character in "\x00\n\r\t")
+        for value in observations
+    ):
+        _invalid()
+    host_digest = hashlib.sha256(
+        b"mycelium.physical_runner.host_identity.v1\x00"
+        + run_id.encode("utf-8")
+        + b"\x00"
+        + observed_host_id.encode("utf-8")
+    ).hexdigest()
+    boot_digest = hashlib.sha256(
+        b"mycelium.physical_runner.boot_identity.v1\x00"
+        + run_id.encode("utf-8")
+        + b"\x00"
+        + observed_boot_id.encode("utf-8")
+    ).hexdigest()
+    return "host-" + host_digest[:32], "boot-" + boot_digest[:32]
+
+
 def _runtime_supported(runtime: str) -> bool:
     if runtime != "mlx-mac-arm64" or platform.system() != "Darwin" or platform.machine() != "arm64":
         return False
@@ -230,8 +263,13 @@ def probe_request(
     port = request["coordinator_port"]
     root = (home or Path.home()) / "mycelium-physical-run" / run_id
 
-    actual_host_id = host_id or _host_identity()
-    actual_boot_id = boot_id or _boot_identity(actual_host_id)
+    observed_host_id = host_id or _host_identity()
+    observed_boot_id = boot_id or _boot_identity(observed_host_id)
+    actual_host_id, actual_boot_id = derive_run_scoped_identity(
+        run_id=run_id,
+        observed_host_id=observed_host_id,
+        observed_boot_id=observed_boot_id,
+    )
     source = [
         {"path": item["path"], "digest": _digest(root / "source" / _relative(item["path"]))}
         for item in request["source_manifest"]
@@ -325,4 +363,10 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["REQUEST_PROTOCOL", "RESULT_PROTOCOL", "main", "probe_request"]
+__all__ = [
+    "REQUEST_PROTOCOL",
+    "RESULT_PROTOCOL",
+    "derive_run_scoped_identity",
+    "main",
+    "probe_request",
+]

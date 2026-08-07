@@ -30,6 +30,10 @@ SHA_MODEL_BLOB = _sha("e")
 SHA_TOKENIZER = _sha("f")
 SHA_SIDECAR = _sha("9")
 SHA_DEPENDENCIES = _sha("8")
+HOST_M4PRO = "host-" + "1" * 32
+BOOT_M4PRO = "boot-" + "2" * 32
+HOST_LAPTOP = "host-" + "3" * 32
+BOOT_LAPTOP = "boot-" + "4" * 32
 
 PRIVATE_MODEL_CACHE = "/Users/operator/Library/Caches/huggingface/hub/models--openai-community--gpt2"
 PRIVATE_TOKENIZER_CACHE = "/Users/operator/Library/Caches/huggingface/tokenizers/openai-community/gpt2"
@@ -148,8 +152,9 @@ def _base_inventory() -> dict[str, Any]:
                 "node_id": "node-0",
                 "ssh_target": "operator@m4pro.example",
                 "ssh_user": "operator",
-                "host_id": "host-m4pro",
-                "boot_id": "boot-m4pro",
+                "probe_transport": "local",
+                "host_id": HOST_M4PRO,
+                "boot_id": BOOT_M4PRO,
                 "runtime": "mlx-mac-arm64",
                 "python_executable": "/opt/mycelium/python/bin/python3",
                 "sidecar_binary": "/opt/mycelium/bin/mycelium-iroh-sidecar",
@@ -167,8 +172,9 @@ def _base_inventory() -> dict[str, Any]:
                 "node_id": "node-1",
                 "ssh_target": "operator@laptop.example",
                 "ssh_user": "operator",
-                "host_id": "host-laptop",
-                "boot_id": "boot-laptop",
+                "probe_transport": "ssh",
+                "host_id": HOST_LAPTOP,
+                "boot_id": BOOT_LAPTOP,
                 "runtime": "mlx-mac-arm64",
                 "python_executable": "/opt/mycelium/python/bin/python3",
                 "sidecar_binary": "/opt/mycelium/bin/mycelium-iroh-sidecar",
@@ -250,6 +256,7 @@ def test_build_safe_plan_is_deterministic_sorted_and_redacted() -> None:
         "node-0",
         "node-1",
     ]
+    assert [host["probe_transport"] for host in first["hosts"]] == ["local", "ssh"]
 
     rendered = _canonical_bytes(first)
     assert b"openai-community/gpt2" in rendered
@@ -283,6 +290,21 @@ def test_build_safe_plan_declares_local_only_cold_and_warm_cache_contracts() -> 
     rendered = _canonical_bytes(safe_plan).lower()
     assert b"expected_network_bytes\":\"positive" not in rendered
     assert b"download" in rendered and b"forbidden" in rendered
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("host_id", "raw-platform-uuid"), ("boot_id", "raw-boot-identity")],
+)
+def test_build_safe_plan_rejects_non_run_scoped_host_identity(field: str, value: str) -> None:
+    inventory = _base_inventory()
+    probes = FakePlanProbes(inventory)
+    inventory["hosts"][0][field] = value
+
+    with pytest.raises(_api().PlanBuildError) as captured:
+        _api().build_safe_plan(inventory, probes=probes)
+
+    assert captured.value.code == "host_invalid"
 
 
 @pytest.mark.parametrize(

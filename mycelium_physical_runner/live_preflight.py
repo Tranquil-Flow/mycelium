@@ -20,6 +20,8 @@ MAX_PROBE_BYTES = 256 * 1024
 MAX_SAFE_PLAN_BYTES = 2 * 1024 * 1024
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SSH_TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
+_RUN_SCOPED_HOST_RE = re.compile(r"^host-[0-9a-f]{32}$")
+_RUN_SCOPED_BOOT_RE = re.compile(r"^boot-[0-9a-f]{32}$")
 _REMOTE_PROBE_MODULE_COMMAND = (
     "/opt/homebrew/bin/python3.14 -m "
     "mycelium_physical_runner.remote_probe --canonical-json"
@@ -41,6 +43,7 @@ class _SubprocessRunner:
         *,
         timeout_seconds: float,
         stdin_bytes: bytes | None,
+        cwd: Path | None = None,
     ) -> _Capture:
         completed = subprocess.run(
             argv,
@@ -49,6 +52,7 @@ class _SubprocessRunner:
             stderr=subprocess.PIPE,
             check=False,
             timeout=timeout_seconds,
+            cwd=cwd,
         )
         return _Capture(completed.returncode, completed.stdout, completed.stderr)
 
@@ -117,6 +121,8 @@ def _production_dependencies(plan: Mapping[str, Any]) -> tuple[_ProductionLocalP
     commit = _git_output("rev-parse", "HEAD")
     records: dict[str, dict[str, Any]] = {}
     for host in plan.get("hosts", []):
+        if host.get("probe_transport") != "ssh":
+            continue
         alias = host.get("ssh_identity_path_alias")
         target = host.get("ssh_target")
         if isinstance(alias, str) and isinstance(target, str) and alias not in records:
@@ -274,6 +280,20 @@ def _ssh_argv(
         "--",
         target,
         remote_command,
+    )
+
+
+def _local_argv(run_id: Any) -> tuple[tuple[str, ...], Path]:
+    if not isinstance(run_id, str) or _SEGMENT_RE.fullmatch(run_id) is None:
+        raise RunnerError("live_preflight_plan_invalid")
+    return (
+        (
+            "/opt/homebrew/bin/python3.14",
+            "-m",
+            "mycelium_physical_runner.remote_probe",
+            "--canonical-json",
+        ),
+        Path.home() / "mycelium-physical-run" / run_id / "source",
     )
 
 
@@ -446,8 +466,14 @@ def run_live_preflight(
             value = host.get(field)
             if not isinstance(value, str) or _SEGMENT_RE.fullmatch(value) is None:
                 raise RunnerError("live_preflight_plan_invalid")
+        if _RUN_SCOPED_HOST_RE.fullmatch(host["host_id"]) is None:
+            raise RunnerError("live_preflight_plan_invalid")
+        if _RUN_SCOPED_BOOT_RE.fullmatch(host["boot_id"]) is None:
+            raise RunnerError("live_preflight_plan_invalid")
         target = host.get("ssh_target")
         if not isinstance(target, str) or _SSH_TARGET_RE.fullmatch(target) is None:
+            raise RunnerError("live_preflight_plan_invalid")
+        if host.get("probe_transport") not in {"local", "ssh"}:
             raise RunnerError("live_preflight_plan_invalid")
     if probes is None and runner is None:
         probes, runner = _production_dependencies(plan)
@@ -468,6 +494,8 @@ def run_live_preflight(
 
     identities: dict[str, str] = {}
     for host in hosts_raw:
+        if host.get("probe_transport") != "ssh":
+            continue
         alias = str(host.get("alias", ""))
         path = _identity_path(host, probes)
         if path is None:
@@ -479,12 +507,17 @@ def run_live_preflight(
 
     for host in hosts_raw:
         alias = str(host.get("alias", ""))
-        argv = _ssh_argv(host, identities[alias], plan.get("run_id"))
+        if host.get("probe_transport") == "local":
+            argv, cwd = _local_argv(plan.get("run_id"))
+        else:
+            argv = _ssh_argv(host, identities[alias], plan.get("run_id"))
+            cwd = None
         try:
             capture = runner.run(
                 argv,
                 timeout_seconds=30.0,
                 stdin_bytes=_remote_request(plan, host),
+                cwd=cwd,
             )
         except Exception:
             _block(blockers, "remote_probe_failed", alias)
