@@ -126,7 +126,8 @@ printf ' host='; hostname
 printf ' mem='; sysctl -n hw.memsize
 ```
 
-Expected baseline: user `evinova-self`, host `m4pro`, 48 GiB physical memory.
+Expected baseline: the operator-confirmed account and host for the 48 GiB M4 Pro. Stop if any
+field differs; do not copy account identifiers into tracked reports.
 
 For the second Mac, use the operator-provided current Tailscale identity rather than a stale IP:
 

@@ -31,7 +31,18 @@ Component designs are authoritative in [`ALLOCATOR.md`](ALLOCATOR.md),
 `route_ready` is `false`. Nothing in this repository claims qualified physical
 execution.
 
-Active development plan (local, not tracked): `~/Desktop/mycelium-demo-plan.md`
+## Astra and MVP continuation
+
+The current cross-host handoff and tracked plans are in
+[`docs/handover/ASTRA_CURRENT.md`](docs/handover/ASTRA_CURRENT.md). Recent work is split across
+two explicitly anchored integration tranches:
+
+- `Tranquil-Flow/mycelium`, branch `integration/wave3-mycelium`, code checkpoint `2109b95`;
+- `Tranquil-Flow/BloomBee`, branch `integration/wave3-serial`, checkpoint `8fded03`.
+
+No existing branch contains both tranches. The handoff records exact GitHub URLs, current
+branch heads, tracked plan/review artifacts, and unreviewed archive branches. Do not use an
+archive branch as an integration base or infer physical readiness from either local suite.
 
 ## Architecture direction
 
@@ -44,8 +55,8 @@ Control-plane records never carry model tensors or protected implementation edit
 
 ## Repository boundaries
 
-- Generated model caches, run directories, local evidence, internal handovers, and planning files remain untracked.
-- Curated evidence must be redacted, immutable, and manifest-addressed before entering version control.
+- Generated model caches, run directories, local evidence, private credentials, and uncurated internal logs remain untracked.
+- Curated plans, handoffs, reviews, and evidence may enter version control only after explicit operator approval, redaction, and integrity-manifest verification.
 - Secrets and device tokens must never be committed.
 - The Network Observatory remains read-only; request submission is a separate control surface.
 

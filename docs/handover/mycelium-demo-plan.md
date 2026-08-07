@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, MLX, native Rust `iroh-sidecar`, Ed25519 evidence signing, SQLite, stdlib HTTP control plane, existing Mycelium Router/relay/runtime/planner/gossip/qualification modules, pytest, Node 22 UI gates.
 
-**Plan location:** `/Users/evinova/Desktop/mycelium-demo-plan.md` — private/local only. Do not add this file or internal handover prose to Git.
+**Tracked plan location:** `docs/handover/mycelium-demo-plan.md`. Published on explicit operator direction on 2026-07-30. The earlier local-only publication instruction is superseded; all physical-evidence and readiness boundaries below remain unchanged.
 
 ---
 
