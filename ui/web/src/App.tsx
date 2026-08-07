@@ -24,11 +24,17 @@ import type {
 import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
+import { LifecycleCoveragePanel } from './features/lifecycle/LifecycleBadge';
+import {
+  LIFECYCLE_STATE_ORDER,
+  projectLifecycle,
+} from './features/lifecycle/lifecycleProjection';
 import { SettingsProvider } from './features/settings/SettingsContext';
 import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
+import { preparingFixture } from './test/lifecycleFixtures/recordedSnapshots';
 import './styles.css';
 
 type AppSource = ObservatoryDataSource | LiveObservatoryEventSource;
@@ -54,6 +60,9 @@ export interface AppProps {
 const defaultSource = createObservatorySource({ source_mode: 'fixture' });
 const emptyFeatureRegistry = createProductFeatureRegistry([]);
 const fixtureInferenceClient = new FixtureInferenceClient();
+const recordedLifecycleProjections = Object.freeze(
+  LIFECYCLE_STATE_ORDER.map((state) => projectLifecycle(preparingFixture({ state }))),
+);
 
 function sourceErrorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : 'Unknown Observatory source error';
@@ -298,11 +307,14 @@ export default function App({
         break;
       case 'readiness':
         content = (
-          <EvidenceView
-            snapshot={snapshot}
-            incidents={incidents}
-            provisioning={provisioning}
-          />
+          <>
+            <EvidenceView
+              snapshot={snapshot}
+              incidents={incidents}
+              provisioning={provisioning}
+            />
+            <LifecycleCoveragePanel projections={recordedLifecycleProjections} />
+          </>
         );
         break;
     }

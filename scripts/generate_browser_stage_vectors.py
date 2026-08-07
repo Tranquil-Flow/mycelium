@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from mycelium_interactive.swarm import matrix_digest
-from mycelium_mobile.pixel_stage import PixelStage, build_stage_pack
+from mycelium_interactive.swarm import matrix_digest  # noqa: E402
+from mycelium_mobile.pixel_stage import PixelStage, build_stage_pack  # noqa: E402
 
 OUTPUT = ROOT / "ui" / "web" / "src" / "test" / "browserStageVectors.json"
 

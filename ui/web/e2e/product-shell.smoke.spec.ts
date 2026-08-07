@@ -82,6 +82,31 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
   }
 
+  await navigation.getByRole('link', { name: /^Readiness/ }).click();
+  const lifecyclePanel = page.getByRole('region', {
+    name: /recorded lifecycle projection coverage/i,
+  });
+  await expect(lifecyclePanel).toBeVisible();
+  const lifecycleLabels = [
+    'Preparing qualifier evidence',
+    'Loading evidence snapshot',
+    'Qualifier-owned not accepted',
+    'Qualified distributed execution',
+    'Generating accepted request',
+    'Cancellation pending',
+    'Peer lost',
+    'Recovering route binding',
+    'Stale qualification',
+    'Revoked swarm member',
+    'Cleanup complete',
+  ] as const;
+  for (const label of lifecycleLabels) {
+    await expect(lifecyclePanel.getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(lifecyclePanel.getByText('recorded_event_projection_only').first()).toBeVisible();
+  await expect(lifecyclePanel.getByText('real_device=false').first()).toBeVisible();
+  await expect(lifecyclePanel.getByText('physical_devices_present=0').first()).toBeVisible();
+
   const hasHorizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
   );

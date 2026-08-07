@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import io
 import json
 from pathlib import Path
@@ -14,10 +15,6 @@ import pytest
 from mycelium_membership.contracts import (
     ASSIGNMENT_OFFER_PROTOCOL,
     sign_membership_message,
-)
-from mycelium_qualification.contracts import (
-    QUALIFIER_AUTHORITY,
-    ROUTE_QUALIFICATION_PROTOCOL,
 )
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import generate_ed25519_signer
@@ -256,35 +253,6 @@ class FakeEvidenceSealer:
             "manifest_path": str(manifest_path),
             "manifest_digest": "sha256:"
             + hashlib.sha256(self.manifest_bytes).hexdigest(),
-        }
-
-
-class FakeEvidenceQualifier:
-    def __init__(
-        self,
-        *,
-        accepted: bool,
-        claim_route_ready: bool,
-        qualified_by: str | None = None,
-    ) -> None:
-        self.accepted = accepted
-        self.claim_route_ready = claim_route_ready
-        self.qualified_by = (
-            QUALIFIER_AUTHORITY if accepted and qualified_by is None else qualified_by
-        )
-        self.calls = 0
-
-    def __call__(self, sealed: dict[str, Any]) -> dict[str, Any]:
-        self.calls += 1
-        return {
-            "protocol": ROUTE_QUALIFICATION_PROTOCOL,
-            "run_id": sealed["run_id"],
-            "manifest_digest": sealed["manifest_digest"],
-            "evidence_class": "physical_qualification",
-            "accepted": self.accepted,
-            "route_ready": self.claim_route_ready,
-            "reason_codes": [] if self.accepted else ["qualification_rejected"],
-            "qualified_by": self.qualified_by,
         }
 
 
@@ -1126,7 +1094,11 @@ def test_physical_seal_without_adapters_rejects_before_orchestration(
     assert runner.calls == []
 
 
-def test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once(
+def test_controller_has_no_injected_qualifier_authority() -> None:
+    assert "qualifier_adapter" not in inspect.signature(QualificationController).parameters
+
+
+def test_physical_seal_stops_writers_locks_manifest_without_qualifying(
     tmp_path: Path,
 ) -> None:
     peers = _peers(3)
@@ -1140,7 +1112,6 @@ def test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once(
         return session
 
     sealer = FakeEvidenceSealer(tmp_path / "sealed", attempts)
-    qualifier = FakeEvidenceQualifier(accepted=True, claim_route_ready=True)
     controller = QualificationController(
         mode="physical",
         peers=peers,
@@ -1152,18 +1123,17 @@ def test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once(
         run_plan=_physical_run_plan(peers),
         session_factory=session_factory,
         seal_adapter=sealer,
-        qualifier_adapter=qualifier,
     )
 
     result = controller.execute("seal")
 
     manifest_path = sealer.root / "evidence-manifest.json"
     assert result["command"] == "seal"
-    assert result["route_ready"] is True
+    assert result["route_ready"] is False
     assert result["release_ready"] is False
-    assert result["qualifier_invocations"] == 1
+    assert result["qualifier_invocations"] == 0
+    assert "qualification" not in result
     assert sealer.calls == 1
-    assert qualifier.calls == 1
     assert manifest_path.read_bytes() == sealer.manifest_bytes
     assert manifest_path.stat().st_mode & 0o222 == 0
     assert sealer.root.stat().st_mode & 0o222 == 0
@@ -1174,7 +1144,7 @@ def test_physical_seal_stops_writers_locks_manifest_and_invokes_qualifier_once(
     )
 
 
-def test_rejected_qualification_cannot_promote_controller_readiness(
+def test_physical_seal_evidence_stops_writers_without_invoking_qualifier(
     tmp_path: Path,
 ) -> None:
     peers = _peers(3)
@@ -1188,7 +1158,6 @@ def test_rejected_qualification_cannot_promote_controller_readiness(
         return session
 
     sealer = FakeEvidenceSealer(tmp_path / "sealed", attempts)
-    qualifier = FakeEvidenceQualifier(accepted=False, claim_route_ready=True)
     controller = QualificationController(
         mode="physical",
         peers=peers,
@@ -1200,57 +1169,21 @@ def test_rejected_qualification_cannot_promote_controller_readiness(
         run_plan=_physical_run_plan(peers),
         session_factory=session_factory,
         seal_adapter=sealer,
-        qualifier_adapter=qualifier,
     )
 
-    result = controller.execute("seal")
+    result = controller.seal_evidence()
 
-    assert result["qualification"]["accepted"] is False
+    assert result["command"] == "seal"
     assert result["route_ready"] is False
     assert result["release_ready"] is False
-    assert result["qualifier_invocations"] == 1
+    assert result["qualifier_invocations"] == 0
+    assert "qualification" not in result
     assert sealer.calls == 1
-    assert qualifier.calls == 1
-
-
-def test_qualification_from_non_authority_cannot_promote_controller_readiness(
-    tmp_path: Path,
-) -> None:
-    peers = _peers(3)
-    source_root, transfers = _transfers(tmp_path / "transfer")
-    runner = StagingRunner(_physical_cleanup_captures(peers))
-    attempts: dict[str, list[FakeNodeSession]] = {}
-
-    def session_factory(**kwargs: Any) -> FakeNodeSession:
-        session = FakeNodeSession(**kwargs)
-        attempts.setdefault(session.node_id, []).append(session)
-        return session
-
-    sealer = FakeEvidenceSealer(tmp_path / "sealed", attempts)
-    qualifier = FakeEvidenceQualifier(
-        accepted=True,
-        claim_route_ready=True,
-        qualified_by="untrusted.qualifier",
+    assert all(
+        session.closed
+        for node_attempts in attempts.values()
+        for session in node_attempts
     )
-    controller = QualificationController(
-        mode="physical",
-        peers=peers,
-        source_root=source_root,
-        transfer_manifest=transfers,
-        membership_snapshot=_snapshot(peers),
-        now=NOW + 1.0,
-        runner=runner,
-        run_plan=_physical_run_plan(peers),
-        session_factory=session_factory,
-        seal_adapter=sealer,
-        qualifier_adapter=qualifier,
-    )
-
-    with pytest.raises(ControllerError, match="qualification_result_invalid"):
-        controller.execute("seal")
-
-    assert sealer.calls == 1
-    assert qualifier.calls == 1
 
 
 def test_physical_run_rejects_endpoint_secret_outside_identity_root(

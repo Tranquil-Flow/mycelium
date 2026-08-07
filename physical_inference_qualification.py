@@ -34,10 +34,6 @@ from mycelium_membership.contracts import (
     MembershipContractError,
     verify_membership_message,
 )
-from mycelium_qualification.contracts import (
-    QUALIFIER_AUTHORITY,
-    ROUTE_QUALIFICATION_PROTOCOL,
-)
 from mycelium_qualification.evidence import (
     EvidenceValidationError,
     canonical_json_bytes,
@@ -701,7 +697,6 @@ class QualificationController:
         run_plan: Mapping[str, Any] | None = None,
         session_factory: Callable[..., Any] | None = None,
         seal_adapter: Callable[..., Mapping[str, Any]] | None = None,
-        qualifier_adapter: Callable[[dict[str, Any]], Mapping[str, Any]] | None = None,
     ):
         if mode not in MODES:
             _reject("controller_mode_invalid")
@@ -741,8 +736,6 @@ class QualificationController:
             _reject("controller_session_factory_invalid")
         if seal_adapter is not None and not callable(seal_adapter):
             _reject("controller_seal_adapter_invalid")
-        if qualifier_adapter is not None and not callable(qualifier_adapter):
-            _reject("controller_qualifier_adapter_invalid")
         self.mode = mode
         self.peers = tuple(peers)
         self.source_root = resolved_root
@@ -753,7 +746,6 @@ class QualificationController:
         self._runner = runner or SubprocessRunner()
         self._session_factory = session_factory or NodeProcessSession
         self._seal_adapter = seal_adapter
-        self._qualifier_adapter = qualifier_adapter
 
     def _validate_transfers(self) -> tuple[dict[str, Any], ...]:
         manifest = self._transfer_manifest
@@ -1618,8 +1610,11 @@ class QualificationController:
             ),
         }
 
-    def _seal_physical(self, evidence: dict[str, Any]) -> dict[str, Any]:
-        if self._seal_adapter is None or self._qualifier_adapter is None:
+    def _seal_physical(
+        self,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self._seal_adapter is None:
             _reject("controller_evidence_adapter_missing")
         run_id = evidence.get("run_id")
         if not isinstance(run_id, str):
@@ -1685,81 +1680,28 @@ class QualificationController:
             or actual_digest != manifest_digest
         ):
             _reject("sealed_manifest_invalid")
-        qualified_value = self._qualifier_adapter(dict(sealed))
-        if not isinstance(qualified_value, Mapping):
-            _reject("qualification_result_invalid")
-        qualification = dict(qualified_value)
-        expected_fields = {
-            "protocol",
-            "run_id",
-            "manifest_digest",
-            "evidence_class",
-            "accepted",
-            "route_ready",
-            "reason_codes",
-            "qualified_by",
-        }
-        reason_codes = qualification.get("reason_codes")
-        accepted = qualification.get("accepted")
-        claimed_route_ready = qualification.get("route_ready")
-        qualified_by = qualification.get("qualified_by")
-        if (
-            set(qualification) != expected_fields
-            or qualification.get("protocol") != ROUTE_QUALIFICATION_PROTOCOL
-            or qualification.get("run_id") != run_id
-            or qualification.get("manifest_digest") != manifest_digest
-            or qualification.get("evidence_class") != "physical_qualification"
-            or not isinstance(accepted, bool)
-            or not isinstance(claimed_route_ready, bool)
-            or not isinstance(reason_codes, list)
-            or not all(isinstance(code, str) and bool(code) for code in reason_codes)
-            or (
-                accepted
-                and (
-                    qualified_by != QUALIFIER_AUTHORITY
-                    or bool(reason_codes)
-                )
-            )
-            or (
-                not accepted
-                and (
-                    qualified_by is not None
-                    or not reason_codes
-                )
-            )
-        ):
-            _reject("qualification_result_invalid")
-        try:
-            post_metadata = manifest_path.lstat()
-            post_parent_metadata = manifest_path.parent.lstat()
-            post_manifest = manifest_path.read_bytes()
-        except OSError as exc:
-            raise ControllerError("sealed_manifest_mutated") from exc
-        if (
-            post_manifest != raw_manifest
-            or post_metadata.st_mode & 0o222
-            or post_parent_metadata.st_mode & 0o222
-            or "sha256:" + hashlib.sha256(post_manifest).hexdigest()
-            != manifest_digest
-        ):
-            _reject("sealed_manifest_mutated")
-        route_ready = bool(
-            qualification["accepted"] and qualification["route_ready"]
-        )
         return {
             **evidence,
             "command": "seal",
-            "route_ready": route_ready,
+            "route_ready": False,
             "release_ready": False,
             "sealed_manifest": sealed,
-            "qualification": qualification,
-            "qualifier_invocations": 1,
+            "qualifier_invocations": 0,
             "claim_boundary": (
-                "writers stopped and immutable same-run evidence qualified once; "
-                "route readiness mirrors only accepted qualifier evidence and release "
-                "readiness remains false"
+                "writers stopped and immutable same-run evidence sealed once; "
+                "qualification has not run and route and release readiness remain false"
             ),
         }
+
+    def seal_evidence(self) -> dict[str, Any]:
+        """Run and seal physical evidence without invoking qualification authority."""
+
+        self._validate_transfers()
+        endpoints = self._validate_membership()
+        if self.mode != "physical":
+            _reject("physical_mode_required")
+        self._validate_physical_distinctness()
+        return self._seal_physical(self._run_physical(endpoints))
 
     def _parse_stage_ack(
         self,
@@ -1977,7 +1919,7 @@ class QualificationController:
             if command == "recover":
                 return self._run_physical(endpoints, operation="recover")
             if command == "seal":
-                if self._seal_adapter is None or self._qualifier_adapter is None:
+                if self._seal_adapter is None:
                     _reject("controller_evidence_adapter_missing")
                 return self._seal_physical(self._run_physical(endpoints))
             if command == "cleanup":

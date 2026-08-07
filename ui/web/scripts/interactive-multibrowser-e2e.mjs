@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import https from 'node:https';
 import net from 'node:net';
 import os from 'node:os';
@@ -136,13 +136,15 @@ async function mobileMetrics(page) {
 async function main() {
   const serverPort = await freePort();
   const deviceLabHost = process.env.MYCELIUM_DEVICE_LAB_HOST?.trim() || null;
-  const suppliedStateRoot = process.env.MYCELIUM_DEVICE_LAB_STATE_ROOT?.trim() || null;
+  const suppliedStateRoot = process.env.MYCELIUM_DEVICE_LAB_STATE_ROOT?.trim()
+    || process.env.MYCELIUM_INTERACTIVE_STATE_DIR?.trim()
+    || null;
   const origin = deviceLabHost
     ? `https://${deviceLabHost}:${serverPort}`
     : `http://127.0.0.1:${serverPort}`;
   const stateRoot = suppliedStateRoot
     ? path.resolve(suppliedStateRoot)
-    : await mkdtemp(path.join(os.tmpdir(), 'mycelium-multibrowser-state-'));
+    : await realpath(await mkdtemp(path.join(os.tmpdir(), 'mycelium-multibrowser-state-')));
   const removeStateRoot = suppliedStateRoot === null;
   const downloadRoot = await mkdtemp(path.join(os.tmpdir(), 'mycelium-multibrowser-download-'));
   const serverArguments = deviceLabHost

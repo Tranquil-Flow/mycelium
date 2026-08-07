@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import stat
 import sys
@@ -10,7 +9,7 @@ import time
 import pytest
 
 from tests.e2e_request_iroh.conftest import (
-    native_iroh_sidecar_binary as node_agent_sidecar_binary,
+    native_iroh_sidecar_binary as node_agent_sidecar_binary,  # noqa: F401
 )
 
 from mycelium_node.process import (
@@ -194,7 +193,7 @@ def test_build_command_local_only_flag_is_explicit(tmp_path: Path) -> None:
 
 
 def test_real_physical_node_hello_and_stop(
-    tmp_path: Path, node_agent_sidecar_binary: Path
+    tmp_path: Path, node_agent_sidecar_binary: Path  # noqa: F811
 ) -> None:
     root = Path(__file__).resolve().parents[2]
     artifact_root = tmp_path / "artifacts"

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 
 from conftest import (
     ASGIResult,
     REQUEST_TOKEN,
-    asgi_request,
     cookie_pair,
     request,
     session_headers,

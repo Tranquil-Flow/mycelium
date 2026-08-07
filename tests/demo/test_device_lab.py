@@ -5,8 +5,6 @@ import json
 from pathlib import Path
 import shutil
 import ssl
-from types import SimpleNamespace
-
 import pytest
 
 from mycelium_demo import cli

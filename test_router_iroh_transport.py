@@ -1459,6 +1459,7 @@ def test_rotation_and_deadline_reserve_one_cancel_per_message(
     deadline.join(timeout=1.0)
     assert not deadline.is_alive()
     release_cancel.set()
+    assert hub.cancel_completed.wait(timeout=1.0)
     rotation.join(timeout=1.0)
     hub.release_confirmed_send.set()
     sender.join(timeout=1.0)
@@ -2019,7 +2020,11 @@ def test_confirmed_send_deadline_includes_wait_for_client_lock() -> None:
 
 def test_reconnect_retry_uses_original_end_to_end_deadline() -> None:
     hub = _Hub()
-    delivery_timeout = 0.3
+    # macOS background-QoS timer coalescing can add roughly 150 ms to a timed
+    # wait. Use a longer deadline with a tighter relative tolerance so the
+    # test still detects deadline reset without depending on sub-100-ms wakeup.
+    delivery_timeout = 1.0
+    scheduler_slack = delivery_timeout * 0.2
     transport = _transport(hub, delivery_timeout_seconds=delivery_timeout)
     transport.bind_router(_RecordingRouter())
     transport.start()
@@ -2049,12 +2054,12 @@ def test_reconnect_retry_uses_original_end_to_end_deadline() -> None:
         retry_timeout = hub.confirmed_send_timeouts[1]
         assert retry_timeout is not None
         assert 0 < retry_timeout < delivery_timeout - 0.02
-        thread.join(timeout=1)
+        thread.join(timeout=delivery_timeout + scheduler_slack)
         assert not thread.is_alive()
         assert len(errors) == 1
         assert isinstance(errors[0], IrohTransportError)
         assert errors[0].code == "delivery_deadline_exceeded"
-        assert len(elapsed) == 1 and elapsed[0] < delivery_timeout + 0.08
+        assert len(elapsed) == 1 and elapsed[0] < delivery_timeout + scheduler_slack
         assert hub.cancel_entered.wait(timeout=1)
         assert hub.cancels == []
         hub.release_cancel.set()
