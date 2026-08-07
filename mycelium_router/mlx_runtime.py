@@ -39,12 +39,14 @@ from mycelium_router.payloads import (
    decode_token_ids,
    encode_activation,
 )
+from mycelium_router.stage_signatures import stage_signature_for_backend
 from mycelium_router.validation import ContractError, validate_execution_graph
 from runtime_contracts import validate_normalized_mlx_runtime
 from runtime_loader import (
    LoadedStage,
    RuntimeExecutionError,
    canonical_json,
+   execute_loaded_stage as _execute_loaded_stage,
 )
 
 
@@ -108,27 +110,16 @@ def _plain_json(value: Any) -> Any:
 
 
 def _stage_signature(graph: ExecutionGraph, stage: Stage, proof: Mapping[str, Any]) -> str:
-   material = {
-      "protocol": "mycelium.stage_signature.v1",
-      "deployment_id": graph.deployment_id,
-      "deployment_epoch": graph.deployment_epoch,
-      "model_id": graph.model_id,
-      "resolved_commit": graph.resolved_commit,
-      "manifest_digest": graph.manifest_digest,
-      "stage_id": stage.stage_id,
-      "range": _plain_json(proof["loaded_range"]),
-      "components": _plain_json(proof["loaded_components"]),
-      "hidden_size": graph.hidden_size,
-      "dtype_bytes": graph.activation_bytes,
-   }
-   encoded = json.dumps(
-      material,
-      sort_keys=True,
-      separators=(",", ":"),
-      ensure_ascii=False,
-      allow_nan=False,
-   ).encode("utf-8")
-   return "sha256:" + hashlib.sha256(encoded).hexdigest()
+   runtime = proof.get("runtime")
+   if not isinstance(runtime, Mapping):
+      _reject("invalid_loaded_stage_runtime", stage.stage_id)
+   runtime_backend = runtime.get("backend")
+   if not isinstance(runtime_backend, str):
+      _reject("invalid_loaded_stage_runtime", stage.stage_id)
+   try:
+      return stage_signature_for_backend(graph, stage, runtime_backend)
+   except ValueError as exc:
+      raise MLXRuntimeError("invalid_loaded_stage_runtime", stage.stage_id) from exc
 
 
 def _range_document(stage: Stage) -> dict[str, int]:
@@ -260,6 +251,7 @@ class MLXRuntimePort:
       loaded_stages: Mapping[str, LoadedStage],
       *,
       clock: Callable[[], float] | None = None,
+      decode_mode: str = "stage_local_kv",
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
@@ -276,6 +268,8 @@ class MLXRuntimePort:
          _reject("missing_model_id")
       if not isinstance(loaded_stages, Mapping):
          _reject("invalid_loaded_stage_mapping")
+      if decode_mode not in {"stage_local_kv", "complete_context_replay"}:
+         _reject("invalid_runtime_decode_mode")
       if not loaded_stages:
          _reject("missing_local_loaded_stages")
       if not all(isinstance(key, str) and key for key in loaded_stages):
@@ -324,6 +318,7 @@ class MLXRuntimePort:
 
       self.node_id = node_id
       self.graph = graph
+      self.decode_mode = decode_mode
       self._bound = MappingProxyType(bound)
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
@@ -648,7 +643,7 @@ class MLXRuntimePort:
             for path_id, state in sorted(self._kv_states.items())
          }
          return {
-            "mode": "stage_local_kv",
+            "mode": self.decode_mode,
             "closed": self._closed,
             "active_state_count": len(states),
             "states": states,
@@ -692,7 +687,11 @@ class MLXRuntimePort:
          if not token_ids:
             _reject("empty_token_sequence")
          config = runtime["model_config"]
-         if item.position + len(token_ids) > config["n_positions"]:
+         if (
+            len(token_ids) > config["n_positions"]
+            if self.decode_mode == "complete_context_replay"
+            else item.position + len(token_ids) > config["n_positions"]
+         ):
             _reject("position_bounds_exceeded")
          if any(token_id >= config["vocab_size"] for token_id in token_ids):
             _reject("token_bounds_exceeded")
@@ -707,7 +706,11 @@ class MLXRuntimePort:
       if envelope.shape[0] != 1 or envelope.shape[2] != self.graph.hidden_size:
          _reject("activation_shape_mismatch")
       sequence = envelope.shape[1]
-      if item.position + sequence > runtime["model_config"]["n_positions"]:
+      if (
+         sequence > runtime["model_config"]["n_positions"]
+         if self.decode_mode == "complete_context_replay"
+         else item.position + sequence > runtime["model_config"]["n_positions"]
+      ):
          _reject("position_bounds_exceeded")
       self._validate_sequence_span(item.batch_key, item.phase, sequence)
       if sys.byteorder != "little":
@@ -824,6 +827,47 @@ class MLXRuntimePort:
          ),
       )
 
+   def _execute_complete_context(
+      self,
+      item: HopWorkItem,
+      stage: Stage,
+      loaded: LoadedStage,
+      runtime: Mapping[str, Any],
+      token_ids: mx.array | None,
+      hidden_states: mx.array | None,
+      sequence: int,
+      fingerprint: str,
+   ) -> RuntimeResult:
+      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         if item.phase == "PREFILL" and item.token_index != -1:
+            _reject("prefill_sequence_mismatch")
+         if item.phase == "RECOVERY_PREFILL" and item.token_index < 0:
+            _reject("recovery_prefill_sequence_mismatch")
+         if item.position != 0:
+            _reject("prefill_position_mismatch")
+      else:
+         if item.position <= 0:
+            _reject("decode_position_mismatch")
+         if sequence != item.position + 1:
+            _reject("decode_context_position_mismatch")
+         if item.token_index < 0:
+            _reject("decode_sequence_mismatch")
+
+      try:
+         if "input_embedding" in stage.component_roles:
+            output = _execute_loaded_stage(loaded, token_ids=token_ids)
+         else:
+            output = _execute_loaded_stage(loaded, hidden_states=hidden_states)
+      except RuntimeExecutionError as exc:
+         raise MLXRuntimeError(str(exc) or "runtime_execution_rejected") from exc
+      mx.eval(output)
+      if not bool(mx.all(mx.isfinite(output)).item()):
+         _reject("nonfinite_stage_output")
+      result = self._runtime_result(stage, runtime, output)
+      self._applied_operation_count += 1
+      self._remember_result(item, fingerprint, result)
+      return result
+
    def _execute_bound(self, item: HopWorkItem) -> RuntimeResult:
       if item.phase == "PREFILL_CHUNK":
          _reject("prefill_chunk_requires_kv_continuity")
@@ -861,6 +905,17 @@ class MLXRuntimePort:
          return replay.result
 
       token_ids, hidden_states, sequence = self._decode_input(item, stage, runtime)
+      if self.decode_mode == "complete_context_replay":
+         return self._execute_complete_context(
+            item,
+            stage,
+            loaded,
+            runtime,
+            token_ids,
+            hidden_states,
+            sequence,
+            fingerprint,
+         )
       if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
          if item.phase == "PREFILL" and item.token_index != -1:
             _reject("kv_prefill_sequence_mismatch")
@@ -978,8 +1033,8 @@ class MLXRuntimePort:
       ):
          _reject("invalid_batch_key_token_span")
 
-   @staticmethod
    def _validate_sequence_span(
+      self,
       key: RuntimeBatchKey | None,
       phase: str,
       sequence: int,
@@ -990,7 +1045,11 @@ class MLXRuntimePort:
          _reject("batch_key_token_span_mismatch")
       if phase == "DECODE" and key.token_span != 1:
          _reject("batch_key_token_span_mismatch")
-      if phase == "DECODE" and sequence != 1:
+      if (
+         phase == "DECODE"
+         and self.decode_mode == "stage_local_kv"
+         and sequence != 1
+      ):
          _reject("decode_requires_single_token")
 
    def execute_batch(self, batch: RuntimeBatch) -> tuple[RuntimeResult, ...]:

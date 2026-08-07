@@ -613,6 +613,19 @@ class PhysicalNodeService:
         backend = placement.runtime_backend
         clock = self._clock.now
         loaded_stages = {placement.placement_id: loaded}
+        route_backends = {
+            candidate.runtime_backend
+            for stage in graph.stages
+            for candidate in stage.placements
+            if candidate.lifecycle_state == "ACTIVE"
+        }
+        if not route_backends or route_backends - {"mlx", "numpy"}:
+            raise NodeCommandError("unsupported_runtime_backend")
+        route_decode_mode = (
+            "complete_context_replay"
+            if "numpy" in route_backends
+            else "stage_local_kv"
+        )
         if backend == "numpy":
             from mycelium_router.numpy_runtime import NumpyRuntimePort
 
@@ -630,6 +643,7 @@ class PhysicalNodeService:
                 graph,
                 loaded_stages,
                 clock=clock,
+                decode_mode=route_decode_mode,
             )
         raise NodeCommandError("unsupported_runtime_backend")
 

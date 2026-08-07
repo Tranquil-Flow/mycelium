@@ -133,6 +133,44 @@ def test_prepare_physical_deployment_is_offline_deterministic_and_exact(
     json.dumps(first.evidence_document(), sort_keys=True, allow_nan=False)
 
 
+def test_prepare_physical_deployment_binds_distinct_backends_by_node(
+    tmp_path: Path,
+) -> None:
+    deployment = prepare_physical_deployment(
+        tmp_path / "mixed",
+        runtime_backends_by_node={"node-a": "mlx", "node-b": "numpy"},
+    )
+
+    assert [item["runtime"]["backend"] for item in deployment.assignments] == [
+        "mlx",
+        "numpy",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("runtime_backends_by_node", "reason"),
+    (
+        ({"node-a": "mlx"}, "runtime_backend_node_set_mismatch"),
+        (
+            {"node-a": "mlx", "node-b": "numpy", "node-c": "numpy"},
+            "runtime_backend_node_set_mismatch",
+        ),
+        ({"node-a": "mlx", "node-b": "cuda"}, "invalid_runtime_backend"),
+        (["mlx", "numpy"], "invalid_runtime_backends_by_node"),
+    ),
+)
+def test_prepare_physical_deployment_rejects_invalid_per_node_backends(
+    tmp_path: Path,
+    runtime_backends_by_node: Any,
+    reason: str,
+) -> None:
+    with pytest.raises(PhysicalDeploymentError, match=f"^{reason}$"):
+        prepare_physical_deployment(
+            tmp_path / "invalid",
+            runtime_backends_by_node=runtime_backends_by_node,
+        )
+
+
 def test_loader_rejects_tampered_embedded_stage_pack_evidence(tmp_path: Path) -> None:
     deployment = prepare_physical_deployment(tmp_path / "deployment")
     report = copy.deepcopy(deployment.artifact_reports[0])

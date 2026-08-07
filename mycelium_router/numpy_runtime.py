@@ -42,6 +42,7 @@ from mycelium_router.payloads import (
    decode_token_ids,
    encode_activation,
 )
+from mycelium_router.stage_signatures import stage_signature_for_backend
 from mycelium_router.validation import ContractError, validate_execution_graph
 from numpy_runtime import (
    NumpyRuntimeError as _StageNumpyRuntimeError,
@@ -122,27 +123,16 @@ def _plain_json(value: Any) -> Any:
 def _stage_signature(
    graph: ExecutionGraph, stage: Stage, proof: Mapping[str, Any]
 ) -> str:
-   material = {
-      "protocol": "mycelium.stage_signature.v1",
-      "deployment_id": graph.deployment_id,
-      "deployment_epoch": graph.deployment_epoch,
-      "model_id": graph.model_id,
-      "resolved_commit": graph.resolved_commit,
-      "manifest_digest": graph.manifest_digest,
-      "stage_id": stage.stage_id,
-      "range": _plain_json(proof["loaded_range"]),
-      "components": _plain_json(proof["loaded_components"]),
-      "hidden_size": graph.hidden_size,
-      "dtype_bytes": graph.activation_bytes,
-   }
-   encoded = json.dumps(
-      material,
-      sort_keys=True,
-      separators=(",", ":"),
-      ensure_ascii=False,
-      allow_nan=False,
-   ).encode("utf-8")
-   return "sha256:" + hashlib.sha256(encoded).hexdigest()
+   runtime = proof.get("runtime")
+   if not isinstance(runtime, Mapping):
+      _reject("invalid_loaded_stage_runtime", stage.stage_id)
+   runtime_backend = runtime.get("backend")
+   if not isinstance(runtime_backend, str):
+      _reject("invalid_loaded_stage_runtime", stage.stage_id)
+   try:
+      return stage_signature_for_backend(graph, stage, runtime_backend)
+   except ValueError as exc:
+      raise NumpyRuntimeError("invalid_loaded_stage_runtime", stage.stage_id) from exc
 
 
 def _range_document(stage: Stage) -> dict[str, int]:
