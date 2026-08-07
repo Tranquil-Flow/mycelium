@@ -20,7 +20,10 @@ MAX_PROBE_BYTES = 256 * 1024
 MAX_SAFE_PLAN_BYTES = 2 * 1024 * 1024
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SSH_TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
-_REMOTE_PROBE_COMMAND = "python3.14 -m mycelium_physical_runner.remote_probe --canonical-json"
+_REMOTE_PROBE_MODULE_COMMAND = (
+    "/opt/homebrew/bin/python3.14 -m "
+    "mycelium_physical_runner.remote_probe --canonical-json"
+)
 _REMOTE_REQUEST_PROTOCOL = "mycelium.physical_runner_remote_probe_request.v1"
 
 
@@ -233,7 +236,11 @@ def _identity_path(host: Mapping[str, Any], probes: Any) -> str | None:
     return path
 
 
-def _ssh_argv(host: Mapping[str, Any], identity_path: str) -> tuple[str, ...]:
+def _ssh_argv(
+    host: Mapping[str, Any],
+    identity_path: str,
+    run_id: Any,
+) -> tuple[str, ...]:
     target = host.get("ssh_target")
     alias = host.get("alias")
     node_id = host.get("node_id")
@@ -244,8 +251,14 @@ def _ssh_argv(host: Mapping[str, Any], identity_path: str) -> tuple[str, ...]:
         or _SEGMENT_RE.fullmatch(alias) is None
         or not isinstance(node_id, str)
         or _SEGMENT_RE.fullmatch(node_id) is None
+        or not isinstance(run_id, str)
+        or _SEGMENT_RE.fullmatch(run_id) is None
     ):
         raise RunnerError("live_preflight_plan_invalid")
+    remote_command = (
+        f'cd "$HOME/mycelium-physical-run/{run_id}/source" && '
+        f"exec {_REMOTE_PROBE_MODULE_COMMAND}"
+    )
     return (
         "ssh",
         "-o",
@@ -260,7 +273,7 @@ def _ssh_argv(host: Mapping[str, Any], identity_path: str) -> tuple[str, ...]:
         identity_path,
         "--",
         target,
-        _REMOTE_PROBE_COMMAND,
+        remote_command,
     )
 
 
@@ -466,7 +479,7 @@ def run_live_preflight(
 
     for host in hosts_raw:
         alias = str(host.get("alias", ""))
-        argv = _ssh_argv(host, identities[alias])
+        argv = _ssh_argv(host, identities[alias], plan.get("run_id"))
         try:
             capture = runner.run(
                 argv,

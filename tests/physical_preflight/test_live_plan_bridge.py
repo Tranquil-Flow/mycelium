@@ -266,7 +266,11 @@ def test_live_preflight_uses_bounded_strict_ssh_argv_and_never_claims_route_read
         assert argv[argv.index("-i") + 1] == PRIVATE_SSH_IDENTITY
         assert any(value.startswith("ConnectTimeout=") for value in argv)
         assert "--" in argv
-        assert argv[-1] == "python3.14 -m mycelium_physical_runner.remote_probe --canonical-json"
+        assert argv[-1] == (
+            'cd "$HOME/mycelium-physical-run/run-w8-001/source" && '
+            "exec /opt/homebrew/bin/python3.14 -m "
+            "mycelium_physical_runner.remote_probe --canonical-json"
+        )
         assert SECRET_VALUE not in "\x00".join(argv)
 
     rendered = _canonical_bytes(result)
