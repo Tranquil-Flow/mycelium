@@ -322,6 +322,18 @@ def test_build_safe_plan_accepts_controller_owned_ssh_key_for_different_remote_u
     assert "ssh_identity_owner" not in safe_plan["hosts"][1]
 
 
+def test_build_safe_plan_binds_ssh_identity_alias_to_validated_key_basename() -> None:
+    inventory = _base_inventory()
+    inventory["hosts"][1]["ssh_identity_path"] = "/Users/controller/.ssh/mycelium-peer-key"
+    inventory["hosts"][1]["ssh_identity_owner"] = "controller-user"
+    probes = FakePlanProbes(inventory)
+
+    safe_plan = _api().build_safe_plan(inventory, probes=probes)
+
+    assert safe_plan["hosts"][1]["ssh_identity_path_alias"] == "mycelium-peer-key"
+    assert b"/Users/controller/.ssh" not in _canonical_bytes(safe_plan)
+
+
 @pytest.mark.parametrize(
     ("expected_code", "mutate"),
     [

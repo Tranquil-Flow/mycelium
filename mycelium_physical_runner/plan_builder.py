@@ -209,6 +209,10 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
         alias = _segment(host.get("alias"), "host_invalid")
         node_id = _segment(host.get("node_id"), "host_invalid")
         ssh_user = _segment(host.get("ssh_user"), "host_invalid")
+        ssh_identity_path_alias = _segment(
+            PurePosixPath(host["ssh_identity_path"]).name,
+            "ssh_identity_path_invalid",
+        )
         probe_transport = host.get("probe_transport")
         if probe_transport not in {"local", "ssh"}:
             _fail("host_invalid")
@@ -256,7 +260,7 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
                 "runtime": runtime,
                 "coordinator_port": port,
                 "credential_path_alias": f"{node_id}-endpoint-key",
-                "ssh_identity_path_alias": f"ssh-identity-{ssh_user}",
+                "ssh_identity_path_alias": ssh_identity_path_alias,
             }
         )
     hosts.sort(key=lambda item: item["node_id"])
