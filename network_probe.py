@@ -16,8 +16,6 @@ import json
 import math
 import socket
 import statistics
-import sys
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -97,6 +95,7 @@ def tcp_ping(host: str, port: int, *, timeout: float = DEFAULT_TIMEOUT_S,
         if settle > 0:
             time.sleep(settle)
     agg = aggregate_samples(samples)
+    agg["samples_ms"] = [round(sample, 3) for sample in samples]
     agg["errors"] = errors[:3]
     agg["loss_ratio"] = round((attempts - len(samples)) / max(1, attempts), 3)
     return agg
@@ -128,6 +127,7 @@ def udp_ping(host: str, port: int, *, timeout: float = DEFAULT_TIMEOUT_S,
     finally:
         sock.close()
     agg = aggregate_samples(samples)
+    agg["samples_ms"] = [round(sample, 3) for sample in samples]
     agg["errors"] = errors[:3]
     agg["loss_ratio"] = round((attempts - len(samples)) / max(1, attempts), 3)
     return agg
@@ -146,6 +146,7 @@ def http_ping(url: str, *, timeout: float = DEFAULT_TIMEOUT_S,
         except Exception as exc:
             errors.append(repr(exc))
     agg = aggregate_samples(samples)
+    agg["samples_ms"] = [round(sample, 3) for sample in samples]
     agg["errors"] = errors[:3]
     agg["loss_ratio"] = round((attempts - len(samples)) / max(1, attempts), 3)
     return agg
@@ -236,9 +237,6 @@ def _target_endpoint(record: dict[str, Any], probe_port: int) -> str | None:
     candidates = []
     if lan_ip:
         candidates.append(lan_ip)
-    location = profile.get("location") or {}
-    isp = (location.get("isp") or "").lower()
-    # Heuristic: same ISP often means same private LAN. We still need IP for probing.
     for key in ("public_ip", "wan_ip"):
         if profile.get(key):
             candidates.append(profile[key])
@@ -324,12 +322,11 @@ def _probe_one_pair(args: tuple[str, str, str, int, float, int]) -> tuple[str, s
     # Mix TCP and HTTP probes; take whichever succeeds
     tcp_result = tcp_ping(host, url_port, timeout=timeout, attempts=attempts)
     if tcp_result["count"] > 0:
-        # Re-derive samples by re-running to keep raw list, simpler: synthesize from avg * attempts
-        samples = [tcp_result["avg_ms"]] * tcp_result["count"]
+        samples = list(tcp_result["samples_ms"])
     else:
         http_result = http_ping(f"http://{host}:{url_port}/health", timeout=timeout, attempts=attempts)
         if http_result["count"] > 0:
-            samples = [http_result["avg_ms"]] * http_result["count"]
+            samples = list(http_result["samples_ms"])
         else:
             err = tcp_result.get("errors", ["unknown"])[0]
     return src_id, dst_id, samples, err

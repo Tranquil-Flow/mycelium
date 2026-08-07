@@ -4,7 +4,13 @@ Mycelium Node Capability Probe
 Join-time auto-profile for layer allocation.
 Stdlib only — no pip installs required.
 """
-import json, os, platform, subprocess, sys, time, urllib.request
+import json
+import os
+import platform
+import subprocess
+import sys
+import time
+import urllib.request
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,7 +204,6 @@ def get_gpu():
             if len(parts) >= 4:
                 name = parts[0]
                 vram_total_mb = int(parts[1])
-                vram_used_mb = int(parts[2])
                 vram_free_mb = int(parts[3])
                 bw = None
                 for key, val in NVIDIA_VRAM_BANDWIDTH.items():
@@ -349,9 +354,21 @@ def get_power():
         bat_cap = run("cat /sys/class/power_supply/BAT*/capacity 2>/dev/null")
         bat_status = run("cat /sys/class/power_supply/BAT*/status 2>/dev/null")
         has_battery = bat_cap is not None
-        # No battery present = plugged in (desktop/server/container)
-        on_ac = True if not has_battery else (ac == "1" or bat_status == "Charging")
-        pct = int(bat_cap) if bat_cap else None
+        ac_values = (ac or "").splitlines()
+        statuses = (bat_status or "").splitlines()
+        capacities = []
+        for value in (bat_cap or "").splitlines():
+            try:
+                capacity = int(value)
+            except ValueError:
+                continue
+            if 0 <= capacity <= 100:
+                capacities.append(capacity)
+        # Multi-battery devices expose one line per battery and AC source.
+        on_ac = True if not has_battery else (
+            "1" in ac_values or any(status in {"Charging", "Full"} for status in statuses)
+        )
+        pct = int(sum(capacities) / len(capacities) + 0.5) if capacities else None
         return {
             "on_ac_power": on_ac,
             "battery_pct": pct,
@@ -364,8 +381,8 @@ def speedtest_download(bytes_to_fetch=5_000_000, timeout=20):
     """Download from multiple free endpoints, return Mbps or None."""
     endpoints = [
         f"https://speed.cloudflare.com/__down?bytes={bytes_to_fetch}",
-        f"https://speed.hetzner.de/100MB.bin",
-        f"http://ipv4.download.thinkbroadband.com/10MB.zip",
+        "https://speed.hetzner.de/100MB.bin",
+        "http://ipv4.download.thinkbroadband.com/10MB.zip",
     ]
     for url in endpoints:
         try:
@@ -489,7 +506,7 @@ def profile():
 
     print("  Speed test (download)...", file=sys.stderr)
     dl = speedtest_download()
-    print(f"  Speed test (upload)...", file=sys.stderr)
+    print("  Speed test (upload)...", file=sys.stderr)
     ul = speedtest_upload()
 
     location = get_location()

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
+import socket
+import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 import sys
 import tempfile
@@ -117,17 +120,39 @@ class NetworkProbeTests(unittest.TestCase):
             self.assertIn("self", report["locations"])
             self.assertEqual(report["locations"]["self"]["precision"], "city")
 
+    def test_probe_one_pair_preserves_raw_tcp_samples(self):
+        tcp_result = {
+            "count": 3,
+            "avg_ms": 20.0,
+            "samples_ms": [10.0, 20.0, 30.0],
+            "errors": [],
+        }
+        with mock.patch.object(np, "tcp_ping", return_value=tcp_result):
+            src, dst, samples, error = np._probe_one_pair(
+                ("self", "peer", "http://127.0.0.1:8788/profile", 8788, 1.0, 3)
+            )
+        self.assertEqual((src, dst), ("self", "peer"))
+        self.assertEqual(samples, [10.0, 20.0, 30.0])
+        self.assertIsNone(error)
+
     def test_probe_uses_port_from_profile_url(self):
         # Two local listeners on different ports. profile_url points at port B,
         # --probe-port points at port A. We must probe B, not A.
-        import socket, threading
-        srv_a = socket.socket(); srv_a.bind(("127.0.0.1", 0)); srv_a.listen(8); pa = srv_a.getsockname()[1]
-        srv_b = socket.socket(); srv_b.bind(("127.0.0.1", 0)); srv_b.listen(8); pb = srv_b.getsockname()[1]
+        srv_a = socket.socket()
+        srv_a.bind(("127.0.0.1", 0))
+        srv_a.listen(8)
+        pa = srv_a.getsockname()[1]
+        srv_b = socket.socket()
+        srv_b.bind(("127.0.0.1", 0))
+        srv_b.listen(8)
+        pb = srv_b.getsockname()[1]
         accepted = {"a": 0, "b": 0}
         def accept_loop(s, key):
             for _ in range(8):
                 try:
-                    c, _ = s.accept(); accepted[key] += 1; c.close()
+                    c, _ = s.accept()
+                    accepted[key] += 1
+                    c.close()
                 except OSError:
                     break
         threading.Thread(target=accept_loop, args=(srv_a, "a"), daemon=True).start()
@@ -140,7 +165,8 @@ class NetworkProbeTests(unittest.TestCase):
         samples, errors = np.collect_pairwise_samples(
             nodes, self_id="self", probe_port=pa, timeout=1.0, attempts=3, max_pairs=0,
         )
-        srv_a.close(); srv_b.close()
+        srv_a.close()
+        srv_b.close()
         self.assertIn(("self", "peer"), samples)
         self.assertGreater(len(samples[("self", "peer")]), 0)
         # We should have hit B (the URL port), not A.
