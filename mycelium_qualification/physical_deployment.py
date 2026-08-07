@@ -400,6 +400,27 @@ def _validate_runtime_backend(runtime_backend: str, runtime_dtype: str) -> str:
     return runtime_backend
 
 
+def _runtime_backends_for_nodes(
+    node_ids: tuple[str, ...],
+    runtime_backend: str,
+    runtime_backends_by_node: Mapping[str, str] | None,
+    runtime_dtype: str,
+) -> dict[str, str]:
+    if runtime_backends_by_node is None:
+        backend = _validate_runtime_backend(runtime_backend, runtime_dtype)
+        return {node_id: backend for node_id in node_ids}
+    if not isinstance(runtime_backends_by_node, Mapping):
+        raise PhysicalDeploymentError("invalid_runtime_backends_by_node")
+    if set(runtime_backends_by_node) != set(node_ids):
+        raise PhysicalDeploymentError("runtime_backend_node_set_mismatch")
+    return {
+        node_id: _validate_runtime_backend(
+            runtime_backends_by_node[node_id], runtime_dtype
+        )
+        for node_id in node_ids
+    }
+
+
 def _safe_local_relative_path(value: Any, *, field: str) -> PurePosixPath:
     if (
         not isinstance(value, str)
@@ -1074,12 +1095,15 @@ def prepare_assignment_artifacts(
     model_source: LocalModelSource | None = None,
     runtime_dtype: str = "float32",
     runtime_backend: str = "mlx",
+    runtime_backends_by_node: Mapping[str, str] | None = None,
 ) -> _PreparedAssignments:
     """Build, compile, provision, and verify exact offline assignments."""
 
     _validate_nodes(node_ids)
     runtime_dtype = _validate_runtime_dtype(runtime_dtype)
-    runtime_backend = _validate_runtime_backend(runtime_backend, runtime_dtype)
+    runtime_backends = _runtime_backends_for_nodes(
+        node_ids, runtime_backend, runtime_backends_by_node, runtime_dtype
+    )
     prepared_root = _prepare_root(Path(root))
     try:
         source_metadata: dict[str, Any] | None = None
@@ -1110,7 +1134,7 @@ def prepare_assignment_artifacts(
             cache_roots={node: str(prepared_root) for node in route["node_order"]},
             runtime_by_node={
                 node: {
-                    "backend": runtime_backend,
+                    "backend": runtime_backends[node],
                     "dtype": runtime_dtype,
                     "quantization": "none",
                 }
@@ -1250,6 +1274,7 @@ def prepare_physical_deployment(
     model_source: LocalModelSource | None = None,
     runtime_dtype: str = "float32",
     runtime_backend: str = "mlx",
+    runtime_backends_by_node: Mapping[str, str] | None = None,
 ) -> PhysicalDeployment:
     """Prepare exact stage assignments plus an independent reference stage."""
 
@@ -1259,6 +1284,7 @@ def prepare_physical_deployment(
         model_source=model_source,
         runtime_dtype=runtime_dtype,
         runtime_backend=runtime_backend,
+        runtime_backends_by_node=runtime_backends_by_node,
     )
     try:
         reference_assignment, reference_report = prepare_monolithic_reference(

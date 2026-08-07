@@ -452,6 +452,17 @@ def test_recovery_prefill_rebuilds_kv_without_replaying_last_token(runtime_case)
       assert port.kv_snapshot()["active_state_count"] == 0
 
 
+def test_constructor_rejects_invalid_decode_mode(runtime_case):
+   placement = runtime_case.graph.stages[0].placements[0]
+   with pytest.raises(MLXRuntimeError, match="^invalid_runtime_decode_mode$"):
+      MLXRuntimePort(
+         placement.node_id,
+         runtime_case.graph,
+         {placement.placement_id: runtime_case.loaded[0]},
+         decode_mode="backend_specific_guess",
+      )
+
+
 def test_constructor_rejects_non_little_endian_host(runtime_case, monkeypatch):
    placement_id = runtime_case.graph.stages[0].placements[0].placement_id
    monkeypatch.setattr("mycelium_router.mlx_runtime.sys.byteorder", "big")

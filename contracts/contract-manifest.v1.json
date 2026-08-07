@@ -180,8 +180,13 @@
         },
         {
           "path": "mycelium_router/layer_builder.py",
-          "sha256": "67fcb62e0b0e835392a3b23a4aa129c7b0cf11d2ae154c98953dec212637d630",
-          "size_bytes": 19856
+          "sha256": "4836db459e9cf1743f3d1e4f9acf828c032d4f882137cf431ace870643bd43be",
+          "size_bytes": 19700
+        },
+        {
+          "path": "mycelium_router/stage_signatures.py",
+          "sha256": "8f2be735ef451f1aedda3f9f47e4b3c9380da2be39333e334ed63f30164c044c",
+          "size_bytes": 3988
         }
       ],
       "protocol": "mycelium.layer_load_proof.v1"

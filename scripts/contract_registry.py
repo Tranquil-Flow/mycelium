@@ -96,6 +96,7 @@ CONTRACT_SPECS = (
             "runtime_loader.py",
             "runtime_contracts.py",
             "mycelium_router/layer_builder.py",
+            "mycelium_router/stage_signatures.py",
         ),
     ),
     ContractSpec(

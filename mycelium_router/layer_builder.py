@@ -29,6 +29,7 @@ from mycelium_router.contracts import (
    Stage,
    StageCost,
 )
+from mycelium_router.stage_signatures import stage_signature_for_assignment
 from mycelium_router.validation import validate_execution_graph
 from planner_assignment import validate_control_plane_tranche
 
@@ -305,22 +306,20 @@ def _physical_link_id(
 
 
 def _stage_signature(
-   assignment: Mapping[str, Any], stage_id: str, model: Mapping[str, Any]
+   assignment: Mapping[str, Any],
+   stage_id: str,
+   model: Mapping[str, Any],
+   runtime_backend: str,
 ) -> str:
-   material = {
-      "protocol": "mycelium.stage_signature.v1",
-      "deployment_id": assignment["deployment_id"],
-      "deployment_epoch": assignment["deployment_epoch"],
-      "model_id": assignment["model_id"],
-      "resolved_commit": assignment["resolved_commit"],
-      "manifest_digest": assignment["manifest_digest"],
-      "stage_id": stage_id,
-      "range": assignment["range"],
-      "components": assignment["components"],
-      "hidden_size": model["hidden_size"],
-      "dtype_bytes": model["dtype_bytes"],
-   }
-   return _SHA256_PREFIX + hashlib.sha256(_canonical_json(material)).hexdigest()
+   try:
+      return stage_signature_for_assignment(
+         assignment,
+         stage_id,
+         model,
+         runtime_backend,
+      )
+   except (TypeError, ValueError) as exc:
+      raise LayerBuildError("invalid_stage_signature") from exc
 
 
 def _edge(
@@ -461,7 +460,12 @@ def build_execution_graph(
          node_id=assignment["node_id"],
          replica_group_id=route_placement["replica_group_id"],
          assignment_id=assignment["assignment_id"],
-         stage_signature=_stage_signature(assignment, stage_id, model),
+         stage_signature=_stage_signature(
+            assignment,
+            stage_id,
+            model,
+            proof["runtime_identity"]["backend"],
+         ),
          load_proof_digest=proof_digest,
          runtime_backend=proof["runtime_identity"]["backend"],
          runtime_endpoint=endpoint,

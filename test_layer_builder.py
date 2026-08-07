@@ -15,6 +15,7 @@ from mycelium_router.serialization import (
     execution_graph_from_dict,
     execution_graph_to_dict,
 )
+from mycelium_router.stage_signatures import stage_signature_for_backend
 from scripts.generate_contract_fixtures import model_manifest as generated_model_manifest
 
 
@@ -121,6 +122,13 @@ def test_builds_deterministic_router_graph_from_bound_control_plane():
     assert [placement.load_proof_digest for stage in first.stages for placement in stage.placements] == [
         layer_load_proof_digest(proof) for proof in proofs
     ]
+    for stage in first.stages:
+        placement = stage.placements[0]
+        assert placement.stage_signature == stage_signature_for_backend(
+            first,
+            stage,
+            placement.runtime_backend,
+        )
     assert len(first.edges) == 1
     assert len(first.loopback_edges) == 1
     assert first.edges[0].link_id.startswith("link:node-a/http-overlay->node-b/http-overlay@sha256:")

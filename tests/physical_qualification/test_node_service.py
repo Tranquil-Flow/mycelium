@@ -1223,15 +1223,25 @@ def test_node_subprocess_binds_every_command_and_never_serializes_secrets(
         )
 
 
-@pytest.mark.parametrize("runtime_backend", ("mlx", "numpy"))
+@pytest.mark.parametrize(
+    ("runtime_backend", "runtime_backends_by_node"),
+    (
+        ("mlx", None),
+        ("numpy", None),
+        ("mlx", {"node-a": "mlx", "node-b": "numpy"}),
+    ),
+    ids=("mlx", "numpy", "mixed-mlx-numpy"),
+)
 def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
     tmp_path: Path,
     runtime_backend: str,
+    runtime_backends_by_node: dict[str, str] | None,
 ) -> None:
     assert SIDECAR_BINARY.is_file()
     deployment = prepare_physical_deployment(
         tmp_path / "deployment",
         runtime_backend=runtime_backend,
+        runtime_backends_by_node=runtime_backends_by_node,
     )
     loaded = [
         load_assignment_stage(assignment, report, load_generation=7)
