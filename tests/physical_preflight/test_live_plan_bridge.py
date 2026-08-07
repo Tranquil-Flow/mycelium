@@ -384,6 +384,27 @@ def test_live_preflight_constructs_production_dependencies_when_not_injected(
     assert len(runner.calls) == 2
 
 
+def test_ssh_identity_alias_selects_private_key_without_exposing_absolute_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity = tmp_path / ".ssh" / "mycelium-peer-key"
+    identity.parent.mkdir(mode=0o700)
+    identity.write_bytes(b"private-key-placeholder")
+    identity.chmod(0o600)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    def forbidden_subprocess(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("ssh -G fallback must not run when the private alias exists")
+
+    monkeypatch.setattr(_api().subprocess, "run", forbidden_subprocess)
+
+    assert _api()._ssh_identity_for(
+        "operator@laptop.example",
+        "mycelium-peer-key",
+    ) == str(identity)
+
+
 def test_live_preflight_treats_any_unknown_as_blocker_and_keeps_readiness_false() -> None:
     plan = _safe_plan()
     payloads = _payloads_for(plan)

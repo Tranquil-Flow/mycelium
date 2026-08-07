@@ -79,7 +79,11 @@ def _git_output(*arguments: str) -> bytes | None:
     return completed.stdout if completed.returncode == 0 else None
 
 
-def _ssh_identity_for(target: str) -> str | None:
+def _ssh_identity_for(target: str, identity_alias: str | None = None) -> str | None:
+    if isinstance(identity_alias, str) and _SEGMENT_RE.fullmatch(identity_alias) is not None:
+        candidate = Path.home() / ".ssh" / identity_alias
+        if candidate.exists():
+            return str(candidate)
     try:
         completed = subprocess.run(
             ("ssh", "-G", "--", target),
@@ -126,7 +130,7 @@ def _production_dependencies(plan: Mapping[str, Any]) -> tuple[_ProductionLocalP
         alias = host.get("ssh_identity_path_alias")
         target = host.get("ssh_target")
         if isinstance(alias, str) and isinstance(target, str) and alias not in records:
-            records[alias] = _identity_record(_ssh_identity_for(target))
+            records[alias] = _identity_record(_ssh_identity_for(target, alias))
     return (
         _ProductionLocalProbes(
             git_dirty=status is None or bool(status.strip()),
