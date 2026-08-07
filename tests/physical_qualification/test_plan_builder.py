@@ -81,7 +81,7 @@ class FakePlanProbes:
                 mode=0o600,
             )
             self.paths[host["ssh_identity_path"]] = FakePathFact(
-                owner=host["ssh_user"],
+                owner=host["ssh_identity_owner"],
                 mode=0o600,
             )
             self.paths[host["socket_root"]] = FakePathFact(kind="directory")
@@ -163,6 +163,7 @@ def _base_inventory() -> dict[str, Any]:
                 "socket_root": "/private/tmp/mycelium-physical-run/run-w8-001/node-0/socket",
                 "credential_path": "/Users/operator/.mycelium/identities/node-0.key",
                 "ssh_identity_path": "/Users/operator/.ssh/id_ed25519_mycelium",
+                "ssh_identity_owner": "operator",
                 "coordinator_port": 43127,
                 "evidence_root": "/Users/operator/mycelium-physical-evidence/run-w8-001/node-0",
             },
@@ -183,6 +184,7 @@ def _base_inventory() -> dict[str, Any]:
                 "socket_root": "/private/tmp/mycelium-physical-run/run-w8-001/node-1/socket",
                 "credential_path": "/Users/operator/.mycelium/identities/node-1.key",
                 "ssh_identity_path": "/Users/operator/.ssh/id_ed25519_mycelium",
+                "ssh_identity_owner": "operator",
                 "coordinator_port": 43128,
                 "evidence_root": "/Users/operator/mycelium-physical-evidence/run-w8-001/node-1",
             },
@@ -305,6 +307,19 @@ def test_build_safe_plan_rejects_non_run_scoped_host_identity(field: str, value:
         _api().build_safe_plan(inventory, probes=probes)
 
     assert captured.value.code == "host_invalid"
+
+
+def test_build_safe_plan_accepts_controller_owned_ssh_key_for_different_remote_user() -> None:
+    inventory = _base_inventory()
+    inventory["hosts"][1]["ssh_user"] = "peer-user"
+    inventory["hosts"][1]["ssh_identity_path"] = "/Users/controller/.ssh/mycelium-peer-key"
+    inventory["hosts"][1]["ssh_identity_owner"] = "controller-user"
+    probes = FakePlanProbes(inventory)
+
+    safe_plan = _api().build_safe_plan(inventory, probes=probes)
+
+    assert safe_plan["hosts"][1]["ssh_user"] == "peer-user"
+    assert "ssh_identity_owner" not in safe_plan["hosts"][1]
 
 
 @pytest.mark.parametrize(

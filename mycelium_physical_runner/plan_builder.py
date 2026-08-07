@@ -97,6 +97,7 @@ def _source_path(value: Any) -> str:
 
 def _validate_host_paths(host: Mapping[str, Any], probes: Any) -> None:
     ssh_user = _segment(host.get("ssh_user"), "host_invalid")
+    ssh_identity_owner = _segment(host.get("ssh_identity_owner"), "host_invalid")
     _path_fact(probes, host.get("staging_root"), code="unsafe_path", kind="directory")
     _path_fact(probes, host.get("socket_root"), code="unsafe_path", kind="directory")
     _path_fact(probes, host.get("evidence_root"), code="unsafe_path", kind="directory")
@@ -112,7 +113,7 @@ def _validate_host_paths(host: Mapping[str, Any], probes: Any) -> None:
         host.get("ssh_identity_path"),
         code="ssh_identity_path_invalid",
         kind="regular",
-        owner=ssh_user,
+        owner=ssh_identity_owner,
     )
 
 
