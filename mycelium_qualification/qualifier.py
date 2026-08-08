@@ -97,6 +97,35 @@ def _nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and value == value.strip() and bool(value)
 
 
+def _execution_graph_contract_payload(
+    value: Mapping[str, Any],
+    *,
+    code: str,
+) -> dict[str, Any]:
+    """Return router-contract graph JSON, accepting production dataclass keys.
+
+    The production physical bundle writes dataclass-shaped stage documents with
+    ``layer_range`` while the router JSON contract parser consumes ``range``.
+    Keep the original sealed/source document for digest bindings, but normalize
+    only the in-memory payload used by the contract parser.
+    """
+
+    document = _as_mapping(value, code)
+    stages_raw = document.get("stages")
+    if not isinstance(stages_raw, list):
+        return document
+    stages: list[dict[str, Any]] = []
+    for stage_raw in stages_raw:
+        stage = _as_mapping(stage_raw, code)
+        has_range = "range" in stage
+        has_layer_range = "layer_range" in stage
+        _require(not (has_range and has_layer_range), code)
+        if has_layer_range:
+            stage["range"] = stage.pop("layer_range")
+        stages.append(stage)
+    return {**document, "stages": stages}
+
+
 def _strict_sequences(values: Any, *, minimum_count: int = 1) -> bool:
     if not isinstance(values, list) or len(values) < minimum_count:
         return False
@@ -1322,10 +1351,16 @@ def _qualify_frozen_route(
 
     model_manifest = _as_mapping(documents["model_manifest"], "invalid_model_manifest")
     _require(mm.verify_manifest_digest(model_manifest), "invalid_model_manifest")
+    execution_graph_document = _as_mapping(
+        documents["execution_graph"], "execution_graph_chain_invalid"
+    )
     try:
         graph = execution_graph_to_dict(
             execution_graph_from_dict(
-                _as_mapping(documents["execution_graph"], "execution_graph_chain_invalid")
+                _execution_graph_contract_payload(
+                    execution_graph_document,
+                    code="execution_graph_chain_invalid",
+                )
             )
         )
     except (ContractError, KeyError, TypeError, ValueError) as exc:
@@ -1413,7 +1448,7 @@ def _qualify_frozen_route(
 
     critical_documents: dict[str, Any] = {
         "control/model-manifest.json": model_manifest,
-        "control/execution-graph.json": graph,
+        "control/execution-graph.json": execution_graph_document,
     }
     reports_by_id = {report["assignment_id"]: report for report in reports}
     for assignment_id, assignment in assignments_by_id.items():
@@ -1450,6 +1485,7 @@ def _qualify_frozen_route(
         and len(offers) == len(assignments),
         "gossip_signature_invalid",
     )
+    graph_document_digest = sha256_document(execution_graph_document)
     offered_assignments: set[str] = set()
     for offer in offers:
         _require(isinstance(offer, Mapping), "gossip_signature_invalid")
@@ -1472,7 +1508,7 @@ def _qualify_frozen_route(
             and message.get("deployment_id") == graph["deployment_id"]
             and message.get("recipient_node_id") == assignment["node_id"]
             and message.get("assignment_digest") == sha256_document(assignment)
-            and message.get("graph_digest") == sha256_document(graph)
+            and message.get("graph_digest") == graph_document_digest
             and _integer(expires_at_unix_ms)
             and now_unix_ms < expires_at_unix_ms
             and signature.get("signed_statement_digest") == sha256_bytes(statement_bytes),

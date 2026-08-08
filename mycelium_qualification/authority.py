@@ -216,6 +216,18 @@ class QualificationAuthority:
                 evidence_files["control/gossip-signature.json"],
                 path="control/gossip-signature.json",
             )
+            if challenge.get("kind") == "physical_frozen_route_challenge_v1":
+                deadlines = [challenge["valid_until_unix_ms"]]
+                snapshot = gossip_signature["snapshot"]
+                for offer in snapshot["assignment_offers"]:
+                    message = offer["message"]
+                    expires_at_unix_ms = message.get("expires_at_unix_ms")
+                    if expires_at_unix_ms is None:
+                        expires_at_unix_ms = int(float(message["expires_at"]) * 1000)
+                    deadlines.append(expires_at_unix_ms)
+                return QualificationAuthority._checked_deadline(
+                    deadlines=deadlines,
+                )
             max_age_ms = challenge["max_load_proof_age_ms"]
             deadlines = [challenge["valid_until_unix_ms"]]
             deadlines.extend(
@@ -233,10 +245,14 @@ class QualificationAuthority:
             )
         except Exception as exc:
             raise QualificationAuthorityError("invalid_validated_route_expiry") from exc
+        if type(max_age_ms) is not int or max_age_ms < 1:
+            raise QualificationAuthorityError("invalid_validated_route_expiry")
+        return QualificationAuthority._checked_deadline(deadlines=deadlines)
+
+    @staticmethod
+    def _checked_deadline(*, deadlines: list[Any]) -> int:
         if (
-            type(max_age_ms) is not int
-            or max_age_ms < 1
-            or not deadlines
+            not deadlines
             or any(type(deadline) is not int or deadline < 0 for deadline in deadlines)
         ):
             raise QualificationAuthorityError("invalid_validated_route_expiry")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,6 +10,7 @@ from mycelium_physical_runner.frozen_evidence import (
     FROZEN_ROUTE_AUTHORITY_PROFILE,
     build_frozen_route_authority_documents,
 )
+from mycelium_qualification import QualificationAuthority
 from mycelium_qualification.contracts import route_qualification_to_dict
 from mycelium_qualification.evidence import (
     canonical_json_bytes,
@@ -18,6 +20,7 @@ from mycelium_qualification.evidence import (
 )
 from mycelium_qualification.qualifier import QualificationError, qualify_route
 from mycelium_qualification.sealer import (
+    _read_sealed_evidence,
     qualify_sealed_evidence,
     seal_physical_evidence,
 )
@@ -338,11 +341,21 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
             "transfer_manifest"
         ]["files"]
     }
+    production_graph = json.loads(
+        canonical_json_bytes(case.documents["router/execution-graph.json"])
+    )
+    for stage in production_graph["stages"]:
+        stage["layer_range"] = stage.pop("range")
+    production_graph_bytes = canonical_json_bytes(production_graph)
+    source_index["control/execution-graph.json"]["size_bytes"] = len(
+        production_graph_bytes
+    )
+    source_index["control/execution-graph.json"]["content_digest"] = sha256_bytes(
+        production_graph_bytes
+    )
     source_documents = {
         "control/model-manifest.json": case.documents["model/model-manifest.json"],
-        "control/execution-graph.json": case.documents[
-            "router/execution-graph.json"
-        ],
+        "control/execution-graph.json": production_graph,
     }
     reports = {
         report["assignment_id"]: report
@@ -365,6 +378,14 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(canonical_json_bytes(document))
         assert source_index[path]["size_bytes"] == destination.stat().st_size
+
+    production_graph_digest = sha256_document(production_graph)
+    membership_snapshot = case.documents["control/gossip-signature.json"]["snapshot"]
+    for offer in membership_snapshot["assignment_offers"]:
+        offer["message"]["graph_digest"] = production_graph_digest
+        offer["signature"]["signed_statement_digest"] = sha256_bytes(
+            canonical_json_bytes(offer["message"])
+        )
 
     peers = [
         {
@@ -445,6 +466,17 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
 
     assert record.route_ready is True
     assert record.evidence_manifest_digest == sealed.manifest_digest
+    files, manifest = _read_sealed_evidence(sealed)
+    authority_record = QualificationAuthority(
+        clock_unix_ms=lambda: case.now_unix_ms
+    ).qualify_and_publish(
+        evidence_files=files,
+        evidence_manifest=manifest,
+        verify_gossip_signature=_verify_synthetic_signature,
+        verify_load_proof_signature=_verify_synthetic_signature,
+    )
+    assert authority_record.route_ready is True
+    assert authority_record.evidence_manifest_digest == sealed.manifest_digest
 
 
 def test_frozen_physical_inference_profile_rejects_unbound_stage_assignment(
