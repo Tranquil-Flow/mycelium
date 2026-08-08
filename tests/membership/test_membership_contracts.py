@@ -410,6 +410,13 @@ def test_assignment_offer_requires_signed_provenance_and_peer_records(field: str
     assert excinfo.value.code == "membership_fields_invalid"
 
 
+def test_assignment_offer_accepts_target_local_physical_preload_provenance() -> None:
+    message = _message(ASSIGNMENT_OFFER_PROTOCOL)
+    message["placement_provenance"] = "target_local_physical_preload"
+
+    assert validate_membership_message(message) == message
+
+
 def test_assignment_offer_rejects_endpoint_record_outside_signed_validity() -> None:
     message = _message(ASSIGNMENT_OFFER_PROTOCOL)
     message["peer_endpoint_records"][0]["valid_until"] = message["expires_at"] + 1.0
