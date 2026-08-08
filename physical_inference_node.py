@@ -318,6 +318,7 @@ class NativeSidecarProcess:
         )
         self.socket_path = socket_root / "i.sock"
         self._bootstrap_material: bytes | None = None
+        self._socket_root_created = False
         self.process: subprocess.Popen[str] | None = None
         self.ready: dict[str, Any] | None = None
 
@@ -348,6 +349,7 @@ class NativeSidecarProcess:
         _require(self.process is None, "sidecar_already_started")
         _require(self.binary.is_file() and os.access(self.binary, os.X_OK), "sidecar_binary_unavailable")
         self.socket_root.mkdir(parents=True, exist_ok=False)
+        self._socket_root_created = True
         _require(len(os.fsencode(self.socket_path)) < 100, "sidecar_socket_path_too_long")
         material = os.urandom(32)
         read_fd, write_fd = os.pipe()
@@ -433,8 +435,41 @@ class NativeSidecarProcess:
             finally:
                 self.process = None
                 self._bootstrap_material = None
+                self.ready = None
+                self._cleanup_socket_root()
         else:
             self._bootstrap_material = None
+            self.ready = None
+            self._cleanup_socket_root()
+
+    def _cleanup_socket_root(self) -> None:
+        if not self._socket_root_created:
+            return
+        try:
+            socket_metadata = self.socket_path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+        else:
+            if not stat.S_ISDIR(socket_metadata.st_mode):
+                try:
+                    self.socket_path.unlink()
+                except OSError:
+                    pass
+        try:
+            root_metadata = self.socket_root.lstat()
+        except FileNotFoundError:
+            self._socket_root_created = False
+            return
+        except OSError:
+            return
+        if stat.S_ISDIR(root_metadata.st_mode):
+            try:
+                self.socket_root.rmdir()
+            except OSError:
+                return
+            self._socket_root_created = False
 
 
 class PhysicalNodeService:

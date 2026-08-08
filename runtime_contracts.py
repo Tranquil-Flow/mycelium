@@ -438,7 +438,7 @@ def assignment_stage_role(components: Any) -> str:
     unknown = tokens - _ASSIGNMENT_STAGE_COMPONENTS
     if unknown:
         raise ValueError(
-            f"unknown assignment component(s): {", ".join(sorted(unknown))}"
+            f"unknown assignment component(s): {', '.join(sorted(unknown))}"
         )
     if "input_embedding" in tokens:
         return "entry"

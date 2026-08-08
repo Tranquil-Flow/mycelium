@@ -157,6 +157,8 @@ class FakeNodeSession:
         command: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
+        if self.closed:
+            raise ControllerError("node_process_exited")
         self.commands.append(command)
         self.sent.append((command, dict(payload)))
         if command == "snapshot" and self.fail_snapshot:
@@ -1376,6 +1378,67 @@ def test_physical_cleanup_uses_declared_local_and_ssh_process_transports(
     assert "StrictHostKeyChecking=yes" in remote_argv
     assert peers[1].ssh_target in remote_argv
     assert result["route_ready"] is False
+
+
+def test_physical_recover_plan_fault_interlock_terminates_remote_before_snapshot(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+    failed_node_id = peers[1].node_id
+    run_plan = _physical_run_plan(peers)
+    run_plan["recovery_fault"] = {
+        "kind": "physical_recovery_fault_interlock_v1",
+        "node_id": failed_node_id,
+        "trigger": "before_snapshot",
+        "mechanism": "controller_close_stdin_process_exit",
+        "claim_boundary": (
+            "bounded controller interlock terminates a real node process before snapshot; "
+            "transport success or latency is not synthesized"
+        ),
+    }
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=run_plan,
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("recover")
+
+    assert result["route_ready"] is False
+    assert result["release_ready"] is False
+    assert result["recovered_nodes"] == [failed_node_id]
+    assert result["restart_attempts"] == {failed_node_id: 1}
+    assert result["recovery_fault"] == {
+        **run_plan["recovery_fault"],
+        "observed": True,
+    }
+    first_attempt, replacement = attempts[failed_node_id]
+    assert first_attempt.closed is True
+    assert "snapshot" not in first_attempt.commands
+    assert replacement.commands[:3] == ["hello", "configure", "start"]
+    assert "snapshot" in replacement.commands
+    predecessor = attempts[peers[0].node_id][0]
+    assert any(command == "rotate" for command, _payload in predecessor.sent)
+    assert all(
+        session.closed
+        for node_attempts in attempts.values()
+        for session in node_attempts
+    )
 
 
 def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(

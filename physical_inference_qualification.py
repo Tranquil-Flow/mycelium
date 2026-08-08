@@ -983,7 +983,7 @@ class QualificationController:
             "decode_count",
             "expected_token_ids",
         }
-        optional_fields = {"qualification_operation"}
+        optional_fields = {"qualification_operation", "recovery_fault"}
         if plan is None or not expected_fields.issubset(plan) or set(plan) - expected_fields - optional_fields:
             _reject("controller_run_plan_invalid")
         if plan.get("protocol") != _RUN_PLAN_PROTOCOL:
@@ -1003,6 +1003,29 @@ class QualificationController:
         entry_node_id = plan.get("entry_node_id")
         if entry_node_id not in node_ids:
             _reject("run_plan_entry_node_invalid")
+        recovery_fault = None
+        if "recovery_fault" in plan:
+            fault = plan.get("recovery_fault")
+            expected_fault_fields = {
+                "kind",
+                "node_id",
+                "trigger",
+                "mechanism",
+                "claim_boundary",
+            }
+            if (
+                not isinstance(fault, Mapping)
+                or set(fault) != expected_fault_fields
+                or fault.get("kind") != "physical_recovery_fault_interlock_v1"
+                or fault.get("node_id") not in node_ids
+                or fault.get("node_id") == entry_node_id
+                or fault.get("trigger") != "before_snapshot"
+                or fault.get("mechanism") != "controller_close_stdin_process_exit"
+                or fault.get("claim_boundary")
+                != "bounded controller interlock terminates a real node process before snapshot; transport success or latency is not synthesized"
+            ):
+                _reject("run_plan_recovery_fault_invalid")
+            recovery_fault = dict(fault)
         records = plan.get("nodes")
         if not isinstance(records, list) or len(records) != len(node_ids):
             _reject("run_plan_nodes_invalid")
@@ -1123,6 +1146,7 @@ class QualificationController:
             "decode_count": decode_count,
             "expected_token_ids": list(expected_token_ids),
             "qualification_operation": qualification_operation,
+            "recovery_fault": recovery_fault,
         }
 
     def _hello_identity(
@@ -1266,6 +1290,7 @@ class QualificationController:
         if operation not in {"run", "cancel", "recover"}:
             _reject("physical_operation_invalid")
         plan = self._validate_run_plan()
+        recovery_fault = plan["recovery_fault"] if operation == "recover" else None
         archive = build_transfer_archive(self.source_root, self._transfer_manifest)
         archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
         peers_by_node = {peer.node_id: peer for peer in self.peers}
@@ -1282,6 +1307,7 @@ class QualificationController:
         stopped: set[int] = set()
         recovered_nodes: list[str] = []
         restart_attempts: dict[str, int] = {}
+        recovery_fault_observed = False
         primary_error: BaseException | None = None
         output_token_ids: list[int] | None = None
         try:
@@ -1471,6 +1497,13 @@ class QualificationController:
                     snapshot_attempt = 1
                     cleanup_deadline = time.monotonic() + 5.0
                     while True:
+                        if (
+                            recovery_fault is not None
+                            and not recovery_fault_observed
+                            and node_id == recovery_fault["node_id"]
+                        ):
+                            sessions[node_id].close()
+                            recovery_fault_observed = True
                         snapshot = sessions[node_id].send(
                             command_id=f"{node_id}-snapshot-{snapshot_attempt}",
                             command="snapshot",
@@ -1768,6 +1801,11 @@ class QualificationController:
             "signed_observations": signed_observations,
             "recovered_nodes": recovered_nodes,
             "restart_attempts": restart_attempts,
+            "recovery_fault": (
+                None
+                if recovery_fault is None
+                else {**recovery_fault, "observed": recovery_fault_observed}
+            ),
             "cleanup": cleanup_actions,
             "claim_boundary": (
                 "physical node sessions executed under bounded control; cancellation "

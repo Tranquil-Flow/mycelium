@@ -27,6 +27,7 @@ from mycelium_qualification.physical_deployment import (
 )
 from physical_inference_node import (
     NODE_CONTROL_PROTOCOL,
+    NativeSidecarProcess,
     NodeCommandError,
     PhysicalNodeService,
     execution_graph_from_document,
@@ -627,6 +628,41 @@ def test_node_service_uses_run_scoped_physical_host_identity(
     )
 
     assert service.host_id == "host-run-physical-identity"
+
+
+def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:
+    socket_root = tmp_path / "socket"
+    socket_root.mkdir()
+    (socket_root / "i.sock").touch()
+
+    class _Stream:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _ExitedProcess:
+        stdout = _Stream()
+        stderr = _Stream()
+
+        def poll(self) -> int:
+            return 0
+
+    sidecar = NativeSidecarProcess(
+        binary=Path("/bin/false"),
+        socket_root=socket_root,
+        local_only=True,
+        queue_capacity=1,
+        startup_timeout=1.0,
+    )
+    sidecar.process = _ExitedProcess()  # type: ignore[assignment]
+    sidecar._bootstrap_material = b"x" * 32
+    setattr(sidecar, "_socket_root_created", True)
+
+    sidecar.close()
+
+    assert sidecar.process is None
+    assert not socket_root.exists()
 
 
 def test_process_group_inventory_uses_exact_process_group_query(
