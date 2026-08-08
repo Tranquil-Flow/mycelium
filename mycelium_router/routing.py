@@ -261,6 +261,15 @@ class ProgressivePathBuilder:
          loopback_edge_id=loopback.edge_id,
       )
       validate_manifest(manifest, build.graph)
+      synchronize = getattr(self.capacity, "synchronize_build", None)
+      if synchronize is not None:
+         synchronized = synchronize(build)
+         if not synchronized.accepted:
+            self.abort(build)
+            raise RoutingError(
+               "path_reservation_sync_rejected",
+               synchronized.reason,
+            )
       commit = self.capacity.commit(
          tuple(hop.reservation_id for hop in build.ordered_hops),
          deployment_epoch=build.graph.deployment_epoch,

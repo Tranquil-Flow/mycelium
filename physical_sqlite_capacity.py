@@ -1,13 +1,16 @@
-"""Shared local SQLite lease coordinator for multi-process physical qualification.
+"""SQLite lease coordinator for bounded physical qualification.
 
-This is intentionally not a remote production reservation transport. It gives
-independent local Router processes one atomic reservation authority so physical
-transport/runtime qualification does not silently duplicate process-local state.
+Each host has an atomic local authority. Complete path builds may replicate
+fully validated reservation records between those authorities so cross-host
+transport/runtime qualification does not silently substitute process-local
+state. This remains intentionally narrower than a production reservation
+transport.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
@@ -15,6 +18,7 @@ from types import MappingProxyType
 
 from mycelium_router.contracts import (
     ExecutionGraph,
+    PathBuildState,
     Placement,
     ReservationCommitResult,
     ReservationRequest,
@@ -29,8 +33,8 @@ from mycelium_router.validation import validate_execution_graph
 
 
 SQLITE_CAPACITY_CLAIM_BOUNDARY = (
-    "shared_local_sqlite_coordinator_for_multi_process_physical_qualification_"
-    "not_remote_production_transport"
+    "path_carried_sqlite_replication_for_cross_host_physical_qualification_"
+    "not_remote_production_reservation_transport"
 )
 
 
@@ -45,12 +49,23 @@ class SQLiteQualificationCapacityPort(CapacityPort):
         *,
         clock,
         id_source,
+        maximum_imported_lease_seconds: float,
     ) -> None:
         self._database = Path(database).resolve()
         self._database.parent.mkdir(parents=True, exist_ok=True)
         self._topology = topology
         self._clock = clock
         self._id_source = id_source
+        if (
+            isinstance(maximum_imported_lease_seconds, bool)
+            or not isinstance(maximum_imported_lease_seconds, (int, float))
+            or not math.isfinite(float(maximum_imported_lease_seconds))
+            or maximum_imported_lease_seconds <= 0
+        ):
+            raise ValueError("invalid_maximum_imported_lease_seconds")
+        self._maximum_imported_lease_seconds = float(
+            maximum_imported_lease_seconds
+        )
         self._capacities = dict(node_available_kv_bytes)
         graph = self._graph()
         expected_nodes = {
@@ -284,6 +299,150 @@ class SQLiteQualificationCapacityPort(CapacityPort):
                 connection.execute("ROLLBACK")
                 raise
 
+    def synchronize_build(
+        self,
+        build: PathBuildState,
+    ) -> ReservationCommitResult:
+        """Atomically mirror path-carried reservations into this host's DB.
+
+        Physical qualification uses one SQLite authority per host. A complete
+        build can therefore arrive with reservation IDs minted by its peer.
+        Mirror only records whose full path, placement, lease, and capacity
+        charge can be independently reconstructed and validated.
+        """
+
+        if not isinstance(build, PathBuildState):
+            return ReservationCommitResult(False, "invalid_path_build")
+        graph = self._graph()
+        if build.graph != graph:
+            return ReservationCommitResult(False, "capacity_graph_mismatch")
+        if len(build.ordered_hops) != len(graph.stages):
+            return ReservationCommitResult(False, "path_incomplete")
+        if len({hop.reservation_id for hop in build.ordered_hops}) != len(
+            build.ordered_hops
+        ):
+            return ReservationCommitResult(False, "duplicate_reservation_id")
+
+        now = self._now()
+        records: list[tuple[str, ReservationRequest, Placement, str]] = []
+        for stage, hop in zip(graph.stages, build.ordered_hops, strict=True):
+            placement = next(
+                (
+                    candidate
+                    for candidate in stage.placements
+                    if candidate.placement_id == hop.placement_id
+                ),
+                None,
+            )
+            if placement is None or hop.stage_id != stage.stage_id:
+                return ReservationCommitResult(False, "placement_stage_mismatch")
+            if not isinstance(hop.reservation_id, str) or not hop.reservation_id:
+                return ReservationCommitResult(False, "invalid_reservation_id")
+            request = ReservationRequest(
+                request_id=build.request.request_id,
+                path_id=build.path_id,
+                path_attempt=build.path_attempt,
+                placement_id=hop.placement_id,
+                kv_bytes=(
+                    len(build.request.prompt_token_ids) + build.request.max_new_tokens
+                )
+                * stage.stage_cost.kv_bytes_per_context_token,
+                deployment_epoch=hop.reservation_epoch,
+                lease_expires_at=hop.reservation_expires_at,
+            )
+            invalid = self._validate_request(request)
+            if invalid:
+                return ReservationCommitResult(False, invalid)
+            if request.deployment_epoch != graph.deployment_epoch:
+                return ReservationCommitResult(False, "deployment_epoch_mismatch")
+            if request.lease_expires_at <= now:
+                return ReservationCommitResult(False, "reservation_expired")
+            if (
+                request.lease_expires_at - now
+                > self._maximum_imported_lease_seconds
+            ):
+                return ReservationCommitResult(False, "lease_duration_exceeded")
+            records.append(
+                (
+                    hop.reservation_id,
+                    request,
+                    placement,
+                    self._placement_identity(placement),
+                )
+            )
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._reap(connection, now)
+                for reservation_id, request, placement, placement_identity in records:
+                    row = connection.execute(
+                        "SELECT * FROM reservations WHERE reservation_id = ?",
+                        (reservation_id,),
+                    ).fetchone()
+                    if row is not None:
+                        existing = self._existing_result(
+                            row,
+                            request,
+                            placement_identity,
+                            now,
+                        )
+                        if not existing.accepted:
+                            connection.execute("ROLLBACK")
+                            return ReservationCommitResult(False, existing.reason)
+                        continue
+                    conflicting = connection.execute(
+                        """
+                        SELECT reservation_id FROM reservations
+                        WHERE request_id = ? AND path_attempt = ? AND placement_id = ?
+                        """,
+                        (
+                            request.request_id,
+                            request.path_attempt,
+                            request.placement_id,
+                        ),
+                    ).fetchone()
+                    if conflicting is not None:
+                        connection.execute("ROLLBACK")
+                        return ReservationCommitResult(False, "idempotency_conflict")
+                    charged = connection.execute(
+                        """
+                        SELECT COALESCE(SUM(kv_bytes), 0) AS charged
+                        FROM reservations
+                        WHERE node_id = ? AND status IN ('RESERVED', 'COMMITTED')
+                        """,
+                        (placement.node_id,),
+                    ).fetchone()["charged"]
+                    if charged + request.kv_bytes > self._capacities[placement.node_id]:
+                        connection.execute("ROLLBACK")
+                        return ReservationCommitResult(False, "capacity_exceeded")
+                    connection.execute(
+                        """
+                        INSERT INTO reservations (
+                            reservation_id, request_id, path_id, path_attempt,
+                            placement_id, node_id, placement_identity, kv_bytes,
+                            deployment_epoch, lease_expires_at, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESERVED')
+                        """,
+                        (
+                            reservation_id,
+                            request.request_id,
+                            request.path_id,
+                            request.path_attempt,
+                            request.placement_id,
+                            placement.node_id,
+                            placement_identity,
+                            request.kv_bytes,
+                            request.deployment_epoch,
+                            request.lease_expires_at,
+                        ),
+                    )
+                connection.execute("COMMIT")
+                return ReservationCommitResult(True)
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+
     def release(self, reservation_ids: tuple[str, ...]) -> None:
         if not reservation_ids:
             return
@@ -377,7 +536,11 @@ class SQLiteQualificationCapacityPort(CapacityPort):
             or request.deployment_epoch < 0
         ):
             return "invalid_deployment_epoch"
-        if not isinstance(request.lease_expires_at, (int, float)):
+        if (
+            isinstance(request.lease_expires_at, bool)
+            or not isinstance(request.lease_expires_at, (int, float))
+            or not math.isfinite(float(request.lease_expires_at))
+        ):
             return "invalid_lease_expiry"
         return ""
 

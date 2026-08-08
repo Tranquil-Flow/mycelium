@@ -54,6 +54,7 @@ from stage_pack import artifact_report_for_loader, verify_stage_pack
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
+MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS = 5.0
 _COMMAND_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
 )
@@ -486,6 +487,7 @@ class PhysicalNodeService:
         self.peer_generation = 0
         self._ids = _UuidSource()
         self._clock = _DistributedProtocolClock()
+        self._router_config = RouterConfig()
         self._sinks: dict[str, _CaptureSink] = {}
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
@@ -762,6 +764,10 @@ class PhysicalNodeService:
             {node: state.available_kv_bytes for node, state in states.items()},
             clock=self._clock,
             id_source=self._ids,
+            maximum_imported_lease_seconds=(
+                self._router_config.reservation_lease_seconds
+                + MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS
+            ),
         )
         runtime = self._build_runtime_port(placement, graph, loaded)
         sidecar = self._new_sidecar_process()
@@ -842,7 +848,7 @@ class PhysicalNodeService:
             transport=transport,
             clock=self._clock,
             id_source=self._ids,
-            config=RouterConfig(),
+            config=self._router_config,
         )
         try:
             transport.bind_router(router)

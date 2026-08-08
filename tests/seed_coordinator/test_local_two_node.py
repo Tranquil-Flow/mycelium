@@ -24,6 +24,7 @@ import pytest
 from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_invite import SqliteInviteRegistry, verify_invite_bundle
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
+from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
 from mycelium_qualification.authority import QualificationAuthority
 from mycelium_qualification.evidence import canonical_json_bytes, sha256_bytes
 from mycelium_qualification.physical_deployment import (
@@ -2136,6 +2137,7 @@ def test_local_two_node_native_process_e2e(
         known_pids=discovered_child_pids,
         socket_root=socket_root,
     ):
+        expected_host_id, _ = derive_local_run_scoped_identity(run_id)
         for node_id, suffix in zip(NODE_IDS, ("a", "b"), strict=True):
             node_processes[node_id] = _IsolatedNodeClient(
                 node_id=node_id,
@@ -2161,7 +2163,7 @@ def test_local_two_node_native_process_e2e(
             observation, observation_trusts[node_id] = _pin_configured_observation(
                 response["result"],
                 process=process,
-                expected_host_id=os.uname().nodename,
+                expected_host_id=expected_host_id,
             )
             configured[node_id] = observation["details"]
             sidecar_pids[node_id] = _native_sidecar_pid(
@@ -2249,9 +2251,13 @@ def test_local_two_node_native_process_e2e(
                 peer_records = accepted_offers[node_id]["peer_endpoint_records"]
                 assert len(peer_records) == 1
                 peer_record = peer_records[0]
+                local_records = accepted_offers[peer_node_id]["peer_endpoint_records"]
+                assert len(local_records) == 1
+                local_record = local_records[0]
                 peer_member = coordinator.member(peer_node_id)
                 assert (
                     peer_record["node_id"] == peer_node_id
+                    and local_record["node_id"] == node_id
                     and peer_record["endpoint_id"] == peer_member["endpoint_id"]
                     and len(peer_member["endpoint_addrs"]) == 1
                 )
@@ -2265,7 +2271,8 @@ def test_local_two_node_native_process_e2e(
                             "endpoint_id": peer_record["endpoint_id"],
                             "endpoint_addr": peer_endpoint_addr,
                             "generation": peer_record["membership_generation"],
-                        }
+                        },
+                        "local_generation": local_record["membership_generation"],
                     },
                 )
                 started = _verified_observation(
