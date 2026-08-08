@@ -1224,6 +1224,25 @@ def test_temp_root_removes_only_explicitly_registered_owned_socket() -> None:
     assert not root.exists()
 
 
+def test_temp_root_removal_accepts_registered_socket_parent_already_removed() -> None:
+    root = _owned_temp_root_for_test()
+    socket_parent = root / "node-a"
+    socket_parent.mkdir()
+    socket_path = socket_parent / "i.sock"
+    owned_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        owned_socket.bind(str(socket_path))
+    finally:
+        owned_socket.close()
+    guard = harness.capture_temp_root(root)
+    socket_path.unlink()
+    socket_parent.rmdir()
+
+    harness.remove_temp_root(guard, owned_socket_paths=(socket_path,))
+
+    assert not root.exists()
+
+
 def _changed_stat(
     metadata: os.stat_result,
     **changes: int,

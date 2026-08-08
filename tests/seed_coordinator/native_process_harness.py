@@ -763,7 +763,7 @@ def remove_temp_root(
             isinstance(socket_path, Path) and socket_path.is_absolute(),
             "cleanup refused invalid owned socket path",
         )
-        canonical_socket = socket_path.parent.resolve(strict=True) / socket_path.name
+        canonical_socket = socket_path.resolve(strict=False)
         try:
             relative_socket = canonical_socket.relative_to(root)
         except ValueError as error:
