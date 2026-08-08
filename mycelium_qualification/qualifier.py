@@ -1263,35 +1263,39 @@ def _qualify_frozen_route(
     """Qualify only ordinary inference over one exact frozen physical placement."""
 
     challenge = _as_mapping(documents["route_challenge"], "route_challenge_invalid")
+    qualification_scope = challenge.get("qualification_scope")
+    challenge_fields = {
+        "kind",
+        "run_id",
+        "evidence_class",
+        "qualification_scope",
+        "generated_at_unix_ms",
+        "valid_until_unix_ms",
+        "deployment_id",
+        "deployment_epoch",
+        "topology_version",
+        "placement_provenance",
+        "model_id",
+        "resolved_commit",
+        "manifest_digest",
+        "entry_node_id",
+        "request",
+        "expected_token_ids",
+        "output_token_ids",
+        "identities",
+        "signed_observations",
+        "cleanup",
+    }
+    if qualification_scope == "cancellation":
+        challenge_fields.add("cancellation")
     _require(
-        set(challenge)
-        == {
-            "kind",
-            "run_id",
-            "evidence_class",
-            "qualification_scope",
-            "generated_at_unix_ms",
-            "valid_until_unix_ms",
-            "deployment_id",
-            "deployment_epoch",
-            "topology_version",
-            "placement_provenance",
-            "model_id",
-            "resolved_commit",
-            "manifest_digest",
-            "entry_node_id",
-            "request",
-            "expected_token_ids",
-            "output_token_ids",
-            "identities",
-            "signed_observations",
-            "cleanup",
-        }
+        set(challenge) == challenge_fields
         and challenge.get("kind") == "physical_frozen_route_challenge_v1"
-        and challenge.get("qualification_scope") == "inference"
+        and qualification_scope in {"inference", "cancellation"}
         and challenge.get("evidence_class") == "physical_qualification",
         "route_challenge_invalid",
     )
+    cancellation_scope = qualification_scope == "cancellation"
     run_id = challenge.get("run_id")
     generated = challenge.get("generated_at_unix_ms")
     valid_until = challenge.get("valid_until_unix_ms")
@@ -1606,7 +1610,8 @@ def _qualify_frozen_route(
         )
         required_events = {"configured", "started", "snapshot", "stopping"}
         if node_id == entry_node_id:
-            required_events.update({"inference_started", "inference_decoded"})
+            required_events.add("inference_started")
+            required_events.add("cancelled" if cancellation_scope else "inference_decoded")
         _require(
             all((node_id, event) in signed_index for event in required_events),
             "signed_observations_missing",
@@ -1642,6 +1647,10 @@ def _qualify_frozen_route(
         snapshot_details = _as_mapping(snapshot.get("details"), "physical_snapshot_invalid")
         transport = _as_mapping(snapshot_details.get("transport"), "physical_snapshot_invalid")
         runtime = _as_mapping(snapshot_details.get("runtime"), "physical_snapshot_invalid")
+        release_counts = _as_mapping(
+            runtime.get("release_counts"), "physical_snapshot_invalid"
+        )
+        required_release_reason = "cancellation" if cancellation_scope else "normal_completion"
         _require(
             transport.get("local_node_id") == node_id
             and transport.get("peer_node_id") in set(assignments_by_node) - {node_id}
@@ -1653,7 +1662,7 @@ def _qualify_frozen_route(
             and snapshot_details.get("transport_fatal_error") is None
             and runtime.get("mode") == "stage_local_kv"
             and runtime.get("active_state_count") == 0
-            and runtime.get("release_counts", {}).get("normal_completion") == 1,
+            and _integer(release_counts.get(required_release_reason), minimum=1),
             "physical_snapshot_invalid",
         )
         transport_records.append(dict(transport))
@@ -1665,27 +1674,83 @@ def _qualify_frozen_route(
 
     expected_tokens = challenge.get("expected_token_ids")
     output_tokens = challenge.get("output_token_ids")
-    decoded = signed_index[(entry_node_id, "inference_decoded")]
-    decoded_output = _as_mapping(
-        _as_mapping(decoded.get("details"), "token_parity_invalid").get("output"),
-        "token_parity_invalid",
-    )
     request = _as_mapping(challenge.get("request"), "token_parity_invalid")
     prompt_tokens = request.get("prompt_token_ids")
     _require(
         isinstance(prompt_tokens, list)
-        and prompt_tokens
-        and all(_integer(token) for token in prompt_tokens)
-        and isinstance(expected_tokens, list)
-        and expected_tokens
-        and all(_integer(token) for token in expected_tokens)
-        and output_tokens == expected_tokens
-        and decoded.get("details", {}).get("status") == "COMPLETED"
-        and decoded_output.get("token_ids") == expected_tokens,
+        and bool(prompt_tokens)
+        and all(_integer(token) for token in prompt_tokens),
         "token_parity_invalid",
     )
+    cancellation_evidence: dict[str, Any] | None = None
+    if cancellation_scope:
+        cancellation_evidence = dict(
+            _as_mapping(challenge.get("cancellation"), "cancellation_evidence_invalid")
+        )
+        cancelled = signed_index[(entry_node_id, "cancelled")]
+        cancelled_details = _as_mapping(
+            cancelled.get("details"), "cancellation_evidence_invalid"
+        )
+        cancel_result = _as_mapping(
+            cancelled_details.get("result"), "cancellation_evidence_invalid"
+        )
+        cancellation_path_id = cancellation_evidence.get("path_id")
+        _require(
+            isinstance(expected_tokens, list)
+            and expected_tokens == []
+            and output_tokens == []
+            and request.get("request_id") == cancellation_evidence.get("request_id")
+            and cancelled_details.get("request_id") == cancellation_evidence.get("request_id")
+            and cancel_result.get("cancelled") is True
+            and cancel_result.get("path_id") == cancellation_path_id
+            and cancel_result.get("path_attempt") == cancellation_evidence.get("path_attempt")
+            and cancel_result.get("status_after") == "CANCELLED"
+            and cancel_result.get("post_cancel_token_count") == 0
+            and _nonempty_string(cancellation_path_id)
+            and _integer(cancellation_evidence.get("path_attempt"), minimum=0)
+            and cancellation_evidence.get("entry_terminal_state") == "CANCELLED"
+            and cancellation_evidence.get("remote_terminal_state") == "CANCELLED"
+            and cancellation_evidence.get("post_cancel_token_count") == 0
+            and cancellation_evidence.get("transport_cancellation_observed") is True
+            and cancellation_evidence.get("cleanup_complete") is True,
+            "cancellation_evidence_invalid",
+        )
+        for node_id in assignments_by_node:
+            snapshot_details = _as_mapping(
+                signed_index[(node_id, "snapshot")].get("details"),
+                "cancellation_cleanup_incomplete",
+            )
+            _require(
+                snapshot_details.get("transport_cancellation_cleanup_complete") is True
+                and snapshot_details.get("transport_pending_delivery_count") == 0,
+                "cancellation_cleanup_incomplete",
+            )
+    else:
+        decoded = signed_index[(entry_node_id, "inference_decoded")]
+        decoded_output = _as_mapping(
+            _as_mapping(decoded.get("details"), "token_parity_invalid").get("output"),
+            "token_parity_invalid",
+        )
+        _require(
+            isinstance(expected_tokens, list)
+            and bool(expected_tokens)
+            and all(_integer(token) for token in expected_tokens)
+            and output_tokens == expected_tokens
+            and decoded.get("details", {}).get("status") == "COMPLETED"
+            and decoded_output.get("token_ids") == expected_tokens,
+            "token_parity_invalid",
+        )
 
     scope = _as_mapping(documents["negative_runs"], "qualification_scope_invalid")
+    expected_qualified_operations = ["cancellation"] if cancellation_scope else ["inference"]
+    expected_unqualified_operations = (
+        ["inference", "recovery"] if cancellation_scope else ["cancellation", "recovery"]
+    )
+    expected_scope_boundary = (
+        "cross-host cancellation only; inference is not qualified by this record; recovery is not qualified"
+        if cancellation_scope
+        else "ordinary frozen-placement inference only; cancellation and recovery are not qualified"
+    )
     _require(
         set(scope)
         == {
@@ -1697,10 +1762,9 @@ def _qualify_frozen_route(
         }
         and scope.get("kind") == "physical_frozen_route_scope_v1"
         and scope.get("run_id") == run_id
-        and scope.get("qualified_operations") == ["inference"]
-        and scope.get("unqualified_operations") == ["cancellation", "recovery"]
-        and scope.get("claim_boundary")
-        == "ordinary frozen-placement inference only; cancellation and recovery are not qualified",
+        and scope.get("qualified_operations") == expected_qualified_operations
+        and scope.get("unqualified_operations") == expected_unqualified_operations
+        and scope.get("claim_boundary") == expected_scope_boundary,
         "qualification_scope_invalid",
     )
 
@@ -1750,26 +1814,52 @@ def _qualify_frozen_route(
         )
     bindings_tuple = tuple(bindings)
 
-    token_parity = {
-        "kind": "exact_greedy_token_parity_v1",
-        "prompt_token_ids": prompt_tokens,
-        "distributed_token_ids": output_tokens,
-        "reference_token_ids": expected_tokens,
-        "passed": True,
-    }
-    numeric_scope = {
-        "kind": "numeric_parity_scope_v1",
-        "qualified": False,
-        "reason": "exact token parity qualified; stage numeric parity not claimed",
-    }
-    lifecycle = {
-        "kind": "normal_completion_lifecycle_v1",
-        "run_id": run_id,
-        "all_stage_states_released": True,
-        "all_staging_roots_removed": True,
-        "cancellation_qualified": False,
-        "recovery_qualified": False,
-    }
+    if cancellation_scope:
+        assert cancellation_evidence is not None
+        token_parity = {
+            "kind": "cancellation_token_suppression_v1",
+            "prompt_token_ids": prompt_tokens,
+            "post_cancel_token_ids": output_tokens,
+            "post_cancel_token_count": 0,
+            "passed": True,
+        }
+        numeric_scope = {
+            "kind": "numeric_parity_scope_v1",
+            "qualified": False,
+            "reason": "cancellation qualification emits no post-cancel tokens; stage numeric parity not claimed",
+        }
+        lifecycle = {
+            "kind": "cross_host_cancellation_lifecycle_v1",
+            "run_id": run_id,
+            "request_id": cancellation_evidence["request_id"],
+            "path_id": cancellation_evidence["path_id"],
+            "path_attempt": cancellation_evidence["path_attempt"],
+            "all_stage_states_released": True,
+            "all_staging_roots_removed": True,
+            "cancellation_qualified": True,
+            "recovery_qualified": False,
+        }
+    else:
+        token_parity = {
+            "kind": "exact_greedy_token_parity_v1",
+            "prompt_token_ids": prompt_tokens,
+            "distributed_token_ids": output_tokens,
+            "reference_token_ids": expected_tokens,
+            "passed": True,
+        }
+        numeric_scope = {
+            "kind": "numeric_parity_scope_v1",
+            "qualified": False,
+            "reason": "exact token parity qualified; stage numeric parity not claimed",
+        }
+        lifecycle = {
+            "kind": "normal_completion_lifecycle_v1",
+            "run_id": run_id,
+            "all_stage_states_released": True,
+            "all_staging_roots_removed": True,
+            "cancellation_qualified": False,
+            "recovery_qualified": False,
+        }
     timing_evidence = [
         {
             "node_id": observation.get("node_id"),
@@ -1802,12 +1892,17 @@ def _qualify_frozen_route(
         "protocol": ROUTE_QUALIFICATION_PROTOCOL,
         "issued_at_unix_ms": now_unix_ms,
         "run_id": run_id,
-        "qualification_scope": "inference",
+        "qualification_scope": qualification_scope,
         "evidence_manifest_digest": manifest_binding,
         "execution_graph_digest": sha256_document(graph),
         "lifecycle_evidence_digest": sha256_document(lifecycle),
         "scope_digest": sha256_document(scope),
     }
+    claim_boundary = (
+        "cross-host cancellation only: exact signed physical node/process/endpoint, model/assignment/load-proof/graph, remote transport, cancellation propagation, zero post-cancel tokens, reservation release, cleanup, source archive, and immutable evidence manifest gates passed; inference is not qualified by this record; recovery is not qualified; stage numeric parity is not claimed"
+        if cancellation_scope
+        else "ordinary frozen-placement inference only: exact signed physical node/process/endpoint, model/assignment/load-proof/graph, remote transport, exact token parity, normal completion, reservation release, cleanup, source archive, and immutable evidence manifest gates passed; cancellation and recovery are not qualified; stage numeric parity is not claimed"
+    )
     record_values = {
         "protocol": ROUTE_QUALIFICATION_PROTOCOL,
         "qualification_id": sha256_document(qualification_material),
@@ -1857,6 +1952,7 @@ def _qualify_frozen_route(
         "contract_manifest_digest": sha256_document(
             {
                 "authority_profile": "physical_frozen_route_inference_v1",
+                "qualification_scope": qualification_scope,
                 "control_kind": control["kind"],
                 "challenge_kind": challenge["kind"],
                 "scope_kind": scope["kind"],
@@ -1865,13 +1961,7 @@ def _qualify_frozen_route(
         "dependency_lock_digests": (source_provenance["archive_digest"],),
         "evidence_manifest_digest": manifest_binding,
         "qualified_by": QUALIFIER_AUTHORITY,
-        "claim_boundary": (
-            "ordinary frozen-placement inference only: exact signed physical node/process/endpoint, "
-            "model/assignment/load-proof/graph, remote transport, exact token parity, normal "
-            "completion, reservation release, cleanup, source archive, and immutable evidence "
-            "manifest gates passed; cancellation and recovery are not qualified; stage numeric "
-            "parity is not claimed"
-        ),
+        "claim_boundary": claim_boundary,
     }
     record = object.__new__(RouteQualificationV1)
     for name, value in record_values.items():

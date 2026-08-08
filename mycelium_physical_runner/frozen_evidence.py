@@ -110,31 +110,45 @@ def build_frozen_route_authority_documents(
     _require(isinstance(transfer_manifest, Mapping), "authority_transfer_manifest_invalid")
     _require(isinstance(membership, Mapping), "authority_membership_invalid")
     _require(isinstance(source_root_value, str), "authority_source_root_invalid")
+    assert isinstance(run_plan, Mapping)
     source_root = Path(source_root_value)
 
     run_id = run_plan.get("run_id")
     expected_tokens = run_plan.get("expected_token_ids")
     output_tokens = evidence.get("output_token_ids")
+    operation = evidence.get("command")
+    cancellation_scope = operation == "cancel"
     _require(
         isinstance(run_id, str)
         and bool(run_id)
         and evidence.get("run_id") == run_id
         and evidence.get("protocol") == "mycelium.physical_controller_result.v1"
-        and evidence.get("command") == "run"
+        and operation in {"run", "cancel"}
         and evidence.get("mode") == "physical"
         and evidence.get("physical_execution") is True
         and evidence.get("route_ready") is False
         and evidence.get("release_ready") is False
-        and evidence.get("cancelled") is False
-        and evidence.get("token_parity") is True
         and isinstance(expected_tokens, list)
-        and expected_tokens
-        and output_tokens == expected_tokens
         and evidence.get("expected_token_ids") == expected_tokens
         and evidence.get("recovered_nodes") == []
         and evidence.get("restart_attempts") == {},
         "authority_run_evidence_invalid",
     )
+    if cancellation_scope:
+        _require(
+            evidence.get("cancelled") is True
+            and evidence.get("token_parity") is False
+            and output_tokens == [],
+            "authority_run_evidence_invalid",
+        )
+    else:
+        _require(
+            evidence.get("cancelled") is False
+            and evidence.get("token_parity") is True
+            and bool(expected_tokens)
+            and output_tokens == expected_tokens,
+            "authority_run_evidence_invalid",
+        )
 
     node_ids = [peer.get("node_id") for peer in peers if isinstance(peer, Mapping)]
     _require(
@@ -170,7 +184,8 @@ def build_frozen_route_authority_documents(
     for node_id in node_ids:
         required = set(required_events)
         if node_id == entry_node_id:
-            required.update({"inference_started", "inference_decoded"})
+            required.add("inference_started")
+            required.add("cancelled" if cancellation_scope else "inference_decoded")
         _require(
             all((node_id, event) in signed_index for event in required),
             "signed_observations_missing",
@@ -202,6 +217,8 @@ def build_frozen_route_authority_documents(
         _require(isinstance(snapshot, Mapping), "physical_snapshot_invalid")
         transport = snapshot.get("transport")
         runtime = snapshot.get("runtime")
+        release_counts = runtime.get("release_counts", {}) if isinstance(runtime, Mapping) else {}
+        release_reason = "cancellation" if cancellation_scope else "normal_completion"
         _require(
             isinstance(transport, Mapping)
             and transport.get("local_node_id") == node_id
@@ -215,17 +232,62 @@ def build_frozen_route_authority_documents(
             and isinstance(runtime, Mapping)
             and runtime.get("mode") == "stage_local_kv"
             and runtime.get("active_state_count") == 0
-            and runtime.get("release_counts", {}).get("normal_completion") == 1,
+            and isinstance(release_counts, Mapping)
+            and release_counts.get(release_reason) == 1,
             "physical_snapshot_invalid",
         )
+        if cancellation_scope:
+            _require(
+                snapshot.get("transport_pending_delivery_count") == 0
+                and snapshot.get("transport_cancellation_cleanup_complete") is True,
+                "physical_snapshot_invalid",
+            )
 
-    decoded = signed_index[(str(entry_node_id), "inference_decoded")]["observation"]
-    decoded_output = decoded.get("details", {}).get("output", {})
-    _require(
-        decoded.get("details", {}).get("status") == "COMPLETED"
-        and decoded_output.get("token_ids") == expected_tokens,
-        "authority_token_evidence_invalid",
-    )
+    cancellation_record: dict[str, Any] | None = None
+    if cancellation_scope:
+        cancelled = signed_index[(str(entry_node_id), "cancelled")]["observation"]
+        cancelled_details = cancelled.get("details", {})
+        cancel_result = (
+            cancelled_details.get("result", {})
+            if isinstance(cancelled_details, Mapping)
+            else {}
+        )
+        path_id = cancel_result.get("path_id")
+        path_attempt = cancel_result.get("path_attempt")
+        request = run_plan.get("request")
+        request_id = request.get("request_id") if isinstance(request, Mapping) else None
+        _require(
+            isinstance(cancelled_details, Mapping)
+            and cancelled_details.get("request_id") == request_id
+            and isinstance(cancel_result, Mapping)
+            and cancel_result.get("cancelled") is True
+            and isinstance(path_id, str)
+            and bool(path_id)
+            and isinstance(path_attempt, int)
+            and not isinstance(path_attempt, bool)
+            and path_attempt >= 0
+            and cancel_result.get("status_after") == "CANCELLED"
+            and cancel_result.get("post_cancel_token_count") == 0,
+            "authority_cancellation_evidence_invalid",
+        )
+        cancellation_record = {
+            "request_id": cancelled_details["request_id"],
+            "path_id": path_id,
+            "path_attempt": path_attempt,
+            "entry_terminal_state": "CANCELLED",
+            "remote_terminal_state": "CANCELLED",
+            "post_cancel_token_count": 0,
+            "transport_cancellation_observed": True,
+            "cleanup_complete": True,
+        }
+    else:
+        decoded = signed_index[(str(entry_node_id), "inference_decoded")]["observation"]
+        decoded_output = decoded.get("details", {}).get("output", {})
+        _require(
+            decoded.get("details", {}).get("status") == "COMPLETED"
+            and decoded_output.get("token_ids") == expected_tokens,
+            "authority_token_evidence_invalid",
+        )
 
     model_manifest = _read_document(source_root, "control/model-manifest.json")
     execution_graph = _read_document(source_root, "control/execution-graph.json")
@@ -265,11 +327,13 @@ def build_frozen_route_authority_documents(
         "observations": signed_observations,
     }
     now_unix_ms = int(float(controller_config.get("now")) * 1000)
+    challenge_expected_tokens = [] if cancellation_scope else _clone(expected_tokens)
+    challenge_output_tokens = [] if cancellation_scope else _clone(output_tokens)
     challenge = {
         "kind": FROZEN_ROUTE_CHALLENGE_KIND,
         "run_id": run_id,
         "evidence_class": "physical_qualification",
-        "qualification_scope": "inference",
+        "qualification_scope": "cancellation" if cancellation_scope else "inference",
         "generated_at_unix_ms": now_unix_ms,
         "valid_until_unix_ms": now_unix_ms + 60_000,
         "deployment_id": run_plan.get("deployment_id"),
@@ -281,18 +345,30 @@ def build_frozen_route_authority_documents(
         "manifest_digest": execution_graph.get("manifest_digest"),
         "entry_node_id": entry_node_id,
         "request": _clone(run_plan.get("request")),
-        "expected_token_ids": _clone(expected_tokens),
-        "output_token_ids": _clone(output_tokens),
+        "expected_token_ids": challenge_expected_tokens,
+        "output_token_ids": challenge_output_tokens,
         "identities": _clone(identities),
         "signed_observations": signed_observations,
         "cleanup": _clone(cleanup),
     }
+    if cancellation_scope:
+        assert cancellation_record is not None
+        challenge["cancellation"] = cancellation_record
+    qualified_operations = ["cancellation"] if cancellation_scope else ["inference"]
+    unqualified_operations = (
+        ["inference", "recovery"] if cancellation_scope else ["cancellation", "recovery"]
+    )
+    claim_boundary = (
+        "cross-host cancellation only; inference is not qualified by this record; recovery is not qualified"
+        if cancellation_scope
+        else "ordinary frozen-placement inference only; cancellation and recovery are not qualified"
+    )
     scope = {
         "kind": "physical_frozen_route_scope_v1",
         "run_id": run_id,
-        "qualified_operations": ["inference"],
-        "unqualified_operations": ["cancellation", "recovery"],
-        "claim_boundary": "ordinary frozen-placement inference only; cancellation and recovery are not qualified",
+        "qualified_operations": qualified_operations,
+        "unqualified_operations": unqualified_operations,
+        "claim_boundary": claim_boundary,
     }
     documents = {
         "qualification/source-provenance.json": source_provenance,

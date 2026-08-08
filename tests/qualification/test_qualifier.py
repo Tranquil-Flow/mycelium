@@ -309,6 +309,89 @@ def _frozen_route_case(case: Any) -> Any:
     return case
 
 
+def _make_frozen_cancellation_case(case: Any) -> Any:
+    case = _frozen_route_case(case)
+    challenge = case.documents["run/route-challenge.json"]
+    signed_observations = case.documents["runtime/load-proof-signatures.json"][
+        "observations"
+    ]
+    entry_node_id = challenge["entry_node_id"]
+    entry_started = next(
+        envelope
+        for envelope in signed_observations
+        if envelope["observation"]["node_id"] == entry_node_id
+        and envelope["observation"]["event"] == "inference_started"
+    )
+    entry_template = dict(entry_started["observation"])
+    cancellation_details = {
+        "request_id": "frozen-cancel-request",
+        "result": {
+            "cancelled": True,
+            "path_id": "frozen-cancel-path",
+            "path_attempt": 0,
+            "status_before": "DECODING",
+            "status_after": "CANCELLED",
+            "post_cancel_token_count": 0,
+        },
+    }
+    signer = generate_ed25519_signer(endpoint_id=entry_template["endpoint_id"])
+    cancelled_observation = dict(
+        entry_template,
+        event="cancelled",
+        details=cancellation_details,
+    )
+    signed_observations[:] = [
+        envelope
+        for envelope in signed_observations
+        if envelope["observation"].get("event") != "inference_decoded"
+    ]
+    signed_observations.append(
+        {
+            "observation": cancelled_observation,
+            "signature": signer.sign(cancelled_observation),
+            "verification_key": signer.public_key_record(),
+        }
+    )
+    for envelope in signed_observations:
+        observation = envelope["observation"]
+        if observation.get("event") != "snapshot":
+            continue
+        runtime = observation["details"]["runtime"]
+        runtime["release_counts"] = {"cancellation": 1}
+        observation["details"]["transport_cancellation_cleanup_complete"] = True
+        observation["details"]["transport_pending_delivery_count"] = 0
+        signer = generate_ed25519_signer(endpoint_id=observation["endpoint_id"])
+        envelope["signature"] = signer.sign(observation)
+        envelope["verification_key"] = signer.public_key_record()
+    challenge.update(
+        {
+            "qualification_scope": "cancellation",
+            "request": {"request_id": "frozen-cancel-request", "prompt_token_ids": [1, 2, 3]},
+            "expected_token_ids": [],
+            "output_token_ids": [],
+            "signed_observations": signed_observations,
+            "cancellation": {
+                "request_id": "frozen-cancel-request",
+                "path_id": "frozen-cancel-path",
+                "path_attempt": 0,
+                "entry_terminal_state": "CANCELLED",
+                "remote_terminal_state": "CANCELLED",
+                "post_cancel_token_count": 0,
+                "transport_cancellation_observed": True,
+                "cleanup_complete": True,
+            },
+        }
+    )
+    case.documents["run/negative-runs.json"] = {
+        "kind": "physical_frozen_route_scope_v1",
+        "run_id": challenge["run_id"],
+        "qualified_operations": ["cancellation"],
+        "unqualified_operations": ["inference", "recovery"],
+        "claim_boundary": "cross-host cancellation only; inference is not qualified by this record; recovery is not qualified",
+    }
+    return case
+
+
 def test_frozen_physical_inference_profile_qualifies_without_post_mvp_claims(
     qualification_case: Any,
 ) -> None:
@@ -324,6 +407,132 @@ def test_frozen_physical_inference_profile_qualifies_without_post_mvp_claims(
     assert "ordinary frozen-placement inference only" in document["claim_boundary"]
     assert "cancellation and recovery are not qualified" in document["claim_boundary"]
     assert len(document["stage_bindings"]) == 2
+
+
+def test_frozen_physical_cancellation_profile_qualifies_cross_host_cancel(
+    qualification_case: Any,
+) -> None:
+    case = _make_frozen_cancellation_case(qualification_case)
+
+    record = _qualify(case)
+    document = route_qualification_to_dict(record)
+
+    assert document["route_ready"] is True
+    assert document["reason_codes"] == []
+    assert document["evidence_class"] == "physical_qualification"
+    assert "cross-host cancellation only" in document["claim_boundary"]
+    assert "recovery is not qualified" in document["claim_boundary"]
+
+
+def _authority_builder_inputs(
+    case: Any,
+    tmp_path: Path,
+    *,
+    command: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    challenge = case.documents["run/route-challenge.json"]
+    control = case.documents["control/control-plane-tranche.json"]
+    source_root = tmp_path / f"source-{command}"
+    source_root.mkdir()
+    source_index = {
+        entry["path"]: entry
+        for entry in case.documents["qualification/source-provenance.json"][
+            "transfer_manifest"
+        ]["files"]
+    }
+    production_graph = json.loads(
+        canonical_json_bytes(case.documents["router/execution-graph.json"])
+    )
+    for stage in production_graph["stages"]:
+        stage["layer_range"] = stage.pop("range")
+    production_graph_bytes = canonical_json_bytes(production_graph)
+    source_index["control/execution-graph.json"]["size_bytes"] = len(
+        production_graph_bytes
+    )
+    source_index["control/execution-graph.json"]["content_digest"] = sha256_bytes(
+        production_graph_bytes
+    )
+    source_documents = {
+        "control/model-manifest.json": case.documents["model/model-manifest.json"],
+        "control/execution-graph.json": production_graph,
+    }
+    reports = {
+        report["assignment_id"]: report
+        for report in case.documents["runtime/provisioning-reports.json"]
+    }
+    proofs = {
+        proof["assignment_id"]: proof
+        for proof in case.documents["runtime/load-proofs.json"]
+    }
+    for assignment in control["assignments"]:
+        node_id = assignment["node_id"]
+        assignment_id = assignment["assignment_id"]
+        source_documents[f"control/{node_id}-assignment.json"] = assignment
+        source_documents[f"control/{node_id}-artifact-report.json"] = reports[
+            assignment_id
+        ]
+        source_documents[f"control/{node_id}-load-proof.json"] = proofs[assignment_id]
+    for path, document in source_documents.items():
+        destination = source_root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(canonical_json_bytes(document))
+        assert source_index[path]["size_bytes"] == destination.stat().st_size
+
+    production_graph_digest = sha256_document(production_graph)
+    membership_snapshot = case.documents["control/gossip-signature.json"]["snapshot"]
+    for offer in membership_snapshot["assignment_offers"]:
+        offer["message"]["graph_digest"] = production_graph_digest
+        offer["signature"]["signed_statement_digest"] = sha256_bytes(
+            canonical_json_bytes(offer["message"])
+        )
+
+    peers = [
+        {
+            "node_id": node_id,
+            "host_id": identity["host_id"],
+        }
+        for node_id, identity in challenge["identities"].items()
+    ]
+    controller_config = {
+        "authority_profile": FROZEN_ROUTE_AUTHORITY_PROFILE,
+        "now": case.now_unix_ms / 1000,
+        "source_root": str(source_root),
+        "peers": peers,
+        "transfer_manifest": case.documents[
+            "qualification/source-provenance.json"
+        ]["transfer_manifest"],
+        "membership_snapshot": case.documents["control/gossip-signature.json"][
+            "snapshot"
+        ],
+        "run_plan": {
+            "run_id": challenge["run_id"],
+            "deployment_id": challenge["deployment_id"],
+            "entry_node_id": challenge["entry_node_id"],
+            "request": challenge["request"],
+            "expected_token_ids": challenge["expected_token_ids"],
+        },
+    }
+    cancellation = command == "cancel"
+    evidence = {
+        "protocol": "mycelium.physical_controller_result.v1",
+        "command": command,
+        "mode": "physical",
+        "run_id": challenge["run_id"],
+        "physical_execution": True,
+        "route_ready": False,
+        "release_ready": False,
+        "cancelled": cancellation,
+        "token_parity": not cancellation,
+        "expected_token_ids": challenge["expected_token_ids"],
+        "output_token_ids": [] if cancellation else challenge["output_token_ids"],
+        "identities": challenge["identities"],
+        "observations": {node_id: {} for node_id in challenge["identities"]},
+        "signed_observations": challenge["signed_observations"],
+        "cleanup": challenge["cleanup"],
+        "recovered_nodes": [],
+        "restart_attempts": {},
+    }
+    return controller_config, evidence
 
 
 def test_frozen_authority_document_builder_binds_dynamic_controller_result(
@@ -477,6 +686,53 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
     )
     assert authority_record.route_ready is True
     assert authority_record.evidence_manifest_digest == sealed.manifest_digest
+
+
+def test_frozen_authority_document_builder_binds_dynamic_cancellation_result(
+    qualification_case: Any,
+    tmp_path: Path,
+) -> None:
+    case = _make_frozen_cancellation_case(qualification_case)
+    controller_config, evidence = _authority_builder_inputs(
+        case,
+        tmp_path,
+        command="cancel",
+    )
+
+    documents = build_frozen_route_authority_documents(
+        controller_config=controller_config,
+        evidence=evidence,
+    )
+
+    challenge = documents["run/route-challenge.json"]
+    assert challenge["qualification_scope"] == "cancellation"
+    assert challenge["expected_token_ids"] == []
+    assert challenge["output_token_ids"] == []
+    assert challenge["cancellation"]["entry_terminal_state"] == "CANCELLED"
+    assert challenge["cancellation"]["post_cancel_token_count"] == 0
+    assert documents["run/negative-runs.json"]["qualified_operations"] == [
+        "cancellation"
+    ]
+    assert documents["run/negative-runs.json"]["unqualified_operations"] == [
+        "inference",
+        "recovery",
+    ]
+
+    sealed = seal_physical_evidence(
+        output_dir=tmp_path / "sealed-cancel",
+        run_id=challenge["run_id"],
+        documents=documents,
+    )
+    record = qualify_sealed_evidence(
+        sealed,
+        now_unix_ms=case.now_unix_ms,
+        verify_gossip_signature=_verify_synthetic_signature,
+        verify_load_proof_signature=_verify_synthetic_signature,
+    )
+    document = route_qualification_to_dict(record)
+    assert document["route_ready"] is True
+    assert "cross-host cancellation only" in document["claim_boundary"]
+    assert "recovery is not qualified" in document["claim_boundary"]
 
 
 def test_frozen_physical_inference_profile_rejects_unbound_stage_assignment(

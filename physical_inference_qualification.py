@@ -983,9 +983,13 @@ class QualificationController:
             "decode_count",
             "expected_token_ids",
         }
-        if plan is None or set(plan) != expected_fields:
+        optional_fields = {"qualification_operation"}
+        if plan is None or not expected_fields.issubset(plan) or set(plan) - expected_fields - optional_fields:
             _reject("controller_run_plan_invalid")
         if plan.get("protocol") != _RUN_PLAN_PROTOCOL:
+            _reject("controller_run_plan_invalid")
+        qualification_operation = plan.get("qualification_operation", "run")
+        if qualification_operation not in {"run", "cancel"}:
             _reject("controller_run_plan_invalid")
         run_id = _segment(plan.get("run_id"), "run_id_invalid")
         deployment_id = _segment(
@@ -1118,6 +1122,7 @@ class QualificationController:
             "request": dict(request),
             "decode_count": decode_count,
             "expected_token_ids": list(expected_token_ids),
+            "qualification_operation": qualification_operation,
         }
 
     def _hello_identity(
@@ -1463,22 +1468,48 @@ class QualificationController:
             for node_id in ordered_node_ids:
                 peer = peers_by_node[node_id]
                 try:
-                    snapshot = sessions[node_id].send(
-                        command_id=f"{node_id}-snapshot-1",
-                        command="snapshot",
-                        payload={},
-                    )
-                    observations[node_id]["snapshot"] = self._verified_observation(
-                        snapshot,
-                        event="snapshot",
-                        peer=peer,
-                        process_id=identities[node_id]["process_id"],
-                        run_id=plan["run_id"],
-                        deployment_id=plan["deployment_id"],
-                        endpoint_id=endpoints[node_id]["endpoint_id"],
-                        expected_verification_key=verification_keys[node_id],
-                        signed_observation_sink=signed_observations,
-                    )
+                    snapshot_attempt = 1
+                    cleanup_deadline = time.monotonic() + 5.0
+                    while True:
+                        snapshot = sessions[node_id].send(
+                            command_id=f"{node_id}-snapshot-{snapshot_attempt}",
+                            command="snapshot",
+                            payload={},
+                        )
+                        snapshot_observation = self._verified_observation(
+                            snapshot,
+                            event="snapshot",
+                            peer=peer,
+                            process_id=identities[node_id]["process_id"],
+                            run_id=plan["run_id"],
+                            deployment_id=plan["deployment_id"],
+                            endpoint_id=endpoints[node_id]["endpoint_id"],
+                            expected_verification_key=verification_keys[node_id],
+                        )
+                        snapshot_details = snapshot_observation.get("details")
+                        cancellation_cleanup_complete = (
+                            isinstance(snapshot_details, Mapping)
+                            and snapshot_details.get("runtime", {}).get("active_state_count") == 0
+                            and snapshot_details.get("transport_pending_delivery_count") == 0
+                            and snapshot_details.get("transport_cancellation_cleanup_complete") is True
+                        )
+                        if operation != "cancel" or cancellation_cleanup_complete:
+                            observations[node_id]["snapshot"] = self._verified_observation(
+                                snapshot,
+                                event="snapshot",
+                                peer=peer,
+                                process_id=identities[node_id]["process_id"],
+                                run_id=plan["run_id"],
+                                deployment_id=plan["deployment_id"],
+                                endpoint_id=endpoints[node_id]["endpoint_id"],
+                                expected_verification_key=verification_keys[node_id],
+                                signed_observation_sink=signed_observations,
+                            )
+                            break
+                        if time.monotonic() >= cleanup_deadline:
+                            _reject("physical_cancellation_cleanup_incomplete")
+                        snapshot_attempt += 1
+                        time.sleep(0.05)
                 except ControllerError as exc:
                     if operation != "recover" or exc.code != "node_process_exited":
                         raise
@@ -1828,6 +1859,12 @@ class QualificationController:
             ),
         }
 
+    def _seal_operation(self) -> str:
+        plan = self._validate_run_plan()
+        operation = plan["qualification_operation"]
+        assert operation in {"run", "cancel"}
+        return operation
+
     def seal_evidence(self) -> dict[str, Any]:
         """Run and seal physical evidence without invoking qualification authority."""
 
@@ -1836,7 +1873,9 @@ class QualificationController:
         if self.mode != "physical":
             _reject("physical_mode_required")
         self._validate_physical_distinctness()
-        return self._seal_physical(self._run_physical(endpoints))
+        return self._seal_physical(
+            self._run_physical(endpoints, operation=self._seal_operation())
+        )
 
     def _parse_stage_ack(
         self,
@@ -2039,7 +2078,9 @@ class QualificationController:
             if command == "seal":
                 if self._seal_adapter is None:
                     _reject("controller_evidence_adapter_missing")
-                return self._seal_physical(self._run_physical(endpoints))
+                return self._seal_physical(
+                    self._run_physical(endpoints, operation=self._seal_operation())
+                )
             if command == "cleanup":
                 return self._cleanup_physical()
         peers = [

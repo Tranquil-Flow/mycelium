@@ -489,6 +489,7 @@ class PhysicalNodeService:
         self._clock = _DistributedProtocolClock()
         self._router_config = RouterConfig()
         self._sinks: dict[str, _CaptureSink] = {}
+        self._last_cancellation: dict[str, Any] | None = None
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
         _require(
@@ -882,14 +883,61 @@ class PhysicalNodeService:
             details["transport_worker_threads"] = self.transport.worker_threads_alive
             details["transport_dispatcher_phase"] = self.transport.dispatcher_phase
             details["transport_outbound_trace"] = list(self.transport.outbound_trace)
+            details["transport_pending_delivery_count"] = self.transport.pending_delivery_count
+            cancellation = self._last_cancellation or self.transport.last_cancellation
+            details["transport_cancellation_cleanup_complete"] = (
+                False
+                if cancellation is None
+                else self.transport.cancellation_cleanup_complete(
+                    str(cancellation["request_id"]),
+                    str(cancellation["path_id"]),
+                )
+            )
         return self._signed_result("snapshot", details)
 
     def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = _exact_fields(payload, {"request_id"}, "invalid_cancel_fields")
         _require(isinstance(data["request_id"], str) and bool(data["request_id"]), "invalid_request_id")
         _require(self.state == "RUNNING" and self.router is not None, "invalid_state_for_cancel")
-        result = self.router.cancel(data["request_id"])
-        return self._signed_result("cancelled", {"request_id": data["request_id"], "result": _plain_json(result)})
+        request_id = data["request_id"]
+        router = self.router
+        assert router is not None
+        path_id: str | None = None
+        path_attempt: int | None = None
+        status_before: str | None = None
+        pre_cancel_token_count = 0
+        try:
+            record = router.get_request(request_id)
+            path_id = record.manifest.path_id
+            path_attempt = record.manifest.path_attempt
+            status_before = record.status
+            pre_cancel_token_count = len(record.generated_token_ids)
+        except (KeyError, AttributeError):
+            pass
+        cancelled = router.cancel(request_id)
+        try:
+            status_after = router.request_status(request_id)
+        except KeyError:
+            status_after = "UNKNOWN"
+        sink = self._sinks.get(request_id)
+        observed_token_count = len(sink.token_ids) if sink is not None else pre_cancel_token_count
+        post_cancel_token_count = max(0, observed_token_count - pre_cancel_token_count)
+        result = {
+            "cancelled": bool(cancelled),
+            "path_id": path_id,
+            "path_attempt": path_attempt,
+            "status_before": status_before,
+            "status_after": status_after,
+            "pre_cancel_token_count": pre_cancel_token_count,
+            "post_cancel_token_count": post_cancel_token_count,
+        }
+        if cancelled and isinstance(path_id, str) and isinstance(path_attempt, int):
+            self._last_cancellation = {
+                "request_id": request_id,
+                "path_id": path_id,
+                "path_attempt": path_attempt,
+            }
+        return self._signed_result("cancelled", {"request_id": request_id, "result": _plain_json(result)})
 
     def _infer_start(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = _exact_fields(payload, {"request"}, "invalid_infer_start_fields")

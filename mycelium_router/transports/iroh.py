@@ -442,6 +442,7 @@ class IrohTransport:
       self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
       self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
+      self._last_cancellation: PathCancellation | None = None
       self._stop = threading.Event()
       self._running = False
       self._closed = False
@@ -510,6 +511,18 @@ class IrohTransport:
       with self._ack_queue.all_tasks_done:
          ack_clean = self._ack_queue.unfinished_tasks == 0
       return state_clean and dispatch_clean and ack_clean
+
+   @property
+   def last_cancellation(self) -> dict[str, object] | None:
+      with self._state_lock:
+         if self._last_cancellation is None:
+            return None
+         cancellation = self._last_cancellation
+         return {
+            "request_id": cancellation.request_id,
+            "path_id": cancellation.path_id,
+            "path_attempt": cancellation.path_attempt,
+         }
 
    @property
    def dispatcher_phase(self) -> str:
@@ -1244,6 +1257,8 @@ class IrohTransport:
             self.manifest_deltas.append(message)
          return
       if isinstance(message, PathCancellation):
+         with self._state_lock:
+            self._last_cancellation = message
          accepted = router.receive_path_cancellation(
             message,
             source_node_id=source_node_id,
@@ -1344,6 +1359,7 @@ class IrohTransport:
    def send_path_cancellation(self, cancellation: PathCancellation) -> None:
       with self._state_lock:
          self._require_running()
+         self._last_cancellation = cancellation
          entry_node = self._entry_nodes.get(cancellation.request_id)
          participants = self._participant_nodes_by_path.get(cancellation.path_id)
          peer_node = self._peer.node_id

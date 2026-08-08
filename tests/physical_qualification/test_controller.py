@@ -125,6 +125,8 @@ class FakeNodeSession:
         self.closed = False
         self.fail_snapshot = False
         self.stale_rotate = False
+        self.cancel_seen = False
+        self.snapshot_count = 0
 
     def _signed(self, event: str, details: dict[str, Any]) -> dict[str, Any]:
         observation = {
@@ -212,14 +214,34 @@ class FakeNodeSession:
                 },
             )
         elif command == "cancel":
+            self.cancel_seen = True
             result = self._signed(
                 "cancelled",
-                {"request_id": payload["request_id"], "result": {"cancelled": True}},
+                {
+                    "request_id": payload["request_id"],
+                    "result": {
+                        "cancelled": True,
+                        "path_id": "path-fake",
+                        "path_attempt": 0,
+                        "status_before": "DECODING",
+                        "status_after": "CANCELLED",
+                        "pre_cancel_token_count": 1,
+                        "post_cancel_token_count": 0,
+                    },
+                },
             )
         elif command == "snapshot":
+            self.snapshot_count += 1
+            cleanup_complete = not self.cancel_seen or self.snapshot_count > 1
             result = self._signed(
                 "snapshot",
-                {"runtime": {"active_state_count": 0}, "capacity": {}, "transport": {}},
+                {
+                    "runtime": {"active_state_count": 0},
+                    "capacity": {},
+                    "transport": {},
+                    "transport_pending_delivery_count": 0 if cleanup_complete else 1,
+                    "transport_cancellation_cleanup_complete": cleanup_complete,
+                },
             )
         elif command == "stop":
             self.state = "STOPPING"
@@ -246,11 +268,15 @@ class FakeEvidenceSealer:
         self,
         root: Path,
         attempts: dict[str, list[FakeNodeSession]],
+        *,
+        expected_command: str = "run",
     ) -> None:
         self.root = root
         self.attempts = attempts
+        self.expected_command = expected_command
         self.calls = 0
         self.manifest_bytes = b""
+        self.last_evidence: dict[str, Any] | None = None
 
     def __call__(
         self,
@@ -259,7 +285,8 @@ class FakeEvidenceSealer:
         evidence: dict[str, Any],
     ) -> dict[str, Any]:
         self.calls += 1
-        assert evidence["command"] == "run"
+        self.last_evidence = evidence
+        assert evidence["command"] == self.expected_command
         assert all(
             session.closed
             for node_attempts in self.attempts.values()
@@ -1248,6 +1275,13 @@ def test_physical_cancel_reaches_entry_node_then_stops_and_cleans_all_peers(
     assert "infer_start" in entry_session.commands
     assert "cancel" in entry_session.commands
     assert "infer_decode" not in entry_session.commands
+    cancelled = result["observations"][peers[0].node_id]["cancelled"]["details"]
+    assert cancelled["result"]["status_after"] == "CANCELLED"
+    assert cancelled["result"]["post_cancel_token_count"] == 0
+    for peer in peers:
+        snapshot = result["observations"][peer.node_id]["snapshot"]["details"]
+        assert snapshot["transport_pending_delivery_count"] == 0
+        assert snapshot["transport_cancellation_cleanup_complete"] is True
     assert all(session.closed for session in sessions.values())
     assert len(runner.calls) == len(peers)
 
@@ -1668,6 +1702,51 @@ def test_physical_seal_evidence_stops_writers_without_invoking_qualifier(
         for node_attempts in attempts.values()
         for session in node_attempts
     )
+
+
+def test_physical_seal_evidence_uses_run_plan_cancellation_scope(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(3, tmp_path)
+    source_root, transfers = _transfers(tmp_path / "transfer")
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        attempts.setdefault(session.node_id, []).append(session)
+        return session
+
+    run_plan = _physical_run_plan(peers)
+    run_plan["qualification_operation"] = "cancel"
+    sealer = FakeEvidenceSealer(
+        tmp_path / "sealed",
+        attempts,
+        expected_command="cancel",
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=run_plan,
+        session_factory=session_factory,
+        seal_adapter=sealer,
+    )
+
+    result = controller.seal_evidence()
+
+    assert result["command"] == "seal"
+    assert result["cancelled"] is True
+    assert result["output_token_ids"] == []
+    assert sealer.last_evidence is not None
+    assert sealer.last_evidence["command"] == "cancel"
+    assert sealer.last_evidence["observations"]["node-0"]["cancelled"]["details"][
+        "result"
+    ]["status_after"] == "CANCELLED"
 
 
 def test_physical_run_rejects_endpoint_secret_outside_identity_root(

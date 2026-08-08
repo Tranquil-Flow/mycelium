@@ -25,10 +25,14 @@ from .runner import PhysicalRunner
 class _RunnerControllerAdapter:
     """Expose sealed-only qualification input while preserving other commands."""
 
+    _STAGED_EXECUTION_COMMANDS = frozenset({"run", "cancel", "recover", "seal"})
+
     def __init__(self, controller: QualificationController) -> None:
         self._controller = controller
 
     def execute(self, command: str) -> Mapping[str, Any]:
+        if command in self._STAGED_EXECUTION_COMMANDS:
+            self._controller.execute("prepare")
         if command == "seal":
             return self._controller.seal_evidence()
         return self._controller.execute(command)

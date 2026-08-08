@@ -38,7 +38,7 @@ class _AssemblyController:
         return {"command": command}
 
 
-def test_assembly_controller_uses_sealed_only_path_for_qualification() -> None:
+def test_assembly_controller_stages_before_sealed_only_qualification_path() -> None:
     adapter_type = getattr(runner_assembly, "_RunnerControllerAdapter", None)
     assert adapter_type is not None
     controller = _AssemblyController()
@@ -46,18 +46,29 @@ def test_assembly_controller_uses_sealed_only_path_for_qualification() -> None:
     result = adapter_type(controller).execute("seal")
 
     assert result == {"command": "seal"}
-    assert controller.calls == ["seal-evidence"]
+    assert controller.calls == ["prepare", "seal-evidence"]
 
 
-def test_assembly_controller_delegates_non_seal_commands() -> None:
+@pytest.mark.parametrize("command", ["run", "cancel", "recover"])
+def test_assembly_controller_stages_before_physical_execution_commands(command: str) -> None:
     adapter_type = getattr(runner_assembly, "_RunnerControllerAdapter", None)
     assert adapter_type is not None
     controller = _AssemblyController()
 
-    result = adapter_type(controller).execute("run")
+    result = adapter_type(controller).execute(command)
 
-    assert result == {"command": "run"}
-    assert controller.calls == ["run"]
+    assert result == {"command": command}
+    assert controller.calls == ["prepare", command]
+
+
+def test_assembly_controller_does_not_pre_stage_prepare_or_cleanup() -> None:
+    adapter_type = getattr(runner_assembly, "_RunnerControllerAdapter", None)
+    assert adapter_type is not None
+    controller = _AssemblyController()
+
+    assert adapter_type(controller).execute("prepare") == {"command": "prepare"}
+    assert adapter_type(controller).execute("cleanup") == {"command": "cleanup"}
+    assert controller.calls == ["prepare", "cleanup"]
 
 
 def test_seal_adapter_requires_exact_documents_and_calls_real_sealer_once(tmp_path: Path) -> None:

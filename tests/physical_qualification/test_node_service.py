@@ -1446,22 +1446,47 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
         cancelled = first.command(
             "cancel", {"request_id": cancelled_request_id}
         )["observation"]["details"]
-        assert cancelled["result"] is True
+        cancel_result = cancelled["result"]
+        assert cancel_result["cancelled"] is True
+        assert isinstance(cancel_result["path_id"], str)
+        assert cancel_result["path_id"].startswith("path-")
+        assert cancel_result["path_attempt"] == 0
+        assert cancel_result["status_before"] == "DECODING"
+        assert cancel_result["status_after"] == "CANCELLED"
+        assert cancel_result["post_cancel_token_count"] == 0
         deadline = time.monotonic() + 5
+        first_after_cancel: dict[str, Any] = {}
         second_after_cancel: dict[str, Any] = {}
         while time.monotonic() < deadline:
+            first_after_cancel = first.command("snapshot")["observation"]["details"]
             second_after_cancel = second.command("snapshot")["observation"]["details"]
-            if second_after_cancel["runtime"]["active_state_count"] == 0:
+            if (
+                first_after_cancel["runtime"]["active_state_count"] == 0
+                and second_after_cancel["runtime"]["active_state_count"] == 0
+                and first_after_cancel["transport_pending_delivery_count"] == 0
+                and second_after_cancel["transport_pending_delivery_count"] == 0
+                and first_after_cancel["transport_cancellation_cleanup_complete"] is True
+                and second_after_cancel["transport_cancellation_cleanup_complete"] is True
+            ):
                 break
             time.sleep(0.02)
+        assert first_after_cancel["runtime"]["active_state_count"] == 0
         assert second_after_cancel["runtime"]["active_state_count"] == 0
+        assert first_after_cancel["transport_pending_delivery_count"] == 0
+        assert second_after_cancel["transport_pending_delivery_count"] == 0
+        assert first_after_cancel["transport_cancellation_cleanup_complete"] is True
+        assert second_after_cancel["transport_cancellation_cleanup_complete"] is True
 
-        first_snapshot = first.command("snapshot")["observation"]["details"]
-        second_snapshot = second.command("snapshot")["observation"]["details"]
+        first_snapshot = first_after_cancel
+        second_snapshot = second_after_cancel
         assert first_snapshot["transport"]["remote_frames_sent"] > 0
         assert second_snapshot["transport"]["remote_frames_received"] > 0
         assert first_snapshot["runtime"]["active_state_count"] == 0
         assert second_snapshot["runtime"]["active_state_count"] == 0
+        assert first_snapshot["transport_pending_delivery_count"] == 0
+        assert second_snapshot["transport_pending_delivery_count"] == 0
+        assert first_snapshot["transport_cancellation_cleanup_complete"] is True
+        assert second_snapshot["transport_cancellation_cleanup_complete"] is True
 
         old_first_endpoint = configured["node-a"]["endpoint_addr"]["id"]
         old_second_endpoint = configured["node-b"]["endpoint_addr"]["id"]
