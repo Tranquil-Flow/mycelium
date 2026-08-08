@@ -39,6 +39,7 @@ class _Hub:
         self.inbound: deque[tuple[bytes, int, bytes] | BaseException] = deque()
         self.inbound_ready = threading.Condition()
         self.sent: list[tuple[bytes, bytes, float | None, int]] = []
+        self.source_generations: list[int] = []
         self.acks: list[bytes] = []
         self.cancels: list[bytes] = []
         self.configurations: list[tuple[str, dict, int]] = []
@@ -117,6 +118,7 @@ class _FakeClient:
         *,
         timeout: float | None = None,
         expected_generation: int,
+        source_generation: int,
     ) -> bytes:
         if not self.connected:
             raise ProtocolError("not_connected")
@@ -132,6 +134,7 @@ class _FakeClient:
         if self.hub.send_failure is not None:
             raise self.hub.send_failure
         self.hub.sent.append((message_id, frame, timeout, expected_generation))
+        self.hub.source_generations.append(source_generation)
         return message_id
 
     def recv_with_generation(self, *, timeout: float | None = None):
@@ -246,12 +249,14 @@ def _transport(
     queue_capacity: int = 2,
     delivery_timeout_seconds: float = 0.2,
     expected_endpoint_id: str = "local-endpoint",
+    local_generation: int | None = None,
 ) -> IrohTransport:
     return IrohTransport(
         node_id="local-node",
         socket_path="/unused",
         bootstrap_secret=b"s" * 32,
         peer=_binding(),
+        local_generation=local_generation,
         expected_endpoint_id=expected_endpoint_id,
         queue_capacity=queue_capacity,
         delivery_timeout_seconds=delivery_timeout_seconds,
@@ -274,6 +279,7 @@ def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() ->
 
     assert len(hub.sent) == 1
     assert hub.sent[0][1] == _event_frame()
+    assert hub.source_generations == [7]
     assert receipt.message_id == hub.sent[0][0]
     assert receipt.peer_endpoint_id == "peer-endpoint"
     assert receipt.peer_generation == 7
@@ -281,6 +287,22 @@ def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() ->
     assert receipt.semantics == "remote_router_dispatch_ack"
     assert receipt.router_protocol == ROUTER_WIRE_PROTOCOL
     assert transport.route_ready is False
+
+
+def test_confirmed_send_binds_distinct_local_membership_generation() -> None:
+    hub = _Hub()
+    transport = _transport(hub, local_generation=3)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    try:
+        transport.send_router_frame(
+            _event_frame(), destination_node_id="peer-node"
+        )
+    finally:
+        transport.close()
+
+    assert hub.sent[0][3] == 7
+    assert hub.source_generations == [3]
 
 
 def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> None:

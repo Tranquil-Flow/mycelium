@@ -19,7 +19,9 @@ from mycelium_router.wire import WireError, decode_frame
 LOCAL_PROTOCOL = "mycelium.iroh_sidecar.local.v1"
 OPERATIONAL_MAX_FRAME_BYTES = 16 * 1024 * 1024
 _CONFIRMED_GENERATION_BYTES = 8
-_LOCAL_MAX_PAYLOAD_BYTES = OPERATIONAL_MAX_FRAME_BYTES + _CONFIRMED_GENERATION_BYTES
+_LOCAL_MAX_PAYLOAD_BYTES = (
+    OPERATIONAL_MAX_FRAME_BYTES + 2 * _CONFIRMED_GENERATION_BYTES
+)
 
 _CLIENT_PROOF_DOMAIN = b"mycelium.iroh_sidecar.local.v1/client-proof\0"
 _SERVER_PROOF_DOMAIN = b"mycelium.iroh_sidecar.local.v1/server-proof\0"
@@ -256,13 +258,16 @@ class SidecarClient:
         *,
         timeout: Optional[float] = None,
         expected_generation: Optional[int] = None,
+        source_generation: Optional[int] = None,
     ) -> bytes:
         """Wait for authenticated remote Router-dispatch acknowledgement.
 
         ``send`` confirms bounded local-sidecar admission. This stronger operation
         pins the authenticated expected peer generation and completes only after
-        the remote Python adapter ACKs successful Router dispatch. Confirmation
-        remains process-lifetime state; no sidecar disk spool exists.
+        the remote Python adapter ACKs successful Router dispatch. The separately
+        bound source generation lets asymmetric membership generations authenticate
+        correctly at the remote peer. Confirmation remains process-lifetime state;
+        no sidecar disk spool exists.
         """
         if not isinstance(frame, bytes):
             raise TypeError("Router frame must be bytes")
@@ -290,8 +295,21 @@ class SidecarClient:
             or selected_generation > (1 << 64) - 1
         ):
             raise ProtocolError("peer_generation_not_configured")
+        selected_source_generation = (
+            selected_generation if source_generation is None else source_generation
+        )
+        if (
+            not isinstance(selected_source_generation, int)
+            or isinstance(selected_source_generation, bool)
+            or selected_source_generation <= 0
+            or selected_source_generation > (1 << 64) - 1
+        ):
+            raise ProtocolError("source_generation_not_configured")
         transport_payload = (
             selected_generation.to_bytes(_CONFIRMED_GENERATION_BYTES, "big")
+            + selected_source_generation.to_bytes(
+                _CONFIRMED_GENERATION_BYTES, "big"
+            )
             + frame
         )
         deadline = time.monotonic() + selected_timeout

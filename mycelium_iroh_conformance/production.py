@@ -39,6 +39,7 @@ class _SendCall:
     frame: bytes
     message_id: bytes
     expected_generation: int
+    source_generation: int
     begin: threading.Event
     begun: threading.Event
     release: threading.Event
@@ -194,6 +195,7 @@ class _ScriptedClient:
         *,
         timeout: float | None = None,
         expected_generation: int,
+        source_generation: int,
     ) -> bytes:
         del timeout
         if not self.connected:
@@ -204,6 +206,7 @@ class _ScriptedClient:
             frame,
             message_id,
             expected_generation,
+            source_generation,
             threading.Event(),
             threading.Event(),
             threading.Event(),

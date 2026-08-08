@@ -46,6 +46,7 @@ const CANCEL_CODE: VarInt = VarInt::from_u32(7);
 const REJECT_CODE: VarInt = VarInt::from_u32(8);
 const MAX_LOCAL_SESSIONS: usize = 16;
 const REMOTE_GENERATION_BYTES: usize = 8;
+const LOCAL_CONFIRMED_GENERATION_BYTES: usize = REMOTE_GENERATION_BYTES * 2;
 const REMOTE_MAX_TRANSFER_BYTES: usize = REMOTE_MAX_FRAME_BYTES;
 
 type MessageId = [u8; 16];
@@ -490,30 +491,41 @@ async fn process_local_record(
     match record.kind {
         RecordKind::Send | RecordKind::SendConfirmed => {
             let confirmed = record.kind == RecordKind::SendConfirmed;
-            let (payload, expected_generation) = if confirmed {
-                if record.payload.len() < REMOTE_GENERATION_BYTES {
+            let (payload, expected_generation, source_generation) = if confirmed {
+                if record.payload.len() < LOCAL_CONFIRMED_GENERATION_BYTES {
                     return error_response(record.message_id, "invalid_generation");
                 }
-                let generation = u64::from_be_bytes(
+                let expected_generation = u64::from_be_bytes(
                     record.payload[..REMOTE_GENERATION_BYTES]
                         .try_into()
                         .expect("generation prefix has fixed length"),
                 );
-                if generation == 0 {
+                let source_generation = u64::from_be_bytes(
+                    record.payload[REMOTE_GENERATION_BYTES..LOCAL_CONFIRMED_GENERATION_BYTES]
+                        .try_into()
+                        .expect("source generation prefix has fixed length"),
+                );
+                if expected_generation == 0 || source_generation == 0 {
                     return error_response(record.message_id, "invalid_generation");
                 }
                 (
-                    record.payload[REMOTE_GENERATION_BYTES..].to_vec(),
-                    Some(generation),
+                    record.payload[LOCAL_CONFIRMED_GENERATION_BYTES..].to_vec(),
+                    Some(expected_generation),
+                    Some(source_generation),
                 )
             } else {
-                (record.payload, None)
+                (record.payload, None, None)
             };
             if validate_router_ingress(&payload).is_err() {
                 return error_response(record.message_id, "invalid_frame");
             }
             match state
-                .enqueue_outbound(record.message_id, payload, expected_generation)
+                .enqueue_outbound(
+                    record.message_id,
+                    payload,
+                    expected_generation,
+                    source_generation,
+                )
                 .await
             {
                 EnqueueOutcome::Queued(control) | EnqueueOutcome::Duplicate(control) => {
@@ -741,6 +753,7 @@ impl InboundControl {
 struct OutboundItem {
     message_id: MessageId,
     payload: Vec<u8>,
+    source_generation: Option<u64>,
     target: Option<PeerBinding>,
     control: Arc<OutboundControl>,
 }
@@ -977,6 +990,7 @@ impl RuntimeState {
         message_id: MessageId,
         payload: Vec<u8>,
         expected_generation: Option<u64>,
+        source_generation: Option<u64>,
     ) -> EnqueueOutcome {
         let digest = frame_digest(&payload);
         let peer = self.peer.read().await;
@@ -1009,6 +1023,7 @@ impl RuntimeState {
         let item = OutboundItem {
             message_id,
             payload,
+            source_generation,
             target,
             control: control.clone(),
         };
@@ -1306,8 +1321,9 @@ async fn send_outbound_once(
             }
         }
     };
+    let source_generation = item.source_generation.unwrap_or(peer.generation);
     let mut transfer = Vec::with_capacity(REMOTE_GENERATION_BYTES + item.payload.len());
-    transfer.extend_from_slice(&peer.generation.to_be_bytes());
+    transfer.extend_from_slice(&source_generation.to_be_bytes());
     transfer.extend_from_slice(&item.payload);
     let encoded = match encode_remote_frame(RemoteKind::Transfer, item.message_id, &transfer) {
         Ok(encoded) => encoded,
@@ -1636,14 +1652,18 @@ mod tests {
         let state = RuntimeState::new(1, false);
         assert!(!state.cancel_outbound([9; 16]).await);
         assert!(matches!(
-            state.enqueue_outbound([1; 16], valid_frame(), None).await,
+            state
+                .enqueue_outbound([1; 16], valid_frame(), None, None)
+                .await,
             EnqueueOutcome::Queued(_)
         ));
         assert!(state.cancel_outbound([1; 16]).await);
         assert!(!state.cancel_outbound([1; 16]).await);
         assert_eq!(state.outbound_slots.available_permits(), 1);
         assert!(matches!(
-            state.enqueue_outbound([2; 16], valid_frame(), None).await,
+            state
+                .enqueue_outbound([2; 16], valid_frame(), None, None)
+                .await,
             EnqueueOutcome::Queued(_)
         ));
     }

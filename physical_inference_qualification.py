@@ -1360,7 +1360,8 @@ class QualificationController:
                             "endpoint_id": remote_identity["endpoint_id"],
                             "endpoint_addr": endpoint_addresses[remote_node_id],
                             "generation": remote_identity["membership_generation"],
-                        }
+                        },
+                        "local_generation": endpoints[node_id]["membership_generation"],
                     },
                 )
                 observations[node_id]["started"] = self._verified_observation(
@@ -1551,7 +1552,10 @@ class QualificationController:
                                     "generation": successor_identity[
                                         "membership_generation"
                                     ],
-                                }
+                                },
+                                "local_generation": endpoints[node_id][
+                                    "membership_generation"
+                                ],
                             },
                         )
                         observations[node_id]["recovered_started"] = (

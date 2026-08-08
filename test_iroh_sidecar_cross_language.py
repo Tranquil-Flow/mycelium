@@ -473,6 +473,54 @@ def test_confirmed_send_waits_for_remote_adapter_ack(sidecars) -> None:
         receiver.close()
 
 
+def test_confirmed_send_carries_distinct_source_membership_generation(sidecars) -> None:
+    first, second = sidecars
+    sender = first.client()
+    receiver = second.client()
+    sender.configure_peer(
+        second.ready["endpoint_id"], second.ready["endpoint_addr"], generation=2
+    )
+    receiver.configure_peer(
+        first.ready["endpoint_id"], first.ready["endpoint_addr"], generation=1
+    )
+    frame = GOLDEN.read_bytes()
+    message_id = b"s" * 16
+    outcome: list[bytes | BaseException] = []
+
+    def send_confirmed() -> None:
+        try:
+            outcome.append(
+                sender.send_confirmed(
+                    frame,
+                    message_id,
+                    timeout=10,
+                    expected_generation=2,
+                    source_generation=1,
+                )
+            )
+        except BaseException as error:
+            outcome.append(error)
+
+    thread = threading.Thread(target=send_confirmed)
+    thread.start()
+    try:
+        delivered_id, source_generation, delivered = receiver.recv_with_generation(
+            timeout=10
+        )
+        assert (delivered_id, source_generation, delivered) == (
+            message_id,
+            1,
+            frame,
+        )
+        receiver.ack(delivered_id)
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert outcome == [message_id]
+    finally:
+        sender.close()
+        receiver.close()
+
+
 def test_exact_operational_cap_frame_is_delivered_and_confirmed(sidecars) -> None:
     first, second = sidecars
     sender, receiver = configure_pair(first, second)

@@ -1077,6 +1077,7 @@ def _configure_and_start_pair(
         )
         assert result["observation"]["event"] == "configured"
         configured[client.node_id] = result["observation"]["details"]
+    membership_generations = {clients[0].node_id: 1, clients[1].node_id: 2}
     for client, peer in ((clients[0], clients[1]), (clients[1], clients[0])):
         peer_details = configured[peer.node_id]
         started = client.command(
@@ -1086,8 +1087,9 @@ def _configure_and_start_pair(
                     "node_id": peer.node_id,
                     "endpoint_id": peer_details["endpoint_addr"]["id"],
                     "endpoint_addr": peer_details["endpoint_addr"],
-                    "generation": 1,
-                }
+                    "generation": membership_generations[peer.node_id],
+                },
+                "local_generation": membership_generations[client.node_id],
             },
         )
         assert started["observation"]["event"] == "started"

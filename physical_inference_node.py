@@ -768,7 +768,16 @@ class PhysicalNodeService:
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "CONFIGURED", "invalid_state_for_start")
-        data = _exact_fields(payload, {"peer"}, "invalid_start_fields")
+        data = _exact_fields(
+            payload, {"peer", "local_generation"}, "invalid_start_fields"
+        )
+        local_generation = data["local_generation"]
+        _require(
+            isinstance(local_generation, int)
+            and not isinstance(local_generation, bool)
+            and 0 < local_generation <= (1 << 64) - 1,
+            "invalid_local_generation",
+        )
         peer_data = _exact_fields(
             data["peer"],
             {"node_id", "endpoint_id", "endpoint_addr", "generation"},
@@ -790,6 +799,7 @@ class PhysicalNodeService:
             socket_path=self.sidecar.socket_path,
             bootstrap_secret=self.sidecar.bootstrap_material,
             peer=peer,
+            local_generation=local_generation,
             expected_endpoint_id=self.endpoint_id,
             queue_capacity=128,
             delivery_timeout_seconds=min(self.command_timeout, 10.0),

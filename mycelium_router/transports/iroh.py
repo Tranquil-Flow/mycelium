@@ -364,6 +364,7 @@ class IrohTransport:
       socket_path: str | Path,
       bootstrap_secret: bytes,
       peer: PeerBinding,
+      local_generation: int | None = None,
       expected_endpoint_id: str,
       queue_capacity: int = 128,
       delivery_timeout_seconds: float = 5.0,
@@ -378,11 +379,20 @@ class IrohTransport:
          raise ValueError("queue_capacity must be positive")
       if delivery_timeout_seconds <= 0 or poll_interval_seconds <= 0:
          raise ValueError("timeouts must be positive")
+      selected_local_generation = (
+         peer.generation if local_generation is None else local_generation
+      )
+      if (
+         type(selected_local_generation) is not int
+         or not 0 < selected_local_generation <= (1 << 64) - 1
+      ):
+         raise ValueError("local generation must be a positive u64")
 
       self.node_id = node_id
       self.socket_path = Path(socket_path)
       self._bootstrap_secret = bytes(bootstrap_secret)
       self._peer = _canonical_peer_binding(peer)
+      self.local_generation = selected_local_generation
       self.expected_endpoint_id = expected_endpoint_id
       self.delivery_timeout_seconds = delivery_timeout_seconds
       self.poll_interval_seconds = poll_interval_seconds
@@ -761,6 +771,7 @@ class IrohTransport:
          message_id,
          timeout=timeout,
          expected_generation=expected_generation,
+         source_generation=self.local_generation,
       )
 
    @staticmethod
