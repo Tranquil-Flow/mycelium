@@ -14,7 +14,6 @@ from dataclasses import fields, is_dataclass, replace
 import json
 import os
 from pathlib import Path, PurePosixPath
-import platform
 import select
 import signal
 import stat
@@ -26,6 +25,7 @@ from typing import Any, Mapping
 import uuid
 
 from mycelium_iroh_sidecar import SidecarClient
+from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
 from mycelium_qualification.evidence import canonical_json_bytes, canonical_json_loads
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_router.contracts import (
@@ -443,7 +443,7 @@ class PhysicalNodeService:
         self.endpoint_secret_file = _validated_endpoint_secret_file(
             endpoint_secret_file
         )
-        self.host_id = platform.node()
+        self.host_id, _boot_id = derive_local_run_scoped_identity(run_id)
         self.process_id = os.getpid()
         self.state = "NEW"
         self.stop_requested = False

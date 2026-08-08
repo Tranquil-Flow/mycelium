@@ -161,6 +161,18 @@ def derive_run_scoped_identity(
     return "host-" + host_digest[:32], "boot-" + boot_digest[:32]
 
 
+def derive_local_run_scoped_identity(run_id: str) -> tuple[str, str]:
+    """Measure this machine and derive the same aliases emitted by live preflight."""
+
+    observed_host_id = _host_identity()
+    observed_boot_id = _boot_identity(observed_host_id)
+    return derive_run_scoped_identity(
+        run_id=run_id,
+        observed_host_id=observed_host_id,
+        observed_boot_id=observed_boot_id,
+    )
+
+
 def _runtime_supported(runtime: str) -> bool:
     if runtime != "mlx-mac-arm64" or platform.system() != "Darwin" or platform.machine() != "arm64":
         return False

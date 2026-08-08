@@ -16,6 +16,7 @@ import uuid
 
 import mlx.core as mx
 import pytest
+import physical_inference_node as node_module
 
 from mycelium_router.decoding import quantized_greedy_token_id
 from mycelium_qualification.evidence import canonical_json_bytes
@@ -581,6 +582,31 @@ def _identity(
         start_microseconds=start_microseconds,
         executable=executable,
     )
+
+
+def test_node_service_uses_run_scoped_physical_host_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+        raising=False,
+    )
+
+    service = PhysicalNodeService(
+        run_id="run-physical-identity",
+        deployment_id="deployment-physical-identity",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+
+    assert service.host_id == "host-run-physical-identity"
 
 
 def test_process_group_inventory_uses_exact_process_group_query(
