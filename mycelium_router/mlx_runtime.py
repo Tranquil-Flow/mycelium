@@ -158,19 +158,25 @@ def _layer_norm(
    bias: mx.array,
    epsilon: float,
 ) -> mx.array:
-   mean = mx.mean(hidden, axis=-1, keepdims=True)
-   variance = mx.mean(mx.square(hidden - mean), axis=-1, keepdims=True)
-   return (hidden - mean) * mx.rsqrt(variance + epsilon) * weight + bias
+   compute = hidden.astype(mx.float32)
+   mean = mx.mean(compute, axis=-1, keepdims=True)
+   variance = mx.mean(mx.square(compute - mean), axis=-1, keepdims=True)
+   normalized = (compute - mean) * mx.rsqrt(variance + epsilon)
+   return (normalized * weight.astype(mx.float32) + bias.astype(mx.float32)).astype(
+      hidden.dtype
+   )
 
 
 def _gelu_new(hidden: mx.array) -> mx.array:
-   return 0.5 * hidden * (
+   compute = hidden.astype(mx.float32)
+   result = 0.5 * compute * (
       1.0
       + mx.tanh(
          math.sqrt(2.0 / math.pi)
-         * (hidden + 0.044715 * mx.power(hidden, 3))
+         * (compute + 0.044715 * mx.power(compute, 3))
       )
    )
+   return result.astype(hidden.dtype)
 
 
 def _gpt2_block_with_kv(
@@ -207,10 +213,15 @@ def _gpt2_block_with_kv(
    else:
       all_key = mx.concatenate((past[0], key), axis=2)
       all_value = mx.concatenate((past[1], value), axis=2)
-   scores = mx.matmul(query, all_key.transpose(0, 1, 3, 2)) * (head_size**-0.5)
+   scores = mx.matmul(query, all_key.transpose(0, 1, 3, 2)) / math.sqrt(head_size)
    if past is None:
-      mask = mx.arange(sequence)[None, None, :] <= mx.arange(sequence)[:, None]
-      scores = mx.where(mask, scores, mx.array(-1e30, dtype=scores.dtype))
+      positions = mx.arange(sequence)
+      causal = positions[:, None] >= positions[None, :]
+      scores = mx.where(
+         causal[None, None, :, :],
+         scores,
+         mx.array(-math.inf, dtype=scores.dtype),
+      )
    weights = mx.softmax(scores, axis=-1)
    attention = mx.matmul(weights, all_value)
    attention = attention.transpose(0, 2, 1, 3).reshape(batch, sequence, hidden_size)
