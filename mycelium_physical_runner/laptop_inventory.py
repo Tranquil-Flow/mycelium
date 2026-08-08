@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import importlib.util
@@ -26,6 +27,7 @@ from mycelium_qualification.evidence import canonical_json_bytes
 from .remote_probe import derive_local_run_scoped_identity
 
 OBSERVATION_PROTOCOL = "mycelium.laptop_inventory_observation.v1"
+VERIFICATION_PROTOCOL = "mycelium.laptop_inventory_verification.v1"
 _HOST_ID_RE = re.compile(r"^host-[0-9a-f]{32}$")
 _BOOT_ID_RE = re.compile(r"^boot-[0-9a-f]{32}$")
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -171,6 +173,109 @@ def build_laptop_observation(
     return {**unsigned, "observation_digest": digest}
 
 
+def _validated_observation(document: Any) -> dict[str, Any]:
+    if not isinstance(document, Mapping):
+        _reject("observation_invalid")
+    value = dict(document)
+    expected_fields = {
+        "protocol",
+        "run_id",
+        "node_id",
+        "host_id",
+        "boot_id",
+        "observed_at_unix_seconds",
+        "host_name",
+        "machine_model",
+        "is_laptop",
+        "capability",
+        "python_version",
+        "collection_method",
+        "physical_qualification_executed",
+        "route_ready",
+        "release_ready",
+        "observation_digest",
+    }
+    if set(value) != expected_fields or value.get("protocol") != OBSERVATION_PROTOCOL:
+        _reject("observation_invalid")
+    supplied_digest = value.get("observation_digest")
+    unsigned = {key: item for key, item in value.items() if key != "observation_digest"}
+    actual_digest = "sha256:" + hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+    if supplied_digest != actual_digest:
+        _reject("observation_digest_invalid")
+    capability = value.get("capability")
+    if not isinstance(capability, Mapping):
+        _reject("observation_invalid")
+    try:
+        facts = LaptopFacts(
+            host_name=value["host_name"],
+            machine_model=value["machine_model"],
+            platform=capability["platform"],
+            architecture=capability["architecture"],
+            memory_bytes=capability["memory_bytes"],
+            available_storage_bytes=capability["available_storage_bytes"],
+            backends=tuple(capability["backends"]),
+            precisions=tuple(capability["precisions"]),
+            python_version=value["python_version"],
+            is_laptop=value["is_laptop"],
+        )
+        rebuilt = build_laptop_observation(
+            run_id=value["run_id"],
+            node_id=value["node_id"],
+            host_id=value["host_id"],
+            boot_id=value["boot_id"],
+            observed_at_unix_seconds=value["observed_at_unix_seconds"],
+            facts=facts,
+        )
+    except (KeyError, TypeError, LaptopInventoryError) as exc:
+        raise LaptopInventoryError("observation_invalid") from exc
+    if rebuilt != value:
+        _reject("observation_invalid")
+    return rebuilt
+
+
+def verify_laptop_inventory(
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    minimum_laptops: int = 3,
+) -> dict[str, Any]:
+    """Verify one unique, digest-bound observed laptop set."""
+
+    if (
+        isinstance(minimum_laptops, bool)
+        or not isinstance(minimum_laptops, int)
+        or minimum_laptops < 1
+    ):
+        _reject("inventory_minimum_invalid")
+    if not isinstance(observations, Sequence) or isinstance(
+        observations, (str, bytes, bytearray)
+    ):
+        _reject("inventory_invalid")
+    validated = tuple(_validated_observation(document) for document in observations)
+    if len(validated) < minimum_laptops:
+        _reject("inventory_minimum_not_met")
+    if len({item["run_id"] for item in validated}) != 1:
+        _reject("inventory_run_mismatch")
+    for field in ("node_id", "host_id", "boot_id"):
+        if len({item[field] for item in validated}) != len(validated):
+            _reject("inventory_identity_not_unique")
+
+    ordered = tuple(sorted(validated, key=lambda item: item["node_id"]))
+    unsigned = {
+        "protocol": VERIFICATION_PROTOCOL,
+        "run_id": ordered[0]["run_id"],
+        "minimum_required_laptops": minimum_laptops,
+        "observed_laptop_count": len(ordered),
+        "node_ids": [item["node_id"] for item in ordered],
+        "observation_digests": [item["observation_digest"] for item in ordered],
+        "inventory_verified": True,
+        "physical_qualification_executed": False,
+        "route_ready": False,
+        "release_ready": False,
+    }
+    digest = "sha256:" + hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+    return {**unsigned, "verification_digest": digest}
+
+
 def _command_output(command: Sequence[str]) -> str:
     try:
         completed = subprocess.run(
@@ -309,7 +414,9 @@ __all__ = [
     "LaptopFacts",
     "LaptopInventoryError",
     "OBSERVATION_PROTOCOL",
+    "VERIFICATION_PROTOCOL",
     "build_laptop_observation",
     "collect_local_laptop_observation",
     "main",
+    "verify_laptop_inventory",
 ]

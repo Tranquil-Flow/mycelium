@@ -10,6 +10,7 @@ from mycelium_physical_runner.laptop_inventory import (
     LaptopFacts,
     LaptopInventoryError,
     build_laptop_observation,
+    verify_laptop_inventory,
 )
 from mycelium_qualification.evidence import canonical_json_bytes
 
@@ -107,3 +108,54 @@ def test_canonical_cli_emits_only_one_observation(monkeypatch, capsys) -> None:
     assert captured.err == ""
     assert json.loads(captured.out) == expected
     assert captured.out == json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def _unique_observation(index: int):
+    hex_character = "abcdef"[index]
+    return _observation(
+        node_id=f"node-laptop-{index}",
+        host_id="host-" + hex_character * 32,
+        boot_id="boot-" + hex_character * 32,
+        facts=_facts(host_name=f"laptop-{index}"),
+    )
+
+
+def test_verify_laptop_inventory_accepts_three_unique_observations() -> None:
+    observations = [_unique_observation(index) for index in (2, 0, 1)]
+
+    verification = verify_laptop_inventory(observations)
+
+    assert verification["protocol"] == "mycelium.laptop_inventory_verification.v1"
+    assert verification["minimum_required_laptops"] == 3
+    assert verification["observed_laptop_count"] == 3
+    assert verification["node_ids"] == ["node-laptop-0", "node-laptop-1", "node-laptop-2"]
+    assert verification["inventory_verified"] is True
+    assert verification["physical_qualification_executed"] is False
+    assert verification["route_ready"] is False
+    assert verification["release_ready"] is False
+    assert verification["verification_digest"].startswith("sha256:")
+
+
+def test_verify_laptop_inventory_rejects_current_two_observation_state() -> None:
+    with pytest.raises(LaptopInventoryError, match="inventory_minimum_not_met"):
+        verify_laptop_inventory([_unique_observation(0), _unique_observation(1)])
+
+
+def test_verify_laptop_inventory_rejects_tampering_and_duplicate_host() -> None:
+    tampered = _unique_observation(0)
+    tampered["capability"]["memory_bytes"] += 1
+    with pytest.raises(LaptopInventoryError, match="observation_digest_invalid"):
+        verify_laptop_inventory([tampered, _unique_observation(1), _unique_observation(2)])
+
+    duplicate = _unique_observation(1)
+    duplicate["host_id"] = _unique_observation(0)["host_id"]
+    duplicate_without_digest = {
+        key: value for key, value in duplicate.items() if key != "observation_digest"
+    }
+    duplicate["observation_digest"] = "sha256:" + hashlib.sha256(
+        canonical_json_bytes(duplicate_without_digest)
+    ).hexdigest()
+    with pytest.raises(LaptopInventoryError, match="inventory_identity_not_unique"):
+        verify_laptop_inventory(
+            [_unique_observation(0), duplicate, _unique_observation(2)]
+        )
