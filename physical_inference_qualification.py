@@ -130,8 +130,9 @@ except BaseException:
 class ControllerError(ValueError):
     """Stable fail-closed controller error."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: str, *, remote_code: str | None = None) -> None:
         self.code = code
+        self.remote_code = remote_code
         super().__init__(code)
 
 
@@ -1173,7 +1174,13 @@ class QualificationController:
         expected_verification_key: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         if response.get("ok") is not True or not isinstance(response.get("result"), Mapping):
-            _reject("node_command_rejected")
+            remote_code: str | None = None
+            remote_error = response.get("error")
+            if isinstance(remote_error, Mapping):
+                candidate = remote_error.get("code")
+                if isinstance(candidate, str) and _SEGMENT_RE.fullmatch(candidate) is not None:
+                    remote_code = candidate
+            raise ControllerError("node_command_rejected", remote_code=remote_code)
         signed = response["result"]
         if set(signed) != {"observation", "signature", "verification_key"}:
             _reject("node_observation_invalid")

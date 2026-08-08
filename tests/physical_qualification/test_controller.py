@@ -625,6 +625,28 @@ def test_physical_mode_requires_distinct_host_and_boot_then_requires_run_plan(
     assert runner.calls == []
 
 
+def test_rejected_node_observation_preserves_remote_error_code(tmp_path: Path) -> None:
+    controller, _runner = _controller(tmp_path, mode="physical")
+    peer = controller.peers[0]
+
+    with pytest.raises(ControllerError, match="node_command_rejected") as caught:
+        controller._verified_observation(
+            {
+                "ok": False,
+                "error": {"code": "prefill_completion_timeout"},
+            },
+            event="inference_started",
+            peer=peer,
+            process_id=1,
+            run_id="run-a",
+            deployment_id="deployment-a",
+            endpoint_id="endpoint-a",
+        )
+
+    assert caught.value.code == "node_command_rejected"
+    assert caught.value.remote_code == "prefill_completion_timeout"
+
+
 def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
     tmp_path: Path,
 ) -> None:
