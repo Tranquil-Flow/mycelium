@@ -38,7 +38,17 @@ _TOP_LEVEL_FIELDS = frozenset(
 )
 _PATH_FIELDS = frozenset({"evidence_output_dir", "lock_path", "state_path", "log_path"})
 _CONTROLLER_FIELDS = frozenset(
-    {"mode", "now", "source_root", "peers", "transfer_manifest", "membership_snapshot", "run_plan", "authority_documents"}
+    {
+        "mode",
+        "now",
+        "source_root",
+        "peers",
+        "transfer_manifest",
+        "membership_snapshot",
+        "run_plan",
+        "authority_documents",
+        "authority_profile",
+    }
 )
 _CONTROLLER_PEER_FIELDS = frozenset(
     {
@@ -229,10 +239,22 @@ def _controller(value: Any) -> Mapping[str, Any]:
     snapshot = dict(value)
     unknown = set(snapshot) - _CONTROLLER_FIELDS
     _require(not unknown, "plan_unknown_field", "controller." + ",".join(sorted(unknown)))
-    required = _CONTROLLER_FIELDS - {"authority_documents"}
+    required = _CONTROLLER_FIELDS - {"authority_documents", "authority_profile"}
     missing = required - set(snapshot)
     _require(not missing, "plan_missing_field", "controller." + ",".join(sorted(missing)))
     _require(snapshot.get("mode") == "physical", "plan_field_invalid", "controller.mode")
+    authority_profile = snapshot.get("authority_profile")
+    _require(
+        authority_profile is None
+        or authority_profile == "physical_frozen_route_inference_v1",
+        "plan_field_invalid",
+        "controller.authority_profile",
+    )
+    _require(
+        authority_profile is None or "authority_documents" not in snapshot,
+        "plan_field_invalid",
+        "controller.authority_documents",
+    )
     now = snapshot.get("now")
     _require(isinstance(now, (int, float)) and not isinstance(now, bool) and math.isfinite(float(now)), "plan_field_invalid", "controller.now")
     snapshot["source_root"] = _safe_local_path(snapshot.get("source_root"), "controller.source_root", existing_directory=True)

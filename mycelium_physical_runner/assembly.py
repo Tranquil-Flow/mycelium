@@ -15,6 +15,10 @@ from .adapters import (
 )
 from .config import RunnerConfig
 from .errors import RunnerError
+from .frozen_evidence import (
+    FROZEN_ROUTE_AUTHORITY_PROFILE,
+    build_frozen_route_authority_documents,
+)
 from .runner import PhysicalRunner
 
 
@@ -56,7 +60,14 @@ def build_production_runner(config: RunnerConfig) -> PhysicalRunner:
         raise RunnerError("runner_assembly_invalid") from exc
 
     configured_documents = controller_config.get("authority_documents")
-    if not isinstance(configured_documents, Mapping):
+    authority_profile = controller_config.get("authority_profile")
+    if authority_profile == FROZEN_ROUTE_AUTHORITY_PROFILE:
+        def document_builder(evidence: Mapping[str, Any]) -> Mapping[str, Any]:
+            return build_frozen_route_authority_documents(
+                controller_config=controller_config,
+                evidence=evidence,
+            )
+    elif not isinstance(configured_documents, Mapping):
         def missing_documents(_evidence: Mapping[str, Any]) -> Mapping[str, Any]:
             raise RunnerError("authority_documents_missing")
 

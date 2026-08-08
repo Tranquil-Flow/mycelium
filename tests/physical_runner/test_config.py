@@ -268,6 +268,26 @@ def test_missing_non_transport_peer_fields_fail_closed(
     assert caught.value.code == "plan_missing_field"
 
 
+def test_controller_authority_profile_is_bounded_and_exclusive(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["authority_profile"] = "physical_frozen_route_inference_v1"
+    config = parse_operator_plan(payload)
+    assert config.controller["authority_profile"] == "physical_frozen_route_inference_v1"
+
+    invalid = _plan(workspace)
+    invalid["controller"]["authority_profile"] = "planner_v2_full_route_v1"
+    with pytest.raises(RunnerError) as invalid_error:
+        parse_operator_plan(invalid)
+    assert invalid_error.value.code == "plan_field_invalid"
+
+    mixed = _plan(workspace)
+    mixed["controller"]["authority_profile"] = "physical_frozen_route_inference_v1"
+    mixed["controller"]["authority_documents"] = {}
+    with pytest.raises(RunnerError) as mixed_error:
+        parse_operator_plan(mixed)
+    assert mixed_error.value.code == "plan_field_invalid"
+
+
 def test_unknown_and_missing_top_level_fields_fail_closed(workspace: Path) -> None:
     extra = _plan(workspace)
     extra["unexpected"] = 1

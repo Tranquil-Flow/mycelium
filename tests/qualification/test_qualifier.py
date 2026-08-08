@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 
+from mycelium_physical_runner.frozen_evidence import (
+    FROZEN_ROUTE_AUTHORITY_PROFILE,
+    build_frozen_route_authority_documents,
+)
 from mycelium_qualification.contracts import route_qualification_to_dict
 from mycelium_qualification.evidence import (
     canonical_json_bytes,
@@ -12,6 +17,11 @@ from mycelium_qualification.evidence import (
     sha256_document,
 )
 from mycelium_qualification.qualifier import QualificationError, qualify_route
+from mycelium_qualification.sealer import (
+    qualify_sealed_evidence,
+    seal_physical_evidence,
+)
+from mycelium_qualification.signing import generate_ed25519_signer
 
 
 Mutation = Callable[[Any], None]
@@ -70,6 +80,428 @@ def _resign_load_statement(case: Any, index: int) -> None:
     signed["signature"]["signed_statement_digest"] = sha256_bytes(
         canonical_json_bytes(signed["statement"])
     )
+
+
+def _frozen_route_case(case: Any) -> Any:
+    tranche = case.documents["control/control-plane-tranche.json"]
+    assignments = tranche["assignments"]
+    graph = case.documents["router/execution-graph.json"]
+    run_id = case.documents["run/route-challenge.json"]["run_id"]
+    expected_tokens = [4599, 3329, 2506, 5145]
+    signed_observations: list[dict[str, Any]] = []
+    identities: dict[str, dict[str, Any]] = {}
+    observation_signers: dict[str, Any] = {}
+
+    def signed(observation: dict[str, Any], endpoint_id: str) -> None:
+        signer = observation_signers.setdefault(
+            endpoint_id,
+            generate_ed25519_signer(endpoint_id=endpoint_id),
+        )
+        signed_observations.append(
+            {
+                "observation": observation,
+                "signature": signer.sign(observation),
+                "verification_key": signer.public_key_record(),
+            }
+        )
+
+    for index, (assignment, stage) in enumerate(
+        zip(assignments, graph["stages"]), start=1
+    ):
+        node_id = assignment["node_id"]
+        host_id = f"physical-host-{index}"
+        process_id = 7_000 + index
+        endpoint_id = f"physical-endpoint-{index}"
+        peer_node_id = assignments[index % len(assignments)]["node_id"]
+        identities[node_id] = {
+            "run_id": run_id,
+            "deployment_id": graph["deployment_id"],
+            "node_id": node_id,
+            "host_id": host_id,
+            "process_id": process_id,
+            "endpoint_id": endpoint_id,
+        }
+        common = {
+            "protocol": "mycelium.node_observation.v1",
+            "run_id": run_id,
+            "deployment_id": graph["deployment_id"],
+            "node_id": node_id,
+            "host_id": host_id,
+            "process_id": process_id,
+            "endpoint_id": endpoint_id,
+            "route_ready": False,
+            "release_ready": False,
+            "reason_codes": ["physical_qualification_pending"],
+        }
+        released_reservations = {
+            f"reservation-{position}": {
+                "reservation_id": f"reservation-{position}",
+                "node_id": reserved_assignment["node_id"],
+                "placement_id": graph["stages"][position - 1]["placements"][0][
+                    "placement_id"
+                ],
+                "status": "RELEASED",
+            }
+            for position, reserved_assignment in enumerate(assignments, start=1)
+        }
+        for event, details in (
+            (
+                "configured",
+                {
+                    "assignment_id": assignment["assignment_id"],
+                    "placement_id": stage["placements"][0]["placement_id"],
+                    "manifest_digest": graph["manifest_digest"],
+                },
+            ),
+            ("started", {}),
+            (
+                "snapshot",
+                {
+                    "transport": {
+                        "local_node_id": node_id,
+                        "peer_node_id": peer_node_id,
+                        "remote_frames_sent": 8,
+                        "remote_frames_received": 8,
+                        "route_ready": False,
+                    },
+                    "transport_fatal_error": None,
+                    "runtime": {
+                        "mode": "stage_local_kv",
+                        "active_state_count": 0,
+                        "release_counts": {"normal_completion": 1},
+                    },
+                    "capacity": {
+                        "node_reserved_kv_bytes": {
+                            reserved_assignment["node_id"]: 0
+                            for reserved_assignment in assignments
+                        },
+                        "reservations": released_reservations,
+                    },
+                },
+            ),
+            ("stopping", {}),
+        ):
+            signed(dict(common, event=event, details=details), endpoint_id)
+        if index == 1:
+            signed(
+                dict(common, event="inference_started", details={"status": "RUNNING"}),
+                endpoint_id,
+            )
+            signed(
+                dict(
+                    common,
+                    event="inference_decoded",
+                    details={
+                        "status": "COMPLETED",
+                        "output": {"token_ids": list(expected_tokens)},
+                    },
+                ),
+                endpoint_id,
+            )
+
+    offers = []
+    for assignment in assignments:
+        statement = {
+            "deployment_id": graph["deployment_id"],
+            "recipient_node_id": assignment["node_id"],
+            "assignment_id": assignment["assignment_id"],
+            "assignment_digest": sha256_document(assignment),
+            "graph_digest": sha256_document(graph),
+            "expires_at_unix_ms": case.now_unix_ms + 30_000,
+        }
+        offers.append(
+            {
+                "message": statement,
+                "signature": {
+                    "algorithm": "ed25519",
+                    "signed_statement_digest": sha256_bytes(
+                        canonical_json_bytes(statement)
+                    ),
+                    "signature": "synthetic-test-signature-never-production",
+                },
+                "verification_key": {"endpoint_id": "physical-seed"},
+            }
+        )
+
+    source_documents = {
+        "control/model-manifest.json": case.documents["model/model-manifest.json"],
+        "control/execution-graph.json": graph,
+    }
+    for assignment, report, proof in zip(
+        assignments,
+        case.documents["runtime/provisioning-reports.json"],
+        case.documents["runtime/load-proofs.json"],
+    ):
+        node_id = assignment["node_id"]
+        source_documents[f"control/{node_id}-assignment.json"] = assignment
+        source_documents[f"control/{node_id}-artifact-report.json"] = report
+        source_documents[f"control/{node_id}-load-proof.json"] = proof
+    case.documents["qualification/source-provenance.json"] = {
+        "kind": "physical_frozen_route_source_provenance_v1",
+        "archive_digest": sha256_document({"archive": "physical"}),
+        "archive_size_bytes": 1,
+        "transfer_manifest": {
+            "protocol": "mycelium.controller_transfer_manifest.v1",
+            "files": [
+                {
+                    "path": path,
+                    "size_bytes": len(canonical_json_bytes(document)),
+                    "content_digest": sha256_document(document),
+                }
+                for path, document in sorted(source_documents.items())
+            ],
+        },
+    }
+    case.documents["control/control-plane-tranche.json"] = {
+        "kind": "physical_frozen_route_control_v1",
+        "entry_node_id": assignments[0]["node_id"],
+        "assignments": assignments,
+        "run_plan_digest": sha256_document({"run_id": run_id}),
+    }
+    case.documents["control/gossip-signature.json"] = {
+        "kind": "physical_frozen_route_membership_v1",
+        "snapshot": {
+            "protocol": "mycelium.controller_membership_snapshot.v1",
+            "deployment_id": graph["deployment_id"],
+            "assignment_offers": offers,
+        },
+    }
+    case.documents["runtime/load-proof-signatures.json"] = {
+        "kind": "physical_frozen_route_signed_observations_v1",
+        "run_id": run_id,
+        "observations": signed_observations,
+    }
+    case.documents["run/route-challenge.json"] = {
+        "kind": "physical_frozen_route_challenge_v1",
+        "run_id": run_id,
+        "evidence_class": "physical_qualification",
+        "qualification_scope": "inference",
+        "generated_at_unix_ms": case.now_unix_ms - 1_000,
+        "valid_until_unix_ms": case.now_unix_ms + 30_000,
+        "deployment_id": graph["deployment_id"],
+        "deployment_epoch": graph["deployment_epoch"],
+        "topology_version": graph["topology_version"],
+        "placement_provenance": "frozen_fixture",
+        "model_id": graph["model_id"],
+        "resolved_commit": graph["resolved_commit"],
+        "manifest_digest": graph["manifest_digest"],
+        "entry_node_id": assignments[0]["node_id"],
+        "request": {"prompt_token_ids": [1, 2, 3]},
+        "expected_token_ids": expected_tokens,
+        "output_token_ids": list(expected_tokens),
+        "identities": identities,
+        "signed_observations": signed_observations,
+        "cleanup": [
+            {"node_id": assignment["node_id"], "removed": True}
+            for assignment in assignments
+        ],
+    }
+    case.documents["run/negative-runs.json"] = {
+        "kind": "physical_frozen_route_scope_v1",
+        "run_id": run_id,
+        "qualified_operations": ["inference"],
+        "unqualified_operations": ["cancellation", "recovery"],
+        "claim_boundary": "ordinary frozen-placement inference only; cancellation and recovery are not qualified",
+    }
+    return case
+
+
+def test_frozen_physical_inference_profile_qualifies_without_post_mvp_claims(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+
+    record = _qualify(case)
+    document = route_qualification_to_dict(record)
+
+    assert document["route_ready"] is True
+    assert document["reason_codes"] == []
+    assert document["evidence_class"] == "physical_qualification"
+    assert document["placement_provenance"] == "frozen_fixture"
+    assert "ordinary frozen-placement inference only" in document["claim_boundary"]
+    assert "cancellation and recovery are not qualified" in document["claim_boundary"]
+    assert len(document["stage_bindings"]) == 2
+
+
+def test_frozen_authority_document_builder_binds_dynamic_controller_result(
+    qualification_case: Any,
+    tmp_path: Path,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    challenge = case.documents["run/route-challenge.json"]
+    control = case.documents["control/control-plane-tranche.json"]
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_index = {
+        entry["path"]: entry
+        for entry in case.documents["qualification/source-provenance.json"][
+            "transfer_manifest"
+        ]["files"]
+    }
+    source_documents = {
+        "control/model-manifest.json": case.documents["model/model-manifest.json"],
+        "control/execution-graph.json": case.documents[
+            "router/execution-graph.json"
+        ],
+    }
+    reports = {
+        report["assignment_id"]: report
+        for report in case.documents["runtime/provisioning-reports.json"]
+    }
+    proofs = {
+        proof["assignment_id"]: proof
+        for proof in case.documents["runtime/load-proofs.json"]
+    }
+    for assignment in control["assignments"]:
+        node_id = assignment["node_id"]
+        assignment_id = assignment["assignment_id"]
+        source_documents[f"control/{node_id}-assignment.json"] = assignment
+        source_documents[f"control/{node_id}-artifact-report.json"] = reports[
+            assignment_id
+        ]
+        source_documents[f"control/{node_id}-load-proof.json"] = proofs[assignment_id]
+    for path, document in source_documents.items():
+        destination = source_root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(canonical_json_bytes(document))
+        assert source_index[path]["size_bytes"] == destination.stat().st_size
+
+    peers = [
+        {
+            "node_id": node_id,
+            "host_id": identity["host_id"],
+        }
+        for node_id, identity in challenge["identities"].items()
+    ]
+    controller_config = {
+        "authority_profile": FROZEN_ROUTE_AUTHORITY_PROFILE,
+        "now": case.now_unix_ms / 1000,
+        "source_root": str(source_root),
+        "peers": peers,
+        "transfer_manifest": case.documents[
+            "qualification/source-provenance.json"
+        ]["transfer_manifest"],
+        "membership_snapshot": case.documents["control/gossip-signature.json"][
+            "snapshot"
+        ],
+        "run_plan": {
+            "run_id": challenge["run_id"],
+            "deployment_id": challenge["deployment_id"],
+            "entry_node_id": challenge["entry_node_id"],
+            "request": challenge["request"],
+            "expected_token_ids": challenge["expected_token_ids"],
+        },
+    }
+    evidence = {
+        "protocol": "mycelium.physical_controller_result.v1",
+        "command": "run",
+        "mode": "physical",
+        "run_id": challenge["run_id"],
+        "physical_execution": True,
+        "route_ready": False,
+        "release_ready": False,
+        "cancelled": False,
+        "token_parity": True,
+        "expected_token_ids": challenge["expected_token_ids"],
+        "output_token_ids": challenge["output_token_ids"],
+        "identities": challenge["identities"],
+        "observations": {node_id: {} for node_id in challenge["identities"]},
+        "signed_observations": challenge["signed_observations"],
+        "cleanup": challenge["cleanup"],
+        "recovered_nodes": [],
+        "restart_attempts": {},
+    }
+
+    documents = build_frozen_route_authority_documents(
+        controller_config=controller_config,
+        evidence=evidence,
+    )
+
+    assert documents["run/route-challenge.json"]["output_token_ids"] == [
+        4599,
+        3329,
+        2506,
+        5145,
+    ]
+    assert documents["run/negative-runs.json"]["qualified_operations"] == [
+        "inference"
+    ]
+    assert documents["run/negative-runs.json"]["unqualified_operations"] == [
+        "cancellation",
+        "recovery",
+    ]
+    sealed = seal_physical_evidence(
+        output_dir=tmp_path / "sealed",
+        run_id=challenge["run_id"],
+        documents=documents,
+    )
+
+    record = qualify_sealed_evidence(
+        sealed,
+        now_unix_ms=case.now_unix_ms,
+        verify_gossip_signature=_verify_synthetic_signature,
+        verify_load_proof_signature=_verify_synthetic_signature,
+    )
+
+    assert record.route_ready is True
+    assert record.evidence_manifest_digest == sealed.manifest_digest
+
+
+def test_frozen_physical_inference_profile_rejects_unbound_stage_assignment(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    signed = case.documents["runtime/load-proof-signatures.json"]["observations"][0]
+    signed["observation"]["details"]["assignment_id"] = "wrong-assignment"
+    signer = generate_ed25519_signer(
+        endpoint_id=signed["observation"]["endpoint_id"]
+    )
+    signed["signature"] = signer.sign(signed["observation"])
+    signed["verification_key"] = signer.public_key_record()
+
+    _assert_rejected(case, "signed_observation_binding_invalid")
+
+
+def test_frozen_physical_inference_profile_rejects_same_host_processes(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    identities = case.documents["run/route-challenge.json"]["identities"]
+    node_ids = list(identities)
+    identities[node_ids[1]]["host_id"] = identities[node_ids[0]]["host_id"]
+
+    _assert_rejected(case, "physical_identity_invalid")
+
+
+def test_frozen_physical_inference_profile_rejects_token_mismatch(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    case.documents["run/route-challenge.json"]["output_token_ids"][-1] += 1
+
+    _assert_rejected(case, "token_parity_invalid")
+
+
+def test_frozen_physical_inference_profile_rejects_post_mvp_scope_claim(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    case.documents["run/negative-runs.json"]["qualified_operations"].append(
+        "recovery"
+    )
+
+    _assert_rejected(case, "qualification_scope_invalid")
+
+
+def test_frozen_physical_inference_profile_rejects_source_pin_mismatch(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    case.documents["qualification/source-provenance.json"]["transfer_manifest"][
+        "files"
+    ][0]["content_digest"] = "sha256:" + "0" * 64
+
+    _assert_rejected(case, "source_provenance_digest_mismatch")
 
 
 def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case: Any) -> None:

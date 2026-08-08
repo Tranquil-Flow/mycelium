@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import model_manifest as mm
+from layer_assignment import validate_assignment_identity
 from mycelium_router.layer_builder import (
     LayerBuildError,
     build_execution_graph,
@@ -32,6 +33,7 @@ from .evidence import (
     sha256_document,
     validate_evidence_manifest,
 )
+from .signing import build_ed25519_verifier
 
 REQUIRED_NEGATIVE_RUNS = (
     "stale_proof",
@@ -1220,6 +1222,628 @@ def _validate_negative_runs(value: Any, run_id: str) -> dict[str, Any]:
     return document
 
 
+def _qualify_frozen_route(
+    *,
+    documents: Mapping[str, Any],
+    evidence_manifest: Mapping[str, Any],
+    manifest_binding: str,
+    now_unix_ms: int,
+    verify_gossip_signature: Callable[[bytes, dict[str, Any]], bool],
+    verify_load_proof_signature: Callable[[bytes, dict[str, Any]], bool],
+) -> RouteQualificationV1:
+    """Qualify only ordinary inference over one exact frozen physical placement."""
+
+    challenge = _as_mapping(documents["route_challenge"], "route_challenge_invalid")
+    _require(
+        set(challenge)
+        == {
+            "kind",
+            "run_id",
+            "evidence_class",
+            "qualification_scope",
+            "generated_at_unix_ms",
+            "valid_until_unix_ms",
+            "deployment_id",
+            "deployment_epoch",
+            "topology_version",
+            "placement_provenance",
+            "model_id",
+            "resolved_commit",
+            "manifest_digest",
+            "entry_node_id",
+            "request",
+            "expected_token_ids",
+            "output_token_ids",
+            "identities",
+            "signed_observations",
+            "cleanup",
+        }
+        and challenge.get("kind") == "physical_frozen_route_challenge_v1"
+        and challenge.get("qualification_scope") == "inference"
+        and challenge.get("evidence_class") == "physical_qualification",
+        "route_challenge_invalid",
+    )
+    run_id = challenge.get("run_id")
+    generated = challenge.get("generated_at_unix_ms")
+    valid_until = challenge.get("valid_until_unix_ms")
+    _require(
+        _nonempty_string(run_id)
+        and evidence_manifest.get("run_id") == run_id
+        and evidence_manifest.get("evidence_class") == "physical_qualification",
+        "evidence_manifest_run_id_mismatch",
+    )
+    _require(
+        _integer(generated)
+        and _integer(valid_until)
+        and generated <= now_unix_ms < valid_until,
+        "stale_route_challenge",
+    )
+    _require(
+        challenge.get("placement_provenance") == "frozen_fixture",
+        "placement_provenance_invalid",
+    )
+
+    source_provenance = _as_mapping(
+        documents["source_provenance"], "source_provenance_invalid"
+    )
+    _require(
+        set(source_provenance)
+        == {"kind", "archive_digest", "archive_size_bytes", "transfer_manifest"}
+        and source_provenance.get("kind")
+        == "physical_frozen_route_source_provenance_v1"
+        and is_sha256_ref(source_provenance.get("archive_digest"))
+        and _integer(source_provenance.get("archive_size_bytes"), minimum=1),
+        "source_provenance_invalid",
+    )
+    transfer_manifest = _as_mapping(
+        source_provenance["transfer_manifest"], "source_provenance_invalid"
+    )
+    _require(
+        transfer_manifest.get("protocol")
+        == "mycelium.controller_transfer_manifest.v1"
+        and set(transfer_manifest) == {"protocol", "files"},
+        "source_provenance_invalid",
+    )
+    source_files = _as_list(transfer_manifest["files"], "source_provenance_invalid")
+    source_index: dict[str, dict[str, Any]] = {}
+    for source_file in source_files:
+        _require(
+            isinstance(source_file, dict)
+            and set(source_file) == {"path", "size_bytes", "content_digest"}
+            and _nonempty_string(source_file.get("path"))
+            and not str(source_file["path"]).startswith("/")
+            and ".." not in str(source_file["path"]).split("/")
+            and _integer(source_file.get("size_bytes"))
+            and is_sha256_ref(source_file.get("content_digest"))
+            and source_file["path"] not in source_index,
+            "source_provenance_invalid",
+        )
+        source_index[source_file["path"]] = source_file
+
+    model_manifest = _as_mapping(documents["model_manifest"], "invalid_model_manifest")
+    _require(mm.verify_manifest_digest(model_manifest), "invalid_model_manifest")
+    try:
+        graph = execution_graph_to_dict(
+            execution_graph_from_dict(
+                _as_mapping(documents["execution_graph"], "execution_graph_chain_invalid")
+            )
+        )
+    except (ContractError, KeyError, TypeError, ValueError) as exc:
+        raise QualificationError("execution_graph_chain_invalid", str(exc)) from exc
+    control = _as_mapping(documents["control_plane_tranche"], "control_plane_chain_invalid")
+    _require(
+        set(control) == {"kind", "entry_node_id", "assignments", "run_plan_digest"}
+        and control.get("kind") == "physical_frozen_route_control_v1"
+        and is_sha256_ref(control.get("run_plan_digest")),
+        "control_plane_chain_invalid",
+    )
+    assignments_raw = _as_list(control["assignments"], "control_plane_chain_invalid")
+    _require(
+        all(isinstance(item, dict) for item in assignments_raw),
+        "control_plane_chain_invalid",
+    )
+    assignments: list[dict[str, Any]] = assignments_raw
+    assignments_by_id: dict[str, dict[str, Any]] = {}
+    assignments_by_node: dict[str, dict[str, Any]] = {}
+    try:
+        for assignment in assignments:
+            validate_assignment_identity(assignment)
+            assignment_id = assignment["assignment_id"]
+            node_id = assignment["node_id"]
+            _require(
+                assignment_id not in assignments_by_id
+                and node_id not in assignments_by_node
+                and assignment.get("deployment_id") == graph["deployment_id"]
+                and assignment.get("deployment_epoch") == graph["deployment_epoch"]
+                and assignment.get("model_id") == graph["model_id"]
+                and assignment.get("resolved_commit") == graph["resolved_commit"]
+                and assignment.get("manifest_digest") == graph["manifest_digest"],
+                "control_plane_chain_invalid",
+            )
+            assignments_by_id[assignment_id] = assignment
+            assignments_by_node[node_id] = assignment
+    except (KeyError, TypeError, ValueError) as exc:
+        raise QualificationError("control_plane_chain_invalid", str(exc)) from exc
+    _require(
+        len(assignments) >= 2
+        and len(graph["stages"]) == len(assignments)
+        and control["entry_node_id"] == challenge["entry_node_id"]
+        and control["entry_node_id"] in assignments_by_node,
+        "control_plane_chain_invalid",
+    )
+
+    reports = _validate_provisioning(documents["provisioning_reports"], assignments)
+    proofs_raw = _as_list(documents["load_proofs"], "load_proof_chain_invalid")
+    _require(all(isinstance(item, dict) for item in proofs_raw), "load_proof_chain_invalid")
+    proofs: list[dict[str, Any]] = proofs_raw
+    proofs_by_id = {proof.get("assignment_id"): proof for proof in proofs}
+    _require(
+        len(proofs_by_id) == len(proofs)
+        and set(proofs_by_id) == set(assignments_by_id),
+        "load_proof_chain_invalid",
+    )
+
+    graph_placements: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for stage in graph["stages"]:
+        _require(len(stage["placements"]) == 1, "execution_graph_chain_invalid")
+        placement = stage["placements"][0]
+        assignment_id = placement["assignment_id"]
+        assignment = assignments_by_id.get(assignment_id)
+        proof = proofs_by_id.get(assignment_id)
+        _require(
+            assignment is not None
+            and proof is not None
+            and assignment_id not in graph_placements
+            and placement.get("node_id") == assignment.get("node_id")
+            and stage.get("range", {}).get("start_layer")
+            == assignment.get("range", {}).get("start_layer")
+            and stage.get("range", {}).get("end_layer_exclusive")
+            == assignment.get("range", {}).get("end_layer_exclusive")
+            and proof.get("node_id") == assignment.get("node_id")
+            and proof.get("deployment_id") == graph["deployment_id"]
+            and proof.get("model_id") == graph["model_id"]
+            and proof.get("resolved_commit") == graph["resolved_commit"]
+            and proof.get("manifest_digest") == graph["manifest_digest"]
+            and proof.get("loaded_tensor_keys") == assignment.get("expected_tensor_keys")
+            and placement.get("load_proof_digest") == layer_load_proof_digest(proof)
+            and is_sha256_ref(proof.get("probe_digest")),
+            "load_proof_chain_invalid",
+        )
+        graph_placements[assignment_id] = (stage, placement)
+
+    critical_documents: dict[str, Any] = {
+        "control/model-manifest.json": model_manifest,
+        "control/execution-graph.json": graph,
+    }
+    reports_by_id = {report["assignment_id"]: report for report in reports}
+    for assignment_id, assignment in assignments_by_id.items():
+        node_id = assignment["node_id"]
+        critical_documents[f"control/{node_id}-assignment.json"] = assignment
+        critical_documents[f"control/{node_id}-artifact-report.json"] = reports_by_id[
+            assignment_id
+        ]
+        critical_documents[f"control/{node_id}-load-proof.json"] = proofs_by_id[
+            assignment_id
+        ]
+    for path, document in critical_documents.items():
+        pin = source_index.get(path)
+        rendered = canonical_json_bytes(document)
+        _require(
+            pin is not None
+            and pin["size_bytes"] == len(rendered)
+            and pin["content_digest"] == sha256_bytes(rendered),
+            "source_provenance_digest_mismatch",
+            path,
+        )
+
+    gossip = _as_mapping(documents["gossip_signature"], "gossip_signature_invalid")
+    _require(
+        set(gossip) == {"kind", "snapshot"}
+        and gossip.get("kind") == "physical_frozen_route_membership_v1",
+        "gossip_signature_invalid",
+    )
+    membership = _as_mapping(gossip["snapshot"], "gossip_signature_invalid")
+    offers = _as_list(membership.get("assignment_offers"), "gossip_signature_invalid")
+    _require(
+        membership.get("protocol") == "mycelium.controller_membership_snapshot.v1"
+        and membership.get("deployment_id") == graph["deployment_id"]
+        and len(offers) == len(assignments),
+        "gossip_signature_invalid",
+    )
+    offered_assignments: set[str] = set()
+    for offer in offers:
+        _require(isinstance(offer, Mapping), "gossip_signature_invalid")
+        message = _as_mapping(offer.get("message"), "gossip_signature_invalid")
+        signature = _as_mapping(offer.get("signature"), "gossip_signature_invalid")
+        assignment_id = message.get("assignment_id")
+        assignment = assignments_by_id.get(assignment_id)
+        expires_seconds = message.get("expires_at")
+        expires_milliseconds = message.get("expires_at_unix_ms")
+        expires_at_unix_ms = (
+            int(float(expires_seconds) * 1000)
+            if isinstance(expires_seconds, (int, float))
+            and not isinstance(expires_seconds, bool)
+            else expires_milliseconds
+        )
+        statement_bytes = canonical_json_bytes(message)
+        _require(
+            assignment is not None
+            and assignment_id not in offered_assignments
+            and message.get("deployment_id") == graph["deployment_id"]
+            and message.get("recipient_node_id") == assignment["node_id"]
+            and message.get("assignment_digest") == sha256_document(assignment)
+            and message.get("graph_digest") == sha256_document(graph)
+            and _integer(expires_at_unix_ms)
+            and now_unix_ms < expires_at_unix_ms
+            and signature.get("signed_statement_digest") == sha256_bytes(statement_bytes),
+            "gossip_signature_invalid",
+        )
+        try:
+            verified = verify_gossip_signature(statement_bytes, dict(signature))
+        except Exception as exc:
+            raise QualificationError("gossip_signature_invalid", str(exc)) from exc
+        _require(verified is True, "gossip_signature_invalid")
+        offered_assignments.add(str(assignment_id))
+    _require(offered_assignments == set(assignments_by_id), "gossip_signature_invalid")
+
+    signed_document = _as_mapping(
+        documents["load_proof_signatures"], "signed_observation_set_invalid"
+    )
+    _require(
+        set(signed_document) == {"kind", "run_id", "observations"}
+        and signed_document.get("kind")
+        == "physical_frozen_route_signed_observations_v1"
+        and signed_document.get("run_id") == run_id
+        and canonical_json_bytes(signed_document.get("observations"))
+        == canonical_json_bytes(challenge.get("signed_observations")),
+        "signed_observation_set_invalid",
+    )
+    envelopes = _as_list(signed_document["observations"], "signed_observation_set_invalid")
+    signed_index: dict[tuple[str, str], dict[str, Any]] = {}
+    for envelope in envelopes:
+        _require(
+            isinstance(envelope, Mapping)
+            and set(envelope) == {"observation", "signature", "verification_key"},
+            "signed_observation_invalid",
+        )
+        observation = _as_mapping(envelope["observation"], "signed_observation_invalid")
+        signature = _as_mapping(envelope["signature"], "signed_observation_invalid")
+        verification_key = _as_mapping(
+            envelope["verification_key"], "signed_observation_invalid"
+        )
+        node_id = observation.get("node_id")
+        event = observation.get("event")
+        key = (str(node_id), str(event))
+        statement_bytes = canonical_json_bytes(observation)
+        key_digest = verification_key.get("verification_key_digest")
+        _require(
+            node_id in assignments_by_node
+            and _nonempty_string(event)
+            and key not in signed_index
+            and observation.get("run_id") == run_id
+            and observation.get("deployment_id") == graph["deployment_id"]
+            and observation.get("route_ready") is False
+            and signature.get("signer_endpoint_id") == observation.get("endpoint_id")
+            and signature.get("signed_statement_digest") == sha256_bytes(statement_bytes)
+            and (
+                key_digest is None
+                or key_digest == signature.get("verification_key_digest")
+            ),
+            "signed_observation_invalid",
+        )
+        try:
+            verified = build_ed25519_verifier([verification_key])(
+                statement_bytes,
+                dict(signature),
+            )
+        except Exception as exc:
+            raise QualificationError("signed_observation_invalid", str(exc)) from exc
+        _require(verified is True, "signed_observation_invalid")
+        signed_index[key] = observation
+
+    identities = _as_mapping(challenge["identities"], "physical_identity_invalid")
+    cleanup = _as_list(challenge["cleanup"], "physical_cleanup_invalid")
+    cleanup_by_node = {
+        item.get("node_id"): item for item in cleanup if isinstance(item, dict)
+    }
+    _require(
+        set(identities) == set(assignments_by_node)
+        and set(cleanup_by_node) == set(assignments_by_node)
+        and all(item.get("removed") is True for item in cleanup_by_node.values())
+        and len({identity.get("host_id") for identity in identities.values()})
+        == len(assignments),
+        "physical_identity_invalid",
+    )
+    entry_node_id = str(challenge["entry_node_id"])
+    transport_records: list[dict[str, Any]] = []
+    runtime_records: list[dict[str, Any]] = []
+    endpoint_by_node: dict[str, str] = {}
+    for node_id, assignment in assignments_by_node.items():
+        identity = _as_mapping(identities[node_id], "physical_identity_invalid")
+        _require(
+            identity.get("run_id") == run_id
+            and identity.get("deployment_id") == graph["deployment_id"]
+            and identity.get("node_id") == node_id
+            and _nonempty_string(identity.get("host_id"))
+            and _integer(identity.get("process_id"), minimum=1),
+            "physical_identity_invalid",
+        )
+        required_events = {"configured", "started", "snapshot", "stopping"}
+        if node_id == entry_node_id:
+            required_events.update({"inference_started", "inference_decoded"})
+        _require(
+            all((node_id, event) in signed_index for event in required_events),
+            "signed_observations_missing",
+        )
+        for event in required_events:
+            observation = signed_index[(node_id, event)]
+            _require(
+                observation.get("host_id") == identity["host_id"]
+                and observation.get("process_id") == identity["process_id"],
+                "signed_observation_binding_invalid",
+            )
+        configured = signed_index[(node_id, "configured")]
+        configured_details = _as_mapping(
+            configured.get("details"), "signed_observation_binding_invalid"
+        )
+        stage, placement = graph_placements[assignment["assignment_id"]]
+        proof = proofs_by_id[assignment["assignment_id"]]
+        endpoint_id = configured.get("endpoint_id")
+        _require(
+            _nonempty_string(endpoint_id)
+            and configured_details.get("assignment_id") == assignment["assignment_id"]
+            and configured_details.get("placement_id") == placement["placement_id"]
+            and configured_details.get("manifest_digest") == graph["manifest_digest"]
+            and configured_details.get("runtime_mode") in {None, "stage_local_kv"}
+            and configured_details.get("stage_pack_digest")
+            in {None, proof.get("stage_pack_digest")}
+            and configured_details.get("stage_pack_verification_digest")
+            in {None, proof.get("stage_pack_verification_digest")},
+            "signed_observation_binding_invalid",
+        )
+        endpoint_by_node[node_id] = str(endpoint_id)
+        snapshot = signed_index[(node_id, "snapshot")]
+        snapshot_details = _as_mapping(snapshot.get("details"), "physical_snapshot_invalid")
+        transport = _as_mapping(snapshot_details.get("transport"), "physical_snapshot_invalid")
+        runtime = _as_mapping(snapshot_details.get("runtime"), "physical_snapshot_invalid")
+        _require(
+            transport.get("local_node_id") == node_id
+            and transport.get("peer_node_id") in set(assignments_by_node) - {node_id}
+            and _integer(transport.get("remote_frames_sent"), minimum=1)
+            and _integer(transport.get("remote_frames_received"), minimum=1)
+            and transport.get("route_ready") is False
+            and transport.get("delivery_semantics")
+            in {None, "remote_router_dispatch_ack"}
+            and snapshot_details.get("transport_fatal_error") is None
+            and runtime.get("mode") == "stage_local_kv"
+            and runtime.get("active_state_count") == 0
+            and runtime.get("release_counts", {}).get("normal_completion") == 1,
+            "physical_snapshot_invalid",
+        )
+        transport_records.append(dict(transport))
+        runtime_records.append({"node_id": node_id, "runtime": dict(runtime)})
+    _require(
+        len(set(endpoint_by_node.values())) == len(assignments),
+        "physical_endpoints_not_distinct",
+    )
+
+    expected_tokens = challenge.get("expected_token_ids")
+    output_tokens = challenge.get("output_token_ids")
+    decoded = signed_index[(entry_node_id, "inference_decoded")]
+    decoded_output = _as_mapping(
+        _as_mapping(decoded.get("details"), "token_parity_invalid").get("output"),
+        "token_parity_invalid",
+    )
+    request = _as_mapping(challenge.get("request"), "token_parity_invalid")
+    prompt_tokens = request.get("prompt_token_ids")
+    _require(
+        isinstance(prompt_tokens, list)
+        and prompt_tokens
+        and all(_integer(token) for token in prompt_tokens)
+        and isinstance(expected_tokens, list)
+        and expected_tokens
+        and all(_integer(token) for token in expected_tokens)
+        and output_tokens == expected_tokens
+        and decoded.get("details", {}).get("status") == "COMPLETED"
+        and decoded_output.get("token_ids") == expected_tokens,
+        "token_parity_invalid",
+    )
+
+    scope = _as_mapping(documents["negative_runs"], "qualification_scope_invalid")
+    _require(
+        set(scope)
+        == {
+            "kind",
+            "run_id",
+            "qualified_operations",
+            "unqualified_operations",
+            "claim_boundary",
+        }
+        and scope.get("kind") == "physical_frozen_route_scope_v1"
+        and scope.get("run_id") == run_id
+        and scope.get("qualified_operations") == ["inference"]
+        and scope.get("unqualified_operations") == ["cancellation", "recovery"]
+        and scope.get("claim_boundary")
+        == "ordinary frozen-placement inference only; cancellation and recovery are not qualified",
+        "qualification_scope_invalid",
+    )
+
+    entry_snapshot = signed_index[(entry_node_id, "snapshot")]
+    entry_capacity = _as_mapping(
+        _as_mapping(entry_snapshot.get("details"), "reservation_evidence_invalid").get(
+            "capacity"
+        ),
+        "reservation_evidence_invalid",
+    )
+    reservations_map = _as_mapping(
+        entry_capacity.get("reservations"), "reservation_evidence_invalid"
+    )
+    reservations: list[dict[str, Any]] = []
+    bindings: list[StageQualificationBinding] = []
+    for assignment_id, (stage, placement) in graph_placements.items():
+        assignment = assignments_by_id[assignment_id]
+        matching = [
+            reservation
+            for reservation in reservations_map.values()
+            if isinstance(reservation, dict)
+            and reservation.get("node_id") == assignment["node_id"]
+            and reservation.get("placement_id") == placement["placement_id"]
+            and reservation.get("status") == "RELEASED"
+        ]
+        _require(len(matching) == 1, "reservation_evidence_invalid")
+        reservation = dict(matching[0])
+        reservation_id = reservation.get("reservation_id")
+        _require(_nonempty_string(reservation_id), "reservation_evidence_invalid")
+        reservations.append(reservation)
+        proof = proofs_by_id[assignment_id]
+        bindings.append(
+            StageQualificationBinding(
+                stage_id=stage["stage_id"],
+                placement_id=placement["placement_id"],
+                assignment_id=assignment_id,
+                node_id=assignment["node_id"],
+                stage_signature=placement["stage_signature"],
+                load_proof_digest=placement["load_proof_digest"],
+                stage_probe_result_digest=proof["probe_digest"],
+                endpoint_id=endpoint_by_node[assignment["node_id"]],
+                process_id=identities[assignment["node_id"]]["process_id"],
+                process_host_id=identities[assignment["node_id"]]["host_id"],
+                tensor_scope_digest=sha256_document(assignment["expected_tensor_keys"]),
+                reservation_id=str(reservation_id),
+            )
+        )
+    bindings_tuple = tuple(bindings)
+
+    token_parity = {
+        "kind": "exact_greedy_token_parity_v1",
+        "prompt_token_ids": prompt_tokens,
+        "distributed_token_ids": output_tokens,
+        "reference_token_ids": expected_tokens,
+        "passed": True,
+    }
+    numeric_scope = {
+        "kind": "numeric_parity_scope_v1",
+        "qualified": False,
+        "reason": "exact token parity qualified; stage numeric parity not claimed",
+    }
+    lifecycle = {
+        "kind": "normal_completion_lifecycle_v1",
+        "run_id": run_id,
+        "all_stage_states_released": True,
+        "all_staging_roots_removed": True,
+        "cancellation_qualified": False,
+        "recovery_qualified": False,
+    }
+    timing_evidence = [
+        {
+            "node_id": observation.get("node_id"),
+            "event": observation.get("event"),
+            "monotonic_ns": observation.get("monotonic_ns"),
+        }
+        for observation in signed_index.values()
+        if _integer(observation.get("monotonic_ns"))
+    ]
+    endpoint_set = [
+        {"node_id": binding.node_id, "endpoint_id": binding.endpoint_id}
+        for binding in bindings_tuple
+    ]
+    process_set = [
+        {
+            "node_id": binding.node_id,
+            "process_host_id": binding.process_host_id,
+            "process_id": binding.process_id,
+        }
+        for binding in bindings_tuple
+    ]
+    tensor_scope = [
+        {
+            "assignment_id": binding.assignment_id,
+            "tensor_scope_digest": binding.tensor_scope_digest,
+        }
+        for binding in bindings_tuple
+    ]
+    qualification_material = {
+        "protocol": ROUTE_QUALIFICATION_PROTOCOL,
+        "issued_at_unix_ms": now_unix_ms,
+        "run_id": run_id,
+        "qualification_scope": "inference",
+        "evidence_manifest_digest": manifest_binding,
+        "execution_graph_digest": sha256_document(graph),
+        "lifecycle_evidence_digest": sha256_document(lifecycle),
+        "scope_digest": sha256_document(scope),
+    }
+    record_values = {
+        "protocol": ROUTE_QUALIFICATION_PROTOCOL,
+        "qualification_id": sha256_document(qualification_material),
+        "issued_at_unix_ms": now_unix_ms,
+        "evidence_class": "physical_qualification",
+        "route_ready": True,
+        "reason_codes": (),
+        "deployment_id": graph["deployment_id"],
+        "deployment_epoch": graph["deployment_epoch"],
+        "topology_version": graph["topology_version"],
+        "placement_provenance": "frozen_fixture",
+        "model_id": graph["model_id"],
+        "resolved_commit": graph["resolved_commit"],
+        "manifest_digest": graph["manifest_digest"],
+        "gossip_snapshot_digest": sha256_document(membership),
+        "gossip_signature_digest": sha256_document(gossip),
+        "planner_snapshot_digest": control["run_plan_digest"],
+        "route_plan_digest": sha256_document(control),
+        "assignments_digest": sha256_document(assignments),
+        "provisioning_reports_digest": sha256_document(reports),
+        "load_proofs_digest": sha256_document(proofs),
+        "load_proof_signatures_digest": sha256_document(signed_document),
+        "execution_graph_digest": sha256_document(graph),
+        "path_manifest_digest": sha256_document(
+            {
+                "entry_node_id": entry_node_id,
+                "request": request,
+                "ordered_stage_ids": [stage["stage_id"] for stage in graph["stages"]],
+            }
+        ),
+        "reservations_digest": sha256_document(reservations),
+        "stage_bindings": bindings_tuple,
+        "endpoint_set_digest": sha256_document(endpoint_set),
+        "process_set_digest": sha256_document(process_set),
+        "tensor_scope_digest": sha256_document(tensor_scope),
+        "transport_digest": sha256_document(transport_records),
+        "timing_evidence_digest": sha256_document(timing_evidence),
+        "token_parity_digest": sha256_document(token_parity),
+        "numeric_parity_digest": sha256_document(numeric_scope),
+        "execution_trace_digest": sha256_document(signed_document),
+        "kv_ownership_digest": sha256_document(runtime_records),
+        "lifecycle_evidence_digest": sha256_document(lifecycle),
+        "negative_runs_digest": sha256_document(scope),
+        "source_provenance_digest": sha256_document(source_provenance),
+        "source_manifest_digest": sha256_document(transfer_manifest),
+        "environment_digest": sha256_document(identities),
+        "contract_manifest_digest": sha256_document(
+            {
+                "authority_profile": "physical_frozen_route_inference_v1",
+                "control_kind": control["kind"],
+                "challenge_kind": challenge["kind"],
+                "scope_kind": scope["kind"],
+            }
+        ),
+        "dependency_lock_digests": (source_provenance["archive_digest"],),
+        "evidence_manifest_digest": manifest_binding,
+        "qualified_by": QUALIFIER_AUTHORITY,
+        "claim_boundary": (
+            "ordinary frozen-placement inference only: exact signed physical node/process/endpoint, "
+            "model/assignment/load-proof/graph, remote transport, exact token parity, normal "
+            "completion, reservation release, cleanup, source archive, and immutable evidence "
+            "manifest gates passed; cancellation and recovery are not qualified; stage numeric "
+            "parity is not claimed"
+        ),
+    }
+    record = object.__new__(RouteQualificationV1)
+    for name, value in record_values.items():
+        object.__setattr__(record, name, value)
+    route_qualification_to_dict(record)
+    return record
+
+
 def qualify_route(
     *,
     evidence_files: Mapping[str, bytes],
@@ -1258,6 +1882,15 @@ def qualify_route(
     evidence_files = files_snapshot
     documents = _load_documents(evidence_files)
     challenge = _as_mapping(documents["route_challenge"], "route_challenge_invalid")
+    if challenge.get("kind") == "physical_frozen_route_challenge_v1":
+        return _qualify_frozen_route(
+            documents=documents,
+            evidence_manifest=evidence_manifest,
+            manifest_binding=manifest_binding,
+            now_unix_ms=now_unix_ms,
+            verify_gossip_signature=verify_gossip_signature,
+            verify_load_proof_signature=verify_load_proof_signature,
+        )
     _require(
         "placement_provenance" in challenge,
         "placement_provenance_missing",
