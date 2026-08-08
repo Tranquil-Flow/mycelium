@@ -50,6 +50,7 @@ def operator_plan_payload(workspace: Path, **overrides: Any) -> dict[str, Any]:
                     "host_id": "host-a",
                     "boot_id": "boot-a",
                     "staging_root": "/opt/mycelium/stage-a",
+                    "process_transport": "local",
                 },
                 {
                     "node_id": "node-b",
@@ -57,6 +58,7 @@ def operator_plan_payload(workspace: Path, **overrides: Any) -> dict[str, Any]:
                     "host_id": "host-b",
                     "boot_id": "boot-b",
                     "staging_root": "/opt/mycelium/stage-b",
+                    "process_transport": "ssh",
                 },
             ],
             "transfer_manifest": {

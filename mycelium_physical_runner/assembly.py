@@ -41,6 +41,7 @@ def build_production_runner(config: RunnerConfig) -> PhysicalRunner:
                 host_id=str(peer["host_id"]),
                 boot_id=str(peer["boot_id"]),
                 staging_root=str(peer["staging_root"]),
+                process_transport=str(peer["process_transport"]),
             )
             for peer in peers_raw
         )

@@ -27,6 +27,8 @@ from physical_inference_qualification import (
     SubprocessRunner,
     _REMOTE_CLEANUP_SCRIPT,
     _REMOTE_STAGE_SCRIPT,
+    _peer_argument,
+    _peer_process_argv,
     _parser,
     build_transfer_archive,
     main,
@@ -266,6 +268,7 @@ def _peers(count: int, *, same_host: bool = False) -> tuple[PeerIdentity, ...]:
                 host_id="host-shared" if same_host else f"host-{index}",
                 boot_id=f"boot-{index}",
                 staging_root=f"/tmp/mycelium-controller/run-a/node-{index}",
+                process_transport="ssh",
             )
         )
     return tuple(values)
@@ -358,6 +361,27 @@ def _physical_run_plan(
         "decode_count": 1,
         "expected_token_ids": [11, 12],
     }
+
+
+def _stage_ack_bytes(
+    peer: PeerIdentity,
+    archive_digest: str,
+    archive_size: int,
+) -> bytes:
+    return (
+        json.dumps(
+            {
+                "protocol": "mycelium.controller_remote_stage_ack.v1",
+                "node_id": peer.node_id,
+                "staging_root": peer.staging_root,
+                "archive_digest": archive_digest,
+                "archive_size_bytes": archive_size,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("ascii")
 
 
 def _physical_cleanup_captures(
@@ -630,6 +654,65 @@ def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledg
     assert all(action["archive_digest"] == archive_digest for action in result["actions"])
 
 
+def test_physical_prepare_uses_declared_local_and_ssh_process_transports(
+    tmp_path: Path,
+) -> None:
+    peers = (
+        PeerIdentity(
+            node_id="node-0",
+            ssh_target="operator@coordinator.example",
+            host_id="host-0",
+            boot_id="boot-0",
+            staging_root="/tmp/mycelium-controller/run-a/node-0",
+            process_transport="local",
+        ),
+        PeerIdentity(
+            node_id="node-1",
+            ssh_target="operator@peer.example",
+            host_id="host-1",
+            boot_id="boot-1",
+            staging_root="/tmp/mycelium-controller/run-a/node-1",
+            process_transport="ssh",
+        ),
+    )
+    source_root, transfers = _transfers(tmp_path)
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    runner = StagingRunner(
+        [
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=_stage_ack_bytes(peer, archive_digest, len(archive)),
+                stderr=b"",
+            )
+            for peer in peers
+        ]
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("prepare")
+
+    local_argv = runner.calls[0][0]
+    remote_argv = runner.calls[1][0]
+    assert local_argv[:2] == ("python3", "-c")
+    assert "ssh" not in local_argv
+    assert remote_argv[0] == "ssh"
+    assert "BatchMode=yes" in remote_argv
+    assert "IdentitiesOnly=yes" in remote_argv
+    assert "StrictHostKeyChecking=yes" in remote_argv
+    assert peers[1].ssh_target in remote_argv
+    assert result["route_ready"] is False
+
+
 def test_physical_prepare_cleans_attempted_peers_when_staging_fails(
     tmp_path: Path,
 ) -> None:
@@ -784,6 +867,98 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
     assert all(archive_digest in call[0][-1] for call in runner.calls)
 
 
+def test_physical_run_uses_declared_local_and_ssh_process_transports(
+    tmp_path: Path,
+) -> None:
+    peers = (
+        PeerIdentity(
+            node_id="node-0",
+            ssh_target="operator@coordinator.example",
+            host_id="host-0",
+            boot_id="boot-0",
+            staging_root="/tmp/mycelium-controller/run-a/node-0",
+            process_transport="local",
+        ),
+        PeerIdentity(
+            node_id="node-1",
+            ssh_target="operator@peer.example",
+            host_id="host-1",
+            boot_id="boot-1",
+            staging_root="/tmp/mycelium-controller/run-a/node-1",
+            process_transport="ssh",
+        ),
+    )
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    sessions: dict[str, FakeNodeSession] = {}
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        sessions[session.node_id] = session
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("run")
+
+    local_argv = sessions["node-0"].argv
+    remote_argv = sessions["node-1"].argv
+    assert local_argv[0] == "/opt/mycelium/python-0/bin/python3"
+    assert "ssh" not in local_argv
+    assert remote_argv[0] == "ssh"
+    assert "BatchMode=yes" in remote_argv
+    assert "IdentitiesOnly=yes" in remote_argv
+    assert "StrictHostKeyChecking=yes" in remote_argv
+    assert peers[1].ssh_target in remote_argv
+    assert result["route_ready"] is False
+
+
+def test_ssh_process_transport_round_trips_exact_remote_argv() -> None:
+    peer = PeerIdentity(
+        node_id="node-1",
+        ssh_target="operator@peer.example",
+        host_id="host-1",
+        boot_id="boot-1",
+        staging_root="/tmp/mycelium-controller/run-a/node-1",
+        process_transport="ssh",
+    )
+    command = (
+        "/opt/mycelium runtime/bin/python3",
+        "/tmp/mycelium route/node;literal.py",
+        "--label",
+        "$(touch /tmp/mycelium-must-not-run)",
+    )
+
+    argv = _peer_process_argv(peer, command)
+
+    assert argv[0] == "ssh"
+    assert shlex.split(argv[-1]) == list(command)
+
+
+def test_local_process_transport_returns_exact_command_argv() -> None:
+    peer = PeerIdentity(
+        node_id="node-0",
+        ssh_target="operator@coordinator.example",
+        host_id="host-0",
+        boot_id="boot-0",
+        staging_root="/tmp/mycelium-controller/run-a/node-0",
+        process_transport="local",
+    )
+    command = ("/opt/mycelium runtime/bin/python3", "literal;argument")
+
+    assert _peer_process_argv(peer, command) == command
+
+
 @pytest.mark.parametrize("peer_count", [3, 5])
 def test_physical_run_orchestrates_every_declared_peer_in_n_way_cycle(
     tmp_path: Path,
@@ -918,7 +1093,68 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
     assert result["release_ready"] is False
     assert len(result["actions"]) == len(peers)
     assert len(runner.calls) == len(peers)
-    assert {call[0][6] for call in runner.calls} == {peer.ssh_target for peer in peers}
+    for peer, call in zip(peers, runner.calls, strict=True):
+        argv = call[0]
+        assert argv[:11] == (
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "ConnectTimeout=15",
+            "--",
+            peer.ssh_target,
+        )
+
+
+def test_physical_cleanup_uses_declared_local_and_ssh_process_transports(
+    tmp_path: Path,
+) -> None:
+    peers = (
+        PeerIdentity(
+            node_id="node-0",
+            ssh_target="operator@coordinator.example",
+            host_id="host-0",
+            boot_id="boot-0",
+            staging_root="/tmp/mycelium-controller/run-a/node-0",
+            process_transport="local",
+        ),
+        PeerIdentity(
+            node_id="node-1",
+            ssh_target="operator@peer.example",
+            host_id="host-1",
+            boot_id="boot-1",
+            staging_root="/tmp/mycelium-controller/run-a/node-1",
+            process_transport="ssh",
+        ),
+    )
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("cleanup")
+
+    local_argv = runner.calls[0][0]
+    remote_argv = runner.calls[1][0]
+    assert local_argv[:2] == ("python3.14", "-c")
+    assert "ssh" not in local_argv
+    assert remote_argv[0] == "ssh"
+    assert "BatchMode=yes" in remote_argv
+    assert "IdentitiesOnly=yes" in remote_argv
+    assert "StrictHostKeyChecking=yes" in remote_argv
+    assert peers[1].ssh_target in remote_argv
+    assert result["route_ready"] is False
 
 
 def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
@@ -974,6 +1210,60 @@ def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
         for session in node_attempts
     )
     assert len(runner.calls) == len(peers)
+
+
+def test_physical_recover_restarts_local_peer_without_ssh(
+    tmp_path: Path,
+) -> None:
+    base_peers = _peers(3)
+    peers = tuple(
+        PeerIdentity(
+            node_id=peer.node_id,
+            ssh_target=peer.ssh_target,
+            host_id=peer.host_id,
+            boot_id=peer.boot_id,
+            staging_root=peer.staging_root,
+            process_transport="local" if index == 0 else "ssh",
+        )
+        for index, peer in enumerate(base_peers)
+    )
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    attempts: dict[str, list[FakeNodeSession]] = {}
+    failed_node_id = peers[0].node_id
+
+    def session_factory(**kwargs: Any) -> FakeNodeSession:
+        session = FakeNodeSession(**kwargs)
+        node_attempts = attempts.setdefault(session.node_id, [])
+        if session.node_id == failed_node_id and not node_attempts:
+            session.fail_snapshot = True
+        node_attempts.append(session)
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    result = controller.execute("recover")
+
+    local_attempts = attempts[failed_node_id]
+    assert result["recovered_nodes"] == [failed_node_id]
+    assert len(local_attempts) == 2
+    assert all(session.argv[0].endswith("/python3") for session in local_attempts)
+    assert all("ssh" not in session.argv for session in local_attempts)
+    assert all(
+        attempts[peer.node_id][0].argv[0] == "ssh"
+        for peer in peers[1:]
+    )
+    assert result["route_ready"] is False
 
 
 def test_physical_recover_bounds_restart_and_cleans_every_session(
@@ -1349,6 +1639,20 @@ def test_cli_accepts_explicit_run_plan_path() -> None:
 
     assert args.command == "run"
     assert args.run_plan == "/tmp/mycelium-controller/run-plan.json"
+
+
+def test_cli_peer_argument_requires_explicit_process_transport() -> None:
+    peer = _peer_argument(
+        "node-0,operator@peer.example,host-0,boot-0,"
+        "/tmp/mycelium-controller/run-a/node-0,local"
+    )
+
+    assert peer.process_transport == "local"
+    with pytest.raises(ControllerError, match="invalid_arguments"):
+        _peer_argument(
+            "node-0,operator@peer.example,host-0,boot-0,"
+            "/tmp/mycelium-controller/run-a/node-0"
+        )
 
 
 def test_cli_bare_dry_run_preflight_is_inert_and_route_false(

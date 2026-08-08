@@ -229,6 +229,7 @@ class PeerIdentity:
     host_id: str
     boot_id: str
     staging_root: str
+    process_transport: str
 
     def __post_init__(self) -> None:
         _segment(self.node_id, "peer_node_id_invalid")
@@ -251,6 +252,30 @@ class PeerIdentity:
             or not any(part.startswith("mycelium") for part in path.parts)
         ):
             _reject("peer_staging_root_invalid")
+        if self.process_transport not in {"local", "ssh"}:
+            _reject("peer_process_transport_invalid")
+
+
+def _peer_process_argv(
+    peer: PeerIdentity,
+    command: tuple[str, ...],
+) -> tuple[str, ...]:
+    if peer.process_transport == "local":
+        return command
+    return (
+        "ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "ConnectTimeout=15",
+        "--",
+        peer.ssh_target,
+        shlex.join(command),
+    )
 
 
 @dataclass(frozen=True)
@@ -1145,39 +1170,28 @@ class QualificationController:
                 peer = peers_by_node[node_id]
                 node_plan = plans_by_node[node_id]
                 node_script = f"{peer.staging_root}/physical_inference_node.py"
-                remote_command = shlex.join(
-                    (
-                        node_plan["python_executable"],
-                        node_script,
-                        "--run-id",
-                        plan["run_id"],
-                        "--deployment-id",
-                        plan["deployment_id"],
-                        "--node-id",
-                        node_id,
-                        "--artifact-root",
-                        peer.staging_root,
-                        "--socket-root",
-                        node_plan["socket_root"],
-                        "--sidecar-binary",
-                        node_plan["sidecar_binary"],
-                        "--endpoint-secret-file",
-                        node_plan["endpoint_secret_file"],
-                        "--command-timeout",
-                        "30",
-                    )
+                node_command = (
+                    node_plan["python_executable"],
+                    node_script,
+                    "--run-id",
+                    plan["run_id"],
+                    "--deployment-id",
+                    plan["deployment_id"],
+                    "--node-id",
+                    node_id,
+                    "--artifact-root",
+                    peer.staging_root,
+                    "--socket-root",
+                    node_plan["socket_root"],
+                    "--sidecar-binary",
+                    node_plan["sidecar_binary"],
+                    "--endpoint-secret-file",
+                    node_plan["endpoint_secret_file"],
+                    "--command-timeout",
+                    "30",
                 )
                 session = self._session_factory(
-                    argv=(
-                        "ssh",
-                        "-o",
-                        "BatchMode=yes",
-                        "-o",
-                        "ConnectTimeout=15",
-                        "--",
-                        peer.ssh_target,
-                        remote_command,
-                    ),
+                    argv=_peer_process_argv(peer, node_command),
                     node_id=node_id,
                     run_id=plan["run_id"],
                     deployment_id=plan["deployment_id"],
@@ -1352,40 +1366,29 @@ class QualificationController:
                     restart_attempts[node_id] = 1
                     node_plan = plans_by_node[node_id]
                     node_script = f"{peer.staging_root}/physical_inference_node.py"
-                    remote_command = shlex.join(
-                        (
-                            node_plan["python_executable"],
-                            node_script,
-                            "--run-id",
-                            plan["run_id"],
-                            "--deployment-id",
-                            plan["deployment_id"],
-                            "--node-id",
-                            node_id,
-                            "--artifact-root",
-                            peer.staging_root,
-                            "--socket-root",
-                            node_plan["socket_root"],
-                            "--sidecar-binary",
-                            node_plan["sidecar_binary"],
-                            "--endpoint-secret-file",
-                            node_plan["endpoint_secret_file"],
-                            "--command-timeout",
-                            "30",
-                        )
+                    node_command = (
+                        node_plan["python_executable"],
+                        node_script,
+                        "--run-id",
+                        plan["run_id"],
+                        "--deployment-id",
+                        plan["deployment_id"],
+                        "--node-id",
+                        node_id,
+                        "--artifact-root",
+                        peer.staging_root,
+                        "--socket-root",
+                        node_plan["socket_root"],
+                        "--sidecar-binary",
+                        node_plan["sidecar_binary"],
+                        "--endpoint-secret-file",
+                        node_plan["endpoint_secret_file"],
+                        "--command-timeout",
+                        "30",
                     )
                     try:
                         replacement = self._session_factory(
-                            argv=(
-                                "ssh",
-                                "-o",
-                                "BatchMode=yes",
-                                "-o",
-                                "ConnectTimeout=15",
-                                "--",
-                                peer.ssh_target,
-                                remote_command,
-                            ),
+                            argv=_peer_process_argv(peer, node_command),
                             node_id=node_id,
                             run_id=plan["run_id"],
                             deployment_id=plan["deployment_id"],
@@ -1739,7 +1742,8 @@ class QualificationController:
         *,
         archive_digest: str,
     ) -> dict[str, Any]:
-        remote_command = shlex.join(
+        argv = _peer_process_argv(
+            peer,
             (
                 "python3.14",
                 "-c",
@@ -1747,19 +1751,10 @@ class QualificationController:
                 peer.staging_root,
                 peer.node_id,
                 archive_digest,
-            )
+            ),
         )
         capture = self._runner.run(
-            (
-                "ssh",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=15",
-                "--",
-                peer.ssh_target,
-                remote_command,
-            ),
+            argv,
             timeout_seconds=30.0,
         )
         if capture.returncode != 0 or capture.stderr or not capture.stdout:
@@ -1825,7 +1820,8 @@ class QualificationController:
         try:
             for peer in self.peers:
                 attempted.append(peer)
-                remote_command = shlex.join(
+                argv = _peer_process_argv(
+                    peer,
                     (
                         "python3",
                         "-c",
@@ -1834,17 +1830,7 @@ class QualificationController:
                         peer.node_id,
                         archive_digest,
                         str(len(archive)),
-                    )
-                )
-                argv = (
-                    "ssh",
-                    "-o",
-                    "BatchMode=yes",
-                    "-o",
-                    "ConnectTimeout=15",
-                    "--",
-                    peer.ssh_target,
-                    remote_command,
+                    ),
                 )
                 capture = self._runner.run(
                     argv,
@@ -1967,7 +1953,7 @@ class _Parser(argparse.ArgumentParser):
 
 def _peer_argument(value: str) -> PeerIdentity:
     parts = value.split(",")
-    if len(parts) != 5:
+    if len(parts) != 6:
         _reject("invalid_arguments")
     return PeerIdentity(
         node_id=parts[0],
@@ -1975,6 +1961,7 @@ def _peer_argument(value: str) -> PeerIdentity:
         host_id=parts[2],
         boot_id=parts[3],
         staging_root=parts[4],
+        process_transport=parts[5],
     )
 
 

@@ -29,6 +29,10 @@ def test_valid_plan_parses_into_a_frozen_config(workspace: Path) -> None:
     assert config.run_id == "run-0001"
     assert config.plan_id == "two-mac-g4"
     assert config.evidence_output_dir == str(workspace / "evidence" / "run-0001")
+    assert [peer["process_transport"] for peer in config.controller["peers"]] == [
+        "local",
+        "ssh",
+    ]
     assert config.gossip_verification_keys[0]["algorithm"] == "ed25519"
     with pytest.raises((AttributeError, TypeError)):
         config.run_id = "other"  # type: ignore[misc]
@@ -66,6 +70,74 @@ def test_secret_file_path_fields_remain_allowed(workspace: Path) -> None:
     config = parse_operator_plan(_plan(workspace))
     node = config.controller["run_plan"]["nodes"][0]
     assert node["endpoint_secret_file"].endswith("/endpoint")
+
+
+@pytest.mark.parametrize("value", [None, "", "remote", True, 1])
+def test_peer_process_transport_is_required_and_bounded(
+    workspace: Path,
+    value: Any,
+) -> None:
+    payload = _plan(workspace)
+    if value is None:
+        payload["controller"]["peers"][0].pop("process_transport", None)
+    else:
+        payload["controller"]["peers"][0]["process_transport"] = value
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code in {"plan_missing_field", "plan_field_invalid"}
+
+
+@pytest.mark.parametrize(
+    "transports",
+    [
+        ("local", "local"),
+        ("ssh", "ssh"),
+        ("ssh", "local"),
+    ],
+)
+def test_entry_peer_must_be_local_and_every_other_peer_must_use_ssh(
+    workspace: Path,
+    transports: tuple[str, str],
+) -> None:
+    payload = _plan(workspace)
+    for peer, process_transport in zip(
+        payload["controller"]["peers"], transports, strict=True
+    ):
+        peer["process_transport"] = process_transport
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_field_invalid"
+
+
+def test_unknown_peer_fields_fail_closed(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["peers"][0]["unexpected"] = "value"
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_unknown_field"
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["node_id", "ssh_target", "host_id", "boot_id", "staging_root"],
+)
+def test_missing_non_transport_peer_fields_fail_closed(
+    workspace: Path,
+    field: str,
+) -> None:
+    payload = _plan(workspace)
+    del payload["controller"]["peers"][0][field]
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_missing_field"
 
 
 def test_unknown_and_missing_top_level_fields_fail_closed(workspace: Path) -> None:

@@ -40,6 +40,9 @@ _PATH_FIELDS = frozenset({"evidence_output_dir", "lock_path", "state_path", "log
 _CONTROLLER_FIELDS = frozenset(
     {"mode", "now", "source_root", "peers", "transfer_manifest", "membership_snapshot", "run_plan", "authority_documents"}
 )
+_CONTROLLER_PEER_FIELDS = frozenset(
+    {"node_id", "ssh_target", "host_id", "boot_id", "staging_root", "process_transport"}
+)
 _PUBLIC_KEY_FIELDS = frozenset(
     {"algorithm", "encoding", "verification_key", "verification_key_digest", "endpoint_id"}
 )
@@ -194,11 +197,50 @@ def _controller(value: Any) -> Mapping[str, Any]:
     snapshot["source_root"] = _safe_local_path(snapshot.get("source_root"), "controller.source_root", existing_directory=True)
     peers = snapshot.get("peers")
     _require(isinstance(peers, list) and len(peers) >= 2, "plan_field_invalid", "controller.peers")
+    peers_by_node: dict[str, Mapping[str, Any]] = {}
     for peer in peers:
         _require(isinstance(peer, Mapping), "plan_field_invalid", "controller.peers")
+        peer_fields = set(peer)
+        unknown_peer_fields = peer_fields - _CONTROLLER_PEER_FIELDS
+        missing_peer_fields = _CONTROLLER_PEER_FIELDS - peer_fields
+        _require(
+            not unknown_peer_fields,
+            "plan_unknown_field",
+            "controller.peers." + ",".join(sorted(unknown_peer_fields)),
+        )
+        _require(
+            not missing_peer_fields,
+            "plan_missing_field",
+            "controller.peers." + ",".join(sorted(missing_peer_fields)),
+        )
+        node_id = peer.get("node_id")
+        _require(
+            isinstance(node_id, str) and bool(node_id) and node_id not in peers_by_node,
+            "plan_field_invalid",
+            "controller.peers.node_id",
+        )
+        peers_by_node[node_id] = peer
+        _require(
+            peer.get("process_transport") in {"local", "ssh"},
+            "plan_field_invalid",
+            "controller.peers.process_transport",
+        )
         _safe_remote_path(peer.get("staging_root"), "controller.peers.staging_root")
     for field in ("transfer_manifest", "membership_snapshot", "run_plan"):
         _require(isinstance(snapshot.get(field), Mapping), "plan_field_invalid", f"controller.{field}")
+    entry_node_id = snapshot["run_plan"].get("entry_node_id")
+    _require(
+        isinstance(entry_node_id, str) and entry_node_id in peers_by_node,
+        "plan_field_invalid",
+        "controller.run_plan.entry_node_id",
+    )
+    for node_id, peer in peers_by_node.items():
+        expected_transport = "local" if node_id == entry_node_id else "ssh"
+        _require(
+            peer.get("process_transport") == expected_transport,
+            "plan_field_invalid",
+            "controller.peers.process_transport",
+        )
     if "authority_documents" in snapshot:
         _require(isinstance(snapshot["authority_documents"], Mapping), "plan_field_invalid", "controller.authority_documents")
     return json.loads(json.dumps(snapshot, sort_keys=True))
