@@ -899,6 +899,7 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
         remote_argv = shlex.split(sessions[peer.node_id].argv[-1])
         node_index = peers.index(peer)
         assert remote_argv[0] == f"/opt/mycelium/python-{node_index}/bin/python3"
+        assert remote_argv[1] == "-B"
         key_flag = remote_argv.index("--endpoint-secret-file")
         assert remote_argv[key_flag + 1] == (
             f"/var/lib/mycelium/identities/{peer.node_id}.key"
@@ -1351,6 +1352,11 @@ def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
     assert result["recovered_nodes"] == [failed_node_id]
     assert result["restart_attempts"] == {failed_node_id: 1}
     assert len(attempts[failed_node_id]) == 2
+    assert all(
+        shlex.split(session.argv[-1])[1] == "-B"
+        for node_attempts in attempts.values()
+        for session in node_attempts
+    )
     predecessor = attempts[peers[0].node_id][0]
     rotate_payload = next(
         payload for command, payload in predecessor.sent if command == "rotate"
@@ -1417,6 +1423,7 @@ def test_physical_recover_restarts_local_peer_without_ssh(
     assert result["recovered_nodes"] == [failed_node_id]
     assert len(local_attempts) == 2
     assert all(session.argv[0].endswith("/python3") for session in local_attempts)
+    assert all(session.argv[1] == "-B" for session in local_attempts)
     assert all("ssh" not in session.argv for session in local_attempts)
     assert all(
         attempts[peer.node_id][0].argv[0] == "ssh"

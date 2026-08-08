@@ -1272,6 +1272,7 @@ class QualificationController:
                 node_script = f"{peer.staging_root}/physical_inference_node.py"
                 node_command = (
                     node_plan["python_executable"],
+                    "-B",
                     node_script,
                     "--run-id",
                     plan["run_id"],
@@ -1469,6 +1470,7 @@ class QualificationController:
                     node_script = f"{peer.staging_root}/physical_inference_node.py"
                     node_command = (
                         node_plan["python_executable"],
+                        "-B",
                         node_script,
                         "--run-id",
                         plan["run_id"],
