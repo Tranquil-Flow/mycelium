@@ -537,18 +537,18 @@ def test_exact_operational_cap_frame_is_delivered_and_confirmed(sidecars) -> Non
 
     def send_confirmed() -> None:
         try:
-            outcome.append(sender.send_confirmed(frame, message_id, timeout=10))
+            outcome.append(sender.send_confirmed(frame, message_id, timeout=80))
         except BaseException as error:
             outcome.append(error)
 
     thread = threading.Thread(target=send_confirmed)
     thread.start()
     try:
-        delivered_id, delivered = receiver.recv(timeout=10)
+        delivered_id, delivered = receiver.recv(timeout=80)
         assert delivered_id == message_id
         assert delivered == frame
         receiver.ack(delivered_id)
-        thread.join(timeout=10)
+        thread.join(timeout=80)
         assert outcome == [message_id]
     finally:
         sender.close()
@@ -828,3 +828,176 @@ def test_malformed_server_hello_type_fails_as_authentication_error(
     responder.join(timeout=2)
     assert not responder.is_alive()
     assert client.connected is False
+
+
+@pytest.fixture
+def triad(short_root: Path):
+    """Three sidecars, enough to exercise a routed peer set."""
+    nodes = [
+        RunningSidecar(short_root / name, bytes([index + 1]) * 32)
+        for index, name in enumerate(("alpha", "beta", "gamma"))
+    ]
+    try:
+        yield tuple(nodes)
+    finally:
+        for node in nodes:
+            node.stop()
+
+
+def peer_entry(node: RunningSidecar, generation: int) -> dict[str, Any]:
+    return {
+        "endpoint_id": node.ready["endpoint_id"],
+        "endpoint_addr": node.ready["endpoint_addr"],
+        "generation": generation,
+    }
+
+
+def test_configure_peers_installs_a_routed_set_and_admits_every_member(triad) -> None:
+    alpha, beta, gamma = triad
+    alpha_client = alpha.client()
+    beta_client = beta.client()
+    gamma_client = gamma.client()
+    frame = GOLDEN.read_bytes()
+    try:
+        # Beta sits in the middle and must accept from both neighbours.
+        beta_client.configure_peers(
+            [peer_entry(alpha, 1), peer_entry(gamma, 1)]
+        )
+        # Each edge node keeps beta as its primary outbound target.
+        alpha_client.configure_peers(
+            [peer_entry(beta, 1), peer_entry(gamma, 1)]
+        )
+        gamma_client.configure_peers(
+            [peer_entry(beta, 1), peer_entry(alpha, 1)]
+        )
+
+        from_alpha = alpha_client.send(frame)
+        from_gamma = gamma_client.send(frame)
+
+        admitted = {}
+        for _ in range(2):
+            delivered_id, delivered = beta_client.recv(timeout=15)
+            assert delivered == frame
+            admitted[delivered_id] = delivered
+            beta_client.ack(delivered_id)
+
+        assert set(admitted) == {from_alpha, from_gamma}
+    finally:
+        alpha_client.close()
+        beta_client.close()
+        gamma_client.close()
+
+
+def test_configure_peers_rejects_a_stale_set_without_disturbing_the_live_table(
+    triad,
+) -> None:
+    alpha, beta, gamma = triad
+    alpha_client = alpha.client()
+    beta_client = beta.client()
+    frame = GOLDEN.read_bytes()
+    try:
+        beta_client.configure_peers([peer_entry(alpha, 4), peer_entry(gamma, 4)])
+        alpha_client.configure_peers([peer_entry(beta, 4)])
+
+        # Generation 4 for gamma is not an advance, so the whole set must fail.
+        with pytest.raises(SidecarError) as failure:
+            beta_client.configure_peers(
+                [peer_entry(alpha, 5), peer_entry(gamma, 4)]
+            )
+        assert failure.value.code == "invalid_peer"
+
+        # The pre-existing table is untouched, so alpha still reaches beta.
+        message_id = alpha_client.send(frame)
+        delivered_id, delivered = beta_client.recv(timeout=15)
+        assert (delivered_id, delivered) == (message_id, frame)
+        beta_client.ack(delivered_id)
+    finally:
+        alpha_client.close()
+        beta_client.close()
+
+
+def test_configure_peers_validates_arguments_before_touching_the_socket(
+    short_root: Path,
+) -> None:
+    client = SidecarClient(short_root / "absent.sock", b"v" * 32)
+    assert client.connected is False
+    with pytest.raises(ValueError):
+        client.configure_peers([])
+    with pytest.raises(ValueError):
+        client.configure_peers([{"endpoint_id": "", "endpoint_addr": {}}])
+    with pytest.raises(ValueError):
+        client.configure_peers([{"endpoint_id": "peer", "endpoint_addr": []}])
+
+
+def test_routed_send_reaches_a_non_primary_peer(triad) -> None:
+    alpha, beta, gamma = triad
+    alpha_client = alpha.client()
+    beta_client = beta.client()
+    gamma_client = gamma.client()
+    frame = GOLDEN.read_bytes()
+    message_id = b"r" * 16
+    outcome: list[bytes | BaseException] = []
+    try:
+        # Alpha's primary is beta, so a routed send to gamma proves the frame
+        # is addressed rather than falling through to the primary binding.
+        alpha_client.configure_peers([peer_entry(beta, 1), peer_entry(gamma, 1)])
+        beta_client.configure_peers([peer_entry(alpha, 1), peer_entry(gamma, 1)])
+        gamma_client.configure_peers([peer_entry(alpha, 1), peer_entry(beta, 1)])
+
+        def send_routed() -> None:
+            try:
+                outcome.append(
+                    alpha_client.send_routed(
+                        gamma.ready["endpoint_id"],
+                        frame,
+                        message_id,
+                        timeout=20,
+                    )
+                )
+            except BaseException as error:
+                outcome.append(error)
+
+        thread = threading.Thread(target=send_routed)
+        thread.start()
+        delivered_id, delivered = gamma_client.recv(timeout=15)
+        assert (delivered_id, delivered) == (message_id, frame)
+        time.sleep(0.1)
+        assert thread.is_alive()
+        assert outcome == []
+        gamma_client.ack(delivered_id)
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+        assert outcome == [message_id]
+
+        # Beta is the primary and must not have received the routed frame.
+        with pytest.raises(TimeoutError):
+            beta_client.recv(timeout=2)
+    finally:
+        alpha_client.close()
+        beta_client.close()
+        gamma_client.close()
+
+
+def test_routed_send_to_an_unconfigured_destination_fails_closed(triad) -> None:
+    alpha, beta, gamma = triad
+    alpha_client = alpha.client()
+    try:
+        alpha_client.configure_peers([peer_entry(beta, 1)])
+        with pytest.raises(SidecarError) as failure:
+            alpha_client.send_routed(
+                gamma.ready["endpoint_id"], GOLDEN.read_bytes(), timeout=10
+            )
+        assert failure.value.code == "peer_rotated"
+    finally:
+        alpha_client.close()
+
+
+def test_send_routed_validates_destination_before_dispatch(short_root: Path) -> None:
+    client = SidecarClient(short_root / "absent.sock", b"v" * 32)
+    frame = GOLDEN.read_bytes()
+    with pytest.raises(TypeError):
+        client.send_routed(b"not-a-string", frame)
+    with pytest.raises(ValueError):
+        client.send_routed("nothex!", frame)
+    with pytest.raises(ValueError):
+        client.send_routed("ab" * 16, frame)

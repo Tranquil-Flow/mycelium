@@ -12,6 +12,7 @@ import socket
 import struct
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional, Tuple
 
 from mycelium_router.wire import WireError, decode_frame
@@ -44,6 +45,9 @@ _CONFIGURE_PEER = 6
 _PING = 7
 _ERROR = 8
 _SEND_CONFIRMED = 9
+_CONFIGURE_PEERS = 10
+_SEND_ROUTED = 11
+_ENDPOINT_ID_BYTES = 32
 _ZERO_ID = b"\0" * 16
 
 
@@ -236,6 +240,72 @@ class SidecarClient:
         )
         self._peer_generation = selected_generation
 
+    def configure_peers(
+        self,
+        peers: Sequence[Mapping[str, Any]],
+        *,
+        timeout: Optional[float] = None,
+    ) -> None:
+        """Atomically install a routed peer set.
+
+        Each entry is a mapping of ``endpoint_id``, ``endpoint_addr`` and an
+        optional ``generation``.  The sidecar validates and generation-fences
+        the whole set before installing any binding, so a rejected call leaves
+        the previously configured table serving traffic unchanged.  The first
+        entry becomes the primary outbound peer.
+        """
+        if isinstance(peers, (str, bytes, Mapping)):
+            raise ValueError("peers must be a sequence of peer objects")
+        entries = list(peers)
+        if not entries:
+            raise ValueError("peers must not be empty")
+        default_generation = self._peer_generation + 1
+        documents = []
+        seen: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                raise ValueError("each peer must be an object")
+            endpoint_id = entry.get("endpoint_id")
+            endpoint_addr = entry.get("endpoint_addr")
+            if not isinstance(endpoint_id, str) or not endpoint_id:
+                raise ValueError("endpoint_id must be a non-empty string")
+            if not isinstance(endpoint_addr, dict):
+                raise ValueError("endpoint_addr must be an object")
+            if endpoint_id in seen:
+                raise ValueError("peers must not repeat an endpoint_id")
+            seen.add(endpoint_id)
+            generation = entry.get("generation", default_generation)
+            if (
+                not isinstance(generation, int)
+                or isinstance(generation, bool)
+                or generation <= 0
+            ):
+                raise ValueError("generation must be a positive integer")
+            documents.append(
+                {
+                    "endpoint_id": endpoint_id,
+                    "endpoint_addr": endpoint_addr,
+                    "generation": generation,
+                }
+            )
+
+        payload = _canonical_json({"peers": documents})
+        message_id = os.urandom(16)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        self._expect_ack(
+            *self._request(
+                _CONFIGURE_PEERS,
+                message_id,
+                payload,
+                socket_timeout=timeout,
+                deadline=deadline,
+            ),
+            message_id,
+        )
+        # The primary binding drives generation-fenced sends, mirroring the
+        # single-peer path so send_confirmed keeps authenticating correctly.
+        self._peer_generation = documents[0]["generation"]
+
     def send(self, frame: bytes, message_id: Optional[bytes] = None) -> bytes:
         if not isinstance(frame, bytes):
             raise TypeError("Router frame must be bytes")
@@ -316,6 +386,88 @@ class SidecarClient:
         try:
             response = self._request(
                 _SEND_CONFIRMED,
+                message_id,
+                transport_payload,
+                socket_timeout=selected_timeout,
+                deadline=deadline,
+            )
+        except socket.timeout as error:
+            raise TimeoutError("confirmed delivery deadline") from error
+        self._expect_ack(*response, message_id)
+        return message_id
+
+    def send_routed(
+        self,
+        destination_endpoint_id: str,
+        frame: bytes,
+        message_id: Optional[bytes] = None,
+        *,
+        timeout: Optional[float] = None,
+        expected_generation: Optional[int] = None,
+        source_generation: Optional[int] = None,
+    ) -> bytes:
+        """Dispatch a frame to a named peer in the configured routing set.
+
+        Unlike ``send``/``send_confirmed``, which always target the primary
+        binding, this addresses one member of the set installed by
+        ``configure_peers``.  A destination absent from that set fails closed
+        with ``peer_rotated`` rather than falling back to the primary.
+        Confirmation semantics match ``send_confirmed``.
+        """
+        if not isinstance(destination_endpoint_id, str):
+            raise TypeError("destination_endpoint_id must be a string")
+        try:
+            destination = bytes.fromhex(destination_endpoint_id)
+        except ValueError as error:
+            raise ValueError("destination_endpoint_id must be hexadecimal") from error
+        if len(destination) != _ENDPOINT_ID_BYTES:
+            raise ValueError("destination_endpoint_id must be 32 bytes")
+        if not isinstance(frame, bytes):
+            raise TypeError("Router frame must be bytes")
+        if len(frame) > OPERATIONAL_MAX_FRAME_BYTES:
+            raise ValueError("Router frame exceeds 16 MiB operational cap")
+        try:
+            decode_frame(frame)
+        except (WireError, ValueError, TypeError) as error:
+            raise ValueError("canonical Router ingress rejected frame") from error
+        if message_id is None:
+            message_id = os.urandom(16)
+        _validate_message_id(message_id)
+        selected_timeout = self._timeout if timeout is None else timeout
+        if selected_timeout <= 0:
+            raise ValueError("timeout must be positive")
+        selected_generation = (
+            self._peer_generation
+            if expected_generation is None
+            else expected_generation
+        )
+        if (
+            not isinstance(selected_generation, int)
+            or isinstance(selected_generation, bool)
+            or selected_generation <= 0
+            or selected_generation > (1 << 64) - 1
+        ):
+            raise ProtocolError("peer_generation_not_configured")
+        selected_source_generation = (
+            selected_generation if source_generation is None else source_generation
+        )
+        if (
+            not isinstance(selected_source_generation, int)
+            or isinstance(selected_source_generation, bool)
+            or selected_source_generation <= 0
+            or selected_source_generation > (1 << 64) - 1
+        ):
+            raise ProtocolError("source_generation_not_configured")
+        transport_payload = (
+            destination
+            + selected_generation.to_bytes(_CONFIRMED_GENERATION_BYTES, "big")
+            + selected_source_generation.to_bytes(_CONFIRMED_GENERATION_BYTES, "big")
+            + frame
+        )
+        deadline = time.monotonic() + selected_timeout
+        try:
+            response = self._request(
+                _SEND_ROUTED,
                 message_id,
                 transport_payload,
                 socket_timeout=selected_timeout,
@@ -582,6 +734,8 @@ def _decode_record(
         _PING,
         _ERROR,
         _SEND_CONFIRMED,
+        _CONFIGURE_PEERS,
+        _SEND_ROUTED,
     }:
         raise ProtocolError("unknown_record_kind")
     if sequence != expected_sequence:

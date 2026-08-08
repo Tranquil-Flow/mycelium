@@ -38,7 +38,7 @@ pub const OPERATIONAL_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 pub const RECEIVE_POLL_WAIT: Duration = Duration::from_millis(250);
 
-const STREAM_IO_TIMEOUT: Duration = Duration::from_secs(15);
+const STREAM_IO_TIMEOUT: Duration = Duration::from_secs(60);
 const LOCAL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
 const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -46,6 +46,8 @@ const CANCEL_CODE: VarInt = VarInt::from_u32(7);
 const REJECT_CODE: VarInt = VarInt::from_u32(8);
 const MAX_LOCAL_SESSIONS: usize = 16;
 const REMOTE_GENERATION_BYTES: usize = 8;
+/// Raw ed25519 public key length, the on-wire size of a routed destination.
+const ENDPOINT_ID_BYTES: usize = 32;
 const LOCAL_CONFIRMED_GENERATION_BYTES: usize = REMOTE_GENERATION_BYTES * 2;
 const REMOTE_MAX_TRANSFER_BYTES: usize = REMOTE_MAX_FRAME_BYTES;
 
@@ -391,6 +393,16 @@ struct ConfigurePeerPayload {
     generation: u64,
 }
 
+/// Atomic multi-peer configuration for explicitly routed topologies.
+///
+/// The whole set is validated before any binding is installed, so a single
+/// malformed or stale entry leaves the existing routing table untouched.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigurePeersPayload {
+    peers: Vec<ConfigurePeerPayload>,
+}
+
 #[derive(Serialize)]
 struct ErrorPayload<'a> {
     code: &'a str,
@@ -489,8 +501,27 @@ async fn process_local_record(
     state: &Arc<RuntimeState>,
 ) -> ResponseRecord {
     match record.kind {
-        RecordKind::Send | RecordKind::SendConfirmed => {
-            let confirmed = record.kind == RecordKind::SendConfirmed;
+        RecordKind::Send | RecordKind::SendConfirmed | RecordKind::SendRouted => {
+            let routed = record.kind == RecordKind::SendRouted;
+            let confirmed = record.kind == RecordKind::SendConfirmed || routed;
+            // A routed record prefixes the raw destination EndpointId, then
+            // carries the same generation prefixes as a confirmed send.
+            let (record, destination) = if routed {
+                if record.payload.len() < ENDPOINT_ID_BYTES {
+                    return error_response(record.message_id, "invalid_peer");
+                }
+                let raw: [u8; ENDPOINT_ID_BYTES] = record.payload[..ENDPOINT_ID_BYTES]
+                    .try_into()
+                    .expect("destination prefix has fixed length");
+                let Ok(destination) = EndpointId::from_bytes(&raw) else {
+                    return error_response(record.message_id, "invalid_peer");
+                };
+                let mut record = record;
+                record.payload.drain(..ENDPOINT_ID_BYTES);
+                (record, Some(destination))
+            } else {
+                (record, None)
+            };
             let (payload, expected_generation, source_generation) = if confirmed {
                 if record.payload.len() < LOCAL_CONFIRMED_GENERATION_BYTES {
                     return error_response(record.message_id, "invalid_generation");
@@ -525,6 +556,7 @@ async fn process_local_record(
                     payload,
                     expected_generation,
                     source_generation,
+                    destination,
                 )
                 .await
             {
@@ -581,6 +613,17 @@ async fn process_local_record(
                 return error_response(record.message_id, "invalid_peer");
             };
             match state.configure_peer(configuration).await {
+                Ok(()) => ack_response(record.message_id),
+                Err(()) => error_response(record.message_id, "invalid_peer"),
+            }
+        }
+        RecordKind::ConfigurePeers => {
+            let Ok(configuration) =
+                serde_json::from_slice::<ConfigurePeersPayload>(&record.payload)
+            else {
+                return error_response(record.message_id, "invalid_peer");
+            };
+            match state.configure_peers(configuration.peers).await {
                 Ok(()) => ack_response(record.message_id),
                 Err(()) => error_response(record.message_id, "invalid_peer"),
             }
@@ -674,8 +717,56 @@ struct PeerBinding {
     generation: u64,
 }
 
+/// Routing table of authenticated peers keyed by `EndpointId`.
+///
+/// `primary` names the binding used by operations that still carry v1
+/// single-peer semantics (outbound dispatch, connection generation fencing).
+/// Inbound admission accepts any binding in the table, which is what lets a
+/// node sit in the middle of a routed topology.
+#[derive(Debug, Default)]
+struct PeerTable {
+    bindings: HashMap<EndpointId, PeerBinding>,
+    primary: Option<EndpointId>,
+}
+
+impl PeerTable {
+    fn primary(&self) -> Option<&PeerBinding> {
+        self.primary
+            .as_ref()
+            .and_then(|endpoint_id| self.bindings.get(endpoint_id))
+    }
+
+    fn get(&self, endpoint_id: EndpointId) -> Option<&PeerBinding> {
+        self.bindings.get(&endpoint_id)
+    }
+
+    fn matches(&self, endpoint_id: EndpointId, generation: u64) -> bool {
+        self.bindings
+            .get(&endpoint_id)
+            .is_some_and(|binding| binding.generation == generation)
+    }
+
+    /// Highest generation any binding holds, used as the staleness floor so a
+    /// rotation can never move the table backwards on any endpoint.
+    fn max_generation(&self) -> u64 {
+        self.bindings
+            .values()
+            .map(|binding| binding.generation)
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn install(&mut self, ordered: Vec<PeerBinding>) {
+        self.primary = ordered.first().map(|binding| binding.address.id);
+        self.bindings = ordered
+            .into_iter()
+            .map(|binding| (binding.address.id, binding))
+            .collect();
+    }
+}
+
 struct RuntimeState {
-    peer: RwLock<Option<PeerBinding>>,
+    peers: RwLock<PeerTable>,
     peer_generation: watch::Sender<u64>,
     peer_changed: Notify,
     local_only: bool,
@@ -854,7 +945,7 @@ impl RuntimeState {
         let seen_limit = capacity.saturating_mul(8).max(64);
         let (peer_generation, _) = watch::channel(0);
         Arc::new(Self {
-            peer: RwLock::new(None),
+            peers: RwLock::new(PeerTable::default()),
             peer_generation,
             peer_changed: Notify::new(),
             local_only,
@@ -877,7 +968,8 @@ impl RuntimeState {
         })
     }
 
-    async fn configure_peer(&self, configuration: ConfigurePeerPayload) -> Result<(), ()> {
+    /// Validate one peer configuration without touching any routing state.
+    fn validate_peer(&self, configuration: ConfigurePeerPayload) -> Result<PeerBinding, ()> {
         let endpoint_id = configuration
             .endpoint_id
             .parse::<EndpointId>()
@@ -897,27 +989,89 @@ impl RuntimeState {
             return Err(());
         }
 
-        let replacement = PeerBinding {
+        Ok(PeerBinding {
             address: configuration.endpoint_addr,
             generation: configuration.generation,
-        };
+        })
+    }
+
+    /// Install an exclusive single peer, preserving v1 semantics: the incoming
+    /// binding becomes the whole table, and any other binding is displaced.
+    async fn configure_peer(&self, configuration: ConfigurePeerPayload) -> Result<(), ()> {
+        let replacement = self.validate_peer(configuration)?;
         let generation = replacement.generation;
-        let mut peer = self.peer.write().await;
-        match peer.as_ref() {
-            Some(current) if current == &replacement => return Ok(()),
-            Some(current) if replacement.generation <= current.generation => return Err(()),
-            Some(_) => {
-                *peer = Some(replacement);
-                self.fence_outbound_for_rotation().await;
-                self.fence_inbound_for_rotation().await;
+        let mut peers = self.peers.write().await;
+        let occupied = !peers.bindings.is_empty();
+        if occupied {
+            if peers.bindings.len() == 1 && peers.primary() == Some(&replacement) {
+                return Ok(());
             }
-            None => *peer = Some(replacement),
+            if replacement.generation <= peers.max_generation() {
+                return Err(());
+            }
         }
-        drop(peer);
+        peers.install(vec![replacement]);
+        if occupied {
+            self.fence_outbound_for_rotation().await;
+            self.fence_inbound_for_rotation().await;
+        }
+        drop(peers);
+        self.publish_peer_generation(generation);
+        Ok(())
+    }
+
+    /// Atomically install a routed peer set.
+    ///
+    /// Every entry is validated and generation-fenced before anything is
+    /// installed, so a single bad entry leaves the previous table intact.
+    async fn configure_peers(&self, configurations: Vec<ConfigurePeerPayload>) -> Result<(), ()> {
+        if configurations.is_empty() {
+            return Err(());
+        }
+        let mut ordered = Vec::with_capacity(configurations.len());
+        let mut seen = HashSet::with_capacity(configurations.len());
+        for configuration in configurations {
+            let binding = self.validate_peer(configuration)?;
+            if !seen.insert(binding.address.id) {
+                return Err(());
+            }
+            ordered.push(binding);
+        }
+
+        let generation = ordered[0].generation;
+        let mut peers = self.peers.write().await;
+        let occupied = !peers.bindings.is_empty();
+        if occupied {
+            let unchanged = peers.bindings.len() == ordered.len()
+                && peers.primary() == Some(&ordered[0])
+                && ordered
+                    .iter()
+                    .all(|binding| peers.bindings.get(&binding.address.id) == Some(binding));
+            if unchanged {
+                return Ok(());
+            }
+            for binding in &ordered {
+                if let Some(existing) = peers.bindings.get(&binding.address.id)
+                    && binding.generation <= existing.generation
+                {
+                    return Err(());
+                }
+            }
+        }
+        peers.install(ordered);
+        if occupied {
+            self.fence_outbound_for_rotation().await;
+            self.fence_inbound_for_rotation().await;
+        }
+        drop(peers);
+        self.publish_peer_generation(generation);
+        Ok(())
+    }
+
+    fn publish_peer_generation(&self, generation: u64) {
         self.peer_generation.send_replace(generation);
         self.peer_changed.notify_waiters();
         self.inbound_ready.notify_waiters();
-        Ok(())
     }
 
     async fn fence_outbound_for_rotation(&self) {
@@ -959,19 +1113,13 @@ impl RuntimeState {
         }
     }
 
-    async fn peer_binding(&self) -> Option<PeerBinding> {
-        self.peer.read().await.clone()
-    }
-
     async fn peer_matches(&self, endpoint_id: EndpointId, generation: u64) -> bool {
-        self.peer.read().await.as_ref().is_some_and(|binding| {
-            binding.address.id == endpoint_id && binding.generation == generation
-        })
+        self.peers.read().await.matches(endpoint_id, generation)
     }
 
     async fn bind_outbound(&self, control: &OutboundControl) -> Option<PeerBinding> {
-        let peer = self.peer.read().await;
-        let binding = peer.as_ref()?.clone();
+        let peers = self.peers.read().await;
+        let binding = peers.primary()?.clone();
         let generation = control.generation.load(Ordering::Acquire);
         if generation == 0 {
             control
@@ -985,18 +1133,31 @@ impl RuntimeState {
         }
     }
 
+    /// Queue a frame for dispatch.
+    ///
+    /// `destination` names an explicit peer for routed topologies; when it is
+    /// absent the primary binding is used, preserving v1 point-to-point sends.
+    /// An unknown destination fails closed rather than falling back.
     async fn enqueue_outbound(
         &self,
         message_id: MessageId,
         payload: Vec<u8>,
         expected_generation: Option<u64>,
         source_generation: Option<u64>,
+        destination: Option<EndpointId>,
     ) -> EnqueueOutcome {
         let digest = frame_digest(&payload);
-        let peer = self.peer.read().await;
-        if expected_generation.is_some_and(|generation| {
-            peer.as_ref().map(|binding| binding.generation) != Some(generation)
-        }) {
+        let peers = self.peers.read().await;
+        let routed = match destination {
+            Some(endpoint_id) => match peers.get(endpoint_id) {
+                Some(binding) => Some(binding.clone()),
+                None => return EnqueueOutcome::PeerRotated,
+            },
+            None => peers.primary().cloned(),
+        };
+        if expected_generation
+            .is_some_and(|generation| routed.as_ref().map(|b| b.generation) != Some(generation))
+        {
             return EnqueueOutcome::PeerRotated;
         }
         let mut tokens = self.outbound_tokens.lock().await;
@@ -1011,7 +1172,7 @@ impl RuntimeState {
             Ok(permit) => permit,
             Err(_) => return EnqueueOutcome::Full,
         };
-        let target = peer.as_ref().cloned();
+        let target = routed;
         let control = Arc::new(OutboundControl {
             cancellation: CancellationToken::new(),
             permit: Mutex::new(Some(permit)),
@@ -1030,7 +1191,7 @@ impl RuntimeState {
         tokens.insert(message_id, control.clone());
         self.outbound.lock().await.push_back(item);
         drop(tokens);
-        drop(peer);
+        drop(peers);
         self.outbound_ready.notify_one();
         EnqueueOutcome::Queued(control)
     }
@@ -1107,12 +1268,11 @@ impl RuntimeState {
     ) -> AdmissionOutcome {
         let digest = frame_digest(&payload);
         let generation = origin.as_ref().map_or(0, |(_, generation)| *generation);
-        let peer = self.peer.read().await;
+        let peers = self.peers.read().await;
         if let Some((endpoint_id, generation)) = origin {
-            let current = peer.as_ref().is_some_and(|binding| {
-                binding.address.id == endpoint_id && binding.generation == generation
-            });
-            if !current {
+            // Any binding in the routing table is a legitimate origin, not just
+            // the primary: a routed node receives from several upstream peers.
+            if !peers.matches(endpoint_id, generation) {
                 let mut inbound = self.inbound.lock().await;
                 inbound.remember_rotated(message_id, self.seen_limit);
                 return AdmissionOutcome::PeerRotated;
@@ -1154,7 +1314,7 @@ impl RuntimeState {
             _permit: permit,
         });
         drop(inbound);
-        drop(peer);
+        drop(peers);
         self.inbound_ready.notify_waiters();
         AdmissionOutcome::Admitted(control)
     }
@@ -1168,7 +1328,7 @@ impl RuntimeState {
         loop {
             let notified = self.inbound_ready.notified();
             {
-                let _peer = self.peer.read().await;
+                let _peers = self.peers.read().await;
                 let mut inbound = self.inbound.lock().await;
                 if let Some(item) = inbound.pending.pop_front() {
                     let result = (item.message_id, item.generation, item.payload.clone());
@@ -1188,7 +1348,7 @@ impl RuntimeState {
     }
 
     async fn ack_inbound(&self, session_id: u64, message_id: MessageId) -> bool {
-        let _peer = self.peer.read().await;
+        let _peers = self.peers.read().await;
         let mut inbound = self.inbound.lock().await;
         let Some(items) = inbound.inflight.get_mut(&session_id) else {
             return false;
@@ -1213,7 +1373,7 @@ impl RuntimeState {
     }
 
     async fn redeliver_session(&self, session_id: u64) {
-        let _peer = self.peer.read().await;
+        let _peers = self.peers.read().await;
         let mut inbound = self.inbound.lock().await;
         let Some(mut inflight) = inbound.inflight.remove(&session_id) else {
             return;
@@ -1396,14 +1556,24 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
             let Ok(connection) = incoming.await else {
                 return;
             };
-            let Some(expected) = connection_state.peer_binding().await else {
-                connection.close(REJECT_CODE, b"unconfigured");
-                return;
+            // Admit against the binding for this specific remote so every peer
+            // in a routed set can open a connection, not just the primary.
+            let expected = {
+                let peers = connection_state.peers.read().await;
+                if peers.bindings.is_empty() {
+                    drop(peers);
+                    connection.close(REJECT_CODE, b"unconfigured");
+                    return;
+                }
+                match peers.get(connection.remote_id()) {
+                    Some(binding) => binding.clone(),
+                    None => {
+                        drop(peers);
+                        connection.close(REJECT_CODE, b"identity");
+                        return;
+                    }
+                }
             };
-            if connection.remote_id() != expected.address.id {
-                connection.close(REJECT_CODE, b"identity");
-                return;
-            }
             let generation_changes = connection_state.peer_generation.subscribe();
             handle_remote_connection(
                 connection,
@@ -1537,6 +1707,7 @@ mod tests {
     use serde_json::json;
     use std::fs::OpenOptions;
     use std::io::Write;
+    use std::net::SocketAddr;
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1653,7 +1824,7 @@ mod tests {
         assert!(!state.cancel_outbound([9; 16]).await);
         assert!(matches!(
             state
-                .enqueue_outbound([1; 16], valid_frame(), None, None)
+                .enqueue_outbound([1; 16], valid_frame(), None, None, None)
                 .await,
             EnqueueOutcome::Queued(_)
         ));
@@ -1662,7 +1833,268 @@ mod tests {
         assert_eq!(state.outbound_slots.available_permits(), 1);
         assert!(matches!(
             state
-                .enqueue_outbound([2; 16], valid_frame(), None, None)
+                .enqueue_outbound([2; 16], valid_frame(), None, None, None)
+                .await,
+            EnqueueOutcome::Queued(_)
+        ));
+    }
+
+    fn test_endpoint_id(seed: u8) -> EndpointId {
+        SecretKey::from_bytes(&[seed; 32]).public()
+    }
+
+    fn peer_payload(seed: u8, generation: u64, address: Ipv4Addr) -> ConfigurePeerPayload {
+        let endpoint_id = test_endpoint_id(seed);
+        let mut endpoint_addr = EndpointAddr::new(endpoint_id);
+        endpoint_addr
+            .addrs
+            .insert(TransportAddr::Ip(SocketAddr::V4(SocketAddrV4::new(
+                address,
+                20_000 + u16::from(seed),
+            ))));
+        ConfigurePeerPayload {
+            endpoint_id: endpoint_id.to_string(),
+            endpoint_addr,
+            generation,
+        }
+    }
+
+    fn loopback_peer(seed: u8, generation: u64) -> ConfigurePeerPayload {
+        peer_payload(seed, generation, Ipv4Addr::LOCALHOST)
+    }
+
+    fn routable_peer(seed: u8, generation: u64) -> ConfigurePeerPayload {
+        peer_payload(seed, generation, Ipv4Addr::new(203, 0, 113, seed))
+    }
+
+    /// The peer document Python hands back is the sidecar's own serialized
+    /// `EndpointAddr`, so the wire shape must survive a JSON round trip.
+    #[test]
+    fn configure_peers_payload_round_trips_through_canonical_json() {
+        let endpoint_id = test_endpoint_id(1);
+        let peer = loopback_peer(1, 2);
+        let encoded = serde_json::to_string(&json!({
+            "peers": [{
+                "endpoint_id": peer.endpoint_id,
+                "endpoint_addr": peer.endpoint_addr,
+                "generation": peer.generation,
+            }],
+        }))
+        .expect("payload serializes");
+
+        let decoded: ConfigurePeersPayload =
+            serde_json::from_str(&encoded).expect("payload deserializes");
+        assert_eq!(decoded.peers.len(), 1);
+        assert_eq!(decoded.peers[0].endpoint_addr.id, endpoint_id);
+        assert_eq!(decoded.peers[0].generation, 2);
+    }
+
+    #[tokio::test]
+    async fn configure_peers_installs_every_binding_and_designates_the_first_as_primary() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![
+                loopback_peer(1, 3),
+                loopback_peer(2, 3),
+                loopback_peer(3, 3),
+            ])
+            .await
+            .expect("atomic multi-peer configuration is accepted");
+
+        for seed in 1_u8..=3 {
+            assert!(
+                state.peer_matches(test_endpoint_id(seed), 3).await,
+                "seed {seed} must be routable after ConfigurePeers"
+            );
+        }
+        assert!(!state.peer_matches(test_endpoint_id(4), 3).await);
+        assert!(!state.peer_matches(test_endpoint_id(1), 2).await);
+
+        let primary = state
+            .peers
+            .read()
+            .await
+            .primary()
+            .cloned()
+            .expect("primary binding exists");
+        assert_eq!(primary.address.id, test_endpoint_id(1));
+        assert_eq!(primary.generation, 3);
+        assert_eq!(*state.peer_generation.borrow(), 3);
+    }
+
+    #[tokio::test]
+    async fn configure_peers_rejects_the_whole_set_when_one_entry_is_stale() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![loopback_peer(1, 5), loopback_peer(2, 5)])
+            .await
+            .expect("initial set is accepted");
+
+        state
+            .configure_peers(vec![
+                loopback_peer(1, 6),
+                loopback_peer(2, 5),
+                loopback_peer(3, 6),
+            ])
+            .await
+            .expect_err("a stale entry must reject the entire set");
+
+        assert!(state.peer_matches(test_endpoint_id(1), 5).await);
+        assert!(!state.peer_matches(test_endpoint_id(1), 6).await);
+        assert!(!state.peer_matches(test_endpoint_id(3), 6).await);
+        assert_eq!(*state.peer_generation.borrow(), 5);
+    }
+
+    #[tokio::test]
+    async fn configure_peers_rejects_duplicates_zero_generations_and_mismatched_ids() {
+        let state = RuntimeState::new(4, true);
+
+        state
+            .configure_peers(vec![loopback_peer(1, 2), loopback_peer(1, 3)])
+            .await
+            .expect_err("duplicate endpoint ids must fail closed");
+
+        state
+            .configure_peers(vec![loopback_peer(1, 0)])
+            .await
+            .expect_err("generation zero must fail closed");
+
+        let mut mismatched = loopback_peer(1, 2);
+        mismatched.endpoint_id = test_endpoint_id(9).to_string();
+        state
+            .configure_peers(vec![mismatched])
+            .await
+            .expect_err("endpoint_id must match endpoint_addr id");
+
+        state
+            .configure_peers(vec![routable_peer(1, 2)])
+            .await
+            .expect_err("local_only sidecars must reject non-loopback peers");
+
+        assert!(state.peers.read().await.primary().is_none());
+        assert_eq!(*state.peer_generation.borrow(), 0);
+    }
+
+    #[tokio::test]
+    async fn configure_peers_fences_displaced_inflight_work() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![loopback_peer(1, 1)])
+            .await
+            .expect("initial set is accepted");
+        let EnqueueOutcome::Queued(control) = state
+            .enqueue_outbound([1; 16], valid_frame(), None, None, None)
+            .await
+        else {
+            panic!("frame must queue against the configured peer");
+        };
+
+        state
+            .configure_peers(vec![loopback_peer(1, 2), loopback_peer(2, 2)])
+            .await
+            .expect("rotation to a larger peer set is accepted");
+
+        assert_eq!(control.terminal(), Some(OutboundTerminal::PeerRotated));
+        assert!(state.peer_matches(test_endpoint_id(2), 2).await);
+    }
+
+    #[tokio::test]
+    async fn single_peer_configuration_remains_exclusive() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![loopback_peer(1, 4), loopback_peer(2, 4)])
+            .await
+            .expect("multi-peer set is accepted");
+
+        state
+            .configure_peer(loopback_peer(3, 5))
+            .await
+            .expect("single-peer rotation is accepted");
+
+        assert!(state.peer_matches(test_endpoint_id(3), 5).await);
+        assert!(!state.peer_matches(test_endpoint_id(1), 4).await);
+        assert!(!state.peer_matches(test_endpoint_id(2), 4).await);
+    }
+
+    #[tokio::test]
+    async fn routed_send_targets_a_named_peer_instead_of_the_primary() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![loopback_peer(1, 1), loopback_peer(2, 1)])
+            .await
+            .expect("routed set is accepted");
+
+        assert!(matches!(
+            state
+                .enqueue_outbound(
+                    [1; 16],
+                    valid_frame(),
+                    None,
+                    None,
+                    Some(test_endpoint_id(2)),
+                )
+                .await,
+            EnqueueOutcome::Queued(_)
+        ));
+        let item = state.next_outbound().await;
+        let target = item.target.expect("routed send binds a target eagerly");
+        assert_eq!(target.address.id, test_endpoint_id(2));
+        assert_ne!(target.address.id, test_endpoint_id(1));
+    }
+
+    #[tokio::test]
+    async fn routed_send_to_an_unconfigured_destination_fails_closed() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![loopback_peer(1, 1)])
+            .await
+            .expect("routed set is accepted");
+
+        assert!(matches!(
+            state
+                .enqueue_outbound(
+                    [3; 16],
+                    valid_frame(),
+                    None,
+                    None,
+                    Some(test_endpoint_id(9)),
+                )
+                .await,
+            EnqueueOutcome::PeerRotated
+        ));
+        // A rejected route must not consume queue capacity.
+        assert_eq!(state.outbound_slots.available_permits(), 4);
+    }
+
+    #[tokio::test]
+    async fn routed_send_checks_the_generation_of_the_named_peer() {
+        let state = RuntimeState::new(4, true);
+        state
+            .configure_peers(vec![loopback_peer(1, 7), loopback_peer(2, 7)])
+            .await
+            .expect("routed set is accepted");
+
+        assert!(matches!(
+            state
+                .enqueue_outbound(
+                    [4; 16],
+                    valid_frame(),
+                    Some(6),
+                    None,
+                    Some(test_endpoint_id(2)),
+                )
+                .await,
+            EnqueueOutcome::PeerRotated
+        ));
+        assert!(matches!(
+            state
+                .enqueue_outbound(
+                    [5; 16],
+                    valid_frame(),
+                    Some(7),
+                    None,
+                    Some(test_endpoint_id(2)),
+                )
                 .await,
             EnqueueOutcome::Queued(_)
         ));

@@ -45,6 +45,8 @@ pub enum RecordKind {
     Ping = 7,
     Error = 8,
     SendConfirmed = 9,
+    ConfigurePeers = 10,
+    SendRouted = 11,
 }
 
 impl TryFrom<u8> for RecordKind {
@@ -61,6 +63,8 @@ impl TryFrom<u8> for RecordKind {
             7 => Ok(Self::Ping),
             8 => Ok(Self::Error),
             9 => Ok(Self::SendConfirmed),
+            10 => Ok(Self::ConfigurePeers),
+            11 => Ok(Self::SendRouted),
             _ => Err(LocalProtocolError::UnknownRecordKind),
         }
     }
@@ -478,6 +482,36 @@ mod tests {
         let server = ServerHello::new(&secret, &client_nonce, &server_nonce, "public").unwrap();
         assert_eq!(server.verify(&secret, &client_nonce).unwrap(), server_nonce);
         assert!(server.verify(&[9_u8; 32], &client_nonce).is_err());
+    }
+
+    #[test]
+    fn configure_peers_is_a_distinct_record_kind_and_unknown_kinds_stay_closed() {
+        assert_eq!(RecordKind::ConfigurePeers as u8, 10);
+        assert_eq!(
+            RecordKind::try_from(10_u8).unwrap(),
+            RecordKind::ConfigurePeers
+        );
+        assert_ne!(RecordKind::ConfigurePeers, RecordKind::ConfigurePeer);
+        assert_eq!(RecordKind::SendRouted as u8, 11);
+        assert_eq!(RecordKind::try_from(11_u8).unwrap(), RecordKind::SendRouted);
+        assert_eq!(
+            RecordKind::try_from(12_u8),
+            Err(LocalProtocolError::UnknownRecordKind)
+        );
+
+        let key = [7_u8; 32];
+        let encoded = encode_record(
+            RecordKind::ConfigurePeers,
+            0,
+            [8_u8; 16],
+            br#"{"peers":[]}"#,
+            &key,
+        )
+        .unwrap();
+        let mut guard = SequenceGuard::new();
+        let decoded = decode_record(&encoded, &key, &mut guard).unwrap();
+        assert_eq!(decoded.kind, RecordKind::ConfigurePeers);
+        assert_eq!(decoded.payload, br#"{"peers":[]}"#);
     }
 
     #[test]
