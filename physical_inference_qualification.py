@@ -1851,7 +1851,7 @@ class QualificationController:
         argv = _peer_process_argv(
             peer,
             (
-                "python3.14",
+                "python3",
                 "-c",
                 _REMOTE_CLEANUP_SCRIPT,
                 peer.staging_root,

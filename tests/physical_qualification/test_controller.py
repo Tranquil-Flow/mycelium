@@ -1306,9 +1306,10 @@ def test_physical_cleanup_uses_declared_local_and_ssh_process_transports(
 
     local_argv = runner.calls[0][0]
     remote_argv = runner.calls[1][0]
-    assert local_argv[:2] == ("python3.14", "-c")
+    assert local_argv[:2] == ("python3", "-c")
     assert "ssh" not in local_argv
     assert remote_argv[0] == "ssh"
+    assert shlex.split(remote_argv[-1])[:2] == ["python3", "-c"]
     assert "BatchMode=yes" in remote_argv
     assert "IdentitiesOnly=yes" in remote_argv
     assert "StrictHostKeyChecking=yes" in remote_argv
