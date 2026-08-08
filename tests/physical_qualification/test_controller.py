@@ -19,7 +19,10 @@ from mycelium_membership.contracts import (
     sign_membership_message,
 )
 from mycelium_qualification.evidence import canonical_json_bytes
-from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_qualification.signing import (
+    build_ed25519_verifier,
+    generate_ed25519_signer,
+)
 from physical_inference_qualification import (
     COMMANDS,
     CommandCapture,
@@ -894,6 +897,30 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
     assert result["release_ready"] is False
     assert result["token_parity"] is True
     assert result["output_token_ids"] == [11, 12]
+    signed_observations = result["signed_observations"]
+    assert len(signed_observations) == 10
+    assert {
+        (item["observation"]["node_id"], item["observation"]["event"])
+        for item in signed_observations
+    } == {
+        ("node-0", "configured"),
+        ("node-0", "started"),
+        ("node-0", "inference_started"),
+        ("node-0", "inference_decoded"),
+        ("node-0", "snapshot"),
+        ("node-0", "stopping"),
+        ("node-1", "configured"),
+        ("node-1", "started"),
+        ("node-1", "snapshot"),
+        ("node-1", "stopping"),
+    }
+    for item in signed_observations:
+        assert set(item) == {"observation", "signature", "verification_key"}
+        verifier = build_ed25519_verifier([item["verification_key"]])
+        assert verifier(
+            canonical_json_bytes(item["observation"]),
+            item["signature"],
+        ) is True
     assert set(sessions) == {peer.node_id for peer in peers}
     for peer in peers:
         remote_argv = shlex.split(sessions[peer.node_id].argv[-1])

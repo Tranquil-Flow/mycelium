@@ -1172,6 +1172,7 @@ class QualificationController:
         deployment_id: str,
         endpoint_id: str,
         expected_verification_key: Mapping[str, Any] | None = None,
+        signed_observation_sink: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if response.get("ok") is not True or not isinstance(response.get("result"), Mapping):
             remote_code: str | None = None
@@ -1237,6 +1238,18 @@ class QualificationController:
             raise ControllerError("node_observation_signature_invalid") from exc
         if valid is not True:
             _reject("node_observation_signature_invalid")
+        if signed_observation_sink is not None:
+            signed_observation_sink.append(
+                json.loads(
+                    canonical_json_bytes(
+                        {
+                            "observation": dict(observation),
+                            "signature": dict(signature),
+                            "verification_key": dict(verification_key),
+                        }
+                    )
+                )
+            )
         return dict(observation)
 
     def _run_physical(
@@ -1257,6 +1270,7 @@ class QualificationController:
         observations: dict[str, dict[str, Any]] = {
             node_id: {} for node_id in peers_by_node
         }
+        signed_observations: list[dict[str, Any]] = []
         endpoint_addresses: dict[str, dict[str, Any]] = {}
         verification_keys: dict[str, dict[str, Any]] = {}
         created_sessions: list[tuple[str, Any]] = []
@@ -1327,6 +1341,7 @@ class QualificationController:
                     run_id=plan["run_id"],
                     deployment_id=plan["deployment_id"],
                     endpoint_id=endpoint_id,
+                    signed_observation_sink=signed_observations,
                 )
                 endpoint_addr = observation["details"].get("endpoint_addr")
                 if (
@@ -1374,6 +1389,7 @@ class QualificationController:
                     deployment_id=plan["deployment_id"],
                     endpoint_id=endpoints[node_id]["endpoint_id"],
                     expected_verification_key=verification_keys[node_id],
+                    signed_observation_sink=signed_observations,
                 )
             entry_node_id = plan["entry_node_id"]
             entry_peer = peers_by_node[entry_node_id]
@@ -1391,6 +1407,7 @@ class QualificationController:
                 deployment_id=plan["deployment_id"],
                 endpoint_id=endpoints[entry_node_id]["endpoint_id"],
                 expected_verification_key=verification_keys[entry_node_id],
+                signed_observation_sink=signed_observations,
             )
             if operation == "cancel":
                 cancelled = sessions[entry_node_id].send(
@@ -1408,6 +1425,7 @@ class QualificationController:
                         deployment_id=plan["deployment_id"],
                         endpoint_id=endpoints[entry_node_id]["endpoint_id"],
                         expected_verification_key=verification_keys[entry_node_id],
+                        signed_observation_sink=signed_observations,
                     )
                 )
                 output_token_ids = []
@@ -1429,6 +1447,7 @@ class QualificationController:
                     deployment_id=plan["deployment_id"],
                     endpoint_id=endpoints[entry_node_id]["endpoint_id"],
                     expected_verification_key=verification_keys[entry_node_id],
+                    signed_observation_sink=signed_observations,
                 )
                 observations[entry_node_id]["inference_decoded"] = (
                     decoded_observation
@@ -1458,6 +1477,7 @@ class QualificationController:
                         deployment_id=plan["deployment_id"],
                         endpoint_id=endpoints[node_id]["endpoint_id"],
                         expected_verification_key=verification_keys[node_id],
+                        signed_observation_sink=signed_observations,
                     )
                 except ControllerError as exc:
                     if operation != "recover" or exc.code != "node_process_exited":
@@ -1524,6 +1544,7 @@ class QualificationController:
                             run_id=plan["run_id"],
                             deployment_id=plan["deployment_id"],
                             endpoint_id=endpoint_id,
+                            signed_observation_sink=signed_observations,
                         )
                         endpoint_addr = configured_observation["details"].get(
                             "endpoint_addr"
@@ -1570,6 +1591,7 @@ class QualificationController:
                                 deployment_id=plan["deployment_id"],
                                 endpoint_id=endpoint_id,
                                 expected_verification_key=verification_keys[node_id],
+                                signed_observation_sink=signed_observations,
                             )
                         )
                         predecessor_id = predecessors[node_id]
@@ -1597,6 +1619,7 @@ class QualificationController:
                             deployment_id=plan["deployment_id"],
                             endpoint_id=endpoints[predecessor_id]["endpoint_id"],
                             expected_verification_key=verification_keys[predecessor_id],
+                            signed_observation_sink=signed_observations,
                         )
                         if (
                             rotated_observation["peer_generation"]
@@ -1621,6 +1644,7 @@ class QualificationController:
                                 deployment_id=plan["deployment_id"],
                                 endpoint_id=endpoint_id,
                                 expected_verification_key=verification_keys[node_id],
+                                signed_observation_sink=signed_observations,
                             )
                         )
                         recovered_nodes.append(node_id)
@@ -1659,6 +1683,7 @@ class QualificationController:
                     deployment_id=plan["deployment_id"],
                     endpoint_id=endpoints[node_id]["endpoint_id"],
                     expected_verification_key=verification_keys[node_id],
+                    signed_observation_sink=signed_observations,
                 )
                 stopped.add(id(sessions[node_id]))
         except BaseException as exc:
@@ -1709,6 +1734,7 @@ class QualificationController:
             "expected_token_ids": plan["expected_token_ids"],
             "identities": identities,
             "observations": observations,
+            "signed_observations": signed_observations,
             "recovered_nodes": recovered_nodes,
             "restart_attempts": restart_attempts,
             "cleanup": cleanup_actions,
