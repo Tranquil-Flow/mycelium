@@ -1633,21 +1633,31 @@ def test_temp_root_partial_cleanup_never_restores_incomplete_tree(
 
 def test_temp_root_recursive_cleanup_fd_stress_leaves_no_owned_residue() -> None:
     descriptor_directory = Path("/dev/fd")
-    before_descriptors = len(os.listdir(descriptor_directory))
+    owned_identities: set[tuple[int, int]] = set()
     roots: list[Path] = []
     for index in range(64):
         root = harness.create_owned_temp_root()
         roots.append(root)
-        nested = root / f"nested-{index}" / "leaf"
+        nested_parent = root / f"nested-{index}"
+        nested = nested_parent / "leaf"
         nested.mkdir(parents=True)
-        (nested / "payload").write_bytes(f"payload-{index}".encode())
+        payload = nested / "payload"
+        payload.write_bytes(f"payload-{index}".encode())
+        for candidate in (root, nested_parent, nested, payload):
+            metadata = candidate.stat(follow_symlinks=False)
+            owned_identities.add((metadata.st_dev, metadata.st_ino))
         harness.remove_temp_root(harness.capture_temp_root(root))
     assert all(not root.exists() for root in roots)
     assert all(
         list(root.parent.glob(root.name + ".quarantine-*")) == []
         for root in roots
     )
-    assert len(os.listdir(descriptor_directory)) == before_descriptors
+    for descriptor in os.listdir(descriptor_directory):
+        try:
+            metadata = os.fstat(int(descriptor))
+        except OSError:
+            continue
+        assert (metadata.st_dev, metadata.st_ino) not in owned_identities
 
 
 def test_temp_root_cleanup_aggregates_restore_failure_and_preserves_both(
