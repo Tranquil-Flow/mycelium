@@ -43,6 +43,8 @@ class _Hub:
         self.acks: list[bytes] = []
         self.cancels: list[bytes] = []
         self.configurations: list[tuple[str, dict, int]] = []
+        self.peer_configurations: list[list[dict]] = []
+        self.routed_sent: list[tuple[str, bytes, bytes, float | None, int]] = []
         self.confirmed_send_entered = threading.Event()
         self.retry_confirmed_send_entered = threading.Event()
         self.release_confirmed_send = threading.Event()
@@ -111,6 +113,17 @@ class _FakeClient:
             raise ProtocolError("not_connected")
         self.hub.configurations.append((endpoint_id, endpoint_addr, generation))
 
+    def configure_peers(
+        self,
+        peers: list[dict],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        del timeout
+        if not self.connected:
+            raise ProtocolError("not_connected")
+        self.hub.peer_configurations.append(peers)
+
     def send_confirmed(
         self,
         frame: bytes,
@@ -134,6 +147,24 @@ class _FakeClient:
         if self.hub.send_failure is not None:
             raise self.hub.send_failure
         self.hub.sent.append((message_id, frame, timeout, expected_generation))
+        self.hub.source_generations.append(source_generation)
+        return message_id
+
+    def send_routed(
+        self,
+        destination_endpoint_id: str,
+        frame: bytes,
+        message_id: bytes,
+        *,
+        timeout: float | None = None,
+        expected_generation: int,
+        source_generation: int,
+    ) -> bytes:
+        if not self.connected:
+            raise ProtocolError("not_connected")
+        self.hub.routed_sent.append(
+            (destination_endpoint_id, message_id, frame, timeout, expected_generation)
+        )
         self.hub.source_generations.append(source_generation)
         return message_id
 
@@ -221,11 +252,16 @@ class _RejectingManifestRouter:
         return False
 
 
-def _binding(*, generation: int = 7) -> PeerBinding:
+def _binding(
+    *,
+    node_id: str = "peer-node",
+    endpoint_id: str = "peer-endpoint",
+    generation: int = 7,
+) -> PeerBinding:
     return PeerBinding(
-        node_id="peer-node",
-        endpoint_id="peer-endpoint",
-        endpoint_addr={"id": "peer-endpoint", "addrs": ["127.0.0.1:1"]},
+        node_id=node_id,
+        endpoint_id=endpoint_id,
+        endpoint_addr={"id": endpoint_id, "addrs": ["127.0.0.1:1"]},
         generation=generation,
     )
 
@@ -250,12 +286,15 @@ def _transport(
     delivery_timeout_seconds: float = 0.2,
     expected_endpoint_id: str = "local-endpoint",
     local_generation: int | None = None,
+    peer: PeerBinding | None = None,
+    peers: list[PeerBinding] | None = None,
 ) -> IrohTransport:
     return IrohTransport(
         node_id="local-node",
         socket_path="/unused",
         bootstrap_secret=b"s" * 32,
-        peer=_binding(),
+        peer=_binding() if peer is None else peer,
+        peers=peers,
         local_generation=local_generation,
         expected_endpoint_id=expected_endpoint_id,
         queue_capacity=queue_capacity,
@@ -287,6 +326,76 @@ def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() ->
     assert receipt.semantics == "remote_router_dispatch_ack"
     assert receipt.router_protocol == ROUTER_WIRE_PROTOCOL
     assert transport.route_ready is False
+
+
+def test_multi_peer_transport_configures_peer_set_atomically_on_start() -> None:
+    hub = _Hub()
+    primary = _binding(node_id="peer-a", endpoint_id="endpoint-a", generation=3)
+    secondary = _binding(node_id="peer-b", endpoint_id="endpoint-b", generation=4)
+    transport = _transport(hub, peer=primary, peers=[secondary])
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    try:
+        assert hub.configurations == []
+        assert hub.peer_configurations == [
+            [
+                {
+                    "endpoint_id": "endpoint-a",
+                    "endpoint_addr": {"id": "endpoint-a", "addrs": ["127.0.0.1:1"]},
+                    "generation": 3,
+                },
+                {
+                    "endpoint_id": "endpoint-b",
+                    "endpoint_addr": {"id": "endpoint-b", "addrs": ["127.0.0.1:1"]},
+                    "generation": 4,
+                },
+            ]
+        ]
+    finally:
+        transport.close()
+
+
+def test_multi_peer_transport_routes_non_primary_destination_by_endpoint() -> None:
+    hub = _Hub()
+    primary = _binding(node_id="peer-a", endpoint_id="endpoint-a", generation=3)
+    secondary = _binding(node_id="peer-b", endpoint_id="endpoint-b", generation=4)
+    transport = _transport(hub, peer=primary, peers=[secondary], local_generation=9)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    try:
+        receipt = transport.send_router_frame(
+            _event_frame(), destination_node_id="peer-b"
+        )
+    finally:
+        transport.close()
+
+    assert hub.sent == []
+    assert len(hub.routed_sent) == 1
+    routed_endpoint, message_id, frame, _timeout, expected_generation = hub.routed_sent[0]
+    assert routed_endpoint == "endpoint-b"
+    assert frame == _event_frame()
+    assert expected_generation == 4
+    assert hub.source_generations == [9]
+    assert receipt.message_id == message_id
+    assert receipt.peer_endpoint_id == "endpoint-b"
+    assert receipt.peer_generation == 4
+
+
+def test_multi_peer_unknown_destination_fails_closed_without_primary_fallback() -> None:
+    hub = _Hub()
+    primary = _binding(node_id="peer-a", endpoint_id="endpoint-a", generation=3)
+    secondary = _binding(node_id="peer-b", endpoint_id="endpoint-b", generation=4)
+    transport = _transport(hub, peer=primary, peers=[secondary])
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    try:
+        with pytest.raises(IrohTransportError, match="destination_binding_mismatch"):
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-c")
+    finally:
+        transport.close()
+
+    assert hub.sent == []
+    assert hub.routed_sent == []
 
 
 def test_confirmed_send_binds_distinct_local_membership_generation() -> None:

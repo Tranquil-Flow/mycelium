@@ -18,7 +18,7 @@ from pathlib import Path
 from queue import Empty, Full, Queue
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 import uuid
 
 from mycelium_iroh_sidecar import (
@@ -368,7 +368,14 @@ class PeerSet:
       with self._lock:
          for binding in canonical:
             existing = self._bindings.get(binding.node_id)
-            if existing is not None and binding.generation <= existing.generation:
+            if existing is None:
+               continue
+            if binding.generation < existing.generation:
+               raise ValueError("stale_peer_generation")
+            if (
+               binding.generation == existing.generation
+               and _peer_binding_snapshot(binding) != _peer_binding_snapshot(existing)
+            ):
                raise ValueError("stale_peer_generation")
          self._bindings = {b.node_id: b for b in canonical}
 
@@ -440,6 +447,7 @@ class IrohTransport:
       socket_path: str | Path,
       bootstrap_secret: bytes,
       peer: PeerBinding,
+      peers: Sequence[PeerBinding] | None = None,
       local_generation: int | None = None,
       expected_endpoint_id: str,
       queue_capacity: int = 128,
@@ -468,6 +476,11 @@ class IrohTransport:
       self.socket_path = Path(socket_path)
       self._bootstrap_secret = bytes(bootstrap_secret)
       self._peer = _canonical_peer_binding(peer)
+      self._peers = PeerSet()
+      try:
+         self._peers.atomic_replace([self._peer, *(peers or ())])
+      except ValueError as error:
+         raise ValueError(str(error)) from error
       self.local_generation = selected_local_generation
       self.expected_endpoint_id = expected_endpoint_id
       self.delivery_timeout_seconds = delivery_timeout_seconds
@@ -626,7 +639,7 @@ class IrohTransport:
                   "local_endpoint_mismatch",
                   f"expected={self.expected_endpoint_id},actual={actual}",
                )
-         self._configure_peer(clients[2], self._peer)
+         self._configure_current_peers(clients[2])
       except BaseException:
          for client in clients:
             try:
@@ -666,6 +679,61 @@ class IrohTransport:
          timeout=timeout,
       )
 
+   @staticmethod
+   def _configure_peers(
+      client: Any,
+      bindings: Sequence[PeerBinding],
+      *,
+      timeout: float | None = None,
+   ) -> None:
+      client.configure_peers(
+         [
+            {
+               "endpoint_id": binding.endpoint_id,
+               "endpoint_addr": _canonical_endpoint_document(
+                  binding.endpoint_addr
+               ),
+               "generation": binding.generation,
+            }
+            for binding in bindings
+         ],
+         timeout=timeout,
+      )
+
+   def _ordered_peer_bindings(self) -> list[PeerBinding]:
+      snapshot = self._peers.snapshot()
+      ordered = [self._peer]
+      ordered.extend(
+         binding
+         for node_id, binding in snapshot.items()
+         if node_id != self._peer.node_id
+      )
+      return ordered
+
+   def _configure_current_peers(
+      self,
+      client: Any,
+      *,
+      timeout: float | None = None,
+   ) -> None:
+      bindings = self._ordered_peer_bindings()
+      if len(bindings) == 1:
+         if timeout is None:
+            self._configure_peer(client, bindings[0])
+         else:
+            self._configure_peer(client, bindings[0], timeout=timeout)
+      else:
+         if timeout is None:
+            self._configure_peers(client, bindings)
+         else:
+            self._configure_peers(client, bindings, timeout=timeout)
+
+   def _lookup_destination_peer(self, destination_node_id: str) -> PeerBinding:
+      try:
+         return self._peers.lookup(destination_node_id)
+      except KeyError:
+         raise IrohTransportError("destination_binding_mismatch") from None
+
    def rotate_peer(self, replacement: PeerBinding) -> None:
       with self._rotation_lock:
          self._rotate_peer(replacement)
@@ -683,7 +751,15 @@ class IrohTransport:
       if control is None:
          raise IrohTransportError("transport_control_unavailable")
       try:
-         self._configure_peer(control, candidate)
+         current_peers = self._peers.snapshot()
+         configured_bindings = [
+            candidate if binding.node_id == candidate.node_id else binding
+            for binding in current_peers.values()
+         ]
+         if len(configured_bindings) == 1:
+            self._configure_peer(control, candidate)
+         else:
+            self._configure_peers(control, configured_bindings)
       except BaseException as error:
          raise self._map_sidecar_error("peer_rotation_failed", error) from error
 
@@ -698,6 +774,13 @@ class IrohTransport:
          if refreshed_snapshot != current_snapshot:
             raise IrohTransportError("peer_rotated")
          self._peer = candidate
+         current_peers = self._peers.snapshot()
+         self._peers.atomic_replace(
+            [
+               candidate if binding.node_id == candidate.node_id else binding
+               for binding in current_peers.values()
+            ]
+         )
          for message_id, pending in self._pending.items():
             if pending.generation >= candidate.generation:
                continue
@@ -723,11 +806,9 @@ class IrohTransport:
    ) -> DeliveryReceipt:
       with self._state_lock:
          self._require_running()
-         peer = self._peer
+         peer = self._lookup_destination_peer(destination_node_id)
          if _trace_peer_binding is not None and peer != _trace_peer_binding:
             raise IrohTransportError("peer_rotated")
-      if destination_node_id != peer.node_id:
-         raise IrohTransportError("destination_binding_mismatch")
       try:
          decode_frame(frame)
       except WireError as error:
@@ -745,11 +826,9 @@ class IrohTransport:
       try:
          with self._state_lock:
             self._require_running()
-            peer = self._peer
+            peer = self._lookup_destination_peer(destination_node_id)
             if _trace_peer_binding is not None and peer != _trace_peer_binding:
                raise IrohTransportError("peer_rotated")
-            if destination_node_id != peer.node_id:
-               raise IrohTransportError("destination_binding_mismatch")
             pending = _PendingSend(peer.generation)
             client = self._send_client
             if client is None:
@@ -768,9 +847,12 @@ class IrohTransport:
             message_id,
             expected_generation=pending.generation,
             timeout=self._remaining(deadline),
+            destination_endpoint_id=(
+               peer.endpoint_id if peer.node_id != self._peer.node_id else None
+            ),
          )
          with self._state_lock:
-            current = self._peer
+            current = self._lookup_destination_peer(destination_node_id)
             if pending.cancelled or current.generation != pending.generation:
                raise IrohTransportError(pending.reason or "peer_rotated")
             pending.completed = True
@@ -798,7 +880,7 @@ class IrohTransport:
             try:
                self._reconnect_send_client(deadline=deadline)
                with self._state_lock:
-                  current = self._peer
+                  current = self._lookup_destination_peer(destination_node_id)
                   if pending.cancelled or current.generation != pending.generation:
                      raise IrohTransportError(pending.reason or "peer_rotated")
                   client = self._send_client
@@ -810,9 +892,12 @@ class IrohTransport:
                   message_id,
                   expected_generation=pending.generation,
                   timeout=self._remaining(deadline),
+                  destination_endpoint_id=(
+                     peer.endpoint_id if peer.node_id != self._peer.node_id else None
+                  ),
                )
                with self._state_lock:
-                  current = self._peer
+                  current = self._lookup_destination_peer(destination_node_id)
                   if pending.cancelled or current.generation != pending.generation:
                      raise IrohTransportError(
                         pending.reason or "peer_rotated"
@@ -854,14 +939,25 @@ class IrohTransport:
       *,
       expected_generation: int,
       timeout: float,
+      destination_endpoint_id: str | None = None,
    ) -> None:
-      client.send_confirmed(
-         frame,
-         message_id,
-         timeout=timeout,
-         expected_generation=expected_generation,
-         source_generation=self.local_generation,
-      )
+      if destination_endpoint_id is None:
+         client.send_confirmed(
+            frame,
+            message_id,
+            timeout=timeout,
+            expected_generation=expected_generation,
+            source_generation=self.local_generation,
+         )
+      else:
+         client.send_routed(
+            destination_endpoint_id,
+            frame,
+            message_id,
+            timeout=timeout,
+            expected_generation=expected_generation,
+            source_generation=self.local_generation,
+         )
 
    @staticmethod
    def _reconnectable(error: BaseException) -> bool:
@@ -880,9 +976,8 @@ class IrohTransport:
          replacement.connect(deadline=deadline)
          if replacement.endpoint_id != self.expected_endpoint_id:
             raise IrohTransportError("local_endpoint_mismatch_after_reconnect")
-         self._configure_peer(
+         self._configure_current_peers(
             replacement,
-            self.peer_binding,
             timeout=self._remaining(deadline),
          )
       except BaseException:
