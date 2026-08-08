@@ -846,6 +846,25 @@ def triad(short_root: Path):
             node.stop()
 
 
+@pytest.fixture
+def pentad(short_root: Path):
+    """Five sidecars with rollback-safe startup and verified teardown."""
+    nodes: list[RunningSidecar] = []
+    try:
+        for index, name in enumerate(("alpha", "beta", "gamma", "delta", "epsilon")):
+            nodes.append(
+                RunningSidecar(short_root / f"ring-{name}", bytes([index + 11]) * 32)
+            )
+        yield tuple(nodes)
+    finally:
+        for node in reversed(nodes):
+            node.stop()
+        assert all(node.process.poll() is not None for node in nodes)
+        for node in nodes:
+            node.socket_path.unlink(missing_ok=True)
+        assert all(not node.socket_path.exists() for node in nodes)
+
+
 def peer_entry(node: RunningSidecar, generation: int) -> dict[str, Any]:
     return {
         "endpoint_id": node.ready["endpoint_id"],
@@ -887,12 +906,32 @@ def _triad_transport(
     secondary_node_id: str,
     secondary: RunningSidecar,
 ) -> IrohTransport:
+    return _peer_set_transport(
+        node_id=node_id,
+        node=node,
+        ordered_peers=(
+            (primary_node_id, primary),
+            (secondary_node_id, secondary),
+        ),
+    )
+
+
+def _peer_set_transport(
+    *,
+    node_id: str,
+    node: RunningSidecar,
+    ordered_peers: tuple[tuple[str, RunningSidecar], ...],
+) -> IrohTransport:
+    primary_node_id, primary = ordered_peers[0]
     return IrohTransport(
         node_id=node_id,
         socket_path=node.socket_path,
         bootstrap_secret=node.secret,
         peer=_transport_binding(primary_node_id, primary),
-        peers=[_transport_binding(secondary_node_id, secondary)],
+        peers=[
+            _transport_binding(peer_node_id, peer)
+            for peer_node_id, peer in ordered_peers[1:]
+        ],
         expected_endpoint_id=node.ready["endpoint_id"],
         delivery_timeout_seconds=20,
         poll_interval_seconds=0.02,
@@ -1006,6 +1045,62 @@ def test_iroh_transport_reports_actual_non_primary_source_peer(triad) -> None:
         assert beta_probe.tokens == []
     finally:
         _close_transports(alpha_transport, beta_transport, gamma_transport)
+
+
+def test_five_transport_ring_routes_every_token_between_non_primary_peers(
+    pentad,
+) -> None:
+    node_names = ("alpha", "beta", "gamma", "delta", "epsilon")
+    node_ids = tuple(f"node-{name}" for name in node_names)
+    transports: list[IrohTransport] = []
+    probes = tuple(_TokenProbe() for _ in pentad)
+
+    try:
+        for index, (node_id, node, probe) in enumerate(
+            zip(node_ids, pentad, probes, strict=True)
+        ):
+            primary_index = (index + 1) % len(pentad)
+            remaining_indexes = tuple(
+                peer_index
+                for peer_index in range(len(pentad))
+                if peer_index not in {index, primary_index}
+            )
+            ordered_peer_indexes = (primary_index, *remaining_indexes)
+            transport = _peer_set_transport(
+                node_id=node_id,
+                node=node,
+                ordered_peers=tuple(
+                    (node_ids[peer_index], pentad[peer_index])
+                    for peer_index in ordered_peer_indexes
+                ),
+            )
+            transport.bind_router(probe)
+            transport.start()
+            transports.append(transport)
+
+        expected: list[tuple[TokenEvent, str] | None] = [None] * len(pentad)
+        for source_index, transport in enumerate(transports):
+            destination_index = (source_index + 2) % len(pentad)
+            token = TokenEvent(
+                f"request-ring-{source_index}",
+                f"path-ring-{source_index}",
+                1,
+                source_index,
+                100 + source_index,
+                10 + source_index,
+            )
+            transport.send_router_frame(
+                encode_frame(token),
+                destination_node_id=node_ids[destination_index],
+            )
+            expected[destination_index] = (token, node_ids[source_index])
+
+        for probe, expected_delivery in zip(probes, expected, strict=True):
+            assert expected_delivery is not None
+            assert probe.token_received.wait(5)
+            assert probe.tokens == [expected_delivery]
+    finally:
+        _close_transports(*transports)
 
 
 def test_configure_peers_installs_a_routed_set_and_admits_every_member(triad) -> None:
