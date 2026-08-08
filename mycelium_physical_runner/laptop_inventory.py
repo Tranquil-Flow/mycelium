@@ -24,6 +24,7 @@ from mycelium_membership import (
 )
 from mycelium_qualification.evidence import canonical_json_bytes
 
+from .plan_builder import PHYSICAL_RUNNER_INVENTORY_PROTOCOL
 from .remote_probe import derive_local_run_scoped_identity
 
 OBSERVATION_PROTOCOL = "mycelium.laptop_inventory_observation.v1"
@@ -32,6 +33,14 @@ _HOST_ID_RE = re.compile(r"^host-[0-9a-f]{32}$")
 _BOOT_ID_RE = re.compile(r"^boot-[0-9a-f]{32}$")
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _LINUX_LAPTOP_CHASSIS_TYPES = frozenset({8, 9, 10, 14, 30, 31, 32})
+_FORBIDDEN_INVENTORY_CLAIM_FIELDS = frozenset(
+    {
+        "inventory_verified",
+        "physical_qualification_executed",
+        "release_ready",
+        "route_ready",
+    }
+)
 
 
 class LaptopInventoryError(ValueError):
@@ -276,6 +285,66 @@ def verify_laptop_inventory(
     return {**unsigned, "verification_digest": digest}
 
 
+def bind_verified_laptops_to_physical_inventory(
+    inventory: Mapping[str, Any],
+    observations: Sequence[Mapping[str, Any]],
+    *,
+    minimum_laptops: int = 3,
+) -> dict[str, Any]:
+    """Gate canonical physical-runner inventory on exact laptop identities."""
+
+    verification = verify_laptop_inventory(
+        observations,
+        minimum_laptops=minimum_laptops,
+    )
+    if not isinstance(inventory, Mapping):
+        _reject("physical_inventory_protocol_invalid")
+    if inventory.get("protocol") != PHYSICAL_RUNNER_INVENTORY_PROTOCOL:
+        _reject("physical_inventory_protocol_invalid")
+    if set(inventory) & _FORBIDDEN_INVENTORY_CLAIM_FIELDS:
+        _reject("physical_inventory_readiness_forbidden")
+    if inventory.get("run_id") != verification["run_id"]:
+        _reject("inventory_run_mismatch")
+    hosts = inventory.get("hosts")
+    if not isinstance(hosts, list):
+        _reject("inventory_node_set_mismatch")
+
+    hosts_by_node: dict[str, Mapping[str, Any]] = {}
+    for host in hosts:
+        if not isinstance(host, Mapping):
+            _reject("inventory_node_set_mismatch")
+        if set(host) & _FORBIDDEN_INVENTORY_CLAIM_FIELDS:
+            _reject("physical_inventory_readiness_forbidden")
+        node_id = host.get("node_id")
+        if not isinstance(node_id, str) or node_id in hosts_by_node:
+            _reject("inventory_node_set_mismatch")
+        hosts_by_node[node_id] = host
+    expected_nodes = set(verification["node_ids"])
+    if set(hosts_by_node) != expected_nodes:
+        _reject("inventory_node_set_mismatch")
+
+    observations_by_node = {
+        observation["node_id"]: _validated_observation(observation)
+        for observation in observations
+    }
+    for node_id, observation in observations_by_node.items():
+        host = hosts_by_node[node_id]
+        if (
+            host.get("host_id") != observation["host_id"]
+            or host.get("boot_id") != observation["boot_id"]
+        ):
+            _reject("inventory_identity_mismatch")
+    try:
+        detached = json.loads(
+            json.dumps(inventory, allow_nan=False, ensure_ascii=False, sort_keys=True)
+        )
+    except (TypeError, ValueError) as exc:
+        raise LaptopInventoryError("physical_inventory_invalid") from exc
+    if not isinstance(detached, dict):
+        _reject("physical_inventory_invalid")
+    return detached
+
+
 def _command_output(command: Sequence[str]) -> str:
     try:
         completed = subprocess.run(
@@ -415,6 +484,7 @@ __all__ = [
     "LaptopInventoryError",
     "OBSERVATION_PROTOCOL",
     "VERIFICATION_PROTOCOL",
+    "bind_verified_laptops_to_physical_inventory",
     "build_laptop_observation",
     "collect_local_laptop_observation",
     "main",

@@ -8,7 +8,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 SAFE_PLAN_PROTOCOL = "mycelium.physical_runner_safe_plan.v1"
-_INVENTORY_PROTOCOL = "mycelium.physical_runner_inventory.v1"
+PHYSICAL_RUNNER_INVENTORY_PROTOCOL = "mycelium.physical_runner_inventory.v1"
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PUBLIC_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$")
@@ -123,7 +123,7 @@ def _canonical_clone(value: Any) -> Any:
 
 def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, Any]:
     root = _mapping(inventory, "inventory_invalid")
-    if root.get("protocol") != _INVENTORY_PROTOCOL:
+    if root.get("protocol") != PHYSICAL_RUNNER_INVENTORY_PROTOCOL:
         _fail("inventory_protocol_invalid")
     if getattr(probes, "git_dirty", None) is not False:
         _fail("git_dirty")
@@ -332,4 +332,9 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
     }
 
 
-__all__ = ["PlanBuildError", "SAFE_PLAN_PROTOCOL", "build_safe_plan"]
+__all__ = [
+    "PHYSICAL_RUNNER_INVENTORY_PROTOCOL",
+    "PlanBuildError",
+    "SAFE_PLAN_PROTOCOL",
+    "build_safe_plan",
+]

@@ -12,6 +12,7 @@ from mycelium_physical_runner.laptop_inventory import (
     build_laptop_observation,
     verify_laptop_inventory,
 )
+from mycelium_physical_runner.plan_builder import PHYSICAL_RUNNER_INVENTORY_PROTOCOL
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
@@ -158,4 +159,93 @@ def test_verify_laptop_inventory_rejects_tampering_and_duplicate_host() -> None:
     with pytest.raises(LaptopInventoryError, match="inventory_identity_not_unique"):
         verify_laptop_inventory(
             [_unique_observation(0), duplicate, _unique_observation(2)]
+        )
+
+
+def _physical_inventory(observations):
+    return {
+        "protocol": PHYSICAL_RUNNER_INVENTORY_PROTOCOL,
+        "run_id": observations[0]["run_id"],
+        "deployment_id": "deployment-m7-001",
+        "hosts": [
+            {
+                "node_id": observation["node_id"],
+                "host_id": observation["host_id"],
+                "boot_id": observation["boot_id"],
+                "probe_transport": "local" if index == 0 else "ssh",
+                "opaque_operator_field": f"preserve-{index}",
+            }
+            for index, observation in enumerate(observations)
+        ],
+        "opaque_root_field": {"preserve": True},
+    }
+
+
+def test_bind_verified_laptops_returns_detached_canonical_inventory() -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+
+    bound = laptop_inventory.bind_verified_laptops_to_physical_inventory(
+        inventory,
+        observations,
+    )
+
+    assert bound == inventory
+    assert bound is not inventory
+    assert bound["hosts"] is not inventory["hosts"]
+    assert "route_ready" not in bound
+    assert "release_ready" not in bound
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_code"),
+    [
+        (
+            lambda inventory: inventory.__setitem__("protocol", "parallel.inventory.v1"),
+            "physical_inventory_protocol_invalid",
+        ),
+        (
+            lambda inventory: inventory.__setitem__("run_id", "different-run"),
+            "inventory_run_mismatch",
+        ),
+        (
+            lambda inventory: inventory.__setitem__("route_ready", True),
+            "physical_inventory_readiness_forbidden",
+        ),
+        (
+            lambda inventory: inventory["hosts"][0].__setitem__(
+                "physical_qualification_executed", True
+            ),
+            "physical_inventory_readiness_forbidden",
+        ),
+        (
+            lambda inventory: inventory["hosts"].pop(),
+            "inventory_node_set_mismatch",
+        ),
+        (
+            lambda inventory: inventory["hosts"][1].__setitem__(
+                "host_id", "host-" + "f" * 32
+            ),
+            "inventory_identity_mismatch",
+        ),
+        (
+            lambda inventory: inventory["hosts"][1].__setitem__(
+                "boot_id", "boot-" + "f" * 32
+            ),
+            "inventory_identity_mismatch",
+        ),
+    ],
+)
+def test_bind_verified_laptops_rejects_inventory_mismatch(
+    mutate,
+    expected_code: str,
+) -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+    mutate(inventory)
+
+    with pytest.raises(LaptopInventoryError, match=expected_code):
+        laptop_inventory.bind_verified_laptops_to_physical_inventory(
+            inventory,
+            observations,
         )
