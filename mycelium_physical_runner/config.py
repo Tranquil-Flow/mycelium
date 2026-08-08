@@ -41,7 +41,15 @@ _CONTROLLER_FIELDS = frozenset(
     {"mode", "now", "source_root", "peers", "transfer_manifest", "membership_snapshot", "run_plan", "authority_documents"}
 )
 _CONTROLLER_PEER_FIELDS = frozenset(
-    {"node_id", "ssh_target", "host_id", "boot_id", "staging_root", "process_transport"}
+    {
+        "node_id",
+        "ssh_target",
+        "ssh_identity_file",
+        "host_id",
+        "boot_id",
+        "staging_root",
+        "process_transport",
+    }
 )
 _PUBLIC_KEY_FIELDS = frozenset(
     {"algorithm", "encoding", "verification_key", "verification_key_digest", "endpoint_id"}
@@ -168,6 +176,39 @@ def _safe_remote_path(value: Any, field: str) -> str:
     return value
 
 
+def _safe_private_file(value: Any, field: str) -> str:
+    normalized = _safe_local_path(value, field)
+    path = Path(normalized)
+    current = Path(path.anchor)
+    try:
+        for part in (path.anchor, *path.parts[1:-1]):
+            if part != path.anchor:
+                current /= part
+            ancestor = current.lstat()
+            _require(
+                stat.S_ISDIR(ancestor.st_mode)
+                and not stat.S_ISLNK(ancestor.st_mode)
+                and ancestor.st_uid in {0, os.geteuid()}
+                and stat.S_IMODE(ancestor.st_mode) & 0o022 == 0,
+                "plan_path_unsafe",
+                field,
+            )
+        metadata = path.lstat()
+    except OSError as exc:
+        raise RunnerError("plan_path_unsafe", field) from exc
+    _require(
+        stat.S_ISREG(metadata.st_mode)
+        and not path.is_symlink()
+        and metadata.st_nlink == 1
+        and metadata.st_size > 0
+        and metadata.st_uid == os.geteuid()
+        and metadata.st_mode & 0o077 == 0,
+        "plan_path_unsafe",
+        field,
+    )
+    return normalized
+
+
 def _verification_keys(value: Any, field: str) -> tuple[Mapping[str, Any], ...]:
     _require(isinstance(value, list) and value, "plan_field_invalid", field)
     records: list[Mapping[str, Any]] = []
@@ -220,11 +261,24 @@ def _controller(value: Any) -> Mapping[str, Any]:
             "controller.peers.node_id",
         )
         peers_by_node[node_id] = peer
+        process_transport = peer.get("process_transport")
         _require(
-            peer.get("process_transport") in {"local", "ssh"},
+            process_transport in {"local", "ssh"},
             "plan_field_invalid",
             "controller.peers.process_transport",
         )
+        ssh_identity_file = peer.get("ssh_identity_file")
+        if process_transport == "ssh":
+            _safe_private_file(
+                ssh_identity_file,
+                "controller.peers.ssh_identity_file",
+            )
+        else:
+            _require(
+                ssh_identity_file is None,
+                "plan_field_invalid",
+                "controller.peers.ssh_identity_file",
+            )
         _safe_remote_path(peer.get("staging_root"), "controller.peers.staging_root")
     for field in ("transfer_manifest", "membership_snapshot", "run_plan"):
         _require(isinstance(snapshot.get(field), Mapping), "plan_field_invalid", f"controller.{field}")

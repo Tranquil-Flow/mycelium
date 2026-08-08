@@ -42,6 +42,11 @@ def build_production_runner(config: RunnerConfig) -> PhysicalRunner:
                 boot_id=str(peer["boot_id"]),
                 staging_root=str(peer["staging_root"]),
                 process_transport=str(peer["process_transport"]),
+                ssh_identity_file=(
+                    None
+                    if peer["ssh_identity_file"] is None
+                    else str(peer["ssh_identity_file"])
+                ),
             )
             for peer in peers_raw
         )

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import io
 import json
@@ -222,6 +222,66 @@ def _read_document(path: Path) -> dict[str, Any]:
     return value
 
 
+_SshIdentityBinding = tuple[
+    tuple[int, int, int, int, int, int, int],
+    tuple[tuple[str, int, int, int, int], ...],
+]
+
+
+def _ssh_identity_file_binding(value: str) -> _SshIdentityBinding:
+    path = Path(value)
+    if (
+        not path.is_absolute()
+        or path.as_posix() != value
+        or "." in path.parts
+        or ".." in path.parts
+    ):
+        _reject("peer_ssh_identity_file_invalid")
+    current = Path(path.anchor)
+    directory_binding: list[tuple[str, int, int, int, int]] = []
+    for part in (path.anchor, *path.parts[1:-1]):
+        if part != path.anchor:
+            current /= part
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise ControllerError("peer_ssh_identity_file_invalid") from exc
+        mode = stat.S_IMODE(metadata.st_mode)
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid not in {0, os.geteuid()}
+            or mode & 0o022
+        ):
+            _reject("peer_ssh_identity_file_invalid")
+        directory_binding.append(
+            (str(current), metadata.st_dev, metadata.st_ino, metadata.st_uid, mode)
+        )
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ControllerError("peer_ssh_identity_file_invalid") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or path.is_symlink()
+        or metadata.st_nlink != 1
+        or metadata.st_size <= 0
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_mode & 0o077 != 0
+    ):
+        _reject("peer_ssh_identity_file_invalid")
+    file_binding = (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+        metadata.st_uid,
+        stat.S_IMODE(metadata.st_mode),
+    )
+    return file_binding, tuple(directory_binding)
+
+
 @dataclass(frozen=True)
 class PeerIdentity:
     node_id: str
@@ -230,6 +290,12 @@ class PeerIdentity:
     boot_id: str
     staging_root: str
     process_transport: str
+    ssh_identity_file: str | None = None
+    _ssh_identity_binding: _SshIdentityBinding | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         _segment(self.node_id, "peer_node_id_invalid")
@@ -254,14 +320,39 @@ class PeerIdentity:
             _reject("peer_staging_root_invalid")
         if self.process_transport not in {"local", "ssh"}:
             _reject("peer_process_transport_invalid")
+        if self.process_transport == "local":
+            if self.ssh_identity_file is not None:
+                _reject("peer_ssh_identity_file_invalid")
+        elif (
+            not isinstance(self.ssh_identity_file, str)
+            or not self.ssh_identity_file
+            or not PurePosixPath(self.ssh_identity_file).is_absolute()
+            or any(character in self.ssh_identity_file for character in "\n\r\t")
+        ):
+            _reject("peer_ssh_identity_file_invalid")
+        else:
+            object.__setattr__(
+                self,
+                "_ssh_identity_binding",
+                _ssh_identity_file_binding(self.ssh_identity_file),
+            )
 
 
 def _peer_process_argv(
     peer: PeerIdentity,
     command: tuple[str, ...],
 ) -> tuple[str, ...]:
+    if not command or not all(isinstance(value, str) and value for value in command):
+        _reject("peer_process_command_invalid")
     if peer.process_transport == "local":
         return command
+    assert peer.ssh_identity_file is not None
+    try:
+        current_binding = _ssh_identity_file_binding(peer.ssh_identity_file)
+    except ControllerError as exc:
+        raise ControllerError("peer_ssh_identity_file_changed") from exc
+    if current_binding != peer._ssh_identity_binding:
+        _reject("peer_ssh_identity_file_changed")
     return (
         "ssh",
         "-o",
@@ -272,6 +363,8 @@ def _peer_process_argv(
         "StrictHostKeyChecking=yes",
         "-o",
         "ConnectTimeout=15",
+        "-i",
+        peer.ssh_identity_file,
         "--",
         peer.ssh_target,
         shlex.join(command),
@@ -1953,7 +2046,11 @@ class _Parser(argparse.ArgumentParser):
 
 def _peer_argument(value: str) -> PeerIdentity:
     parts = value.split(",")
-    if len(parts) != 6:
+    if len(parts) != 7:
+        _reject("invalid_arguments")
+    process_transport = parts[5]
+    identity_file = None if parts[6] == "-" else parts[6]
+    if (process_transport == "local") != (identity_file is None):
         _reject("invalid_arguments")
     return PeerIdentity(
         node_id=parts[0],
@@ -1961,7 +2058,8 @@ def _peer_argument(value: str) -> PeerIdentity:
         host_id=parts[2],
         boot_id=parts[3],
         staging_root=parts[4],
-        process_transport=parts[5],
+        process_transport=process_transport,
+        ssh_identity_file=identity_file,
     )
 
 

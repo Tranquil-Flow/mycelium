@@ -28,3 +28,7 @@ def test_production_assembly_preserves_local_and_ssh_process_transports(
     controller_adapter: Any = runner._controller
     controller: Any = controller_adapter._controller
     assert [peer.process_transport for peer in controller.peers] == ["local", "ssh"]
+    assert [peer.ssh_identity_file for peer in controller.peers] == [
+        None,
+        payload["controller"]["peers"][1]["ssh_identity_file"],
+    ]

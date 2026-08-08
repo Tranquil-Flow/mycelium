@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+import mycelium_physical_runner.config as config_module
 from mycelium_physical_runner.config import (
     MAX_PLAN_BYTES,
     RunnerConfig,
@@ -102,15 +103,135 @@ def test_entry_peer_must_be_local_and_every_other_peer_must_use_ssh(
     transports: tuple[str, str],
 ) -> None:
     payload = _plan(workspace)
+    ssh_identity_file = payload["controller"]["peers"][1]["ssh_identity_file"]
     for peer, process_transport in zip(
         payload["controller"]["peers"], transports, strict=True
     ):
         peer["process_transport"] = process_transport
+        peer["ssh_identity_file"] = (
+            None if process_transport == "local" else ssh_identity_file
+        )
 
     with pytest.raises(RunnerError) as caught:
         parse_operator_plan(payload)
 
     assert caught.value.code == "plan_field_invalid"
+
+
+def test_ssh_peer_requires_explicit_identity_file(workspace: Path) -> None:
+    payload = _plan(workspace)
+    del payload["controller"]["peers"][1]["ssh_identity_file"]
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_missing_field"
+
+
+def test_local_peer_rejects_ssh_identity_file(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["peers"][0]["ssh_identity_file"] = str(
+        workspace / "ssh" / "local.identity"
+    )
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_field_invalid"
+
+
+def test_ssh_identity_file_must_exist(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["peers"][1]["ssh_identity_file"] = str(
+        workspace / "ssh" / "missing.identity"
+    )
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
+
+
+def test_ssh_identity_file_must_be_regular(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["peers"][1]["ssh_identity_file"] = str(
+        workspace / "ssh"
+    )
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
+
+
+def test_ssh_identity_file_must_have_single_hard_link(workspace: Path) -> None:
+    payload = _plan(workspace)
+    identity_file = Path(
+        payload["controller"]["peers"][1]["ssh_identity_file"]
+    )
+    second_link = identity_file.with_name("second.identity")
+    second_link.hardlink_to(identity_file)
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
+
+
+def test_ssh_identity_file_must_not_be_group_or_other_accessible(
+    workspace: Path,
+) -> None:
+    payload = _plan(workspace)
+    identity_file = Path(
+        payload["controller"]["peers"][1]["ssh_identity_file"]
+    )
+    identity_file.chmod(0o640)
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
+
+
+def test_ssh_identity_ancestor_must_not_be_group_or_other_writable(
+    workspace: Path,
+) -> None:
+    payload = _plan(workspace)
+    identity_file = Path(
+        payload["controller"]["peers"][1]["ssh_identity_file"]
+    )
+    identity_file.parent.chmod(0o777)
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
+
+
+def test_ssh_identity_file_must_not_be_empty(workspace: Path) -> None:
+    payload = _plan(workspace)
+    identity_file = Path(
+        payload["controller"]["peers"][1]["ssh_identity_file"]
+    )
+    identity_file.write_bytes(b"")
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
+
+
+def test_ssh_identity_file_must_be_owned_by_controller_user(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _plan(workspace)
+    monkeypatch.setattr(config_module.os, "geteuid", lambda: -1)
+
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(payload)
+
+    assert caught.value.code == "plan_path_unsafe"
 
 
 def test_unknown_peer_fields_fail_closed(workspace: Path) -> None:
@@ -125,7 +246,14 @@ def test_unknown_peer_fields_fail_closed(workspace: Path) -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["node_id", "ssh_target", "host_id", "boot_id", "staging_root"],
+    [
+        "node_id",
+        "ssh_target",
+        "ssh_identity_file",
+        "host_id",
+        "boot_id",
+        "staging_root",
+    ],
 )
 def test_missing_non_transport_peer_fields_fail_closed(
     workspace: Path,

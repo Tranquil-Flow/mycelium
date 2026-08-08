@@ -4,8 +4,10 @@ import hashlib
 import inspect
 import io
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
 import sys
 import tarfile
 from typing import Any
@@ -37,13 +39,37 @@ from physical_inference_qualification import (
 NOW = 10_000.0
 EPOCH = 9
 DIGEST = "sha256:" + "a" * 64
+_SECURE_IDENTITY_ROOT: Path | None = None
+
+
+@pytest.fixture(autouse=True)
+def _secure_identity_root(tmp_path: Path):
+    global _SECURE_IDENTITY_ROOT
+    base = Path.home() / ".cache" / "mycelium-physical-tests"
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    base.chmod(0o700)
+    root = base / f"{os.getpid()}-{tmp_path.parent.name}-{tmp_path.name}"
+    root.mkdir(mode=0o700)
+    _SECURE_IDENTITY_ROOT = root
+    try:
+        yield
+    finally:
+        _SECURE_IDENTITY_ROOT = None
+        shutil.rmtree(root, ignore_errors=True)
 
 
 class RecordingRunner:
     def __init__(self) -> None:
         self.calls: list[tuple[tuple[str, ...], float]] = []
 
-    def run(self, argv: tuple[str, ...], *, timeout_seconds: float) -> object:
+    def run(
+        self,
+        argv: tuple[str, ...],
+        *,
+        timeout_seconds: float,
+        stdin_bytes: bytes | None = None,
+    ) -> CommandCapture:
+        del stdin_bytes
         self.calls.append((argv, timeout_seconds))
         raise AssertionError("dry/fake/local controller must not launch commands")
 
@@ -258,7 +284,12 @@ class FakeEvidenceSealer:
         }
 
 
-def _peers(count: int, *, same_host: bool = False) -> tuple[PeerIdentity, ...]:
+def _peers(
+    count: int,
+    identity_root: Path,
+    *,
+    same_host: bool = False,
+) -> tuple[PeerIdentity, ...]:
     values = []
     for index in range(count):
         values.append(
@@ -269,6 +300,9 @@ def _peers(count: int, *, same_host: bool = False) -> tuple[PeerIdentity, ...]:
                 boot_id=f"boot-{index}",
                 staging_root=f"/tmp/mycelium-controller/run-a/node-{index}",
                 process_transport="ssh",
+                ssh_identity_file=str(
+                    _private_identity_file(identity_root, f"identity-{index}")
+                ),
             )
         )
     return tuple(values)
@@ -444,7 +478,7 @@ def _controller(
     transfer_manifest: dict[str, Any] | None = None,
     runner: RecordingRunner | None = None,
 ) -> tuple[QualificationController, RecordingRunner]:
-    peers = _peers(count, same_host=same_host)
+    peers = _peers(count, tmp_path, same_host=same_host)
     source_root, transfers = _transfers(tmp_path)
     recorder = runner or RecordingRunner()
     return (
@@ -534,7 +568,7 @@ def test_transfer_manifest_rejects_traversal_credentials_and_model_caches(
         {"path": path, "size_bytes": 1, "content_digest": DIGEST}
     )
     transfers["files"].sort(key=lambda record: record["path"])
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     controller = QualificationController(
         mode="dry-run",
         peers=peers,
@@ -550,7 +584,7 @@ def test_transfer_manifest_rejects_traversal_credentials_and_model_caches(
 
 
 def test_seed_signature_and_current_epoch_are_mandatory(tmp_path: Path) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     tampered = _snapshot(peers)
     tampered["assignment_offers"][0]["message"]["deployment_epoch"] = EPOCH - 1
     controller, runner = _controller(tmp_path, snapshot=tampered)
@@ -594,7 +628,7 @@ def test_physical_mode_requires_distinct_host_and_boot_then_requires_run_plan(
 def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(2)
+    peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     archive = build_transfer_archive(source_root, transfers)
     archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
@@ -657,6 +691,7 @@ def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledg
 def test_physical_prepare_uses_declared_local_and_ssh_process_transports(
     tmp_path: Path,
 ) -> None:
+    identity_file = _private_identity_file(tmp_path)
     peers = (
         PeerIdentity(
             node_id="node-0",
@@ -673,6 +708,7 @@ def test_physical_prepare_uses_declared_local_and_ssh_process_transports(
             boot_id="boot-1",
             staging_root="/tmp/mycelium-controller/run-a/node-1",
             process_transport="ssh",
+            ssh_identity_file=str(identity_file),
         ),
     )
     source_root, transfers = _transfers(tmp_path)
@@ -716,7 +752,7 @@ def test_physical_prepare_uses_declared_local_and_ssh_process_transports(
 def test_physical_prepare_cleans_attempted_peers_when_staging_fails(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(2)
+    peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     archive = build_transfer_archive(source_root, transfers)
     archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
@@ -783,7 +819,7 @@ def test_physical_prepare_cleans_attempted_peers_when_staging_fails(
 def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(2)
+    peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     archive = build_transfer_archive(source_root, transfers)
     archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
@@ -870,6 +906,7 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
 def test_physical_run_uses_declared_local_and_ssh_process_transports(
     tmp_path: Path,
 ) -> None:
+    identity_file = _private_identity_file(tmp_path)
     peers = (
         PeerIdentity(
             node_id="node-0",
@@ -886,6 +923,7 @@ def test_physical_run_uses_declared_local_and_ssh_process_transports(
             boot_id="boot-1",
             staging_root="/tmp/mycelium-controller/run-a/node-1",
             process_transport="ssh",
+            ssh_identity_file=str(identity_file),
         ),
     )
     source_root, transfers = _transfers(tmp_path)
@@ -923,7 +961,18 @@ def test_physical_run_uses_declared_local_and_ssh_process_transports(
     assert result["route_ready"] is False
 
 
-def test_ssh_process_transport_round_trips_exact_remote_argv() -> None:
+def _private_identity_file(tmp_path: Path, name: str = "peer.identity") -> Path:
+    del tmp_path
+    assert _SECURE_IDENTITY_ROOT is not None
+    identity_file = _SECURE_IDENTITY_ROOT / name
+    if not identity_file.exists():
+        identity_file.write_bytes(b"non-credential test identity\n")
+    identity_file.chmod(0o600)
+    return identity_file
+
+
+def test_ssh_process_transport_round_trips_exact_remote_argv(tmp_path: Path) -> None:
+    identity_file = _private_identity_file(tmp_path)
     peer = PeerIdentity(
         node_id="node-1",
         ssh_target="operator@peer.example",
@@ -931,6 +980,7 @@ def test_ssh_process_transport_round_trips_exact_remote_argv() -> None:
         boot_id="boot-1",
         staging_root="/tmp/mycelium-controller/run-a/node-1",
         process_transport="ssh",
+        ssh_identity_file=str(identity_file),
     )
     command = (
         "/opt/mycelium runtime/bin/python3",
@@ -942,7 +992,89 @@ def test_ssh_process_transport_round_trips_exact_remote_argv() -> None:
     argv = _peer_process_argv(peer, command)
 
     assert argv[0] == "ssh"
+    assert argv[9:11] == ("-i", peer.ssh_identity_file)
     assert shlex.split(argv[-1]) == list(command)
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "hardlink", "permissive"])
+def test_ssh_peer_rejects_unsafe_identity_file(tmp_path: Path, kind: str) -> None:
+    identity_file = tmp_path / "peer.identity"
+    if kind == "directory":
+        identity_file.mkdir()
+    elif kind != "missing":
+        identity_file.write_bytes(b"non-credential test identity\n")
+        identity_file.chmod(0o600)
+        if kind == "hardlink":
+            (tmp_path / "second.identity").hardlink_to(identity_file)
+        elif kind == "permissive":
+            identity_file.chmod(0o640)
+
+    with pytest.raises(ControllerError, match="peer_ssh_identity_file_invalid"):
+        PeerIdentity(
+            node_id="node-1",
+            ssh_target="operator@peer.example",
+            host_id="host-1",
+            boot_id="boot-1",
+            staging_root="/tmp/mycelium-controller/run-a/node-1",
+            process_transport="ssh",
+            ssh_identity_file=str(identity_file),
+        )
+
+
+def test_ssh_peer_rejects_identity_under_writable_ancestor(tmp_path: Path) -> None:
+    identity_file = _private_identity_file(tmp_path)
+    identity_file.parent.chmod(0o777)
+
+    with pytest.raises(ControllerError, match="peer_ssh_identity_file_invalid"):
+        PeerIdentity(
+            node_id="node-1",
+            ssh_target="operator@peer.example",
+            host_id="host-1",
+            boot_id="boot-1",
+            staging_root="/tmp/mycelium-controller/run-a/node-1",
+            process_transport="ssh",
+            ssh_identity_file=str(identity_file),
+        )
+
+
+def test_ssh_identity_replacement_is_rejected_before_process_use(
+    tmp_path: Path,
+) -> None:
+    identity_file = _private_identity_file(tmp_path)
+    peer = PeerIdentity(
+        node_id="node-1",
+        ssh_target="operator@peer.example",
+        host_id="host-1",
+        boot_id="boot-1",
+        staging_root="/tmp/mycelium-controller/run-a/node-1",
+        process_transport="ssh",
+        ssh_identity_file=str(identity_file),
+    )
+    replacement = _private_identity_file(tmp_path, "replacement.identity")
+    replacement.replace(identity_file)
+
+    with pytest.raises(ControllerError, match="peer_ssh_identity_file_changed"):
+        _peer_process_argv(peer, ("true",))
+
+
+def test_ssh_identity_in_place_mutation_is_rejected_before_process_use(
+    tmp_path: Path,
+) -> None:
+    identity_file = _private_identity_file(tmp_path)
+    peer = PeerIdentity(
+        node_id="node-1",
+        ssh_target="operator@peer.example",
+        host_id="host-1",
+        boot_id="boot-1",
+        staging_root="/tmp/mycelium-controller/run-a/node-1",
+        process_transport="ssh",
+        ssh_identity_file=str(identity_file),
+    )
+    identity_file.write_bytes(b"changed non-credential test identity bytes\n")
+    identity_file.chmod(0o600)
+
+    with pytest.raises(ControllerError, match="peer_ssh_identity_file_changed"):
+        _peer_process_argv(peer, ("true",))
 
 
 def test_local_process_transport_returns_exact_command_argv() -> None:
@@ -964,7 +1096,7 @@ def test_physical_run_orchestrates_every_declared_peer_in_n_way_cycle(
     tmp_path: Path,
     peer_count: int,
 ) -> None:
-    peers = _peers(peer_count)
+    peers = _peers(peer_count, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     cleanup_responses = [
         CommandCapture(
@@ -1035,7 +1167,7 @@ def test_physical_run_orchestrates_every_declared_peer_in_n_way_cycle(
 def test_physical_cancel_reaches_entry_node_then_stops_and_cleans_all_peers(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner(_physical_cleanup_captures(peers))
     sessions: dict[str, FakeNodeSession] = {}
@@ -1073,7 +1205,7 @@ def test_physical_cancel_reaches_entry_node_then_stops_and_cleans_all_peers(
 def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(5)
+    peers = _peers(5, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner(_physical_cleanup_captures(peers))
     controller = QualificationController(
@@ -1095,7 +1227,7 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
     assert len(runner.calls) == len(peers)
     for peer, call in zip(peers, runner.calls, strict=True):
         argv = call[0]
-        assert argv[:11] == (
+        assert argv[:13] == (
             "ssh",
             "-o",
             "BatchMode=yes",
@@ -1105,6 +1237,8 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
             "StrictHostKeyChecking=yes",
             "-o",
             "ConnectTimeout=15",
+            "-i",
+            peer.ssh_identity_file,
             "--",
             peer.ssh_target,
         )
@@ -1113,6 +1247,7 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
 def test_physical_cleanup_uses_declared_local_and_ssh_process_transports(
     tmp_path: Path,
 ) -> None:
+    identity_file = _private_identity_file(tmp_path)
     peers = (
         PeerIdentity(
             node_id="node-0",
@@ -1129,6 +1264,7 @@ def test_physical_cleanup_uses_declared_local_and_ssh_process_transports(
             boot_id="boot-1",
             staging_root="/tmp/mycelium-controller/run-a/node-1",
             process_transport="ssh",
+            ssh_identity_file=str(identity_file),
         ),
     )
     source_root, transfers = _transfers(tmp_path)
@@ -1160,7 +1296,7 @@ def test_physical_cleanup_uses_declared_local_and_ssh_process_transports(
 def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner(_physical_cleanup_captures(peers))
     snapshot = _snapshot(peers)
@@ -1215,7 +1351,7 @@ def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
 def test_physical_recover_restarts_local_peer_without_ssh(
     tmp_path: Path,
 ) -> None:
-    base_peers = _peers(3)
+    base_peers = _peers(3, tmp_path)
     peers = tuple(
         PeerIdentity(
             node_id=peer.node_id,
@@ -1224,6 +1360,7 @@ def test_physical_recover_restarts_local_peer_without_ssh(
             boot_id=peer.boot_id,
             staging_root=peer.staging_root,
             process_transport="local" if index == 0 else "ssh",
+            ssh_identity_file=None if index == 0 else peer.ssh_identity_file,
         )
         for index, peer in enumerate(base_peers)
     )
@@ -1269,7 +1406,7 @@ def test_physical_recover_restarts_local_peer_without_ssh(
 def test_physical_recover_bounds_restart_and_cleans_every_session(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner(_physical_cleanup_captures(peers))
     attempts: dict[str, list[FakeNodeSession]] = {}
@@ -1309,7 +1446,7 @@ def test_physical_recover_bounds_restart_and_cleans_every_session(
 def test_physical_recover_rejects_stale_generation_and_cleans(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner(_physical_cleanup_captures(peers))
     attempts: dict[str, list[FakeNodeSession]] = {}
@@ -1352,7 +1489,7 @@ def test_physical_recover_rejects_stale_generation_and_cleans(
 def test_physical_seal_without_adapters_rejects_before_orchestration(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner(_physical_cleanup_captures(peers))
     attempts: dict[str, list[FakeNodeSession]] = {}
@@ -1391,7 +1528,7 @@ def test_controller_has_no_injected_qualifier_authority() -> None:
 def test_physical_seal_stops_writers_locks_manifest_without_qualifying(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path / "transfer")
     runner = StagingRunner(_physical_cleanup_captures(peers))
     attempts: dict[str, list[FakeNodeSession]] = {}
@@ -1437,7 +1574,7 @@ def test_physical_seal_stops_writers_locks_manifest_without_qualifying(
 def test_physical_seal_evidence_stops_writers_without_invoking_qualifier(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(3)
+    peers = _peers(3, tmp_path)
     source_root, transfers = _transfers(tmp_path / "transfer")
     runner = StagingRunner(_physical_cleanup_captures(peers))
     attempts: dict[str, list[FakeNodeSession]] = {}
@@ -1479,7 +1616,7 @@ def test_physical_seal_evidence_stops_writers_without_invoking_qualifier(
 def test_physical_run_rejects_endpoint_secret_outside_identity_root(
     tmp_path: Path,
 ) -> None:
-    peers = _peers(2)
+    peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = RecordingRunner()
     controller = QualificationController(
@@ -1510,7 +1647,7 @@ def test_physical_run_rejects_unsafe_python_executable(
     tmp_path: Path,
     python_executable: str,
 ) -> None:
-    peers = _peers(2)
+    peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)
     runner = StagingRunner([])
     run_plan = _physical_run_plan(peers)
@@ -1641,17 +1778,37 @@ def test_cli_accepts_explicit_run_plan_path() -> None:
     assert args.run_plan == "/tmp/mycelium-controller/run-plan.json"
 
 
-def test_cli_peer_argument_requires_explicit_process_transport() -> None:
-    peer = _peer_argument(
+def test_cli_peer_argument_requires_explicit_process_transport_and_identity(
+    tmp_path: Path,
+) -> None:
+    identity_file = _private_identity_file(tmp_path)
+    local_peer = _peer_argument(
         "node-0,operator@peer.example,host-0,boot-0,"
-        "/tmp/mycelium-controller/run-a/node-0,local"
+        "/tmp/mycelium-controller/run-a/node-0,local,-"
+    )
+    remote_peer = _peer_argument(
+        "node-1,operator@peer.example,host-1,boot-1,"
+        f"/tmp/mycelium-controller/run-a/node-1,ssh,{identity_file}"
     )
 
-    assert peer.process_transport == "local"
+    assert local_peer.process_transport == "local"
+    assert local_peer.ssh_identity_file is None
+    assert remote_peer.process_transport == "ssh"
+    assert remote_peer.ssh_identity_file == str(identity_file)
     with pytest.raises(ControllerError, match="invalid_arguments"):
         _peer_argument(
             "node-0,operator@peer.example,host-0,boot-0,"
             "/tmp/mycelium-controller/run-a/node-0"
+        )
+    with pytest.raises(ControllerError, match="invalid_arguments"):
+        _peer_argument(
+            "node-0,operator@peer.example,host-0,boot-0,"
+            "/tmp/mycelium-controller/run-a/node-0,local,/tmp/identity"
+        )
+    with pytest.raises(ControllerError, match="invalid_arguments"):
+        _peer_argument(
+            "node-1,operator@peer.example,host-1,boot-1,"
+            "/tmp/mycelium-controller/run-a/node-1,ssh,-"
         )
 
 
