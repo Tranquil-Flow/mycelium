@@ -2567,7 +2567,11 @@ while True:
             supervised.shutdown_timeout_seconds = 1.0
         supervised.close()
         supervised.close()
-    assert descriptors() == baseline_descriptors
+    # In the full suite, pytest/plugin-owned descriptors can legitimately close
+    # while this cleanup probe runs. The process-boundary invariant is
+    # leak-shaped: closing a node process must not leave any new parent
+    # descriptor behind.
+    assert descriptors() - baseline_descriptors == set()
     assert {
         thread.name for thread in threading.enumerate() if thread.is_alive()
     } == baseline_threads
@@ -2628,7 +2632,7 @@ def test_handshake_release_failure_closes_fds_and_reaps_blocked_launcher(
     assert marker.exists() is False
     assert len(launched) == 1
     assert launched[0].poll() is not None
-    assert descriptors() == before
+    assert descriptors() - before == set()
     assert not any(
         thread.name.startswith("mycelium-node-") and thread.is_alive()
         for thread in threading.enumerate()
