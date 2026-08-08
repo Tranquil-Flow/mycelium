@@ -593,6 +593,24 @@ async fn process_local_record(
             },
             None => error_response(record.message_id, "empty"),
         },
+        RecordKind::ReceiveFrom => match state.receive_from(session_id, RECEIVE_POLL_WAIT).await {
+            Some((message_id, source_endpoint, generation, payload)) => {
+                let source = source_endpoint.map_or([0_u8; ENDPOINT_ID_BYTES], |endpoint_id| {
+                    *endpoint_id.as_bytes()
+                });
+                ResponseRecord {
+                    kind: RecordKind::DeliveryFrom,
+                    message_id,
+                    payload: [
+                        source.as_slice(),
+                        generation.to_be_bytes().as_slice(),
+                        payload.as_slice(),
+                    ]
+                    .concat(),
+                }
+            }
+            None => error_response(record.message_id, "empty"),
+        },
         RecordKind::Ack => {
             if state.ack_inbound(session_id, record.message_id).await {
                 ack_response(record.message_id)
@@ -629,7 +647,7 @@ async fn process_local_record(
             }
         }
         RecordKind::Ping => ack_response(record.message_id),
-        RecordKind::Delivery | RecordKind::Error => {
+        RecordKind::Delivery | RecordKind::DeliveryFrom | RecordKind::Error => {
             error_response(record.message_id, "invalid_kind")
         }
     }
@@ -792,6 +810,7 @@ struct InboundState {
 
 struct InboundItem {
     message_id: MessageId,
+    source_endpoint: Option<EndpointId>,
     generation: u64,
     payload: Vec<u8>,
     control: Arc<InboundControl>,
@@ -1267,6 +1286,7 @@ impl RuntimeState {
         payload: Vec<u8>,
     ) -> AdmissionOutcome {
         let digest = frame_digest(&payload);
+        let source_endpoint = origin.as_ref().map(|(endpoint_id, _)| *endpoint_id);
         let generation = origin.as_ref().map_or(0, |(_, generation)| *generation);
         let peers = self.peers.read().await;
         if let Some((endpoint_id, generation)) = origin {
@@ -1308,6 +1328,7 @@ impl RuntimeState {
         inbound.active.insert(message_id, control.clone());
         inbound.pending.push_back(InboundItem {
             message_id,
+            source_endpoint,
             generation,
             payload,
             control: control.clone(),
@@ -1324,6 +1345,24 @@ impl RuntimeState {
         session_id: u64,
         maximum_wait: Duration,
     ) -> Option<(MessageId, u64, Vec<u8>)> {
+        self.receive_item(session_id, maximum_wait).await.map(
+            |(message_id, _source_endpoint, generation, payload)| (message_id, generation, payload),
+        )
+    }
+
+    async fn receive_from(
+        &self,
+        session_id: u64,
+        maximum_wait: Duration,
+    ) -> Option<(MessageId, Option<EndpointId>, u64, Vec<u8>)> {
+        self.receive_item(session_id, maximum_wait).await
+    }
+
+    async fn receive_item(
+        &self,
+        session_id: u64,
+        maximum_wait: Duration,
+    ) -> Option<(MessageId, Option<EndpointId>, u64, Vec<u8>)> {
         let deadline = Instant::now() + maximum_wait;
         loop {
             let notified = self.inbound_ready.notified();
@@ -1331,7 +1370,12 @@ impl RuntimeState {
                 let _peers = self.peers.read().await;
                 let mut inbound = self.inbound.lock().await;
                 if let Some(item) = inbound.pending.pop_front() {
-                    let result = (item.message_id, item.generation, item.payload.clone());
+                    let result = (
+                        item.message_id,
+                        item.source_endpoint,
+                        item.generation,
+                        item.payload.clone(),
+                    );
                     inbound
                         .inflight
                         .entry(session_id)

@@ -20,8 +20,11 @@ from mycelium_router.wire import WireError, decode_frame
 LOCAL_PROTOCOL = "mycelium.iroh_sidecar.local.v1"
 OPERATIONAL_MAX_FRAME_BYTES = 16 * 1024 * 1024
 _CONFIRMED_GENERATION_BYTES = 8
+_ENDPOINT_ID_BYTES = 32
 _LOCAL_MAX_PAYLOAD_BYTES = (
-    OPERATIONAL_MAX_FRAME_BYTES + 2 * _CONFIRMED_GENERATION_BYTES
+    OPERATIONAL_MAX_FRAME_BYTES
+    + _ENDPOINT_ID_BYTES
+    + 2 * _CONFIRMED_GENERATION_BYTES
 )
 
 _CLIENT_PROOF_DOMAIN = b"mycelium.iroh_sidecar.local.v1/client-proof\0"
@@ -47,7 +50,8 @@ _ERROR = 8
 _SEND_CONFIRMED = 9
 _CONFIGURE_PEERS = 10
 _SEND_ROUTED = 11
-_ENDPOINT_ID_BYTES = 32
+_RECEIVE_FROM = 12
+_DELIVERY_FROM = 13
 _ZERO_ID = b"\0" * 16
 
 
@@ -521,6 +525,56 @@ class SidecarClient:
                 continue
             self._raise_response(kind, message_id, payload, _ZERO_ID)
 
+    def recv_with_source(
+        self, *, timeout: Optional[float] = None
+    ) -> Tuple[bytes, Optional[str], int, bytes]:
+        """Receive one frame with authenticated source endpoint provenance."""
+
+        maximum_wait = self._timeout if timeout is None else timeout
+        if maximum_wait <= 0:
+            raise ValueError("timeout must be positive")
+        deadline = time.monotonic() + maximum_wait
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("no sidecar delivery before deadline")
+            try:
+                kind, message_id, payload = self._request(
+                    _RECEIVE_FROM,
+                    _ZERO_ID,
+                    b"",
+                    socket_timeout=max(self._timeout, remaining + 0.5),
+                    deadline=deadline,
+                )
+            except socket.timeout as error:
+                raise TimeoutError("no sidecar delivery before deadline") from error
+            if kind == _DELIVERY_FROM:
+                provenance_bytes = _ENDPOINT_ID_BYTES + _CONFIRMED_GENERATION_BYTES
+                if len(payload) < provenance_bytes:
+                    raise ProtocolError("missing_delivery_source")
+                source_bytes = payload[:_ENDPOINT_ID_BYTES]
+                source_endpoint_id = (
+                    None if source_bytes == bytes(_ENDPOINT_ID_BYTES) else source_bytes.hex()
+                )
+                generation = int.from_bytes(
+                    payload[
+                        _ENDPOINT_ID_BYTES : _ENDPOINT_ID_BYTES
+                        + _CONFIRMED_GENERATION_BYTES
+                    ],
+                    "big",
+                )
+                router_frame = payload[provenance_bytes:]
+                if generation <= 0:
+                    raise ProtocolError("invalid_delivery_generation")
+                try:
+                    decode_frame(router_frame)
+                except (WireError, ValueError, TypeError) as error:
+                    raise ProtocolError("invalid_router_delivery") from error
+                return message_id, source_endpoint_id, generation, router_frame
+            if kind == _ERROR and _error_code(payload) == "empty":
+                continue
+            self._raise_response(kind, message_id, payload, _ZERO_ID)
+
     def ack(self, message_id: bytes) -> None:
         _validate_message_id(message_id)
         self._expect_ack(*self._request(_ACK, message_id, b""), message_id)
@@ -736,6 +790,8 @@ def _decode_record(
         _SEND_CONFIRMED,
         _CONFIGURE_PEERS,
         _SEND_ROUTED,
+        _RECEIVE_FROM,
+        _DELIVERY_FROM,
     }:
         raise ProtocolError("unknown_record_kind")
     if sequence != expected_sequence:

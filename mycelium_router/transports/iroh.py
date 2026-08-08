@@ -360,6 +360,17 @@ class PeerSet:
          raise KeyError(node_id)
       return binding
 
+   def lookup_endpoint(self, endpoint_id: str) -> PeerBinding:
+      with self._lock:
+         matches = [
+            binding
+            for binding in self._bindings.values()
+            if binding.endpoint_id == endpoint_id
+         ]
+      if len(matches) != 1:
+         raise KeyError(endpoint_id)
+      return matches[0]
+
    def atomic_replace(self, bindings: list[PeerBinding]) -> None:
       canonical = [_canonical_peer_binding(b) for b in bindings]
       node_ids = [b.node_id for b in canonical]
@@ -500,7 +511,7 @@ class IrohTransport:
       self._receiver_thread: threading.Thread | None = None
       self._dispatcher_thread: threading.Thread | None = None
       self._dispatch_queue: Queue[
-         tuple[bytes, int, bytes, bytes, DecodedFrame | None]
+         tuple[bytes, str, int, bytes, bytes, DecodedFrame | None]
       ] = Queue(maxsize=queue_capacity)
       self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
@@ -733,6 +744,12 @@ class IrohTransport:
          return self._peers.lookup(destination_node_id)
       except KeyError:
          raise IrohTransportError("destination_binding_mismatch") from None
+
+   def _lookup_source_peer(self, source_endpoint_id: str) -> PeerBinding:
+      try:
+         return self._peers.lookup_endpoint(source_endpoint_id)
+      except KeyError:
+         raise IrohTransportError("source_binding_mismatch") from None
 
    def rotate_peer(self, replacement: PeerBinding) -> None:
       with self._rotation_lock:
@@ -1165,10 +1182,15 @@ class IrohTransport:
             return
          if delivery is None:
             continue
-         message_id, delivery_generation, frame = delivery
+         message_id, source_endpoint_id, delivery_generation, frame = delivery
          digest = hashlib.sha256(frame).digest()
          with self._state_lock:
-            if delivery_generation != self._peer.generation:
+            source_peer = (
+               self._peer
+               if source_endpoint_id is None
+               else self._lookup_source_peer(source_endpoint_id)
+            )
+            if delivery_generation != source_peer.generation:
                self._set_fatal(IrohTransportError("peer_rotated"))
                return
             previous = self._seen.get(message_id)
@@ -1193,7 +1215,14 @@ class IrohTransport:
                return
          try:
             self._dispatch_queue.put_nowait(
-               (message_id, delivery_generation, frame, digest, decoded)
+               (
+                  message_id,
+                  source_peer.node_id,
+                  delivery_generation,
+                  frame,
+                  digest,
+                  decoded,
+               )
             )
          except Full:
             with self._state_lock:
@@ -1206,6 +1235,7 @@ class IrohTransport:
          try:
             (
                message_id,
+               source_node_id,
                delivery_generation,
                _frame,
                digest,
@@ -1214,8 +1244,7 @@ class IrohTransport:
          except Empty:
             continue
          try:
-            with self._state_lock:
-               current_generation = self._peer.generation
+            current_generation = self._peers.lookup(source_node_id).generation
             if delivery_generation != current_generation:
                raise IrohTransportError("peer_rotated_during_dispatch")
             if decoded is None:
@@ -1229,11 +1258,11 @@ class IrohTransport:
                continue
             with self._state_lock:
                self._dispatcher_phase = f"dispatching:{type(decoded).__name__}"
-            self._dispatch(decoded, source_node_id=self.peer_binding.node_id)
+            self._dispatch(decoded, source_node_id=source_node_id)
             with self._state_lock:
                self._dispatcher_phase = "awaiting_local_ack"
-               if delivery_generation != self._peer.generation:
-                  raise IrohTransportError("peer_rotated_during_dispatch")
+            if delivery_generation != self._peers.lookup(source_node_id).generation:
+               raise IrohTransportError("peer_rotated_during_dispatch")
             self._ack_after_dispatch(message_id)
             with self._state_lock:
                self._dispatcher_phase = "idle"
@@ -1288,14 +1317,23 @@ class IrohTransport:
          request.completed.set()
          self._ack_queue.task_done()
 
-   def _recv(self, client: Any) -> tuple[bytes, int, bytes] | None:
-      receive = client.recv_with_generation
+   def _recv(
+      self, client: Any
+   ) -> tuple[bytes, str | None, int, bytes] | None:
+      receive = getattr(client, "recv_with_source", None)
+      source_aware = receive is not None
+      if receive is None:
+         receive = client.recv_with_generation
       try:
-         return receive(wait_seconds=self.poll_interval_seconds)
+         delivery = receive(wait_seconds=self.poll_interval_seconds)
       except TypeError as error:
          if "wait_seconds" not in str(error):
             raise
-         return receive(timeout=self.poll_interval_seconds)
+         delivery = receive(timeout=self.poll_interval_seconds)
+      if delivery is None or source_aware:
+         return delivery
+      message_id, generation, frame = delivery
+      return message_id, None, generation, frame
 
    def _reconnect_receive_client(self) -> None:
       replacement = self._new_client()
@@ -1611,7 +1649,7 @@ class IrohTransport:
 
       with self._receipt_trace_condition:
          self._require_running()
-         trace_peer = self._peer
+         trace_peer = self._lookup_destination_peer(destination)
          self._inflight_receipt_trace_commits += 1
       try:
          placeholder_receipt = DeliveryReceipt(

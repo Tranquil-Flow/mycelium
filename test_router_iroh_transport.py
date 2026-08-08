@@ -666,9 +666,7 @@ def test_remote_trace_builder_preflight_failure_sends_nothing(
 
 def test_remote_receipt_trace_oversize_is_rejected_before_send() -> None:
     oversized_endpoint_id = "peer-endpoint-" + "x" * 600
-    hub = _Hub()
-    transport = _transport(hub)
-    transport._peer = PeerBinding(
+    oversized_peer = PeerBinding(
         node_id="peer-node",
         endpoint_id=oversized_endpoint_id,
         endpoint_addr={
@@ -677,6 +675,8 @@ def test_remote_receipt_trace_oversize_is_rejected_before_send() -> None:
         },
         generation=7,
     )
+    hub = _Hub()
+    transport = _transport(hub, peer=oversized_peer)
     transport.bind_router(_RecordingRouter())
     transport.start()
     transport._entry_nodes["request-1"] = "peer-node"

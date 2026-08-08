@@ -28,6 +28,8 @@ from mycelium_iroh_sidecar import (
     SidecarError,
 )
 from mycelium_iroh_sidecar import client as sidecar_client_module
+from mycelium_router.contracts import TokenEvent
+from mycelium_router.transports.iroh import IrohTransport, PeerBinding
 from mycelium_router.wire import decode_frame, encode_frame
 
 ROOT = Path(__file__).resolve().parent
@@ -850,6 +852,160 @@ def peer_entry(node: RunningSidecar, generation: int) -> dict[str, Any]:
         "endpoint_addr": node.ready["endpoint_addr"],
         "generation": generation,
     }
+
+
+class _TokenProbe:
+    def __init__(self) -> None:
+        self.tokens: list[tuple[TokenEvent, str | None]] = []
+        self.token_received = threading.Event()
+
+    def receive_token_event(
+        self, event: TokenEvent, *, source_node_id: str | None = None
+    ) -> bool:
+        self.tokens.append((event, source_node_id))
+        self.token_received.set()
+        return True
+
+
+def _transport_binding(
+    node_id: str, node: RunningSidecar, *, generation: int = 1
+) -> PeerBinding:
+    return PeerBinding(
+        node_id=node_id,
+        endpoint_id=node.ready["endpoint_id"],
+        endpoint_addr=node.ready["endpoint_addr"],
+        generation=generation,
+    )
+
+
+def _triad_transport(
+    *,
+    node_id: str,
+    node: RunningSidecar,
+    primary_node_id: str,
+    primary: RunningSidecar,
+    secondary_node_id: str,
+    secondary: RunningSidecar,
+) -> IrohTransport:
+    return IrohTransport(
+        node_id=node_id,
+        socket_path=node.socket_path,
+        bootstrap_secret=node.secret,
+        peer=_transport_binding(primary_node_id, primary),
+        peers=[_transport_binding(secondary_node_id, secondary)],
+        expected_endpoint_id=node.ready["endpoint_id"],
+        delivery_timeout_seconds=20,
+        poll_interval_seconds=0.02,
+    )
+
+
+def _start_transport_triad(
+    triad: tuple[RunningSidecar, RunningSidecar, RunningSidecar],
+    *,
+    gamma_primary: str,
+) -> tuple[
+    IrohTransport,
+    IrohTransport,
+    IrohTransport,
+    _TokenProbe,
+    _TokenProbe,
+    _TokenProbe,
+]:
+    alpha, beta, gamma = triad
+    alpha_transport = _triad_transport(
+        node_id="node-alpha",
+        node=alpha,
+        primary_node_id="node-beta",
+        primary=beta,
+        secondary_node_id="node-gamma",
+        secondary=gamma,
+    )
+    beta_transport = _triad_transport(
+        node_id="node-beta",
+        node=beta,
+        primary_node_id="node-alpha",
+        primary=alpha,
+        secondary_node_id="node-gamma",
+        secondary=gamma,
+    )
+    if gamma_primary == "node-alpha":
+        gamma_transport = _triad_transport(
+            node_id="node-gamma",
+            node=gamma,
+            primary_node_id="node-alpha",
+            primary=alpha,
+            secondary_node_id="node-beta",
+            secondary=beta,
+        )
+    else:
+        gamma_transport = _triad_transport(
+            node_id="node-gamma",
+            node=gamma,
+            primary_node_id="node-beta",
+            primary=beta,
+            secondary_node_id="node-alpha",
+            secondary=alpha,
+        )
+    probes = (_TokenProbe(), _TokenProbe(), _TokenProbe())
+    transports = (alpha_transport, beta_transport, gamma_transport)
+    started: list[IrohTransport] = []
+    try:
+        for transport, probe in zip(transports, probes, strict=True):
+            transport.bind_router(probe)
+            transport.start()
+            started.append(transport)
+    except BaseException:
+        _close_transports(*started)
+        raise
+    return (*transports, *probes)
+
+
+def _close_transports(*transports: IrohTransport) -> None:
+    for transport in reversed(transports):
+        transport.close()
+
+
+def test_iroh_transport_routes_token_to_non_primary_peer(triad) -> None:
+    token = TokenEvent("request-routed", "path-routed", 1, 2, 42, 3)
+    (
+        alpha_transport,
+        beta_transport,
+        gamma_transport,
+        _alpha_probe,
+        beta_probe,
+        gamma_probe,
+    ) = _start_transport_triad(triad, gamma_primary="node-alpha")
+    try:
+        alpha_transport._entry_nodes[token.request_id] = "node-gamma"
+        alpha_transport.send_token_event(token)
+
+        assert gamma_probe.token_received.wait(5)
+        assert gamma_probe.tokens == [(token, "node-alpha")]
+        assert beta_probe.tokens == []
+    finally:
+        _close_transports(alpha_transport, beta_transport, gamma_transport)
+
+
+def test_iroh_transport_reports_actual_non_primary_source_peer(triad) -> None:
+    token = TokenEvent("request-source", "path-source", 1, 2, 43, 4)
+    (
+        alpha_transport,
+        beta_transport,
+        gamma_transport,
+        _alpha_probe,
+        beta_probe,
+        gamma_probe,
+    ) = _start_transport_triad(triad, gamma_primary="node-beta")
+    try:
+        alpha_transport.send_router_frame(
+            encode_frame(token), destination_node_id="node-gamma"
+        )
+
+        assert gamma_probe.token_received.wait(5)
+        assert gamma_probe.tokens == [(token, "node-alpha")]
+        assert beta_probe.tokens == []
+    finally:
+        _close_transports(alpha_transport, beta_transport, gamma_transport)
 
 
 def test_configure_peers_installs_a_routed_set_and_admits_every_member(triad) -> None:

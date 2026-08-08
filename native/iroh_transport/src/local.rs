@@ -17,7 +17,9 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub const LOCAL_PROTOCOL: &str = "mycelium.iroh_sidecar.local.v1";
 pub const LOCAL_RECORD_VERSION: u8 = 1;
-pub const LOCAL_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024 + 16;
+// Routed sends carry 32 bytes of destination plus two u64 generations.
+// Source-aware deliveries carry 32 bytes of source plus one u64 generation.
+pub const LOCAL_MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024 + 48;
 pub const LOCAL_RECORD_HEADER_BYTES: usize = 1 + 1 + 8 + 16 + 4;
 pub const LOCAL_RECORD_TAG_BYTES: usize = 32;
 pub const LOCAL_MAX_RECORD_BYTES: usize =
@@ -47,6 +49,8 @@ pub enum RecordKind {
     SendConfirmed = 9,
     ConfigurePeers = 10,
     SendRouted = 11,
+    ReceiveFrom = 12,
+    DeliveryFrom = 13,
 }
 
 impl TryFrom<u8> for RecordKind {
@@ -65,6 +69,8 @@ impl TryFrom<u8> for RecordKind {
             9 => Ok(Self::SendConfirmed),
             10 => Ok(Self::ConfigurePeers),
             11 => Ok(Self::SendRouted),
+            12 => Ok(Self::ReceiveFrom),
+            13 => Ok(Self::DeliveryFrom),
             _ => Err(LocalProtocolError::UnknownRecordKind),
         }
     }
@@ -494,8 +500,18 @@ mod tests {
         assert_ne!(RecordKind::ConfigurePeers, RecordKind::ConfigurePeer);
         assert_eq!(RecordKind::SendRouted as u8, 11);
         assert_eq!(RecordKind::try_from(11_u8).unwrap(), RecordKind::SendRouted);
+        assert_eq!(RecordKind::ReceiveFrom as u8, 12);
         assert_eq!(
-            RecordKind::try_from(12_u8),
+            RecordKind::try_from(12_u8).unwrap(),
+            RecordKind::ReceiveFrom
+        );
+        assert_eq!(RecordKind::DeliveryFrom as u8, 13);
+        assert_eq!(
+            RecordKind::try_from(13_u8).unwrap(),
+            RecordKind::DeliveryFrom
+        );
+        assert_eq!(
+            RecordKind::try_from(14_u8),
             Err(LocalProtocolError::UnknownRecordKind)
         );
 
