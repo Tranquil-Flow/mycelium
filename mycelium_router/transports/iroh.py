@@ -327,6 +327,56 @@ def _peer_binding_snapshot(
    )
 
 
+class PeerSet:
+   """Thread-safe multi-peer binding manager for routed topologies.
+
+   Replaces the single-peer ``_peer`` field when the sidecar is evolved to
+   support an explicitly routed N-node graph.  All mutations are atomic and
+   generation-fenced: a stale-generation upsert or replacement is rejected
+   before any internal state changes.
+   """
+
+   def __init__(self) -> None:
+      self._bindings: dict[str, PeerBinding] = {}
+      self._lock = threading.RLock()
+
+   @property
+   def count(self) -> int:
+      with self._lock:
+         return len(self._bindings)
+
+   def upsert(self, binding: PeerBinding) -> None:
+      canonical = _canonical_peer_binding(binding)
+      with self._lock:
+         existing = self._bindings.get(canonical.node_id)
+         if existing is not None and canonical.generation <= existing.generation:
+            raise ValueError("stale_peer_generation")
+         self._bindings[canonical.node_id] = canonical
+
+   def lookup(self, node_id: str) -> PeerBinding:
+      with self._lock:
+         binding = self._bindings.get(node_id)
+      if binding is None:
+         raise KeyError(node_id)
+      return binding
+
+   def atomic_replace(self, bindings: list[PeerBinding]) -> None:
+      canonical = [_canonical_peer_binding(b) for b in bindings]
+      node_ids = [b.node_id for b in canonical]
+      if len(set(node_ids)) != len(node_ids):
+         raise ValueError("duplicate_node_id")
+      with self._lock:
+         for binding in canonical:
+            existing = self._bindings.get(binding.node_id)
+            if existing is not None and binding.generation <= existing.generation:
+               raise ValueError("stale_peer_generation")
+         self._bindings = {b.node_id: b for b in canonical}
+
+   def snapshot(self) -> dict[str, PeerBinding]:
+      with self._lock:
+         return dict(self._bindings)
+
+
 @dataclass(frozen=True)
 class DeliveryReceipt:
    message_id: bytes
