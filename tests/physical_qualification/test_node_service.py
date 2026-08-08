@@ -584,6 +584,26 @@ def _identity(
     )
 
 
+def test_distributed_protocol_clock_rebases_distinct_monotonic_origins() -> None:
+    local_monotonic = [100.0]
+    remote_monotonic = [50_000.0]
+    local_clock = node_module._DistributedProtocolClock(
+        unix_now=lambda: 1_800_000_000.0,
+        monotonic_now=lambda: local_monotonic[0],
+    )
+    remote_clock = node_module._DistributedProtocolClock(
+        unix_now=lambda: 1_800_000_000.2,
+        monotonic_now=lambda: remote_monotonic[0],
+    )
+
+    lease_expires_at = local_clock.now() + 30.0
+    local_monotonic[0] += 0.5
+    remote_monotonic[0] += 0.5
+
+    assert remote_clock.now() < lease_expires_at
+    assert remote_clock.now() - local_clock.now() == pytest.approx(0.2)
+
+
 def test_node_service_uses_run_scoped_physical_host_identity(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

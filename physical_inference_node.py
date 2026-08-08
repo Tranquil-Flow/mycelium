@@ -21,7 +21,7 @@ import subprocess
 import sys
 import time
 import traceback
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 import uuid
 
 from mycelium_iroh_sidecar import SidecarClient
@@ -213,7 +213,11 @@ def execution_graph_from_document(document: Any) -> ExecutionGraph:
         raise NodeCommandError("invalid_execution_graph") from exc
 
 
-def device_states_from_document(document: Any) -> dict[str, DeviceState]:
+def device_states_from_document(
+    document: Any,
+    *,
+    observed_at: float | None = None,
+) -> dict[str, DeviceState]:
     _require(isinstance(document, dict) and bool(document), "invalid_device_states")
     expected = {
         "node_id",
@@ -228,7 +232,7 @@ def device_states_from_document(document: Any) -> dict[str, DeviceState]:
         "neighbor_bandwidth_bytes_per_second",
     }
     states: dict[str, DeviceState] = {}
-    now = time.monotonic()
+    now = time.time() if observed_at is None else observed_at
     for node_id, state_document in document.items():
         state_data = _exact_fields(state_document, expected, "invalid_device_state_fields")
         _require(state_data["node_id"] == node_id, "device_state_key_mismatch")
@@ -248,9 +252,30 @@ class _UuidSource:
         return f"{namespace}-{uuid.uuid4()}"
 
 
-class _MonotonicClock:
+class _DistributedProtocolClock:
+    """Unix-aligned time that advances monotonically within this process.
+
+    Lease deadlines cross physical hosts, so raw ``time.monotonic()`` values
+    cannot enter Router/runtime protocol state: each host has a different
+    monotonic epoch.  Anchor once to the shared Unix domain, then advance from
+    the local monotonic source to avoid wall-clock jumps during a run.
+    """
+
+    def __init__(
+        self,
+        *,
+        unix_now: Callable[[], float] | None = None,
+        monotonic_now: Callable[[], float] | None = None,
+    ) -> None:
+        self._monotonic_now = monotonic_now or time.monotonic
+        wall_source = unix_now or time.time
+        self._unix_origin = float(wall_source())
+        self._monotonic_origin = float(self._monotonic_now())
+
     def now(self) -> float:
-        return time.monotonic()
+        return self._unix_origin + (
+            float(self._monotonic_now()) - self._monotonic_origin
+        )
 
 
 class _CaptureSink:
@@ -460,7 +485,7 @@ class PhysicalNodeService:
         self.endpoint_addr: dict[str, Any] | None = None
         self.peer_generation = 0
         self._ids = _UuidSource()
-        self._clock = _MonotonicClock()
+        self._clock = _DistributedProtocolClock()
         self._sinks: dict[str, _CaptureSink] = {}
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
@@ -678,7 +703,10 @@ class PhysicalNodeService:
         )
         graph = execution_graph_from_document(data["graph"])
         _require(graph.deployment_id == self.deployment_id, "graph_deployment_id_mismatch")
-        states = device_states_from_document(data["device_states"])
+        states = device_states_from_document(
+            data["device_states"],
+            observed_at=self._clock.now(),
+        )
         _require(set(states) == {placement.node_id for stage in graph.stages for placement in stage.placements}, "device_state_node_mismatch")
         assignment = self._safe_document(data["assignment_file"], "invalid_assignment_file")
         _require(assignment.get("deployment_id") == self.deployment_id, "assignment_deployment_id_mismatch")
@@ -881,7 +909,7 @@ class PhysicalNodeService:
             **{
                 **request_data,
                 "prompt_token_ids": tuple(request_data["prompt_token_ids"]),
-                "admitted_at": time.monotonic(),
+                "admitted_at": self._clock.now(),
             }
         )
         _require(self.state == "RUNNING" and self.router is not None, "invalid_state_for_infer_start")
