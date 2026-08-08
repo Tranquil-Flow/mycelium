@@ -17,7 +17,7 @@ import pytest
 from mycelium_iroh_sidecar import ProtocolError, SidecarClient
 from mycelium_iroh_sidecar import client as sidecar_client_module
 import mycelium_router.transports.iroh as iroh_module
-from mycelium_router.contracts import TokenEvent
+from mycelium_router.contracts import FailureReport, TokenEvent
 from mycelium_router.transports.iroh import (
     PROCESS_LIFETIME_LIMITATION,
     DeliveryReceipt,
@@ -681,6 +681,34 @@ def test_trace_identity_omits_overlong_public_fields_without_leaking_them() -> N
         value not in identity
         for value in (sensitive_request, sensitive_phase, str(sensitive_token))
     )
+
+
+def test_failure_trace_identity_preserves_bounded_failure_diagnostics() -> None:
+    identity = json.loads(
+        _bounded_trace_identity(
+            FailureReport(
+                request_id="request-1",
+                path_id="path-1",
+                path_attempt=0,
+                token_index=-1,
+                scope="PLACEMENT",
+                reason="runtime_payload_shape_mismatch",
+                placement_id="placement-001",
+                node_id="node-1",
+            )
+        )
+    )
+
+    assert identity == {
+        "node_id": "node-1",
+        "path_attempt": 0,
+        "path_id": "path-1",
+        "placement_id": "placement-001",
+        "reason": "runtime_payload_shape_mismatch",
+        "request_id": "request-1",
+        "scope": "PLACEMENT",
+        "token_index": -1,
+    }
 
 
 def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_generation() -> None:

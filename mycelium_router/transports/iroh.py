@@ -115,6 +115,32 @@ def _bounded_trace_identity(
       candidate = {**identity, "token_index": token_index}
       if fits(candidate):
          identity = candidate
+   if isinstance(message, FailureReport):
+      for field_name in (
+         "scope",
+         "reason",
+         "path_id",
+         "placement_id",
+         "edge_id",
+         "node_id",
+      ):
+         value = getattr(message, field_name)
+         if not value:
+            continue
+         encoded_value = value.encode("utf-8")
+         if len(encoded_value) <= _TRACE_ID_BYTES:
+            candidate = {**identity, field_name: value}
+         else:
+            candidate = {
+               **identity,
+               f"{field_name}_sha256": hashlib.sha256(encoded_value).hexdigest(),
+            }
+         if fits(candidate):
+            identity = candidate
+      if 0 <= message.path_attempt < 2**63:
+         candidate = {**identity, "path_attempt": message.path_attempt}
+         if fits(candidate):
+            identity = candidate
    request = getattr(message, "request", None)
    graph = getattr(message, "graph", None)
    build = getattr(message, "build", None)
