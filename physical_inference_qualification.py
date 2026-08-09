@@ -65,6 +65,10 @@ _FORBIDDEN_NAME_RE = re.compile(
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_TRANSFER_BYTES = 256 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
+_MIN_STAGE_TIMEOUT_SECONDS = 120.0
+_MAX_STAGE_TIMEOUT_SECONDS = 300.0
+_STAGE_TIMEOUT_OVERHEAD_SECONDS = 30.0
+_STAGE_MINIMUM_BYTES_PER_SECOND = 1024 * 1024
 _STAGE_ACK_PROTOCOL = "mycelium.controller_remote_stage_ack.v1"
 _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
 _NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
@@ -798,6 +802,25 @@ def build_transfer_archive(
             member.gname = ""
             archive.addfile(member, io.BytesIO(content))
     return stream.getvalue()
+
+
+def _stage_timeout_seconds(archive_size_bytes: int) -> float:
+    """Bound staging time while allowing large verified archives over slow links."""
+
+    if (
+        not isinstance(archive_size_bytes, int)
+        or isinstance(archive_size_bytes, bool)
+        or archive_size_bytes < 0
+    ):
+        _reject("transfer_size_invalid")
+    estimated = (
+        _STAGE_TIMEOUT_OVERHEAD_SECONDS
+        + archive_size_bytes / _STAGE_MINIMUM_BYTES_PER_SECOND
+    )
+    return min(
+        _MAX_STAGE_TIMEOUT_SECONDS,
+        max(_MIN_STAGE_TIMEOUT_SECONDS, estimated),
+    )
 
 
 class QualificationController:
@@ -2043,7 +2066,7 @@ class QualificationController:
                 )
                 capture = self._runner.run(
                     argv,
-                    timeout_seconds=120.0,
+                    timeout_seconds=_stage_timeout_seconds(len(archive)),
                     stdin_bytes=archive,
                 )
                 ack = self._parse_stage_ack(

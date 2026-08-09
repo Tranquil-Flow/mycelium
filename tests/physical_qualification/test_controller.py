@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+import physical_inference_qualification as controller_module
 from mycelium_membership.contracts import (
     ASSIGNMENT_OFFER_PROTOCOL,
     sign_membership_message,
@@ -677,6 +678,13 @@ def test_rejected_node_observation_preserves_remote_error_code(tmp_path: Path) -
 
     assert caught.value.code == "node_command_rejected"
     assert caught.value.remote_code == "prefill_completion_timeout"
+
+
+def test_physical_prepare_timeout_scales_with_archive_size_and_stays_bounded() -> None:
+    assert controller_module._stage_timeout_seconds(0) == 120.0
+    assert controller_module._stage_timeout_seconds(90 * 1024 * 1024) == 120.0
+    assert controller_module._stage_timeout_seconds(354_068_480) == 300.0
+    assert controller_module._stage_timeout_seconds(10**12) == 300.0
 
 
 def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
