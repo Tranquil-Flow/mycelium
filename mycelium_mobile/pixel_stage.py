@@ -21,6 +21,7 @@ import platform
 import tempfile
 import threading
 import time
+from types import MappingProxyType
 from typing import Any, Mapping, NoReturn, Sequence
 import uuid
 
@@ -36,6 +37,14 @@ MAX_REPLAY_RESULTS = 128
 MAX_ACTIVE_CONNECTIONS = 16
 SOCKET_TIMEOUT_SECONDS = 5.0
 TOKEN_HEADER = "x-mycelium-stage-token"
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    return value
 
 _PACK_FIELDS = frozenset(
     {
@@ -279,6 +288,20 @@ def build_stage_pack(
 class PixelStage:
     """One exact assignment-derived GPT-2 decoder block with replay defense."""
 
+    __slots__ = (
+        "_document",
+        "_tensors",
+        "_inner_size",
+        "request_count",
+        "_replay",
+        "_lock",
+    )
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in {"_document", "_tensors", "_inner_size"} and hasattr(self, name):
+            raise AttributeError(f"{name[1:]} is immutable")
+        object.__setattr__(self, name, value)
+
     def __init__(
         self,
         *,
@@ -286,14 +309,26 @@ class PixelStage:
         tensors: Mapping[str, Any],
         inner_size: int,
     ) -> None:
-        self.document = dict(document)
-        self.tensors = dict(tensors)
-        self.inner_size = inner_size
+        self._document = _freeze(document)
+        self._tensors = _freeze(tensors)
+        self._inner_size = inner_size
         self.request_count = 0
         self._replay: OrderedDict[str, tuple[str, tuple[tuple[float, ...], ...]]] = (
             OrderedDict()
         )
         self._lock = threading.Lock()
+
+    @property
+    def document(self) -> Mapping[str, Any]:
+        return self._document
+
+    @property
+    def tensors(self) -> Mapping[str, Any]:
+        return self._tensors
+
+    @property
+    def inner_size(self) -> int:
+        return self._inner_size
 
     @classmethod
     def from_document(cls, value: Any) -> "PixelStage":
@@ -583,6 +618,26 @@ class PixelStage:
             self._replay[request_id] = (fingerprint, frozen)
             self.request_count += 1
             return [list(row) for row in frozen]
+
+    def release_requests(self, request_ids: Sequence[str] | None = None) -> int:
+        """Release selected replay entries, or every entry during shutdown."""
+
+        if request_ids is not None and (
+            not isinstance(request_ids, Sequence)
+            or isinstance(request_ids, (str, bytes, bytearray))
+            or not all(isinstance(value, str) and value for value in request_ids)
+        ):
+            _reject("release_request_ids_invalid")
+        with self._lock:
+            if request_ids is None:
+                released = len(self._replay)
+                self._replay.clear()
+                return released
+            released = 0
+            for request_id in set(request_ids):
+                if self._replay.pop(request_id, None) is not None:
+                    released += 1
+            return released
 
 
 class _StageServer(ThreadingHTTPServer):
