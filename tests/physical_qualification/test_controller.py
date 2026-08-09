@@ -682,9 +682,10 @@ def test_rejected_node_observation_preserves_remote_error_code(tmp_path: Path) -
 
 def test_physical_prepare_timeout_scales_with_archive_size_and_stays_bounded() -> None:
     assert controller_module._stage_timeout_seconds(0) == 120.0
-    assert controller_module._stage_timeout_seconds(90 * 1024 * 1024) == 120.0
-    assert controller_module._stage_timeout_seconds(354_068_480) == 300.0
-    assert controller_module._stage_timeout_seconds(10**12) == 300.0
+    assert controller_module._stage_timeout_seconds(30 * 1024 * 1024) == 120.0
+    assert controller_module._stage_timeout_seconds(90 * 1024 * 1024) == 240.0
+    assert 735.0 < controller_module._stage_timeout_seconds(354_068_480) < 736.0
+    assert controller_module._stage_timeout_seconds(10**12) == 900.0
 
 
 def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
@@ -2077,3 +2078,19 @@ def test_subprocess_runner_is_argv_only_and_separates_output_streams(
     assert capture.stderr == b"err"
     assert capture.argv[-1] == injected
     assert not sentinel.exists()
+
+
+def test_subprocess_runner_allows_bounded_large_archive_timeout() -> None:
+    runner = SubprocessRunner()
+
+    capture = runner.run(
+        (sys.executable, "-c", "pass"),
+        timeout_seconds=735.5,
+    )
+
+    assert capture.returncode == 0
+    with pytest.raises(ControllerError, match="runner_arguments_invalid"):
+        runner.run(
+            (sys.executable, "-c", "pass"),
+            timeout_seconds=900.1,
+        )

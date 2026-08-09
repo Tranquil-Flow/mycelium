@@ -65,10 +65,11 @@ _FORBIDDEN_NAME_RE = re.compile(
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_TRANSFER_BYTES = 256 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
+_MAX_RUNNER_TIMEOUT_SECONDS = 900.0
 _MIN_STAGE_TIMEOUT_SECONDS = 120.0
-_MAX_STAGE_TIMEOUT_SECONDS = 300.0
-_STAGE_TIMEOUT_OVERHEAD_SECONDS = 30.0
-_STAGE_MINIMUM_BYTES_PER_SECOND = 1024 * 1024
+_MAX_STAGE_TIMEOUT_SECONDS = _MAX_RUNNER_TIMEOUT_SECONDS
+_STAGE_TIMEOUT_OVERHEAD_SECONDS = 60.0
+_STAGE_MINIMUM_BYTES_PER_SECOND = 512 * 1024
 _STAGE_ACK_PROTOCOL = "mycelium.controller_remote_stage_ack.v1"
 _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
 _NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
@@ -411,7 +412,7 @@ class SubprocessRunner:
             or not isinstance(timeout_seconds, (int, float))
             or isinstance(timeout_seconds, bool)
             or not math.isfinite(float(timeout_seconds))
-            or not 0.0 < float(timeout_seconds) <= 300.0
+            or not 0.0 < float(timeout_seconds) <= _MAX_RUNNER_TIMEOUT_SECONDS
             or (stdin_bytes is not None and not isinstance(stdin_bytes, bytes))
         ):
             _reject("runner_arguments_invalid")
