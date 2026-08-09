@@ -147,6 +147,7 @@ def _safe_plan() -> dict[str, Any]:
                 "host_id": HOST_M4PRO,
                 "boot_id": BOOT_M4PRO,
                 "runtime": "mlx-mac-arm64",
+                "python_executable": "/opt/mycelium/python/bin/python3",
                 "coordinator_port": 43127,
                 "credential_path_alias": "node-0-endpoint-key",
                 "ssh_identity_path_alias": "wave8-ssh-identity",
@@ -160,7 +161,8 @@ def _safe_plan() -> dict[str, Any]:
                 "probe_transport": "ssh",
                 "host_id": HOST_LAPTOP,
                 "boot_id": BOOT_LAPTOP,
-                "runtime": "mlx-mac-arm64",
+                "runtime": "numpy-linux-x86_64",
+                "python_executable": "/usr/bin/python3",
                 "coordinator_port": 43128,
                 "credential_path_alias": "node-1-endpoint-key",
                 "ssh_identity_path_alias": "wave8-ssh-identity",
@@ -269,7 +271,7 @@ def test_live_preflight_uses_local_probe_for_controller_and_bounded_strict_ssh_f
 
         if host["probe_transport"] == "local":
             assert argv == (
-                "/opt/homebrew/bin/python3.14",
+                "/opt/mycelium/python/bin/python3",
                 "-m",
                 "mycelium_physical_runner.remote_probe",
                 "--canonical-json",
@@ -288,7 +290,7 @@ def test_live_preflight_uses_local_probe_for_controller_and_bounded_strict_ssh_f
             assert "--" in argv
             assert argv[-1] == (
                 'cd "$HOME/mycelium-physical-run/run-w8-001/source" && '
-                "exec /opt/homebrew/bin/python3.14 -m "
+                "exec /usr/bin/python3 -m "
                 "mycelium_physical_runner.remote_probe --canonical-json"
             )
 
@@ -298,7 +300,10 @@ def test_live_preflight_uses_local_probe_for_controller_and_bounded_strict_ssh_f
     assert SECRET_VALUE.encode("utf-8") not in rendered
 
 
-@pytest.mark.parametrize("field", ["alias", "node_id", "ssh_target", "probe_transport"])
+@pytest.mark.parametrize(
+    "field",
+    ["alias", "node_id", "ssh_target", "probe_transport", "python_executable"],
+)
 def test_live_preflight_rejects_tampered_shell_bearing_host_identity_before_output(field: str) -> None:
     plan = _safe_plan()
     plan["hosts"][0][field] = "safe; printf secret"

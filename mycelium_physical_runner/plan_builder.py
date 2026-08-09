@@ -5,13 +5,14 @@ import json
 import re
 from collections.abc import Mapping
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, TypeGuard
 
 SAFE_PLAN_PROTOCOL = "mycelium.physical_runner_safe_plan.v1"
 PHYSICAL_RUNNER_INVENTORY_PROTOCOL = "mycelium.physical_runner_inventory.v1"
 _SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PUBLIC_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$")
+_PYTHON_EXECUTABLE_RE = re.compile(r"^/(?:[A-Za-z0-9._+-]+/)*[A-Za-z0-9._+-]+$")
 _RUN_SCOPED_HOST_RE = re.compile(r"^host-[0-9a-f]{32}$")
 _RUN_SCOPED_BOOT_RE = re.compile(r"^boot-[0-9a-f]{32}$")
 
@@ -119,6 +120,16 @@ def _validate_host_paths(host: Mapping[str, Any], probes: Any) -> None:
 
 def _canonical_clone(value: Any) -> Any:
     return json.loads(json.dumps(value, allow_nan=False, sort_keys=True))
+
+
+def is_safe_python_executable(value: Any) -> TypeGuard[str]:
+    return (
+        isinstance(value, str)
+        and len(value) <= 1024
+        and _PYTHON_EXECUTABLE_RE.fullmatch(value) is not None
+        and ".." not in PurePosixPath(value).parts
+        and str(PurePosixPath(value)) == value
+    )
 
 
 def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, Any]:
@@ -231,6 +242,9 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
         runtime = host.get("runtime")
         if not isinstance(runtime, str) or getattr(probes, "supported_runtimes", {}).get(runtime) is not True:
             _fail("unsupported_runtime")
+        python_executable = host.get("python_executable")
+        if not is_safe_python_executable(python_executable):
+            _fail("python_executable_invalid")
         port = host.get("coordinator_port")
         if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
             _fail("host_invalid")
@@ -258,6 +272,7 @@ def build_safe_plan(inventory: Mapping[str, Any], *, probes: Any) -> dict[str, A
                 "host_id": host_id,
                 "boot_id": boot_id,
                 "runtime": runtime,
+                "python_executable": python_executable,
                 "coordinator_port": port,
                 "credential_path_alias": f"{node_id}-endpoint-key",
                 "ssh_identity_path_alias": ssh_identity_path_alias,
@@ -337,4 +352,5 @@ __all__ = [
     "PlanBuildError",
     "SAFE_PLAN_PROTOCOL",
     "build_safe_plan",
+    "is_safe_python_executable",
 ]

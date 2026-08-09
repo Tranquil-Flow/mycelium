@@ -272,6 +272,38 @@ def test_build_safe_plan_is_deterministic_sorted_and_redacted() -> None:
     assert SECRET_VALUE.encode("utf-8") not in rendered
 
 
+def test_build_safe_plan_preserves_per_host_python_executables() -> None:
+    inventory = _base_inventory()
+    inventory["hosts"][1]["python_executable"] = "/usr/bin/python3"
+
+    safe_plan = _build(inventory)
+
+    assert [host["python_executable"] for host in safe_plan["hosts"]] == [
+        "/opt/mycelium/python/bin/python3",
+        "/usr/bin/python3",
+    ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "python3",
+        "/usr/bin/../bin/python3",
+        "/usr/bin/python 3",
+        "/usr/bin/python3;touch",
+    ],
+)
+def test_build_safe_plan_rejects_unsafe_python_executable(value: str) -> None:
+    inventory = _base_inventory()
+    probes = FakePlanProbes(inventory)
+    inventory["hosts"][1]["python_executable"] = value
+
+    with pytest.raises(_api().PlanBuildError) as captured:
+        _api().build_safe_plan(inventory, probes=probes)
+
+    assert captured.value.code == "python_executable_invalid"
+
+
 def test_build_safe_plan_declares_local_only_cold_and_warm_cache_contracts() -> None:
     safe_plan = _build(_base_inventory())
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import RunnerError
-from .plan_builder import SAFE_PLAN_PROTOCOL
+from .plan_builder import SAFE_PLAN_PROTOCOL, is_safe_python_executable
 
 LIVE_PREFLIGHT_PROTOCOL = "mycelium.physical_runner_live_preflight.v1"
 LIVE_PROBE_PROTOCOL = "mycelium.physical_runner_live_probe.v1"
@@ -22,10 +22,6 @@ _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SSH_TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
 _RUN_SCOPED_HOST_RE = re.compile(r"^host-[0-9a-f]{32}$")
 _RUN_SCOPED_BOOT_RE = re.compile(r"^boot-[0-9a-f]{32}$")
-_REMOTE_PROBE_MODULE_COMMAND = (
-    "/opt/homebrew/bin/python3.14 -m "
-    "mycelium_physical_runner.remote_probe --canonical-json"
-)
 _REMOTE_REQUEST_PROTOCOL = "mycelium.physical_runner_remote_probe_request.v1"
 
 
@@ -254,6 +250,7 @@ def _ssh_argv(
     target = host.get("ssh_target")
     alias = host.get("alias")
     node_id = host.get("node_id")
+    python_executable = host.get("python_executable")
     if (
         not isinstance(target, str)
         or _SSH_TARGET_RE.fullmatch(target) is None
@@ -263,11 +260,13 @@ def _ssh_argv(
         or _SEGMENT_RE.fullmatch(node_id) is None
         or not isinstance(run_id, str)
         or _SEGMENT_RE.fullmatch(run_id) is None
+        or not is_safe_python_executable(python_executable)
     ):
         raise RunnerError("live_preflight_plan_invalid")
     remote_command = (
         f'cd "$HOME/mycelium-physical-run/{run_id}/source" && '
-        f"exec {_REMOTE_PROBE_MODULE_COMMAND}"
+        f"exec {python_executable} -m "
+        "mycelium_physical_runner.remote_probe --canonical-json"
     )
     return (
         "ssh",
@@ -287,12 +286,17 @@ def _ssh_argv(
     )
 
 
-def _local_argv(run_id: Any) -> tuple[tuple[str, ...], Path]:
-    if not isinstance(run_id, str) or _SEGMENT_RE.fullmatch(run_id) is None:
+def _local_argv(host: Mapping[str, Any], run_id: Any) -> tuple[tuple[str, ...], Path]:
+    python_executable = host.get("python_executable")
+    if (
+        not isinstance(run_id, str)
+        or _SEGMENT_RE.fullmatch(run_id) is None
+        or not is_safe_python_executable(python_executable)
+    ):
         raise RunnerError("live_preflight_plan_invalid")
     return (
         (
-            "/opt/homebrew/bin/python3.14",
+            python_executable,
             "-m",
             "mycelium_physical_runner.remote_probe",
             "--canonical-json",
@@ -479,6 +483,8 @@ def run_live_preflight(
             raise RunnerError("live_preflight_plan_invalid")
         if host.get("probe_transport") not in {"local", "ssh"}:
             raise RunnerError("live_preflight_plan_invalid")
+        if not is_safe_python_executable(host.get("python_executable")):
+            raise RunnerError("live_preflight_plan_invalid")
     if probes is None and runner is None:
         probes, runner = _production_dependencies(plan)
     elif probes is None or runner is None:
@@ -512,7 +518,7 @@ def run_live_preflight(
     for host in hosts_raw:
         alias = str(host.get("alias", ""))
         if host.get("probe_transport") == "local":
-            argv, cwd = _local_argv(plan.get("run_id"))
+            argv, cwd = _local_argv(host, plan.get("run_id"))
         else:
             argv = _ssh_argv(host, identities[alias], plan.get("run_id"))
             cwd = None
