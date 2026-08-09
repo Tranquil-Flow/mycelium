@@ -23,20 +23,12 @@ from mycelium_router.contracts import (
     StageCost,
 )
 from mycelium_router.layer_builder import layer_load_proof_digest
-from mycelium_router.mlx_runtime import _stage_signature
+from mycelium_router.stage_signatures import stage_signature_for_backend
 from runtime_loader import canonical_json
 from stage_pack import (
     artifact_report_for_loader,
     compile_stage_pack,
     verify_stage_pack,
-)
-from two_process_runtime_qualification import (
-    DEPLOYMENT_EPOCH,
-    DEPLOYMENT_ID,
-    _LocalOnlyFetcher,
-    _build_local_model,
-    _control_plane_binding,
-    _route_for_manifest,
 )
 from weight_provisioning import artifact_report_errors, provision_assignment, sha256_file
 
@@ -82,6 +74,62 @@ _SAFETENSORS_DTYPE_BYTES = {
 }
 _RUNTIME_DTYPE_BYTES = {"float16": 2, "bfloat16": 2, "float32": 4}
 _PREPARABLE_RUNTIME_DTYPES = frozenset({"float16", "float32"})
+DEPLOYMENT_ID = "12345678-1234-5678-9234-abcdefabcdef"
+DEPLOYMENT_EPOCH = 1
+
+
+def _route_for_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    ranges = (
+        {"start_layer": 0, "end_layer_exclusive": 1, "layer_count": 1},
+        {"start_layer": 1, "end_layer_exclusive": 2, "layer_count": 1},
+    )
+    nodes = ("node-a", "node-b")
+    return {
+        "ok": True,
+        "protocol": "mycelium.manual_provisioning_route.v1",
+        "claim_boundary": (
+            "offline qualification route for assignment compilation only; "
+            "not a route-readiness claim"
+        ),
+        "model": {
+            "model_id": manifest["model_id"],
+            "num_layers": manifest["num_layers"],
+            "manifest_digest": manifest_digest_ref(manifest),
+            "resolved_commit": manifest["resolved_commit"],
+        },
+        "route": [
+            {"node_id": node, "range": copy.deepcopy(layer_range)}
+            for node, layer_range in zip(nodes, ranges)
+        ],
+        "node_order": list(nodes),
+    }
+
+
+def _control_plane_binding() -> dict[str, Any]:
+    return {
+        "protocol": "mycelium.control_plane_binding.v1",
+        "evidence_bundle_digest": "sha256:" + "a" * 64,
+        "planner_snapshot_digest": "sha256:" + "b" * 64,
+        "snapshot_generation": 1,
+        "swarm_id": "offline-two-process-qualification",
+        "deployment_id": DEPLOYMENT_ID,
+        "deployment_epoch": DEPLOYMENT_EPOCH,
+    }
+
+
+def _stage_signature(
+    graph: ExecutionGraph,
+    stage: Stage,
+    proof: Mapping[str, Any],
+) -> str:
+    runtime = proof.get("runtime")
+    runtime_backend = runtime.get("backend") if isinstance(runtime, Mapping) else None
+    if not isinstance(runtime_backend, str):
+        raise PhysicalDeploymentError("invalid_loaded_stage_runtime")
+    try:
+        return stage_signature_for_backend(graph, stage, runtime_backend)
+    except ValueError as exc:
+        raise PhysicalDeploymentError("invalid_loaded_stage_runtime") from exc
 
 
 @dataclass(frozen=True)
@@ -1109,6 +1157,11 @@ def prepare_assignment_artifacts(
         source_metadata: dict[str, Any] | None = None
         tokenizer_assets: tuple[dict[str, Any], ...] = ()
         if model_source is None:
+            from two_process_runtime_qualification import (
+                _LocalOnlyFetcher,
+                _build_local_model,
+            )
+
             manifest, _ = _build_local_model(prepared_root, n_positions=16)
             fetcher: Any = _LocalOnlyFetcher(prepared_root)
         else:
