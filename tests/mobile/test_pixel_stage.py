@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import builtins
 import copy
-from dataclasses import replace
+from dataclasses import asdict, replace
 import hashlib
 import json
 import math
 from pathlib import Path
 import struct
+import subprocess
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -41,12 +44,45 @@ from mycelium_router.stage_signatures import stage_signature_for_backend
 from two_process_runtime_qualification import _layer_tensors
 
 PARENT_ASSIGNMENT_DIGEST = "sha256:" + "c" * 64
+PIXEL_NODE_DEPLOYMENT_ID = "00000000-0000-4000-8000-000000000009"
 
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
         value, ensure_ascii=True, allow_nan=False, sort_keys=True, separators=(",", ":")
     ).encode("ascii")
+
+
+def test_physical_node_import_for_pixel_does_not_require_array_backends() -> None:
+    code = """
+import builtins
+import sys
+
+original_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name.partition('.')[0] in {'mlx', 'numpy'}:
+        raise ModuleNotFoundError(name)
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+sys.path.insert(0, '.')
+import physical_inference_node
+assert 'mlx' not in sys.modules
+assert 'numpy' not in sys.modules
+print('pixel_node_import=ok')
+"""
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", code],
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "pixel_node_import=ok"
 
 
 def _pack() -> dict[str, object]:
@@ -369,6 +405,424 @@ def _runtime_item(*, payload: bytes | None = None) -> HopWorkItem:
         position=0,
         terminal=False,
     )
+
+
+def _pixel_node_assignment() -> dict[str, object]:
+    from layer_assignment import assignment_id_for
+
+    fixture = _pack()
+    tensors = fixture["tensors"]
+    assert isinstance(tensors, dict)
+    tensor_keys = sorted(tensors)
+    semantic_identity: dict[str, object] = {
+        "protocol": "mycelium.layer_assignment.v2",
+        "deployment_id": PIXEL_NODE_DEPLOYMENT_ID,
+        "deployment_epoch": 7,
+        "node_id": "node-pixel",
+        "model_id": "fixture/gpt2-tiny",
+        "resolved_commit": "a" * 40,
+        "manifest_digest": "sha256:" + "b" * 64,
+        "range": {
+            "start_layer": 1,
+            "end_layer_exclusive": 2,
+            "layer_count": 1,
+        },
+        "components": ["decoder"],
+        "component_tensor_keys": {"decoder": tensor_keys},
+        "component_aliases": {},
+        "expected_tensor_prefixes": ["transformer.h.1."],
+        "expected_tensor_keys": tensor_keys,
+        "files": [
+            {
+                "path": "model.safetensors",
+                "size_bytes": 1,
+                "content_digest": "sha256:" + "f" * 64,
+            }
+        ],
+        "artifact_cache_root": "/data/data/com.termux/files/home/.cache/mycelium",
+        "runtime": {
+            "backend": "pixel-stdlib",
+            "dtype": "float32",
+            "quantization": "none",
+        },
+    }
+    return {
+        "assignment_id": assignment_id_for(semantic_identity),
+        **semantic_identity,
+        "route_ready": False,
+        "claim_boundary": (
+            "minimal upstream shards assigned; runtime has not loaded or probed layers"
+        ),
+    }
+
+
+def _pixel_node_pack(
+    assignment: dict[str, object],
+    *,
+    run_id: str = "run-pixel",
+) -> dict[str, object]:
+    fixture = _pack()
+    tensors = copy.deepcopy(fixture["tensors"])
+    assert isinstance(tensors, dict)
+    return build_stage_pack(
+        run_id=run_id,
+        deployment_id=str(assignment["deployment_id"]),
+        assignment_id=str(assignment["assignment_id"]),
+        stage_id="stage-001",
+        model_id="fixture/gpt2-tiny",
+        resolved_commit="a" * 40,
+        manifest_digest="sha256:" + "b" * 64,
+        parent_assignment_digest="sha256:"
+        + hashlib.sha256(_canonical(assignment)).hexdigest(),
+        parent_load_proof_digest="sha256:" + "d" * 64,
+        start_layer=1,
+        end_layer_exclusive=2,
+        n_head=2,
+        hidden_size=4,
+        epsilon=1e-5,
+        activation_function="gelu_new",
+        scale_attn_weights=True,
+        scale_attn_by_inverse_layer_idx=False,
+        reorder_and_upcast_attn=False,
+        add_cross_attention=False,
+        tensors=tensors,
+    )
+
+
+def _pixel_node_graph(assignment: dict[str, object]) -> ExecutionGraph:
+    deployment_epoch = assignment["deployment_epoch"]
+    assert isinstance(deployment_epoch, (int, bool))
+    graph = replace(
+        _runtime_graph(),
+        deployment_id=PIXEL_NODE_DEPLOYMENT_ID,
+        deployment_epoch=int(deployment_epoch),
+    )
+    pixel_stage = graph.stages[1]
+    placement = replace(
+        pixel_stage.placements[0],
+        assignment_id=str(assignment["assignment_id"]),
+        stage_signature="pending-pixel-signature",
+    )
+    graph = graph.with_stages(
+        (
+            graph.stages[0],
+            replace(pixel_stage, placements=(placement,)),
+            graph.stages[2],
+        )
+    )
+    pixel_stage = graph.stages[1]
+    placement = replace(
+        pixel_stage.placements[0],
+        stage_signature=stage_signature_for_backend(
+            graph,
+            pixel_stage,
+            "pixel-stdlib",
+        ),
+    )
+    return graph.with_stages(
+        (
+            graph.stages[0],
+            replace(pixel_stage, placements=(placement,)),
+            graph.stages[2],
+        )
+    )
+
+
+def _pixel_node_states() -> dict[str, dict[str, object]]:
+    nodes = ("node-entry", "node-pixel", "node-final")
+    return {
+        node_id: {
+            "node_id": node_id,
+            "state_seq": 1,
+            "last_updated": 1.0,
+            "availability": "ALIVE",
+            "compute_units_per_second": 1_000.0,
+            "free_compute_fraction": 1.0,
+            "available_kv_bytes": 1_000_000,
+            "pending_hop_queue_depth": 0,
+            "neighbor_rtt_ms": {
+                peer: 1.0 for peer in nodes if peer != node_id
+            },
+            "neighbor_bandwidth_bytes_per_second": {
+                peer: 1_000_000.0 for peer in nodes if peer != node_id
+            },
+        }
+        for node_id in nodes
+    }
+
+
+def test_physical_node_configures_pixel_runtime_without_generic_loader(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import physical_inference_node as node_module
+    from physical_inference_node import PhysicalNodeService
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    assignment = _pixel_node_assignment()
+    pack = _pixel_node_pack(assignment)
+    (artifact_root / "assignment.json").write_bytes(_canonical(assignment))
+    (artifact_root / "pixel-pack.json").write_bytes(_canonical(pack))
+
+    service = PhysicalNodeService(
+        run_id="run-pixel",
+        deployment_id=PIXEL_NODE_DEPLOYMENT_ID,
+        node_id="node-pixel",
+        artifact_root=artifact_root,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=tmp_path / "sidecar",
+        sidecar_local_only=True,
+        command_timeout=10.0,
+    )
+
+    class FakeSidecar:
+        socket_path = tmp_path / "socket" / "i.sock"
+        bootstrap_material = b"s" * 32
+        closed = False
+
+        def start(self):
+            return {
+                "endpoint_id": "pixel-endpoint",
+                "endpoint_addr": {"id": "pixel-endpoint"},
+            }
+
+        def close(self):
+            self.closed = True
+
+    fake_sidecar = FakeSidecar()
+    monkeypatch.setattr(service, "_new_sidecar_process", lambda: fake_sidecar)
+
+    original_import = builtins.__import__
+
+    def reject_generic_loader(name, *args, **kwargs):
+        if name in {"runtime_loader", "stage_pack"}:
+            raise AssertionError(f"generic loader imported on Pixel path: {name}")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_generic_loader)
+
+    configured = service._configure(
+        {
+            "assignment_file": "assignment.json",
+            "pixel_stage_pack_file": "pixel-pack.json",
+            "graph": json.loads(_canonical(asdict(_pixel_node_graph(assignment)))),
+            "device_states": _pixel_node_states(),
+            "load_generation": 1,
+        }
+    )
+    try:
+        assert isinstance(service.runtime, PixelStageRuntimePort)
+        assert service.runtime.kv_snapshot()["backend"] == "pixel-stdlib"
+        assert configured["observation"]["route_ready"] is False
+        assert configured["observation"]["details"]["runtime_mode"] == (
+            "complete_context_replay"
+        )
+        assert configured["observation"]["details"]["pixel_stage_pack_digest"] == (
+            pack["pack_digest"]
+        )
+
+        class FakeTransport:
+            def __init__(self, **kwargs):
+                self.arguments = kwargs
+                self.bound_router = None
+                self.started = False
+                self.closed = False
+
+            def bind_router(self, router):
+                self.bound_router = router
+
+            def start(self):
+                self.started = True
+
+            def close(self):
+                self.closed = True
+
+        monkeypatch.setattr(node_module, "IrohTransport", FakeTransport)
+        started = service._start(
+            {
+                "peer": {
+                    "node_id": "node-entry",
+                    "endpoint_id": "entry-endpoint",
+                    "endpoint_addr": {
+                        "id": "entry-endpoint",
+                        "addrs": ["127.0.0.1:1"],
+                    },
+                    "generation": 2,
+                },
+                "local_generation": 1,
+            }
+        )
+        assert isinstance(service.transport, FakeTransport)
+        assert service.transport.bound_router is service.router
+        assert service.transport.started is True
+        assert service.router is not None
+        assert service.runtime is not None
+        assert started["observation"]["event"] == "started"
+        assert started["observation"]["route_ready"] is False
+        transport = service.transport
+        runtime = service.runtime
+    finally:
+        service.close()
+    assert transport.closed is True
+    assert runtime.kv_snapshot()["closed"] is True
+    assert fake_sidecar.closed is True
+
+
+def test_physical_node_rejects_pixel_runtime_binding_with_stable_code(
+    tmp_path: Path,
+) -> None:
+    from physical_inference_node import NodeCommandError, PhysicalNodeService
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    service = PhysicalNodeService(
+        run_id="run-pixel",
+        deployment_id="deployment-pixel",
+        node_id="node-pixel",
+        artifact_root=artifact_root,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=tmp_path / "sidecar",
+        sidecar_local_only=True,
+        command_timeout=10.0,
+    )
+    graph = _runtime_graph()
+    placement = graph.stages[1].placements[0]
+
+    with pytest.raises(NodeCommandError, match="invalid_pixel_runtime_binding"):
+        service._build_runtime_port(
+            placement,
+            graph,
+            PixelStage.from_document(_pack()),
+            parent_assignment_digest="sha256:" + "e" * 64,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "route_ready",
+        "quantization",
+        "extra_runtime_field",
+        "model_semantic_laundering",
+        "boolean_epoch_collision",
+    ],
+)
+def test_physical_node_rejects_invalid_pixel_parent_assignment_before_sidecar(
+    tmp_path: Path,
+    monkeypatch,
+    mutation: str,
+) -> None:
+    from layer_assignment import assignment_id_for
+    from physical_inference_node import NodeCommandError, PhysicalNodeService
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    assignment = _pixel_node_assignment()
+    if mutation == "route_ready":
+        assignment["route_ready"] = True
+    elif mutation == "quantization":
+        runtime = assignment["runtime"]
+        assert isinstance(runtime, dict)
+        runtime["quantization"] = "int4"
+        assignment["assignment_id"] = assignment_id_for(assignment)
+    elif mutation == "extra_runtime_field":
+        runtime = assignment["runtime"]
+        assert isinstance(runtime, dict)
+        runtime["unexpected"] = "value"
+        assignment["assignment_id"] = assignment_id_for(assignment)
+    elif mutation == "model_semantic_laundering":
+        assignment["model_id"] = "attacker/other-model"
+        assignment["assignment_id"] = assignment_id_for(assignment)
+    else:
+        assignment["deployment_epoch"] = True
+        assignment["assignment_id"] = assignment_id_for(assignment)
+    pack = _pixel_node_pack(assignment)
+    (artifact_root / "assignment.json").write_bytes(_canonical(assignment))
+    (artifact_root / "pixel-pack.json").write_bytes(_canonical(pack))
+    service = PhysicalNodeService(
+        run_id="run-pixel",
+        deployment_id=PIXEL_NODE_DEPLOYMENT_ID,
+        node_id="node-pixel",
+        artifact_root=artifact_root,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=tmp_path / "sidecar",
+        sidecar_local_only=True,
+        command_timeout=10.0,
+    )
+    sidecar_started = False
+
+    def unexpected_sidecar():
+        nonlocal sidecar_started
+        sidecar_started = True
+        raise AssertionError("sidecar started before assignment validation")
+
+    monkeypatch.setattr(service, "_new_sidecar_process", unexpected_sidecar)
+
+    expected_error = (
+        "pixel_assignment_pack_mismatch"
+        if mutation in {"model_semantic_laundering", "boolean_epoch_collision"}
+        else "invalid_assignment_file"
+    )
+    with pytest.raises(NodeCommandError, match=expected_error):
+        service._configure(
+            {
+                "assignment_file": "assignment.json",
+                "pixel_stage_pack_file": "pixel-pack.json",
+                "graph": json.loads(
+                    _canonical(asdict(_pixel_node_graph(assignment)))
+                ),
+                "device_states": _pixel_node_states(),
+                "load_generation": 1,
+            }
+        )
+    assert sidecar_started is False
+
+
+def test_physical_node_rejects_cross_run_pixel_pack_before_sidecar(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from physical_inference_node import NodeCommandError, PhysicalNodeService
+
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    assignment = _pixel_node_assignment()
+    pack = _pixel_node_pack(assignment, run_id="other-run")
+    (artifact_root / "assignment.json").write_bytes(_canonical(assignment))
+    (artifact_root / "pixel-pack.json").write_bytes(_canonical(pack))
+    service = PhysicalNodeService(
+        run_id="run-pixel",
+        deployment_id=PIXEL_NODE_DEPLOYMENT_ID,
+        node_id="node-pixel",
+        artifact_root=artifact_root,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=tmp_path / "sidecar",
+        sidecar_local_only=True,
+        command_timeout=10.0,
+    )
+    sidecar_started = False
+
+    def unexpected_sidecar():
+        nonlocal sidecar_started
+        sidecar_started = True
+        raise AssertionError("sidecar started for cross-run pack")
+
+    monkeypatch.setattr(service, "_new_sidecar_process", unexpected_sidecar)
+
+    with pytest.raises(NodeCommandError, match="pixel_stage_run_id_mismatch"):
+        service._configure(
+            {
+                "assignment_file": "assignment.json",
+                "pixel_stage_pack_file": "pixel-pack.json",
+                "graph": json.loads(
+                    _canonical(asdict(_pixel_node_graph(assignment)))
+                ),
+                "device_states": _pixel_node_states(),
+                "load_generation": 1,
+            }
+        )
+    assert sidecar_started is False
 
 
 def _runtime(

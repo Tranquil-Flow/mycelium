@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from dataclasses import fields, is_dataclass, replace
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -48,8 +49,6 @@ from mycelium_router.router import Router
 from mycelium_router.transports.iroh import IrohTransport, PeerBinding
 from mycelium_router.validation import validate_execution_graph
 from physical_sqlite_capacity import SQLiteQualificationCapacityPort
-from runtime_loader import canonical_json, load_assignment_stage
-from stage_pack import artifact_report_for_loader, verify_stage_pack
 
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
@@ -660,11 +659,104 @@ class PhysicalNodeService:
             endpoint_secret_file=self.endpoint_secret_file,
         )
 
+    @staticmethod
+    def _validate_pixel_assignment_binding(
+        assignment: dict[str, Any],
+        pixel_stage: Any,
+        graph: ExecutionGraph,
+        graph_stage: Stage,
+        placement: Placement,
+    ) -> None:
+        document = pixel_stage.document
+        string_fields = (
+            "deployment_id",
+            "model_id",
+            "resolved_commit",
+            "manifest_digest",
+            "node_id",
+            "assignment_id",
+        )
+        _require(
+            all(type(assignment.get(field)) is str for field in string_fields)
+            and type(assignment.get("deployment_epoch")) is int,
+            "pixel_assignment_pack_mismatch",
+        )
+        expected_scalars = {
+            "deployment_id": graph.deployment_id,
+            "deployment_epoch": graph.deployment_epoch,
+            "model_id": graph.model_id,
+            "resolved_commit": graph.resolved_commit,
+            "manifest_digest": graph.manifest_digest,
+            "node_id": placement.node_id,
+            "assignment_id": placement.assignment_id,
+        }
+        _require(
+            all(assignment.get(field) == expected for field, expected in expected_scalars.items()),
+            "pixel_assignment_pack_mismatch",
+        )
+        _require(
+            all(
+                assignment.get(field) == document[field]
+                for field in (
+                    "deployment_id",
+                    "assignment_id",
+                    "model_id",
+                    "resolved_commit",
+                    "manifest_digest",
+                )
+            ),
+            "pixel_assignment_pack_mismatch",
+        )
+        layer_range = assignment.get("range")
+        expected_range = {
+            "start_layer": graph_stage.layer_range.start_layer,
+            "end_layer_exclusive": graph_stage.layer_range.end_layer_exclusive,
+            "layer_count": graph_stage.layer_range.layer_count,
+        }
+        _require(
+            isinstance(layer_range, dict)
+            and set(layer_range) == set(expected_range)
+            and all(type(layer_range.get(field)) is int for field in expected_range)
+            and layer_range == expected_range
+            and document["start_layer"] == expected_range["start_layer"]
+            and document["end_layer_exclusive"]
+            == expected_range["end_layer_exclusive"],
+            "pixel_assignment_pack_mismatch",
+        )
+        roles = list(graph_stage.component_roles)
+        _require(
+            type(assignment.get("components")) is list
+            and all(type(role) is str for role in assignment["components"])
+            and assignment["components"] == roles
+            and list(document["component_roles"]) == roles,
+            "pixel_assignment_pack_mismatch",
+        )
+        tensor_keys = sorted(pixel_stage.tensors)
+        component_tensor_keys = assignment.get("component_tensor_keys")
+        expected_tensor_keys = assignment.get("expected_tensor_keys")
+        expected_tensor_prefixes = assignment.get("expected_tensor_prefixes")
+        _require(
+            type(component_tensor_keys) is dict
+            and set(component_tensor_keys) == {"decoder"}
+            and type(component_tensor_keys["decoder"]) is list
+            and all(type(key) is str for key in component_tensor_keys["decoder"])
+            and component_tensor_keys["decoder"] == tensor_keys
+            and type(expected_tensor_keys) is list
+            and all(type(key) is str for key in expected_tensor_keys)
+            and expected_tensor_keys == tensor_keys
+            and type(expected_tensor_prefixes) is list
+            and all(type(prefix) is str for prefix in expected_tensor_prefixes)
+            and expected_tensor_prefixes == [pixel_stage.prefix],
+            "pixel_assignment_pack_mismatch",
+        )
+
     def _build_runtime_port(
         self,
         placement: Placement,
         graph: ExecutionGraph,
         loaded: Any,
+        *,
+        parent_assignment_digest: str | None = None,
     ) -> Any:
         """Lazily import and instantiate the placement's declared runtime port.
 
@@ -682,13 +774,36 @@ class PhysicalNodeService:
             for candidate in stage.placements
             if candidate.lifecycle_state == "ACTIVE"
         }
-        if not route_backends or route_backends - {"mlx", "numpy"}:
+        if not route_backends or route_backends - {"mlx", "numpy", "pixel-stdlib"}:
             raise NodeCommandError("unsupported_runtime_backend")
         route_decode_mode = (
             "complete_context_replay"
-            if "numpy" in route_backends
+            if route_backends & {"numpy", "pixel-stdlib"}
             else "stage_local_kv"
         )
+        if backend == "pixel-stdlib":
+            from mycelium_mobile.pixel_runtime import (
+                PixelRuntimeError,
+                PixelStageRuntimePort,
+            )
+            from mycelium_mobile.pixel_stage import PixelStage
+
+            _require(isinstance(loaded, PixelStage), "invalid_pixel_stage_pack_file")
+            _require(
+                isinstance(parent_assignment_digest, str)
+                and bool(parent_assignment_digest),
+                "invalid_parent_assignment_digest",
+            )
+            assert isinstance(parent_assignment_digest, str)
+            try:
+                return PixelStageRuntimePort(
+                    loaded,
+                    graph=graph,
+                    placement_id=placement.placement_id,
+                    parent_assignment_digest=parent_assignment_digest,
+                )
+            except PixelRuntimeError as exc:
+                raise NodeCommandError("invalid_pixel_runtime_binding") from exc
         if backend == "numpy":
             from mycelium_router.numpy_runtime import NumpyRuntimePort
 
@@ -727,9 +842,17 @@ class PhysicalNodeService:
             "device_states",
             "load_generation",
         }
+        pixel_stage_pack_fields = {
+            "assignment_file",
+            "pixel_stage_pack_file",
+            "graph",
+            "device_states",
+            "load_generation",
+        }
         _require(
             isinstance(payload, dict)
-            and set(payload) in (legacy_fields, stage_pack_fields),
+            and set(payload)
+            in (legacy_fields, stage_pack_fields, pixel_stage_pack_fields),
             "invalid_configure_fields",
         )
         data = payload
@@ -750,7 +873,52 @@ class PhysicalNodeService:
         _require(assignment.get("deployment_id") == self.deployment_id, "assignment_deployment_id_mismatch")
         _require(assignment.get("node_id") == self.node_id, "assignment_node_id_mismatch")
         stage_pack_digest: str | None = None
-        if "stage_pack_file" in data:
+        report: dict[str, Any] | None = None
+        pixel_stage: Any = None
+        parent_assignment_digest: str | None = None
+        if "pixel_stage_pack_file" in data:
+            from layer_assignment import (
+                LAYER_ASSIGNMENT_PROTOCOL,
+                validate_assignment_identity,
+            )
+            from mycelium_mobile.pixel_stage import PixelStage, PixelStageError
+
+            try:
+                _require(
+                    assignment.get("protocol") == LAYER_ASSIGNMENT_PROTOCOL,
+                    "invalid_assignment_file",
+                )
+                validate_assignment_identity(assignment)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise NodeCommandError("invalid_assignment_file") from exc
+            runtime_identity = assignment.get("runtime")
+            _require(
+                isinstance(runtime_identity, dict)
+                and set(runtime_identity) == {"backend", "dtype", "quantization"}
+                and runtime_identity.get("backend") == "pixel-stdlib"
+                and runtime_identity.get("dtype") == "float32"
+                and runtime_identity.get("quantization") == "none",
+                "invalid_assignment_file",
+            )
+            pixel_pack = self._safe_document(
+                data["pixel_stage_pack_file"],
+                "invalid_pixel_stage_pack_file",
+            )
+            try:
+                pixel_stage = PixelStage.from_document(pixel_pack)
+            except PixelStageError as exc:
+                raise NodeCommandError("invalid_pixel_stage_pack_file") from exc
+            _require(
+                pixel_stage.document["run_id"] == self.run_id,
+                "pixel_stage_run_id_mismatch",
+            )
+            parent_assignment_digest = "sha256:" + hashlib.sha256(
+                canonical_json_bytes(assignment)
+            ).hexdigest()
+            stage_pack_digest = pixel_pack["pack_digest"]
+        elif "stage_pack_file" in data:
+            from stage_pack import artifact_report_for_loader, verify_stage_pack
+
             manifest = self._safe_document(
                 data["manifest_file"],
                 "invalid_manifest_file",
@@ -776,22 +944,39 @@ class PhysicalNodeService:
                 data["artifact_report_file"],
                 "invalid_artifact_report_file",
             )
-        local_placements = [
-            placement
+        local_bindings = [
+            (stage, placement)
             for stage in graph.stages
             for placement in stage.placements
             if placement.node_id == self.node_id and placement.lifecycle_state == "ACTIVE"
         ]
-        _require(len(local_placements) == 1, "invalid_local_placement_count")
-        placement = local_placements[0]
+        _require(len(local_bindings) == 1, "invalid_local_placement_count")
+        graph_stage, placement = local_bindings[0]
         _require(placement.assignment_id == assignment.get("assignment_id"), "placement_assignment_mismatch")
-        loaded = load_assignment_stage(assignment, report, load_generation=data["load_generation"])
-        load_proof_document = json.loads(canonical_json(loaded.proof))
-        _require(
-            layer_load_proof_digest(load_proof_document)
-            == placement.load_proof_digest,
-            "placement_load_proof_mismatch",
-        )
+        if pixel_stage is not None:
+            self._validate_pixel_assignment_binding(
+                assignment,
+                pixel_stage,
+                graph,
+                graph_stage,
+                placement,
+            )
+            loaded = pixel_stage
+        else:
+            from runtime_loader import canonical_json, load_assignment_stage
+
+            assert report is not None
+            loaded = load_assignment_stage(
+                assignment,
+                report,
+                load_generation=data["load_generation"],
+            )
+            load_proof_document = json.loads(canonical_json(loaded.proof))
+            _require(
+                layer_load_proof_digest(load_proof_document)
+                == placement.load_proof_digest,
+                "placement_load_proof_mismatch",
+            )
         topology = PublishedTopologyProvider(graph)
         device_provider = PublishedDeviceStateProvider(topology, states)
         capacity = SQLiteQualificationCapacityPort(
@@ -805,7 +990,12 @@ class PhysicalNodeService:
                 + MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS
             ),
         )
-        runtime = self._build_runtime_port(placement, graph, loaded)
+        runtime = self._build_runtime_port(
+            placement,
+            graph,
+            loaded,
+            parent_assignment_digest=parent_assignment_digest,
+        )
         sidecar = self._new_sidecar_process()
         try:
             ready = sidecar.start()
@@ -830,10 +1020,14 @@ class PhysicalNodeService:
             "runtime_mode": runtime.decode_mode,
         }
         if stage_pack_digest is not None:
-            configured_details["stage_pack_digest"] = stage_pack_digest
-            configured_details["stage_pack_verification_digest"] = report[
-                "stage_pack_verification_digest"
-            ]
+            if pixel_stage is not None:
+                configured_details["pixel_stage_pack_digest"] = stage_pack_digest
+            else:
+                assert report is not None
+                configured_details["stage_pack_digest"] = stage_pack_digest
+                configured_details["stage_pack_verification_digest"] = report[
+                    "stage_pack_verification_digest"
+                ]
         return self._signed_result("configured", configured_details)
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
