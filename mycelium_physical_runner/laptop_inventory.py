@@ -291,8 +291,14 @@ def bind_verified_laptops_to_physical_inventory(
     *,
     minimum_laptops: int = 3,
 ) -> dict[str, Any]:
-    """Gate canonical physical-runner inventory on exact laptop identities."""
+    """Identity-bind JSON-canonical inventory before full ``build_safe_plan`` validation."""
 
+    if (
+        isinstance(minimum_laptops, bool)
+        or not isinstance(minimum_laptops, int)
+        or minimum_laptops < 3
+    ):
+        _reject("inventory_minimum_invalid")
     verification = verify_laptop_inventory(
         observations,
         minimum_laptops=minimum_laptops,
@@ -341,6 +347,8 @@ def bind_verified_laptops_to_physical_inventory(
     except (TypeError, ValueError) as exc:
         raise LaptopInventoryError("physical_inventory_invalid") from exc
     if not isinstance(detached, dict):
+        _reject("physical_inventory_invalid")
+    if detached != inventory:
         _reject("physical_inventory_invalid")
     return detached
 

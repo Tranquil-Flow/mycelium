@@ -197,6 +197,30 @@ def test_bind_verified_laptops_returns_detached_canonical_inventory() -> None:
     assert "release_ready" not in bound
 
 
+def test_bind_verified_laptops_cannot_lower_minimum_below_three() -> None:
+    observations = [_unique_observation(index) for index in (0, 1)]
+    inventory = _physical_inventory(observations)
+
+    with pytest.raises(LaptopInventoryError, match="inventory_minimum_invalid"):
+        laptop_inventory.bind_verified_laptops_to_physical_inventory(
+            inventory,
+            observations,
+            minimum_laptops=2,
+        )
+
+
+def test_bind_verified_laptops_rejects_json_normalizing_inventory() -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+    inventory["opaque_root_field"] = {"must_remain_tuple": ("a", "b")}
+
+    with pytest.raises(LaptopInventoryError, match="physical_inventory_invalid"):
+        laptop_inventory.bind_verified_laptops_to_physical_inventory(
+            inventory,
+            observations,
+        )
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected_code"),
     [
