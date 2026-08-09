@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 def _digest(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
@@ -135,6 +137,51 @@ def test_run_scoped_host_identity_is_deterministic_but_not_cross_run_linkable() 
     assert first[1].startswith("boot-")
     assert observed_host_id not in repr(first)
     assert observed_boot_id not in repr(first)
+
+
+def test_remote_probe_supports_numpy_on_linux_x86_64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mycelium_physical_runner import remote_probe
+
+    monkeypatch.setattr(remote_probe.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(remote_probe.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        remote_probe,
+        "_module_available",
+        lambda name: name == "numpy",
+        raising=False,
+    )
+
+    assert remote_probe._runtime_supported("numpy-linux-x86_64") is True
+
+
+@pytest.mark.parametrize(
+    ("system", "machine", "dependency_available"),
+    [
+        ("Darwin", "arm64", True),
+        ("Linux", "arm64", True),
+        ("Linux", "x86_64", False),
+    ],
+)
+def test_remote_probe_rejects_numpy_linux_runtime_when_platform_or_dependency_mismatches(
+    monkeypatch: pytest.MonkeyPatch,
+    system: str,
+    machine: str,
+    dependency_available: bool,
+) -> None:
+    from mycelium_physical_runner import remote_probe
+
+    monkeypatch.setattr(remote_probe.platform, "system", lambda: system)
+    monkeypatch.setattr(remote_probe.platform, "machine", lambda: machine)
+    monkeypatch.setattr(
+        remote_probe,
+        "_module_available",
+        lambda _name: dependency_available,
+        raising=False,
+    )
+
+    assert remote_probe._runtime_supported("numpy-linux-x86_64") is False
 
 
 def test_remote_probe_rejects_path_traversal_aliases(tmp_path: Path) -> None:

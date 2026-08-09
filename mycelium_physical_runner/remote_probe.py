@@ -173,14 +173,28 @@ def derive_local_run_scoped_identity(run_id: str) -> tuple[str, str]:
     )
 
 
-def _runtime_supported(runtime: str) -> bool:
-    if runtime != "mlx-mac-arm64" or platform.system() != "Darwin" or platform.machine() != "arm64":
-        return False
+def _module_available(name: str) -> bool:
     try:
-        __import__("mlx.core")
+        __import__(name)
     except ImportError:
         return False
     return True
+
+
+def _runtime_supported(runtime: str) -> bool:
+    if runtime == "mlx-mac-arm64":
+        return (
+            platform.system() == "Darwin"
+            and platform.machine() == "arm64"
+            and _module_available("mlx.core")
+        )
+    if runtime == "numpy-linux-x86_64":
+        return (
+            platform.system() == "Linux"
+            and platform.machine() == "x86_64"
+            and _module_available("numpy")
+        )
+    return False
 
 
 def _port_available(port: int) -> bool:
