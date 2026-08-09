@@ -33,13 +33,21 @@ _HOST_ID_RE = re.compile(r"^host-[0-9a-f]{32}$")
 _BOOT_ID_RE = re.compile(r"^boot-[0-9a-f]{32}$")
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _LINUX_LAPTOP_CHASSIS_TYPES = frozenset({8, 9, 10, 14, 30, 31, 32})
-_FORBIDDEN_INVENTORY_CLAIM_FIELDS = frozenset(
+_FORBIDDEN_INVENTORY_CLAIM_KEY_MARKERS = frozenset(
     {
-        "inventory_verified",
-        "physical_qualification_executed",
-        "release_ready",
-        "route_ready",
+        "inventoryverified",
+        "physicallyqualified",
+        "qualification",
+        "releaseready",
+        "routeready",
+        "readyforrelease",
+        "readyforroute",
+        "releaseisready",
+        "routeisready",
     }
+)
+_READINESS_CONFIG_TOKENS = frozenset(
+    {"deadline", "interval", "seconds", "timeout", "window"}
 )
 
 
@@ -67,6 +75,68 @@ class LaptopFacts:
 
 def _reject(code: str) -> NoReturn:
     raise LaptopInventoryError(code)
+
+
+def _require_exact_json_shape(value: Any, code: str) -> None:
+    if type(value) is dict:
+        for key, nested in value.items():
+            if type(key) is not str:
+                _reject(code)
+            _require_exact_json_shape(nested, code)
+        return
+    if type(value) is list:
+        for nested in value:
+            _require_exact_json_shape(nested, code)
+        return
+    if type(value) not in {str, int, float, bool, type(None)}:
+        _reject(code)
+
+
+def _canonical_snapshot(value: Any, code: str) -> Any:
+    _require_exact_json_shape(value, code)
+    try:
+        detached = json.loads(
+            json.dumps(value, allow_nan=False, ensure_ascii=False, sort_keys=True)
+        )
+    except (TypeError, ValueError) as exc:
+        raise LaptopInventoryError(code) from exc
+    if detached != value:
+        _reject(code)
+    return detached
+
+
+def _inventory_claim_key_forbidden(key: str) -> bool:
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    ordered_tokens = tuple(re.findall(r"[a-z0-9]+", separated.casefold()))
+    tokens = frozenset(ordered_tokens)
+    compact = "".join(ordered_tokens)
+    if any(marker in compact for marker in _FORBIDDEN_INVENTORY_CLAIM_KEY_MARKERS):
+        return True
+    if "qualified" in tokens:
+        if {"fully", "domain", "name"}.issubset(tokens):
+            return False
+        return True
+    if "verified" in tokens and "inventory" in tokens:
+        return True
+    readiness = tokens & {"ready", "readiness"}
+    readiness_domain = tokens & {"authority", "release", "route"}
+    return bool(
+        readiness
+        and readiness_domain
+        and not (tokens & _READINESS_CONFIG_TOKENS)
+    )
+
+
+def _reject_forbidden_inventory_claims(value: Any) -> None:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if isinstance(key, str):
+                if _inventory_claim_key_forbidden(key):
+                    _reject("physical_inventory_readiness_forbidden")
+            _reject_forbidden_inventory_claims(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _reject_forbidden_inventory_claims(nested)
 
 
 def _segment(value: Any, code: str) -> str:
@@ -299,19 +369,30 @@ def bind_verified_laptops_to_physical_inventory(
         or minimum_laptops < 3
     ):
         _reject("inventory_minimum_invalid")
+    try:
+        raw_observations = list(observations)
+    except (TypeError, ValueError) as exc:
+        raise LaptopInventoryError("observation_invalid") from exc
+    observation_snapshot = _canonical_snapshot(
+        raw_observations,
+        "observation_invalid",
+    )
+    inventory_snapshot = _canonical_snapshot(
+        inventory,
+        "physical_inventory_invalid",
+    )
     verification = verify_laptop_inventory(
-        observations,
+        observation_snapshot,
         minimum_laptops=minimum_laptops,
     )
-    if not isinstance(inventory, Mapping):
+    if not isinstance(inventory_snapshot, dict):
         _reject("physical_inventory_protocol_invalid")
-    if inventory.get("protocol") != PHYSICAL_RUNNER_INVENTORY_PROTOCOL:
+    if inventory_snapshot.get("protocol") != PHYSICAL_RUNNER_INVENTORY_PROTOCOL:
         _reject("physical_inventory_protocol_invalid")
-    if set(inventory) & _FORBIDDEN_INVENTORY_CLAIM_FIELDS:
-        _reject("physical_inventory_readiness_forbidden")
-    if inventory.get("run_id") != verification["run_id"]:
+    _reject_forbidden_inventory_claims(inventory_snapshot)
+    if inventory_snapshot.get("run_id") != verification["run_id"]:
         _reject("inventory_run_mismatch")
-    hosts = inventory.get("hosts")
+    hosts = inventory_snapshot.get("hosts")
     if not isinstance(hosts, list):
         _reject("inventory_node_set_mismatch")
 
@@ -319,8 +400,6 @@ def bind_verified_laptops_to_physical_inventory(
     for host in hosts:
         if not isinstance(host, Mapping):
             _reject("inventory_node_set_mismatch")
-        if set(host) & _FORBIDDEN_INVENTORY_CLAIM_FIELDS:
-            _reject("physical_inventory_readiness_forbidden")
         node_id = host.get("node_id")
         if not isinstance(node_id, str) or node_id in hosts_by_node:
             _reject("inventory_node_set_mismatch")
@@ -331,7 +410,7 @@ def bind_verified_laptops_to_physical_inventory(
 
     observations_by_node = {
         observation["node_id"]: _validated_observation(observation)
-        for observation in observations
+        for observation in observation_snapshot
     }
     for node_id, observation in observations_by_node.items():
         host = hosts_by_node[node_id]
@@ -340,17 +419,7 @@ def bind_verified_laptops_to_physical_inventory(
             or host.get("boot_id") != observation["boot_id"]
         ):
             _reject("inventory_identity_mismatch")
-    try:
-        detached = json.loads(
-            json.dumps(inventory, allow_nan=False, ensure_ascii=False, sort_keys=True)
-        )
-    except (TypeError, ValueError) as exc:
-        raise LaptopInventoryError("physical_inventory_invalid") from exc
-    if not isinstance(detached, dict):
-        _reject("physical_inventory_invalid")
-    if detached != inventory:
-        _reject("physical_inventory_invalid")
-    return detached
+    return inventory_snapshot
 
 
 def _command_output(command: Sequence[str]) -> str:

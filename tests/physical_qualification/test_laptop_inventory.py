@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+import copy
 import hashlib
 import json
 
@@ -215,6 +217,127 @@ def test_bind_verified_laptops_rejects_json_normalizing_inventory() -> None:
     inventory["opaque_root_field"] = {"must_remain_tuple": ("a", "b")}
 
     with pytest.raises(LaptopInventoryError, match="physical_inventory_invalid"):
+        laptop_inventory.bind_verified_laptops_to_physical_inventory(
+            inventory,
+            observations,
+        )
+
+
+class _ChangingObservationSequence(Sequence):
+    def __init__(self, values):
+        self._values = tuple(values)
+        self.iteration_count = 0
+
+    def __len__(self):
+        return len(self._values)
+
+    def __getitem__(self, index):
+        return self._values[index]
+
+    def __iter__(self):
+        self.iteration_count += 1
+        if self.iteration_count == 1:
+            return iter(self._values)
+        return iter(())
+
+
+def test_bind_verified_laptops_materializes_observations_exactly_once() -> None:
+    values = [_unique_observation(index) for index in (0, 1, 2)]
+    observations = _ChangingObservationSequence(values)
+    inventory = _physical_inventory(values)
+
+    bound = laptop_inventory.bind_verified_laptops_to_physical_inventory(
+        inventory,
+        observations,
+    )
+
+    assert bound == inventory
+    assert observations.iteration_count == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("qualification_id", "qualification-attacker"),
+        ("physically_qualified", True),
+        ("route_ready_from_authority", True),
+        ("route_is_ready", True),
+        ("ready_for_release", True),
+        ("qualification", {"route_ready": True}),
+    ],
+)
+def test_bind_verified_laptops_rejects_claim_aliases_and_nested_claims(
+    field,
+    value,
+) -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+    inventory["opaque_root_field"][field] = value
+
+    with pytest.raises(
+        LaptopInventoryError, match="physical_inventory_readiness_forbidden"
+    ):
+        laptop_inventory.bind_verified_laptops_to_physical_inventory(
+            inventory,
+            observations,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("readiness_timeout_seconds", 30),
+        ("fully_qualified_domain_name", "laptop.example.test"),
+    ],
+)
+def test_bind_verified_laptops_preserves_unrelated_opaque_fields(field, value) -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+    inventory["opaque_root_field"][field] = value
+
+    bound = laptop_inventory.bind_verified_laptops_to_physical_inventory(
+        inventory,
+        observations,
+    )
+
+    assert bound == inventory
+
+
+class _TupleEqualToList(tuple):
+    def __eq__(self, other):
+        return list(self) == other
+
+
+def test_bind_verified_laptops_rejects_equality_masked_json_normalization() -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+    inventory["opaque_root_field"] = {
+        "masked": _TupleEqualToList(("a", "b")),
+    }
+
+    with pytest.raises(LaptopInventoryError, match="physical_inventory_invalid"):
+        laptop_inventory.bind_verified_laptops_to_physical_inventory(
+            inventory,
+            observations,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["extra", "duplicate"])
+def test_bind_verified_laptops_rejects_extra_and_duplicate_nodes(mutation) -> None:
+    observations = [_unique_observation(index) for index in (0, 1, 2)]
+    inventory = _physical_inventory(observations)
+    if mutation == "extra":
+        extra = copy.deepcopy(inventory["hosts"][0])
+        extra.update(
+            node_id="node-laptop-extra",
+            host_id="host-" + "9" * 32,
+            boot_id="boot-" + "8" * 32,
+        )
+        inventory["hosts"].append(extra)
+    else:
+        inventory["hosts"][2]["node_id"] = inventory["hosts"][1]["node_id"]
+
+    with pytest.raises(LaptopInventoryError, match="inventory_node_set_mismatch"):
         laptop_inventory.bind_verified_laptops_to_physical_inventory(
             inventory,
             observations,

@@ -16,6 +16,12 @@ from typing import Any, Callable
 
 import pytest
 
+from mycelium_physical_runner.laptop_inventory import (
+    LaptopFacts,
+    bind_verified_laptops_to_physical_inventory,
+    build_laptop_observation,
+)
+
 
 def _sha(label: str) -> str:
     return "sha256:" + label[0] * 64
@@ -270,6 +276,56 @@ def test_build_safe_plan_is_deterministic_sorted_and_redacted() -> None:
     assert b"/Users/operator/.ssh" not in rendered
     assert all("ssh_identity_path_alias" in host for host in first["hosts"])
     assert SECRET_VALUE.encode("utf-8") not in rendered
+
+
+def test_verified_three_laptop_inventory_composes_with_real_safe_plan() -> None:
+    inventory = _base_inventory()
+    third = copy.deepcopy(inventory["hosts"][1])
+    third.update(
+        alias="laptop-2",
+        node_id="node-2",
+        host_id="host-" + "5" * 32,
+        boot_id="boot-" + "6" * 32,
+        coordinator_port=43129,
+        staging_root="/Users/operator/mycelium-physical-run/run-w8-001/node-2",
+        socket_root="/private/tmp/mycelium-physical-run/run-w8-001/node-2/socket",
+        credential_path="/Users/operator/.mycelium/identities/node-2.key",
+        evidence_root="/Users/operator/mycelium-physical-evidence/run-w8-001/node-2",
+    )
+    inventory["hosts"].append(third)
+    observations = [
+        build_laptop_observation(
+            run_id=inventory["run_id"],
+            node_id=host["node_id"],
+            host_id=host["host_id"],
+            boot_id=host["boot_id"],
+            observed_at_unix_seconds=1_786_230_000 + index,
+            facts=LaptopFacts(
+                host_name=host["alias"],
+                machine_model=f"LaptopModel{index}",
+                platform="macOS-26.5.1",
+                architecture="arm64",
+                memory_bytes=16 * 1024**3,
+                available_storage_bytes=80 * 1024**3,
+                backends=("mlx",),
+                precisions=("float16",),
+                python_version="3.14.4",
+                is_laptop=True,
+            ),
+        )
+        for index, host in enumerate(inventory["hosts"])
+    ]
+
+    bound = bind_verified_laptops_to_physical_inventory(inventory, observations)
+    safe_plan = _api().build_safe_plan(bound, probes=FakePlanProbes(inventory))
+
+    assert [host["node_id"] for host in safe_plan["hosts"]] == [
+        "node-0",
+        "node-1",
+        "node-2",
+    ]
+    assert safe_plan["route_ready"] is False
+    assert safe_plan["release_ready"] is False
 
 
 def test_build_safe_plan_preserves_per_host_python_executables() -> None:
