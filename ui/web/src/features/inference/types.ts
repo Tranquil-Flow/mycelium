@@ -18,6 +18,8 @@ export type InferencePhase =
 
 export interface InferenceHistoryEntry {
   readonly request_id: string;
+  readonly prompt: string;
+  readonly response: string;
   readonly terminal_state: 'completed' | 'cancelled' | 'failed';
   readonly token_count: number;
   readonly started_at_unix_ms: number;
@@ -35,6 +37,7 @@ export interface InferenceSessionState {
   readonly accepted_request: InferenceAcceptedResponse | null;
   readonly captured_binding: QualificationBinding | null;
   readonly requested_max_new_tokens: number;
+  readonly submitted_prompt: string | null;
   readonly output: string;
   readonly token_count: number;
   readonly last_applied_sequence: number;

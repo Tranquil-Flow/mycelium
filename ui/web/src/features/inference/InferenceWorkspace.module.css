@@ -313,6 +313,20 @@
   font-size: 0.73rem;
 }
 
+.modelIdentity {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.modelIdentity strong {
+  color: #dff8ee;
+}
+
+.modelIdentity small {
+  color: var(--text-secondary, #a9bbb4);
+  font: 0.68rem/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .outputPanel,
 .history {
   display: grid;
@@ -326,6 +340,126 @@
 
 .terminal strong {
   color: var(--accent, #67d7ac);
+}
+
+.fieldHelp {
+  color: var(--text-secondary, #a9bbb4);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.routeActivity {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) minmax(12rem, 0.85fr);
+  gap: 0.8rem 1.4rem;
+  align-items: center;
+  padding: 0.95rem 1rem;
+  overflow: hidden;
+  border: 1px solid rgb(103 215 172 / 24%);
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(110deg, rgb(103 215 172 / 8%), transparent 45%),
+    #07100d;
+}
+
+.routeActivity::after {
+  position: absolute;
+  inset: 0;
+  width: 32%;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgb(103 215 172 / 8%), transparent);
+  transform: translateX(-120%);
+  animation: activitySweep 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.activityCopy {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.activityCopy strong {
+  color: #dff8ee;
+  font-size: 0.9rem;
+}
+
+.activityCopy span,
+.routeActivity > small {
+  color: var(--text-secondary, #a9bbb4);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.routeActivity > small {
+  grid-column: 1 / -1;
+}
+
+.activityRoute {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.activityGateway,
+.activityStage {
+  z-index: 1;
+  display: block;
+  width: 0.72rem;
+  height: 0.72rem;
+  flex: 0 0 0.72rem;
+  border: 2px solid #67d7ac;
+  border-radius: 50%;
+  background: #07100d;
+  box-shadow: 0 0 0 0 rgb(103 215 172 / 35%);
+  animation: activityNodePulse 1.45s ease-out infinite;
+}
+
+.activityGateway {
+  border-radius: 0.18rem;
+  transform: rotate(45deg);
+}
+
+.activityTrack {
+  position: relative;
+  display: block;
+  height: 2px;
+  min-width: 2rem;
+  flex: 1 1 auto;
+  overflow: hidden;
+  background: rgb(103 215 172 / 25%);
+}
+
+.activitySignal {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  display: block;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: #dff8ee;
+  box-shadow: 0 0 0.65rem #67d7ac;
+  animation: activitySignalTravel 1.35s ease-in-out infinite;
+}
+
+.activityStage + .activityStage {
+  margin-left: 0.38rem;
+}
+
+@keyframes activitySignalTravel {
+  from { left: 0; transform: translateX(-100%); }
+  to { left: 100%; transform: translateX(0); }
+}
+
+@keyframes activityNodePulse {
+  55% { box-shadow: 0 0 0 0 rgb(103 215 172 / 30%); }
+  100% { box-shadow: 0 0 0 0.52rem rgb(103 215 172 / 0%); }
+}
+
+@keyframes activitySweep {
+  0%, 22% { transform: translateX(-120%); }
+  72%, 100% { transform: translateX(410%); }
 }
 
 .output {
@@ -369,6 +503,35 @@
   text-transform: uppercase;
 }
 
+.historyText {
+  width: min(22rem, 34vw);
+  white-space: normal;
+}
+
+.historyText summary {
+  max-width: 22rem;
+  overflow: hidden;
+  color: #dff8ee;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyText pre {
+  max-width: 34rem;
+  max-height: 14rem;
+  margin: 0.65rem 0 0;
+  padding: 0.7rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 0.45rem;
+  color: #dff8ee;
+  background: #050b09;
+  font: 0.76rem/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 @media (max-width: 900px) {
   .header,
   .grid {
@@ -377,6 +540,10 @@
 
   .header {
     display: grid;
+  }
+
+  .routeActivity {
+    grid-template-columns: 1fr;
   }
 
   .privacy {
@@ -430,6 +597,13 @@
   .review button:hover:not(:disabled) {
     transform: none;
   }
+
+  .routeActivity::after,
+  .activityGateway,
+  .activityStage,
+  .activitySignal {
+    animation: none;
+  }
 }
 
 @media (forced-colors: active) {
@@ -447,6 +621,7 @@
   .privacy,
   .executionClass,
   .review,
+  .routeActivity,
   .output {
     border: 1px solid CanvasText;
   }

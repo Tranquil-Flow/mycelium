@@ -22,10 +22,14 @@ import {
 const QUALIFICATION_CHANGED_REASON =
   'Qualification changed; review and accept the current binding';
 const ACTIVE_REQUEST_REASON = 'A request is already active';
+const RESTORED_STREAM_RETRY_DELAYS_MS = Object.freeze([250, 750, 1_500, 3_000]);
+const MAX_HISTORY_PROMPT_CHARS = 8_192;
+const MAX_HISTORY_RESPONSE_CHARS = 65_536;
 
 interface UseInferenceSessionOptions {
   readonly client: InferenceClient;
   readonly now?: () => number;
+  readonly restored_state?: InferenceSessionState | null;
 }
 
 type SessionAction =
@@ -35,6 +39,7 @@ type SessionAction =
   | {
       readonly type: 'submitting';
       readonly binding: QualificationBinding;
+      readonly prompt: string;
       readonly max_new_tokens: number;
       readonly now: number;
     }
@@ -47,7 +52,8 @@ type SessionAction =
   | { readonly type: 'stream_failed'; readonly code: string; readonly now: number }
   | { readonly type: 'submission_failed'; readonly code: string }
   | { readonly type: 'form_failed'; readonly reason: string }
-  | { readonly type: 'clear_form_error' };
+  | { readonly type: 'clear_form_error' }
+  | { readonly type: 'clear_session' };
 
 const initialState: InferenceSessionState = Object.freeze({
   qualification_status: 'loading',
@@ -57,6 +63,7 @@ const initialState: InferenceSessionState = Object.freeze({
   accepted_request: null,
   captured_binding: null,
   requested_max_new_tokens: 0,
+  submitted_prompt: null,
   output: '',
   token_count: 0,
   last_applied_sequence: -1,
@@ -66,6 +73,35 @@ const initialState: InferenceSessionState = Object.freeze({
   started_at_unix_ms: null,
   history: Object.freeze([]),
 });
+
+function restoreInitialState(
+  restored: InferenceSessionState | null | undefined,
+): InferenceSessionState {
+  if (restored === null || restored === undefined) return initialState;
+  const terminalHistory = restored.accepted_request === null
+    ? undefined
+    : restored.history.find(
+        (entry) => entry.request_id === restored.accepted_request?.request_id,
+      );
+  const phase = terminalHistory !== undefined
+    ? terminalHistory.terminal_state
+    : ['submitting', 'streaming', 'cancelling'].includes(restored.phase)
+      ? restored.accepted_request === null
+        ? 'idle'
+        : 'interrupted'
+      : restored.phase;
+  return Object.freeze({
+    ...restored,
+    qualification_status: 'loading',
+    qualification: null,
+    qualification_changed: false,
+    phase,
+    form_error: null,
+    error_code: terminalHistory?.error_code ?? restored.error_code,
+    cancellation_requested: false,
+    history: Object.freeze([...restored.history]),
+  });
+}
 
 function cloneBinding(binding: QualificationBinding): QualificationBinding {
   return Object.freeze({
@@ -124,6 +160,11 @@ function terminalHistory(
   return Object.freeze([
     {
       request_id: state.accepted_request.request_id,
+      prompt: boundedHistoryText(
+        state.submitted_prompt ?? '',
+        MAX_HISTORY_PROMPT_CHARS,
+      ),
+      response: boundedHistoryText(state.output, MAX_HISTORY_RESPONSE_CHARS),
       terminal_state: phase,
       token_count: state.token_count,
       started_at_unix_ms: state.started_at_unix_ms,
@@ -134,6 +175,10 @@ function terminalHistory(
     },
     ...state.history,
   ].slice(0, 20));
+}
+
+function boundedHistoryText(value: string, maximum: number): string {
+  return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
 }
 
 function failStream(
@@ -180,6 +225,7 @@ export function inferenceSessionReducer(
         ...state,
         phase: 'submitting',
         captured_binding: cloneBinding(action.binding),
+        submitted_prompt: action.prompt,
         requested_max_new_tokens: action.max_new_tokens,
         accepted_request: null,
         output: '',
@@ -270,6 +316,12 @@ export function inferenceSessionReducer(
       return Object.freeze({ ...state, phase: 'idle', form_error: action.reason });
     case 'clear_form_error':
       return state.form_error === null ? state : Object.freeze({ ...state, form_error: null });
+    case 'clear_session':
+      return Object.freeze({
+        ...initialState,
+        qualification_status: state.qualification_status,
+        qualification: state.qualification,
+      });
   }
 }
 
@@ -297,13 +349,18 @@ export interface InferenceSessionController extends InferenceSessionState {
   readonly reload_qualification: () => Promise<void>;
   readonly accept_current_qualification: () => void;
   readonly clear_form_error: () => void;
+  readonly clear_session: () => void;
 }
 
 export function useInferenceSession({
   client,
   now = Date.now,
+  restored_state = null,
 }: UseInferenceSessionOptions): InferenceSessionController {
-  const [state, baseDispatch] = useReducer(inferenceSessionReducer, initialState);
+  const [state, baseDispatch] = useReducer(
+    inferenceSessionReducer,
+    restoreInitialState(restored_state),
+  );
   const stateRef = useRef(state);
   const mountedRef = useRef(true);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -311,6 +368,13 @@ export function useInferenceSession({
   const startPromiseRef = useRef<Promise<void> | null>(null);
   const streamPromiseRef = useRef<Promise<void> | null>(null);
   const cancelPromiseRef = useRef<Promise<void> | null>(null);
+  const resumeAfterRestoreAttemptsRef = useRef(
+    restored_state?.accepted_request !== null &&
+      restored_state?.accepted_request !== undefined &&
+      ['submitting', 'streaming', 'interrupted', 'cancelling'].includes(restored_state.phase)
+      ? 0
+      : -1,
+  );
 
   const dispatch = useCallback((action: SessionAction): void => {
     if (!mountedRef.current) return;
@@ -371,7 +435,7 @@ export function useInferenceSession({
         } catch (error) {
           if (controller.signal.aborted || isTerminalInferencePhase(stateRef.current.phase)) return;
           const failure = publicFailure(error, 'stream_failed');
-          if (failure.retryable) {
+          if (failure.retryable || failure.code === 'stream_already_attached') {
             dispatch({ type: 'interrupted', code: failure.code });
           } else {
             dispatch({ type: 'stream_failed', code: failure.code, now: now() });
@@ -441,6 +505,7 @@ export function useInferenceSession({
         dispatch({
           type: 'submitting',
           binding: current.binding,
+          prompt,
           max_new_tokens: maxNewTokens,
           now: now(),
         });
@@ -505,6 +570,33 @@ export function useInferenceSession({
           ? ACTIVE_REQUEST_REASON
           : inferenceBlockReason(state.qualification, now());
 
+  useEffect(() => {
+    if (
+      resumeAfterRestoreAttemptsRef.current < 0 ||
+      state.qualification_status !== 'ready' ||
+      state.phase !== 'interrupted' ||
+      state.accepted_request === null
+    ) {
+      return;
+    }
+    const attempt = resumeAfterRestoreAttemptsRef.current;
+    if (attempt > 0 && state.error_code !== 'stream_already_attached') {
+      resumeAfterRestoreAttemptsRef.current = -1;
+      return;
+    }
+    if (attempt >= RESTORED_STREAM_RETRY_DELAYS_MS.length) {
+      resumeAfterRestoreAttemptsRef.current = -1;
+      dispatch({ type: 'stream_failed', code: 'stream_already_attached', now: now() });
+      return;
+    }
+    const cursor = state.last_applied_sequence < 0 ? null : state.last_applied_sequence;
+    const timer = window.setTimeout(() => {
+      resumeAfterRestoreAttemptsRef.current = attempt + 1;
+      void runStream(state.accepted_request!, cursor);
+    }, RESTORED_STREAM_RETRY_DELAYS_MS[attempt]);
+    return () => window.clearTimeout(timer);
+  }, [dispatch, now, runStream, state.accepted_request, state.error_code, state.last_applied_sequence, state.phase, state.qualification_status]);
+
   return {
     ...state,
     can_submit: submitBlockReason === null,
@@ -515,5 +607,6 @@ export function useInferenceSession({
     reload_qualification: loadQualification,
     accept_current_qualification: () => dispatch({ type: 'qualification_accepted' }),
     clear_form_error: () => dispatch({ type: 'clear_form_error' }),
+    clear_session: () => dispatch({ type: 'clear_session' }),
   };
 }

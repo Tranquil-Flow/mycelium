@@ -23,7 +23,7 @@ from mycelium_membership import (
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 8
 _SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -155,6 +155,49 @@ class SqliteSeedState:
                     runtime_endpoint TEXT,
                     FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
                 ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS seed_authority_rotations (
+                    authority_generation INTEGER PRIMARY KEY NOT NULL
+                        CHECK (authority_generation >= 2),
+                    previous_generation INTEGER NOT NULL
+                        CHECK (previous_generation >= 1),
+                    old_seed_key_digest TEXT NOT NULL,
+                    new_seed_key_digest TEXT NOT NULL,
+                    initiated_at REAL NOT NULL,
+                    effective_at REAL NOT NULL,
+                    overlap_expires_at REAL NOT NULL,
+                    reason TEXT NOT NULL,
+                    transition_json TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (status IN ('PENDING', 'COMPLETED'))
+                ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS seed_rotation_acknowledgements (
+                    node_id TEXT NOT NULL,
+                    member_generation INTEGER NOT NULL
+                        CHECK (member_generation >= 1),
+                    authority_generation INTEGER NOT NULL
+                        CHECK (authority_generation >= 2),
+                    transition_digest TEXT NOT NULL,
+                    message_id TEXT NOT NULL UNIQUE,
+                    acknowledged_at REAL NOT NULL,
+                    PRIMARY KEY (node_id, authority_generation),
+                    FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY (authority_generation)
+                        REFERENCES seed_authority_rotations(authority_generation)
+                        ON DELETE CASCADE
+                ) WITHOUT ROWID;
+                CREATE TABLE IF NOT EXISTS seed_resume_acceptances (
+                    request_message_id TEXT PRIMARY KEY NOT NULL,
+                    request_envelope_digest TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    previous_incarnation TEXT NOT NULL,
+                    accepted_incarnation TEXT NOT NULL,
+                    previous_generation INTEGER NOT NULL
+                        CHECK (previous_generation >= 1),
+                    generation INTEGER NOT NULL CHECK (generation >= 2),
+                    acceptance_json TEXT NOT NULL,
+                    FOREIGN KEY (node_id) REFERENCES seed_members(node_id)
+                        ON DELETE CASCADE
+                ) WITHOUT ROWID;
                 """
             )
             row = connection.execute(
@@ -165,7 +208,7 @@ class SqliteSeedState:
                     "INSERT INTO seed_metadata (key, value) VALUES ('schema_version', ?)",
                     (str(_SCHEMA_VERSION),),
                 )
-            elif row["value"] in {"1", "2", "3", "4"}:
+            elif row["value"] in {"1", "2", "3", "4", "5", "6", "7"}:
                 columns = {
                     item["name"]
                     for item in connection.execute("PRAGMA table_info(seed_members)")
@@ -224,6 +267,272 @@ class SqliteSeedState:
         except sqlite3.Error as exc:
             connection.rollback()
             raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def identity_binding(self) -> dict[str, str]:
+        """Return the exact durable coordinator binding without creating it."""
+
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT key, value FROM seed_metadata "
+                "WHERE key IN ('swarm_id', 'seed_node_id', 'seed_key_digest')"
+            ).fetchall()
+            binding = {
+                str(row["key"]): str(row["value"])
+                for row in rows
+            }
+            if set(binding) != {"swarm_id", "seed_node_id", "seed_key_digest"}:
+                raise SeedStateError("seed_state_identity_missing")
+            return binding
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    def authority_state(self) -> dict[str, Any]:
+        """Return the current authority generation and latest rotation, if any."""
+
+        connection = self._connect()
+        try:
+            generation_row = connection.execute(
+                "SELECT value FROM seed_metadata WHERE key = 'authority_generation'"
+            ).fetchone()
+            if generation_row is None:
+                raise SeedStateError("seed_state_identity_missing")
+            try:
+                generation = int(generation_row["value"])
+            except (TypeError, ValueError) as exc:
+                raise SeedStateError("seed_state_corrupt") from exc
+            if generation < 1 or str(generation) != generation_row["value"]:
+                raise SeedStateError("seed_state_corrupt")
+            row = connection.execute(
+                "SELECT authority_generation, previous_generation, "
+                "old_seed_key_digest, new_seed_key_digest, initiated_at, "
+                "effective_at, overlap_expires_at, reason, transition_json, status "
+                "FROM seed_authority_rotations ORDER BY authority_generation DESC LIMIT 1"
+            ).fetchone()
+            rotation = None if row is None else {
+                "authority_generation": row["authority_generation"],
+                "previous_generation": row["previous_generation"],
+                "old_seed_key_digest": row["old_seed_key_digest"],
+                "new_seed_key_digest": row["new_seed_key_digest"],
+                "initiated_at": row["initiated_at"],
+                "effective_at": row["effective_at"],
+                "overlap_expires_at": row["overlap_expires_at"],
+                "reason": row["reason"],
+                "transition": json.loads(row["transition_json"]),
+                "status": row["status"],
+            }
+            return {"authority_generation": generation, "rotation": rotation}
+        except SeedStateError:
+            raise
+        except (json.JSONDecodeError, sqlite3.Error, TypeError, ValueError) as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
+        finally:
+            connection.close()
+
+    def begin_authority_rotation(self, transition: Mapping[str, Any]) -> None:
+        """Persist one monotonic pending authority transition."""
+
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            generation_row = connection.execute(
+                "SELECT value FROM seed_metadata WHERE key = 'authority_generation'"
+            ).fetchone()
+            digest_row = connection.execute(
+                "SELECT value FROM seed_metadata WHERE key = 'seed_key_digest'"
+            ).fetchone()
+            if generation_row is None or digest_row is None:
+                raise SeedStateError("seed_state_identity_missing")
+            current_generation = int(generation_row["value"])
+            if (
+                transition.get("previous_generation") != current_generation
+                or transition.get("authority_generation") != current_generation + 1
+                or transition.get("old_seed_key_digest") != digest_row["value"]
+            ):
+                raise SeedStateError("seed_authority_rotation_stale")
+            pending = connection.execute(
+                "SELECT 1 FROM seed_authority_rotations WHERE status = 'PENDING'"
+            ).fetchone()
+            if pending is not None:
+                raise SeedStateError("seed_authority_rotation_pending")
+            connection.execute(
+                "INSERT INTO seed_authority_rotations "
+                "(authority_generation, previous_generation, old_seed_key_digest, "
+                "new_seed_key_digest, initiated_at, effective_at, overlap_expires_at, "
+                "reason, transition_json, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')",
+                (
+                    transition["authority_generation"],
+                    transition["previous_generation"],
+                    transition["old_seed_key_digest"],
+                    transition["new_seed_key_digest"],
+                    transition["initiated_at"],
+                    transition["effective_at"],
+                    transition["overlap_expires_at"],
+                    transition["reason"],
+                    canonical_json_bytes(dict(transition)).decode("utf-8"),
+                ),
+            )
+            connection.commit()
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except (KeyError, sqlite3.Error, TypeError, ValueError) as exc:
+            connection.rollback()
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def complete_authority_rotation(
+        self,
+        *,
+        authority_generation: int,
+        new_seed_key_digest: str,
+    ) -> None:
+        """Atomically promote one pending transition in durable metadata."""
+
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT previous_generation, new_seed_key_digest, status "
+                "FROM seed_authority_rotations WHERE authority_generation = ?",
+                (authority_generation,),
+            ).fetchone()
+            generation_row = connection.execute(
+                "SELECT value FROM seed_metadata WHERE key = 'authority_generation'"
+            ).fetchone()
+            digest_row = connection.execute(
+                "SELECT value FROM seed_metadata WHERE key = 'seed_key_digest'"
+            ).fetchone()
+            if row is None or generation_row is None or digest_row is None:
+                raise SeedStateError("seed_authority_rotation_unknown")
+            if (
+                row["new_seed_key_digest"] != new_seed_key_digest
+                or row["previous_generation"] + 1 != authority_generation
+            ):
+                raise SeedStateError("seed_authority_rotation_stale")
+            current_generation = int(generation_row["value"])
+            if row["status"] == "COMPLETED":
+                if (
+                    current_generation != authority_generation
+                    or digest_row["value"] != new_seed_key_digest
+                ):
+                    raise SeedStateError("seed_state_corrupt")
+                connection.commit()
+                return
+            if (
+                row["status"] != "PENDING"
+                or current_generation != row["previous_generation"]
+            ):
+                raise SeedStateError("seed_authority_rotation_stale")
+            connection.execute(
+                "UPDATE seed_metadata SET value = ? WHERE key = 'seed_key_digest'",
+                (new_seed_key_digest,),
+            )
+            connection.execute(
+                "UPDATE seed_metadata SET value = ? WHERE key = 'authority_generation'",
+                (str(authority_generation),),
+            )
+            connection.execute(
+                "UPDATE seed_authority_rotations SET status = 'COMPLETED' "
+                "WHERE authority_generation = ?",
+                (authority_generation,),
+            )
+            connection.commit()
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            connection.rollback()
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def save_seed_rotation_acknowledgement(
+        self,
+        message: Mapping[str, Any],
+    ) -> None:
+        """Persist a current member's acknowledgement of the exact pending transition."""
+
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            rotation = connection.execute(
+                "SELECT transition_json, status FROM seed_authority_rotations "
+                "WHERE authority_generation = ?",
+                (message["authority_generation"],),
+            ).fetchone()
+            member = connection.execute(
+                "SELECT generation, incarnation FROM seed_members WHERE node_id = ?",
+                (message["sender_node_id"],),
+            ).fetchone()
+            if rotation is None or rotation["status"] != "PENDING":
+                raise SeedStateError("seed_authority_rotation_unknown")
+            if (
+                member is None
+                or member["generation"] != message["generation"]
+                or member["incarnation"] != message["incarnation"]
+            ):
+                raise SeedStateError("seed_member_generation_stale")
+            expected_digest = "sha256:" + hashlib.sha256(
+                rotation["transition_json"].encode("utf-8")
+            ).hexdigest()
+            if message["transition_digest"] != expected_digest:
+                raise SeedStateError("seed_authority_rotation_ack_mismatch")
+            connection.execute(
+                "INSERT INTO seed_rotation_acknowledgements "
+                "(node_id, member_generation, authority_generation, "
+                "transition_digest, message_id, acknowledged_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(node_id, authority_generation) DO UPDATE SET "
+                "member_generation = excluded.member_generation, "
+                "transition_digest = excluded.transition_digest, "
+                "message_id = excluded.message_id, "
+                "acknowledged_at = excluded.acknowledged_at",
+                (
+                    message["sender_node_id"],
+                    message["generation"],
+                    message["authority_generation"],
+                    message["transition_digest"],
+                    message["message_id"],
+                    message["issued_at"],
+                ),
+            )
+            connection.commit()
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except (KeyError, sqlite3.Error, TypeError, ValueError) as exc:
+            connection.rollback()
+            raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def seed_rotation_acknowledgements(
+        self,
+        *,
+        authority_generation: int,
+    ) -> list[dict[str, Any]]:
+        """Load durable acknowledgements for one authority generation."""
+
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT node_id, member_generation, authority_generation, "
+                "transition_digest, message_id, acknowledged_at "
+                "FROM seed_rotation_acknowledgements "
+                "WHERE authority_generation = ? ORDER BY node_id",
+                (authority_generation,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise SeedStateError("seed_state_corrupt") from exc
         finally:
             connection.close()
 
@@ -385,6 +694,18 @@ class SqliteSeedState:
                     )
                 elif row["value"] != value:
                     raise SeedStateError("seed_state_identity_mismatch")
+            generation = connection.execute(
+                "SELECT value FROM seed_metadata WHERE key = 'authority_generation'"
+            ).fetchone()
+            if generation is None:
+                connection.execute(
+                    "INSERT INTO seed_metadata (key, value) VALUES "
+                    "('authority_generation', '1')"
+                )
+            elif generation["value"] != str(int(generation["value"])) or int(
+                generation["value"]
+            ) < 1:
+                raise SeedStateError("seed_state_corrupt")
             connection.commit()
         except SeedStateError:
             connection.rollback()
@@ -1454,6 +1775,181 @@ class SqliteSeedState:
         except sqlite3.Error as exc:
             connection.rollback()
             raise SeedStateError("seed_state_unavailable") from exc
+        finally:
+            connection.close()
+
+    def load_resume_acceptance(
+        self,
+        *,
+        request_message_id: str,
+        request_envelope_digest: str,
+    ) -> dict[str, Any] | None:
+        """Return one exact committed resume response for HTTP retry."""
+
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT request_envelope_digest, acceptance_json
+                FROM seed_resume_acceptances WHERE request_message_id = ?
+                """,
+                (request_message_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["request_envelope_digest"] != request_envelope_digest:
+                raise SeedStateError("seed_resume_retry_mismatch")
+            return self._decode_acceptance(row["acceptance_json"])
+        except SeedStateError:
+            raise
+        except sqlite3.Error as exc:
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
+        finally:
+            connection.close()
+
+    def commit_resume(
+        self,
+        *,
+        request_message_id: str,
+        request_envelope_digest: str,
+        previous_incarnation: str,
+        previous_generation: int,
+        message_id: str,
+        member: Mapping[str, Any],
+        acceptance: Mapping[str, Any],
+        already_advanced: bool = False,
+    ) -> dict[str, Any]:
+        """Atomically advance one durable member and store its resume response."""
+
+        addresses = canonical_json_bytes(list(member["endpoint_addrs"])).decode("utf-8")
+        runtime_capability = canonical_json_bytes(
+            dict(member["runtime_capability"])
+        ).decode("utf-8")
+        acceptance_json = canonical_json_bytes(dict(acceptance)).decode("utf-8")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT request_envelope_digest, acceptance_json
+                FROM seed_resume_acceptances WHERE request_message_id = ?
+                """,
+                (request_message_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["request_envelope_digest"] != request_envelope_digest:
+                    raise SeedStateError("seed_resume_retry_mismatch")
+                connection.commit()
+                return self._decode_acceptance(existing["acceptance_json"])
+            if connection.execute(
+                "SELECT 1 FROM seed_emitted_messages WHERE message_id = ?",
+                (message_id,),
+            ).fetchone() is not None:
+                raise SeedStateError("seed_message_id_reused")
+
+            if already_advanced:
+                cursor = connection.execute(
+                    """
+                    UPDATE seed_members SET
+                        endpoint_addrs_json = ?, lease_expires_at = ?,
+                        last_heartbeat_sequence = ?, last_liveness_at = ?,
+                        next_heartbeat_due_at = ?, last_activity_receipt_at = ?,
+                        active_requests = ?, lifecycle_state = ?
+                    WHERE node_id = ? AND endpoint_id = ?
+                      AND verification_key_digest = ?
+                      AND incarnation = ? AND generation = ?
+                      AND lifecycle_state NOT IN ('STOPPING', 'STOPPED')
+                    """,
+                    (
+                        addresses,
+                        member["lease_expires_at"],
+                        member["last_heartbeat_sequence"],
+                        member["last_liveness_at"],
+                        member["next_heartbeat_due_at"],
+                        member["last_activity_receipt_at"],
+                        member["active_requests"],
+                        member["lifecycle_state"],
+                        member["node_id"],
+                        member["endpoint_id"],
+                        member["verification_key_digest"],
+                        member["incarnation"],
+                        member["generation"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise SeedStateError("seed_state_member_conflict")
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE seed_members SET
+                        endpoint_addrs_json = ?, peer_class = ?,
+                        runtime_capability_json = ?, incarnation = ?, generation = ?,
+                        lease_expires_at = ?, last_heartbeat_sequence = ?,
+                        last_liveness_at = ?, next_heartbeat_due_at = ?,
+                        last_activity_receipt_at = ?, active_requests = ?,
+                        lifecycle_state = ?
+                    WHERE node_id = ? AND endpoint_id = ?
+                      AND verification_key_digest = ?
+                      AND incarnation = ? AND generation = ?
+                      AND lifecycle_state NOT IN ('STOPPING', 'STOPPED')
+                    """,
+                    (
+                        addresses,
+                        member["peer_class"],
+                        runtime_capability,
+                        member["incarnation"],
+                        member["generation"],
+                        member["lease_expires_at"],
+                        member["last_heartbeat_sequence"],
+                        member["last_liveness_at"],
+                        member["next_heartbeat_due_at"],
+                        member["last_activity_receipt_at"],
+                        member["active_requests"],
+                        member["lifecycle_state"],
+                        member["node_id"],
+                        member["endpoint_id"],
+                        member["verification_key_digest"],
+                        previous_incarnation,
+                        previous_generation,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise SeedStateError("seed_state_member_conflict")
+
+            connection.execute(
+                "INSERT INTO seed_emitted_messages (message_id) VALUES (?)",
+                (message_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO seed_resume_acceptances (
+                    request_message_id, request_envelope_digest, node_id,
+                    previous_incarnation, accepted_incarnation,
+                    previous_generation, generation, acceptance_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request_message_id,
+                    request_envelope_digest,
+                    member["node_id"],
+                    previous_incarnation,
+                    member["incarnation"],
+                    previous_generation,
+                    member["generation"],
+                    acceptance_json,
+                ),
+            )
+            connection.commit()
+            return dict(acceptance)
+        except SeedStateError:
+            connection.rollback()
+            raise
+        except sqlite3.IntegrityError as exc:
+            connection.rollback()
+            raise SeedStateError("seed_resume_conflict") from exc
+        except sqlite3.Error as exc:
+            connection.rollback()
+            raise SeedStateError(_sqlite_state_error_code(exc)) from exc
         finally:
             connection.close()
 

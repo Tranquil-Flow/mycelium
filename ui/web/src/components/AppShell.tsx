@@ -6,6 +6,7 @@ import type {
   ObservatorySourceState,
 } from '../data/observatorySource';
 import type { LiveObservatoryEventState } from '../data/observatoryEventSource';
+import type { ProductEvidenceState } from '../features/productEvidence/source';
 
 interface AppShellProps {
   readonly activeView: ProductRouteId;
@@ -14,6 +15,8 @@ interface AppShellProps {
   readonly sourceMode: ProductSourceMode;
   readonly sourceState: ObservatorySourceState | LiveObservatoryEventState | null;
   readonly routeReadiness: RouteReadinessState;
+  readonly productEvidenceConfigured?: boolean;
+  readonly productEvidenceState?: ProductEvidenceState | null;
   readonly children: ReactNode;
 }
 
@@ -79,6 +82,8 @@ export function AppShell({
   sourceMode,
   sourceState,
   routeReadiness,
+  productEvidenceConfigured = false,
+  productEvidenceState = null,
   children,
 }: AppShellProps) {
   const mainRef = useRef<HTMLElement>(null);
@@ -90,13 +95,22 @@ export function AppShell({
     }
   }, [activeView]);
   const activeLabel = PRODUCT_ROUTES.find((route) => route.id === activeView)?.label ?? activeView;
-  const isDeviceLab = activeView === 'lab';
+  const isDeviceLab = activeView === 'lab' && sourceMode === 'fixture';
   const isFixture = sourceMode === 'fixture';
   const isReplay = sourceMode === 'replay';
-  const isLiveCurrent =
+  const observatoryLiveCurrent =
     sourceState?.source_mode === 'live' &&
     sourceState.status === 'connected' &&
     sourceState.freshness === 'current';
+  const productLiveCurrent =
+    productEvidenceState?.status === 'connected'
+    && productEvidenceState.source_mode === 'live'
+    && productEvidenceState.freshness === 'current';
+  const isLiveCurrent = observatoryLiveCurrent
+    && (!productEvidenceConfigured || productLiveCurrent);
+  const displayedGeneration = productEvidenceConfigured
+    ? productEvidenceState?.generation ?? null
+    : sourceState?.generation ?? null;
   const currentLabel = isDeviceLab
     ? 'Live local device status'
     : isFixture
@@ -104,14 +118,14 @@ export function AppShell({
     : isReplay
       ? sourceState === null
         ? 'Replay evidence · loading'
-        : `Replay evidence · g${sourceState.generation}`
+        : `Replay evidence · g${displayedGeneration}`
     : sourceState === null
       ? 'Connecting'
       : sourceState.status === 'disconnected'
-        ? `Disconnected · g${sourceState.generation}`
+        ? `Disconnected · g${displayedGeneration}`
         : isLiveCurrent
-          ? `Current evidence · g${sourceState.generation}`
-          : `Stale evidence · g${sourceState.generation}`;
+          ? `Current evidence · g${displayedGeneration}`
+          : `Stale or degraded evidence · g${displayedGeneration}`;
 
   return (
     <div className="app-shell">
@@ -187,7 +201,7 @@ export function AppShell({
                     ? 'Local evidence bundle'
                     : isReplay
                       ? 'Local evidence replay'
-                      : 'Same-origin product gateway'}
+                      : 'Unified product evidence gateway'}
               </strong>
               <span>
                 {isDeviceLab
@@ -217,7 +231,7 @@ export function AppShell({
                   ? 'fixture evidence'
                   : isReplay
                     ? 'replay evidence'
-                    : 'semantic gateway projection'}
+                    : 'unified product snapshot'}
             </span>
           </div>
           <button type="button" className="current-control" disabled>

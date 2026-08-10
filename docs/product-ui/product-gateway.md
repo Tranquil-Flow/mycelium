@@ -41,7 +41,7 @@ Sessions, request ownership, response sizes, request bodies, SSE frames, queue d
 
 Upstream service credentials are injected server-side. Browser headers, cookies, origins, query strings, and arbitrary upstream response headers are never forwarded. Upstream credentials are checked against browser-visible bodies, errors, and stream frames before emission. Stable public error codes contain no exception text or private endpoint.
 
-Prompt and generated output exist only in bounded request/stream memory. The gateway does not write them to logs, URLs, storage, or metrics.
+Prompt and generated output exist only in bounded request/stream memory on the gateway. The gateway does not write them to logs, URLs, storage, or metrics. The browser UI may retain a bounded, versioned prompt/output snapshot and at most 20 privacy-safe history rows in tab-scoped `sessionStorage` so navigation and refresh can recover the tab session; it rejects malformed state and provides an explicit clear-history control. Qualification authority is never restored from browser storage.
 
 ## Deployment defaults
 

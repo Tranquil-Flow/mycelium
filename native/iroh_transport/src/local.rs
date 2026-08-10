@@ -51,6 +51,8 @@ pub enum RecordKind {
     SendRouted = 11,
     ReceiveFrom = 12,
     DeliveryFrom = 13,
+    GetTransportObservations = 14,
+    TransportObservations = 15,
 }
 
 impl TryFrom<u8> for RecordKind {
@@ -71,6 +73,8 @@ impl TryFrom<u8> for RecordKind {
             11 => Ok(Self::SendRouted),
             12 => Ok(Self::ReceiveFrom),
             13 => Ok(Self::DeliveryFrom),
+            14 => Ok(Self::GetTransportObservations),
+            15 => Ok(Self::TransportObservations),
             _ => Err(LocalProtocolError::UnknownRecordKind),
         }
     }
@@ -511,7 +515,15 @@ mod tests {
             RecordKind::DeliveryFrom
         );
         assert_eq!(
-            RecordKind::try_from(14_u8),
+            RecordKind::try_from(14_u8).unwrap(),
+            RecordKind::GetTransportObservations
+        );
+        assert_eq!(
+            RecordKind::try_from(15_u8).unwrap(),
+            RecordKind::TransportObservations
+        );
+        assert_eq!(
+            RecordKind::try_from(16_u8),
             Err(LocalProtocolError::UnknownRecordKind)
         );
 

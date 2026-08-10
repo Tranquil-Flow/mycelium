@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from pathlib import Path
 import re
 import signal
 import sys
 import threading
+import stat
 from typing import NoReturn, Sequence
 
 from mycelium_invite import SqliteInviteRegistry
@@ -20,12 +23,15 @@ from mycelium_node.process import (
 )
 from mycelium_qualification.evidence import canonical_json_bytes
 
+from .authority import load_bound_seed_signer
 from .coordinator import SeedCoordinator, _segment
 from .http import (
     SeedHTTPServer,
     _validate_bind_address,
     _validate_endpoint_url,
 )
+from .operator import verify_seed_key_transition
+from .state import SqliteSeedState
 
 
 _STATUS_PROTOCOL = "mycelium.seed_main_status.v1"
@@ -99,6 +105,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--swarm-id", default="mycelium-swarm")
     parser.add_argument("--seed-node-id", default="seed-node")
     parser.add_argument("--incarnation", default="seed-main")
+    parser.add_argument("--init-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -124,10 +131,11 @@ def _preflight(args: argparse.Namespace) -> PrivateDirectoryLease:
                 expected_host=(None if args.bind in {"0.0.0.0", "::"} else args.bind),
                 expected_port=None if args.port == 0 else args.port,
             )
-        state_root = private_directory_lease(
-            args.data_dir,
-            create=not args.dry_run,
-        )
+        if args.init_only and args.dry_run:
+            raise ValueError("init-only and dry-run are mutually exclusive")
+        state_root = private_directory_lease(args.data_dir, create=args.init_only)
+        if not state_root.exists and not args.dry_run:
+            raise ValueError("seed state root is missing")
         return state_root
     except Exception as exc:
         failure = _EntrypointFailure(
@@ -151,11 +159,24 @@ def _run_bound(
 ) -> int:
     try:
         state_root.revalidate()
-        signer = load_or_create_node_signer(Path("identity") / "seed.key")
-        state_root.revalidate()
+        key_path = Path("identity") / "seed.key"
         database = Path("state.sqlite3")
+        if args.init_only:
+            if key_path.exists() or key_path.is_symlink() or database.exists():
+                raise ValueError("seed state is already initialized")
+            signer = load_or_create_node_signer(key_path)
+        state_root.revalidate()
+        if not args.init_only and not database.is_file():
+            raise ValueError("seed database is missing")
         state_root.revalidate()
         invite_registry = SqliteInviteRegistry(database)
+        state = SqliteSeedState(database)
+        if not args.init_only:
+            binding = state.identity_binding()
+            signer = load_bound_seed_signer(
+                Path("identity"),
+                expected_digest=binding["seed_key_digest"],
+            )
         state_root.revalidate()
         coordinator = SeedCoordinator(
             swarm_id=args.swarm_id,
@@ -164,13 +185,51 @@ def _run_bound(
             signer=signer,
             invite_registry=invite_registry,
             incarnation=args.incarnation,
+            state=state,
         )
+        rotation_envelope = None
+        rotation_path = Path("identity") / "seed.rotation.json"
+        if rotation_path.exists() or rotation_path.is_symlink():
+            metadata = rotation_path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise ValueError("seed rotation record is unsafe")
+            raw_rotation = rotation_path.read_bytes()
+            rotation_envelope = json.loads(raw_rotation)
+            if canonical_json_bytes(rotation_envelope) != raw_rotation:
+                raise ValueError("seed rotation record is noncanonical")
+            transition = verify_seed_key_transition(
+                rotation_envelope,
+                now=0.0,
+            )
+            if signer.verification_key_digest not in {
+                transition["old_seed_key_digest"],
+                transition["new_seed_key_digest"],
+            }:
+                raise ValueError("seed rotation record is not bound")
         state_root.revalidate()
     except Exception as exc:
         raise _EntrypointFailure(
             "seed_preflight_failed",
             EXIT_PREFLIGHT_FAILURE,
         ) from exc
+
+    if args.init_only:
+        _emit_status(
+            {
+                "protocol": _STATUS_PROTOCOL,
+                "event": "seed_initialized",
+                "seed_endpoint_id": signer.endpoint_id,
+                "seed_key_digest": signer.verification_key_digest,
+                "route_ready": False,
+            }
+        )
+        return EXIT_SUCCESS
 
     server: SeedHTTPServer | None = None
     stopping = threading.Event()
@@ -187,6 +246,7 @@ def _run_bound(
             host=args.bind,
             port=args.port,
             advertised_url=args.advertised_url,
+            rotation_envelope=rotation_envelope,
         )
         state_root.revalidate()
         for signum in (signal.SIGINT, signal.SIGTERM):

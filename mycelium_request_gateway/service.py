@@ -331,6 +331,9 @@ class RequestGatewayService:
             with session.condition:
                 session.outcome = "backend_failed"
         finally:
+            release = getattr(self._backend, "release", None)
+            if callable(release):
+                release(session.request_id)
             with session.condition:
                 session.submission = None
                 session.captured = None
@@ -480,7 +483,8 @@ class RequestGatewayService:
             ):
                 raise AdmissionError("invalid_stream_ack")
             subscription._cursor = sequence
-            RequestGatewayService._discard_through_locked(session, sequence)
+            session.acknowledged_through = max(session.acknowledged_through, sequence)
+            session.condition.notify_all()
 
     @staticmethod
     def _discard_through_locked(session: _Session, sequence: int) -> None:

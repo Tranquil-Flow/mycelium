@@ -105,15 +105,18 @@ def _route_for_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _control_plane_binding() -> dict[str, Any]:
+def _control_plane_binding(
+    deployment_id: str = DEPLOYMENT_ID,
+    deployment_epoch: int = DEPLOYMENT_EPOCH,
+) -> dict[str, Any]:
     return {
         "protocol": "mycelium.control_plane_binding.v1",
         "evidence_bundle_digest": "sha256:" + "a" * 64,
         "planner_snapshot_digest": "sha256:" + "b" * 64,
         "snapshot_generation": 1,
         "swarm_id": "offline-two-process-qualification",
-        "deployment_id": DEPLOYMENT_ID,
-        "deployment_epoch": DEPLOYMENT_EPOCH,
+        "deployment_id": deployment_id,
+        "deployment_epoch": deployment_epoch,
     }
 
 
@@ -205,10 +208,10 @@ def build_execution_graph(
     link_scheme: str = "local-loopback",
     runtime_scheme: str = "pipe",
 ) -> ExecutionGraph:
-    """Bind two exact assignment/load-proof pairs into one signed graph."""
+    """Bind an ordered physical pipeline and its loopback into one signed graph."""
 
-    if len(assignments) != 2 or len(proofs) != 2:
-        raise PhysicalDeploymentError("execution_graph_requires_two_assignments")
+    if len(assignments) < 2 or len(proofs) != len(assignments):
+        raise PhysicalDeploymentError("execution_graph_requires_matching_assignments")
     if not link_scheme or not runtime_scheme:
         raise PhysicalDeploymentError("invalid_execution_graph_scheme")
     normalized_proofs = tuple(json.loads(canonical_json(proof)) for proof in proofs)
@@ -249,8 +252,23 @@ def build_execution_graph(
         placements.append(placement)
         stages.append(stage)
 
+    forward_edges = tuple(
+        PlacementEdge(
+            edge_id=(
+                f"forward:{placements[index].placement_id}"
+                f"->{placements[index + 1].placement_id}"
+            ),
+            from_placement_id=placements[index].placement_id,
+            to_placement_id=placements[index + 1].placement_id,
+            link_id=(
+                f"{link_scheme}:{assignments[index]['node_id']}"
+                f"->{assignments[index + 1]['node_id']}"
+            ),
+        )
+        for index in range(len(placements) - 1)
+    )
     first_node = assignments[0]["node_id"]
-    second_node = assignments[1]["node_id"]
+    final_node = assignments[-1]["node_id"]
     graph = ExecutionGraph(
         deployment_id=assignments[0]["deployment_id"],
         deployment_epoch=assignments[0]["deployment_epoch"],
@@ -264,20 +282,16 @@ def build_execution_graph(
         activation_bytes=_activation_bytes_for_assignments(assignments),
         token_envelope_bytes=9,
         stages=tuple(stages),
-        edges=(
-            PlacementEdge(
-                edge_id="forward:placement-000->placement-001",
-                from_placement_id=placements[0].placement_id,
-                to_placement_id=placements[1].placement_id,
-                link_id=f"{link_scheme}:{first_node}->{second_node}",
-            ),
-        ),
+        edges=forward_edges,
         loopback_edges=(
             PlacementEdge(
-                edge_id="loopback:placement-001->placement-000",
-                from_placement_id=placements[1].placement_id,
+                edge_id=(
+                    f"loopback:{placements[-1].placement_id}"
+                    f"->{placements[0].placement_id}"
+                ),
+                from_placement_id=placements[-1].placement_id,
                 to_placement_id=placements[0].placement_id,
-                link_id=f"{link_scheme}:{second_node}->{first_node}",
+                link_id=f"{link_scheme}:{final_node}->{first_node}",
             ),
         ),
     )
@@ -306,8 +320,8 @@ def build_physical_device_states(graph: ExecutionGraph) -> dict[str, DeviceState
             for placement in stage.placements
         )
     )
-    if len(node_ids) != 2:
-        raise PhysicalDeploymentError("physical_graph_requires_two_nodes")
+    if len(node_ids) < 2:
+        raise PhysicalDeploymentError("physical_graph_requires_two_or_more_nodes")
     bandwidth = {node_id: 1_000_000_000.0 for node_id in node_ids}
     return {
         node_id: DeviceState(
@@ -446,6 +460,12 @@ def _validate_runtime_backend(runtime_backend: str, runtime_dtype: str) -> str:
     if runtime_backend == "numpy" and runtime_dtype != "float32":
         raise PhysicalDeploymentError("numpy_runtime_requires_float32")
     return runtime_backend
+
+
+def _validate_runtime_quantization(value: str) -> str:
+    if value not in {"none", "int8-weight-only"}:
+        raise PhysicalDeploymentError("invalid_runtime_quantization")
+    return value
 
 
 def _runtime_backends_for_nodes(
@@ -894,6 +914,19 @@ def _resolve_local_model_source(
     )
 
 
+def compile_local_model_manifest(
+    model_source: LocalModelSource,
+) -> dict[str, Any]:
+    """Compile the immutable manifest without provisioning any assignment.
+
+    This is the first pass used by evidence-driven placement: shard layout is
+    frozen, its exact manifest is priced and signed, and only then are the
+    derived assignments materialized.
+    """
+
+    return copy.deepcopy(_resolve_local_model_source(model_source).manifest)
+
+
 def _record_private_file(
     path: Path,
     relative: PurePosixPath,
@@ -1124,9 +1157,38 @@ def _balanced_layer_ranges(
 
 
 def _route_with_nodes(
-    manifest: dict[str, Any], node_ids: tuple[str, ...]
+    manifest: dict[str, Any],
+    node_ids: tuple[str, ...],
+    layer_ranges: Sequence[range] | None = None,
 ) -> dict[str, Any]:
-    ranges = _balanced_layer_ranges(manifest["num_layers"], len(node_ids))
+    if layer_ranges is None:
+        ranges = _balanced_layer_ranges(manifest["num_layers"], len(node_ids))
+    else:
+        selected = tuple(layer_ranges)
+        if len(selected) != len(node_ids):
+            raise PhysicalDeploymentError("physical_deployment_layer_ranges_invalid")
+        cursor = 0
+        ranges = []
+        for layer_range in selected:
+            if (
+                not isinstance(layer_range, range)
+                or layer_range.step != 1
+                or layer_range.start != cursor
+                or layer_range.stop <= layer_range.start
+            ):
+                raise PhysicalDeploymentError(
+                    "physical_deployment_layer_ranges_invalid"
+                )
+            ranges.append(
+                {
+                    "start_layer": layer_range.start,
+                    "end_layer_exclusive": layer_range.stop,
+                    "layer_count": len(layer_range),
+                }
+            )
+            cursor = layer_range.stop
+        if cursor != manifest["num_layers"]:
+            raise PhysicalDeploymentError("physical_deployment_layer_ranges_invalid")
     route = _route_for_manifest(manifest)
     route["route"] = [
         {"node_id": node_id, "range": copy.deepcopy(layer_range)}
@@ -1144,11 +1206,16 @@ def prepare_assignment_artifacts(
     runtime_dtype: str = "float32",
     runtime_backend: str = "mlx",
     runtime_backends_by_node: Mapping[str, str] | None = None,
+    runtime_quantization: str = "none",
+    deployment_id: str = DEPLOYMENT_ID,
+    deployment_epoch: int = DEPLOYMENT_EPOCH,
+    layer_ranges: Sequence[range] | None = None,
 ) -> _PreparedAssignments:
     """Build, compile, provision, and verify exact offline assignments."""
 
     _validate_nodes(node_ids)
     runtime_dtype = _validate_runtime_dtype(runtime_dtype)
+    runtime_quantization = _validate_runtime_quantization(runtime_quantization)
     runtime_backends = _runtime_backends_for_nodes(
         node_ids, runtime_backend, runtime_backends_by_node, runtime_dtype
     )
@@ -1178,22 +1245,25 @@ def prepare_assignment_artifacts(
                 model_id=manifest["model_id"],
                 resolved_commit=manifest["resolved_commit"],
             )
-        route = _route_with_nodes(manifest, node_ids)
+        route = _route_with_nodes(manifest, node_ids, layer_ranges)
         assignments = compile_layer_assignments(
             route_plan=route,
             manifest=manifest,
-            deployment_id=DEPLOYMENT_ID,
-            deployment_epoch=DEPLOYMENT_EPOCH,
+            deployment_id=deployment_id,
+            deployment_epoch=deployment_epoch,
             cache_roots={node: str(prepared_root) for node in route["node_order"]},
             runtime_by_node={
                 node: {
                     "backend": runtime_backends[node],
                     "dtype": runtime_dtype,
-                    "quantization": "none",
+                    "quantization": runtime_quantization,
                 }
                 for node in route["node_order"]
             },
-            control_plane_binding=_control_plane_binding(),
+            control_plane_binding=_control_plane_binding(
+                deployment_id,
+                deployment_epoch,
+            ),
         )
         if len(assignments) != len(node_ids):
             raise PhysicalDeploymentError(
@@ -1328,6 +1398,7 @@ def prepare_physical_deployment(
     runtime_dtype: str = "float32",
     runtime_backend: str = "mlx",
     runtime_backends_by_node: Mapping[str, str] | None = None,
+    runtime_quantization: str = "none",
 ) -> PhysicalDeployment:
     """Prepare exact stage assignments plus an independent reference stage."""
 
@@ -1338,6 +1409,7 @@ def prepare_physical_deployment(
         runtime_dtype=runtime_dtype,
         runtime_backend=runtime_backend,
         runtime_backends_by_node=runtime_backends_by_node,
+        runtime_quantization=runtime_quantization,
     )
     try:
         reference_assignment, reference_report = prepare_monolithic_reference(

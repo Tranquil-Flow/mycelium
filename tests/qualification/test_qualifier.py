@@ -85,7 +85,11 @@ def _resign_load_statement(case: Any, index: int) -> None:
     )
 
 
-def _frozen_route_case(case: Any) -> Any:
+def _frozen_route_case(
+    case: Any,
+    *,
+    runtime_mode: str = "stage_local_kv",
+) -> Any:
     tranche = case.documents["control/control-plane-tranche.json"]
     assignments = tranche["assignments"]
     graph = case.documents["router/execution-graph.json"]
@@ -169,7 +173,7 @@ def _frozen_route_case(case: Any) -> Any:
                     },
                     "transport_fatal_error": None,
                     "runtime": {
-                        "mode": "stage_local_kv",
+                        "mode": runtime_mode,
                         "active_state_count": 0,
                         "release_counts": {"normal_completion": 1},
                     },
@@ -407,6 +411,20 @@ def test_frozen_physical_inference_profile_qualifies_without_post_mvp_claims(
     assert "ordinary frozen-placement inference only" in document["claim_boundary"]
     assert "cancellation and recovery are not qualified" in document["claim_boundary"]
     assert len(document["stage_bindings"]) == 2
+
+
+def test_complete_context_replay_physical_profile_remains_qualifiable(
+    qualification_case: Any,
+) -> None:
+    case = _frozen_route_case(
+        qualification_case,
+        runtime_mode="complete_context_replay",
+    )
+
+    record = _qualify(case)
+
+    assert record.route_ready is True
+    assert record.reason_codes == ()
 
 
 def test_frozen_physical_cancellation_profile_qualifies_cross_host_cancel(

@@ -181,6 +181,7 @@ def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(t
     repo = _repo(
         tmp_path,
         {
+            "ui/web/src/features/inference/deploymentClient.ts": "fetch('/__mycelium/deployments/select', { method: 'POST' });\n",
             "ui/web/src/features/inference/requestClient.ts": "fetch('/api/v1/inference/requests', { method: 'POST' });\n",
             "ui/web/src/features/swarm/SwarmClient.ts": "fetch('/api/v1/swarm/join', { method: 'POST' });\n",
             "ui/web/src/features/membership/membershipClient.ts": "fetch('/api/v1/membership/join', { method: 'POST' });\n",

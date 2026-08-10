@@ -76,8 +76,11 @@ def test_bootstrap_creates_bounded_http_only_strict_session(app) -> None:
             "swarm_status": "/api/v1/swarm/status",
             "swarm_invites": "/api/v1/swarm/invites",
             "swarm_join": "/api/v1/swarm/join",
-            "swarm_leave": "/api/v1/swarm/leave",
-        },
+                "swarm_leave": "/api/v1/swarm/leave",
+                "product_snapshot": "/api/v1/product/snapshot",
+                "product_events": "/api/v1/product/events",
+                "product_export": "/api/v1/product/export",
+            },
         "limits": {"max_prompt_utf8_bytes": 131_072, "max_new_tokens": 4_096},
         "qualification_authority": "mycelium_qualification.qualifier:RouteQualificationV1",
     }

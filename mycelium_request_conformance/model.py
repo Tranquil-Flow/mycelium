@@ -527,13 +527,10 @@ class GatewayModel:
             or cursor > state.delivered_through
         ):
             return StepResult(state, "invalid_stream_ack")
-        retained = tuple(event for event in state.events if event.sequence >= cursor)
         return StepResult(
             replace(
                 state,
-                events=retained,
                 acknowledged_through=cursor,
-                discarded_through=max(state.discarded_through, cursor - 1),
                 stream_cursor=cursor,
             ),
             "acknowledged",

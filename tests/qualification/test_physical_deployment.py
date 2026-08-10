@@ -15,6 +15,7 @@ from mycelium_qualification.physical_deployment import (
     PhysicalDeploymentError,
     build_execution_graph,
     build_physical_device_states,
+    compile_local_model_manifest,
     prepare_physical_deployment,
 )
 from runtime_loader import RuntimeLoadError, execute_loaded_stage, load_assignment_stage
@@ -266,6 +267,18 @@ def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
     _write_dialogpt_style_monolithic_source(source_root, n_layer=5)
     source_digest = sha256_file(source_root / "model.safetensors")
 
+    planning_manifest = compile_local_model_manifest(
+        LocalModelSource(
+            root=source_root,
+            model_id="microsoft/DialoGPT-small",
+            requested_revision="local-main",
+            resolved_commit="f" * 40,
+        )
+    )
+    assert planning_manifest["model_id"] == "microsoft/DialoGPT-small"
+    assert planning_manifest["num_layers"] == 5
+    assert planning_manifest["files"][0]["content_digest"]["value"] == source_digest
+
     deployment = prepare_physical_deployment(
         tmp_path / "deployment",
         node_ids=("mac-a", "mac-b"),
@@ -348,6 +361,53 @@ def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
     assert graph.activation_bytes == 2
     assert graph.hidden_size == 4
     json.dumps(deployment.evidence_document(), sort_keys=True, allow_nan=False)
+
+
+def test_execution_graph_accepts_three_ordered_physical_stages(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "three-stage-source"
+    _write_dialogpt_style_monolithic_source(source_root, n_layer=5)
+    deployment = prepare_physical_deployment(
+        tmp_path / "three-stage-deployment",
+        node_ids=("node-0", "node-1", "node-2"),
+        model_source=LocalModelSource(
+            root=source_root,
+            model_id="local/three-stage-model",
+            requested_revision="snapshot",
+            resolved_commit="3" * 40,
+        ),
+    )
+    loaded = [
+        load_assignment_stage(assignment, report, load_generation=17)
+        for assignment, report in zip(
+            deployment.assignments,
+            deployment.artifact_reports,
+            strict=True,
+        )
+    ]
+
+    graph = build_execution_graph(
+        deployment.assignments,
+        [stage.proof for stage in loaded],
+        link_scheme="iroh",
+    )
+
+    assert [stage.placements[0].node_id for stage in graph.stages] == [
+        "node-0",
+        "node-1",
+        "node-2",
+    ]
+    assert [edge.link_id for edge in graph.edges] == [
+        "iroh:node-0->node-1",
+        "iroh:node-1->node-2",
+    ]
+    assert graph.loopback_edges[0].link_id == "iroh:node-2->node-0"
+    assert set(build_physical_device_states(graph)) == {
+        "node-0",
+        "node-1",
+        "node-2",
+    }
 
 
 def test_prepare_physical_deployment_accepts_local_sharded_gpt2_source(

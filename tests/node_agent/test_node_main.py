@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+from contextlib import nullcontext
 import gc
 import importlib
 import io
@@ -12,6 +13,7 @@ from pathlib import Path
 import selectors
 import signal
 import socket
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -21,6 +23,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 import weakref
+import uuid
 
 import pytest
 
@@ -37,6 +40,16 @@ from tests.e2e_request_iroh.conftest import (
 def _ids():
     values = count(1)
     return lambda: f"node-main-seed-message-{next(values)}"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="procfs is Linux-specific")
+def test_linux_ancestry_fallback_does_not_require_executable_visibility() -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+
+    assert process_module._linux_parent_and_group(os.getpid()) == (
+        os.getppid(),
+        os.getpgrp(),
+    )
 
 
 class _WeakReferenceableCloseError(OSError):
@@ -94,6 +107,7 @@ def _node_command(
     bundle_file: Path | None = None,
     bundle_stdin: bool = False,
     dry_run: bool = False,
+    lifecycle_state: str | None = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -122,6 +136,8 @@ def _node_command(
     )
     if dry_run:
         command.append("--dry-run")
+    if lifecycle_state is not None:
+        command.extend(["--lifecycle-state", lifecycle_state])
     return command
 
 
@@ -158,6 +174,7 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
             node_id="node-main-a",
             sidecar=node_main_sidecar_binary,
             bundle_file=invite_file,
+            lifecycle_state="RUNNING",
         )
         assert bundle["token"] not in command
         process = subprocess.Popen(
@@ -193,6 +210,7 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
             assert member["endpoint_id"] == status["node_endpoint_id"]
             assert member["generation"] == 1
             assert member["last_heartbeat_sequence"] == 1
+            assert member["lifecycle_state"] == "RUNNING"
         finally:
             process.terminate()
             stdout, stderr = process.communicate(timeout=10)
@@ -210,6 +228,80 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
     while _pid_exists(child_pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert _pid_exists(child_pid) is False
+
+
+def test_node_and_seed_restart_resume_without_invite(
+    tmp_path: Path,
+    node_main_sidecar_binary: Path,  # noqa: F811
+) -> None:
+    signer = generate_ed25519_signer(endpoint_id="seed-resume-endpoint")
+    database = tmp_path / "seed-resume" / "state.sqlite3"
+    data_dir = tmp_path / "node-resume"
+    invite_file = tmp_path / "resume-invite.json"
+    first_seed = SeedCoordinator(
+        swarm_id="swarm-node-resume",
+        seed_node_id="seed-node",
+        seed_url=None,
+        signer=signer,
+        invite_registry=SqliteInviteRegistry(database),
+        incarnation="seed-before-restart",
+        id_source=_ids(),
+    )
+    with SeedHTTPServer(first_seed, host="127.0.0.1", port=0) as first_server:
+        port = int(first_server.base_url.rsplit(":", 1)[1])
+        bundle = first_seed.mint_invite(nonce="resume-only-invite", ttl_seconds=120)
+        _write_bundle(invite_file, bundle)
+        command = _node_command(
+            data_dir=data_dir,
+            node_id="node-resume",
+            sidecar=node_main_sidecar_binary,
+            bundle_file=invite_file,
+            lifecycle_state="RUNNING",
+        )
+        first_process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        first_status = _read_status(first_process)
+        first_process.terminate()
+        first_process.communicate(timeout=10)
+        assert first_process.returncode == 0
+        assert first_status["membership_generation"] == 1
+
+    invite_file.unlink()
+    restarted_seed = SeedCoordinator(
+        swarm_id="swarm-node-resume",
+        seed_node_id="seed-node",
+        seed_url=None,
+        signer=signer,
+        invite_registry=SqliteInviteRegistry(database),
+        incarnation="seed-after-restart",
+        id_source=lambda: f"resume-restarted-{uuid.uuid4()}",
+    )
+    with SeedHTTPServer(restarted_seed, host="127.0.0.1", port=port):
+        resumed_process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        resumed_status = _read_status(resumed_process)
+        resumed_process.terminate()
+        resumed_process.communicate(timeout=10)
+        assert resumed_process.returncode == 0
+
+    assert resumed_status["membership_resumed"] is True
+    assert resumed_status["membership_generation"] == 2
+    assert restarted_seed.member("node-resume")["generation"] == 2
+    assert restarted_seed.member("node-resume")["incarnation"].endswith(".r1")
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM consumed_invites").fetchone()[0] == 1
 
 
 def test_node_accepts_join_bundle_from_stdin_without_secret_leakage(
@@ -296,18 +388,23 @@ def test_node_dry_run_performs_no_network_or_process_io(
     monkeypatch.setattr(node_main, "PhysicalNodeProcess", forbidden)
     monkeypatch.setattr(node_main, "load_or_create_node_signer", forbidden)
 
-    assert (
-        node_main.run(
-            _node_command(
-                data_dir=data_dir,
-                node_id="node-main-dry",
-                sidecar=sidecar,
-                bundle_file=bundle_file,
-                dry_run=True,
-            )[3:]
-        )
-        == 0
+    command = _node_command(
+        data_dir=data_dir,
+        node_id="node-main-dry",
+        sidecar=sidecar,
+        bundle_file=bundle_file,
+        dry_run=True,
     )
+    command.extend(
+        [
+            "--peer-class",
+            "android_termux_iroh",
+            "--membership-endpoint-id",
+            "iroh-mobile-endpoint",
+        ]
+    )
+
+    assert node_main.run(command[3:]) == 0
 
     captured = capsys.readouterr()
     expected = {
@@ -575,6 +672,17 @@ for line in sys.stdin:
         ) -> dict[str, Any]:
             return {}
 
+        def rotation(self, *, now: float) -> None:
+            return None
+
+        def accepted_seed_key_digest(
+            self,
+            _envelope: dict[str, Any],
+            *,
+            now: float,
+        ) -> str:
+            return coordinator.signer.verification_key_digest
+
         def send_member_message(
             self,
             envelope: dict[str, Any],
@@ -619,7 +727,7 @@ for line in sys.stdin:
     monkeypatch.setattr(
         node_main,
         "load_or_create_node_signer",
-        lambda _path: FakeSigner(),
+        lambda _path, **_kwargs: FakeSigner(),
     )
     monkeypatch.setattr(
         node_main,
@@ -2697,6 +2805,9 @@ def test_node_run_bound_finally_retains_primary_through_four_cleanup_failures(
         def private_subdirectory(self, _name: str) -> ArtifactRoot:
             return artifact_root
 
+        def working_directory(self):
+            return nullcontext()
+
     class Client:
         def identity(self, *, now: float) -> dict[str, str]:
             return {"seed_node_id": "seed-node"}
@@ -2743,7 +2854,7 @@ def test_node_run_bound_finally_retains_primary_through_four_cleanup_failures(
     monkeypatch.setattr(
         node_main,
         "load_or_create_node_signer",
-        lambda _path: FakeSigner(),
+        lambda _path, **_kwargs: FakeSigner(),
     )
     monkeypatch.setattr(node_main, "NodeMembershipSession", FakeSession)
     monkeypatch.setattr(
@@ -2775,6 +2886,9 @@ def test_node_run_bound_finally_retains_primary_through_four_cleanup_failures(
             "deployment_id": "deployment-cleanup-primary",
             "advertise": ["https://node.test/control"],
             "heartbeat_interval": 1.0,
+            "lifecycle_state": "RUNNING",
+            "membership_endpoint_id": None,
+            "peer_class": "mac_mlx_iroh",
         },
     )()
 

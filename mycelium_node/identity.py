@@ -77,21 +77,36 @@ def _prepare_private_parent(key_path: Path) -> None:
         raise NodeIdentityError("node_identity_path_invalid") from exc
 
 
-def _signer(private_bytes: bytes) -> Ed25519EvidenceSigner:
+def _signer(
+    private_bytes: bytes,
+    *,
+    endpoint_id: str | None = None,
+) -> Ed25519EvidenceSigner:
     try:
         private_key = Ed25519PrivateKey.from_private_bytes(private_bytes)
     except ValueError as exc:
         raise NodeIdentityError("node_identity_invalid") from exc
     public_bytes = private_key.public_key().public_bytes_raw()
     digest = sha256_bytes(public_bytes).split(":", 1)[1]
+    if endpoint_id is not None and (
+        not isinstance(endpoint_id, str)
+        or not endpoint_id
+        or endpoint_id != endpoint_id.strip()
+    ):
+        raise NodeIdentityError("node_identity_endpoint_invalid")
     return Ed25519EvidenceSigner(
-        endpoint_id=f"node-identity-{digest[:32]}",
+        endpoint_id=endpoint_id or f"node-identity-{digest[:32]}",
         _private_key=private_key,
         _public_key_bytes=public_bytes,
     )
 
 
-def _load_existing(key_path: Path, *, allow_incomplete: bool = False) -> Ed25519EvidenceSigner | None:
+def _load_existing(
+    key_path: Path,
+    *,
+    allow_incomplete: bool = False,
+    endpoint_id: str | None = None,
+) -> Ed25519EvidenceSigner | None:
     try:
         metadata = key_path.lstat()
         mode = stat.S_IMODE(metadata.st_mode)
@@ -121,10 +136,14 @@ def _load_existing(key_path: Path, *, allow_incomplete: bool = False) -> Ed25519
         return None
     if len(private_bytes) != _KEY_BYTES:
         raise NodeIdentityError("node_identity_invalid")
-    return _signer(private_bytes)
+    return _signer(private_bytes, endpoint_id=endpoint_id)
 
 
-def _write_new(key_path: Path) -> Ed25519EvidenceSigner | None:
+def _write_new(
+    key_path: Path,
+    *,
+    endpoint_id: str | None = None,
+) -> Ed25519EvidenceSigner | None:
     private_key = Ed25519PrivateKey.generate()
     private_bytes = private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
     flags = (
@@ -168,25 +187,68 @@ def _write_new(key_path: Path) -> Ed25519EvidenceSigner | None:
             os.close(parent_descriptor)
     except OSError as exc:
         raise NodeIdentityError("node_identity_write_failed") from exc
-    return _signer(private_bytes)
+    return _signer(private_bytes, endpoint_id=endpoint_id)
 
 
-def load_or_create_node_signer(key_file: str | Path) -> Ed25519EvidenceSigner:
+def load_or_create_node_signer(
+    key_file: str | Path,
+    *,
+    endpoint_id: str | None = None,
+) -> Ed25519EvidenceSigner:
     """Load one durable signer or atomically create it on first startup."""
 
     key_path = _absolute_path(key_file)
     _prepare_private_parent(key_path)
     if key_path.exists() or key_path.is_symlink():
-        existing = _load_existing(key_path, allow_incomplete=True)
+        existing = _load_existing(
+            key_path,
+            allow_incomplete=True,
+            endpoint_id=endpoint_id,
+        )
         if existing is not None:
             return existing
     else:
-        created = _write_new(key_path)
+        created = _write_new(key_path, endpoint_id=endpoint_id)
         if created is not None:
             return created
     for _attempt in range(_CREATE_RETRIES):
-        existing = _load_existing(key_path, allow_incomplete=True)
+        existing = _load_existing(
+            key_path,
+            allow_incomplete=True,
+            endpoint_id=endpoint_id,
+        )
         if existing is not None:
             return existing
         time.sleep(_CREATE_RETRY_SECONDS)
     raise NodeIdentityError("node_identity_invalid")
+
+
+def load_node_signer(
+    key_file: str | Path,
+    *,
+    endpoint_id: str | None = None,
+) -> Ed25519EvidenceSigner:
+    """Load an existing owner-only signer without creating any path or key."""
+
+    key_path = _absolute_path(key_file)
+    try:
+        parent = key_path.parent.lstat()
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or stat.S_ISLNK(parent.st_mode)
+            or parent.st_uid != os.getuid()
+        ):
+            raise NodeIdentityError("node_identity_path_invalid")
+        if stat.S_IMODE(parent.st_mode) != 0o700:
+            raise NodeIdentityError("node_identity_permissions_invalid")
+        key_path.lstat()
+    except FileNotFoundError as exc:
+        raise NodeIdentityError("node_identity_missing") from exc
+    except NodeIdentityError:
+        raise
+    except OSError as exc:
+        raise NodeIdentityError("node_identity_path_invalid") from exc
+    signer = _load_existing(key_path, endpoint_id=endpoint_id)
+    if signer is None:  # pragma: no cover - load-only never permits incomplete keys
+        raise NodeIdentityError("node_identity_invalid")
+    return signer

@@ -1,0 +1,599 @@
+{
+  "base_plan_digest": "sha256:9927e3943b56c705badddc283c7f852ad941e18716bcedb0d4af2ea2a72c680d",
+  "cases": [
+    {
+      "action": "existing_track_intent",
+      "affected_group_ids": [
+        "stage-003"
+      ],
+      "candidate_plan": null,
+      "candidate_plan_digest": null,
+      "capacity_gain_fraction": null,
+      "escalation_order": [],
+      "event_id": "replica-drop-n4",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "replica-drop",
+      "reason": "an unaffected legal placement-intent track survives; runtime readiness remains external",
+      "recommendation": "router_builder_validate_existing_track",
+      "snapshot_generation": 2,
+      "surviving_track_ids": [
+        "track-000",
+        "track-002"
+      ],
+      "urgency": "immediate"
+    },
+    {
+      "action": "full_replan",
+      "affected_group_ids": [
+        "stage-001"
+      ],
+      "candidate_plan": {
+        "diagnostics": {
+          "accepted_replica_nodes": [
+            "n5"
+          ],
+          "admitted_node_ids": [
+            "n0",
+            "n2",
+            "n3",
+            "n4"
+          ],
+          "candidate_node_ids": [
+            "n0",
+            "n2",
+            "n3",
+            "n4",
+            "n5"
+          ],
+          "decode_mode": "unknown",
+          "excluded_nodes": {
+            "n1": "topology_event:unique-stage-drop-n1:device_unavailable"
+          },
+          "frozen_primary_order": [
+            "n0",
+            "n2",
+            "n3",
+            "n4"
+          ],
+          "node_runtime": {},
+          "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+          "placement_provenance": "planner_v2",
+          "primary_order": [
+            "n0",
+            "n2",
+            "n3",
+            "n4"
+          ],
+          "primary_search": [
+            "primary order frozen from directed latency and jitter only",
+            "admitted_node_count=4",
+            "topology_cycle_cost_ms=6.9"
+          ],
+          "speculative": {
+            "enabled": false,
+            "target_fallback": true
+          },
+          "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
+          "unplaced_node_ids": [
+            "n5"
+          ],
+          "workload": {
+            "arrival_process": "poisson_capacity_sweep",
+            "mode": "sensitivity_grid",
+            "name": "interactive_chat_v1",
+            "network_size_changes_capacity_not_demand": true,
+            "source": "LMSYS-Chat-1M",
+            "user_scale": 2.0
+          }
+        },
+        "forward_edges": [
+          {
+            "capacity_rps": 6.581995871772189,
+            "cost_ms": 151.92960000000002,
+            "dst_placement_id": "stage-001-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-000-primary"
+          },
+          {
+            "capacity_rps": 2.7179112525874514,
+            "cost_ms": 367.9296,
+            "dst_placement_id": "stage-002-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-001-primary"
+          },
+          {
+            "capacity_rps": 2.101151094615674,
+            "cost_ms": 475.92960000000005,
+            "dst_placement_id": "stage-003-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          },
+          {
+            "capacity_rps": 2.101151094615674,
+            "cost_ms": 475.92960000000005,
+            "dst_placement_id": "stage-003-replica-n5",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          }
+        ],
+        "handoff_state": "placement_intent_only",
+        "legal_tracks": [
+          {
+            "cost_ms": 1576.3232000000003,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-primary",
+              "stage-003-primary"
+            ],
+            "track_id": "track-000",
+            "traffic_fraction": 0.6337774298990722
+          },
+          {
+            "cost_ms": 1683.8232000000003,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-primary",
+              "stage-003-replica-n5"
+            ],
+            "track_id": "track-001",
+            "traffic_fraction": 0.36622257010092785
+          }
+        ],
+        "loopbacks": [
+          {
+            "cost_ms": 580.5344000000001,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-primary"
+          },
+          {
+            "cost_ms": 688.0344000000001,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-replica-n5"
+          }
+        ],
+        "metrics": {
+          "replicated_output_capacity_tps": 584.350919306302,
+          "replicated_request_capacity_rps": 2.7179112525874514,
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_payload_bytes": 256,
+              "name": "interactive-c1",
+              "output_goodput_tps": 135.85406013444117,
+              "prefill_payload_bytes": 17920,
+              "single_request_tps": 135.85406013444117,
+              "tpot_ms": 7.3608400000000005,
+              "ttft_ms": 8.8476
+            },
+            {
+              "confidence": 1.0,
+              "decode_payload_bytes": 256,
+              "name": "interactive-c4",
+              "output_goodput_tps": 370.3484237971083,
+              "prefill_payload_bytes": 17920,
+              "single_request_tps": 135.85406013444117,
+              "tpot_ms": 7.3608400000000005,
+              "ttft_ms": 8.8476
+            }
+          ],
+          "unmet_capacity_sweep_demand_rps": 67.45752734390378
+        },
+        "model": {
+          "architecture": "Decoder",
+          "dtype_bytes": 2,
+          "head_dim": 32,
+          "hidden_size": 128,
+          "kv_heads": 2,
+          "model_id": "org/model",
+          "num_layers": 4,
+          "revision": "immutable-revision",
+          "weight_bytes": 240000000,
+          "weight_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "placements": [
+          {
+            "layer_range": {
+              "end": 1,
+              "start": 0
+            },
+            "node_id": "n0",
+            "placement_id": "stage-000-primary",
+            "primary": true,
+            "replica_group_id": "stage-000",
+            "service_capacity_rps": 70.17543859649123
+          },
+          {
+            "layer_range": {
+              "end": 2,
+              "start": 1
+            },
+            "node_id": "n2",
+            "placement_id": "stage-001-primary",
+            "primary": true,
+            "replica_group_id": "stage-001",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 3,
+              "start": 2
+            },
+            "node_id": "n3",
+            "placement_id": "stage-002-primary",
+            "primary": true,
+            "replica_group_id": "stage-002",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n4",
+            "placement_id": "stage-003-primary",
+            "primary": true,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n5",
+            "placement_id": "stage-003-replica-n5",
+            "primary": false,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 3508.771929824561
+          }
+        ],
+        "protocol": "mycelium.route_plan.v2",
+        "provenance": {
+          "budget_exhausted": false,
+          "candidate_budget": 100000,
+          "candidate_node_count": 4,
+          "explored_candidates": 6,
+          "globally_exact": true,
+          "mode": "exact_topology_enumeration"
+        },
+        "snapshot_digest": "sha256:c95c059ae9aa4cae688eeb0741bf26d400f292d55197e8d7e2b69a329d4bb89a",
+        "workload_name": "interactive_chat_v1"
+      },
+      "candidate_plan_digest": "sha256:f1caa3457123025c3254c4298685701f6dfc08ca3f5167ca718f8d2ddb3ef447",
+      "capacity_gain_fraction": -0.2935344152794448,
+      "escalation_order": [
+        "successor_standby_candidate",
+        "full_replan"
+      ],
+      "event_id": "unique-stage-drop-n1",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "unique-interior-stage-drop",
+      "reason": "fresh placement intent computed from the supplied topology snapshot",
+      "recommendation": "prefer_route_ready_successor_standby_else_provision_candidate",
+      "snapshot_generation": 3,
+      "surviving_track_ids": [],
+      "urgency": "immediate"
+    },
+    {
+      "action": "existing_track_intent",
+      "affected_group_ids": [],
+      "candidate_plan": null,
+      "candidate_plan_digest": null,
+      "capacity_gain_fraction": null,
+      "escalation_order": [],
+      "event_id": "directed-edge-drop-n2-n3",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "directed-edge-drop",
+      "reason": "an unaffected legal placement-intent track survives; runtime readiness remains external",
+      "recommendation": "router_builder_validate_existing_track",
+      "snapshot_generation": 4,
+      "surviving_track_ids": [
+        "track-001",
+        "track-002"
+      ],
+      "urgency": "immediate"
+    },
+    {
+      "action": "candidate_replan",
+      "affected_group_ids": [],
+      "candidate_plan": {
+        "diagnostics": {
+          "accepted_replica_nodes": [
+            "n6",
+            "n5"
+          ],
+          "admitted_node_ids": [
+            "n0",
+            "n1",
+            "n2",
+            "n3"
+          ],
+          "candidate_node_ids": [
+            "n0",
+            "n1",
+            "n2",
+            "n3",
+            "n4",
+            "n5",
+            "n6"
+          ],
+          "decode_mode": "unknown",
+          "excluded_nodes": {},
+          "frozen_primary_order": [
+            "n0",
+            "n1",
+            "n2",
+            "n3"
+          ],
+          "node_runtime": {},
+          "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+          "placement_provenance": "planner_v2",
+          "primary_order": [
+            "n0",
+            "n1",
+            "n2",
+            "n3"
+          ],
+          "primary_search": [
+            "primary order frozen from directed latency and jitter only",
+            "admitted_node_count=4",
+            "topology_cycle_cost_ms=5.4"
+          ],
+          "speculative": {
+            "enabled": false,
+            "target_fallback": true
+          },
+          "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
+          "unplaced_node_ids": [
+            "n4",
+            "n5",
+            "n6"
+          ],
+          "workload": {
+            "arrival_process": "poisson_capacity_sweep",
+            "mode": "sensitivity_grid",
+            "name": "interactive_chat_v1",
+            "network_size_changes_capacity_not_demand": true,
+            "source": "LMSYS-Chat-1M",
+            "user_scale": 2.0
+          }
+        },
+        "forward_edges": [
+          {
+            "capacity_rps": 6.581995871772189,
+            "cost_ms": 151.92960000000002,
+            "dst_placement_id": "stage-001-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-000-primary"
+          },
+          {
+            "capacity_rps": 3.847195548333087,
+            "cost_ms": 259.9296,
+            "dst_placement_id": "stage-002-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-001-primary"
+          },
+          {
+            "capacity_rps": 3.847195548333087,
+            "cost_ms": 259.9296,
+            "dst_placement_id": "stage-002-replica-n5",
+            "kind": "forward",
+            "src_placement_id": "stage-001-primary"
+          },
+          {
+            "capacity_rps": 2.7179112525874514,
+            "cost_ms": 367.9296,
+            "dst_placement_id": "stage-003-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          },
+          {
+            "capacity_rps": 38.471955483330866,
+            "cost_ms": 25.992960000000004,
+            "dst_placement_id": "stage-003-replica-n6",
+            "kind": "forward",
+            "src_placement_id": "stage-002-primary"
+          },
+          {
+            "capacity_rps": 1.4452337347614557,
+            "cost_ms": 691.9295999999999,
+            "dst_placement_id": "stage-003-primary",
+            "kind": "forward",
+            "src_placement_id": "stage-002-replica-n5"
+          },
+          {
+            "capacity_rps": 38.471955483330866,
+            "cost_ms": 25.992960000000004,
+            "dst_placement_id": "stage-003-replica-n6",
+            "kind": "forward",
+            "src_placement_id": "stage-002-replica-n5"
+          }
+        ],
+        "handoff_state": "placement_intent_only",
+        "legal_tracks": [
+          {
+            "cost_ms": 463.6556,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-primary",
+              "stage-003-replica-n6"
+            ],
+            "track_id": "track-000",
+            "traffic_fraction": 0.5845028807800267
+          },
+          {
+            "cost_ms": 463.6556,
+            "placement_ids": [
+              "stage-000-primary",
+              "stage-001-primary",
+              "stage-002-replica-n5",
+              "stage-003-replica-n6"
+            ],
+            "track_id": "track-001",
+            "traffic_fraction": 0.41549711921997334
+          }
+        ],
+        "loopbacks": [
+          {
+            "cost_ms": 473.03440000000006,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-primary"
+          },
+          {
+            "cost_ms": 25.803440000000002,
+            "dst_placement_id": "stage-000-primary",
+            "payload_bytes": 16,
+            "src_placement_id": "stage-003-replica-n6"
+          }
+        ],
+        "metrics": {
+          "replicated_output_capacity_tps": 1415.1291124310205,
+          "replicated_request_capacity_rps": 6.581995871772189,
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_payload_bytes": 256,
+              "name": "interactive-c1",
+              "output_goodput_tps": 170.62400611516438,
+              "prefill_payload_bytes": 17920,
+              "single_request_tps": 170.62400611516438,
+              "tpot_ms": 5.86084,
+              "ttft_ms": 7.8476
+            },
+            {
+              "confidence": 1.0,
+              "decode_payload_bytes": 256,
+              "name": "interactive-c4",
+              "output_goodput_tps": 454.51239909824733,
+              "prefill_payload_bytes": 17920,
+              "single_request_tps": 170.62400611516438,
+              "tpot_ms": 5.86084,
+              "ttft_ms": 7.8476
+            }
+          ],
+          "unmet_capacity_sweep_demand_rps": 63.59344272471905
+        },
+        "model": {
+          "architecture": "Decoder",
+          "dtype_bytes": 2,
+          "head_dim": 32,
+          "hidden_size": 128,
+          "kv_heads": 2,
+          "model_id": "org/model",
+          "num_layers": 4,
+          "revision": "immutable-revision",
+          "weight_bytes": 240000000,
+          "weight_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "placements": [
+          {
+            "layer_range": {
+              "end": 1,
+              "start": 0
+            },
+            "node_id": "n0",
+            "placement_id": "stage-000-primary",
+            "primary": true,
+            "replica_group_id": "stage-000",
+            "service_capacity_rps": 70.17543859649123
+          },
+          {
+            "layer_range": {
+              "end": 2,
+              "start": 1
+            },
+            "node_id": "n1",
+            "placement_id": "stage-001-primary",
+            "primary": true,
+            "replica_group_id": "stage-001",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 3,
+              "start": 2
+            },
+            "node_id": "n2",
+            "placement_id": "stage-002-primary",
+            "primary": true,
+            "replica_group_id": "stage-002",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 3,
+              "start": 2
+            },
+            "node_id": "n5",
+            "placement_id": "stage-002-replica-n5",
+            "primary": false,
+            "replica_group_id": "stage-002",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n3",
+            "placement_id": "stage-003-primary",
+            "primary": true,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 3508.771929824561
+          },
+          {
+            "layer_range": {
+              "end": 4,
+              "start": 3
+            },
+            "node_id": "n6",
+            "placement_id": "stage-003-replica-n6",
+            "primary": false,
+            "replica_group_id": "stage-003",
+            "service_capacity_rps": 35087.71929824561
+          }
+        ],
+        "protocol": "mycelium.route_plan.v2",
+        "provenance": {
+          "budget_exhausted": false,
+          "candidate_budget": 100000,
+          "candidate_node_count": 4,
+          "explored_candidates": 6,
+          "globally_exact": true,
+          "mode": "exact_topology_enumeration"
+        },
+        "snapshot_digest": "sha256:2452db9c216eae5b9df44198a521cbe71cb823ea32879001ff82b056ec01bbbc",
+        "workload_name": "interactive_chat_v1"
+      },
+      "candidate_plan_digest": "sha256:0830ad92306f458a119f2ded8d598a2f3e56738a1ed75afd790acfcef4c42f71",
+      "capacity_gain_fraction": 0.7108555541513963,
+      "escalation_order": [
+        "full_replan"
+      ],
+      "event_id": "fast-node-join-n6",
+      "external_readiness_required": true,
+      "handoff_state": "placement_intent_only",
+      "name": "fast-node-join",
+      "reason": "fresh placement intent computed from the supplied topology snapshot",
+      "recommendation": "provision_candidate",
+      "snapshot_generation": 5,
+      "surviving_track_ids": [
+        "track-000",
+        "track-001",
+        "track-002"
+      ],
+      "urgency": "deferred"
+    }
+  ],
+  "handoff_state": "placement_intent_only",
+  "protocol": "mycelium.layer_replan_simulation_report.v1"
+}

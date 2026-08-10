@@ -23,6 +23,20 @@ GPT2_DECODER_TENSOR_SUFFIXES = (
     "mlp.c_proj.weight",
     "mlp.c_proj.bias",
 )
+QWEN2_DECODER_TENSOR_SUFFIXES = (
+    "input_layernorm.weight",
+    "self_attn.q_proj.weight",
+    "self_attn.q_proj.bias",
+    "self_attn.k_proj.weight",
+    "self_attn.k_proj.bias",
+    "self_attn.v_proj.weight",
+    "self_attn.v_proj.bias",
+    "self_attn.o_proj.weight",
+    "post_attention_layernorm.weight",
+    "mlp.gate_proj.weight",
+    "mlp.up_proj.weight",
+    "mlp.down_proj.weight",
+)
 NORMALIZED_MLX_RUNTIME_FIELDS = frozenset(
     {*MLX_RUNTIME_BASE_FIELDS, "architecture", "model_config"}
 )
@@ -40,6 +54,22 @@ GPT2_MODEL_CONFIG_FIELDS = frozenset(
         "scale_attn_by_inverse_layer_idx",
         "reorder_and_upcast_attn",
         "add_cross_attention",
+    }
+)
+QWEN2_MODEL_CONFIG_FIELDS = frozenset(
+    {
+        "n_layer",
+        "n_embd",
+        "n_head",
+        "n_kv_head",
+        "n_inner",
+        "vocab_size",
+        "n_positions",
+        "rms_norm_epsilon",
+        "rope_theta",
+        "head_dim",
+        "activation_function",
+        "tie_word_embeddings",
     }
 )
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
@@ -60,6 +90,7 @@ _SUPPORTED_GPT2_FLAGS = {
     "reorder_and_upcast_attn": False,
     "add_cross_attention": False,
 }
+_SUPPORTED_QUANTIZATIONS = frozenset({"none", "int8-weight-only"})
 
 
 @runtime_checkable
@@ -149,6 +180,86 @@ def normalize_gpt2_model_config(
     return normalized
 
 
+def normalize_qwen2_model_config(
+    config: Mapping[str, Any], *, expected_layers: int
+) -> dict[str, Any]:
+    """Extract the exact Qwen2 decoder subset executable by Mycelium."""
+
+    if not isinstance(config, Mapping):
+        raise ValueError("runtime model_config source must be an object")
+    n_layer = _positive_int(config.get("num_hidden_layers", config.get("n_layer")), "n_layer")
+    if n_layer != expected_layers:
+        raise ValueError("runtime model_config n_layer does not match manifest layer count")
+    n_embd = _positive_int(config.get("hidden_size", config.get("n_embd")), "n_embd")
+    n_head = _positive_int(config.get("num_attention_heads", config.get("n_head")), "n_head")
+    n_kv_head = _positive_int(config.get("num_key_value_heads", config.get("n_kv_head")), "n_kv_head")
+    head_dim = _positive_int(config.get("head_dim", n_embd // n_head), "head_dim")
+    if n_embd != n_head * head_dim or n_head % n_kv_head != 0:
+        raise ValueError("runtime model_config has incompatible attention heads")
+    n_inner = _positive_int(config.get("intermediate_size", config.get("n_inner")), "n_inner")
+    vocab_size = _positive_int(config.get("vocab_size"), "vocab_size")
+    n_positions = _positive_int(
+        config.get("max_position_embeddings", config.get("n_positions")),
+        "n_positions",
+    )
+    epsilon = config.get("rms_norm_eps", config.get("rms_norm_epsilon"))
+    rope_theta = config.get("rope_theta")
+    for value, field in ((epsilon, "rms_norm_epsilon"), (rope_theta, "rope_theta")):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or float(value) <= 0
+        ):
+            raise ValueError(f"runtime model_config {field} must be positive and finite")
+    activation = config.get("hidden_act", config.get("activation_function"))
+    if activation != "silu":
+        raise ValueError("runtime model_config activation_function must be silu")
+    tied = config.get("tie_word_embeddings")
+    if not isinstance(tied, bool):
+        raise ValueError("runtime model_config tie_word_embeddings must be boolean")
+    normalized = {
+        "n_layer": n_layer,
+        "n_embd": n_embd,
+        "n_head": n_head,
+        "n_kv_head": n_kv_head,
+        "n_inner": n_inner,
+        "vocab_size": vocab_size,
+        "n_positions": n_positions,
+        "rms_norm_epsilon": float(epsilon),
+        "rope_theta": float(rope_theta),
+        "head_dim": head_dim,
+        "activation_function": "silu",
+        "tie_word_embeddings": tied,
+    }
+    json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return normalized
+
+
+def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    architecture = runtime.get("architecture")
+    model_config = runtime.get("model_config")
+    if not isinstance(model_config, Mapping):
+        raise ValueError(f"{architecture} runtime requires model_config")
+    if architecture == "gpt2":
+        if set(model_config) != GPT2_MODEL_CONFIG_FIELDS:
+            raise ValueError("gpt2 model_config fields do not match the normalized runtime contract")
+        return architecture, normalize_gpt2_model_config(
+            model_config,
+            expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+        )
+    if architecture == "qwen2":
+        if set(model_config) != QWEN2_MODEL_CONFIG_FIELDS:
+            raise ValueError(
+                "qwen2 architecture model_config fields do not match the normalized runtime contract"
+            )
+        return architecture, normalize_qwen2_model_config(
+            model_config,
+            expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+        )
+    raise ValueError("unsupported runtime architecture; expected gpt2 or qwen2")
+
+
 def validate_normalized_mlx_runtime(runtime: Any) -> dict[str, Any]:
     """Validate an assignment runtime as the exact executable MLX contract."""
     if not isinstance(runtime, Mapping):
@@ -159,30 +270,20 @@ def validate_normalized_mlx_runtime(runtime: Any) -> dict[str, Any]:
         )
     if runtime.get("backend") != "mlx":
         raise ValueError("unsupported runtime backend; expected mlx")
-    if runtime.get("quantization") != "none":
-        raise ValueError("unsupported runtime quantization; only none is supported")
+    if runtime.get("quantization") not in _SUPPORTED_QUANTIZATIONS:
+        raise ValueError("unsupported runtime quantization")
     if runtime.get("dtype") not in _SUPPORTED_MLX_DTYPES:
         raise ValueError(
             "unsupported runtime dtype; expected float16, bfloat16, or float32"
         )
-    if runtime.get("architecture") != "gpt2":
-        raise ValueError("unsupported runtime architecture; only gpt2 is supported")
-    model_config = runtime.get("model_config")
-    if not isinstance(model_config, Mapping):
-        raise ValueError("gpt2 runtime requires model_config")
-    if set(model_config) != GPT2_MODEL_CONFIG_FIELDS:
-        raise ValueError(
-            "gpt2 model_config fields do not match the normalized runtime contract"
-        )
-    normalized_config = normalize_gpt2_model_config(
-        model_config,
-        expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
-    )
+    architecture, normalized_config = _normalize_architecture_runtime(runtime)
+    if architecture == "gpt2" and runtime["quantization"] != "none":
+        raise ValueError("gpt2 runtime quantization is unsupported")
     normalized = {
         "backend": "mlx",
         "dtype": runtime["dtype"],
-        "quantization": "none",
-        "architecture": "gpt2",
+        "quantization": runtime["quantization"],
+        "architecture": architecture,
         "model_config": normalized_config,
     }
     if json.loads(json.dumps(runtime, allow_nan=False)) != normalized:
@@ -201,28 +302,18 @@ def validate_normalized_numpy_runtime(runtime: Any) -> dict[str, Any]:
         )
     if runtime.get("backend") != "numpy":
         raise ValueError("unsupported runtime backend; expected numpy")
-    if runtime.get("quantization") != "none":
-        raise ValueError("unsupported runtime quantization; only none is supported")
+    if runtime.get("quantization") not in _SUPPORTED_QUANTIZATIONS:
+        raise ValueError("unsupported runtime quantization")
     if runtime.get("dtype") not in SUPPORTED_NUMPY_DTYPES:
         raise ValueError("unsupported numpy runtime dtype; expected float32")
-    if runtime.get("architecture") != "gpt2":
-        raise ValueError("unsupported runtime architecture; only gpt2 is supported")
-    model_config = runtime.get("model_config")
-    if not isinstance(model_config, Mapping):
-        raise ValueError("gpt2 runtime requires model_config")
-    if set(model_config) != GPT2_MODEL_CONFIG_FIELDS:
-        raise ValueError(
-            "gpt2 model_config fields do not match the normalized runtime contract"
-        )
-    normalized_config = normalize_gpt2_model_config(
-        model_config,
-        expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
-    )
+    architecture, normalized_config = _normalize_architecture_runtime(runtime)
+    if architecture == "gpt2" and runtime["quantization"] != "none":
+        raise ValueError("gpt2 runtime quantization is unsupported")
     normalized = {
         "backend": "numpy",
         "dtype": runtime["dtype"],
-        "quantization": "none",
-        "architecture": "gpt2",
+        "quantization": runtime["quantization"],
+        "architecture": architecture,
         "model_config": normalized_config,
     }
     if json.loads(json.dumps(runtime, allow_nan=False)) != normalized:

@@ -4,8 +4,10 @@ import bootstrapSchema from '../../../contracts/product/product-ui-bootstrap-v1.
 import inferenceSchema from '../../../contracts/product/product-ui-inference-v1.schema.json';
 import observatorySchema from '../../../contracts/product/product-ui-observatory-v1.schema.json';
 import swarmSchema from '../../../contracts/product/product-ui-swarm-v1.schema.json';
+import canonicalBootstrap from '../../../../contracts/compatibility-fixtures/product-ui-bootstrap-v1.json';
 import {
   MAX_PROMPT_UTF8_BYTES,
+  QUALIFICATION_MAX_AGE_MS,
   PRODUCT_API_PATHS,
   PRODUCT_BOOTSTRAP_PROTOCOL,
   PRODUCT_ERROR_PROTOCOL,
@@ -169,6 +171,8 @@ describe('frozen product UI wire contracts', () => {
 
   it('freezes same-origin endpoint paths and exposes no upstream credential', () => {
     expect(decodeProductBootstrap(bootstrap)).toEqual(bootstrap);
+    expect(decodeProductBootstrap(structuredClone(canonicalBootstrap))).toEqual(canonicalBootstrap);
+    expect(schemaValidator(bootstrapSchema)(canonicalBootstrap)).toBe(true);
     for (const path of Object.values(PRODUCT_API_PATHS)) {
       expect(path).toMatch(/^\/api\/v1\//);
       expect(path).not.toContain('://');
@@ -255,7 +259,9 @@ describe('frozen product UI wire contracts', () => {
 
   it('fails closed for stale and future qualification evidence', () => {
     const ready = decodeProductQualification(acceptedQualification);
-    expect(inferenceBlockReason(ready, 1_800_300_000_001)).toBe('Qualification is stale');
+    expect(inferenceBlockReason(ready, 1_800_000_000_000 + QUALIFICATION_MAX_AGE_MS + 1)).toBe(
+      'Qualification is stale',
+    );
     expect(inferenceBlockReason(ready, 1_799_999_999_999)).toBe(
       'Qualification timestamp is in the future',
     );

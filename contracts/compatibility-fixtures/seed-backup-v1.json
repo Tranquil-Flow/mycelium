@@ -1,0 +1,9 @@
+{
+  "authority_generation": 1,
+  "backup_directory": "/operator-private/backup-fixture",
+  "backup_id": "backup-fixture",
+  "member_count": 1,
+  "protocol": "mycelium.seed_backup.v1",
+  "route_ready": false,
+  "seed_key_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+}

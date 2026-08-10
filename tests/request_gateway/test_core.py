@@ -25,6 +25,7 @@ from mycelium_request_gateway.contracts import (
     InferenceSubmission,
     QualificationBinding,
     REQUEST_GATEWAY_PROTOCOL,
+    _public_model_id,
     qualification_binding,
 )
 from mycelium_request_gateway.service import RequestGatewayService
@@ -235,6 +236,13 @@ def test_exact_current_qualification_binding_admits(runtime, qualification):
     assert request_id == "request-001"
     assert backend.started_event.wait(timeout=1)
     assert backend.started == [_submission(qualification)]
+
+
+def test_public_model_id_preserves_bounded_provider_and_model_name():
+    assert (
+        _public_model_id("Qwen/Qwen2.5-0.5B-Instruct")
+        == "Qwen/Qwen2.5-0.5B-Instruct"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1,11 +1,12 @@
 {
-  "eligibility_generation": "085c9987e9fa1999d57073ffcac2aceb0c1e3f8ae229704f62a0c06c7e246627",
+  "eligibility_generation": "4ea7a37c1f91550d0ac0406ed80bf7e8a40782959ab77662c3d950be81571d1c",
   "nodes": [
     {
       "boot_id": "boot-node-a-1",
       "concurrency_limit": 2,
       "eligible": true,
       "exclusion_reasons": [],
+      "fast_allocatable_bytes": 34359738368,
       "in_flight": 0,
       "incarnation": 1,
       "memory_domains": [
@@ -29,7 +30,7 @@
       "queue_depth": 0,
       "status_version": {
         "incarnation": 1,
-        "payload_hash": "sha256:0e3869dc687a4cf82df7ae89609e304f75807fc1ff1ecd143d1955585b3f9b78",
+        "payload_hash": "sha256:0b9e0d738d714c183d79711100dd3e967a074e2d9f5d41ca131f320aa32997ff",
         "sequence": 1
       },
       "total_allocatable_bytes": 34359738368
@@ -39,6 +40,7 @@
       "concurrency_limit": 2,
       "eligible": true,
       "exclusion_reasons": [],
+      "fast_allocatable_bytes": 34359738368,
       "in_flight": 0,
       "incarnation": 1,
       "memory_domains": [
@@ -62,12 +64,12 @@
       "queue_depth": 0,
       "status_version": {
         "incarnation": 1,
-        "payload_hash": "sha256:6e74198056d3cdd1376f863d001a89b34ec9d70831acf5b4a1601fadf28a5bda",
+        "payload_hash": "sha256:88870e0038cb2a0ee394c315edd74be64042dfced3fab041ab8fca876b27d8f2",
         "sequence": 1
       },
       "total_allocatable_bytes": 34359738368
     }
   ],
   "protocol": "mycelium.gossip.allocator_view.v1",
-  "snapshot_generation": 8
+  "snapshot_generation": 10
 }

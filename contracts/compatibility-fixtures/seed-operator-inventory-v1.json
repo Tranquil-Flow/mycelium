@@ -1,0 +1,20 @@
+{
+  "members": [
+    {
+      "activation_eligible": true,
+      "generation": 2,
+      "incarnation": "incarnation-fixture",
+      "lease_freshness": "fresh",
+      "lifecycle_state": "RUNNING",
+      "node_id": "node-fixture",
+      "peer_class": "mac_mlx_iroh",
+      "revocation_state": "active"
+    }
+  ],
+  "observed_at_unix_ms": 1700000000000,
+  "protocol": "mycelium.seed_operator_inventory.v1",
+  "route_ready": false,
+  "seed_key_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "seed_node_id": "seed-fixture",
+  "swarm_id": "swarm-fixture"
+}

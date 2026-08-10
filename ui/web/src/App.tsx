@@ -24,6 +24,14 @@ import type {
 import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
+import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
+import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
+import {
+  ProductEvidenceSettings,
+  ProductEvidenceSummary,
+  ProductEvidenceWorkspace,
+  productEvidenceRouteReady,
+} from './features/productEvidence/ProductEvidenceWorkspace';
 import { LifecycleCoveragePanel } from './features/lifecycle/LifecycleBadge';
 import {
   LIFECYCLE_STATE_ORDER,
@@ -171,6 +179,7 @@ export default function App({
   productState,
   deviceLabOperatorToken = null,
 }: AppProps) {
+  const productEvidence = useProductEvidence();
   const effectiveProductState =
     productState !== undefined && productState.source_mode === source.source_mode
       ? productState
@@ -262,34 +271,76 @@ export default function App({
 
   const rendered: SourceResult =
     sourceResult.source === source ? sourceResult : { source, state: 'loading' };
+  const unifiedEvidenceReady = productEvidenceRouteReady(productEvidence.visible);
 
   let content;
   if (activeView === 'lab') {
-    content = <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />;
+    content = <>
+      <ProductEvidenceSummary compact />
+      <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />
+    </>;
   } else if (activeView === 'settings') {
-    content = <SettingsWorkspace />;
+    content = <>
+      <ProductEvidenceSummary compact />
+      <ProductEvidenceSettings />
+      <SettingsWorkspace />
+    </>;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
   } else if (rendered.state === 'error') {
     content = <BundleError message={rendered.message} sourceMode={source.source_mode} />;
   } else if (activeView === 'inference') {
     content = (
-      <InferenceWorkspace
-        client={source.source_mode !== 'live' ? fixtureInferenceClient : undefined}
-        externalBlockReason={
-          (source.source_mode !== 'live' || productState !== undefined) &&
-          !effectiveProductState.route_readiness.value
-            ? `Inference disabled: ${effectiveProductState.route_readiness.reasons.join(', ')}`
-            : null
-        }
-      />
+      <>
+        <ProductEvidenceSummary compact />
+        <InferenceWorkspace
+          client={source.source_mode !== 'live' ? fixtureInferenceClient : undefined}
+          externalBlockReason={
+            source.source_mode === 'live' && productEvidence.configured && !unifiedEvidenceReady
+              ? `Inference disabled: ${productEvidence.visible?.reason_code ?? 'unified product evidence is not current and qualified'}`
+              : (source.source_mode !== 'live' || productState !== undefined) &&
+                !effectiveProductState.route_readiness.value
+                ? `Inference disabled: ${effectiveProductState.route_readiness.reasons.join(', ')}`
+                : null
+          }
+        />
+      </>
     );
   } else if (rendered.sourceState.source_mode === 'live') {
-    content = activeView === 'nodes'
-      ? <ProductNodesWorkspace sourceMode="live" />
-      : isProductEventState(rendered.sourceState)
-        ? <ProductGatewayProjectionView state={rendered.sourceState} />
-        : <SemanticProjectionView state={rendered.sourceState} />;
+    content = productEvidence.configured
+      ? (
+          <>
+            <ProductEvidenceSummary compact />
+            {activeView === 'nodes' ? (
+              <ProductNodesWorkspace sourceMode="live" />
+            ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
+              <LiveRouteWorkspace
+                view={activeView}
+                qualification={
+                  isProductEventState(rendered.sourceState)
+                    ? rendered.sourceState.projection.snapshot.qualification
+                    : null
+                }
+                freshness={rendered.sourceState.freshness}
+              />
+            ) : (
+              <ProductEvidenceWorkspace view={activeView} />
+            )}
+          </>
+        )
+      : activeView === 'nodes'
+        ? <ProductNodesWorkspace sourceMode="live" />
+        : isProductEventState(rendered.sourceState)
+          ? activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents'
+            ? (
+                <LiveRouteWorkspace
+                  view={activeView}
+                  qualification={rendered.sourceState.projection.snapshot.qualification}
+                  freshness={rendered.sourceState.freshness}
+                />
+              )
+            : <ProductGatewayProjectionView state={rendered.sourceState} />
+          : <SemanticProjectionView state={rendered.sourceState} />;
   } else {
     const { snapshot, incidents, provisioning } = rendered.sourceState.bundle;
     switch (activeView) {
@@ -328,7 +379,8 @@ export default function App({
     sourceState.status === 'connected' &&
     sourceState.freshness === 'current' &&
     sourceState.route_ready &&
-    sourceState.projection.snapshot.qualification?.evidence_class === 'physical_qualification';
+    sourceState.projection.snapshot.qualification?.evidence_class === 'physical_qualification' &&
+    (!productEvidence.configured || unifiedEvidenceReady);
   const renderedProductState: ProductState = acceptedPhysicalLiveReadiness
     ? {
         ...effectiveProductState,
@@ -341,7 +393,19 @@ export default function App({
       }
     : effectiveProductState;
   const scopeLabel = (() => {
-    if (activeView === 'lab') return 'local browser-stage swarm';
+    if (activeView === 'lab' && !productEvidence.configured) return 'local browser-stage swarm';
+    if (productEvidence.visible !== null) {
+      const route = productEvidence.visible.snapshot.entities.find(
+        (entity) => entity.kind === 'route',
+      );
+      if (route !== undefined) {
+        const deployment = route.attributes.deployment_id;
+        const model = route.attributes.model_id;
+        if (typeof deployment === 'string' && typeof model === 'string') {
+          return `${deployment} · ${model}`;
+        }
+      }
+    }
     if (sourceState === null) {
       if (source.source_mode === 'fixture') return 'offline fixture';
       if (source.source_mode === 'replay') return 'replay evidence';
@@ -363,6 +427,8 @@ export default function App({
         sourceMode={source.source_mode}
         sourceState={sourceState}
         routeReadiness={renderedProductState.route_readiness}
+        productEvidenceConfigured={productEvidence.configured}
+        productEvidenceState={productEvidence.visible}
       >
         <ProductFeatureSlot
           route={activeView}

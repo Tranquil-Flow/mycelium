@@ -31,6 +31,12 @@ from mycelium_seed.http import (
 
 from . import membership as membership_module
 from .identity import load_or_create_node_signer
+from .durable_membership import (
+    PROTOCOL as MEMBERSHIP_STATE_PROTOCOL,
+    load_membership_state,
+    next_incarnation,
+    save_membership_state,
+)
 from .membership import NodeMembershipSession
 from .process import (
     _ExecutableIdentity,
@@ -47,11 +53,29 @@ from .process import (
 
 
 _STATUS_PROTOCOL = "mycelium.node_main_status.v1"
-_DEFAULT_CAPABILITY = {
-    "runtime_backend": "mlx",
-    "transport": "iroh",
-    "activation_protocol": "mycelium.router_wire.v1",
+_PEER_CAPABILITIES = {
+    "mac_mlx_iroh": {
+        "runtime_backend": "mlx",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    },
+    "android_termux_iroh": {
+        "runtime_backend": "pixel-stdlib",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    },
+    "linux_numpy_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    },
+    "linux_tbd": {
+        "runtime_backend": "tbd",
+        "transport": "none",
+        "activation_protocol": None,
+    },
 }
+_DEFAULT_CAPABILITY = _PEER_CAPABILITIES["mac_mlx_iroh"]
 _MAX_JOIN_BUNDLE_BYTES = 1024 * 1024
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY
@@ -253,7 +277,7 @@ def _validate_advertised_endpoint(value: str) -> str:
 def _parser() -> argparse.ArgumentParser:
     parser = _SafeArgumentParser(prog="python -m mycelium_node")
     parser.add_argument("--data-dir", required=True)
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group(required=False)
     source.add_argument(
         "--join-bundle-file",
         "--seed-invite",
@@ -261,11 +285,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     source.add_argument("--join-bundle-stdin", action="store_true")
     parser.add_argument("--node-id", required=True)
+    parser.add_argument(
+        "--peer-class",
+        choices=tuple(_PEER_CAPABILITIES),
+        default="mac_mlx_iroh",
+    )
+    parser.add_argument("--membership-endpoint-id")
     parser.add_argument("--advertise", action="append", required=True)
     parser.add_argument("--sidecar-path")
     parser.add_argument("--run-id", default="node-main-run")
     parser.add_argument("--deployment-id", default="node-main-unassigned")
     parser.add_argument("--incarnation", default="node-main")
+    parser.add_argument(
+        "--lifecycle-state",
+        choices=("NEW", "CONFIGURED", "RUNNING", "DRAINING"),
+        default="NEW",
+    )
     parser.add_argument("--heartbeat-interval", type=float, default=30.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser
@@ -364,6 +399,7 @@ def _preflight(
     SeedHTTPClient,
     Path,
     tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity],
+    dict[str, Any] | None,
 ]:
     state_root: PrivateDirectoryLease | None = None
     try:
@@ -373,13 +409,42 @@ def _preflight(
             args.data_dir,
             create=not args.dry_run,
         )
-        if args.join_bundle_stdin:
-            bundle = _stdin_document()
-        else:
-            bundle = _canonical_document(args.join_bundle_file)
         now = time.time()
-        verified = verify_invite_bundle(bundle, now=now)
-        client = SeedHTTPClient.from_invite_bundle(bundle, now=now)
+        persisted = load_membership_state(state_root.path)
+        if persisted is None:
+            if args.join_bundle_stdin:
+                bundle = _stdin_document()
+            elif args.join_bundle_file is not None:
+                bundle = _canonical_document(args.join_bundle_file)
+            else:
+                raise ValueError("join bundle is required for first enrollment")
+            verified = verify_invite_bundle(bundle, now=now)
+            client = SeedHTTPClient.from_invite_bundle(bundle, now=now)
+        else:
+            if (
+                persisted["node_id"] != args.node_id
+                or (
+                    args.membership_endpoint_id is not None
+                    and persisted["endpoint_id"] != args.membership_endpoint_id
+                )
+            ):
+                raise ValueError("persisted membership identity mismatch")
+            bundle = {}
+            verified = {
+                "payload": {
+                    "swarm_id": persisted["swarm_id"],
+                    "seed_url": persisted["seed_url"],
+                    "nonce": "persisted-resume",
+                },
+                "seed_key_digest": persisted["seed_key_digest"],
+                "seed_key_records": list(persisted["seed_key_records"]),
+            }
+            client = SeedHTTPClient(
+                seed_url=persisted["seed_url"],
+                swarm_id=persisted["swarm_id"],
+                seed_key_digest=persisted["seed_key_digest"],
+                seed_key_records=list(persisted["seed_key_records"]),
+            )
         sidecar = _sidecar_path(args.sidecar_path)
         advertised_endpoints = [
             _validate_advertised_endpoint(value) for value in args.advertise
@@ -398,22 +463,36 @@ def _preflight(
             sidecar_local_only=False,
         )
         validation_signer = generate_ed25519_signer(
-            endpoint_id="node-preflight-endpoint"
+            endpoint_id=args.membership_endpoint_id or "node-preflight-endpoint"
         )
         validation_session = NodeMembershipSession(
             node_id=args.node_id,
             swarm_id=verified["payload"]["swarm_id"],
             seed_node_id="seed-preflight-node",
             signer=validation_signer,
-            incarnation=args.incarnation,
+            incarnation=(
+                args.incarnation
+                if persisted is None
+                else next_incarnation(
+                    args.incarnation,
+                    int(persisted["restart_count"]) + 1,
+                )
+            ),
             software_version="mycelium-node-main",
-            peer_class="mac_mlx_iroh",
-            runtime_capability=_DEFAULT_CAPABILITY,
+            peer_class=args.peer_class,
+            runtime_capability=_PEER_CAPABILITIES[args.peer_class],
         )
-        validation_session.join_request(
-            invite_nonce=verified["payload"]["nonce"],
-            endpoint_addrs=advertised_endpoints,
-        )
+        if persisted is None:
+            validation_session.join_request(
+                invite_nonce=verified["payload"]["nonce"],
+                endpoint_addrs=advertised_endpoints,
+            )
+        else:
+            validation_session.resume_request(
+                previous_generation=int(persisted["membership_generation"]),
+                previous_incarnation=persisted["incarnation"],
+                endpoint_addrs=advertised_endpoints,
+            )
         membership_module.validate_heartbeat_shape(
             lifecycle_state="NEW",
             active_requests=0,
@@ -422,7 +501,7 @@ def _preflight(
             activity_receipt_digest=None,
             activity_peer_node_id=None,
         )
-        return state_root, bundle, verified, client, sidecar, identities
+        return state_root, bundle, verified, client, sidecar, identities, persisted
     except _EntrypointFailure as failure:
         cleanup_phases: list[str] = []
         if state_root is not None:
@@ -470,8 +549,12 @@ def _run_bound(
         _ExecutableIdentity,
         _ExecutableIdentity,
     ],
+    persisted: dict[str, Any] | None = None,
 ) -> int:
     try:
+        rotation_method = getattr(client, "rotation", None)
+        if callable(rotation_method):
+            rotation_method(now=time.time())
         seed_identity = client.identity(now=time.time() + 1.0)
     except Exception as exc:
         raise _EntrypointFailure(
@@ -483,35 +566,49 @@ def _run_bound(
     artifact_root: PrivateDirectoryLease | None = None
     try:
         state_root.revalidate()
-        signer = load_or_create_node_signer(Path("identity") / "node.key")
+        signer = load_or_create_node_signer(
+            Path("identity") / "node.key",
+            endpoint_id=args.membership_endpoint_id,
+        )
         state_root.revalidate()
+        runtime_incarnation = (
+            args.incarnation
+            if persisted is None
+            else next_incarnation(
+                args.incarnation,
+                int(persisted["restart_count"]) + 1,
+            )
+        )
+        if persisted is not None and signer.endpoint_id != persisted["endpoint_id"]:
+            raise ValueError("persisted membership identity mismatch")
         session = NodeMembershipSession(
             node_id=args.node_id,
             swarm_id=verified["payload"]["swarm_id"],
             seed_node_id=seed_identity["seed_node_id"],
             signer=signer,
-            incarnation=args.incarnation,
+            incarnation=runtime_incarnation,
             software_version="mycelium-node-main",
-            peer_class="mac_mlx_iroh",
-            runtime_capability=_DEFAULT_CAPABILITY,
+            peer_class=args.peer_class,
+            runtime_capability=_PEER_CAPABILITIES[args.peer_class],
         )
         artifact_root = state_root.private_subdirectory("artifacts")
         state_root.revalidate()
         artifact_root.revalidate()
         temporary_root = _temporary_root()
-        command = build_physical_node_command(
-            python_executable=_service_interpreter(),
-            service_script=Path(__file__).resolve().parents[1]
-            / "physical_inference_node.py",
-            run_id=args.run_id,
-            deployment_id=args.deployment_id,
-            node_id=args.node_id,
-            artifact_root=Path("artifacts"),
-            socket_root=temporary_root.path,
-            sidecar_binary=sidecar,
-            sidecar_local_only=False,
-            descriptor_relative_artifact_root=True,
-        )
+        with state_root.working_directory():
+            command = build_physical_node_command(
+                python_executable=_service_interpreter(),
+                service_script=Path(__file__).resolve().parents[1]
+                / "physical_inference_node.py",
+                run_id=args.run_id,
+                deployment_id=args.deployment_id,
+                node_id=args.node_id,
+                artifact_root=Path("artifacts"),
+                socket_root=temporary_root.path,
+                sidecar_binary=sidecar,
+                sidecar_local_only=False,
+                descriptor_relative_artifact_root=True,
+            )
         state_root.revalidate()
         artifact_root.revalidate()
     except Exception as exc:
@@ -536,6 +633,7 @@ def _run_bound(
 
     process: PhysicalNodeProcess | None = None
     stopping = threading.Event()
+    acknowledged_authority_generation: int | None = None
     previous: dict[int, object] = {}
     failure: _EntrypointFailure | None = None
 
@@ -545,30 +643,100 @@ def _run_bound(
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
             previous[signum] = signal.signal(signum, request_stop)
-        process = PhysicalNodeProcess(
-            command=command,
-            node_id=args.node_id,
-            run_id=args.run_id,
-            deployment_id=args.deployment_id,
-            expected_executables=identities,
-        )
+        # The child resolves its descriptor-relative artifact directory during
+        # startup, so pin its inherited cwd to the retained state-root fd.
+        with state_root.working_directory():
+            process = PhysicalNodeProcess(
+                command=command,
+                node_id=args.node_id,
+                run_id=args.run_id,
+                deployment_id=args.deployment_id,
+                expected_executables=identities,
+            )
         hello = process.command("hello")
         if not isinstance(hello, dict) or hello.get("route_ready") is not False:
             raise RuntimeError("node child claim is invalid")
 
-        request = session.join_request(
-            invite_nonce=verified["payload"]["nonce"],
-            endpoint_addrs=args.advertise,
-        )
         try:
-            acceptance = client.join(
-                invite_token=bundle["token"],
-                join_envelope=request,
+            rotation = client.rotation(now=time.time())
+            if persisted is None:
+                request = session.join_request(
+                    invite_nonce=verified["payload"]["nonce"],
+                    endpoint_addrs=args.advertise,
+                )
+                acceptance = client.join(
+                    invite_token=bundle["token"],
+                    join_envelope=request,
+                )
+                accepted_digest = client.accepted_seed_key_digest(
+                    acceptance,
+                    now=time.time(),
+                )
+                session.accept_join(
+                    acceptance,
+                    seed_key_digest=accepted_digest,
+                )
+                restart_count = 0
+            else:
+                request = session.resume_request(
+                    previous_generation=int(persisted["membership_generation"]),
+                    previous_incarnation=persisted["incarnation"],
+                    endpoint_addrs=args.advertise,
+                )
+                acceptance = client.resume(resume_envelope=request)
+                accepted_digest = client.accepted_seed_key_digest(
+                    acceptance,
+                    now=time.time(),
+                )
+                session.accept_resume(
+                    acceptance,
+                    seed_key_digest=accepted_digest,
+                )
+                restart_count = int(persisted["restart_count"]) + 1
+            acceptance_record = acceptance.get("verification_key")
+            if not isinstance(acceptance_record, dict):
+                records = verified.get("seed_key_records")
+                acceptance_record = (
+                    dict(records[0])
+                    if isinstance(records, (list, tuple))
+                    and len(records) == 1
+                    and isinstance(records[0], dict)
+                    else None
+                )
+            if not isinstance(acceptance_record, dict):
+                raise ValueError("membership acceptance key is invalid")
+            save_membership_state(
+                state_root.path,
+                {
+                    "protocol": MEMBERSHIP_STATE_PROTOCOL,
+                    "node_id": args.node_id,
+                    "swarm_id": verified["payload"]["swarm_id"],
+                    "seed_node_id": seed_identity["seed_node_id"],
+                    "seed_url": verified["payload"]["seed_url"],
+                    "seed_key_digest": accepted_digest,
+                    "seed_key_records": [dict(acceptance_record)],
+                    "endpoint_id": signer.endpoint_id,
+                    "incarnation": runtime_incarnation,
+                    "membership_generation": session.generation,
+                    "restart_count": restart_count,
+                },
             )
-            session.accept_join(
-                acceptance,
-                seed_key_digest=verified["seed_key_digest"],
-            )
+            state_root.revalidate()
+            if (
+                rotation is not None
+                and session.seed_key_digest
+                == rotation["transition"]["old_seed_key_digest"]
+            ):
+                session.trust_seed_rotation(
+                    rotation["transition"],
+                    old_endpoint_id=rotation["old_signature"]["signer_endpoint_id"],
+                    new_endpoint_id=rotation["new_signature"]["signer_endpoint_id"],
+                )
+                acknowledgement = session.seed_rotation_acknowledgement()
+                client.send_member_message(acknowledgement, now=time.time() + 1.0)
+                acknowledged_authority_generation = int(
+                    rotation["transition"]["authority_generation"]
+                )
         except SeedHTTPError as exc:
             if _join_rejected(exc):
                 raise _EntrypointFailure(
@@ -585,7 +753,10 @@ def _run_bound(
                 EXIT_RUNTIME_FAILURE,
             ) from exc
 
-        heartbeat = session.heartbeat(lifecycle_state="NEW", active_requests=0)
+        heartbeat = session.heartbeat(
+            lifecycle_state=args.lifecycle_state,
+            active_requests=0,
+        )
         renewal = client.send_member_message(
             heartbeat,
             now=time.time() + 1.0,
@@ -594,8 +765,7 @@ def _run_bound(
             renewal,
             heartbeat_message_id=heartbeat["message"]["message_id"],
         )
-        _emit_status(
-            {
+        status: dict[str, object] = {
                 "protocol": _STATUS_PROTOCOL,
                 "event": "node_started",
                 "node_id": args.node_id,
@@ -605,10 +775,33 @@ def _run_bound(
                 "node_process_pid": process.pid,
                 "route_ready": False,
             }
-        )
+        if persisted is not None:
+            status["membership_resumed"] = True
+        _emit_status(status)
         while not stopping.wait(args.heartbeat_interval):
+            rotation = client.rotation(now=time.time())
+            if (
+                rotation is not None
+                and session.seed_key_digest
+                == rotation["transition"]["old_seed_key_digest"]
+            ):
+                session.trust_seed_rotation(
+                    rotation["transition"],
+                    old_endpoint_id=rotation["old_signature"]["signer_endpoint_id"],
+                    new_endpoint_id=rotation["new_signature"]["signer_endpoint_id"],
+                )
+                authority_generation = int(
+                    rotation["transition"]["authority_generation"]
+                )
+                if acknowledged_authority_generation != authority_generation:
+                    acknowledgement = session.seed_rotation_acknowledgement()
+                    client.send_member_message(
+                        acknowledgement,
+                        now=time.time() + 1.0,
+                    )
+                    acknowledged_authority_generation = authority_generation
             heartbeat = session.heartbeat(
-                lifecycle_state="NEW",
+                lifecycle_state=args.lifecycle_state,
                 active_requests=0,
             )
             renewal = client.send_member_message(
@@ -657,7 +850,7 @@ def _run_bound(
 
 def run(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    state_root, bundle, verified, client, sidecar, identities = _preflight(args)
+    state_root, bundle, verified, client, sidecar, identities, persisted = _preflight(args)
     failure: _EntrypointFailure | None = None
     result = EXIT_SUCCESS
     try:
@@ -679,6 +872,7 @@ def run(argv: Sequence[str] | None = None) -> int:
                     client,
                     sidecar,
                     identities,
+                    persisted,
                 )
     except _EntrypointFailure as exc:
         failure = exc

@@ -106,10 +106,9 @@ def test_fixture_serve_stops_when_dependency_bootstrap_fails() -> None:
     assert calls == [["npm", "ci"]]
 
 
-def test_live_serve_delegates_to_same_origin_browser_mlx_runtime(tmp_path: Path) -> None:
+def test_live_serve_delegates_to_qualified_physical_runtime(tmp_path: Path) -> None:
     calls: list[list[str]] = []
-    token_file = tmp_path / "operator-token"
-    state_root = tmp_path / "state"
+    operator_plan = tmp_path / "operator-plan.json"
 
     exit_code = cli.main(
         [
@@ -120,10 +119,10 @@ def test_live_serve_delegates_to_same_origin_browser_mlx_runtime(tmp_path: Path)
             "127.0.0.1",
             "--port",
             "8799",
-            "--state-root",
-            str(state_root),
-            "--operator-token-file",
-            str(token_file),
+            "--operator-plan",
+            str(operator_plan),
+            "--seed-state-root",
+            str(tmp_path / "seed"),
         ],
         live_server_main=lambda argv: calls.append(list(argv)) or 17,
         process_runner=lambda *args, **kwargs: pytest.fail("fixture process must not start"),
@@ -137,15 +136,15 @@ def test_live_serve_delegates_to_same_origin_browser_mlx_runtime(tmp_path: Path)
             "127.0.0.1",
             "--port",
             "8799",
-            "--state-root",
-            str(state_root),
-            "--operator-token-file",
-            str(token_file),
+            "--operator-plan",
+            str(operator_plan),
+            "--seed-state-root",
+            str(tmp_path / "seed"),
         ]
     ]
 
 
-def test_live_serve_forwards_optional_https_and_static_arguments(tmp_path: Path) -> None:
+def test_live_serve_forwards_deployment_and_static_arguments(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     exit_code = cli.main(
@@ -153,16 +152,14 @@ def test_live_serve_forwards_optional_https_and_static_arguments(tmp_path: Path)
             "serve",
             "--mode",
             "live",
-            "--public-origin",
-            "https://demo.example",
+            "--operator-plan",
+            str(tmp_path / "operator-plan.json"),
+            "--deployment-dir",
+            str(tmp_path / "deployment"),
             "--static-root",
             str(tmp_path / "static"),
-            "--worker-static-root",
-            str(tmp_path / "worker-static"),
-            "--tls-cert",
-            str(tmp_path / "cert.pem"),
-            "--tls-key",
-            str(tmp_path / "key.pem"),
+            "--seed-state-root",
+            str(tmp_path / "seed"),
         ],
         live_server_main=lambda argv: calls.append(list(argv)) or 0,
         environ={},
@@ -175,18 +172,55 @@ def test_live_serve_forwards_optional_https_and_static_arguments(tmp_path: Path)
             "127.0.0.1",
             "--port",
             "8787",
-            "--public-origin",
-            "https://demo.example",
+            "--operator-plan",
+            str(tmp_path / "operator-plan.json"),
+            "--deployment-dir",
+            str(tmp_path / "deployment"),
             "--static-root",
             str(tmp_path / "static"),
-            "--worker-static-root",
-            str(tmp_path / "worker-static"),
-            "--tls-cert",
-            str(tmp_path / "cert.pem"),
-            "--tls-key",
-            str(tmp_path / "key.pem"),
+            "--seed-state-root",
+            str(tmp_path / "seed"),
         ]
     ]
+
+
+def test_live_serve_forwards_multiple_qualified_deployment_plans(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+
+    exit_code = cli.main(
+        [
+            "serve",
+            "--mode",
+            "live",
+            "--operator-plan",
+            str(first),
+            "--operator-plan",
+            str(second),
+            "--seed-state-root",
+            str(tmp_path / "seed"),
+        ],
+        live_server_main=lambda argv: calls.append(list(argv)) or 0,
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert calls[0][-6:] == [
+        "--operator-plan",
+        str(first),
+        "--operator-plan",
+        str(second),
+        "--seed-state-root",
+        str(tmp_path / "seed"),
+    ]
+
+
+def test_live_serve_requires_operator_plan() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["serve", "--mode", "live"], environ={})
+
+    assert exc.value.code == 2
 
 
 def test_fixture_serve_rejects_live_only_arguments(tmp_path: Path) -> None:

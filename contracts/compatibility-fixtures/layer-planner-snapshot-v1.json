@@ -1,9 +1,11 @@
 {
+  "capacity_profile_bindings": {},
+  "decode_mode": "stage_local_kv",
   "deployment": {
     "deployment_epoch": 1,
     "deployment_id": "12345678-1234-5678-1234-567812345678"
   },
-  "evidence_bundle_digest": "sha256:07c57801ddc10d4955cda04cdc547d768791dddd51e60cbb1f1ebc2de1e1b805",
+  "evidence_bundle_digest": "sha256:3eb094fdd637e59cb6aafee58dccca8796a4dab719e6550f7ec2887a289ab7a8",
   "links": [
     {
       "bandwidth_Bps": 112500000.0,
@@ -38,6 +40,16 @@
     "weight_bytes": 53687091200,
     "weight_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e"
   },
+  "node_runtime": {
+    "node-a": {
+      "backend": "mlx",
+      "decode_mode": "stage_local_kv"
+    },
+    "node-b": {
+      "backend": "mlx",
+      "decode_mode": "stage_local_kv"
+    }
+  },
   "nodes": [
     {
       "calibration_confidence": 1.0,
@@ -60,6 +72,7 @@
       "total_memory_bytes": 34359738368
     }
   ],
+  "placement_provenance": "planner_v2",
   "policy": {
     "memory_reserve_fraction": 0,
     "replica_budget": 0,
@@ -67,7 +80,7 @@
     "ttft_slo_ms": 1000000
   },
   "protocol": "mycelium.layer_planner_snapshot.v1",
-  "snapshot_generation": 8,
+  "snapshot_generation": 10,
   "swarm_id": "swarm-a",
   "workload": {
     "concurrency_points": [

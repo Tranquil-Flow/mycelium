@@ -118,3 +118,17 @@ The interactive browser path remains local qualification evidence:
 Physical Iroh activation, cross-device execution, sealed route evidence, and a
 qualification-authority decision are separate remaining work. Only that
 physical qualification path may produce `route_ready=true`.
+
+## Trusted multi-device operator path
+
+`scripts/mint_swarm_invites.py` provides the bounded native-device enrollment entry
+point. It pins the live HTTP seed to the durable signer in its owner-only state
+directory, creates at most 64 unique single-use bundles, writes every bundle mode
+`0600` beneath a new mode-`0700` batch directory, and emits only a digest manifest and
+sanitized status. It never overwrites a prior batch and never claims route readiness.
+
+The current product UI intentionally leaves these mutations disabled: an invitation
+is a credential, while the UI consumes privacy-reduced projections. Operators follow
+`docs/swarm-multi-device-onboarding.md`; external testers are bounded by
+`docs/contracts/external-tester-boundary.md`. Membership remains separate from
+capability evidence, placement, artifact loading, and physical route qualification.

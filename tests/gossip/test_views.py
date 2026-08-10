@@ -231,6 +231,38 @@ def test_allocator_view_counts_unified_memory_domain_once() -> None:
     assert domain.reclaimable_bytes == 2 * 1024**3
     assert domain.reservation_generation == 1
     assert node_a.total_allocatable_bytes == 32 * 1024**3
+    assert node_a.fast_allocatable_bytes == 32 * 1024**3
+
+
+def test_allocator_view_keeps_fast_and_total_memory_tiers_distinct() -> None:
+    store = populated_store(FakeClock())
+    status = status_payload("node-a")
+    status["memory_domains"] = [
+        {
+            "memory_domain_id": "system-0",
+            "kind": "system",
+            "total_bytes": 32 * 1024**3,
+            "allocatable_after_reservations_bytes": 24 * 1024**3,
+            "committed_bytes": 0,
+            "reclaimable_bytes": 0,
+            "reservation_generation": 1,
+        },
+        {
+            "memory_domain_id": "vram-0",
+            "kind": "vram",
+            "total_bytes": 16 * 1024**3,
+            "allocatable_after_reservations_bytes": 12 * 1024**3,
+            "committed_bytes": 0,
+            "reclaimable_bytes": 0,
+            "reservation_generation": 1,
+        },
+    ]
+    store.apply(make_record(RecordKind.STATUS, node_id="node-a", sequence=2, payload=status))
+
+    view = build_allocator_view(store.snapshot(), (alive("node-a"), alive("node-b")), ())
+    node_a = next(node for node in view.nodes if node.node_id == "node-a")
+    assert node_a.fast_allocatable_bytes == 12 * 1024**3
+    assert node_a.total_allocatable_bytes == 36 * 1024**3
 
 
 def test_allocator_view_keeps_ineligible_node_with_reason_for_diagnostics() -> None:

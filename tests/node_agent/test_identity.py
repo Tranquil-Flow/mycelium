@@ -7,7 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from mycelium_node.identity import NodeIdentityError, load_or_create_node_signer
+from mycelium_node.identity import (
+    NodeIdentityError,
+    load_node_signer,
+    load_or_create_node_signer,
+)
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import build_ed25519_verifier
 
@@ -31,6 +35,48 @@ def test_identity_survives_restart_and_signs_with_same_pin(tmp_path: Path) -> No
     assert stat.S_IMODE(key_path.parent.lstat().st_mode) == 0o700
     assert key_path.stat().st_size == 32
     assert "verification_key" not in key_path.name
+
+
+def test_transport_endpoint_label_does_not_change_durable_identity(
+    tmp_path: Path,
+) -> None:
+    key_path = tmp_path / "private" / "node-identity.key"
+    transport_endpoint = "iroh-pixel8-endpoint"
+
+    enrolled = load_or_create_node_signer(
+        key_path,
+        endpoint_id=transport_endpoint,
+    )
+    restored = load_node_signer(
+        key_path,
+        endpoint_id=transport_endpoint,
+    )
+    derived = load_node_signer(key_path)
+
+    assert enrolled.endpoint_id == transport_endpoint
+    assert restored.endpoint_id == transport_endpoint
+    assert derived.endpoint_id.startswith("node-identity-")
+    assert {
+        enrolled.verification_key_digest,
+        restored.verification_key_digest,
+        derived.verification_key_digest,
+    } == {enrolled.verification_key_digest}
+    statement = {"protocol": "test.node.transport_binding.v1", "value": 19}
+    verifier = build_ed25519_verifier([derived.public_key_record()])
+    assert verifier(canonical_json_bytes(statement), enrolled.sign(statement)) is True
+
+
+@pytest.mark.parametrize("endpoint_id", ["", " endpoint", "endpoint "])
+def test_transport_endpoint_label_must_be_canonical(
+    tmp_path: Path,
+    endpoint_id: str,
+) -> None:
+    with pytest.raises(NodeIdentityError) as excinfo:
+        load_or_create_node_signer(
+            tmp_path / "private" / "node-identity.key",
+            endpoint_id=endpoint_id,
+        )
+    assert excinfo.value.code == "node_identity_endpoint_invalid"
 
 
 def test_concurrent_first_load_converges_on_one_identity(tmp_path: Path) -> None:

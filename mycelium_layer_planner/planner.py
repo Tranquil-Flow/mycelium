@@ -169,6 +169,9 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             "target_kv_owner": result.target_kv_owner,
         }
     diagnostics = {
+        "placement_provenance": snapshot.get("placement_provenance", "planner_v2"),
+        "decode_mode": snapshot.get("decode_mode", "unknown"),
+        "node_runtime": dict(snapshot.get("node_runtime", {})),
         "topology": "ordered_stage_groups_with_independent_loops_and_cross_edges",
         "primary_order": list(primary.order),
         "frozen_primary_order": list(primary.frozen_primary_order),

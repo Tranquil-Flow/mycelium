@@ -7,6 +7,8 @@ import math
 import re
 from typing import Any, Mapping, Sequence
 
+from mycelium_request_gateway.contracts import is_public_model_id
+
 
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 REQUEST_PROTOCOL = "mycelium.request_gateway.v1"
@@ -192,8 +194,8 @@ def valid_binding(document: object) -> bool:
     assert isinstance(document, Mapping)
     if not all(
         _public_identifier(document[field])
-        for field in ("qualification_id", "deployment_id", "model_id", "resolved_commit")
-    ):
+        for field in ("qualification_id", "deployment_id", "resolved_commit")
+    ) or not is_public_model_id(document["model_id"]):
         return False
     if not all(
         _sha256(document[field])

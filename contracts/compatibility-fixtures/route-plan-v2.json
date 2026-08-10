@@ -9,12 +9,15 @@
       "node-a",
       "node-b"
     ],
+    "decode_mode": "unknown",
     "excluded_nodes": {},
     "frozen_primary_order": [
       "node-a",
       "node-b"
     ],
+    "node_runtime": {},
     "path_cost": "phase_sensitive_latency_plus_payload_over_bandwidth",
+    "placement_provenance": "planner_v2",
     "primary_order": [
       "node-a",
       "node-b"

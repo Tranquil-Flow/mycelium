@@ -1,19 +1,35 @@
-import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   MAX_NEW_TOKENS,
   MAX_PROMPT_UTF8_BYTES,
 } from '../../app/contracts';
 import { ProductInferenceClient, type InferenceClient } from './requestClient';
+import {
+  createBrowserInferenceTabSessionStore,
+  type InferenceTabSessionStore,
+} from './sessionStore';
 import { isTerminalInferencePhase } from './types';
 import { useInferenceSession } from './useInferenceSession';
 import styles from './InferenceWorkspace.module.css';
+import {
+  HttpDeploymentRegistryClient,
+  type DeploymentRegistryClient,
+  type DeploymentRegistryStatus,
+} from './deploymentClient';
 
 const encoder = new TextEncoder();
+const activeModelDisplay = Object.freeze({
+  name: import.meta.env.VITE_ACTIVE_MODEL_DISPLAY_NAME?.trim() ?? '',
+  deployment_id: import.meta.env.VITE_ACTIVE_MODEL_DEPLOYMENT_ID?.trim() ?? '',
+  manifest_digest: import.meta.env.VITE_ACTIVE_MODEL_MANIFEST_DIGEST?.trim() ?? '',
+});
 
 export interface InferenceWorkspaceProps {
   readonly client?: InferenceClient;
   readonly now?: () => number;
   readonly externalBlockReason?: string | null;
+  readonly sessionStore?: InferenceTabSessionStore | null;
+  readonly deploymentClient?: DeploymentRegistryClient | null;
 }
 
 function phaseLabel(phase: ReturnType<typeof useInferenceSession>['phase']): string {
@@ -53,11 +69,82 @@ function executionLabel(
   return 'Execution source unknown — distributed execution disabled';
 }
 
-export function InferenceWorkspace({ client, now, externalBlockReason = null }: InferenceWorkspaceProps) {
+function activityCopy(
+  phase: ReturnType<typeof useInferenceSession>['phase'],
+  tokenCount: number,
+  stageCount: number,
+): { readonly title: string; readonly detail: string } | null {
+  if (phase === 'submitting') {
+    return {
+      title: 'Submitting request',
+      detail: 'Revalidating the captured model and deployment binding.',
+    };
+  }
+  if (phase === 'streaming' && tokenCount === 0) {
+    return {
+      title: 'Waiting for first token',
+      detail: `Distributed prefill and first-token decode are running across ${stageCount} qualified ${stageCount === 1 ? 'stage' : 'stages'}.`,
+    };
+  }
+  if (phase === 'streaming') {
+    return {
+      title: 'Generating response',
+      detail: 'Decoded tokens are streaming back from the qualified route.',
+    };
+  }
+  if (phase === 'cancelling') {
+    return {
+      title: 'Stopping generation',
+      detail: 'Cancellation is propagating across the qualified route.',
+    };
+  }
+  return null;
+}
+
+function modelDisplayName(
+  qualification: ReturnType<typeof useInferenceSession>['qualification'],
+): string {
+  if (qualification === null) return 'Unknown';
+  if (
+    activeModelDisplay.name.length > 0 &&
+    activeModelDisplay.deployment_id === qualification.binding.deployment_id &&
+    activeModelDisplay.manifest_digest === qualification.binding.manifest_digest
+  ) {
+    return activeModelDisplay.name;
+  }
+  return qualification.binding.model_id;
+}
+
+function historyPreview(value: string, emptyLabel: string): string {
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (compact.length === 0) return emptyLabel;
+  return compact.length <= 96 ? compact : `${compact.slice(0, 95)}…`;
+}
+
+export function InferenceWorkspace({
+  client,
+  now,
+  externalBlockReason = null,
+  sessionStore,
+  deploymentClient,
+}: InferenceWorkspaceProps) {
   const defaultClient = useMemo(() => new ProductInferenceClient(), []);
-  const session = useInferenceSession({ client: client ?? defaultClient, now });
-  const [prompt, setPrompt] = useState('');
-  const [maxNewTokens, setMaxNewTokens] = useState(256);
+  const defaultSessionStore = useMemo(() => createBrowserInferenceTabSessionStore(), []);
+  const defaultDeploymentClient = useMemo(() => new HttpDeploymentRegistryClient(), []);
+  const effectiveDeploymentClient = deploymentClient === undefined
+    ? client === undefined ? defaultDeploymentClient : null
+    : deploymentClient;
+  const effectiveSessionStore = sessionStore === undefined ? defaultSessionStore : sessionStore;
+  const restored = useMemo(() => effectiveSessionStore?.load() ?? null, [effectiveSessionStore]);
+  const session = useInferenceSession({
+    client: client ?? defaultClient,
+    now,
+    restored_state: restored?.session,
+  });
+  const [prompt, setPrompt] = useState(restored?.prompt ?? '');
+  const [maxNewTokens, setMaxNewTokens] = useState(restored?.max_new_tokens ?? 8);
+  const [deploymentRegistry, setDeploymentRegistry] = useState<DeploymentRegistryStatus | null>(null);
+  const [deploymentSwitching, setDeploymentSwitching] = useState(false);
   const promptBytes = encoder.encode(prompt).byteLength;
   const promptReason = prompt.length === 0
     ? 'Prompt is required'
@@ -72,6 +159,41 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
   const canResume = session.accepted_request !== null &&
     (session.phase === 'interrupted' || session.phase === 'cancelling');
   const qualification = session.qualification;
+  const activeModelName = modelDisplayName(qualification);
+  const stageCount = Math.max(
+    1,
+    qualification?.binding.stage_load_proof_digests.length ?? 1,
+  );
+  const activity = activityCopy(session.phase, session.token_count, stageCount);
+
+  useEffect(() => {
+    effectiveSessionStore?.save({
+      prompt,
+      max_new_tokens: maxNewTokens,
+      session,
+    });
+  }, [effectiveSessionStore, maxNewTokens, prompt, session]);
+
+  useEffect(() => {
+    if (effectiveDeploymentClient === null) return;
+    const controller = new AbortController();
+    void effectiveDeploymentClient.status(controller.signal)
+      .then(setDeploymentRegistry)
+      .catch(() => setDeploymentRegistry(null));
+    return () => controller.abort();
+  }, [effectiveDeploymentClient]);
+
+  const selectDeployment = async (deploymentId: string): Promise<void> => {
+    if (effectiveDeploymentClient === null || active || deploymentSwitching) return;
+    setDeploymentSwitching(true);
+    try {
+      const next = await effectiveDeploymentClient.select(deploymentId);
+      setDeploymentRegistry(next);
+      await session.reload_qualification();
+    } finally {
+      setDeploymentSwitching(false);
+    }
+  };
 
   const submit = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault();
@@ -97,8 +219,8 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
           </p>
         </div>
         <div className={styles.privacy} aria-label="Inference privacy policy">
-          <strong>Session memory only</strong>
-          <span>Prompt and output are not persisted by default.</span>
+          <strong>Tab-session history</strong>
+          <span>Prompt and output stay only in this tab and survive navigation or refresh.</span>
         </div>
       </header>
 
@@ -138,19 +260,35 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
 
           <div className={styles.controls}>
             <label className={styles.field}>
-              <span>Qualified model and deployment</span>
+              <span>Active qualified model and deployment</span>
               <select
-                value={qualification === null ? 'unavailable' : 'current'}
-                disabled
-                aria-label="Qualified model and deployment"
+                value={deploymentRegistry?.selected_deployment_id ?? (qualification === null ? 'unavailable' : qualification.binding.deployment_id)}
+                disabled={
+                  active ||
+                  deploymentSwitching ||
+                  deploymentRegistry === null ||
+                  !deploymentRegistry.switching_allowed ||
+                  deploymentRegistry.deployments.filter((item) => item.health === 'qualified').length < 2
+                }
+                onChange={(event) => void selectDeployment(event.currentTarget.value)}
+                aria-label="Active qualified model and deployment"
               >
                 <option value="unavailable">Qualification unavailable</option>
-                {qualification !== null ? (
-                  <option value="current">
-                    {qualification.binding.model_id} · {qualification.binding.deployment_id}
-                  </option>
-                ) : null}
+                {deploymentRegistry !== null
+                  ? deploymentRegistry.deployments.map((item) => (
+                      <option key={item.deployment_id} value={item.deployment_id} disabled={item.health !== 'qualified'}>
+                        {item.model_id} · {item.quantization} · {item.topology_size} stages
+                      </option>
+                    ))
+                  : qualification !== null
+                    ? <option value={qualification.binding.deployment_id}>{activeModelName} · {qualification.binding.deployment_id}</option>
+                    : null}
               </select>
+              <small className={styles.fieldHelp}>
+                {deploymentRegistry === null
+                  ? 'Read-only until multiple qualified deployments are live.'
+                  : 'Switching is atomic and disabled while a request is active.'}
+              </small>
             </label>
             <label className={styles.field}>
               <span>Maximum new tokens</span>
@@ -235,7 +373,12 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
             </div>
             <div>
               <dt>Model</dt>
-              <dd>{qualification?.binding.model_id ?? 'Unknown'}</dd>
+              <dd className={styles.modelIdentity}>
+                <strong>{activeModelName}</strong>
+                {qualification !== null && activeModelName !== qualification.binding.model_id ? (
+                  <small>Admission identity: {qualification.binding.model_id}</small>
+                ) : null}
+              </dd>
             </div>
             <div>
               <dt>Deployment</dt>
@@ -268,6 +411,33 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
             <span>{session.token_count.toLocaleString()} tokens applied</span>
           </div>
         </div>
+        {activity !== null ? (
+          <div
+            className={styles.routeActivity}
+            role="status"
+            aria-live="polite"
+            aria-label="Distributed route activity"
+          >
+            <div className={styles.activityCopy}>
+              <strong>{activity.title}</strong>
+              <span>{activity.detail}</span>
+            </div>
+            <div className={styles.activityRoute} aria-hidden="true">
+              <i className={styles.activityGateway} />
+              <span className={styles.activityTrack}>
+                <i className={styles.activitySignal} />
+              </span>
+              {Array.from({ length: Math.min(stageCount, 5) }, (_, index) => (
+                <i
+                  className={styles.activityStage}
+                  style={{ animationDelay: `${index * 180}ms` }}
+                  key={index}
+                />
+              ))}
+            </div>
+            <small>Live request activity; per-stage timing is not currently exposed.</small>
+          </div>
+        ) : null}
         <pre
           className={styles.output}
           role="log"
@@ -277,7 +447,7 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
           aria-relevant="additions"
           tabIndex={0}
         >
-          {session.output || 'Decoded output will appear here. Nothing is stored after this page session.'}
+          {session.output || 'Decoded output will appear here and stay only in this tab session.'}
         </pre>
       </section>
 
@@ -288,12 +458,26 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
               <p className={styles.eyebrow}>Privacy-safe tab metadata</p>
               <h2 id="history-title">Request history</h2>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                effectiveSessionStore?.clear();
+                session.clear_session();
+                setPrompt('');
+                setMaxNewTokens(8);
+              }}
+              disabled={active}
+            >
+              Clear session history
+            </button>
           </div>
           <div className={styles.tableWrap}>
             <table>
               <thead>
                 <tr>
                   <th scope="col">Request</th>
+                  <th scope="col">Prompt</th>
+                  <th scope="col">Response</th>
                   <th scope="col">Model</th>
                   <th scope="col">Deployment</th>
                   <th scope="col">Terminal state</th>
@@ -305,7 +489,23 @@ export function InferenceWorkspace({ client, now, externalBlockReason = null }: 
                 {session.history.map((entry) => (
                   <tr key={entry.request_id}>
                     <th scope="row">{entry.request_id}</th>
-                    <td>{entry.model_id}</td>
+                    <td>
+                      <details className={styles.historyText}>
+                        <summary>{historyPreview(entry.prompt, 'Prompt not retained')}</summary>
+                        <pre>{entry.prompt || 'Prompt not retained'}</pre>
+                      </details>
+                    </td>
+                    <td>
+                      <details className={styles.historyText}>
+                        <summary>{historyPreview(entry.response, 'No decoded response')}</summary>
+                        <pre>{entry.response || 'No decoded response'}</pre>
+                      </details>
+                    </td>
+                    <td>
+                      {qualification !== null && entry.model_id === qualification.binding.model_id
+                        ? activeModelName
+                        : entry.model_id}
+                    </td>
                     <td>{entry.deployment_id}</td>
                     <td>{entry.terminal_state}</td>
                     <td>{entry.token_count}</td>

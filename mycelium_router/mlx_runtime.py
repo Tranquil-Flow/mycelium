@@ -48,6 +48,7 @@ from runtime_loader import (
    canonical_json,
    execute_loaded_stage as _execute_loaded_stage,
 )
+from weight_quantization import Int8RowwiseWeight
 
 
 _SHA256_REF_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -248,6 +249,144 @@ def _gpt2_block_with_kv(
       + tensors[f"{prefix}mlp.c_proj.bias"]
    )
    return residual + feed_forward, (all_key, all_value)
+
+
+def _rms_norm(
+   hidden: mx.array,
+   weight: mx.array,
+   epsilon: float,
+) -> mx.array:
+   dtype = hidden.dtype
+   compute = hidden.astype(mx.float32)
+   normalized = compute * mx.rsqrt(
+      mx.mean(mx.square(compute), axis=-1, keepdims=True) + epsilon
+   )
+   return (normalized * weight.astype(mx.float32)).astype(dtype)
+
+
+def _qwen2_linear(hidden: mx.array, weight: Any) -> mx.array:
+   if isinstance(weight, Int8RowwiseWeight):
+      projected = mx.matmul(
+         hidden,
+         weight.values.astype(mx.float32).transpose(1, 0),
+      )
+      return projected * weight.scales
+   return mx.matmul(hidden, weight.transpose(1, 0))
+
+
+def _qwen2_embedding(weight: Any, token_ids: mx.array) -> mx.array:
+   if isinstance(weight, Int8RowwiseWeight):
+      return (
+         weight.values[token_ids].astype(mx.float32)
+         * weight.scales[token_ids, None]
+      )
+   return weight[token_ids]
+
+
+def _qwen2_rope_at_position(
+   query: mx.array,
+   key: mx.array,
+   *,
+   position: int,
+   theta: float,
+) -> tuple[mx.array, mx.array]:
+   sequence = int(query.shape[2])
+   head_dim = int(query.shape[3])
+   exponent = mx.arange(0, head_dim, 2, dtype=mx.float32) / head_dim
+   inv_freq = 1.0 / mx.power(mx.array(theta, dtype=mx.float32), exponent)
+   positions = mx.arange(position, position + sequence, dtype=mx.float32)
+   frequencies = positions.reshape(-1, 1) * inv_freq.reshape(1, -1)
+   embedding = mx.concatenate((frequencies, frequencies), axis=-1)
+   cosine = mx.cos(embedding)[None, None, :, :]
+   sine = mx.sin(embedding)[None, None, :, :]
+
+   def rotate_half(value: mx.array) -> mx.array:
+      first, second = mx.split(value, 2, axis=-1)
+      return mx.concatenate((-second, first), axis=-1)
+
+   return (
+      query * cosine + rotate_half(query) * sine,
+      key * cosine + rotate_half(key) * sine,
+   )
+
+
+def _qwen2_block_with_kv(
+   hidden: mx.array,
+   tensors: Mapping[str, Any],
+   prefix: str,
+   config: Mapping[str, Any],
+   position: int,
+   past: tuple[mx.array, mx.array] | None,
+) -> tuple[mx.array, tuple[mx.array, mx.array]]:
+   n_head = int(config["n_head"])
+   n_kv_head = int(config["n_kv_head"])
+   head_dim = int(config["head_dim"])
+   residual = hidden
+   normalized = _rms_norm(
+      hidden,
+      tensors[prefix + "input_layernorm.weight"],
+      float(config["rms_norm_epsilon"]),
+   )
+   query = _qwen2_linear(
+      normalized, tensors[prefix + "self_attn.q_proj.weight"]
+   ) + tensors[prefix + "self_attn.q_proj.bias"]
+   key = _qwen2_linear(
+      normalized, tensors[prefix + "self_attn.k_proj.weight"]
+   ) + tensors[prefix + "self_attn.k_proj.bias"]
+   value = _qwen2_linear(
+      normalized, tensors[prefix + "self_attn.v_proj.weight"]
+   ) + tensors[prefix + "self_attn.v_proj.bias"]
+   batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
+   query = query.reshape(batch, sequence, n_head, head_dim).transpose(0, 2, 1, 3)
+   key = key.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+   value = value.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+   query, key = _qwen2_rope_at_position(
+      query,
+      key,
+      position=position,
+      theta=float(config["rope_theta"]),
+   )
+   if past is None:
+      all_key = key
+      all_value = value
+   else:
+      all_key = mx.concatenate((past[0], key), axis=2)
+      all_value = mx.concatenate((past[1], value), axis=2)
+   repeats = n_head // n_kv_head
+   attention_key = mx.repeat(all_key, repeats, axis=1)
+   attention_value = mx.repeat(all_value, repeats, axis=1)
+   scores = mx.matmul(
+      query, attention_key.transpose(0, 1, 3, 2)
+   ) / math.sqrt(head_dim)
+   query_positions = mx.arange(position, position + sequence)
+   key_positions = mx.arange(int(all_key.shape[2]))
+   causal = query_positions[:, None] >= key_positions[None, :]
+   probabilities = mx.softmax(
+      mx.where(
+         causal[None, None, :, :],
+         scores,
+         mx.array(-math.inf, dtype=scores.dtype),
+      ),
+      axis=-1,
+   )
+   attended = mx.matmul(probabilities, attention_value)
+   attended = attended.transpose(0, 2, 1, 3).reshape(batch, sequence, -1)
+   hidden = residual + _qwen2_linear(
+      attended, tensors[prefix + "self_attn.o_proj.weight"]
+   )
+   residual = hidden
+   normalized = _rms_norm(
+      hidden,
+      tensors[prefix + "post_attention_layernorm.weight"],
+      float(config["rms_norm_epsilon"]),
+   )
+   gate = _qwen2_linear(normalized, tensors[prefix + "mlp.gate_proj.weight"])
+   gate = gate * mx.sigmoid(gate)
+   up = _qwen2_linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
+   hidden = residual + _qwen2_linear(
+      gate * up, tensors[prefix + "mlp.down_proj.weight"]
+   )
+   return hidden, (all_key, all_value)
 
 
 class MLXRuntimePort:
@@ -748,6 +887,57 @@ class MLXRuntimePort:
       tensors = loaded.tensors
       start = stage.layer_range.start_layer
       end = stage.layer_range.end_layer_exclusive
+      if runtime["architecture"] == "qwen2":
+         if "input_embedding" in stage.component_roles:
+            if token_ids is None or hidden_states is not None:
+               _reject("entry_stage_requires_token_ids")
+            hidden = _qwen2_embedding(
+               tensors["model.embed_tokens.weight"], token_ids
+            )
+         else:
+            if hidden_states is None or token_ids is not None:
+               _reject("non_entry_stage_requires_hidden_states")
+            hidden = hidden_states
+         next_layers: dict[int, tuple[mx.array, mx.array]] = {}
+         for layer in range(start, end):
+            hidden, layer_kv = _qwen2_block_with_kv(
+               hidden,
+               tensors,
+               f"model.layers.{layer}.",
+               config,
+               position,
+               past_layers.get(layer),
+            )
+            next_layers[layer] = layer_kv
+         if "final_norm" in stage.component_roles:
+            hidden = _rms_norm(
+               hidden,
+               tensors["model.norm.weight"],
+               float(config["rms_norm_epsilon"]),
+            )
+         if "lm_head" in stage.component_roles:
+            aliases = loaded.resolved_aliases
+            if not isinstance(aliases, Mapping):
+               _reject("invalid_loaded_stage_aliases")
+            alias = aliases.get("lm_head", {})
+            if not isinstance(alias, Mapping):
+               _reject("invalid_loaded_stage_aliases")
+            head_keys = alias.get("tensor_keys", ["lm_head.weight"])
+            if (
+               not isinstance(head_keys, (list, tuple))
+               or len(head_keys) != 1
+               or not isinstance(head_keys[0], str)
+            ):
+               _reject("invalid_loaded_stage_aliases")
+            hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
+         mx.eval(
+            hidden,
+            *(array for pair in next_layers.values() for array in pair),
+         )
+         if not bool(mx.all(mx.isfinite(hidden)).item()):
+            _reject("nonfinite_stage_output")
+         return hidden, next_layers
+
       transformer_key = f"transformer.h.{start}.ln_1.weight"
       plain_key = f"h.{start}.ln_1.weight"
       if transformer_key in tensors and plain_key not in tensors:

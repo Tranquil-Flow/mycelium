@@ -44,6 +44,7 @@ def production_source_files() -> list[Path]:
 def test_mutating_http_calls_are_confined_to_typed_product_action_clients() -> None:
     allowed_clients = {
         (UI_ROOT / "web" / "src" / "features" / "deviceLab" / "deviceLabClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "deploymentClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
@@ -65,10 +66,12 @@ def test_browser_network_is_confined_to_read_only_source_and_typed_action_client
     allowed_transports = {
         (UI_ROOT / "web" / "src" / "data" / "observatorySource.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "deviceLab" / "deviceLabClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "inference" / "deploymentClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
-        (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
-        (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
+            (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
+            (UI_ROOT / "web" / "src" / "features" / "productEvidence" / "source.ts").resolve(),
+            (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
     }
     forbidden_browser_writes = ("WebSocket", "XMLHttpRequest", "sendBeacon", "WebTransport")
     for path in production_source_files():

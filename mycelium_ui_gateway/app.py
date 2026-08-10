@@ -9,6 +9,8 @@ import time
 from typing import Any, Awaitable, Callable, Mapping, Sequence, Union
 from urllib.parse import urlsplit
 
+from mycelium_product_spine import validate_product_event, validate_product_snapshot
+
 from .config import GatewayConfig
 from .coordinator import CoordinatorError, SwarmCoordinator
 from .sessions import (
@@ -59,6 +61,9 @@ _SWARM_STATUS = "/api/v1/swarm/status"
 _SWARM_INVITES = "/api/v1/swarm/invites"
 _SWARM_JOIN = "/api/v1/swarm/join"
 _SWARM_LEAVE = "/api/v1/swarm/leave"
+_PRODUCT_SNAPSHOT = "/api/v1/product/snapshot"
+_PRODUCT_EVENTS = "/api/v1/product/events"
+_PRODUCT_EXPORT = "/api/v1/product/export"
 _API_PATHS = {
     "observatory_snapshot": _OBSERVATORY_SNAPSHOT,
     "observatory_events": _OBSERVATORY_EVENTS,
@@ -68,6 +73,9 @@ _API_PATHS = {
     "swarm_invites": _SWARM_INVITES,
     "swarm_join": _SWARM_JOIN,
     "swarm_leave": _SWARM_LEAVE,
+    "product_snapshot": _PRODUCT_SNAPSHOT,
+    "product_events": _PRODUCT_EVENTS,
+    "product_export": _PRODUCT_EXPORT,
 }
 
 
@@ -216,6 +224,7 @@ class ProductGatewayASGIApplication:
         config: GatewayConfig,
         observatory_app: ASGIApplication,
         request_gateway_app: ASGIApplication,
+        product_app: ASGIApplication | None = None,
         swarm_coordinator: SwarmCoordinator,
         request_gateway_bearer_token: str,
         observatory_bearer_token: str | None = None,
@@ -226,6 +235,8 @@ class ProductGatewayASGIApplication:
             raise ValueError("invalid_gateway_config")
         if not callable(observatory_app) or not callable(request_gateway_app):
             raise ValueError("invalid_upstream_application")
+        if product_app is not None and not callable(product_app):
+            raise ValueError("invalid_product_application")
         if swarm_coordinator is None:
             raise ValueError("invalid_swarm_coordinator")
         if not config.is_loopback and access_policy is None:
@@ -244,6 +255,7 @@ class ProductGatewayASGIApplication:
         self._config = config
         self._observatory_app = observatory_app
         self._request_gateway_app = request_gateway_app
+        self._product_app = product_app
         self._coordinator = swarm_coordinator
         self._request_token = request_token
         self._observatory_token = observatory_token
@@ -313,6 +325,12 @@ class ProductGatewayASGIApplication:
                 await self._inference_cancel(send, session, route_value or "")
             elif route == "swarm_status":
                 await self._swarm_status(send)
+            elif route == "product_snapshot":
+                await self._product_snapshot(send)
+            elif route == "product_events":
+                await self._stream_product(scope, receive, send)
+            elif route == "product_export":
+                await self._product_export(send)
             else:
                 await self._swarm_action(scope, receive, send, route)
         except BrowserRequestError as exc:
@@ -337,6 +355,9 @@ class ProductGatewayASGIApplication:
             _SWARM_INVITES: ("swarm_invites", frozenset({"POST"})),
             _SWARM_JOIN: ("swarm_join", frozenset({"POST"})),
             _SWARM_LEAVE: ("swarm_leave", frozenset({"POST"})),
+            _PRODUCT_SNAPSHOT: ("product_snapshot", frozenset({"GET"})),
+            _PRODUCT_EVENTS: ("product_events", frozenset({"GET"})),
+            _PRODUCT_EXPORT: ("product_export", frozenset({"GET"})),
         }
         if isinstance(path, str) and path in fixed:
             route, methods = fixed[path]
@@ -522,6 +543,89 @@ class ProductGatewayASGIApplication:
         )
         validate_qualification(document)
         await self._send_json(send, 200, document)
+
+    async def _product_snapshot(self, send: Send) -> None:
+        if self._product_app is None:
+            raise BrowserRequestError(
+                503,
+                "product_snapshot_unavailable",
+                retryable=True,
+            )
+        _status, document = await self._json_upstream(
+            self._product_app,
+            method="GET",
+            path="/v1/product/snapshot",
+            token=None,
+        )
+        try:
+            validated = validate_product_snapshot(document)
+        except Exception:
+            raise UpstreamFailure("invalid_upstream_response") from None
+        await self._send_json(send, 200, validated)
+
+    async def _product_export(self, send: Send) -> None:
+        if self._product_app is None:
+            raise BrowserRequestError(503, "product_export_unavailable", retryable=True)
+        _status, document = await self._json_upstream(
+            self._product_app,
+            method="GET",
+            path="/v1/product/export",
+            token=None,
+        )
+        try:
+            validated = validate_product_snapshot(document)
+        except Exception:
+            raise UpstreamFailure("invalid_upstream_response") from None
+        await self._send_json(send, 200, validated)
+
+    async def _stream_product(
+        self,
+        scope: Mapping[str, Any],
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        if self._product_app is None:
+            raise BrowserRequestError(503, "product_events_unavailable", retryable=True)
+        try:
+            cursor = validate_last_event_id(_header_values(scope, b"last-event-id"))
+        except GatewayValidationError as exc:
+            raise BrowserRequestError(400, exc.code) from None
+
+        def validate(raw: bytes) -> bytes:
+            self._check_no_credentials(raw)
+            lines = raw[:-2].split(b"\n")
+            if (
+                len(lines) != 3
+                or not lines[0].startswith(b"id: ")
+                or lines[1] != b"event: product_snapshot"
+                or not lines[2].startswith(b"data: ")
+            ):
+                raise GatewayValidationError("invalid_upstream_event")
+            event_id = validate_last_event_id([lines[0][4:]])
+            document = strict_json_document(lines[2][6:], code="invalid_upstream_event")
+            try:
+                event = validate_product_event(document)
+            except Exception:
+                raise GatewayValidationError("invalid_upstream_event") from None
+            if event_id is None or int(event_id) != event["cursor"]:
+                raise GatewayValidationError("invalid_upstream_event")
+            return (
+                b"id: "
+                + event_id
+                + b"\nevent: product_snapshot\ndata: "
+                + canonical_json(event)
+                + b"\n\n"
+            )
+
+        await self._forward_sse(
+            self._product_app,
+            path="/v1/product/events",
+            token=None,
+            cursor=cursor,
+            receive=receive,
+            send=send,
+            validator=validate,
+        )
 
     async def _read_json_body(
         self, scope: Mapping[str, Any], receive: Receive
@@ -856,6 +960,7 @@ def create_product_gateway_application(
     config: GatewayConfig,
     observatory_app: ASGIApplication,
     request_gateway_app: ASGIApplication,
+    product_app: ASGIApplication | None = None,
     swarm_coordinator: SwarmCoordinator,
     request_gateway_bearer_token: str,
     observatory_bearer_token: str | None = None,
@@ -866,6 +971,7 @@ def create_product_gateway_application(
         config=config,
         observatory_app=observatory_app,
         request_gateway_app=request_gateway_app,
+        product_app=product_app,
         swarm_coordinator=swarm_coordinator,
         request_gateway_bearer_token=request_gateway_bearer_token,
         observatory_bearer_token=observatory_bearer_token,

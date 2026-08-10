@@ -38,6 +38,7 @@ _UI_CLIENT_CALL_PATTERN = re.compile(
 _UI_SUFFIXES = frozenset({".js", ".jsx", ".ts", ".tsx"})
 _ALLOWED_PRODUCT_ACTION_CLIENTS = frozenset(
     {
+        "ui/web/src/features/inference/deploymentClient.ts",
         "ui/web/src/features/inference/requestClient.ts",
         "ui/web/src/features/deviceLab/deviceLabClient.ts",
         "ui/web/src/features/membership/membershipClient.ts",

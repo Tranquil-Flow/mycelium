@@ -145,6 +145,14 @@ class RouterSessionBackend:
         if is_cancelled() or self._is_cancelled(request_id):
             return "cancelled"
         admission = self._require_current_deployment(submission)
+        policy = getattr(self._codec, "policy_response", None)
+        if callable(policy):
+            response = policy(submission.prompt)
+            if response is not None:
+                if not isinstance(response, str) or not response or len(response) > 4_096:
+                    raise AdmissionError("invalid_policy_response")
+                emit_token(0, response)
+                return "completed"
         prompt_token_ids = self._codec.encode(submission.prompt)
         if not isinstance(prompt_token_ids, tuple) or not prompt_token_ids or not all(
             isinstance(item, int) and not isinstance(item, bool) and item >= 0
@@ -368,6 +376,11 @@ class RouterSessionBackend:
 
     def cancel(self, request_id: str) -> None:
         self._cancel_once(request_id, external=True)
+
+    def release(self, request_id: str) -> None:
+        release = getattr(self._router, "release_request", None)
+        if callable(release):
+            release(request_id)
 
     def _cancel_once(self, request_id: str, *, external: bool = False) -> None:
         with self._lock:

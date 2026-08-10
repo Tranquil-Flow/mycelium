@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
+    "build:live": "tsc -b && VITE_OBSERVATORY_SOURCE_MODE=live vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run --pool=forks --maxWorkers=1",
     "test:watch": "vitest",

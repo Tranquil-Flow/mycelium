@@ -15,11 +15,13 @@ import numpy as np
 
 from runtime_contracts import (
     GPT2_DECODER_TENSOR_SUFFIXES,
+    QWEN2_DECODER_TENSOR_SUFFIXES,
     assignment_stage_role,
     validate_assignment_stage_boundaries,
     validate_loaded_stage_authentication,
     validate_normalized_numpy_runtime,
 )
+from weight_quantization import Int8RowwiseWeight
 
 
 class NumpyRuntimeError(ValueError):
@@ -95,6 +97,42 @@ def _softmax(value: np.ndarray, axis: int) -> np.ndarray:
     return (exponent / np.sum(exponent, axis=axis, keepdims=True)).astype(dtype)
 
 
+def quantize_qwen2_numpy_tensors(
+    tensors: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Replace Qwen2 matrix weights with deterministic symmetric int8 rows."""
+
+    result: dict[str, Any] = {}
+    for key, raw in tensors.items():
+        value = np.asarray(raw)
+        if key.endswith(".weight") and value.ndim == 2:
+            compute = value.astype(np.float32)
+            scales = np.max(np.abs(compute), axis=1) / 127.0
+            scales = np.where(scales == 0.0, 1.0, scales).astype(np.float32)
+            scaled = compute / scales[:, None]
+            rounded = np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)
+            quantized = np.clip(rounded, -127, 127).astype(np.int8)
+            quantized.flags.writeable = False
+            scales.flags.writeable = False
+            result[key] = Int8RowwiseWeight(quantized, scales)
+        else:
+            result[key] = raw
+    return result
+
+
+def _qwen2_linear(hidden: np.ndarray, weight: Any) -> np.ndarray:
+    if isinstance(weight, Int8RowwiseWeight):
+        projected = np.matmul(hidden, weight.values.astype(np.float32).T)
+        return projected * weight.scales
+    return np.matmul(hidden, weight.T)
+
+
+def _qwen2_embedding(weight: Any, ids: np.ndarray) -> np.ndarray:
+    if isinstance(weight, Int8RowwiseWeight):
+        return weight.values[ids].astype(np.float32) * weight.scales[ids, None]
+    return weight[ids]
+
+
 def _gpt2_block(
     hidden: np.ndarray,
     tensors: Mapping[str, np.ndarray],
@@ -155,6 +193,132 @@ def _gpt2_block(
     return residual + feed_forward
 
 
+def _rms_norm(hidden: np.ndarray, weight: np.ndarray, epsilon: float) -> np.ndarray:
+    dtype = hidden.dtype
+    compute = hidden.astype(np.float32)
+    normalized = compute * np.reciprocal(
+        np.sqrt(np.mean(np.square(compute), axis=-1, keepdims=True) + epsilon)
+    )
+    return (normalized * weight.astype(np.float32)).astype(dtype)
+
+
+def _silu(hidden: np.ndarray) -> np.ndarray:
+    dtype = hidden.dtype
+    compute = hidden.astype(np.float32)
+    return (compute / (1.0 + np.exp(-compute))).astype(dtype)
+
+
+def _qwen2_rope(
+    query: np.ndarray,
+    key: np.ndarray,
+    *,
+    theta: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    sequence = query.shape[2]
+    head_dim = query.shape[3]
+    inv_freq = 1.0 / (
+        theta ** (np.arange(0, head_dim, 2, dtype=np.float32) / head_dim)
+    )
+    frequencies = np.outer(np.arange(sequence, dtype=np.float32), inv_freq)
+    embedding = np.concatenate((frequencies, frequencies), axis=-1)
+    cosine = np.cos(embedding)[None, None, :, :]
+    sine = np.sin(embedding)[None, None, :, :]
+
+    def rotate_half(value: np.ndarray) -> np.ndarray:
+        first, second = np.split(value, 2, axis=-1)
+        return np.concatenate((-second, first), axis=-1)
+
+    return (
+        query * cosine + rotate_half(query) * sine,
+        key * cosine + rotate_half(key) * sine,
+    )
+
+
+def _qwen2_block(
+    hidden: np.ndarray,
+    tensors: Mapping[str, np.ndarray],
+    prefix: str,
+    config: Mapping[str, Any],
+) -> np.ndarray:
+    n_head = int(config["n_head"])
+    n_kv_head = int(config["n_kv_head"])
+    head_dim = int(config["head_dim"])
+    epsilon = float(config["rms_norm_epsilon"])
+    residual = hidden
+    normalized = _rms_norm(
+        hidden, tensors[prefix + "input_layernorm.weight"], epsilon
+    )
+    query = _qwen2_linear(normalized, tensors[prefix + "self_attn.q_proj.weight"])
+    query += tensors[prefix + "self_attn.q_proj.bias"]
+    key = _qwen2_linear(normalized, tensors[prefix + "self_attn.k_proj.weight"])
+    key += tensors[prefix + "self_attn.k_proj.bias"]
+    value = _qwen2_linear(normalized, tensors[prefix + "self_attn.v_proj.weight"])
+    value += tensors[prefix + "self_attn.v_proj.bias"]
+    batch, sequence, _ = hidden.shape
+    query = query.reshape(batch, sequence, n_head, head_dim).transpose(0, 2, 1, 3)
+    key = key.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+    value = value.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+    query, key = _qwen2_rope(query, key, theta=float(config["rope_theta"]))
+    repeats = n_head // n_kv_head
+    key = np.repeat(key, repeats, axis=1)
+    value = np.repeat(value, repeats, axis=1)
+    scores = np.matmul(query, key.transpose(0, 1, 3, 2)) / math.sqrt(head_dim)
+    positions = np.arange(sequence)
+    causal = positions[:, None] >= positions[None, :]
+    probabilities = _softmax(
+        np.where(causal[None, None, :, :], scores, -np.inf), axis=-1
+    )
+    attended = np.matmul(probabilities, value)
+    attended = attended.transpose(0, 2, 1, 3).reshape(batch, sequence, -1)
+    hidden = residual + _qwen2_linear(
+        attended, tensors[prefix + "self_attn.o_proj.weight"]
+    )
+    residual = hidden
+    normalized = _rms_norm(
+        hidden, tensors[prefix + "post_attention_layernorm.weight"], epsilon
+    )
+    gated = _silu(
+        _qwen2_linear(normalized, tensors[prefix + "mlp.gate_proj.weight"])
+    ) * _qwen2_linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
+    return residual + _qwen2_linear(
+        gated, tensors[prefix + "mlp.down_proj.weight"]
+    )
+
+
+def _qwen2_expected_shapes(config: Mapping[str, Any]) -> dict[str, tuple[int, ...]]:
+    hidden = int(config["n_embd"])
+    inner = int(config["n_inner"])
+    head_dim = int(config["head_dim"])
+    kv = int(config["n_kv_head"]) * head_dim
+    shapes: dict[str, tuple[int, ...]] = {
+        "model.embed_tokens.weight": (int(config["vocab_size"]), hidden),
+        "model.norm.weight": (hidden,),
+    }
+    suffix_shapes = {
+        "input_layernorm.weight": (hidden,),
+        "self_attn.q_proj.weight": (hidden, hidden),
+        "self_attn.q_proj.bias": (hidden,),
+        "self_attn.k_proj.weight": (kv, hidden),
+        "self_attn.k_proj.bias": (kv,),
+        "self_attn.v_proj.weight": (kv, hidden),
+        "self_attn.v_proj.bias": (kv,),
+        "self_attn.o_proj.weight": (hidden, hidden),
+        "post_attention_layernorm.weight": (hidden,),
+        "mlp.gate_proj.weight": (inner, hidden),
+        "mlp.up_proj.weight": (inner, hidden),
+        "mlp.down_proj.weight": (hidden, inner),
+    }
+    if set(suffix_shapes) != set(QWEN2_DECODER_TENSOR_SUFFIXES):
+        _reject("internal_decoder_tensor_contract_mismatch")
+    for layer in range(int(config["n_layer"])):
+        prefix = f"model.layers.{layer}."
+        for suffix, shape in suffix_shapes.items():
+            shapes[prefix + suffix] = shape
+    if not bool(config["tie_word_embeddings"]):
+        shapes["lm_head.weight"] = (int(config["vocab_size"]), hidden)
+    return shapes
+
+
 class NumpyGPT2Runtime:
     """Full-context NumPy GPT-2 oracle; no KV cache or distributed claim."""
 
@@ -189,6 +353,8 @@ class NumpyGPT2Runtime:
                 _reject("nonfinite_tensor")
             value.flags.writeable = False
             materialized[key] = value
+        if normalized["quantization"] == "int8-weight-only":
+            materialized = quantize_qwen2_numpy_tensors(materialized)
         self._runtime = copy.deepcopy(normalized)
         self._tensors = MappingProxyType(materialized)
         self._dtype = dtype
@@ -250,6 +416,80 @@ class NumpyGPT2Runtime:
         return result
 
 
+class NumpyQwen2Runtime:
+    """Full-context NumPy Qwen2 oracle used by the M5 parity gate."""
+
+    backend = "numpy"
+
+    def __init__(self, *, runtime: Mapping[str, Any], tensors: Mapping[str, Any]):
+        try:
+            normalized = validate_normalized_numpy_runtime(runtime)
+        except (TypeError, ValueError) as exc:
+            raise NumpyRuntimeError("invalid_numpy_runtime") from exc
+        if normalized["architecture"] != "qwen2":
+            _reject("invalid_numpy_runtime")
+        shapes = _qwen2_expected_shapes(normalized["model_config"])
+        if not isinstance(tensors, Mapping) or set(tensors) != set(shapes):
+            _reject("tensor_inventory_mismatch")
+        dtype = np.dtype(normalized["dtype"])
+        materialized: dict[str, np.ndarray] = {}
+        for key in sorted(shapes):
+            raw = np.asarray(tensors[key])
+            if raw.shape != shapes[key] or raw.dtype.kind not in {"f", "i", "u"}:
+                _reject("tensor_shape_mismatch")
+            value = np.array(raw, dtype=dtype, order="C", copy=True)
+            if not np.isfinite(value).all():
+                _reject("nonfinite_tensor")
+            value.flags.writeable = False
+            materialized[key] = value
+        self._runtime = copy.deepcopy(normalized)
+        self._tensors = MappingProxyType(materialized)
+        self._dtype = dtype
+        self._identity = MappingProxyType(
+            {
+                "backend": "numpy",
+                "backend_version": importlib.metadata.version("numpy"),
+                "device": "cpu",
+                "dtype": normalized["dtype"],
+                "quantization": normalized["quantization"],
+                "architecture": "qwen2",
+                "route_ready": False,
+                "claim_boundary": "monolithic NumPy parity runtime; no route claim",
+            }
+        )
+
+    @property
+    def runtime_identity(self) -> Mapping[str, Any]:
+        return self._identity
+
+    def forward_token_ids(self, token_ids: Any) -> np.ndarray:
+        ids = _validated_token_ids(token_ids, self._runtime["model_config"])
+        config = self._runtime["model_config"]
+        hidden = _qwen2_embedding(
+            self._tensors["model.embed_tokens.weight"], ids
+        ).astype(self._dtype, copy=False)
+        for layer in range(int(config["n_layer"])):
+            hidden = _qwen2_block(
+                hidden, self._tensors, f"model.layers.{layer}.", config
+            )
+        hidden = _rms_norm(
+            hidden,
+            self._tensors["model.norm.weight"],
+            float(config["rms_norm_epsilon"]),
+        )
+        head = (
+            self._tensors["model.embed_tokens.weight"]
+            if config["tie_word_embeddings"]
+            else self._tensors["lm_head.weight"]
+        )
+        logits = _qwen2_linear(hidden, head)
+        if not np.isfinite(logits).all():
+            _reject("nonfinite_logits")
+        result = np.ascontiguousarray(logits, dtype=self._dtype)
+        result.flags.writeable = False
+        return result
+
+
 def _plain(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {key: _plain(item) for key, item in value.items()}
@@ -273,23 +513,37 @@ def tensor_digest(tensors: Mapping[str, Any]) -> str:
 
     digest = hashlib.sha256()
     for key in sorted(tensors):
-        array = np.ascontiguousarray(np.asarray(tensors[key]))
-        metadata = _canonical_json(
-            {
-                "dtype": str(array.dtype),
-                "name": key,
-                "shape": list(array.shape),
-            }
-        ).encode("utf-8")
-        payload = array.tobytes(order="C")
-        digest.update(len(metadata).to_bytes(8, "big"))
-        digest.update(metadata)
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
+        value = tensors[key]
+        arrays = (
+            (("values", value.values), ("scales", value.scales))
+            if isinstance(value, Int8RowwiseWeight)
+            else (("value", value),)
+        )
+        for part, raw in arrays:
+            array = np.ascontiguousarray(np.asarray(raw))
+            metadata = _canonical_json(
+                {
+                    "dtype": str(array.dtype),
+                    "name": key,
+                    "part": part,
+                    "shape": list(array.shape),
+                }
+            ).encode("utf-8")
+            payload = array.tobytes(order="C")
+            digest.update(len(metadata).to_bytes(8, "big"))
+            digest.update(metadata)
+            digest.update(len(payload).to_bytes(8, "big"))
+            digest.update(payload)
     return "sha256:" + digest.hexdigest()
 
 
-def _stage_namespace(tensors: Mapping[str, Any], start: int) -> str:
+def _stage_namespace(
+    tensors: Mapping[str, Any], start: int, architecture: str
+) -> str:
+    if architecture == "qwen2":
+        if f"model.layers.{start}.input_layernorm.weight" in tensors:
+            return "model."
+        _reject("invalid_loaded_stage_namespace")
     transformer_key = f"transformer.h.{start}.ln_1.weight"
     plain_key = f"h.{start}.ln_1.weight"
     if transformer_key in tensors and plain_key not in tensors:
@@ -307,7 +561,30 @@ def _stage_shapes(
     namespace: str,
     components: list[str],
     aliases: Mapping[str, Any],
+    architecture: str,
 ) -> dict[str, tuple[int, ...]]:
+    if architecture == "qwen2":
+        all_shapes = _qwen2_expected_shapes(config)
+        shapes: dict[str, tuple[int, ...]] = {}
+        if "input_embedding" in components:
+            shapes["model.embed_tokens.weight"] = all_shapes[
+                "model.embed_tokens.weight"
+            ]
+        for layer in range(start, end):
+            prefix = f"model.layers.{layer}."
+            for suffix in QWEN2_DECODER_TENSOR_SUFFIXES:
+                shapes[prefix + suffix] = all_shapes[prefix + suffix]
+        if "final_norm" in components:
+            shapes["model.norm.weight"] = all_shapes["model.norm.weight"]
+        if "lm_head" in components:
+            alias = aliases.get("lm_head")
+            head_key = (
+                alias["tensor_keys"][0]
+                if isinstance(alias, Mapping)
+                else "lm_head.weight"
+            )
+            shapes[head_key] = (int(config["vocab_size"]), int(config["n_embd"]))
+        return shapes
     hidden = int(config["n_embd"])
     all_shapes = _expected_shapes(config)
 
@@ -448,7 +725,7 @@ def _validated_stage(
         raise NumpyRuntimeError("invalid_loaded_stage_boundaries") from exc
     if not isinstance(tensors, Mapping):
         _reject("invalid_loaded_stage_tensors")
-    namespace = _stage_namespace(tensors, start)
+    namespace = _stage_namespace(tensors, start, runtime["architecture"])
     shapes = _stage_shapes(
         config=config,
         start=start,
@@ -456,6 +733,7 @@ def _validated_stage(
         namespace=namespace,
         components=components,
         aliases=aliases,
+        architecture=runtime["architecture"],
     )
     loaded_keys = proof.get("loaded_tensor_keys")
     if (
@@ -465,9 +743,22 @@ def _validated_stage(
     ):
         _reject("loaded_tensor_inventory_mismatch")
     expected_dtype = np.dtype(runtime["dtype"])
-    materialized: dict[str, np.ndarray] = {}
+    materialized: dict[str, Any] = {}
     for key in sorted(shapes):
-        value = np.asarray(tensors[key])
+        raw = tensors[key]
+        if isinstance(raw, Int8RowwiseWeight):
+            if runtime["quantization"] != "int8-weight-only":
+                _reject("unsupported_tensor_dtype")
+            if raw.shape != shapes[key] or np.asarray(raw.values).dtype != np.int8:
+                _reject("tensor_shape_mismatch")
+            scales = np.asarray(raw.scales)
+            if scales.shape != (shapes[key][0],) or scales.dtype != np.float32:
+                _reject("tensor_shape_mismatch")
+            if not np.isfinite(scales).all() or np.any(scales <= 0):
+                _reject("nonfinite_tensor")
+            materialized[key] = raw
+            continue
+        value = np.asarray(raw)
         if value.shape != shapes[key]:
             _reject("tensor_shape_mismatch")
         if value.dtype != expected_dtype:
@@ -561,32 +852,48 @@ def execute_loaded_stage(
         if token_ids is None or hidden_states is not None:
             _reject("entry_stage_requires_token_ids")
         ids = _validated_token_ids(token_ids, config)
-        positions = np.arange(ids.shape[1], dtype=np.int64)
-        hidden = (
-            tensors[f"{namespace}wte.weight"][ids]
-            + tensors[f"{namespace}wpe.weight"][positions]
-        ).astype(dtype, copy=False)
+        if runtime["architecture"] == "qwen2":
+            hidden = _qwen2_embedding(
+                tensors["model.embed_tokens.weight"], ids
+            ).astype(dtype, copy=False)
+        else:
+            positions = np.arange(ids.shape[1], dtype=np.int64)
+            hidden = (
+                tensors[f"{namespace}wte.weight"][ids]
+                + tensors[f"{namespace}wpe.weight"][positions]
+            ).astype(dtype, copy=False)
     else:
         if hidden_states is None or token_ids is not None:
             _reject("non_entry_stage_requires_hidden_states")
         hidden = _validated_hidden_states(hidden_states, config, dtype)
 
-    epsilon = float(config["layer_norm_epsilon"])
     for layer in range(start, end):
-        hidden = _gpt2_block(
-            hidden,
-            tensors,
-            f"{namespace}h.{layer}.",
-            int(config["n_head"]),
-            epsilon,
-        )
+        if runtime["architecture"] == "qwen2":
+            hidden = _qwen2_block(
+                hidden, tensors, f"model.layers.{layer}.", config
+            )
+        else:
+            hidden = _gpt2_block(
+                hidden,
+                tensors,
+                f"{namespace}h.{layer}.",
+                int(config["n_head"]),
+                float(config["layer_norm_epsilon"]),
+            )
     if "final_norm" in components:
-        hidden = _layer_norm(
-            hidden,
-            tensors[f"{namespace}ln_f.weight"],
-            tensors[f"{namespace}ln_f.bias"],
-            epsilon,
-        )
+        if runtime["architecture"] == "qwen2":
+            hidden = _rms_norm(
+                hidden,
+                tensors["model.norm.weight"],
+                float(config["rms_norm_epsilon"]),
+            )
+        else:
+            hidden = _layer_norm(
+                hidden,
+                tensors[f"{namespace}ln_f.weight"],
+                tensors[f"{namespace}ln_f.bias"],
+                float(config["layer_norm_epsilon"]),
+            )
     if "lm_head" in components:
         alias = aliases.get("lm_head")
         head_key = (
@@ -594,7 +901,11 @@ def execute_loaded_stage(
             if isinstance(alias, Mapping)
             else "lm_head.weight"
         )
-        hidden = np.matmul(hidden, tensors[head_key].transpose(1, 0))
+        hidden = (
+            _qwen2_linear(hidden, tensors[head_key])
+            if runtime["architecture"] == "qwen2"
+            else np.matmul(hidden, tensors[head_key].transpose(1, 0))
+        )
     if not np.isfinite(hidden).all():
         _reject("nonfinite_stage_output")
     result = np.ascontiguousarray(hidden, dtype=dtype)

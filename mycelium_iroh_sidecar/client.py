@@ -52,6 +52,8 @@ _CONFIGURE_PEERS = 10
 _SEND_ROUTED = 11
 _RECEIVE_FROM = 12
 _DELIVERY_FROM = 13
+_GET_TRANSPORT_OBSERVATIONS = 14
+_TRANSPORT_OBSERVATIONS = 15
 _ZERO_ID = b"\0" * 16
 
 
@@ -593,6 +595,34 @@ class SidecarClient:
             message_id,
         )
 
+    def transport_observations(self) -> list[dict[str, Any]]:
+        """Return sidecar-observed Iroh connection/path statistics."""
+
+        message_id = os.urandom(16)
+        kind, returned_id, payload = self._request(
+            _GET_TRANSPORT_OBSERVATIONS,
+            message_id,
+            b"",
+        )
+        if returned_id != message_id:
+            raise ProtocolError("response_message_id_mismatch")
+        if kind != _TRANSPORT_OBSERVATIONS:
+            self._raise_response(kind, returned_id, payload, message_id)
+        try:
+            document = _decode_json_object(payload)
+        except (UnicodeError, ValueError, json.JSONDecodeError) as error:
+            raise ProtocolError("invalid_transport_observations") from error
+        if set(document) != {"protocol", "observations"} or document.get(
+            "protocol"
+        ) != "mycelium.iroh_sidecar.transport_observations.v1":
+            raise ProtocolError("invalid_transport_observations")
+        observations = document.get("observations")
+        if not isinstance(observations, list) or not all(
+            isinstance(item, dict) for item in observations
+        ):
+            raise ProtocolError("invalid_transport_observations")
+        return observations
+
     def _request(
         self,
         kind: int,
@@ -792,6 +822,8 @@ def _decode_record(
         _SEND_ROUTED,
         _RECEIVE_FROM,
         _DELIVERY_FROM,
+        _GET_TRANSPORT_OBSERVATIONS,
+        _TRANSPORT_OBSERVATIONS,
     }:
         raise ProtocolError("unknown_record_kind")
     if sequence != expected_sequence:

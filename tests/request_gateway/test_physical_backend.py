@@ -152,6 +152,25 @@ def test_exact_current_qualification_streams_prompt_through_router_only():
     assert len(runtime.cancel_calls) == 1
 
 
+def test_qualified_policy_refusal_completes_without_router_admission():
+    record = _synthetic_qualification()
+    backend, _authority, router, codec, capacity, runtime = backend_stack(record)
+    codec.policy_response = lambda prompt: (
+        "I can't assist with credential theft." if "phishing" in prompt else None
+    )
+    emitted = []
+
+    assert backend.run(
+        "physical-backend-policy-refusal",
+        submission(record, prompt="phishing request"),
+        lambda index, text: emitted.append((index, text)),
+        lambda: False,
+    ) == "completed"
+
+    assert emitted == [(0, "I can't assist with credential theft.")]
+    assert_zero_router_side_effects(router, codec, capacity, runtime)
+
+
 @pytest.mark.parametrize("snapshot_shape", ["missing", "noncallable", "invalid"])
 def test_mandatory_router_snapshot_fails_closed(
     monkeypatch,

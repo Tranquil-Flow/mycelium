@@ -75,15 +75,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve = commands.add_parser(
         "serve",
-        help="launch bundled fixture UI or genuine local browser/MLX inference",
+        help="launch bundled fixture UI or a qualified physical inference route",
     )
     serve.add_argument(
         "--mode",
         choices=("fixture", "live"),
         required=True,
         help=(
-            "fixture serves bundled synthetic product data; live serves genuine local "
-            "browser-stage inference and never changes route readiness"
+            "fixture serves bundled synthetic product data; live serves only a "
+            "qualified physical route"
         ),
     )
     serve.add_argument("--host", default="127.0.0.1")
@@ -95,6 +95,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--worker-static-root", type=Path)
     serve.add_argument("--tls-cert", type=Path)
     serve.add_argument("--tls-key", type=Path)
+    serve.add_argument("--operator-plan", type=Path, action="append")
+    serve.add_argument("--deployment-dir", type=Path)
+    serve.add_argument("--registry-state", type=Path)
+    serve.add_argument("--seed-state-root", type=Path)
     return parser
 
 
@@ -105,16 +109,14 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         "--port",
         str(args.port if args.port is not None else 8787),
     ]
+    for operator_plan in args.operator_plan or ():
+        result.extend(("--operator-plan", str(operator_plan)))
     optional_paths = (
-        ("--state-root", args.state_root),
-        ("--operator-token-file", args.operator_token_file),
+        ("--deployment-dir", args.deployment_dir),
         ("--static-root", args.static_root),
-        ("--worker-static-root", args.worker_static_root),
-        ("--tls-cert", args.tls_cert),
-        ("--tls-key", args.tls_key),
+        ("--registry-state", args.registry_state),
+        ("--seed-state-root", args.seed_state_root),
     )
-    if args.public_origin is not None:
-        result.extend(("--public-origin", args.public_origin))
     for flag, value in optional_paths:
         if value is not None:
             result.extend((flag, str(value)))
@@ -132,6 +134,10 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.worker_static_root,
             args.tls_cert,
             args.tls_key,
+            args.operator_plan,
+            args.seed_state_root,
+            args.deployment_dir,
+            args.registry_state,
         )
     )
 
@@ -227,8 +233,24 @@ def main(
     if args.action != "serve":
         raise AssertionError(f"unsupported action: {args.action}")
     if args.mode == "live":
+        if args.operator_plan is None:
+            parser.error("live mode requires --operator-plan")
+        if args.seed_state_root is None:
+            parser.error("live mode requires --seed-state-root")
+        if any(
+            value is not None
+            for value in (
+                args.state_root,
+                args.operator_token_file,
+                args.public_origin,
+                args.worker_static_root,
+                args.tls_cert,
+                args.tls_key,
+            )
+        ):
+            parser.error("physical live mode is loopback-only and rejects interactive-runtime options")
         if live_server_main is None:
-            from mycelium_interactive.server import main as live_server_main
+            from mycelium_live.supervisor import main as live_server_main
 
         return int(live_server_main(_live_arguments(args)))
     if _fixture_has_live_only_arguments(args):

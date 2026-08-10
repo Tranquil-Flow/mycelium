@@ -13,8 +13,12 @@ from mycelium_membership import (
     HEARTBEAT_PROTOCOL,
     JOIN_ACCEPTANCE_PROTOCOL,
     JOIN_REQUEST_PROTOCOL,
+    RESUME_ACCEPTANCE_PROTOCOL,
+    RESUME_REQUEST_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
+    SEED_ROTATION_ACK_PROTOCOL,
     MembershipContractError,
+    peer_runtime_is_activation_eligible,
     sign_membership_message,
     validate_membership_message,
     verify_join_request,
@@ -24,7 +28,11 @@ from mycelium_qualification.signing import generate_ed25519_signer
 
 
 def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
-    seed_to_node = protocol in {JOIN_ACCEPTANCE_PROTOCOL, ASSIGNMENT_OFFER_PROTOCOL}
+    seed_to_node = protocol in {
+        JOIN_ACCEPTANCE_PROTOCOL,
+        RESUME_ACCEPTANCE_PROTOCOL,
+        ASSIGNMENT_OFFER_PROTOCOL,
+    }
     sender_node_id = "seed-node" if seed_to_node else "node-a"
     sender_endpoint_id = endpoint_id or (
         "endpoint-seed" if seed_to_node else "endpoint-node-a"
@@ -62,6 +70,29 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
             "accepted_node_id": "node-a",
             "accepted_incarnation": "incarnation-001",
             "membership_generation": 1,
+            "lease_expires_at": 4_600.0,
+        },
+        RESUME_REQUEST_PROTOCOL: {
+            "previous_incarnation": "incarnation-000",
+            "endpoint_addr": {
+                "id": sender_endpoint_id,
+                "addrs": ["iroh-relay://relay.example/node-a"],
+            },
+            "software_version": "0.1.0",
+            "peer_class": "mac_mlx_iroh",
+            "runtime_capability": {
+                "runtime_backend": "mlx",
+                "transport": "iroh",
+                "activation_protocol": "mycelium.router_wire.v1",
+            },
+        },
+        RESUME_ACCEPTANCE_PROTOCOL: {
+            "generation": 2,
+            "request_message_id": "resume-request-001",
+            "accepted_node_id": "node-a",
+            "accepted_incarnation": "incarnation-001",
+            "previous_membership_generation": 1,
+            "membership_generation": 2,
             "lease_expires_at": 4_600.0,
         },
         CAPABILITY_REPORT_PROTOCOL: {
@@ -124,6 +155,10 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
             "last_request_id": None,
             "completed_at": 1_050.0,
         },
+        SEED_ROTATION_ACK_PROTOCOL: {
+            "authority_generation": 2,
+            "transition_digest": "sha256:" + "e" * 64,
+        },
     }[protocol]
     return {**common, **specific}
 
@@ -133,12 +168,15 @@ def _message(protocol: str, *, endpoint_id: str | None = None) -> dict:
     [
         JOIN_REQUEST_PROTOCOL,
         JOIN_ACCEPTANCE_PROTOCOL,
+        RESUME_REQUEST_PROTOCOL,
+        RESUME_ACCEPTANCE_PROTOCOL,
         CAPABILITY_REPORT_PROTOCOL,
         LINK_PROBE_REPORT_PROTOCOL,
         HEARTBEAT_PROTOCOL,
         ASSIGNMENT_OFFER_PROTOCOL,
         ASSIGNMENT_RESULT_PROTOCOL,
         DRAIN_ACK_PROTOCOL,
+        SEED_ROTATION_ACK_PROTOCOL,
     ],
 )
 def test_all_membership_messages_round_trip_with_pinned_signer(protocol: str) -> None:
@@ -369,6 +407,48 @@ def test_join_request_requires_signed_peer_runtime_declaration(field: str) -> No
         validate_membership_message(message)
 
     assert excinfo.value.code == "membership_fields_invalid"
+
+
+def test_android_termux_runtime_declaration_is_exact_and_protocol_capable() -> None:
+    message = _message(JOIN_REQUEST_PROTOCOL)
+    message["peer_class"] = "android_termux_iroh"
+    message["runtime_capability"] = {
+        "runtime_backend": "pixel-stdlib",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    }
+
+    validate_membership_message(message)
+    assert (
+        peer_runtime_is_activation_eligible(
+            message["peer_class"],
+            message["runtime_capability"],
+        )
+        is False
+    )
+
+    message["runtime_capability"] = {
+        **message["runtime_capability"],
+        "runtime_backend": "android",
+    }
+    with pytest.raises(MembershipContractError) as excinfo:
+        validate_membership_message(message)
+    assert excinfo.value.code == "membership_runtime_capability_mismatch"
+
+
+def test_linux_numpy_iroh_runtime_is_activation_eligible() -> None:
+    message = _message(JOIN_REQUEST_PROTOCOL)
+    message["peer_class"] = "linux_numpy_iroh"
+    message["runtime_capability"] = {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    }
+
+    validate_membership_message(message)
+    assert peer_runtime_is_activation_eligible(
+        message["peer_class"], message["runtime_capability"]
+    )
 
 
 def test_heartbeat_liveness_source_requires_bound_receipt_shape() -> None:

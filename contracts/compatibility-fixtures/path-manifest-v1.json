@@ -1,0 +1,27 @@
+{
+  "deployment_epoch": 1,
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "loopback_edge_id": "loopback:stage-001-primary->stage-000-primary",
+  "manifest_digest": "sha256:929f7300658a4917ae9bd961209af7f758325796e2b1e82c18bacc36ab393d5e",
+  "ordered_hops": [
+    {
+      "placement_id": "stage-000-primary",
+      "reservation_epoch": 1,
+      "reservation_expires_at": 1300.0,
+      "reservation_id": "reservation-0",
+      "stage_id": "stage-000"
+    },
+    {
+      "placement_id": "stage-001-primary",
+      "reservation_epoch": 1,
+      "reservation_expires_at": 1300.0,
+      "reservation_id": "reservation-1",
+      "stage_id": "stage-001"
+    }
+  ],
+  "path_attempt": 1,
+  "path_id": "path-fixture",
+  "protocol": "mycelium.path_manifest.v1",
+  "request_id": "request-fixture",
+  "topology_version": 1
+}

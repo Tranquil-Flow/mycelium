@@ -147,6 +147,32 @@ _VERIFICATION_SCHEMA: tuple[str, Any] = (
                         ),
                     },
                 ),
+                (
+                    "map",
+                    {
+                        "backend": str,
+                        "dtype": str,
+                        "quantization": str,
+                        "architecture": str,
+                        "model_config": (
+                            "map",
+                            {
+                                "n_layer": int,
+                                "n_embd": int,
+                                "n_head": int,
+                                "n_kv_head": int,
+                                "n_inner": int,
+                                "vocab_size": int,
+                                "n_positions": int,
+                                "rms_norm_epsilon": float,
+                                "rope_theta": float,
+                                "head_dim": int,
+                                "activation_function": str,
+                                "tie_word_embeddings": bool,
+                            },
+                        ),
+                    },
+                ),
             ),
         ),
         "artifact_root": str,
@@ -261,6 +287,32 @@ _PACK_RUNTIME_SCHEMA: tuple[str, Any] = (
                         "scale_attn_by_inverse_layer_idx": _ANY_SCHEMA,
                         "reorder_and_upcast_attn": _ANY_SCHEMA,
                         "add_cross_attention": _ANY_SCHEMA,
+                    },
+                ),
+            },
+        ),
+        (
+            "map",
+            {
+                "backend": _ANY_SCHEMA,
+                "dtype": _ANY_SCHEMA,
+                "quantization": _ANY_SCHEMA,
+                "architecture": _ANY_SCHEMA,
+                "model_config": (
+                    "map",
+                    {
+                        "n_layer": _ANY_SCHEMA,
+                        "n_embd": _ANY_SCHEMA,
+                        "n_head": _ANY_SCHEMA,
+                        "n_kv_head": _ANY_SCHEMA,
+                        "n_inner": _ANY_SCHEMA,
+                        "vocab_size": _ANY_SCHEMA,
+                        "n_positions": _ANY_SCHEMA,
+                        "rms_norm_epsilon": _ANY_SCHEMA,
+                        "rope_theta": _ANY_SCHEMA,
+                        "head_dim": _ANY_SCHEMA,
+                        "activation_function": _ANY_SCHEMA,
+                        "tie_word_embeddings": _ANY_SCHEMA,
                     },
                 ),
             },
@@ -1133,6 +1185,8 @@ def compile_stage_pack(
     assignment: dict[str, Any],
     manifest: dict[str, Any],
     artifact_report: dict[str, Any],
+    *,
+    source_artifact_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Compile one canonical local pack from authoritative assignment evidence."""
     if not isinstance(assignment, dict) or not isinstance(manifest, dict):
@@ -1144,12 +1198,23 @@ def compile_stage_pack(
     root_raw = artifact_report.get("resolved_artifact_cache_root")
     if not isinstance(root_raw, str) or not Path(root_raw).is_absolute():
         raise ValueError("artifact report lacks an absolute resolved root")
-    try:
-        root = Path(root_raw).resolve(strict=True)
-    except OSError as exc:
-        raise ValueError("artifact root is unavailable") from exc
-    if str(root) != root_raw or not root.is_dir():
-        raise ValueError("artifact root must be an exact resolved directory")
+    target_root = Path(root_raw)
+    if source_artifact_root is None:
+        try:
+            root = target_root.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("artifact root is unavailable") from exc
+        if str(root) != root_raw or not root.is_dir():
+            raise ValueError("artifact root must be an exact resolved directory")
+    else:
+        if str(target_root) != root_raw:
+            raise ValueError("artifact root must be an exact absolute path")
+        try:
+            root = Path(source_artifact_root).resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("source artifact root is unavailable") from exc
+        if not root.is_dir():
+            raise ValueError("source artifact root must be a directory")
 
     verified = artifact_report.get("verified_files")
     if not isinstance(verified, list):
@@ -1171,7 +1236,7 @@ def compile_stage_pack(
             raise ValueError(f"verified local path is invalid: {path}")
         local = Path(local_raw)
         try:
-            relative = local.relative_to(root)
+            relative = local.relative_to(target_root)
         except ValueError as exc:
             raise ValueError(f"verified local path escapes artifact root: {path}") from exc
         relative_posix = relative.as_posix()
@@ -1214,7 +1279,7 @@ def compile_stage_pack(
         ),
         "expected_tensor_keys": copy.deepcopy(assignment["expected_tensor_keys"]),
         "upstream_files": copy.deepcopy(assignment_files),
-        "artifact_root": str(root),
+        "artifact_root": root_raw,
         "artifacts": artifacts,
         "runtime": copy.deepcopy(assignment["runtime"]),
         "control_plane_binding": copy.deepcopy(
@@ -1560,6 +1625,7 @@ def verify_stage_pack(
     *,
     assignment: dict[str, Any],
     manifest: dict[str, Any],
+    source_artifact_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Verify pack identity, authoritative ownership, files, and tensor coverage."""
     if not isinstance(pack, dict):
@@ -1581,15 +1647,25 @@ def verify_stage_pack(
     root_raw = pack.get("artifact_root")
     if not isinstance(root_raw, str) or not Path(root_raw).is_absolute():
         raise ValueError("stage pack artifact root must be absolute")
-    root = Path(root_raw)
-    if root.is_symlink():
-        raise ValueError("stage pack artifact root may not be a symlink")
-    try:
-        resolved_root = root.resolve(strict=True)
-    except OSError as exc:
-        raise ValueError("stage pack artifact root is unavailable") from exc
-    if str(resolved_root) != root_raw or not resolved_root.is_dir():
-        raise ValueError("stage pack artifact root must be exact and canonical")
+    target_root = Path(root_raw)
+    if source_artifact_root is None:
+        if target_root.is_symlink():
+            raise ValueError("stage pack artifact root may not be a symlink")
+        try:
+            resolved_root = target_root.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("stage pack artifact root is unavailable") from exc
+        if str(resolved_root) != root_raw or not resolved_root.is_dir():
+            raise ValueError("stage pack artifact root must be exact and canonical")
+    else:
+        if str(target_root) != root_raw:
+            raise ValueError("stage pack artifact root must be exact and canonical")
+        try:
+            resolved_root = Path(source_artifact_root).resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("stage pack source artifact root is unavailable") from exc
+        if not resolved_root.is_dir():
+            raise ValueError("stage pack source artifact root must be a directory")
 
     artifacts_raw = pack.get("artifacts")
     if not isinstance(artifacts_raw, list) or not artifacts_raw:

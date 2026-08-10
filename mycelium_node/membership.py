@@ -23,6 +23,9 @@ from mycelium_membership import (
     LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MAX_MESSAGE_TTL_SECONDS,
+    RESUME_ACCEPTANCE_PROTOCOL,
+    RESUME_REQUEST_PROTOCOL,
+    SEED_ROTATION_ACK_PROTOCOL,
     MembershipContractError,
     sign_membership_message,
     validate_peer_runtime_capability,
@@ -166,9 +169,11 @@ class NodeMembershipSession:
         self._ttl = float(message_ttl_seconds)
         self._lock = threading.RLock()
         self._pending_join_message_id: str | None = None
+        self._pending_resume: tuple[str, int, str] | None = None
         self._generation: int | None = None
         self._seed_key_digest: str | None = None
         self._seed_endpoint_id: str | None = None
+        self._seed_rotation: dict[str, Any] | None = None
         self._lease_expires_at: float | None = None
         self._heartbeat_sequence = 0
         self._seen_ids: dict[str, float] = {}
@@ -204,6 +209,81 @@ class NodeMembershipSession:
 
     def _now(self) -> float:
         return _finite_now(self._clock())
+
+    def trust_seed_rotation(
+        self,
+        transition: Mapping[str, Any],
+        *,
+        old_endpoint_id: str,
+        new_endpoint_id: str,
+    ) -> None:
+        """Install a transition already dual-signature-verified by the seed client."""
+
+        with self._lock:
+            if self._seed_key_digest is None or self._seed_endpoint_id is None:
+                raise NodeMembershipError("membership_not_joined")
+            if (
+                transition.get("old_seed_key_digest") != self._seed_key_digest
+                or old_endpoint_id != self._seed_endpoint_id
+                or transition.get("new_seed_key_digest") == self._seed_key_digest
+                or not isinstance(new_endpoint_id, str)
+                or not new_endpoint_id
+            ):
+                raise NodeMembershipError("membership_seed_rotation_mismatch")
+            self._seed_rotation = {
+                **dict(transition),
+                "old_endpoint_id": old_endpoint_id,
+                "new_endpoint_id": new_endpoint_id,
+            }
+
+    def seed_rotation_acknowledgement(self) -> dict[str, Any]:
+        """Acknowledge the exact dual-signed authority transition now trusted."""
+
+        with self._lock:
+            if self._seed_rotation is None:
+                raise NodeMembershipError("membership_seed_rotation_unknown")
+            transition = {
+                key: value
+                for key, value in self._seed_rotation.items()
+                if key not in {"old_endpoint_id", "new_endpoint_id"}
+            }
+            message = {
+                **self._post_join_common(SEED_ROTATION_ACK_PROTOCOL),
+                "authority_generation": transition["authority_generation"],
+                "transition_digest": "sha256:"
+                + hashlib.sha256(canonical_json_bytes(transition)).hexdigest(),
+            }
+            return sign_membership_message(signer=self.signer, message=message)
+
+    def _seed_identity_for_envelope(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        now: float,
+    ) -> tuple[str, str]:
+        record = envelope.get("verification_key")
+        signature = envelope.get("signature")
+        if not isinstance(record, Mapping) or not isinstance(signature, Mapping):
+            raise NodeMembershipError("membership_seed_rotation_mismatch")
+        digest = record.get("verification_key_digest")
+        endpoint = signature.get("signer_endpoint_id")
+        rotation = self._seed_rotation
+        if rotation is None:
+            if digest != self._seed_key_digest or endpoint != self._seed_endpoint_id:
+                raise NodeMembershipError("membership_seed_rotation_mismatch")
+            return str(digest), str(endpoint)
+        allowed = {(rotation["old_seed_key_digest"], rotation["old_endpoint_id"])}
+        if now >= float(rotation["effective_at"]):
+            allowed.add(
+                (rotation["new_seed_key_digest"], rotation["new_endpoint_id"])
+            )
+        if now > float(rotation["overlap_expires_at"]):
+            allowed.discard(
+                (rotation["old_seed_key_digest"], rotation["old_endpoint_id"])
+            )
+        if (digest, endpoint) not in allowed:
+            raise NodeMembershipError("membership_seed_rotation_mismatch")
+        return str(digest), str(endpoint)
 
     def _new_message_id(self) -> str:
         value = _segment(self._id_source(), "message_id")
@@ -347,6 +427,109 @@ class NodeMembershipSession:
             self._pending_join_message_id = None
             return message
 
+    def resume_request(
+        self,
+        *,
+        previous_generation: int,
+        previous_incarnation: str,
+        endpoint_addrs: Sequence[str],
+    ) -> dict[str, Any]:
+        """Sign a restart request under the existing durable device identity."""
+
+        with self._lock:
+            if self._generation is not None:
+                raise NodeMembershipError("membership_already_joined")
+            if self._pending_join_message_id is not None or self._pending_resume is not None:
+                raise NodeMembershipError("resume_request_already_pending")
+            if (
+                isinstance(previous_generation, bool)
+                or not isinstance(previous_generation, int)
+                or previous_generation < 1
+            ):
+                raise ValueError("previous_generation is invalid")
+            previous_incarnation = _segment(
+                previous_incarnation,
+                "previous_incarnation",
+            )
+            if previous_incarnation == self.incarnation:
+                raise NodeMembershipError("membership_resume_incarnation_invalid")
+            now = self._now()
+            message = {
+                "protocol": RESUME_REQUEST_PROTOCOL,
+                "message_id": self._new_message_id(),
+                "swarm_id": self.swarm_id,
+                "sender_node_id": self.node_id,
+                "sender_endpoint_id": self.signer.endpoint_id,
+                "recipient_node_id": self.seed_node_id,
+                "incarnation": self.incarnation,
+                "generation": previous_generation,
+                "issued_at": now,
+                "expires_at": now + self._ttl,
+                "previous_incarnation": previous_incarnation,
+                "software_version": self.software_version,
+                "peer_class": self.peer_class,
+                "runtime_capability": dict(self.runtime_capability),
+                "endpoint_addr": {
+                    "id": self.signer.endpoint_id,
+                    "addrs": list(endpoint_addrs),
+                },
+            }
+            envelope = sign_membership_message(signer=self.signer, message=message)
+            self._pending_resume = (
+                message["message_id"],
+                previous_generation,
+                previous_incarnation,
+            )
+            return envelope
+
+    def accept_resume(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        seed_key_digest: str,
+    ) -> dict[str, Any]:
+        """Install a seed-authorized generation advance after process restart."""
+
+        with self._lock:
+            now = self._now()
+            message = verify_membership_message(
+                envelope,
+                now=now,
+                expected_key_digest=seed_key_digest,
+                expected_protocol=RESUME_ACCEPTANCE_PROTOCOL,
+            )
+            if message["message_id"] in self._seen_ids:
+                raise NodeMembershipError("membership_message_replayed")
+            if self._generation is not None:
+                raise NodeMembershipError("membership_already_joined")
+            pending = self._pending_resume
+            expected = (
+                pending is not None
+                and message["swarm_id"] == self.swarm_id
+                and message["sender_node_id"] == self.seed_node_id
+                and message["recipient_node_id"] == self.node_id
+                and message["request_message_id"] == pending[0]
+                and message["accepted_node_id"] == self.node_id
+                and message["accepted_incarnation"] == self.incarnation
+                and message["previous_membership_generation"] == pending[1]
+                and message["membership_generation"] == pending[1] + 1
+            )
+            if not expected:
+                raise NodeMembershipError("resume_acceptance_mismatch")
+            self._remember_incoming(
+                message["message_id"],
+                expires_at=float(message["expires_at"]),
+                now=now,
+            )
+            if float(message["lease_expires_at"]) <= now:
+                raise NodeMembershipError("membership_lease_expired")
+            self._generation = int(message["membership_generation"])
+            self._seed_key_digest = seed_key_digest
+            self._seed_endpoint_id = message["sender_endpoint_id"]
+            self._lease_expires_at = float(message["lease_expires_at"])
+            self._pending_resume = None
+            return message
+
     def _verify_seed_message(
         self,
         envelope: Mapping[str, Any],
@@ -362,16 +545,20 @@ class NodeMembershipSession:
         now = self._now()
         if now >= self._lease_expires_at:
             raise NodeMembershipError("membership_lease_expired")
+        expected_digest, expected_endpoint = self._seed_identity_for_envelope(
+            envelope,
+            now=now,
+        )
         message = verify_membership_message(
             envelope,
             now=now,
-            expected_key_digest=self._seed_key_digest,
+            expected_key_digest=expected_digest,
             expected_protocol=expected_protocol,
         )
         if (
             message["swarm_id"] != self.swarm_id
             or message["sender_node_id"] != self.seed_node_id
-            or message["sender_endpoint_id"] != self._seed_endpoint_id
+            or message["sender_endpoint_id"] != expected_endpoint
             or message["recipient_node_id"] != self.node_id
             or message["generation"] != self._generation
         ):
@@ -403,16 +590,20 @@ class NodeMembershipSession:
                 raise NodeMembershipError("membership_not_joined")
             now = self._now()
             old_lease_expires_at = self._lease_expires_at
+            expected_digest, expected_endpoint = self._seed_identity_for_envelope(
+                envelope,
+                now=now,
+            )
             message = verify_membership_message(
                 envelope,
                 now=now,
-                expected_key_digest=self._seed_key_digest,
+                expected_key_digest=expected_digest,
                 expected_protocol=LEASE_RENEWAL_PROTOCOL,
             )
             if (
                 message["swarm_id"] != self.swarm_id
                 or message["sender_node_id"] != self.seed_node_id
-                or message["sender_endpoint_id"] != self._seed_endpoint_id
+                or message["sender_endpoint_id"] != expected_endpoint
                 or message["recipient_node_id"] != self.node_id
                 or message["generation"] != self._generation
             ):

@@ -1,0 +1,15 @@
+{
+  "connect_rtt_ema_ms": 1.2,
+  "dst_endpoint_id": "endpoint-node-b",
+  "dst_node_id": "node-b",
+  "goodput_mbps": 900.0,
+  "jitter_ms": 0.1,
+  "loss_ratio": 0.0,
+  "measurement_method": "active_probe",
+  "protocol": "mycelium.link_state.v1",
+  "reachable": true,
+  "rtt_p95_ms": 1.8,
+  "sample_count": 16,
+  "src_endpoint_id": "endpoint-node-a",
+  "src_node_id": "node-a"
+}

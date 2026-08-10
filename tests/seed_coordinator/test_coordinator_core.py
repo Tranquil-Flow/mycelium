@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from pathlib import Path
+import sqlite3
 import threading
 
 import pytest
@@ -12,6 +13,7 @@ from mycelium_membership import (
     ASSIGNMENT_RESULT_PROTOCOL,
     CAPABILITY_REPORT_PROTOCOL,
     HEARTBEAT_PROTOCOL,
+    SEED_ROTATION_ACK_PROTOCOL,
 )
 from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.evidence import canonical_json_bytes
@@ -23,6 +25,11 @@ from mycelium_seed import SeedCoordinator, SeedCoordinatorError, SqliteSeedState
 NOW = 2_000.0
 MAC_RUNTIME_CAPABILITY = {
     "runtime_backend": "mlx",
+    "transport": "iroh",
+    "activation_protocol": "mycelium.router_wire.v1",
+}
+ANDROID_TERMUX_RUNTIME_CAPABILITY = {
+    "runtime_backend": "pixel-stdlib",
     "transport": "iroh",
     "activation_protocol": "mycelium.router_wire.v1",
 }
@@ -157,6 +164,70 @@ def test_invite_join_and_signed_telemetry_roundtrip(tmp_path: Path) -> None:
     assert coordinator.member("node-a")["last_heartbeat_sequence"] == 1
 
 
+def test_signed_seed_rotation_ack_is_bound_to_member_and_exact_transition(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-rotation-ack")
+    transition = {
+        "swarm_id": "swarm-a",
+        "seed_node_id": "seed-node",
+        "previous_generation": 1,
+        "authority_generation": 2,
+        "old_seed_key_digest": coordinator.signer.verification_key_digest,
+        "new_seed_key_digest": "sha256:" + "9" * 64,
+        "initiated_at": NOW,
+        "effective_at": NOW,
+        "overlap_expires_at": NOW + 300.0,
+        "reason": "scheduled_rotation",
+    }
+    state = SqliteSeedState(tmp_path / "seed-state" / "state.sqlite3")
+    state.begin_authority_rotation(transition)
+    node.trust_seed_rotation(
+        transition,
+        old_endpoint_id=coordinator.signer.endpoint_id,
+        new_endpoint_id="seed-endpoint-next",
+    )
+
+    acknowledgement = node.seed_rotation_acknowledgement()
+    accepted = coordinator.receive_member_message(
+        acknowledgement,
+        expected_protocol=SEED_ROTATION_ACK_PROTOCOL,
+    )
+    assert accepted["authority_generation"] == 2
+    assert state.seed_rotation_acknowledgements(authority_generation=2) == [
+        {
+            "node_id": "node-a",
+            "member_generation": 1,
+            "authority_generation": 2,
+            "transition_digest": accepted["transition_digest"],
+            "message_id": accepted["message_id"],
+            "acknowledged_at": NOW,
+        }
+    ]
+
+
+def test_member_lifecycle_cannot_regress_after_running(tmp_path: Path) -> None:
+    coordinator = _coordinator(tmp_path)
+    node = _node(tmp_path)
+    _join(coordinator, node, nonce="invite-lifecycle")
+    running = node.heartbeat(lifecycle_state="RUNNING", active_requests=0)
+    coordinator.receive_member_message(running, expected_protocol=HEARTBEAT_PROTOCOL)
+
+    regressed = node.heartbeat(lifecycle_state="CONFIGURED", active_requests=0)
+    with pytest.raises(
+        SeedCoordinatorError,
+        match="seed_member_lifecycle_regression",
+    ):
+        coordinator.receive_member_message(
+            regressed,
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )
+
+    assert coordinator.member("node-a")["lifecycle_state"] == "RUNNING"
+
+
 def test_join_retry_returns_exact_committed_acceptance(tmp_path: Path) -> None:
     coordinator = _coordinator(tmp_path)
     node = _node(tmp_path)
@@ -190,6 +261,70 @@ def test_join_retry_returns_exact_committed_acceptance(tmp_path: Path) -> None:
     )
     assert after_restart == first
     assert restored.member("node-a")["generation"] == 1
+
+
+def test_signed_resume_advances_generation_without_consuming_invite(
+    tmp_path: Path,
+) -> None:
+    coordinator = _coordinator(tmp_path)
+    first = _node(tmp_path, incarnation="incarnation-a")
+    _join(coordinator, first, nonce="invite-resume-once")
+    database = coordinator._state.database  # noqa: SLF001 - durable gate oracle
+
+    resumed = _node(tmp_path, incarnation="incarnation-b")
+    request = resumed.resume_request(
+        previous_generation=1,
+        previous_incarnation="incarnation-a",
+        endpoint_addrs=["https://100.117.33.124:9443/control"],
+    )
+    acceptance = coordinator.accept_resume(resume_envelope=request)
+    resumed.accept_resume(
+        acceptance,
+        seed_key_digest=coordinator.signer.verification_key_digest,
+    )
+
+    assert resumed.generation == 2
+    assert coordinator.member("node-a")["incarnation"] == "incarnation-b"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM consumed_invites").fetchone()[0] == 1
+
+    restarted = _coordinator(
+        tmp_path,
+        signer=coordinator.signer,
+        id_prefix="resume-restarted",
+    )
+    assert restarted.accept_resume(resume_envelope=request) == acceptance
+    assert restarted.member("node-a")["generation"] == 2
+
+
+def test_resume_rejects_revoked_and_stale_members(tmp_path: Path) -> None:
+    coordinator = _coordinator(tmp_path)
+    first = _node(tmp_path, incarnation="incarnation-a")
+    _join(coordinator, first, nonce="invite-resume-policy")
+    stale = _node(tmp_path, incarnation="incarnation-b")
+    stale_request = stale.resume_request(
+        previous_generation=2,
+        previous_incarnation="incarnation-a",
+        endpoint_addrs=["https://100.117.33.124:9443/control"],
+    )
+    with pytest.raises(SeedCoordinatorError) as stale_error:
+        coordinator.accept_resume(resume_envelope=stale_request)
+    assert stale_error.value.code == "seed_resume_generation_stale"
+
+    coordinator.advance_member_generation(
+        node_id="node-a",
+        expected_generation=1,
+        lifecycle_state="STOPPED",
+    )
+    revoked = _node(tmp_path, incarnation="incarnation-c")
+    revoked_request = revoked.resume_request(
+        previous_generation=1,
+        previous_incarnation="incarnation-a",
+        endpoint_addrs=["https://100.117.33.124:9443/control"],
+    )
+    with pytest.raises(SeedCoordinatorError) as revoked_error:
+        coordinator.accept_resume(resume_envelope=revoked_request)
+    assert revoked_error.value.code == "seed_resume_member_revoked"
 
 
 def test_join_precommit_failure_does_not_consume_invite(tmp_path: Path) -> None:
@@ -648,6 +783,7 @@ def test_join_rejects_one_endpoint_identity_under_multiple_node_ids(
     ("peer_class", "runtime_capability", "activation_eligible"),
     [
         ("mac_mlx_iroh", MAC_RUNTIME_CAPABILITY, True),
+        ("android_termux_iroh", ANDROID_TERMUX_RUNTIME_CAPABILITY, False),
         *[
             (peer_class, capability, False)
             for peer_class, capability in NON_ACTIVATION_RUNTIME_CAPABILITIES.items()

@@ -17,7 +17,14 @@ import pytest
 from mycelium_iroh_sidecar import ProtocolError, SidecarClient
 from mycelium_iroh_sidecar import client as sidecar_client_module
 import mycelium_router.transports.iroh as iroh_module
-from mycelium_router.contracts import FailureReport, TokenEvent
+from mycelium_router.contracts import (
+    FailureReport,
+    HopHeader,
+    PathBuildState,
+    PathHop,
+    ProgressivePrefillContext,
+    TokenEvent,
+)
 from mycelium_router.transports.iroh import (
     PROCESS_LIFETIME_LIMITATION,
     DeliveryReceipt,
@@ -27,7 +34,14 @@ from mycelium_router.transports.iroh import (
     _bounded_trace_identity,
     _delivery_receipt_digest,
 )
-from mycelium_router.wire import ROUTER_WIRE_PROTOCOL, encode_frame
+from mycelium_router.wire import (
+    ROUTER_WIRE_PROTOCOL,
+    decode_frame,
+    encode_frame,
+    encode_progressive_prefill,
+)
+from test_router_contracts import graph_fixture
+from test_router_policy import request_fixture
 
 
 @dataclass
@@ -326,6 +340,152 @@ def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() ->
     assert receipt.semantics == "remote_router_dispatch_ack"
     assert receipt.router_protocol == ROUTER_WIRE_PROTOCOL
     assert transport.route_ready is False
+
+
+@pytest.mark.parametrize("forward_kind", ["progressive", "token"])
+def test_inbound_dispatch_schedules_ordered_remote_forward_without_ack_cycle(
+    forward_kind: str,
+) -> None:
+    hub = _Hub()
+    hub.block_confirmed_send = True
+    transport = _transport(hub, delivery_timeout_seconds=1.0)
+    handler_returned = threading.Event()
+    graph = graph_fixture()
+    request = request_fixture()
+    first = graph.stages[0].placements[0]
+    hop = PathHop(
+        stage_id=graph.stages[0].stage_id,
+        placement_id=first.placement_id,
+        reservation_id="reservation-forward",
+        reservation_expires_at=30.0,
+        reservation_epoch=graph.deployment_epoch,
+    )
+    build = PathBuildState(
+        request=request,
+        graph=graph,
+        path_id="path-forward",
+        path_attempt=0,
+        ordered_hops=(hop,),
+    )
+    header = HopHeader(
+        request_id=request.request_id,
+        path_id=build.path_id,
+        path_attempt=build.path_attempt,
+        phase="PREFILL",
+        token_index=-1,
+        hop_index=0,
+        source_placement_id="",
+        destination_placement_id=first.placement_id,
+        topology_version=graph.topology_version,
+        idempotency_key=f"{request.request_id}:path-forward:0:PREFILL:-1:0",
+    )
+    progressive_frame = encode_progressive_prefill(
+        header,
+        ProgressivePrefillContext(
+            graph=graph,
+            request=request,
+            build=build,
+            payload=b"activation",
+        ),
+    )
+    forwarded_frame = (
+        progressive_frame if forward_kind == "progressive" else _event_frame(202)
+    )
+
+    class ForwardingRouter(_RecordingRouter):
+        def receive_token_event(
+            self,
+            event: TokenEvent,
+            *,
+            source_node_id: str | None = None,
+        ) -> None:
+            transport._send_or_dispatch("peer-node", forwarded_frame)
+            handler_returned.set()
+            super().receive_token_event(event, source_node_id=source_node_id)
+
+    transport.bind_router(ForwardingRouter())
+    transport.start()
+    try:
+        inbound_message_id = b"f" * 16
+        hub.deliver(inbound_message_id, _event_frame(101))
+        assert handler_returned.wait(timeout=1)
+        deadline = time.monotonic() + 1
+        while inbound_message_id not in hub.acks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert hub.acks == [inbound_message_id]
+        assert hub.confirmed_send_entered.wait(timeout=1)
+        assert transport.worker_threads_alive == 3
+        hub.release_confirmed_send.set()
+        deadline = time.monotonic() + 1
+        while not hub.sent and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(hub.sent) == 1
+    finally:
+        hub.release_confirmed_send.set()
+        transport.close()
+
+
+def test_multi_hop_progressive_frame_preserves_graph_entry_not_previous_hop() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    graph = graph_fixture()
+    request = request_fixture()
+    first = graph.stages[0].placements[0]
+    build = PathBuildState(
+        request=request,
+        graph=graph,
+        path_id="path-multi-hop-entry",
+        path_attempt=0,
+        ordered_hops=(
+            PathHop(
+                stage_id=graph.stages[0].stage_id,
+                placement_id=first.placement_id,
+                reservation_id="reservation-entry",
+                reservation_expires_at=30.0,
+                reservation_epoch=graph.deployment_epoch,
+            ),
+        ),
+    )
+    header = HopHeader(
+        request_id=request.request_id,
+        path_id=build.path_id,
+        path_attempt=build.path_attempt,
+        phase="PREFILL",
+        token_index=-1,
+        hop_index=0,
+        source_placement_id="",
+        destination_placement_id=first.placement_id,
+        topology_version=graph.topology_version,
+        idempotency_key=f"{request.request_id}:multi-hop-entry:0:PREFILL:-1:0",
+    )
+    frame = encode_progressive_prefill(
+        header,
+        ProgressivePrefillContext(
+            graph=graph,
+            request=request,
+            build=build,
+            payload=b"activation",
+        ),
+    )
+    captured: dict[str, str] = {}
+
+    class ProgressiveRouter(_RecordingRouter):
+        def receive_progressive_prefill(
+            self,
+            _header,
+            _context,
+            *,
+            source_node_id: str,
+            entry_node_id: str,
+        ) -> None:
+            captured["source"] = source_node_id
+            captured["entry"] = entry_node_id
+
+    transport.bind_router(ProgressiveRouter())
+    transport._dispatch(decode_frame(frame), source_node_id="node-b")
+
+    assert captured == {"source": "node-b", "entry": first.node_id}
+    assert transport._entry_nodes[request.request_id] == first.node_id
 
 
 def test_multi_peer_transport_configures_peer_set_atomically_on_start() -> None:

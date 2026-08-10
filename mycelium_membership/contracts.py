@@ -15,6 +15,8 @@ from mycelium_qualification.signing import (
 
 JOIN_REQUEST_PROTOCOL = "mycelium.membership.join_request.v1"
 JOIN_ACCEPTANCE_PROTOCOL = "mycelium.membership.join_acceptance.v1"
+RESUME_REQUEST_PROTOCOL = "mycelium.membership.resume_request.v1"
+RESUME_ACCEPTANCE_PROTOCOL = "mycelium.membership.resume_acceptance.v1"
 CAPABILITY_REPORT_PROTOCOL = "mycelium.membership.capability_report.v1"
 LINK_PROBE_REPORT_PROTOCOL = "mycelium.membership.link_probe_report.v1"
 HEARTBEAT_PROTOCOL = "mycelium.membership.heartbeat.v1"
@@ -22,6 +24,7 @@ LEASE_RENEWAL_PROTOCOL = "mycelium.membership.lease_renewal.v1"
 ASSIGNMENT_OFFER_PROTOCOL = "mycelium.membership.assignment_offer.v1"
 ASSIGNMENT_RESULT_PROTOCOL = "mycelium.membership.assignment_result.v1"
 DRAIN_ACK_PROTOCOL = "mycelium.membership.drain_ack.v1"
+SEED_ROTATION_ACK_PROTOCOL = "mycelium.membership.seed_rotation_ack.v1"
 SIGNED_MESSAGE_PROTOCOL = "mycelium.membership.signed_message.v1"
 
 MAX_MESSAGE_TTL_SECONDS = 3_600.0
@@ -48,6 +51,16 @@ _PEER_RUNTIME_CAPABILITIES = {
         "runtime_backend": "android",
         "transport": "http",
         "activation_protocol": None,
+    },
+    "android_termux_iroh": {
+        "runtime_backend": "pixel-stdlib",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
+    },
+    "linux_numpy_iroh": {
+        "runtime_backend": "numpy",
+        "transport": "iroh",
+        "activation_protocol": ROUTER_ACTIVATION_PROTOCOL,
     },
     "linux_tbd": {
         "runtime_backend": "tbd",
@@ -86,6 +99,25 @@ _SPECIFIC_FIELDS = {
             "request_message_id",
             "accepted_node_id",
             "accepted_incarnation",
+            "membership_generation",
+            "lease_expires_at",
+        }
+    ),
+    RESUME_REQUEST_PROTOCOL: frozenset(
+        {
+            "previous_incarnation",
+            "endpoint_addr",
+            "software_version",
+            "peer_class",
+            "runtime_capability",
+        }
+    ),
+    RESUME_ACCEPTANCE_PROTOCOL: frozenset(
+        {
+            "request_message_id",
+            "accepted_node_id",
+            "accepted_incarnation",
+            "previous_membership_generation",
             "membership_generation",
             "lease_expires_at",
         }
@@ -155,6 +187,9 @@ _SPECIFIC_FIELDS = {
     ),
     DRAIN_ACK_PROTOCOL: frozenset(
         {"drain_id", "active_requests", "last_request_id", "completed_at"}
+    ),
+    SEED_ROTATION_ACK_PROTOCOL: frozenset(
+        {"authority_generation", "transition_digest"}
     ),
 }
 _ENVELOPE_FIELDS = frozenset(
@@ -274,11 +309,12 @@ def peer_runtime_is_activation_eligible(
     peer_class: Any,
     runtime_capability: Any,
 ) -> bool:
-    """Return seed-computed eligibility after exact class/capability validation."""
+    """Return current production eligibility after exact capability validation."""
 
     validated = validate_peer_runtime_capability(peer_class, runtime_capability)
     return (
-        validated["transport"] == "iroh"
+        peer_class in {"mac_mlx_iroh", "linux_numpy_iroh"}
+        and validated["transport"] == "iroh"
         and validated["activation_protocol"] == ROUTER_ACTIVATION_PROTOCOL
     )
 
@@ -317,6 +353,10 @@ def _validate_join_request(message: Mapping[str, Any]) -> None:
         message["peer_class"],
         message["runtime_capability"],
     )
+    _validate_membership_endpoint(message)
+
+
+def _validate_membership_endpoint(message: Mapping[str, Any]) -> None:
     endpoint = message["endpoint_addr"]
     _require(
         isinstance(endpoint, Mapping) and set(endpoint) == {"id", "addrs"},
@@ -334,6 +374,23 @@ def _validate_join_request(message: Mapping[str, Any]) -> None:
         and all(_text(item, maximum=1_024) for item in addrs),
         "membership_endpoint_addr_invalid",
     )
+
+
+def _validate_resume_request(message: Mapping[str, Any]) -> None:
+    _require(
+        _segment(message["previous_incarnation"]),
+        "membership_identifier_invalid",
+    )
+    _require(
+        message["previous_incarnation"] != message["incarnation"],
+        "membership_resume_incarnation_invalid",
+    )
+    _require(_text(message["software_version"], maximum=128), "membership_text_invalid")
+    validate_peer_runtime_capability(
+        message["peer_class"],
+        message["runtime_capability"],
+    )
+    _validate_membership_endpoint(message)
 
 
 def _validate_join_acceptance(message: Mapping[str, Any]) -> None:
@@ -356,9 +413,43 @@ def _validate_join_acceptance(message: Mapping[str, Any]) -> None:
     )
     lease = _number(message["lease_expires_at"])
     issued = _number(message["issued_at"])
-    _require(lease is not None and issued is not None and lease > issued, "membership_time_invalid")
+    _require(
+        lease is not None and issued is not None and lease > issued,
+        "membership_time_invalid",
+    )
     _require(
         lease - issued <= MAX_MESSAGE_TTL_SECONDS,
+        "membership_lease_ttl_invalid",
+    )
+
+
+def _validate_resume_acceptance(message: Mapping[str, Any]) -> None:
+    for field in (
+        "request_message_id",
+        "accepted_node_id",
+        "accepted_incarnation",
+    ):
+        _require(_segment(message[field]), "membership_identifier_invalid")
+    _require(
+        message["accepted_node_id"] == message["recipient_node_id"],
+        "membership_recipient_mismatch",
+    )
+    previous = message["previous_membership_generation"]
+    current = message["membership_generation"]
+    _require(
+        _integer(previous, minimum=1)
+        and _integer(current, minimum=2)
+        and current == previous + 1
+        and current == message["generation"],
+        "membership_generation_invalid",
+    )
+    lease = _number(message["lease_expires_at"])
+    issued = _number(message["issued_at"])
+    _require(
+        lease is not None
+        and issued is not None
+        and lease > issued
+        and lease - issued <= MAX_MESSAGE_TTL_SECONDS,
         "membership_lease_ttl_invalid",
     )
 
@@ -537,9 +628,19 @@ def _validate_drain_ack(message: Mapping[str, Any]) -> None:
     )
 
 
+def _validate_seed_rotation_ack(message: Mapping[str, Any]) -> None:
+    _require(
+        _integer(message["authority_generation"], minimum=2),
+        "membership_authority_generation_invalid",
+    )
+    _require(_digest(message["transition_digest"]), "membership_digest_invalid")
+
+
 _VALIDATORS = {
     JOIN_REQUEST_PROTOCOL: _validate_join_request,
     JOIN_ACCEPTANCE_PROTOCOL: _validate_join_acceptance,
+    RESUME_REQUEST_PROTOCOL: _validate_resume_request,
+    RESUME_ACCEPTANCE_PROTOCOL: _validate_resume_acceptance,
     CAPABILITY_REPORT_PROTOCOL: _validate_capability,
     LINK_PROBE_REPORT_PROTOCOL: _validate_link_probe,
     HEARTBEAT_PROTOCOL: _validate_heartbeat,
@@ -547,6 +648,7 @@ _VALIDATORS = {
     ASSIGNMENT_OFFER_PROTOCOL: _validate_assignment_offer,
     ASSIGNMENT_RESULT_PROTOCOL: _validate_assignment_result,
     DRAIN_ACK_PROTOCOL: _validate_drain_ack,
+    SEED_ROTATION_ACK_PROTOCOL: _validate_seed_rotation_ack,
 }
 
 

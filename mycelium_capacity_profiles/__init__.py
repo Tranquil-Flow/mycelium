@@ -16,7 +16,7 @@ from .contracts import (
     canonical_json_bytes,
 )
 from .document import MAX_PROFILE_DOCUMENT_BYTES, parse_capacity_profile_bytes
-from .status import status_with_capacity_profile
+from .status import placement_calibration_digest, status_with_capacity_profile
 
 
 def initialize_capacity_profile_catalog(
@@ -51,5 +51,6 @@ __all__ = [
     "compile_capacity_profile",
     "initialize_capacity_profile_catalog",
     "parse_capacity_profile_bytes",
+    "placement_calibration_digest",
     "status_with_capacity_profile",
 ]

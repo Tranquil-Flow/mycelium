@@ -1,0 +1,96 @@
+{
+  "counters": {
+    "applied_operation_count": 0,
+    "fatal": null,
+    "frames_received": 0,
+    "frames_sent": 0
+  },
+  "decode_mode": "stage_local_kv",
+  "deployment_id": "12345678-1234-5678-1234-567812345678",
+  "incidents": [],
+  "model_id": "org/model",
+  "peers": [
+    {
+      "active_kv_state_count": 0,
+      "applied_operation_count": 0,
+      "decode_mode": "stage_local_kv",
+      "frames_received": 0,
+      "frames_sent": 0,
+      "node_id": "node-a",
+      "placements": [
+        {
+          "component_roles": [
+            "input_embedding",
+            "decoder"
+          ],
+          "end_layer_exclusive": 2,
+          "node_id": "node-a",
+          "placement_id": "stage-000-primary",
+          "runtime_backend": "mlx",
+          "stage_id": "stage-000",
+          "start_layer": 0
+        }
+      ],
+      "release_counts": {},
+      "retained_result_count": 0
+    },
+    {
+      "active_kv_state_count": 0,
+      "applied_operation_count": 0,
+      "decode_mode": "stage_local_kv",
+      "frames_received": 0,
+      "frames_sent": 0,
+      "node_id": "node-b",
+      "placements": [
+        {
+          "component_roles": [
+            "decoder",
+            "final_norm",
+            "lm_head"
+          ],
+          "end_layer_exclusive": 4,
+          "node_id": "node-b",
+          "placement_id": "stage-001-primary",
+          "runtime_backend": "mlx",
+          "stage_id": "stage-001",
+          "start_layer": 2
+        }
+      ],
+      "release_counts": {},
+      "retained_result_count": 0
+    }
+  ],
+  "protocol": "mycelium.live_route_status.v1",
+  "recent_inferences": [],
+  "route_alive": false,
+  "route_identity_digest": "sha256:53acff4e81fe35642ff93900a73d070efaab56998fb1aa57924f60ef6fa7bbe5",
+  "simulated": false,
+  "stages": [
+    {
+      "component_roles": [
+        "input_embedding",
+        "decoder"
+      ],
+      "end_layer_exclusive": 2,
+      "node_id": "node-a",
+      "placement_id": "stage-000-primary",
+      "runtime_backend": "mlx",
+      "stage_id": "stage-000",
+      "start_layer": 0
+    },
+    {
+      "component_roles": [
+        "decoder",
+        "final_norm",
+        "lm_head"
+      ],
+      "end_layer_exclusive": 4,
+      "node_id": "node-b",
+      "placement_id": "stage-001-primary",
+      "runtime_backend": "mlx",
+      "stage_id": "stage-001",
+      "start_layer": 2
+    }
+  ],
+  "topology_version": 1
+}

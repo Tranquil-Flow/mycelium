@@ -264,7 +264,7 @@ def test_schema_v2_to_v4_migrates_without_losing_a4_member_state(
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT value FROM seed_metadata WHERE key = 'schema_version'"
-        ).fetchone() == ("5",)
+            ).fetchone() == ("8",)
         assert _renewal_columns(connection) == {
             "node_id",
             "generation",
@@ -278,7 +278,7 @@ def test_schema_v2_to_v4_migrates_without_losing_a4_member_state(
     assert migrated.load_members() == [expected_member]
 
 
-def test_schema_v1_migrates_directly_to_v5_with_a4_columns_and_renewals(
+def test_schema_v1_migrates_directly_to_v8_with_a4_columns_and_renewals(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "seed-state-v1.sqlite3"
@@ -319,7 +319,7 @@ def test_schema_v1_migrates_directly_to_v5_with_a4_columns_and_renewals(
     with sqlite3.connect(database) as connection:
         assert connection.execute(
             "SELECT value FROM seed_metadata WHERE key = 'schema_version'"
-        ).fetchone() == ("5",)
+        ).fetchone() == ("8",)
         member_columns = {
             row[1] for row in connection.execute("PRAGMA table_info(seed_members)")
         }

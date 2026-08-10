@@ -13,6 +13,7 @@ const MAX_INCIDENTS = 256;
 const MAX_REASON_CODES = 64;
 const MAX_STAGE_DIGESTS = 256;
 const PUBLIC_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}$/;
+const PUBLIC_MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,63}(?:\/[A-Za-z0-9][A-Za-z0-9._:~-]{0,63})?$/;
 const HOST_PORT = /^(?:[A-Za-z0-9.-]+):[0-9]{1,5}$/;
 const CREDENTIAL = /(?:\bbearer\s+|\bsk-[a-z0-9_-]{12,}|\bgh[pousr]_[a-z0-9]{20,}|\bgithub_pat_[a-z0-9_]{20,}|-----BEGIN[ A-Z0-9_-]{0,48}PRIVATE KEY-----)/i;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/;
@@ -267,6 +268,17 @@ function publicIdentifier(value: unknown, path: string): string {
   return value;
 }
 
+function publicModelIdentifier(value: unknown, path: string): string {
+  if (
+    typeof value !== 'string' ||
+    !PUBLIC_MODEL_ID.test(value) ||
+    CREDENTIAL.test(value)
+  ) {
+    return invalid(`${path} must be a public model identifier`);
+  }
+  return value;
+}
+
 function digest(value: unknown, path: string): string {
   if (typeof value !== 'string' || !SHA256_REF.test(value)) {
     return invalid(`${path} must be a sha256 reference`);
@@ -332,7 +344,7 @@ function decodeBinding(value: unknown): ObservatoryAdapterBinding {
       item.topology_version,
       'qualification.binding.topology_version',
     ),
-    model_id: publicIdentifier(item.model_id, 'qualification.binding.model_id'),
+    model_id: publicModelIdentifier(item.model_id, 'qualification.binding.model_id'),
     resolved_commit: publicIdentifier(
       item.resolved_commit,
       'qualification.binding.resolved_commit',

@@ -31,6 +31,8 @@ POLICY = {
     "tpot_slo_ms": 1_000_000,
 }
 PERFORMANCE = {
+    "backend": "mlx",
+    "decode_mode": "stage_local_kv",
     "prefill_ms_per_layer_token": 0.001,
     "decode_ms_per_layer_token": 0.001,
     "memory_bandwidth_Bps": 1_000_000_000,
@@ -118,6 +120,7 @@ def bundle(model_manifest: dict, *, epoch: int = 3):
         status["performance"] = copy.deepcopy(PERFORMANCE)
         store.apply(make_record(RecordKind.PROFILE, node_id=node_id, ttl_ms=10_000, payload=profile_payload(node_id)))
         store.apply(make_record(RecordKind.STATUS, node_id=node_id, ttl_ms=10_000, payload=status))
+        store.apply(make_record(RecordKind.MEMBERSHIP, node_id=node_id, ttl_ms=10_000))
         service.submit_liveness(
             LivenessEvent(LivenessKind.PUT, "swarm-a", node_id, 1, f"boot-{node_id}-1", clock())
         )

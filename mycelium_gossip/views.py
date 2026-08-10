@@ -107,6 +107,7 @@ class AllocatorNodeEvidence:
     eligible: bool
     exclusion_reasons: Tuple[str, ...]
     memory_domains: Tuple[MemoryDomainEvidence, ...]
+    fast_allocatable_bytes: int
     total_allocatable_bytes: int
     queue_depth: Optional[int]
     in_flight: Optional[int]
@@ -424,6 +425,13 @@ def build_allocator_view(
             reasons.append("peer_quarantined")
         domains = _memory_domains(status)
         total_allocatable = sum(domain.allocatable_after_reservations_bytes for domain in domains)
+        fast_allocatable = sum(
+            domain.allocatable_after_reservations_bytes
+            for domain in domains
+            if domain.kind in {"unified", "vram", "accelerator"}
+        )
+        if fast_allocatable == 0:
+            fast_allocatable = total_allocatable
         if status is not None and total_allocatable <= 0:
             reasons.append("no_allocatable_memory")
         nodes.append(
@@ -435,6 +443,7 @@ def build_allocator_view(
                 eligible=not reasons,
                 exclusion_reasons=tuple(reasons),
                 memory_domains=domains,
+                fast_allocatable_bytes=fast_allocatable,
                 total_allocatable_bytes=total_allocatable,
                 queue_depth=int(status_payload["queue_depth"]) if "queue_depth" in status_payload else None,
                 in_flight=int(status_payload["in_flight"]) if "in_flight" in status_payload else None,

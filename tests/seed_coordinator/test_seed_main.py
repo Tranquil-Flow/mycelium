@@ -50,6 +50,20 @@ def _command(data_dir: Path) -> list[str]:
     ]
 
 
+def _initialize(data_dir: Path) -> dict[str, Any]:
+    completed = subprocess.run(
+        [*_command(data_dir), "--init-only"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert completed.stderr == ""
+    return json.loads(completed.stdout)
+
+
 def _start(data_dir: Path) -> tuple[subprocess.Popen[str], dict[str, Any]]:
     process = subprocess.Popen(
         _command(data_dir),
@@ -71,6 +85,9 @@ def test_seed_module_starts_real_listener_and_reuses_private_identity(
     tmp_path: Path,
 ) -> None:
     data_dir = tmp_path / "seed"
+    initialized = _initialize(data_dir)
+    assert initialized["event"] == "seed_initialized"
+    assert initialized["route_ready"] is False
     first, first_status = _start(data_dir)
     try:
         assert first_status == {
@@ -108,6 +125,22 @@ def test_seed_module_starts_real_listener_and_reuses_private_identity(
         second_stdout, second_stderr = second.communicate(timeout=5)
     assert second.returncode == 0
     assert "private" not in second_stdout.lower() + second_stderr.lower()
+
+
+def test_seed_service_refuses_implicit_initialization(tmp_path: Path) -> None:
+    completed = subprocess.run(
+        _command(tmp_path / "missing-seed"),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "seed_preflight_failed\n"
+    assert not (tmp_path / "missing-seed").exists()
 
 
 def test_seed_dry_run_performs_no_network_io_and_emits_canonical_not_ready(
@@ -170,8 +203,7 @@ def test_seed_rejects_non_owner_only_state_root_without_chmod(
 
 def test_seed_runtime_failure_has_distinct_exit_status(tmp_path: Path) -> None:
     data_dir = tmp_path / "seed-runtime-failure"
-    data_dir.mkdir(mode=0o700)
-    data_dir.chmod(0o700)
+    _initialize(data_dir)
     occupied = socket.socket()
     occupied.bind(("127.0.0.1", 0))
     port = occupied.getsockname()[1]
@@ -266,6 +298,7 @@ def test_second_signal_handler_failure_restores_first_and_closes_server(
     seed_main = importlib.import_module("mycelium_seed.__main__")
     data_dir = tmp_path / "seed-handlers"
     data_dir.mkdir(mode=0o700)
+    (data_dir / "state.sqlite3").touch(mode=0o600)
     old_handler = object()
     calls: list[tuple[int, object]] = []
 
@@ -281,6 +314,13 @@ def test_second_signal_handler_failure_restores_first_and_closes_server(
     class FakeRegistry:
         def __init__(self, _path: Path) -> None:
             return None
+
+    class FakeState:
+        def __init__(self, _path: Path) -> None:
+            return None
+
+        def identity_binding(self) -> dict[str, str]:
+            return {"seed_key_digest": "sha256:" + "1" * 64}
 
     class FakeServer:
         instances: list["FakeServer"] = []
@@ -309,10 +349,13 @@ def test_second_signal_handler_failure_restores_first_and_closes_server(
         return old_handler
 
     monkeypatch.setattr(
-        seed_main, "load_or_create_node_signer", lambda _path: FakeSigner()
+        seed_main,
+        "load_bound_seed_signer",
+        lambda _path, **_kwargs: FakeSigner(),
     )
     monkeypatch.setattr(seed_main, "SeedCoordinator", FakeCoordinator)
     monkeypatch.setattr(seed_main, "SqliteInviteRegistry", FakeRegistry)
+    monkeypatch.setattr(seed_main, "SqliteSeedState", FakeState)
     monkeypatch.setattr(seed_main, "SeedHTTPServer", FakeServer)
     monkeypatch.setattr(seed_main.signal, "signal", fake_signal)
 
@@ -331,6 +374,7 @@ def test_seed_status_failure_closes_started_server(
     seed_main = importlib.import_module("mycelium_seed.__main__")
     data_dir = tmp_path / "seed-status"
     data_dir.mkdir(mode=0o700)
+    (data_dir / "state.sqlite3").touch(mode=0o600)
 
     class FakeSigner:
         endpoint_id = "seed-status-endpoint"
@@ -344,6 +388,13 @@ def test_seed_status_failure_closes_started_server(
     class FakeRegistry:
         def __init__(self, _path: Path) -> None:
             return None
+
+    class FakeState:
+        def __init__(self, _path: Path) -> None:
+            return None
+
+        def identity_binding(self) -> dict[str, str]:
+            return {"seed_key_digest": "sha256:" + "1" * 64}
 
     class FakeServer:
         instance: "FakeServer"
@@ -361,10 +412,13 @@ def test_seed_status_failure_closes_started_server(
             self.closed = True
 
     monkeypatch.setattr(
-        seed_main, "load_or_create_node_signer", lambda _path: FakeSigner()
+        seed_main,
+        "load_bound_seed_signer",
+        lambda _path, **_kwargs: FakeSigner(),
     )
     monkeypatch.setattr(seed_main, "SeedCoordinator", FakeCoordinator)
     monkeypatch.setattr(seed_main, "SqliteInviteRegistry", FakeRegistry)
+    monkeypatch.setattr(seed_main, "SqliteSeedState", FakeState)
     monkeypatch.setattr(seed_main, "SeedHTTPServer", FakeServer)
     monkeypatch.setattr(
         seed_main,
@@ -542,7 +596,7 @@ def test_state_root_lease_pins_original_during_signer_path_api(
     monkeypatch.setattr(seed_main, "SqliteInviteRegistry", forbidden_registry)
 
     with pytest.raises(seed_main._EntrypointFailure) as failed:
-        seed_main.run(["--data-dir", str(data_dir)])
+        seed_main.run(["--data-dir", str(data_dir), "--init-only"])
 
     assert failed.value.code == "seed_preflight_failed"
     assert not (data_dir / "identity" / "seed.key").exists()

@@ -13,7 +13,7 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use iroh::endpoint::{RecvStream, SendStream, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
@@ -647,9 +647,19 @@ async fn process_local_record(
             }
         }
         RecordKind::Ping => ack_response(record.message_id),
-        RecordKind::Delivery | RecordKind::DeliveryFrom | RecordKind::Error => {
-            error_response(record.message_id, "invalid_kind")
+        RecordKind::GetTransportObservations => {
+            let payload = serde_json::to_vec(&state.transport_observation_documents().await)
+                .unwrap_or_default();
+            ResponseRecord {
+                kind: RecordKind::TransportObservations,
+                message_id: record.message_id,
+                payload,
+            }
         }
+        RecordKind::Delivery
+        | RecordKind::DeliveryFrom
+        | RecordKind::TransportObservations
+        | RecordKind::Error => error_response(record.message_id, "invalid_kind"),
     }
 }
 
@@ -796,6 +806,52 @@ struct RuntimeState {
     outbound_ready: Notify,
     outbound_slots: Arc<Semaphore>,
     outbound_tokens: Mutex<HashMap<MessageId, Arc<OutboundControl>>>,
+    outbound_connections: Mutex<HashMap<(EndpointId, u64), iroh::endpoint::Connection>>,
+    transport_observations: Mutex<HashMap<(EndpointId, u64), TransportObservationState>>,
+}
+
+#[derive(Debug, Default)]
+struct TransportObservationState {
+    connections_opened: u64,
+    frames_sent: u64,
+    attempts: u64,
+    failures: u64,
+    reconnect_count: u64,
+    selected_path_changes: u64,
+    path_class: String,
+    relay_identity: Option<String>,
+    cold_rtt_ms: Option<f64>,
+    rtt_samples_ms: VecDeque<f64>,
+    acknowledged_bytes: u64,
+    acknowledged_elapsed_ms: f64,
+    measured_at_unix_ms: u64,
+}
+
+#[derive(Serialize)]
+struct TransportObservationDocument {
+    protocol: &'static str,
+    remote_endpoint_id: String,
+    connection_generation: u64,
+    path_class: String,
+    relay_identity: Option<String>,
+    relay_region: Option<String>,
+    cold_rtt_ms: f64,
+    warm_rtt_ms: f64,
+    observed_goodput_bps: f64,
+    jitter_ms: f64,
+    loss_ratio: f64,
+    sample_count: usize,
+    connections_opened: u64,
+    frames_sent: u64,
+    reconnect_count: u64,
+    selected_path_changes: u64,
+    measured_at_unix_ms: u64,
+}
+
+#[derive(Serialize)]
+struct TransportObservationEnvelope {
+    protocol: &'static str,
+    observations: Vec<TransportObservationDocument>,
 }
 
 struct InboundState {
@@ -984,6 +1040,8 @@ impl RuntimeState {
             outbound_ready: Notify::new(),
             outbound_slots: Arc::new(Semaphore::new(capacity)),
             outbound_tokens: Mutex::new(HashMap::with_capacity(capacity)),
+            outbound_connections: Mutex::new(HashMap::new()),
+            transport_observations: Mutex::new(HashMap::new()),
         })
     }
 
@@ -1033,6 +1091,7 @@ impl RuntimeState {
         if occupied {
             self.fence_outbound_for_rotation().await;
             self.fence_inbound_for_rotation().await;
+            self.close_outbound_connections().await;
         }
         drop(peers);
         self.publish_peer_generation(generation);
@@ -1081,6 +1140,7 @@ impl RuntimeState {
         if occupied {
             self.fence_outbound_for_rotation().await;
             self.fence_inbound_for_rotation().await;
+            self.close_outbound_connections().await;
         }
         drop(peers);
         self.publish_peer_generation(generation);
@@ -1134,6 +1194,115 @@ impl RuntimeState {
 
     async fn peer_matches(&self, endpoint_id: EndpointId, generation: u64) -> bool {
         self.peers.read().await.matches(endpoint_id, generation)
+    }
+
+    async fn reusable_connection(
+        &self,
+        endpoint: &Endpoint,
+        peer: &PeerBinding,
+    ) -> Result<iroh::endpoint::Connection, ()> {
+        let key = (peer.address.id, peer.generation);
+        if let Some(connection) = self.outbound_connections.lock().await.get(&key) {
+            return Ok(connection.clone());
+        }
+        let connection = timeout(
+            STREAM_IO_TIMEOUT,
+            endpoint.connect(peer.address.clone(), IROH_ALPN),
+        )
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())?;
+        if connection.remote_id() != peer.address.id {
+            connection.close(REJECT_CODE, b"identity");
+            return Err(());
+        }
+        let mut connections = self.outbound_connections.lock().await;
+        if let Some(existing) = connections.get(&key) {
+            connection.close(REJECT_CODE, b"duplicate");
+            return Ok(existing.clone());
+        }
+        connections.insert(key, connection.clone());
+        drop(connections);
+        let (path_class, relay_identity, rtt_ms) = selected_path_observation(&connection);
+        let mut observations = self.transport_observations.lock().await;
+        let observation = observations.entry(key).or_default();
+        if observation.connections_opened > 0 {
+            observation.reconnect_count = observation.reconnect_count.saturating_add(1);
+        }
+        observation.connections_opened = observation.connections_opened.saturating_add(1);
+        observation.measured_at_unix_ms = unix_time_ms();
+        update_selected_path(observation, path_class, relay_identity, rtt_ms);
+        log_transport_event(
+            "transport_connection_opened",
+            peer.address.id,
+            peer.generation,
+        );
+        Ok(connection)
+    }
+
+    async fn evict_connection(&self, peer: &PeerBinding) {
+        let key = (peer.address.id, peer.generation);
+        if let Some(connection) = self.outbound_connections.lock().await.remove(&key) {
+            connection.close(REJECT_CODE, b"retry");
+        }
+        let mut observations = self.transport_observations.lock().await;
+        let observation = observations.entry(key).or_default();
+        observation.failures = observation.failures.saturating_add(1);
+        observation.measured_at_unix_ms = unix_time_ms();
+    }
+
+    async fn note_attempt(&self, peer: &PeerBinding) {
+        let key = (peer.address.id, peer.generation);
+        let mut observations = self.transport_observations.lock().await;
+        let observation = observations.entry(key).or_default();
+        observation.attempts = observation.attempts.saturating_add(1);
+        observation.measured_at_unix_ms = unix_time_ms();
+    }
+
+    async fn note_delivered(
+        &self,
+        peer: &PeerBinding,
+        connection: &iroh::endpoint::Connection,
+        payload_bytes: usize,
+        elapsed: Duration,
+    ) {
+        let key = (peer.address.id, peer.generation);
+        let (path_class, relay_identity, rtt_ms) = selected_path_observation(connection);
+        let mut observations = self.transport_observations.lock().await;
+        let observation = observations.entry(key).or_default();
+        observation.frames_sent = observation.frames_sent.saturating_add(1);
+        observation.acknowledged_bytes = observation
+            .acknowledged_bytes
+            .saturating_add(payload_bytes as u64);
+        observation.acknowledged_elapsed_ms += elapsed.as_secs_f64() * 1_000.0;
+        observation.measured_at_unix_ms = unix_time_ms();
+        update_selected_path(observation, path_class, relay_identity, rtt_ms);
+    }
+
+    async fn transport_observation_documents(&self) -> TransportObservationEnvelope {
+        let peers = self.peers.read().await;
+        let observations = self.transport_observations.lock().await;
+        let mut documents = peers
+            .bindings
+            .values()
+            .map(|peer| {
+                let key = (peer.address.id, peer.generation);
+                let state = observations.get(&key);
+                transport_observation_document(peer, state)
+            })
+            .collect::<Vec<_>>();
+        documents.sort_by(|left, right| left.remote_endpoint_id.cmp(&right.remote_endpoint_id));
+        TransportObservationEnvelope {
+            protocol: "mycelium.iroh_sidecar.transport_observations.v1",
+            observations: documents,
+        }
+    }
+
+    async fn close_outbound_connections(&self) {
+        let connections = std::mem::take(&mut *self.outbound_connections.lock().await);
+        for (_, connection) in connections {
+            connection.close(REJECT_CODE, b"peer_rotated");
+        }
     }
 
     async fn bind_outbound(&self, control: &OutboundControl) -> Option<PeerBinding> {
@@ -1430,6 +1599,127 @@ impl RuntimeState {
     }
 }
 
+fn unix_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn selected_path_observation(
+    connection: &iroh::endpoint::Connection,
+) -> (String, Option<String>, Option<f64>) {
+    let paths = connection.paths();
+    let Some(path) = paths.iter().find(|path| path.is_selected()) else {
+        return ("unknown".to_owned(), None, None);
+    };
+    let path_class = if path.is_ip() {
+        "direct"
+    } else if path.is_relay() {
+        "relay"
+    } else {
+        "unknown"
+    };
+    let relay_identity = path.is_relay().then(|| path.remote_addr().to_string());
+    (
+        path_class.to_owned(),
+        relay_identity,
+        Some(path.rtt().as_secs_f64() * 1_000.0),
+    )
+}
+
+fn update_selected_path(
+    state: &mut TransportObservationState,
+    path_class: String,
+    relay_identity: Option<String>,
+    rtt_ms: Option<f64>,
+) {
+    if !state.path_class.is_empty() && state.path_class != path_class {
+        state.selected_path_changes = state.selected_path_changes.saturating_add(1);
+    } else if state.path_class.is_empty() && path_class != "unknown" {
+        state.selected_path_changes = state.selected_path_changes.saturating_add(1);
+    }
+    state.path_class = path_class;
+    state.relay_identity = relay_identity;
+    if let Some(rtt_ms) = rtt_ms.filter(|value| value.is_finite() && *value >= 0.0) {
+        state.cold_rtt_ms.get_or_insert(rtt_ms);
+        state.rtt_samples_ms.push_back(rtt_ms);
+        while state.rtt_samples_ms.len() > 64 {
+            state.rtt_samples_ms.pop_front();
+        }
+    }
+}
+
+fn transport_observation_document(
+    peer: &PeerBinding,
+    state: Option<&TransportObservationState>,
+) -> TransportObservationDocument {
+    let empty = TransportObservationState::default();
+    let state = state.unwrap_or(&empty);
+    let sample_count = state.rtt_samples_ms.len();
+    let warm_rtt_ms = if sample_count == 0 {
+        0.0
+    } else {
+        state.rtt_samples_ms.iter().sum::<f64>() / sample_count as f64
+    };
+    let jitter_ms = if sample_count == 0 {
+        0.0
+    } else {
+        let variance = state
+            .rtt_samples_ms
+            .iter()
+            .map(|value| (value - warm_rtt_ms).powi(2))
+            .sum::<f64>()
+            / sample_count as f64;
+        variance.sqrt()
+    };
+    let observed_goodput_bps = if state.acknowledged_elapsed_ms <= 0.0 {
+        0.0
+    } else {
+        state.acknowledged_bytes as f64 / (state.acknowledged_elapsed_ms / 1_000.0)
+    };
+    let loss_ratio = if state.attempts == 0 {
+        0.0
+    } else {
+        state.failures as f64 / state.attempts as f64
+    };
+    TransportObservationDocument {
+        protocol: "mycelium.iroh_sidecar.transport_observation.v1",
+        remote_endpoint_id: peer.address.id.to_string(),
+        connection_generation: peer.generation,
+        path_class: if state.path_class.is_empty() {
+            "unknown".to_owned()
+        } else {
+            state.path_class.clone()
+        },
+        relay_identity: state.relay_identity.clone(),
+        relay_region: None,
+        cold_rtt_ms: state.cold_rtt_ms.unwrap_or(0.0),
+        warm_rtt_ms,
+        observed_goodput_bps,
+        jitter_ms,
+        loss_ratio,
+        sample_count,
+        connections_opened: state.connections_opened,
+        frames_sent: state.frames_sent,
+        reconnect_count: state.reconnect_count,
+        selected_path_changes: state.selected_path_changes,
+        measured_at_unix_ms: state.measured_at_unix_ms,
+    }
+}
+
+fn log_transport_event(event: &'static str, endpoint_id: EndpointId, generation: u64) {
+    let encoded = serde_json::to_string(&serde_json::json!({
+        "event": event,
+        "remote_endpoint_id": endpoint_id.to_string(),
+        "connection_generation": generation,
+    }))
+    .unwrap_or_else(|_| "{\"event\":\"logging_failure\"}".to_owned());
+    eprintln!("{encoded}");
+}
+
 async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
     loop {
         let item = state.next_outbound().await;
@@ -1462,7 +1752,7 @@ async fn outbound_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
             if !state.peer_matches(peer.address.id, peer.generation).await {
                 break OutboundTerminal::PeerRotated;
             }
-            match send_outbound_once(&endpoint, &peer, &item).await {
+            match send_outbound_once(&endpoint, &state, &peer, &item).await {
                 SendAttempt::Delivered => break OutboundTerminal::Delivered,
                 SendAttempt::Cancelled => {
                     break item
@@ -1499,29 +1789,32 @@ enum SendAttempt {
 
 async fn send_outbound_once(
     endpoint: &Endpoint,
+    state: &Arc<RuntimeState>,
     peer: &PeerBinding,
     item: &OutboundItem,
 ) -> SendAttempt {
+    state.note_attempt(peer).await;
     let connection = tokio::select! {
         () = item.control.cancellation.cancelled() => return SendAttempt::Cancelled,
-        result = timeout(STREAM_IO_TIMEOUT, endpoint.connect(peer.address.clone(), IROH_ALPN)) => {
-            match result {
-                Ok(Ok(connection)) => connection,
-                _ => return SendAttempt::Retry,
+        result = state.reusable_connection(endpoint, peer) => match result {
+            Ok(connection) => connection,
+            Err(()) => {
+                state.evict_connection(peer).await;
+                return SendAttempt::Retry;
             }
         }
     };
-    if connection.remote_id() != peer.address.id {
-        connection.close(REJECT_CODE, b"identity");
-        return SendAttempt::Retry;
-    }
+    let started = Instant::now();
 
     let (mut send, mut receive) = tokio::select! {
         () = item.control.cancellation.cancelled() => return SendAttempt::Cancelled,
         result = timeout(STREAM_IO_TIMEOUT, connection.open_bi()) => {
             match result {
                 Ok(Ok(streams)) => streams,
-                _ => return SendAttempt::Retry,
+                _ => {
+                    state.evict_connection(peer).await;
+                    return SendAttempt::Retry;
+                },
             }
         }
     };
@@ -1543,6 +1836,7 @@ async fn send_outbound_once(
     };
     if !matches!(write_result, Ok(Ok(()))) || send.finish().is_err() {
         cancel_streams(&mut send, &mut receive);
+        state.evict_connection(peer).await;
         return SendAttempt::Retry;
     }
 
@@ -1556,18 +1850,24 @@ async fn send_outbound_once(
                 Ok(Ok(response)) => response,
                 _ => {
                     cancel_streams(&mut send, &mut receive);
+                    state.evict_connection(peer).await;
                     return SendAttempt::Retry;
                 }
             }
         }
     };
     let Ok(response) = decode_remote_frame(&response) else {
+        state.evict_connection(peer).await;
         return SendAttempt::Retry;
     };
     if response.message_id != item.message_id {
+        state.evict_connection(peer).await;
         return SendAttempt::Retry;
     }
     if response.kind == RemoteKind::Ack && response.payload.is_empty() {
+        state
+            .note_delivered(peer, &connection, item.payload.len(), started.elapsed())
+            .await;
         SendAttempt::Delivered
     } else if response.kind == RemoteKind::Error && response.payload == b"peer_rotated" {
         SendAttempt::PeerRotated

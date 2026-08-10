@@ -294,6 +294,46 @@ def test_two_rust_sidecars_transfer_only_canonical_router_frames(sidecars) -> No
         receiver.close()
 
 
+def test_transport_observation_proves_multiple_frames_reuse_one_connection(
+    sidecars,
+) -> None:
+    first, second = sidecars
+    sender, receiver = configure_pair(first, second)
+    frame = GOLDEN.read_bytes()
+    try:
+        for index in range(4):
+            message_id = index.to_bytes(16, "big")
+            sender.send(frame, message_id)
+            delivered_id, delivered = receiver.recv(timeout=10)
+            assert (delivered_id, delivered) == (message_id, frame)
+            receiver.ack(delivered_id)
+
+        deadline = time.monotonic() + 5
+        observation = None
+        while time.monotonic() < deadline:
+            values = sender.transport_observations()
+            if values and values[0]["frames_sent"] == 4:
+                observation = values[0]
+                break
+            time.sleep(0.02)
+
+        assert observation is not None
+        assert observation["protocol"] == (
+            "mycelium.iroh_sidecar.transport_observation.v1"
+        )
+        assert observation["remote_endpoint_id"] == second.ready["endpoint_id"]
+        assert observation["connection_generation"] == 1
+        assert observation["path_class"] == "direct"
+        assert observation["connections_opened"] == 1
+        assert observation["frames_sent"] == 4
+        assert observation["sample_count"] >= 4
+        assert observation["observed_goodput_bps"] > 0
+        assert observation["reconnect_count"] == 0
+    finally:
+        sender.close()
+        receiver.close()
+
+
 def test_remote_rejection_reconnects_and_retries_pending_delivery(sidecars) -> None:
     first, second = sidecars
     sender = first.client()

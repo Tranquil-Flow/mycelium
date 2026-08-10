@@ -32,7 +32,7 @@ describe('renderProductFeature harness', () => {
     expect(screen.getByRole('textbox', { name: /prompt/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
     expect(screen.getByText(/inference disabled: fixture_source_not_authoritative/i)).toBeVisible();
-    expect(screen.getByText(/session memory only/i)).toBeInTheDocument();
+    expect(screen.getByText(/tab-session history/i)).toBeInTheDocument();
     expect(rendered.networkRecorder?.requests).toHaveLength(0);
   });
 

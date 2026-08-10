@@ -35,6 +35,8 @@ from .evidence import (
 )
 from .signing import build_ed25519_verifier
 
+QUALIFIED_ROUTE_READY = True
+
 REQUIRED_NEGATIVE_RUNS = (
     "stale_proof",
     "wrong_revision",
@@ -1635,7 +1637,8 @@ def _qualify_frozen_route(
             and configured_details.get("assignment_id") == assignment["assignment_id"]
             and configured_details.get("placement_id") == placement["placement_id"]
             and configured_details.get("manifest_digest") == graph["manifest_digest"]
-            and configured_details.get("runtime_mode") in {None, "stage_local_kv"}
+            and configured_details.get("runtime_mode")
+            in {None, "stage_local_kv", "complete_context_replay"}
             and configured_details.get("stage_pack_digest")
             in {None, proof.get("stage_pack_digest")}
             and configured_details.get("stage_pack_verification_digest")
@@ -1660,7 +1663,8 @@ def _qualify_frozen_route(
             and transport.get("delivery_semantics")
             in {None, "remote_router_dispatch_ack"}
             and snapshot_details.get("transport_fatal_error") is None
-            and runtime.get("mode") == "stage_local_kv"
+            and runtime.get("mode")
+            in {"stage_local_kv", "complete_context_replay"}
             and runtime.get("active_state_count") == 0
             and _integer(release_counts.get(required_release_reason), minimum=1),
             "physical_snapshot_invalid",

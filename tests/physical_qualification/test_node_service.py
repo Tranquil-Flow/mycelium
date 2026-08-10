@@ -630,6 +630,52 @@ def test_node_service_uses_run_scoped_physical_host_identity(
     assert service.host_id == "host-run-physical-identity"
 
 
+def test_infer_decode_accepts_eos_completion_without_visible_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-eos",
+        deployment_id="deployment-eos",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+
+    class CompletedRouter:
+        def decode_one_distributed(self, request_id: str) -> bool:
+            assert request_id == "request-eos"
+            return True
+
+        def request_status(self, request_id: str) -> str:
+            assert request_id == "request-eos"
+            return "COMPLETED"
+
+    service.state = "RUNNING"
+    service.router = CompletedRouter()  # type: ignore[assignment]
+    service._sinks["request-eos"] = node_module._CaptureSink()
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+
+    decoded = service._infer_decode({"request_id": "request-eos", "count": 1})
+
+    assert decoded["details"] == {
+        "request_id": "request-eos",
+        "dispatched": 1,
+        "status": "COMPLETED",
+        "output": {"token_indexes": [], "token_ids": []},
+    }
+
+
 def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:
     socket_root = tmp_path / "socket"
     socket_root.mkdir()
@@ -1174,6 +1220,90 @@ def test_execution_graph_document_round_trip_is_strict(tmp_path: Path) -> None:
     document["unexpected"] = True
     with pytest.raises(NodeCommandError, match="invalid_execution_graph_fields"):
         execution_graph_from_document(document)
+
+
+def test_node_start_configures_successor_and_additional_authenticated_peers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class Sidecar:
+        socket_path = tmp_path / "sidecar.sock"
+        bootstrap_material = b"s" * 32
+
+        def close(self) -> None:
+            return
+
+    class Runtime:
+        def close(self, *, reason: str) -> None:
+            del reason
+
+    class Transport:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def bind_router(self, router: Any) -> None:
+            captured["router"] = router
+
+        def start(self) -> None:
+            captured["started"] = True
+
+        def close(self) -> None:
+            return
+
+    class Router:
+        def __init__(self, **kwargs: Any) -> None:
+            captured["router_kwargs"] = kwargs
+
+    monkeypatch.setattr(node_module, "IrohTransport", Transport)
+    monkeypatch.setattr(node_module, "Router", Router)
+    service = PhysicalNodeService(
+        run_id="run-multi-peer",
+        deployment_id="deployment-multi-peer",
+        node_id="node-a",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=270.0,
+    )
+    service.state = "CONFIGURED"
+    service.sidecar = Sidecar()  # type: ignore[assignment]
+    service.endpoint_id = "endpoint-a"
+    service.runtime = Runtime()
+    service.topology = object()  # type: ignore[assignment]
+    service.device_states = object()  # type: ignore[assignment]
+    service.capacity = object()  # type: ignore[assignment]
+    service.signer = node_module.generate_ed25519_signer(endpoint_id="endpoint-a")
+
+    def peer(node_id: str) -> dict[str, Any]:
+        endpoint_id = f"endpoint-{node_id[-1]}"
+        return {
+            "node_id": node_id,
+            "endpoint_id": endpoint_id,
+            "endpoint_addr": {"id": endpoint_id, "addrs": []},
+            "generation": 1,
+        }
+
+    try:
+        started = service._start(
+            {
+                "peer": peer("node-b"),
+                "peers": [peer("node-c")],
+                "local_generation": 1,
+            }
+        )
+        assert captured["peer"].node_id == "node-b"
+        assert [item.node_id for item in captured["peers"]] == ["node-c"]
+        assert captured["delivery_timeout_seconds"] == 240.0
+        assert captured["started"] is True
+        assert [item["node_id"] for item in started["observation"]["details"]["peers"]] == [
+            "node-b",
+            "node-c",
+        ]
+    finally:
+        service.close()
 
 
 def test_safe_document_rejects_nested_symlinks_and_hardlinks(tmp_path: Path) -> None:

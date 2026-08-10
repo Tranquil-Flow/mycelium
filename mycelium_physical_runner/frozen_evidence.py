@@ -230,7 +230,8 @@ def build_frozen_route_authority_documents(
             and transport.get("route_ready") is False
             and snapshot.get("transport_fatal_error") is None
             and isinstance(runtime, Mapping)
-            and runtime.get("mode") == "stage_local_kv"
+            and runtime.get("mode")
+            in {"stage_local_kv", "complete_context_replay"}
             and runtime.get("active_state_count") == 0
             and isinstance(release_counts, Mapping)
             and release_counts.get(release_reason) == 1,

@@ -75,7 +75,7 @@ def test_schema_v1_migrates_directly_to_current_member_contract(tmp_path: Path) 
             )
         }
 
-    assert version == ("5",)
+    assert version == ("8",)
     assert columns["last_heartbeat_sequence"] == ("INTEGER", 1, "0")
     assert columns["peer_class"] == ("TEXT", 1, "'linux_tbd'")
     assert columns["runtime_capability_json"][0:2] == ("TEXT", 1)

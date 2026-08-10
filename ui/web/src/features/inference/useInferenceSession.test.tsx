@@ -10,6 +10,7 @@ import {
   type ProductQualification,
 } from '../../app/contracts';
 import { InferenceClientError, type InferenceClient } from './requestClient';
+import type { InferenceSessionState } from './types';
 import { useInferenceSession } from './useInferenceSession';
 
 const NOW = 1_800_000_000_000;
@@ -225,6 +226,126 @@ describe('useInferenceSession', () => {
     expect(hook.result.current.output).toBe('AB');
     expect(hook.result.current.last_applied_sequence).toBe(3);
     expect(hook.result.current.phase).toBe('completed');
+  });
+
+  it('automatically resumes an active request restored after a page refresh', async () => {
+    const client = new FakeClient();
+    client.streamBatches.push([
+      event(2, { type: 'token', token_index: 1, text: 'B' }),
+      event(3, { type: 'completed' }),
+    ]);
+    const restored: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: qualification(),
+      qualification_changed: false,
+      phase: 'streaming',
+      accepted_request: accepted,
+      captured_binding: qualification().binding,
+      requested_max_new_tokens: 8,
+      submitted_prompt: 'restored prompt',
+      output: 'A',
+      token_count: 1,
+      last_applied_sequence: 1,
+      error_code: null,
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [],
+    };
+
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
+    );
+
+    await waitFor(() => expect(hook.result.current.phase).toBe('completed'));
+    expect(client.streamCursors).toEqual([1]);
+    expect(hook.result.current.output).toBe('AB');
+    expect(hook.result.current.history).toHaveLength(1);
+  });
+
+  it('does not resurrect a request already recorded terminal in history', async () => {
+    const client = new FakeClient();
+    const restored: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: qualification(),
+      qualification_changed: false,
+      phase: 'interrupted',
+      accepted_request: accepted,
+      captured_binding: qualification().binding,
+      requested_max_new_tokens: 8,
+      submitted_prompt: 'cancelled prompt',
+      output: '',
+      token_count: 0,
+      last_applied_sequence: 0,
+      error_code: 'stream_disconnected',
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [{
+        request_id: accepted.request_id,
+        prompt: 'cancelled prompt',
+        response: '',
+        terminal_state: 'cancelled',
+        token_count: 0,
+        started_at_unix_ms: NOW,
+        finished_at_unix_ms: NOW + 1,
+        deployment_id: qualification().binding.deployment_id,
+        model_id: qualification().binding.model_id,
+        error_code: null,
+      }],
+    };
+
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 2, restored_state: restored }),
+    );
+
+    await waitFor(() => expect(hook.result.current.qualification_status).toBe('ready'));
+    expect(hook.result.current.phase).toBe('cancelled');
+    expect(hook.result.current.can_submit).toBe(true);
+    expect(client.streamCursors).toEqual([]);
+    expect(hook.result.current.history).toHaveLength(1);
+  });
+
+  it('retries the transient old-subscriber race while restoring an active request', async () => {
+    const client = new FakeClient();
+    client.streamBatches.push(
+      [],
+      [],
+      [
+        event(2, { type: 'token', token_index: 1, text: 'B' }),
+        event(3, { type: 'completed' }),
+      ],
+    );
+    client.streamFailures.push(
+      new InferenceClientError('stream_already_attached', false),
+      new InferenceClientError('stream_already_attached', false),
+    );
+    const restored: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: qualification(),
+      qualification_changed: false,
+      phase: 'streaming',
+      accepted_request: accepted,
+      captured_binding: qualification().binding,
+      requested_max_new_tokens: 8,
+      submitted_prompt: 'restored prompt',
+      output: 'A',
+      token_count: 1,
+      last_applied_sequence: 1,
+      error_code: null,
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [],
+    };
+
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
+    );
+
+    await waitFor(() => expect(hook.result.current.phase).toBe('completed'), { timeout: 4_000 });
+    expect(client.streamCursors).toEqual([1, 1, 1]);
+    expect(hook.result.current.output).toBe('AB');
   });
 
   it('fails with the stable client code when the stream fails before its accepted event', async () => {

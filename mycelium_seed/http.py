@@ -36,9 +36,11 @@ from .coordinator import (
     SeedCoordinator,
     SeedCoordinatorError,
 )
+from .operator import SeedOperatorError, verify_seed_key_transition
 
 
 SEED_JOIN_HTTP_PROTOCOL = "mycelium.seed.join_http.v1"
+SEED_RESUME_HTTP_PROTOCOL = "mycelium.seed.resume_http.v1"
 SEED_MEMBER_HTTP_PROTOCOL = "mycelium.seed.member_http.v1"
 SEED_HTTP_ERROR_PROTOCOL = "mycelium.seed.http_error.v1"
 MAX_HTTP_FRAME_BYTES = 1024 * 1024
@@ -327,6 +329,10 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
     def coordinator(self) -> SeedCoordinator:
         return self.server.coordinator  # type: ignore[attr-defined, no-any-return]
 
+    @property
+    def rotation_envelope(self) -> Mapping[str, Any] | None:
+        return self.server.rotation_envelope  # type: ignore[attr-defined, no-any-return]
+
     def _send(self, status: int, value: Mapping[str, Any]) -> None:
         body = canonical_json_bytes(dict(value))
         if getattr(self, "_response_started", False):
@@ -377,6 +383,12 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         self._response_started = False
+        if self.path == "/seed/rotation":
+            if self.rotation_envelope is None:
+                self._fail("seed_rotation_absent", status=HTTPStatus.NOT_FOUND)
+            else:
+                self._send(HTTPStatus.OK, self.rotation_envelope)
+            return
         if self.path != "/seed/identity":
             self._fail("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
             return
@@ -426,6 +438,16 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                         "seed_http_internal_error",
                         status=HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
+                return
+            if self.path == "/seed/resume":
+                if set(body) != {"protocol", "resume_envelope"}:
+                    raise SeedHTTPError("seed_http_body_invalid")
+                if body.get("protocol") != SEED_RESUME_HTTP_PROTOCOL:
+                    raise SeedHTTPError("seed_http_protocol_invalid")
+                acceptance = self.coordinator.accept_resume(
+                    resume_envelope=body["resume_envelope"],
+                )
+                self._send(HTTPStatus.OK, acceptance)
                 return
             if self.path == "/seed/message":
                 if set(body) != {"protocol", "envelope"}:
@@ -477,6 +499,7 @@ class SeedHTTPServer:
         host: str,
         port: int,
         advertised_url: str | None = None,
+        rotation_envelope: Mapping[str, Any] | None = None,
     ) -> None:
         host, requested_port = _validate_bind_address(host, port)
         if host in {"0.0.0.0", "::"} and advertised_url is None:
@@ -501,6 +524,9 @@ class SeedHTTPServer:
         self._server.block_on_close = True
         self._server.timeout = 0.05
         self._server.coordinator = coordinator  # type: ignore[attr-defined]
+        self._server.rotation_envelope = (  # type: ignore[attr-defined]
+            None if rotation_envelope is None else dict(rotation_envelope)
+        )
         self._server.handle_error = lambda *_args: None
         bound_host, bound_port = self._server.server_address[:2]
         published_host = {
@@ -670,6 +696,8 @@ class SeedHTTPClient:
         self.swarm_id = swarm_id
         self.seed_key_digest = seed_key_digest
         self.seed_key_records = [record]
+        self._rotation_transition: dict[str, Any] | None = None
+        self._rotation_records: dict[str, dict[str, Any]] = {}
         self.timeout = float(timeout)
         self._opener = build_opener(_NoRedirect())
 
@@ -762,7 +790,10 @@ class SeedHTTPClient:
         ):
             raise SeedHTTPError("seed_http_seed_envelope_invalid")
         if (
-            record.get("verification_key_digest") != self.seed_key_digest
+            not self._seed_digest_accepted(
+                record.get("verification_key_digest"),
+                now=now,
+            )
             or statement.get("swarm_id") != self.swarm_id
             or statement.get("seed_url") != self.seed_url
             or signature.get("signer_endpoint_id") != statement.get("seed_endpoint_id")
@@ -792,6 +823,68 @@ class SeedHTTPClient:
             raise SeedHTTPError("seed_http_seed_time_invalid")
         return dict(statement)
 
+    def _seed_digest_accepted(self, digest: object, *, now: float) -> bool:
+        transition = self._rotation_transition
+        if transition is None:
+            return digest == self.seed_key_digest
+        if now < float(transition["effective_at"]):
+            return digest == transition["old_seed_key_digest"]
+        if now <= float(transition["overlap_expires_at"]):
+            return digest in {
+                transition["old_seed_key_digest"],
+                transition["new_seed_key_digest"],
+            }
+        return digest == transition["new_seed_key_digest"]
+
+    def rotation(self, *, now: float) -> dict[str, Any] | None:
+        """Fetch and verify a dual-signed rotation under the current trust pin."""
+
+        try:
+            envelope = dict(self._request("GET", "/seed/rotation"))
+        except SeedHTTPError as exc:
+            if exc.code == "seed_rotation_absent" and exc.status == HTTPStatus.NOT_FOUND:
+                return None
+            raise
+        try:
+            transition = verify_seed_key_transition(
+                envelope,
+                now=now,
+            )
+        except SeedOperatorError as exc:
+            raise SeedHTTPError(exc.code) from exc
+        if self.seed_key_digest not in {
+            transition["old_seed_key_digest"],
+            transition["new_seed_key_digest"],
+        }:
+            raise SeedHTTPError("seed_operator_rotation_record_invalid")
+        self._rotation_transition = transition
+        self._rotation_records = {
+            transition["old_seed_key_digest"]: dict(envelope["old_verification_key"]),
+            transition["new_seed_key_digest"]: dict(envelope["new_verification_key"]),
+        }
+        return envelope
+
+    def accepted_seed_key_digest(
+        self,
+        envelope: Mapping[str, Any],
+        *,
+        now: float,
+    ) -> str:
+        """Return the trusted signer digest carried by one seed message."""
+
+        record = envelope.get("verification_key")
+        digest = (
+            record.get("verification_key_digest")
+            if isinstance(record, Mapping)
+            else None
+        )
+        if not isinstance(digest, str) or not self._seed_digest_accepted(
+            digest,
+            now=now,
+        ):
+            raise SeedHTTPError("seed_http_seed_pin_mismatch")
+        return digest
+
     def identity(self, *, now: float) -> dict[str, Any]:
         envelope = self._request("GET", "/seed/identity")
         return self._verify_seed_envelope(
@@ -813,6 +906,21 @@ class SeedHTTPClient:
                 "protocol": SEED_JOIN_HTTP_PROTOCOL,
                 "invite_token": invite_token,
                 "join_envelope": dict(join_envelope),
+            },
+        )
+        return dict(response)
+
+    def resume(
+        self,
+        *,
+        resume_envelope: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        response = self._request(
+            "POST",
+            "/seed/resume",
+            {
+                "protocol": SEED_RESUME_HTTP_PROTOCOL,
+                "resume_envelope": dict(resume_envelope),
             },
         )
         return dict(response)
@@ -839,10 +947,18 @@ class SeedHTTPClient:
         )
         if message.get("protocol") == HEARTBEAT_PROTOCOL:
             try:
+                response_record = response.get("verification_key")
+                response_digest = (
+                    response_record.get("verification_key_digest")
+                    if isinstance(response_record, Mapping)
+                    else None
+                )
+                if not self._seed_digest_accepted(response_digest, now=now):
+                    raise MembershipContractError("membership_key_pin_invalid")
                 renewal = verify_membership_message(
                     response,
                     now=now,
-                    expected_key_digest=self.seed_key_digest,
+                    expected_key_digest=response_digest,
                     expected_protocol=LEASE_RENEWAL_PROTOCOL,
                     expected_swarm_id=self.swarm_id,
                     expected_sender_node_id=message.get("recipient_node_id"),

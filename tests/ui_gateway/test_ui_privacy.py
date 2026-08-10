@@ -11,6 +11,7 @@ from conftest import (
     FakeUpstream,
     json_body,
     observatory_snapshot,
+    qualification,
     request,
     session_headers,
 )
@@ -19,6 +20,7 @@ from mycelium_ui_gateway import GatewayConfig, create_product_gateway_applicatio
 from mycelium_ui_gateway.validation import (
     GatewayValidationError,
     validate_observatory_envelope,
+    validate_qualification,
     validate_swarm_status,
 )
 
@@ -87,6 +89,23 @@ def test_observatory_projection_rejects_unbacked_mistyped_or_private_state(mutat
     with pytest.raises(GatewayValidationError) as raised:
         validate_observatory_envelope(payload)
     assert raised.value.code == "invalid_observatory_response"
+
+
+def test_qualification_projection_accepts_namespaced_public_model_id() -> None:
+    payload = qualification(route_ready=True)
+    payload["binding"]["model_id"] = "Qwen/Qwen2.5-0.5B-Instruct"
+
+    validate_qualification(payload)
+
+
+@pytest.mark.parametrize("model_id", ("Qwen//model", "Qwen/model/variant", "/model"))
+def test_qualification_projection_rejects_path_like_model_id(model_id: str) -> None:
+    payload = qualification(route_ready=True)
+    payload["binding"]["model_id"] = model_id
+
+    with pytest.raises(GatewayValidationError) as raised:
+        validate_qualification(payload)
+    assert raised.value.code == "invalid_upstream_qualification"
 
 
 def test_swarm_projection_rejects_private_network_identifiers() -> None:

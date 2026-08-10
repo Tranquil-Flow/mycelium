@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import re
 from typing import Any, Mapping
 
@@ -17,6 +18,10 @@ MAX_PROMPT_UTF8_BYTES = 131_072
 MAX_NEW_TOKENS = 4_096
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}")
 _ERROR_CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_PUBLIC_MODEL_ID_RE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,63}"
+    r"(?:/[A-Za-z0-9][A-Za-z0-9._:~-]{0,63})?"
+)
 
 
 def is_valid_request_id(value: object) -> bool:
@@ -25,6 +30,11 @@ def is_valid_request_id(value: object) -> bool:
 
 def is_safe_error_code(value: object) -> bool:
     return isinstance(value, str) and _ERROR_CODE_RE.fullmatch(value) is not None
+
+
+def is_public_model_id(value: object) -> bool:
+    """Return whether a model id is safe for the browser-visible contract."""
+    return isinstance(value, str) and _PUBLIC_MODEL_ID_RE.fullmatch(value) is not None
 
 
 class AdmissionError(ValueError):
@@ -45,6 +55,12 @@ def _require(condition: bool, code: str) -> None:
 def qualification_digest(qualification: RouteQualificationV1) -> str:
     """Digest the entire canonical authority record for exact-match admission."""
     return sha256_bytes(canonical_json_bytes(route_qualification_to_dict(qualification)))
+
+
+def _public_model_id(model_id: str) -> str:
+    if is_public_model_id(model_id):
+        return model_id
+    return "model-sha256-" + hashlib.sha256(model_id.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,13 +157,14 @@ class QualificationBinding:
 
 def qualification_binding(qualification: RouteQualificationV1) -> QualificationBinding:
     """Project an authority record into the exact client admission binding."""
+    model_id = _public_model_id(qualification.model_id)
     return QualificationBinding(
         qualification_id=qualification.qualification_id,
         qualification_digest=qualification_digest(qualification),
         deployment_id=qualification.deployment_id,
         deployment_epoch=qualification.deployment_epoch,
         topology_version=qualification.topology_version,
-        model_id=qualification.model_id,
+        model_id=model_id,
         resolved_commit=qualification.resolved_commit,
         manifest_digest=qualification.manifest_digest,
         path_manifest_digest=qualification.path_manifest_digest,

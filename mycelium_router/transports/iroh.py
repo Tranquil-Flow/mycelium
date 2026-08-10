@@ -330,10 +330,8 @@ def _peer_binding_snapshot(
 class PeerSet:
    """Thread-safe multi-peer binding manager for routed topologies.
 
-   Replaces the single-peer ``_peer`` field when the sidecar is evolved to
-   support an explicitly routed N-node graph.  All mutations are atomic and
-   generation-fenced: a stale-generation upsert or replacement is rejected
-   before any internal state changes.
+   All mutations are atomic and generation-fenced: a stale-generation upsert
+   or replacement is rejected before any internal state changes.
    """
 
    def __init__(self) -> None:
@@ -415,6 +413,7 @@ class TransportEvidence:
    remote_frames_received: int
    router_frames_dispatched: int
    duplicate_frames: int
+   transport_path_observations: tuple[Mapping[str, Any], ...] = ()
    route_ready: bool = False
    delivery_semantics: str = DELIVERY_SEMANTICS
    process_lifetime_limitation: str = PROCESS_LIFETIME_LIMITATION
@@ -440,11 +439,12 @@ ClientFactory = Callable[..., Any]
 
 
 class IrohTransport:
-   """Point-to-point authenticated iroh adapter implementing ``TransportPort``.
+   """Authenticated iroh adapter implementing ``TransportPort``.
 
-   The current native v1 sidecar has one authenticated peer binding.  This
-   adapter therefore fails closed on any destination other than that exact
-   Mycelium node/EndpointID/generation tuple.
+   Every destination and inbound source must match the configured Mycelium
+   node/EndpointID/generation peer set. ``peer`` remains the primary successor
+   binding for compatibility and rotation; ``peers`` supplies the additional
+   participants required by an N-node routed topology.
    """
 
    route_ready = False
@@ -510,9 +510,13 @@ class IrohTransport:
       self._control_client: Any | None = None
       self._receiver_thread: threading.Thread | None = None
       self._dispatcher_thread: threading.Thread | None = None
+      self._forward_thread: threading.Thread | None = None
       self._dispatch_queue: Queue[
          tuple[bytes, str, int, bytes, bytes, DecodedFrame | None]
       ] = Queue(maxsize=queue_capacity)
+      self._forward_queue: Queue[tuple[str, bytes]] = Queue(
+         maxsize=queue_capacity
+      )
       self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
       self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
@@ -557,6 +561,7 @@ class IrohTransport:
          threads = (
             self._receiver_thread,
             self._dispatcher_thread,
+            self._forward_thread,
             *self._cancellation_threads.values(),
             *self._delivery_cancel_threads.values(),
          )
@@ -582,9 +587,11 @@ class IrohTransport:
          )
       with self._dispatch_queue.all_tasks_done:
          dispatch_clean = self._dispatch_queue.unfinished_tasks == 0
+      with self._forward_queue.all_tasks_done:
+         forward_clean = self._forward_queue.unfinished_tasks == 0
       with self._ack_queue.all_tasks_done:
          ack_clean = self._ack_queue.unfinished_tasks == 0
-      return state_clean and dispatch_clean and ack_clean
+      return state_clean and dispatch_clean and forward_clean and ack_clean
 
    @property
    def last_cancellation(self) -> dict[str, object] | None:
@@ -1257,7 +1264,9 @@ class IrohTransport:
                   self._inflight_received.pop(message_id, None)
                continue
             with self._state_lock:
-               self._dispatcher_phase = f"dispatching:{type(decoded).__name__}"
+               self._dispatcher_phase = (
+                  f"dispatching:{type(decoded.message).__name__}"
+               )
             self._dispatch(decoded, source_node_id=source_node_id)
             with self._state_lock:
                self._dispatcher_phase = "awaiting_local_ack"
@@ -1284,6 +1293,36 @@ class IrohTransport:
             return
          finally:
             self._dispatch_queue.task_done()
+
+   def _forward_loop(self) -> None:
+      current = threading.current_thread()
+      while not self._stop.is_set():
+         try:
+            destination, frame = self._forward_queue.get(
+               timeout=self.poll_interval_seconds
+            )
+         except Empty:
+            with self._state_lock:
+               if self._forward_queue.empty():
+                  if self._forward_thread is current:
+                     self._forward_thread = None
+                  return
+            continue
+         try:
+            self._send_or_dispatch(destination, frame)
+         except BaseException as error:
+            if not self._stop.is_set():
+               self._set_fatal(
+                  error
+                  if isinstance(error, IrohTransportError)
+                  else self._map_sidecar_error("forward_delivery_failed", error)
+               )
+            return
+         finally:
+            self._forward_queue.task_done()
+      with self._state_lock:
+         if self._forward_thread is current:
+            self._forward_thread = None
 
    def _ack_after_dispatch(self, message_id: bytes) -> None:
       request = _AckRequest(message_id=message_id, completed=threading.Event())
@@ -1380,10 +1419,14 @@ class IrohTransport:
       if isinstance(message, ProgressivePrefillMessage):
          frame = encode_frame(message, decoded.payload)
          header, context = decode_progressive_prefill(frame)
+         entry_node = self._node_for_placement(
+            context.graph,
+            context.build.ordered_hops[0].placement_id,
+         )
          with self._state_lock:
             entry_node_id = self._entry_nodes.setdefault(
                header.request_id,
-               source_node_id,
+               entry_node,
             )
             self._path_graphs[header.path_id] = context.graph
             self._participant_nodes_by_path[header.path_id] = frozenset(
@@ -1545,15 +1588,16 @@ class IrohTransport:
          self._last_cancellation = cancellation
          entry_node = self._entry_nodes.get(cancellation.request_id)
          participants = self._participant_nodes_by_path.get(cancellation.path_id)
-         peer_node = self._peer.node_id
+         configured_nodes = frozenset(self._peers.snapshot())
       if entry_node != self.node_id:
          raise IrohTransportError("path_cancellation_source_not_entry")
       if participants is None:
          raise IrohTransportError("unknown_path", cancellation.path_id)
-      if participants - {self.node_id, peer_node}:
+      remote_participants = tuple(sorted(participants - {self.node_id}))
+      if set(remote_participants) - configured_nodes:
          raise IrohTransportError("path_cancellation_participant_unbound")
       frame = encode_frame(cancellation)
-      if peer_node not in participants:
+      if not remote_participants:
          self._forget_path(cancellation.request_id, cancellation.path_id)
          return
       if not self._cancellation_slots.acquire(blocking=False):
@@ -1566,7 +1610,7 @@ class IrohTransport:
                raise IrohTransportError("path_cancellation_already_pending")
             thread = threading.Thread(
                target=self._deliver_path_cancellation,
-               args=(cancellation, peer_node, frame),
+               args=(cancellation, remote_participants, frame),
                name=f"mycelium-iroh-path-cancel-{cancellation.path_id}",
                daemon=True,
             )
@@ -1585,12 +1629,13 @@ class IrohTransport:
    def _deliver_path_cancellation(
       self,
       cancellation: PathCancellation,
-      peer_node: str,
+      peer_nodes: tuple[str, ...],
       frame: bytes,
    ) -> None:
       delivered = False
       try:
-         self._send_or_dispatch(peer_node, frame)
+         for peer_node in peer_nodes:
+            self._send_or_dispatch(peer_node, frame)
          delivered = True
       except BaseException as error:
          if not self._stop.is_set():
@@ -1645,6 +1690,48 @@ class IrohTransport:
             self._require_running()
             self._outbound_trace.append(trace)
          self._dispatch(decoded, source_node_id=self.node_id)
+         return
+
+      # Router dispatch may synchronously forward a progressive build, publish its
+      # manifest, and then return a token. Waiting for the next peer's confirmed
+      # dispatch on this one dispatcher thread creates an acknowledgement cycle in
+      # a three-stage route. The manifest and its token must also share one ordered
+      # queue: otherwise the token can overtake the manifest and make the receiver
+      # wait for registration on the same dispatcher needed to process that lock.
+      # Acknowledge inbound dispatch after these downstream operations are scheduled.
+      message = decoded.message
+      defer_remote_forward = isinstance(message, ProgressivePrefillMessage)
+      if isinstance(message, ManifestLocked):
+         entry_node = self._node_for_placement(
+            message.build.graph,
+            message.build.ordered_hops[0].placement_id,
+         )
+         defer_remote_forward = destination != entry_node
+      if isinstance(message, TokenEvent):
+         with self._forward_queue.all_tasks_done:
+            ordered_forward_pending = self._forward_queue.unfinished_tasks > 0
+         with self._state_lock:
+            relaying_inbound_token = self._dispatcher_phase == "dispatching:TokenEvent"
+         defer_remote_forward = ordered_forward_pending or relaying_inbound_token
+      if (
+         threading.current_thread() is self._dispatcher_thread
+         and defer_remote_forward
+      ):
+         with self._state_lock:
+            self._require_running()
+            try:
+               self._forward_queue.put_nowait((destination, frame))
+            except Full as error:
+               raise IrohTransportError("forward_queue_full") from error
+            thread = self._forward_thread
+            if thread is None or not thread.is_alive():
+               thread = threading.Thread(
+                  target=self._forward_loop,
+                  name=f"mycelium-iroh-forward-{self.node_id}",
+                  daemon=True,
+               )
+               self._forward_thread = thread
+               thread.start()
          return
 
       with self._receipt_trace_condition:
@@ -1730,22 +1817,81 @@ class IrohTransport:
    def evidence(self) -> TransportEvidence:
       with self._state_lock:
          peer = self._peer
+         peers = self._peers.snapshot()
+         control_client = self._control_client
          endpoint_id = (
             self._send_client.endpoint_id
             if self._send_client is not None
             else self.expected_endpoint_id
          )
-         return TransportEvidence(
-            local_node_id=self.node_id,
-            local_endpoint_id=endpoint_id,
-            peer_node_id=peer.node_id,
-            peer_endpoint_id=peer.endpoint_id,
-            peer_generation=peer.generation,
-            remote_frames_sent=self._remote_frames_sent,
-            remote_frames_received=self._remote_frames_received,
-            router_frames_dispatched=self._router_frames_dispatched,
-            duplicate_frames=self._duplicate_frames,
+         counters = (
+            self._remote_frames_sent,
+            self._remote_frames_received,
+            self._router_frames_dispatched,
+            self._duplicate_frames,
          )
+      observations: tuple[Mapping[str, Any], ...] = ()
+      if control_client is not None:
+         query = getattr(control_client, "transport_observations", None)
+         if callable(query):
+            try:
+               raw = query()
+               by_endpoint = {
+                  binding.endpoint_id: binding for binding in peers.values()
+               }
+               projected = []
+               for item in raw:
+                  remote_endpoint = item.get("remote_endpoint_id")
+                  binding = by_endpoint.get(remote_endpoint)
+                  if binding is None:
+                     raise IrohTransportError("transport_observation_peer_mismatch")
+                  measured_at = item.get("measured_at_unix_ms", 0)
+                  if type(measured_at) is not int or measured_at < 0:
+                     raise IrohTransportError("transport_observation_time_invalid")
+                  projected.append({
+                     "protocol": "mycelium.transport_path_observation.v1",
+                     "local_node_id": self.node_id,
+                     "local_endpoint_id": endpoint_id,
+                     "remote_node_id": binding.node_id,
+                     "remote_endpoint_id": remote_endpoint,
+                     "connection_generation": item.get("connection_generation"),
+                     "path_class": item.get("path_class"),
+                     "relay_identity": item.get("relay_identity"),
+                     "relay_region": item.get("relay_region"),
+                     "cold_rtt_ms": item.get("cold_rtt_ms"),
+                     "warm_rtt_ms": item.get("warm_rtt_ms"),
+                     "observed_goodput_Bps": item.get("observed_goodput_bps"),
+                     "jitter_ms": item.get("jitter_ms"),
+                     "loss_ratio": item.get("loss_ratio"),
+                     "sample_count": item.get("sample_count"),
+                     "connections_opened": item.get("connections_opened"),
+                     "frames_sent": item.get("frames_sent"),
+                     "reconnect_count": item.get("reconnect_count"),
+                     "selected_path_changes": item.get("selected_path_changes"),
+                     "measurement_source": "iroh_activation_plane",
+                     "measured_at_unix_ms": measured_at,
+                    "fresh_until_unix_ms": measured_at + 7_200_000,
+                     "exclusions": [],
+                  })
+               observations = tuple(projected)
+            except IrohTransportError:
+               raise
+            except BaseException as error:
+               raise self._map_sidecar_error(
+                  "transport_observation_failed", error
+               ) from error
+      return TransportEvidence(
+         local_node_id=self.node_id,
+         local_endpoint_id=endpoint_id,
+         peer_node_id=peer.node_id,
+         peer_endpoint_id=peer.endpoint_id,
+         peer_generation=peer.generation,
+         remote_frames_sent=counters[0],
+         remote_frames_received=counters[1],
+         router_frames_dispatched=counters[2],
+         duplicate_frames=counters[3],
+         transport_path_observations=observations,
+      )
 
    def close(self) -> None:
       with self._lifecycle_lock:
@@ -1782,6 +1928,7 @@ class IrohTransport:
             self._control_client = None
          thread = self._receiver_thread
          dispatcher_thread = self._dispatcher_thread
+         forward_thread = self._forward_thread
          cancellation_threads = tuple(self._cancellation_threads.values())
          delivery_cancel_threads = tuple(
             self._delivery_cancel_threads.values()
@@ -1825,6 +1972,15 @@ class IrohTransport:
             error = IrohTransportError("dispatcher_shutdown_timeout")
             self._set_fatal(error)
             raise error
+      if (
+         forward_thread is not None
+         and forward_thread is not threading.current_thread()
+      ):
+         forward_thread.join(timeout=max(1.0, self.delivery_timeout_seconds))
+         if forward_thread.is_alive():
+            error = IrohTransportError("forwarder_shutdown_timeout")
+            self._set_fatal(error)
+            raise error
       for cancellation_thread in cancellation_threads:
          if cancellation_thread is threading.current_thread():
             continue
@@ -1856,6 +2012,8 @@ class IrohTransport:
             self._receiver_thread = None
          if self._dispatcher_thread is dispatcher_thread:
             self._dispatcher_thread = None
+         if self._forward_thread is forward_thread:
+            self._forward_thread = None
 
    def _set_fatal(self, error: IrohTransportError) -> None:
       with self._state_lock:

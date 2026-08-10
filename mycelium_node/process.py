@@ -692,6 +692,19 @@ def _inventory_linux_process(pid: int) -> _ProcessIdentity:
     )
 
 
+def _linux_parent_and_group(pid: int) -> tuple[int, int]:
+    """Read only ancestry fields when a hardened procfs hides ``/proc/PID/exe``."""
+
+    raw = (Path("/proc") / str(pid) / "stat").read_text(encoding="ascii")
+    close_paren = raw.rfind(")")
+    if close_paren < 0:
+        raise ProcessLookupError(pid)
+    fields = raw[close_paren + 2 :].split()
+    if len(fields) < 4:
+        raise ProcessLookupError(pid)
+    return int(fields[1]), int(fields[2])
+
+
 class _DarwinBSDInfo(ctypes.Structure):
     _fields_ = [
         ("flags", ctypes.c_uint32),
@@ -825,9 +838,12 @@ def _protected_process_groups(deadline: float) -> set[int]:
         try:
             identity = _inventory_process(pid)
         except (OSError, subprocess.SubprocessError, ValueError):
-            if sys.platform != "darwin":
+            if sys.platform == "darwin":
+                parent_pid, process_group = _darwin_parent_and_group(pid, deadline)
+            elif sys.platform == "linux":
+                parent_pid, process_group = _linux_parent_and_group(pid)
+            else:
                 raise
-            parent_pid, process_group = _darwin_parent_and_group(pid, deadline)
             groups.add(process_group)
             pid = parent_pid
         else:

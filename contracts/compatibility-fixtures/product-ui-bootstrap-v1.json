@@ -1,0 +1,27 @@
+{
+  "api": {
+    "inference_submit": "/api/v1/inference",
+    "observatory_events": "/api/v1/observatory/events",
+    "observatory_snapshot": "/api/v1/observatory/snapshot",
+    "product_events": "/api/v1/product/events",
+    "product_export": "/api/v1/product/export",
+    "product_snapshot": "/api/v1/product/snapshot",
+    "qualification_current": "/api/v1/qualification/current",
+    "swarm_invites": "/api/v1/swarm/invites",
+    "swarm_join": "/api/v1/swarm/join",
+    "swarm_leave": "/api/v1/swarm/leave",
+    "swarm_status": "/api/v1/swarm/status"
+  },
+  "limits": {
+    "max_new_tokens": 4096,
+    "max_prompt_utf8_bytes": 131072
+  },
+  "protocol": "mycelium.product_ui.bootstrap.v1",
+  "qualification_authority": "mycelium_qualification.qualifier:RouteQualificationV1",
+  "session": {
+    "csrf_header": "X-Mycelium-CSRF",
+    "csrf_token": "synthetic-fixture-csrf-token",
+    "expires_at_unix_ms": 1900000000000
+  },
+  "source_mode": "fixture"
+}

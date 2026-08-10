@@ -50,6 +50,7 @@ MODES = frozenset({"dry-run", "fake", "local", "physical"})
 _RESULT_PROTOCOL = "mycelium.physical_controller_result.v1"
 _SNAPSHOT_PROTOCOL = "mycelium.controller_membership_snapshot.v1"
 _TRANSFER_PROTOCOL = "mycelium.controller_transfer_manifest.v1"
+_NODE_TRANSFERS_PROTOCOL = "mycelium.controller_node_transfer_manifests.v1"
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SSH_TARGET_RE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$"
@@ -63,9 +64,11 @@ _FORBIDDEN_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_DOCUMENT_BYTES = 1_048_576
-_MAX_TRANSFER_BYTES = 256 * 1024 * 1024
+_MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
 _MAX_RUNNER_TIMEOUT_SECONDS = 900.0
+NODE_COMMAND_TIMEOUT_SECONDS = 270.0
+NODE_SESSION_TIMEOUT_SECONDS = 300.0
 _MIN_STAGE_TIMEOUT_SECONDS = 120.0
 _MAX_STAGE_TIMEOUT_SECONDS = _MAX_RUNNER_TIMEOUT_SECONDS
 _STAGE_TIMEOUT_OVERHEAD_SECONDS = 60.0
@@ -75,7 +78,7 @@ _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
 _NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 _NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
 _RUN_PLAN_PROTOCOL = "mycelium.controller_run_plan.v1"
-_REMOTE_STAGE_SCRIPT = r'''import hashlib,io,json,os,shutil,sys,tarfile
+_REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,sys,tarfile
 from pathlib import Path,PurePosixPath
 root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);created=False
 try:
@@ -85,11 +88,18 @@ try:
         current=current/part
         if current.exists() and current.is_symlink():raise ValueError("symlink")
     root.mkdir(parents=True,mode=0o700,exist_ok=False);created=True
-    raw=sys.stdin.buffer.read(expected_size+1)
-    if len(raw)!=expected_size:raise ValueError("size")
-    actual="sha256:"+hashlib.sha256(raw).hexdigest()
+    archive_path=root/".incoming.tar";digest=hashlib.sha256();received=0
+    flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
+    if hasattr(os,"O_NOFOLLOW"):flags|=os.O_NOFOLLOW
+    with os.fdopen(os.open(archive_path,flags,0o600),"wb") as incoming:
+        while received<expected_size:
+            content=sys.stdin.buffer.read(min(1_048_576,expected_size-received))
+            if not content:raise ValueError("size")
+            incoming.write(content);digest.update(content);received+=len(content)
+        if sys.stdin.buffer.read(1):raise ValueError("size")
+    archive_path.chmod(0o600);actual="sha256:"+digest.hexdigest()
     if actual!=expected_digest:raise ValueError("digest")
-    with tarfile.open(fileobj=io.BytesIO(raw),mode="r:") as archive:
+    with tarfile.open(archive_path,mode="r:") as archive:
         members=archive.getmembers();names=[member.name for member in members]
         if not members or len(members)>256 or names!=sorted(names) or len(names)!=len(set(names)):raise ValueError("members")
         for member in members:
@@ -97,15 +107,20 @@ try:
             if not member.isfile() or relative.is_absolute() or str(relative)!=member.name or any(part in ("",".","..") for part in relative.parts):raise ValueError("member")
             source=archive.extractfile(member)
             if source is None:raise ValueError("content")
-            content=source.read()
-            if len(content)!=member.size:raise ValueError("content")
             destination=root.joinpath(*relative.parts);destination.parent.mkdir(parents=True,mode=0o700,exist_ok=True)
-            with destination.open("xb") as output:output.write(content)
+            remaining=member.size
+            with destination.open("xb") as output:
+                while remaining:
+                    content=source.read(min(1_048_576,remaining))
+                    if not content:raise ValueError("content")
+                    output.write(content);remaining-=len(content)
+                if source.read(1):raise ValueError("content")
             destination.chmod(0o600)
+    archive_path.unlink()
     marker={"archive_digest":actual,"node_id":node_id};marker_path=root/".mycelium-stage.json"
     with marker_path.open("x",encoding="utf-8") as output:output.write(json.dumps(marker,sort_keys=True,separators=(",",":"))+"\n")
     marker_path.chmod(0o600)
-    ack={"archive_digest":actual,"archive_size_bytes":len(raw),"node_id":node_id,"protocol":"mycelium.controller_remote_stage_ack.v1","staging_root":str(root)}
+    ack={"archive_digest":actual,"archive_size_bytes":received,"node_id":node_id,"protocol":"mycelium.controller_remote_stage_ack.v1","staging_root":str(root)}
     sys.stdout.write(json.dumps(ack,sort_keys=True,separators=(",",":"))+"\n");sys.stdout.flush()
 except BaseException:
     if created:shutil.rmtree(root,ignore_errors=True)
@@ -836,6 +851,7 @@ class QualificationController:
         transfer_manifest: Mapping[str, Any],
         membership_snapshot: Mapping[str, Any],
         now: float,
+        node_transfer_manifests: Mapping[str, Any] | None = None,
         runner: CommandRunner | None = None,
         run_plan: Mapping[str, Any] | None = None,
         session_factory: Callable[..., Any] | None = None,
@@ -883,6 +899,11 @@ class QualificationController:
         self.peers = tuple(peers)
         self.source_root = resolved_root
         self._transfer_manifest = dict(transfer_manifest)
+        self._node_transfer_manifests = (
+            None
+            if node_transfer_manifests is None
+            else dict(node_transfer_manifests)
+        )
         self._membership_snapshot = dict(membership_snapshot)
         self._run_plan = None if run_plan is None else dict(run_plan)
         self._now = float(now)
@@ -907,9 +928,67 @@ class QualificationController:
         paths = [record.get("path") for record in records]
         if paths != sorted(paths) or len(paths) != len(set(paths)):
             _reject("transfer_manifest_order_invalid")
-        return tuple(
+        verified = tuple(
             _verify_transfer_file(self.source_root, record) for record in records
         )
+        node_manifests = self._node_transfer_manifests
+        if node_manifests is None:
+            return verified
+        if (
+            set(node_manifests) != {"protocol", "manifests"}
+            or node_manifests.get("protocol") != _NODE_TRANSFERS_PROTOCOL
+            or not isinstance(node_manifests.get("manifests"), Mapping)
+        ):
+            _reject("node_transfer_manifests_invalid")
+        manifests = node_manifests["manifests"]
+        expected_nodes = {peer.node_id for peer in self.peers}
+        if set(manifests) != expected_nodes:
+            _reject("node_transfer_manifests_invalid")
+        base_records = {record["path"]: record for record in verified}
+        covered_paths: set[str] = set()
+        for node_id in sorted(expected_nodes):
+            node_manifest = manifests[node_id]
+            if (
+                not isinstance(node_manifest, Mapping)
+                or set(node_manifest) != {"protocol", "files"}
+                or node_manifest.get("protocol") != _TRANSFER_PROTOCOL
+                or not isinstance(node_manifest.get("files"), list)
+                or not node_manifest["files"]
+            ):
+                _reject("node_transfer_manifest_invalid")
+            node_paths = [record.get("path") for record in node_manifest["files"]]
+            if node_paths != sorted(node_paths) or len(node_paths) != len(set(node_paths)):
+                _reject("node_transfer_manifest_order_invalid")
+            for record in node_manifest["files"]:
+                if not isinstance(record, Mapping):
+                    _reject("node_transfer_manifest_invalid")
+                base = base_records.get(record.get("path"))
+                if base is None or dict(record) != base:
+                    _reject("node_transfer_manifest_not_base_subset")
+            if "physical_inference_node.py" not in node_paths:
+                _reject("node_transfer_manifest_node_script_missing")
+            covered_paths.update(node_paths)
+        if covered_paths != set(base_records):
+            _reject("node_transfer_manifests_incomplete")
+        return verified
+
+    def _transfer_manifest_for_node(self, node_id: str) -> Mapping[str, Any]:
+        if self._node_transfer_manifests is None:
+            return self._transfer_manifest
+        manifests = self._node_transfer_manifests.get("manifests")
+        if not isinstance(manifests, Mapping):
+            _reject("node_transfer_manifests_invalid")
+        manifest = manifests.get(node_id)
+        if not isinstance(manifest, Mapping):
+            _reject("node_transfer_manifest_invalid")
+        return manifest
+
+    def _archive_identity_for_peer(self, peer: PeerIdentity) -> tuple[bytes, str]:
+        archive = build_transfer_archive(
+            self.source_root,
+            self._transfer_manifest_for_node(peer.node_id),
+        )
+        return archive, "sha256:" + hashlib.sha256(archive).hexdigest()
 
     def _validate_membership(self) -> dict[str, dict[str, Any]]:
         snapshot = self._membership_snapshot
@@ -1119,7 +1198,37 @@ class QualificationController:
                 }
             )
         if actual_node_ids != sorted(node_ids):
-            _reject("run_plan_nodes_invalid")
+            graphs = [item["configure"].get("graph") for item in normalized_nodes]
+            if (
+                not graphs
+                or not all(isinstance(graph, Mapping) for graph in graphs)
+                or any(graph != graphs[0] for graph in graphs[1:])
+            ):
+                _reject("run_plan_nodes_invalid")
+            stages = graphs[0].get("stages")
+            if not isinstance(stages, list) or not stages:
+                _reject("run_plan_nodes_invalid")
+            graph_node_order: list[Any] = []
+            for stage in stages:
+                placements = (
+                    stage.get("placements") if isinstance(stage, Mapping) else None
+                )
+                if not isinstance(placements, list) or len(placements) != 1:
+                    _reject("run_plan_nodes_invalid")
+                placement = placements[0]
+                node_id = (
+                    placement.get("node_id")
+                    if isinstance(placement, Mapping)
+                    else None
+                )
+                if node_id not in graph_node_order:
+                    graph_node_order.append(node_id)
+            if (
+                graph_node_order != actual_node_ids
+                or set(actual_node_ids) != set(node_ids)
+                or entry_node_id != actual_node_ids[0]
+            ):
+                _reject("run_plan_nodes_invalid")
         request = plan.get("request")
         request_fields = {
             "request_id",
@@ -1315,9 +1424,11 @@ class QualificationController:
             _reject("physical_operation_invalid")
         plan = self._validate_run_plan()
         recovery_fault = plan["recovery_fault"] if operation == "recover" else None
-        archive = build_transfer_archive(self.source_root, self._transfer_manifest)
-        archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
         peers_by_node = {peer.node_id: peer for peer in self.peers}
+        archive_digests = {
+            node_id: self._archive_identity_for_peer(peer)[1]
+            for node_id, peer in peers_by_node.items()
+        }
         plans_by_node = {record["node_id"]: record for record in plan["nodes"]}
         sessions: dict[str, Any] = {}
         identities: dict[str, dict[str, Any]] = {}
@@ -1358,14 +1469,14 @@ class QualificationController:
                     "--endpoint-secret-file",
                     node_plan["endpoint_secret_file"],
                     "--command-timeout",
-                    "30",
+                    str(int(NODE_COMMAND_TIMEOUT_SECONDS)),
                 )
                 session = self._session_factory(
                     argv=_peer_process_argv(peer, node_command),
                     node_id=node_id,
                     run_id=plan["run_id"],
                     deployment_id=plan["deployment_id"],
-                    timeout_seconds=45.0,
+                    timeout_seconds=NODE_SESSION_TIMEOUT_SECONDS,
                 )
                 sessions[node_id] = session
                 created_sessions.append((node_id, session))
@@ -1421,17 +1532,30 @@ class QualificationController:
             for node_id in ordered_node_ids:
                 peer = peers_by_node[node_id]
                 remote_node_id = successors[node_id]
-                remote_identity = endpoints[remote_node_id]
+                additional_node_ids = [
+                    candidate
+                    for candidate in ordered_node_ids
+                    if candidate not in {node_id, remote_node_id}
+                ]
+
+                def peer_document(candidate: str) -> dict[str, Any]:
+                    identity = endpoints[candidate]
+                    return {
+                        "node_id": candidate,
+                        "endpoint_id": identity["endpoint_id"],
+                        "endpoint_addr": endpoint_addresses[candidate],
+                        "generation": identity["membership_generation"],
+                    }
+
                 started = sessions[node_id].send(
                     command_id=f"{node_id}-start-1",
                     command="start",
                     payload={
-                        "peer": {
-                            "node_id": remote_node_id,
-                            "endpoint_id": remote_identity["endpoint_id"],
-                            "endpoint_addr": endpoint_addresses[remote_node_id],
-                            "generation": remote_identity["membership_generation"],
-                        },
+                        "peer": peer_document(remote_node_id),
+                        "peers": [
+                            peer_document(candidate)
+                            for candidate in additional_node_ids
+                        ],
                         "local_generation": endpoints[node_id]["membership_generation"],
                     },
                 )
@@ -1595,7 +1719,7 @@ class QualificationController:
                         "--endpoint-secret-file",
                         node_plan["endpoint_secret_file"],
                         "--command-timeout",
-                        "30",
+                        str(int(NODE_COMMAND_TIMEOUT_SECONDS)),
                     )
                     try:
                         replacement = self._session_factory(
@@ -1603,7 +1727,7 @@ class QualificationController:
                             node_id=node_id,
                             run_id=plan["run_id"],
                             deployment_id=plan["deployment_id"],
-                            timeout_seconds=45.0,
+                            timeout_seconds=NODE_SESSION_TIMEOUT_SECONDS,
                         )
                         created_sessions.append((node_id, replacement))
                         sessions[node_id] = replacement
@@ -1651,19 +1775,30 @@ class QualificationController:
                             configured_observation
                         )
                         successor_id = successors[node_id]
-                        successor_identity = endpoints[successor_id]
+                        additional_node_ids = [
+                            candidate
+                            for candidate in ordered_node_ids
+                            if candidate not in {node_id, successor_id}
+                        ]
+
+                        def recovery_peer_document(candidate: str) -> dict[str, Any]:
+                            identity = endpoints[candidate]
+                            return {
+                                "node_id": candidate,
+                                "endpoint_id": identity["endpoint_id"],
+                                "endpoint_addr": endpoint_addresses[candidate],
+                                "generation": identity["membership_generation"],
+                            }
+
                         started = replacement.send(
                             command_id=f"{node_id}-start-recover-1",
                             command="start",
                             payload={
-                                "peer": {
-                                    "node_id": successor_id,
-                                    "endpoint_id": successor_identity["endpoint_id"],
-                                    "endpoint_addr": endpoint_addresses[successor_id],
-                                    "generation": successor_identity[
-                                        "membership_generation"
-                                    ],
-                                },
+                                "peer": recovery_peer_document(successor_id),
+                                "peers": [
+                                    recovery_peer_document(candidate)
+                                    for candidate in additional_node_ids
+                                ],
                                 "local_generation": endpoints[node_id][
                                     "membership_generation"
                                 ],
@@ -1796,7 +1931,10 @@ class QualificationController:
         for peer in self.peers:
             try:
                 cleanup_actions.append(
-                    self._cleanup_peer(peer, archive_digest=archive_digest)
+                    self._cleanup_peer(
+                        peer,
+                        archive_digest=archive_digests[peer.node_id],
+                    )
                 )
             except ControllerError:
                 cleanup_failed = True
@@ -2012,12 +2150,11 @@ class QualificationController:
         return ack
 
     def _cleanup_physical(self) -> dict[str, Any]:
-        archive = build_transfer_archive(self.source_root, self._transfer_manifest)
-        archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
         actions: list[dict[str, Any]] = []
         failed = False
         for peer in self.peers:
             try:
+                _archive, archive_digest = self._archive_identity_for_peer(peer)
                 actions.append(
                     self._cleanup_peer(peer, archive_digest=archive_digest)
                 )
@@ -2046,13 +2183,12 @@ class QualificationController:
         endpoints: Mapping[str, Mapping[str, Any]],
     ) -> dict[str, Any]:
         del transfers
-        archive = build_transfer_archive(self.source_root, self._transfer_manifest)
-        archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
         actions: list[dict[str, Any]] = []
-        attempted: list[PeerIdentity] = []
+        attempted: list[tuple[PeerIdentity, str]] = []
         try:
             for peer in self.peers:
-                attempted.append(peer)
+                archive, archive_digest = self._archive_identity_for_peer(peer)
+                attempted.append((peer, archive_digest))
                 argv = _peer_process_argv(
                     peer,
                     (
@@ -2089,7 +2225,7 @@ class QualificationController:
                 )
         except ControllerError as stage_error:
             cleanup_failed = False
-            for peer in attempted:
+            for peer, archive_digest in attempted:
                 try:
                     self._cleanup_peer(peer, archive_digest=archive_digest)
                 except ControllerError:
@@ -2159,7 +2295,12 @@ class QualificationController:
                 "node_id": peer.node_id,
                 "command": command,
                 "argv": None,
-                "transfers": [dict(record) for record in transfers],
+                "transfers": [
+                    dict(record)
+                    for record in self._transfer_manifest_for_node(peer.node_id).get(
+                        "files", []
+                    )
+                ],
             }
             for peer in self.peers
         ]
@@ -2213,6 +2354,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--peers", nargs="+")
     parser.add_argument("--source-root")
     parser.add_argument("--transfer-manifest")
+    parser.add_argument("--node-transfer-manifests")
     parser.add_argument("--membership-snapshot")
     parser.add_argument("--run-plan")
     parser.add_argument("--now", type=float)
@@ -2258,6 +2400,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             peers=peers,
             source_root=Path(args.source_root),
             transfer_manifest=_read_document(Path(args.transfer_manifest)),
+            node_transfer_manifests=(
+                None
+                if args.node_transfer_manifests is None
+                else _read_document(Path(args.node_transfer_manifests))
+            ),
             membership_snapshot=_read_document(Path(args.membership_snapshot)),
             now=args.now,
             run_plan=(

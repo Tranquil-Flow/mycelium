@@ -107,6 +107,46 @@ def test_iroh_cancellation_frame_is_control_only_then_path_is_forgotten() -> Non
    _assert_all_clients_closed(hub)
 
 
+def test_iroh_cancellation_fans_out_to_every_configured_path_participant() -> None:
+   hub = _Hub()
+   third = _binding(
+      node_id="third-node",
+      endpoint_id="third-endpoint",
+      generation=7,
+   )
+   transport = _transport(hub, peers=[third])
+   transport.bind_router(_CancellationRouter())
+   cancellation = PathCancellation(
+      "request-iroh-fanout",
+      "path-iroh-fanout",
+      0,
+      3,
+   )
+   transport.start()
+   try:
+      transport.remember_entry(cancellation.request_id, "local-node")
+      with transport._state_lock:
+         transport._participant_nodes_by_path[cancellation.path_id] = frozenset(
+            {"local-node", "peer-node", "third-node"}
+         )
+
+      transport.send_path_cancellation(cancellation)
+      _wait_until(lambda: len(hub.sent) + len(hub.routed_sent) == 2)
+      _wait_until(lambda: not transport._cancellation_threads)
+
+      primary_frame = hub.sent[0][1]
+      third_endpoint, _message_id, third_frame, _timeout, generation = hub.routed_sent[0]
+      assert decode_frame(primary_frame).message == cancellation
+      assert decode_frame(third_frame).message == cancellation
+      assert third_endpoint == "third-endpoint"
+      assert generation == 7
+      assert cancellation.path_id not in transport._participant_nodes_by_path
+      assert cancellation.request_id not in transport._entry_nodes
+   finally:
+      transport.close()
+   _assert_all_clients_closed(hub)
+
+
 @pytest.mark.parametrize(
    ("setup", "error_code"),
    [

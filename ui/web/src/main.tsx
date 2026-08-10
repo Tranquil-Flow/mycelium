@@ -8,6 +8,11 @@ import {
 } from './features/observatory/live/ObservatoryController';
 import { bootstrapProductGatewaySession } from './features/observatory/live/productGatewaySession';
 import { consumeDeviceLabOperatorCapability } from './features/deviceLab/deviceLabCapability';
+import { ProductEvidenceProvider } from './features/productEvidence/ProductEvidenceContext';
+import {
+  createLiveProductEvidenceSource,
+  type LiveProductEvidenceSource,
+} from './features/productEvidence/source';
 
 const deviceLabOperatorToken = consumeDeviceLabOperatorCapability();
 
@@ -16,10 +21,15 @@ if (rootElement === null) throw new Error('Network Observatory root element is m
 const root = createRoot(rootElement);
 const sourceMode = resolveProductObservatorySourceMode(import.meta.env.VITE_OBSERVATORY_SOURCE_MODE);
 
-function renderProduct(source: Parameters<typeof App>[0]['source']): void {
+function renderProduct(
+  source: Parameters<typeof App>[0]['source'],
+  productEvidenceSource?: LiveProductEvidenceSource,
+): void {
   root.render(
     <StrictMode>
-      <App source={source} deviceLabOperatorToken={deviceLabOperatorToken} />
+      <ProductEvidenceProvider source={productEvidenceSource}>
+        <App source={source} deviceLabOperatorToken={deviceLabOperatorToken} />
+      </ProductEvidenceProvider>
     </StrictMode>,
   );
 }
@@ -27,10 +37,18 @@ function renderProduct(source: Parameters<typeof App>[0]['source']): void {
 async function bootstrapLiveProduct(): Promise<void> {
   const bootstrap = await bootstrapProductGatewaySession();
   if (bootstrap.source_mode !== 'live') throw new Error('product_gateway_source_mode_mismatch');
-  renderProduct(createProductObservatoryLiveSource());
+  renderProduct(
+    createProductObservatoryLiveSource(),
+    createLiveProductEvidenceSource(),
+  );
 }
 
-if (sourceMode === 'fixture') {
+if (deviceLabOperatorToken !== null) {
+  // The isolated Device Lab server intentionally exposes only its same-origin
+  // operator API, not the physical product bootstrap. App renders the live local
+  // Device Lab workspace before consulting this non-authoritative fixture source.
+  renderProduct(createObservatorySource({ source_mode: 'fixture' }));
+} else if (sourceMode === 'fixture') {
   renderProduct(createObservatorySource({ source_mode: 'fixture' }));
 } else {
   root.render(

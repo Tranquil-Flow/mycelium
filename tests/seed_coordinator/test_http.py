@@ -15,6 +15,7 @@ from mycelium_node import NodeMembershipSession, load_or_create_node_signer
 from mycelium_qualification.signing import generate_ed25519_signer
 from mycelium_seed import SeedCoordinator
 from mycelium_seed.http import SeedHTTPClient, SeedHTTPError, SeedHTTPServer
+from mycelium_seed.operator import SEED_KEY_TRANSITION_PROTOCOL
 
 
 NOW = 3_000.0
@@ -99,6 +100,125 @@ def test_real_http_join_and_member_message_roundtrip(tmp_path: Path) -> None:
             join_envelope=request,
         )
         assert retry_acceptance == acceptance
+
+        restarted_node = NodeMembershipSession(
+            node_id="node-http",
+            swarm_id="swarm-http",
+            seed_node_id="seed-node",
+            signer=load_or_create_node_signer(tmp_path / "node" / "identity.key"),
+            incarnation="node-incarnation-r1",
+            software_version="mycelium-test",
+            peer_class="mac_mlx_iroh",
+            runtime_capability={
+                "runtime_backend": "mlx",
+                "transport": "iroh",
+                "activation_protocol": "mycelium.router_wire.v1",
+            },
+            clock=lambda: NOW,
+            id_source=_ids("node-resume"),
+        )
+        resume_request = restarted_node.resume_request(
+            previous_generation=1,
+            previous_incarnation="node-incarnation",
+            endpoint_addrs=["https://node-http/control"],
+        )
+        resume_acceptance = client.resume(resume_envelope=resume_request)
+        restarted_node.accept_resume(
+            resume_acceptance,
+            seed_key_digest=coordinator.signer.verification_key_digest,
+        )
+        assert restarted_node.generation == 2
+        assert coordinator.member("node-http")["generation"] == 2
+
+
+def test_client_learns_dual_signed_seed_rotation_and_bounds_overlap(
+    tmp_path: Path,
+) -> None:
+    old_signer = generate_ed25519_signer(endpoint_id="seed-old")
+    new_signer = generate_ed25519_signer(endpoint_id="seed-new")
+    transition = {
+        "swarm_id": "swarm-rotation",
+        "seed_node_id": "seed-node",
+        "previous_generation": 1,
+        "authority_generation": 2,
+        "old_seed_key_digest": old_signer.verification_key_digest,
+        "new_seed_key_digest": new_signer.verification_key_digest,
+        "initiated_at": NOW,
+        "effective_at": NOW,
+        "overlap_expires_at": NOW + 60,
+        "reason": "scheduled_rotation",
+    }
+    envelope = {
+        "protocol": SEED_KEY_TRANSITION_PROTOCOL,
+        "transition": transition,
+        "old_signature": old_signer.sign(transition),
+        "old_verification_key": old_signer.public_key_record(),
+        "new_signature": new_signer.sign(transition),
+        "new_verification_key": new_signer.public_key_record(),
+    }
+    old = SeedCoordinator(
+        swarm_id="swarm-rotation",
+        seed_node_id="seed-node",
+        seed_url=None,
+        signer=old_signer,
+        invite_registry=SqliteInviteRegistry(tmp_path / "old" / "state.sqlite3"),
+        incarnation="seed-old-incarnation",
+        clock=lambda: NOW,
+    )
+    with SeedHTTPServer(
+        old,
+        host="127.0.0.1",
+        port=0,
+        rotation_envelope=envelope,
+    ) as server:
+        client = SeedHTTPClient(
+            seed_url=server.base_url,
+            swarm_id="swarm-rotation",
+            seed_key_digest=old_signer.verification_key_digest,
+            seed_key_records=[old_signer.public_key_record()],
+        )
+        assert client.rotation(now=NOW) == envelope
+        assert client._seed_digest_accepted(  # noqa: SLF001 - trust-boundary test
+            old_signer.verification_key_digest,
+            now=NOW + 30,
+        )
+        assert client._seed_digest_accepted(  # noqa: SLF001 - trust-boundary test
+            new_signer.verification_key_digest,
+            now=NOW + 30,
+        )
+        assert not client._seed_digest_accepted(  # noqa: SLF001
+            old_signer.verification_key_digest,
+            now=NOW + 61,
+        )
+        assert client._seed_digest_accepted(  # noqa: SLF001
+            new_signer.verification_key_digest,
+            now=NOW + 61,
+        )
+
+        new_client = SeedHTTPClient(
+            seed_url=server.base_url,
+            swarm_id="swarm-rotation",
+            seed_key_digest=new_signer.verification_key_digest,
+            seed_key_records=[new_signer.public_key_record()],
+        )
+        assert new_client.rotation(now=NOW + 30) == envelope
+        assert new_client._seed_digest_accepted(  # noqa: SLF001
+            new_signer.verification_key_digest,
+            now=NOW + 61,
+        )
+
+        unrelated_signer = generate_ed25519_signer(endpoint_id="seed-unrelated")
+        unrelated = SeedHTTPClient(
+            seed_url=server.base_url,
+            swarm_id="swarm-rotation",
+            seed_key_digest=unrelated_signer.verification_key_digest,
+            seed_key_records=[unrelated_signer.public_key_record()],
+        )
+        with pytest.raises(
+            SeedHTTPError,
+            match="seed_operator_rotation_record_invalid",
+        ):
+            unrelated.rotation(now=NOW + 30)
 
 
 def test_http_server_rejects_noncanonical_or_oversized_json(tmp_path: Path) -> None:

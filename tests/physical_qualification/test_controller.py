@@ -751,6 +751,82 @@ def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledg
     assert all(action["archive_digest"] == archive_digest for action in result["actions"])
 
 
+def test_physical_prepare_uses_node_specific_subset_archives(tmp_path: Path) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    records = {record["path"]: record for record in transfers["files"]}
+    node_manifests = {
+        "protocol": "mycelium.controller_node_transfer_manifests.v1",
+        "manifests": {
+            peers[0].node_id: {
+                "protocol": "mycelium.controller_transfer_manifest.v1",
+                "files": [records["physical_inference_node.py"]],
+            },
+            peers[1].node_id: transfers,
+        },
+    }
+    archives = [
+        build_transfer_archive(source_root, node_manifests["manifests"][peer.node_id])
+        for peer in peers
+    ]
+    digests = ["sha256:" + hashlib.sha256(archive).hexdigest() for archive in archives]
+    runner = StagingRunner(
+        [
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=_stage_ack_bytes(peer, digest, len(archive)),
+                stderr=b"",
+            )
+            for peer, digest, archive in zip(peers, digests, archives, strict=True)
+        ]
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        node_transfer_manifests=node_manifests,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("prepare")
+
+    assert archives[0] != archives[1]
+    assert [call[2] for call in runner.calls] == archives
+    assert [action["archive_digest"] for action in result["actions"]] == digests
+
+
+def test_node_transfer_manifests_must_cover_the_base_manifest(tmp_path: Path) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    node_script = transfers["files"][0]
+    node_manifests = {
+        "protocol": "mycelium.controller_node_transfer_manifests.v1",
+        "manifests": {
+            peer.node_id: {
+                "protocol": "mycelium.controller_transfer_manifest.v1",
+                "files": [node_script],
+            }
+            for peer in peers
+        },
+    }
+    controller = QualificationController(
+        mode="dry-run",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        node_transfer_manifests=node_manifests,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+    )
+
+    with pytest.raises(ControllerError, match="node_transfer_manifests_incomplete"):
+        controller.execute("prepare")
+
+
 def test_physical_prepare_uses_declared_local_and_ssh_process_transports(
     tmp_path: Path,
 ) -> None:
@@ -1242,12 +1318,25 @@ def test_physical_run_orchestrates_every_declared_peer_in_n_way_cycle(
         )
         for node_id, session in sessions.items()
     }
+    actual_peer_sets = {
+        node_id: {
+            payload["peer"]["node_id"],
+            *(item["node_id"] for item in payload["peers"]),
+        }
+        for node_id, session in sessions.items()
+        for command, payload in session.sent
+        if command == "start"
+    }
     assert result["peer_count"] == peer_count
     assert result["route_ready"] is False
     assert set(sessions) == set(ordered_node_ids)
     assert all("start" in session.commands for session in sessions.values())
     assert actual_successors == expected_successors
     assert set(actual_successors.values()) == set(ordered_node_ids)
+    assert actual_peer_sets == {
+        node_id: set(ordered_node_ids) - {node_id}
+        for node_id in ordered_node_ids
+    }
     assert all(session.closed for session in sessions.values())
     assert len(runner.calls) == peer_count
 
@@ -1953,6 +2042,7 @@ def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
         staged = staging_root / record["path"]
         assert staged.read_bytes() == (source_root / record["path"]).read_bytes()
         assert staged.stat().st_mode & 0o777 == 0o600
+    assert not (staging_root / ".incoming.tar").exists()
 
     cleanup_argv = (
         sys.executable,
@@ -1975,6 +2065,14 @@ def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
     )
     assert second_cleanup.returncode == 0
     assert json.loads(second_cleanup.stdout)["removed"] is False
+
+
+def test_remote_stage_program_streams_archive_and_members_with_bounded_memory() -> None:
+    assert "read(expected_size+1)" not in _REMOTE_STAGE_SCRIPT
+    assert "read(min(1_048_576,expected_size-received))" in _REMOTE_STAGE_SCRIPT
+    assert 'os.open(archive_path,flags,0o600)' in _REMOTE_STAGE_SCRIPT
+    assert "content=source.read()" not in _REMOTE_STAGE_SCRIPT
+    assert "source.read(min(1_048_576,remaining))" in _REMOTE_STAGE_SCRIPT
 
 
 def test_cli_accepts_explicit_run_plan_path() -> None:

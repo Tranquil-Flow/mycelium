@@ -9,6 +9,7 @@ from .contracts import (
     synthetic_route_qualification_fixture,
 )
 from .qualifier import QualificationError, qualify_route
+from .live import LiveRouteQualificationError, issue_live_route_qualification
 from .sealer import (
     EvidenceSealingError,
     SealedEvidence,
@@ -28,12 +29,14 @@ __all__ = (
     "QualificationError",
     "EvidenceSigningError",
     "EvidenceSealingError",
+    "LiveRouteQualificationError",
     "RouteQualificationV1",
     "SealedEvidence",
     "StageQualificationBinding",
     "build_ed25519_verifier",
     "generate_ed25519_signer",
     "qualify_route",
+    "issue_live_route_qualification",
     "qualify_sealed_evidence",
     "route_qualification_from_dict",
     "route_qualification_to_dict",

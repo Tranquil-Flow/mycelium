@@ -54,6 +54,8 @@ NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS = 5.0
+_MAX_IROH_DELIVERY_TIMEOUT_SECONDS = 240.0
+_MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS = 240.0
 _COMMAND_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
 )
@@ -1032,9 +1034,16 @@ class PhysicalNodeService:
 
     def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "CONFIGURED", "invalid_state_for_start")
-        data = _exact_fields(
-            payload, {"peer", "local_generation"}, "invalid_start_fields"
+        _require(
+            isinstance(payload, dict)
+            and set(payload)
+            in (
+                {"peer", "local_generation"},
+                {"peer", "peers", "local_generation"},
+            ),
+            "invalid_start_fields",
         )
+        data = payload
         local_generation = data["local_generation"]
         _require(
             isinstance(local_generation, int)
@@ -1052,6 +1061,30 @@ class PhysicalNodeService:
         except (TypeError, ValueError) as exc:
             raise NodeCommandError("invalid_peer_binding") from exc
         _require(peer.node_id != self.node_id, "self_peer_binding")
+        additional_peer_documents = data.get("peers", [])
+        _require(isinstance(additional_peer_documents, list), "invalid_peers")
+        additional_peers: list[PeerBinding] = []
+        for document in additional_peer_documents:
+            peer_document = _exact_fields(
+                document,
+                {"node_id", "endpoint_id", "endpoint_addr", "generation"},
+                "invalid_peer_fields",
+            )
+            try:
+                additional_peer = PeerBinding(**peer_document)
+            except (TypeError, ValueError) as exc:
+                raise NodeCommandError("invalid_peer_binding") from exc
+            _require(additional_peer.node_id != self.node_id, "self_peer_binding")
+            additional_peers.append(additional_peer)
+        all_peers = [peer, *additional_peers]
+        _require(
+            len({item.node_id for item in all_peers}) == len(all_peers),
+            "duplicate_peer_node_id",
+        )
+        _require(
+            len({item.endpoint_id for item in all_peers}) == len(all_peers),
+            "duplicate_peer_endpoint_id",
+        )
         assert self.sidecar is not None
         assert self.endpoint_id is not None
         assert self.runtime is not None
@@ -1063,10 +1096,18 @@ class PhysicalNodeService:
             socket_path=self.sidecar.socket_path,
             bootstrap_secret=self.sidecar.bootstrap_material,
             peer=peer,
+            peers=additional_peers,
             local_generation=local_generation,
             expected_endpoint_id=self.endpoint_id,
             queue_capacity=128,
-            delivery_timeout_seconds=min(self.command_timeout, 10.0),
+            # A confirmed delivery acknowledges completed local Router dispatch.
+            # Progressive prefill dispatch can synchronously execute and forward
+            # through a slower downstream stage before the acknowledgement returns,
+            # so a ten-second ceiling spuriously rejects healthy heterogeneous routes.
+            delivery_timeout_seconds=min(
+                self.command_timeout,
+                _MAX_IROH_DELIVERY_TIMEOUT_SECONDS,
+            ),
             poll_interval_seconds=0.02,
         )
         router = Router(
@@ -1090,7 +1131,13 @@ class PhysicalNodeService:
         self.router = router
         self.peer_generation = peer.generation
         self.state = "RUNNING"
-        return self._signed_result("started", {"peer": _plain_json(peer)})
+        return self._signed_result(
+            "started",
+            {
+                "peer": _plain_json(peer),
+                "peers": [_plain_json(item) for item in all_peers],
+            },
+        )
 
     def _snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         _exact_fields(payload, set(), "invalid_snapshot_fields")
@@ -1201,9 +1248,14 @@ class PhysicalNodeService:
         request_id = self.router.start_distributed_prefill(request, sink)
         _require(request_id == request.request_id, "request_id_changed")
         self._sinks[request_id] = sink
-        deadline = time.monotonic() + min(self.command_timeout * 0.8, 20.0)
+        deadline = time.monotonic() + min(
+            self.command_timeout * 0.8,
+            _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS,
+        )
         status = self.router.request_status(request_id)
         while status == "PREFILL" and time.monotonic() < deadline:
+            if self.transport is not None and self.transport.fatal_error is not None:
+                raise NodeCommandError(self.transport.fatal_error.code)
             time.sleep(0.01)
             status = self.router.request_status(request_id)
         _require(status != "PREFILL", "prefill_completion_timeout")
@@ -1234,16 +1286,24 @@ class PhysicalNodeService:
             if not self.router.decode_one_distributed(data["request_id"]):
                 break
             dispatched += 1
-            deadline = time.monotonic() + min(self.command_timeout * 0.8, 20.0)
+            deadline = time.monotonic() + min(
+                self.command_timeout * 0.8,
+                _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS,
+            )
             status = self.router.request_status(data["request_id"])
             while (
                 len(sink.token_ids) == output_count
-                and status not in {"FAILED", "CANCELLED"}
+                and status not in {"COMPLETED", "FAILED", "CANCELLED"}
                 and time.monotonic() < deadline
             ):
+                if self.transport is not None and self.transport.fatal_error is not None:
+                    raise NodeCommandError(self.transport.fatal_error.code)
                 time.sleep(0.01)
                 status = self.router.request_status(data["request_id"])
-            _require(len(sink.token_ids) > output_count, "decode_completion_timeout")
+            _require(
+                len(sink.token_ids) > output_count or status == "COMPLETED",
+                "decode_completion_timeout",
+            )
         return self._signed_result(
             "inference_decoded",
             {
@@ -1251,6 +1311,26 @@ class PhysicalNodeService:
                 "dispatched": dispatched,
                 "status": self.router.request_status(data["request_id"]),
                 "output": sink.snapshot(),
+            },
+        )
+
+    def _infer_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = _exact_fields(payload, {"request_id"}, "invalid_infer_cancel_fields")
+        _require(
+            isinstance(data["request_id"], str) and bool(data["request_id"]),
+            "invalid_request_id",
+        )
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_infer_cancel",
+        )
+        cancelled = self.router.cancel(data["request_id"])
+        return self._signed_result(
+            "inference_cancelled",
+            {
+                "request_id": data["request_id"],
+                "cancelled": bool(cancelled),
+                "status": self.router.request_status(data["request_id"]),
             },
         )
 
@@ -1316,6 +1396,7 @@ class PhysicalNodeService:
             "cancel": self._cancel,
             "infer_start": self._infer_start,
             "infer_decode": self._infer_decode,
+            "infer_cancel": self._infer_cancel,
             "rotate": self._rotate,
             "stop": self._stop,
         }
@@ -1406,6 +1487,15 @@ def main() -> int:
         print(f"physical-node startup rejected: {type(exc).__name__}", file=sys.stderr)
         return 2
 
+    def stop_on_signal(signum: int, _frame: Any) -> None:
+        service.close()
+        raise SystemExit(128 + signum)
+
+    prior_signal_handlers = {
+        signum: signal.signal(signum, stop_on_signal)
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+
     try:
         for raw_line in sys.stdin.buffer:
             command_id = "unknown"
@@ -1433,6 +1523,8 @@ def main() -> int:
         service.close()
         return 0
     finally:
+        for signum, handler in prior_signal_handlers.items():
+            signal.signal(signum, handler)
         service.close()
 
 

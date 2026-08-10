@@ -4,8 +4,11 @@ from typing import Any
 
 from mycelium_router.contracts import (
    EXECUTION_GRAPH_PROTOCOL,
+   PATH_MANIFEST_PROTOCOL,
    ExecutionGraph,
    LayerRange,
+   PathHop,
+   PathManifest,
    Placement,
    PlacementEdge,
    Stage,
@@ -135,6 +138,101 @@ def execution_graph_to_dict(graph: ExecutionGraph) -> dict[str, Any]:
       ],
       "edges": [_edge_to_dict(edge) for edge in graph.edges],
       "loopback_edges": [_edge_to_dict(edge) for edge in graph.loopback_edges],
+   }
+
+
+_PATH_MANIFEST_FIELDS = frozenset(
+   {
+      "protocol",
+      "path_id",
+      "path_attempt",
+      "request_id",
+      "deployment_id",
+      "deployment_epoch",
+      "topology_version",
+      "manifest_digest",
+      "ordered_hops",
+      "loopback_edge_id",
+   }
+)
+_PATH_HOP_FIELDS = frozenset(
+   {
+      "stage_id",
+      "placement_id",
+      "reservation_id",
+      "reservation_expires_at",
+      "reservation_epoch",
+   }
+)
+
+
+def path_manifest_from_dict(payload: dict[str, Any]) -> PathManifest:
+   """Decode one exact JSON path contract before graph-bound validation."""
+   if not isinstance(payload, dict) or set(payload) != _PATH_MANIFEST_FIELDS:
+      raise ContractError("invalid_manifest_fields")
+   if payload.get("protocol") != PATH_MANIFEST_PROTOCOL:
+      raise ContractError("unsupported_manifest_protocol")
+   try:
+      raw_hops = payload["ordered_hops"]
+      if not isinstance(raw_hops, list) or not raw_hops:
+         raise ContractError("invalid_manifest_hops")
+      hops = []
+      for item in raw_hops:
+         if not isinstance(item, dict) or set(item) != _PATH_HOP_FIELDS:
+            raise ContractError("invalid_manifest_hop_fields")
+         hops.append(PathHop(**item))
+      manifest = PathManifest(
+         protocol=payload["protocol"],
+         path_id=payload["path_id"],
+         path_attempt=payload["path_attempt"],
+         request_id=payload["request_id"],
+         deployment_id=payload["deployment_id"],
+         deployment_epoch=payload["deployment_epoch"],
+         topology_version=payload["topology_version"],
+         manifest_digest=payload["manifest_digest"],
+         ordered_hops=tuple(hops),
+         loopback_edge_id=payload["loopback_edge_id"],
+      )
+   except ContractError:
+      raise
+   except (KeyError, TypeError, ValueError) as error:
+      raise ContractError("invalid_manifest_field", str(error)) from error
+   if (
+      not isinstance(manifest.path_id, str)
+      or not manifest.path_id
+      or not isinstance(manifest.request_id, str)
+      or not manifest.request_id
+      or type(manifest.path_attempt) is not int
+      or manifest.path_attempt < 0
+      or type(manifest.deployment_epoch) is not int
+      or type(manifest.topology_version) is not int
+   ):
+      raise ContractError("invalid_manifest_identity")
+   return manifest
+
+
+def path_manifest_to_dict(manifest: PathManifest) -> dict[str, Any]:
+   """Encode one JSON path contract; graph binding remains caller-owned."""
+   return {
+      "protocol": manifest.protocol,
+      "path_id": manifest.path_id,
+      "path_attempt": manifest.path_attempt,
+      "request_id": manifest.request_id,
+      "deployment_id": manifest.deployment_id,
+      "deployment_epoch": manifest.deployment_epoch,
+      "topology_version": manifest.topology_version,
+      "manifest_digest": manifest.manifest_digest,
+      "ordered_hops": [
+         {
+            "stage_id": hop.stage_id,
+            "placement_id": hop.placement_id,
+            "reservation_id": hop.reservation_id,
+            "reservation_expires_at": hop.reservation_expires_at,
+            "reservation_epoch": hop.reservation_epoch,
+         }
+         for hop in manifest.ordered_hops
+      ],
+      "loopback_edge_id": manifest.loopback_edge_id,
    }
 
 

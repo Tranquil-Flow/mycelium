@@ -28,7 +28,7 @@ describe('product shell feature slots', () => {
     }
     expect(screen.getByRole('heading', { name: /^inference$/i })).toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByText(/session memory only/i)).toBeInTheDocument();
+    expect(screen.getByText(/tab-session history/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
   });
 

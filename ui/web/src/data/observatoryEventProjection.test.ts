@@ -82,6 +82,25 @@ describe('read-only Observatory event projection', () => {
     expect(() => decodeObservatoryAdapterEvent(unbacked)).toThrow(/proof|digest|evidence/i);
   });
 
+  it('accepts one namespace segment in a public model id', () => {
+    const event = validObservatoryAdapterEvent();
+    event.bundle.snapshot.qualification!.binding.model_id = 'Qwen/Qwen2.5-0.5B-Instruct';
+
+    expect(
+      decodeObservatoryAdapterEvent(event).bundle.snapshot.qualification!.binding.model_id,
+    ).toBe('Qwen/Qwen2.5-0.5B-Instruct');
+  });
+
+  it.each(['Qwen//model', 'Qwen/model/variant', '/model'])(
+    'rejects path-like model id %s',
+    (modelId) => {
+      const event = validObservatoryAdapterEvent();
+      event.bundle.snapshot.qualification!.binding.model_id = modelId;
+
+      expect(() => decodeObservatoryAdapterEvent(event)).toThrow(/model identifier/i);
+    },
+  );
+
   it('rejects unbacked route promotion, cursor mismatch, endpoint identifiers, and unordered sessions', () => {
     const promoted = validObservatoryAdapterEvent();
     promoted.bundle.provisioning.route_ready = true;

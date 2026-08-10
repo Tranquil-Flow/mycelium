@@ -8,7 +8,7 @@ export const PRODUCT_QUALIFIER_AUTHORITY =
   'mycelium_qualification.qualifier:RouteQualificationV1' as const;
 export const MAX_PROMPT_UTF8_BYTES = 131_072;
 export const MAX_NEW_TOKENS = 4_096;
-export const QUALIFICATION_MAX_AGE_MS = 300_000;
+export const QUALIFICATION_MAX_AGE_MS = 3_600_000;
 export const MAX_COLLECTION_ITEMS = 4_096;
 
 export const PRODUCT_API_PATHS = Object.freeze({
@@ -20,6 +20,9 @@ export const PRODUCT_API_PATHS = Object.freeze({
   swarm_invites: '/api/v1/swarm/invites',
   swarm_join: '/api/v1/swarm/join',
   swarm_leave: '/api/v1/swarm/leave',
+  product_snapshot: '/api/v1/product/snapshot',
+  product_events: '/api/v1/product/events',
+  product_export: '/api/v1/product/export',
 } as const);
 
 const SHA256_REF = /^sha256:[0-9a-f]{64}$/;

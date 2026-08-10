@@ -223,6 +223,39 @@ def test_reconnect_can_replay_last_server_acked_event_if_client_did_not_apply_it
         service.close()
 
 
+def test_reconnect_replays_multiple_acknowledged_events_until_buffer_pressure():
+    qualification = _synthetic_qualification()
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=ScriptedBackend(("one", "two", "three")),
+        request_id_source=lambda: "resume-window-001",
+        max_buffered_events=8,
+    )
+    try:
+        request_id = service.submit(_submission(qualification, max_new_tokens=3))
+        first = service.subscribe(request_id, last_event_id=None)
+        acknowledged = []
+        for _ in range(3):
+            item = first.next_event(timeout=1)
+            assert item is not None
+            first.ack(item.sequence)
+            acknowledged.append(item)
+        first.close()
+
+        resumed = service.subscribe(request_id, last_event_id=acknowledged[0].sequence)
+        replay = _drain(resumed)
+
+        assert [event.sequence for event in replay] == [1, 2, 3, 4]
+        assert [event.text for event in replay if event.kind == "token"] == [
+            "one",
+            "two",
+            "three",
+        ]
+        assert replay[-1].kind == "completed"
+    finally:
+        service.close()
+
+
 def test_bounded_backpressure_pauses_backend_until_consumer_acks():
     qualification = _synthetic_qualification()
     backend = BurstBackend(5)

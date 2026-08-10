@@ -30,6 +30,9 @@ from mycelium_membership import (
     LEASE_RENEWAL_PROTOCOL,
     LINK_PROBE_REPORT_PROTOCOL,
     MAX_MESSAGE_TTL_SECONDS,
+    RESUME_ACCEPTANCE_PROTOCOL,
+    RESUME_REQUEST_PROTOCOL,
+    SEED_ROTATION_ACK_PROTOCOL,
     MembershipContractError,
     peer_runtime_is_activation_eligible,
     sign_membership_message,
@@ -45,6 +48,14 @@ from .state import SeedStateError, SqliteSeedState
 
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MAX_REPLAY_IDS = 4096
+_LIFECYCLE_ORDER = {
+    "NEW": 0,
+    "CONFIGURED": 1,
+    "RUNNING": 2,
+    "DRAINING": 3,
+    "STOPPING": 4,
+    "STOPPED": 5,
+}
 SEED_SIGNED_ENVELOPE_PROTOCOL = "mycelium.seed.signed_envelope.v1"
 SEED_IDENTITY_PROTOCOL = "mycelium.seed.identity.v1"
 SEED_RECEIPT_PROTOCOL = "mycelium.seed.receipt.v1"
@@ -55,6 +66,7 @@ _MEMBER_PROTOCOLS = frozenset(
         HEARTBEAT_PROTOCOL,
         ASSIGNMENT_RESULT_PROTOCOL,
         DRAIN_ACK_PROTOCOL,
+        SEED_ROTATION_ACK_PROTOCOL,
     }
 )
 
@@ -519,6 +531,152 @@ class SeedCoordinator:
             self._members[node_id] = member
             return committed
 
+    def accept_resume(
+        self,
+        *,
+        resume_envelope: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Resume one enrolled durable principal without consuming an invite."""
+
+        with self._lock:
+            request_digest: str | None = None
+            request_message_id: str | None = None
+            if isinstance(resume_envelope, Mapping):
+                try:
+                    candidate = resume_envelope.get("message")
+                    if isinstance(candidate, Mapping):
+                        value = candidate.get("message_id")
+                        if isinstance(value, str):
+                            request_message_id = value
+                    request_digest = hashlib.sha256(
+                        canonical_json_bytes(dict(resume_envelope))
+                    ).hexdigest()
+                except (TypeError, ValueError, UnicodeError):
+                    pass
+            if request_message_id is not None and request_digest is not None:
+                try:
+                    committed = self._state.load_resume_acceptance(
+                        request_message_id=request_message_id,
+                        request_envelope_digest=request_digest,
+                    )
+                except SeedStateError as exc:
+                    raise SeedCoordinatorError(exc.code) from exc
+                if committed is not None:
+                    return committed
+
+            untrusted = resume_envelope.get("message")
+            if not isinstance(untrusted, Mapping):
+                raise SeedCoordinatorError("seed_resume_request_invalid")
+            node_id = untrusted.get("sender_node_id")
+            if not isinstance(node_id, str):
+                raise SeedCoordinatorError("seed_resume_request_invalid")
+            previous = self._members.get(node_id)
+            if previous is None:
+                raise SeedCoordinatorError("seed_member_unknown")
+            now = self._now()
+            try:
+                request = verify_membership_message(
+                    resume_envelope,
+                    now=now,
+                    expected_key_digest=previous.verification_key_digest,
+                    expected_protocol=RESUME_REQUEST_PROTOCOL,
+                    expected_swarm_id=self.swarm_id,
+                    expected_sender_node_id=node_id,
+                    expected_recipient_node_id=self.seed_node_id,
+                )
+            except MembershipContractError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
+            record = resume_envelope.get("verification_key")
+            key_digest = (
+                record.get("verification_key_digest")
+                if isinstance(record, Mapping)
+                else None
+            )
+            if (
+                request["sender_endpoint_id"] != previous.endpoint_id
+                or key_digest != previous.verification_key_digest
+                or request["peer_class"] != previous.peer_class
+                or dict(request["runtime_capability"])
+                != previous.runtime_capability
+            ):
+                raise SeedCoordinatorError("seed_resume_identity_mismatch")
+            if previous.lifecycle_state in {"STOPPING", "STOPPED"}:
+                raise SeedCoordinatorError("seed_resume_member_revoked")
+
+            already_advanced = (
+                previous.generation == request["generation"] + 1
+                and previous.incarnation == request["incarnation"]
+            )
+            if not already_advanced and (
+                previous.generation != request["generation"]
+                or previous.incarnation != request["previous_incarnation"]
+            ):
+                raise SeedCoordinatorError("seed_resume_generation_stale")
+            generation = request["generation"] + 1
+            lease_expires_at = self._bounded_deadline(
+                issued_at=now,
+                ttl_seconds=self._lease_seconds,
+                reserve_headroom=True,
+            )
+            endpoint = request["endpoint_addr"]
+            member = _Member(
+                node_id=node_id,
+                endpoint_id=previous.endpoint_id,
+                endpoint_addrs=tuple(endpoint["addrs"]),
+                peer_class=previous.peer_class,
+                runtime_capability=dict(previous.runtime_capability),
+                verification_key_digest=previous.verification_key_digest,
+                incarnation=request["incarnation"],
+                generation=generation,
+                lease_expires_at=lease_expires_at,
+                last_liveness_at=now,
+                next_heartbeat_due_at=now + self._keepalive_interval_seconds,
+                active_requests=0,
+                lifecycle_state="NEW",
+            )
+            message_id = _segment(self._id_source(), "message_id")
+            if message_id in self._emitted_ids:
+                raise SeedCoordinatorError("seed_message_id_reused")
+            message = {
+                "protocol": RESUME_ACCEPTANCE_PROTOCOL,
+                "message_id": message_id,
+                "swarm_id": self.swarm_id,
+                "sender_node_id": self.seed_node_id,
+                "sender_endpoint_id": self.signer.endpoint_id,
+                "recipient_node_id": node_id,
+                "incarnation": self.incarnation,
+                "generation": generation,
+                "issued_at": now,
+                "expires_at": self._bounded_deadline(
+                    issued_at=now,
+                    ttl_seconds=self._message_ttl_seconds,
+                ),
+                "request_message_id": request["message_id"],
+                "accepted_node_id": node_id,
+                "accepted_incarnation": request["incarnation"],
+                "previous_membership_generation": request["generation"],
+                "membership_generation": generation,
+                "lease_expires_at": lease_expires_at,
+            }
+            acceptance = sign_membership_message(signer=self.signer, message=message)
+            assert request_digest is not None
+            try:
+                committed = self._state.commit_resume(
+                    request_message_id=request["message_id"],
+                    request_envelope_digest=request_digest,
+                    previous_incarnation=request["previous_incarnation"],
+                    previous_generation=request["generation"],
+                    message_id=message_id,
+                    member=member.projection(),
+                    acceptance=acceptance,
+                    already_advanced=already_advanced,
+                )
+            except SeedStateError as exc:
+                raise SeedCoordinatorError(exc.code) from exc
+            self._emitted_ids.add(message_id)
+            self._members[node_id] = member
+            return committed
+
     def _liveness_projection(
         self,
         member: _Member,
@@ -967,6 +1125,13 @@ class SeedCoordinator:
                     raise MembershipContractError("membership_message_expired")
                 if now >= member.lease_expires_at:
                     raise SeedCoordinatorError("seed_member_lease_expired")
+                next_lifecycle = message["lifecycle_state"]
+                if (
+                    next_lifecycle not in _LIFECYCLE_ORDER
+                    or _LIFECYCLE_ORDER[next_lifecycle]
+                    < _LIFECYCLE_ORDER.get(member.lifecycle_state, -1)
+                ):
+                    raise SeedCoordinatorError("seed_member_lifecycle_regression")
 
                 sequence = int(message["heartbeat_sequence"])
                 if sequence <= member.last_heartbeat_sequence:
@@ -1061,6 +1226,9 @@ class SeedCoordinator:
                     "runtime_endpoint": message["runtime_endpoint"],
                 }
                 self._persist("save_assignment_result", updated_assignment)
+            elif expected_protocol == SEED_ROTATION_ACK_PROTOCOL:
+                self._ensure_not_replayed(member, message["message_id"])
+                self._persist("save_seed_rotation_acknowledgement", message)
             else:
                 self._ensure_not_replayed(member, message["message_id"])
             if expected_protocol != HEARTBEAT_PROTOCOL:

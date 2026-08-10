@@ -153,14 +153,14 @@ def _numpy_identity_fields() -> tuple[str, ...]:
    return ("backend", "backend_version", "device", "dtype", "quantization", "architecture")
 
 
-def _numpy_runtime_identity() -> Mapping[str, Any]:
+def _numpy_runtime_identity(runtime: Mapping[str, Any]) -> Mapping[str, Any]:
    return {
       "backend": "numpy",
       "backend_version": importlib.metadata.version("numpy"),
       "device": "cpu",
-      "dtype": "float32",
-      "quantization": "none",
-      "architecture": "gpt2",
+      "dtype": runtime["dtype"],
+      "quantization": runtime["quantization"],
+      "architecture": runtime["architecture"],
    }
 
 
@@ -386,7 +386,7 @@ class NumpyRuntimePort:
          or set(identity) != expected_identity_fields
       ):
          _reject("invalid_runtime_identity", placement.placement_id)
-      canonical_identity = _numpy_runtime_identity()
+      canonical_identity = _numpy_runtime_identity(runtime)
       for field, expected in canonical_identity.items():
          if identity.get(field) != expected:
             _reject(

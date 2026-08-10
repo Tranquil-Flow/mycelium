@@ -190,7 +190,8 @@ def test_expired_replay_cursor_fails_without_mutation():
     acked_accepted = model.apply(Action.ack(0), state=delivered_accepted.state)
     delivered_token = model.apply(Action.next_event(), state=acked_accepted.state)
     acknowledged = model.apply(Action.ack(1), state=delivered_token.state)
-    disconnected = model.apply(Action.disconnect(), state=acknowledged.state)
+    pressure = model.apply(Action.token(1, "beta"), state=acknowledged.state)
+    disconnected = model.apply(Action.disconnect(), state=pressure.state)
 
     expired = model.apply(Action.reconnect(-1), state=disconnected.state)
 
