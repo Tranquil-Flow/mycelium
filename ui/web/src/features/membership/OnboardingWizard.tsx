@@ -2,9 +2,17 @@ import { useState, type FormEvent } from 'react';
 import { HttpMembershipClient, type MembershipClient, type MembershipInvite } from './membershipClient';
 import styles from './Membership.module.css';
 
-export interface OnboardingWizardProps { readonly client?: MembershipClient; readonly readOnly?: boolean; }
+export interface OnboardingWizardProps {
+  readonly client?: MembershipClient;
+  readonly readOnly?: boolean;
+  readonly readOnlyReason?: string;
+}
 
-export function OnboardingWizard({ client = new HttpMembershipClient(), readOnly = false }: OnboardingWizardProps) {
+export function OnboardingWizard({
+  client = new HttpMembershipClient(),
+  readOnly = false,
+  readOnlyReason = 'Enrollment is unavailable in offline evidence mode.',
+}: OnboardingWizardProps) {
   const [mode, setMode] = useState<'choose' | 'invite' | 'join'>('choose');
   const [invite, setInvite] = useState<MembershipInvite | null>(null);
   const [code, setCode] = useState('');
@@ -31,7 +39,7 @@ export function OnboardingWizard({ client = new HttpMembershipClient(), readOnly
     <section className={styles.panel} aria-label="Membership onboarding choices">
       <button type="button" disabled={busy || readOnly} onClick={() => void createInvite()}>Create single-use invite</button>
       <button type="button" disabled={readOnly} onClick={() => setMode('join')}>Join with invite code</button>
-      {readOnly ? <p role="status">Enrollment is unavailable in offline evidence mode.</p> : null}
+      {readOnly ? <p role="status">{readOnlyReason}</p> : null}
     </section>
     {mode === 'invite' && invite !== null ? <section className={styles.panel} aria-live="polite"><h3>Single-use invitation</h3><code className={styles.code}>{invite.invite_code}</code><p>Expires {invite.expires_at}. Invite is not route readiness and grants no browser inference capability.</p></section> : null}
     {mode === 'join' ? <form className={styles.panel} onSubmit={(event) => void submitJoin(event)}><h3>Enter invitation</h3><label>Invite code<input required maxLength={512} value={code} disabled={readOnly} onChange={(event) => setCode(event.target.value)} /></label><label>Endpoint identity (optional)<input maxLength={512} value={endpointId} disabled={readOnly} onChange={(event) => setEndpointId(event.target.value)} /></label><button type="submit" disabled={readOnly || busy || code.trim() === ''}>Join swarm</button></form> : null}

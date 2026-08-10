@@ -1,0 +1,91 @@
+{
+  "entities": [
+    {
+      "attributes": {
+        "activation_eligible": false,
+        "activation_protocol": "mycelium.router_wire.v1",
+        "authority_generation": 1,
+        "incarnation": "mobile-incarnation-fixture",
+        "lease_freshness": "fresh",
+        "lifecycle": "running",
+        "membership_generation": 1,
+        "peer_class": "android_termux_iroh",
+        "placement_id": null,
+        "runtime_backend": "pixel-stdlib",
+        "transport": "iroh"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "mobile-conformance-fixture",
+      "freshness": {
+        "observed_at_unix_ms": 1900000000000,
+        "status": "current",
+        "valid_until_unix_ms": 1900000300000
+      },
+      "kind": "device",
+      "label": "Mobile conformance device",
+      "source_id": "membership-source"
+    }
+  ],
+  "notices": [],
+  "protocol": "mycelium.product_snapshot.v1",
+  "provenance": {
+    "projector": "mycelium_product_spine",
+    "projector_version": "m12-v1",
+    "source_mode": "fixture"
+  },
+  "publication": {
+    "cursor": 1,
+    "generation": 1,
+    "published_at_unix_ms": 1900000000000,
+    "snapshot_id": "snapshot-fixture",
+    "source_mode": "fixture"
+  },
+  "readiness": [
+    {
+      "dimension": "membership",
+      "reason_code": null,
+      "scope_id": "mobile-conformance-fixture",
+      "source_id": "membership-source",
+      "state": "ready"
+    },
+    {
+      "dimension": "qualification",
+      "reason_code": "mobile_qualification_required",
+      "scope_id": "mobile-conformance-fixture",
+      "source_id": "membership-source",
+      "state": "not_ready"
+    }
+  ],
+  "relations": [],
+  "source_states": [
+    {
+      "authority": "seed_coordinator",
+      "generation": 1,
+      "observed_at_unix_ms": 1900000000000,
+      "reason_code": null,
+      "source_id": "membership-source",
+      "status": "current",
+      "valid_until_unix_ms": 1900000300000
+    }
+  ],
+  "supported_entity_kinds": [
+    "artifact",
+    "assignment",
+    "device",
+    "directed_link",
+    "incident",
+    "load_proof",
+    "qualification",
+    "request",
+    "route",
+    "runtime_kv_ownership",
+    "source_provenance",
+    "stage"
+  ]
+}

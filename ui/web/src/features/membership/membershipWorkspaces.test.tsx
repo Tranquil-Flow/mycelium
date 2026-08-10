@@ -35,6 +35,20 @@ describe('membership UI', () => {
     expect(screen.getByRole('button', { name: /^join swarm$/i })).toBeDisabled();
   });
 
+  it('renders the operator credential boundary while preserving read-only controls', () => {
+    const api = client();
+    render(
+      <OnboardingWizard
+        client={api}
+        readOnly
+        readOnlyReason="Issue one private bundle per invited device from the durable seed."
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/one private bundle per invited device/i);
+    expect(screen.getByRole('button', { name: /create single-use invite/i })).toBeDisabled();
+  });
+
   it('shows explicit states and requires revocation confirmation', async () => {
     const api = client();
     render(<AdminWorkspace client={api} />);

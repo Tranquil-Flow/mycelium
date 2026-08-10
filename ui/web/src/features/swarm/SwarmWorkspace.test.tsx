@@ -158,6 +158,23 @@ describe('SwarmWorkspace', () => {
     expect(client.leave).not.toHaveBeenCalled();
   });
 
+  it('explains an injected operator-only boundary without enabling mutations', () => {
+    const client = fakeClient();
+    render(
+      <SwarmWorkspace
+        client={client}
+        initialStatus={status}
+        now={() => NOW}
+        readOnly
+        readOnlyReason="Native enrollment uses one owner-only signed bundle per device."
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(/owner-only signed bundle per device/i);
+    expect(screen.getByRole('button', { name: /create native-node invite/i })).toBeDisabled();
+    expect(client.createInvite).not.toHaveBeenCalled();
+  });
+
   it('fails closed with an accessible error and does not invent inventory data', async () => {
     const client = fakeClient({ status: vi.fn(async () => { throw new Error('status_unavailable'); }) });
     render(<SwarmWorkspace client={client} now={() => NOW} />);

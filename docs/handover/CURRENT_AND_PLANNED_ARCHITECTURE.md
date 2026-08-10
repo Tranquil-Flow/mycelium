@@ -1,0 +1,275 @@
+# Mycelium current and planned architecture
+
+**Status:** Canonical review entry point, 2026-08-10. This document supersedes the
+operational status in `ASTRA_CURRENT.md`; the older file remains historical
+provenance. M14 is the current implemented tranche; M15 is next.
+
+## Read this first
+
+Review these sources in order:
+
+1. this document;
+2. `docs/superpowers/specs/2026-08-09-mycelium-live-mvp-design.md` for the bounded
+   M0-M11 product contract;
+3. `docs/live-mvp-operator-runbook.md` for current operation and limitations;
+4. `docs/superpowers/specs/2026-08-09-mycelium-astra-architecture-product-design.md`
+   for the target architecture;
+5. `docs/superpowers/plans/2026-08-09-mycelium-post-m11-astra-architecture.md` for
+   M12-M21 execution order;
+6. `docs/reviews/2026-08-10-external-review-status.md` for independent findings and
+   their disposition.
+
+Repository baseline: branch `integration/wave8-two-device-g4`, HEAD
+`533d107810eda951a60e373b5c94b95840249923`. The M7-M11 tranche is staged but
+uncommitted. The two implementation plans are intentionally untracked pending
+review. Never infer a source revision from an evidence timestamp alone.
+
+For Astra: review the staged working-tree diff in addition to the recorded HEAD.
+Private evidence paths in this document are host-local and may not resolve on another
+machine; verify the recorded digests or request an explicit evidence bundle rather than
+assuming absence. The complete physical/MLX gate must run on a compatible macOS host.
+The authoritative remaining release conditions are the numbered conditions in the
+external-review status document.
+
+## As-built request path
+
+```text
+React/Vite Inference workspace
+        |
+        | same-origin HTTP + SSE
+        v
+product gateway -> request gateway
+                    |  RouterPort / PromptCodec / QualificationSource seams
+                    v
+             LiveDeploymentRegistry
+                    |
+                    v
+               LiveRouterPort
+                    |
+                    v
+             PhysicalLiveRoute
+                    |
+        persistent node command sessions
+                    |
+       native Iroh activation transport
+                    |
+       assignment-bound stage runtimes
+```
+
+The request gateway owns admission, bounded SSE streaming, session cancellation,
+and terminal lifecycle. The registry atomically selects one already-qualified
+deployment and binds each admitted request to that immutable deployment. The live
+adapter drives one physical route thread per admitted request. The physical route
+owns node processes, endpoint challenges, stage execution, transport counters,
+stage-local KV cleanup, and fail-closed route state.
+
+Browser cancellation now sets a request-local cancellation signal. The physical
+route observes it between bounded node commands, sends `infer_cancel`, verifies
+every peer's cleanup state, and returns `CANCELLED`. Adapter and physical prompt/
+output token state is released after terminal lifecycle. A transport command that
+is already blocked cannot yet be interrupted before its command timeout; M18 adds
+traffic-aware liveness and scoped recovery.
+
+## Current deployments and topology
+
+The active registry contains two independent, qualified two-stage deployments:
+
+| Model | Quantization | Stage 0 | Stage 1 | Purpose |
+| --- | --- | --- | --- | --- |
+| `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX `[0,12)` | MLX `[12,24)` | baseline and failover |
+| `Qwen/Qwen2.5-1.5B-Instruct` | int8 weight-only | MLX `[0,14)` | MLX `[14,28)` | selected quality candidate |
+
+M7 separately proved a three-host 0.5B topology: M4 Pro/MLX `[0,8)`, Evi
+MacBook Pro/MLX `[8,16)`, and Surface/NumPy `[16,24)`. That proof is not the same
+deployment as either currently registered two-host route. Do not blend their host,
+performance, or qualification claims.
+
+The serving path is contiguous pipeline/model parallelism. Embeddings belong to the
+entry stage; final normalization and LM head belong to the final stage. Every stage
+pack contains only the stage's authorized tensors plus shared tokenizer/config
+assets. Normal decode uses request-, deployment-, generation-, and layer-bound
+stage-local KV; the ordinary activation path does not transfer KV.
+
+The current product does **not** claim tensor parallelism, data-parallel replicas,
+pipeline microbatch overlap, continuous batching, speculative decode, request-time
+layer reallocation, continuous topology re-optimization, or in-flight KV migration.
+
+## Current planning, trust, and network authority
+
+M13 made one signed, source-bound Gossip evidence bundle authoritative for placement.
+M14 now adds a complete activation-plane matrix across three physical hosts. Each of
+the six directed edges carried four authenticated Router frames over one persistent
+Iroh connection. Exact cycle search selected `node-0 -> node-2 -> node-1 -> node-0`
+at 42.104 ms instead of the canonical cycle at 384.554 ms under the documented warm
+RTT/2 plus jitter objective. The chosen cycle is opened into a forward pipeline plus
+explicit final-to-entry decode loopback before the contiguous allocation DP runs.
+The resulting mixed MLX/NumPy/MLX allocation is 1/1/22 layers and uses
+`complete_context_replay`; homogeneous MLX `stage_local_kv` remains separately
+qualified. Continuous topology re-optimization, replication, and scoped replanning
+remain later milestones.
+
+Peers are trusted operator-controlled devices. SSH and Tailscale currently provide
+staging and reachability; activation traffic uses native Iroh. Tailscale is not a
+protocol requirement, but it is presently an operational dependency for peers on
+different LANs.
+
+The live supervisor now loads the durable seed signer and database selected by the
+operator plan, verifies the authority generation and key digest, and signs live-clock
+assignment offers with that authority. Authority rotation to generation 2 and signed
+acknowledgement were physically exercised. Native nodes retain owner-only restart
+credentials and can sign a resume request after seed/node restart without reusing an
+invite; revoked, stale, changed-key, changed-endpoint, changed-capability, replay-
+conflicting, and cross-swarm resumes fail closed. Heterogeneous convergence and
+internet-native direct/relay operation remain M20 scope.
+
+The current tranche adds a safe operator bridge for more trusted devices without
+claiming M20 complete. One live durable `SeedCoordinator` can be pinned to its stored
+signer and issue up to 64 unique, short-lived, single-use, owner-only native invite
+files per batch. An executable eight-device test proves independent durable keys,
+nonces, HTTP joins, generations, and members. Enrollment is intentionally distinct
+from route activation: every new member remains not ready until capability, placement,
+artifact load, runtime, and a rebuilt physical topology are separately qualified.
+The external-tester contract and operator procedure are in
+`docs/contracts/external-tester-boundary.md` and
+`docs/swarm-multi-device-onboarding.md`.
+
+## As-built capability matrix against the Astra specification
+
+`qualified` means physical evidence exists for only the boundary stated. It does not
+promote the rest of a composite capability.
+
+| Astra capability | State | Exact current boundary |
+| --- | --- | --- |
+| 4.1 Evidence-driven planning | `qualified` | One signed, source-bound M13 bundle coherently supplies membership, status, runtime/decode mode, memory tiers, and required directed edges to the selected live candidate; stale or mismatched evidence fails closed. |
+| 4.2 Capability-aware contiguous allocation | `qualified` | Deterministic contiguous DP selected the M13 two-Mac 15/9 split and the M14 measured-order three-host 1/1/22 split. Compute-only and fast-memory-only physical A/B inputs produced distinct allocations with `planner_v2` provenance. |
+| 4.3 Directed cyclic topology | `qualified` | A complete six-edge activation-plane matrix across three physical hosts drove exact cycle selection; the winning cycle differs from canonical order and is opened into forward edges plus explicit decode loopback. |
+| 4.4 Phase/workload objectives | `implemented_unintegrated` | TTFT/TPOT are measured separately; workload scenario selection does not drive live placement. |
+| 4.5 Assignment-local artifacts | `partially_qualified` | M13 materializes and proves only each host's assigned shard plus shared static assets, with assignment-bound load proofs. Cache eviction, corruption recovery, concurrent staging, and full runtime memory/thermal admission are not qualified. |
+| 4.6 Progressive routing and immutable execution | `design_only` | A deployment graph is pinned, but request-scoped progressive prefill and `PathManifest` reservation are not serving. |
+| 4.7 Batching/scheduling/backpressure | `implemented_unintegrated` | Router/request bounds exist; no qualified product microbatch overlap, continuous batching, or QoS scheduling claim exists. |
+| 4.8 Data-parallel stage replication | `implemented_unintegrated` | Planner/flow concepts exist; no live replica group or multi-track physical throughput proof exists. |
+| 4.9 Speculative decode | `design_only` | No promoted draft/target runtime path. |
+| 4.10 KV ownership/fault tolerance | `partially_qualified` | Stage-local KV ownership and cleanup are physically observed on homogeneous MLX routes. Any NumPy or Pixel placement downgrades the route to complete-context replay; standby/replay recovery is not implemented. |
+| 4.11 Deterministic scoped replanning | `implemented_unintegrated` | Replan types/logic exist; current failure rebuilds or switches a complete deployment. |
+| 4.12 Signed heterogeneous membership | `partially_qualified` | Durable signed membership now binds two MLX Macs and one `linux_numpy_iroh` host as fresh activation-eligible members. Device Lab/mobile and different-network heterogeneous activation remain separate M20 work. |
+| 4.13 Traffic-aware liveness | `implemented_unintegrated` | General liveness code exists, but the live route can remain blocked until node command timeout after peer loss. |
+| 4.14 Authenticated direct/relay transport | `partially_qualified` | Native authenticated Iroh publishes path class, relay metadata when present, cold/warm RTT, goodput, jitter/loss, reconnects, generations, freshness, and connection reuse. M14 physically observed six direct edges; it makes no relay-path claim. |
+| 4.15 Privacy/authority/qualification | `qualified` | One privacy-reduced product snapshot/event spine drives browser-safe Nodes, Readiness, and Incidents projections; qualifier-gated admission, durable authority generation, and refresh persistence are physically exercised in the two-Mac M12 boundary. |
+
+## Product UI truth boundary
+
+The shell has eight stable workspaces: Inference, Device Lab, Network, Nodes, Plans,
+Readiness, Incidents, and Settings. Inference uses the product/request gateway.
+The product snapshot/event spine is the shared privacy-reduced source for Nodes,
+Readiness, and Incidents, while bounded same-origin live route/deployment endpoints
+remain action/status adapters for Inference. M13 placement and M14 topology
+projections give Plans, Network, Nodes, and Readiness the same planner inputs,
+measured directed links, candidate cycles, selected order, allocation, connection
+reuse, evidence digests, and promotion outcome after refresh.
+
+Prompt and response text may persist only in bounded browser tab-session history.
+Observatory/status projections must not contain prompts, decoded output, token arrays,
+credentials, activations, tensors, KV content, private paths, or private addresses.
+The sealed Pixel 8 proof is a real Device Lab browser worker running a labelled
+deterministic numerical fixture and remains `activation_eligible=false`. Separately,
+the source tree contains a Router-native Android stdlib stage runtime (currently named
+`pixel-stdlib` in code for compatibility). That runtime is a device-vendor-neutral
+experimental activation candidate, not a qualified mobile deployment; membership,
+transport, stage parity, thermal, battery, lifecycle, and network-loss evidence still
+gate promotion. The Pixel 8 is only the first physical conformance device.
+
+## Claim and evidence ledger
+
+Private physical evidence remains outside the repository. Paths below are operator
+references, not public release artifacts.
+
+| Milestone | Current assessment | Primary evidence | Remaining closure |
+| --- | --- | --- | --- |
+| M7 | Physical three-host route demonstrated | `/Users/evinova-self/mycelium-physical-run/m7-qwen-three-host-surface-topology.json`; M7 operator plan/build report | Seal prompt/counter/latency/browser proof into a manifest tied to the staged source |
+| M8 | Stage-local KV, timing, browser completion, and browser cancellation observed on both physical stages | `/Users/evinova-self/mycelium-physical-run/m8-qwen-two-host-mlx-topology.json`; owner-only `m8-qwen2.5-int8-two-host-mlx-v4/review-live-status-20260810.json` (`sha256:9bb18fe80465503dadd3752c3d072a827881dc3fcc8027284f88d7b6ad2b1429`) | Bind the fresh proof and staged source state into the coherent release manifest |
+| M9 | Stage-sharded 1.5B route and three model-answer checks demonstrated | `/Users/evinova-self/mycelium-physical-run/m9-qwen15-two-host-mlx-topology.json`; v4 `quality-gate.json` | Label the fourth case as gateway-policy refusal; seal baseline comparison/counters |
+| M10 | Registry persistence, atomic selection, history attribution, and failover paths implemented | `/Users/evinova-self/mycelium-physical-run/m10-deployment-registry.json`; registry tests | Seal one failover/restart transcript and source binding |
+| M11 | Pixel Device Lab proof, eight-section browser checks, and fresh stable-peer inference/cancellation demonstrated | `/Users/evinova-self/mycelium-physical-run/m11-device-lab/pixel8-physical-proof.json`; M8 review status; test/runbook records | Rebuild/reprove current 1.5B availability, decide persistent seed identity, and create the coherent release manifest |
+| M12 | Closed for the operator-approved two-Mac scope: durable authority generation 2, signed rotation acknowledgements, invite-free node resume, unified product projections, and post-restart browser inference/history | `/Users/evinova-self/mycelium-physical-run/m12-resume-proof-20260810`; `docs/handover/M12_PROGRESS_2026-08-10.md` | Different-network Mac and Android/Termux remain explicitly deferred conformance work; they are not inference-stage proofs |
+
+The deterministic credential-theft refusal is a gateway safety policy and performs no
+Router admission. The factual, arithmetic, and exact-format cases are distributed
+model outputs. Never describe all four as model-quality generations.
+
+## Known operational state and limitations
+
+- The live supervisor is a foreground loopback process, not an installed durable
+  service. Seed and node identity/membership survive restart, but route process restart
+  still requires the exact staged deployment bundles and startup challenge.
+- On 2026-08-10 both routes requalified, then the Evi MacBook Pro went offline during
+  the first new request. The product cancellation became terminal immediately, while
+  the in-flight physical command remained bounded by the node command timeout. This is
+  a concrete example of why M18 traffic-aware liveness and scoped recovery remain open.
+- Evi MacBook Pro has a user LaunchAgent at
+  `~/Library/LaunchAgents/com.mycelium.keep-awake.plist` which keeps `caffeinate -si`
+  active across logins. It protects against ordinary idle sleep but not lid-triggered sleep. Supported closed-lid service
+  requires AC power and Apple's clamshell peripherals; the runbook also records the
+  explicit, reversible administrator override for an operator-approved unattended run.
+- A fatal route error latches fail-closed. Recovery rebuilds and requalifies a complete
+  topology; there is no transparent in-flight failover or KV migration.
+- The larger model is materially more useful than the 0.5B baseline but remains slow
+  over the present two-host route.
+- After the final 2026-08-10 rebuild, both deployments passed their startup challenge.
+  The first 1.5B browser request then streamed six decoded tokens before a
+  `decode_completion_timeout`; that deployment failed closed and the operator selected
+  the still-qualified 0.5B route. Treat the larger deployment as unavailable until it
+  is rebuilt and a fresh request completes. This is additional physical evidence for
+  the M18 traffic-aware liveness/recovery scope, not a successful M9 availability claim.
+- Assignment-local remote staging now hashes a bounded stream into an owner-only
+  temporary archive and extracts from disk. The 1.79 GB physical restage held the
+  helper near 15-18 MB RSS instead of buffering the complete archive and forcing swap.
+- M11 evidence is distributed across private run directories and is not yet one sealed
+  release manifest. Task 0 of the post-M11 plan is therefore the immediate gate before
+  M12 implementation.
+
+## Planned architecture, M12-M21
+
+```text
+signed membership + capability + load + directed-link evidence
+                              |
+                         GossipService
+                              |
+                      PlannerInputAdapter
+                              |
+          measured cycle search + contiguous allocation DP
+                              |
+                          RoutePlanV2
+                              |
+       assignment-local stage packs and runtime load proofs
+                              |
+                      ExecutionGraphV1
+                              |
+     admission -> progressive prefill -> immutable PathManifest
+                              |
+  stage-local KV -> bounded scheduling -> persistent authenticated Iroh
+                              |
+      lifecycle/recovery evidence -> qualifier -> product evidence spine
+                              |
+                   all eight live UI workspaces
+```
+
+| Milestone | Architectural result |
+| --- | --- |
+| M12 | Durable native membership plus unified privacy-reduced evidence snapshot/event spine and rich live UI foundation |
+| M13 | Signed evidence drives capability-aware contiguous allocation DP and assignment-local deployment |
+| M14 | Measured directed links drive honest cycle/order selection and physical decode loopback |
+| M15 | Separate prefill/decode and workload scenarios drive robust/Pareto plan comparison |
+| M16 | Resource admission, progressive prefill, immutable paths, bounded QoS scheduling and backpressure |
+| M17 | Data-parallel stage replicas and complete legal request tracks improve measured concurrency |
+| M18 | Traffic-aware liveness, scoped replanning, fenced KV standby or truthful replay recovery |
+| M19 | Optional speculative decode promoted only with target parity and measured end-to-end gain |
+| M20 | Heterogeneous invited participation and authenticated direct/relay operation without Tailscale dependency |
+| M21 | Complete planned UI, accessibility/performance/privacy gates, cold bootstrap, and sealed release closure |
+
+## Reviewer rules
+
+Treat executing code and fresh tests as stronger than prose. Treat private evidence as
+a claim only after verifying its digest, source binding, host/process identities, and
+qualification authority. Do not equate a checked plan box, fixture, simulated route,
+staged artifact, or startup challenge with a sealed physical product claim. Report
+current implementation defects separately from planned M12-M21 capabilities.

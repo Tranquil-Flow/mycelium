@@ -38,6 +38,9 @@ const bootstrap: ProductBootstrap = {
     swarm_invites: '/api/v1/swarm/invites',
     swarm_join: '/api/v1/swarm/join',
     swarm_leave: '/api/v1/swarm/leave',
+    product_snapshot: '/api/v1/product/snapshot',
+    product_events: '/api/v1/product/events',
+    product_export: '/api/v1/product/export',
   },
   limits: { max_prompt_utf8_bytes: 131_072, max_new_tokens: 4_096 },
   qualification_authority: 'mycelium_qualification.qualifier:RouteQualificationV1',
@@ -52,6 +55,22 @@ function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
 }
 
 describe('HttpSwarmClient', () => {
+  it('binds the default browser fetch to its global receiver', async () => {
+    const browserGlobal = globalThis;
+    const browserFetch = vi.fn(function (this: unknown) {
+      if (this !== browserGlobal) throw new TypeError('Illegal invocation');
+      return Promise.resolve(jsonResponse(status));
+    });
+    vi.stubGlobal('fetch', browserFetch);
+    try {
+      const client = new HttpSwarmClient();
+      await expect(client.status()).resolves.toEqual(status);
+      expect(browserFetch.mock.contexts[0]).toBe(browserGlobal);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('loads and validates same-origin status without an upstream bearer credential', async () => {
     const fetcher = vi.fn<SwarmFetcher>(async () => jsonResponse(status));
     const client = new HttpSwarmClient({ fetcher, now: () => 1_900_000_000_000 });

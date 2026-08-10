@@ -1,0 +1,18 @@
+{
+  "expires_at": 1300.0,
+  "generation": 1,
+  "goodput_bytes_per_second": 12000000.0,
+  "incarnation": "incarnation-fixture",
+  "issued_at": 1000.0,
+  "message_id": "link_probe_report-fixture",
+  "probe_sequence": 3,
+  "protocol": "mycelium.membership.link_probe_report.v1",
+  "reachable": true,
+  "recipient_node_id": "seed-node",
+  "rtt_ms": 42.5,
+  "sender_endpoint_id": "endpoint-node-a",
+  "sender_node_id": "node-a",
+  "swarm_id": "swarm-fixture",
+  "target_endpoint_id": "endpoint-seed",
+  "target_node_id": "seed-node"
+}

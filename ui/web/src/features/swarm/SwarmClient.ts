@@ -64,7 +64,7 @@ export class HttpSwarmClient implements SwarmClient {
   #bootstrapPromise: Promise<ProductBootstrap> | null = null;
 
   constructor(options: HttpSwarmClientOptions = {}) {
-    this.#fetcher = options.fetcher ?? fetch;
+    this.#fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
     this.#now = options.now ?? Date.now;
     this.#maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   }

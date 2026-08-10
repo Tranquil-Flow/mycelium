@@ -1,0 +1,42 @@
+{
+  "message": {
+    "endpoint_addr": {
+      "addrs": [
+        "iroh-relay://relay.example/node-a"
+      ],
+      "id": "endpoint-node-a"
+    },
+    "expires_at": 1300.0,
+    "generation": 0,
+    "incarnation": "incarnation-fixture",
+    "invite_nonce": "invite-fixture",
+    "issued_at": 1000.0,
+    "message_id": "join-request-fixture",
+    "peer_class": "mac_mlx_iroh",
+    "protocol": "mycelium.membership.join_request.v1",
+    "recipient_node_id": "seed-node",
+    "runtime_capability": {
+      "activation_protocol": "mycelium.router_wire.v1",
+      "runtime_backend": "mlx",
+      "transport": "iroh"
+    },
+    "sender_endpoint_id": "endpoint-node-a",
+    "sender_node_id": "node-a",
+    "software_version": "0.1.0",
+    "swarm_id": "swarm-fixture"
+  },
+  "protocol": "mycelium.membership.signed_message.v1",
+  "signature": {
+    "algorithm": "ed25519",
+    "signature": "GaHLE6ftlJTbACOM0hMmgy0mFrQu8ohDc1Qw5Q14MEa0PEqrJ/5lBDDoT5INn/nTjdlIicaEIspnOvDwLRqwBw==",
+    "signed_statement_digest": "sha256:4b74508f242e321f58184c18aacd47241351c38dfeb1b0900e4f0a4ac03730c4",
+    "signer_endpoint_id": "endpoint-node-a",
+    "verification_key_digest": "sha256:34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e"
+  },
+  "verification_key": {
+    "algorithm": "ed25519",
+    "encoding": "base64",
+    "verification_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+    "verification_key_digest": "sha256:34750f98bd59fcfc946da45aaabe933be154a4b5094e1c4abf42866505f3c97e"
+  }
+}

@@ -13,6 +13,7 @@ export interface SwarmWorkspaceProps {
   readonly now?: () => number;
   readonly concealNetworkIdentity?: boolean;
   readonly readOnly?: boolean;
+  readonly readOnlyReason?: string;
 }
 
 function errorMessage(error: unknown): string {
@@ -50,6 +51,7 @@ export function SwarmWorkspace({
   now = Date.now,
   concealNetworkIdentity = false,
   readOnly = false,
+  readOnlyReason = 'Enrollment and membership changes are unavailable in offline evidence mode.',
 }: SwarmWorkspaceProps) {
   const defaultClient = useMemo(() => new HttpSwarmClient({ now }), [now]);
   const swarmClient = client ?? defaultClient;
@@ -236,7 +238,7 @@ export function SwarmWorkspace({
           <p className={styles.eyebrow}>Coordinator enrollment</p>
           <h2 id="enroll-title">Invite or join</h2>
           <p>Invites are bounded, single-use enrollment material. They are never stored by this page.</p>
-          {readOnly ? <p role="status">Enrollment and membership changes are unavailable in offline evidence mode.</p> : null}
+          {readOnly ? <p role="status">{readOnlyReason}</p> : null}
           <button type="button" onClick={() => void createInvite('native_inference_node')} disabled={busy || readOnly}>
             Create native-node invite
           </button>
