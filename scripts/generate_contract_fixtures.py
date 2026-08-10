@@ -66,7 +66,7 @@ from mycelium_membership import (
     sign_membership_message,
     validate_membership_message,
 )
-from mycelium_performance_budget import validate_performance_budget, validate_performance_budget_v2
+from mycelium_performance_budget import validate_performance_budget, validate_performance_budget_v2, validate_performance_budget_v3
 from mycelium_product_spine import (
     ENTITY_KINDS,
     validate_product_event,
@@ -80,8 +80,11 @@ from mycelium_qualification.contracts import (
 from mycelium_request_gateway.contracts import (
     InferenceSubmission,
     QualificationBinding,
+    REQUEST_GATEWAY_PROTOCOL_V2,
+    REQUEST_EVENT_PROTOCOL_V2,
     StreamEvent,
 )
+from mycelium_m16_runtime import validate_m16_runtime_status
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
     complete_directed_observation_matrix,
@@ -992,6 +995,22 @@ def performance_budget_v2() -> dict[str, Any]:
     )
 
 
+def performance_budget_v3() -> dict[str, Any]:
+    dimensions = [
+        {"dimension": name, "state": "met", "bound": 1000.0, "observed": 1.0, "unit": "milliseconds", "evidence_digest": "sha256:" + "a" * 64, "reason": "observed_within_bound"}
+        for name in (
+            "admission_latency_p95_ms", "queue_wait_p95_ms", "maximum_queue_depth",
+            "completed_requests", "interactive_latency_regression_ratio",
+            "batch_starvation_interval_ms", "cancellation_release_latency_ms",
+            "runtime_batch_size",
+        )
+    ]
+    dimensions[-1].update({"state": "approved_exclusion", "bound": 1.0, "observed": 1.0, "unit": "requests", "reason": "sequential_dispatch_observed"})
+    return validate_performance_budget_v3(
+        {"protocol": "mycelium.performance_budget.v3", "budget_id": "m16-physical-v1", "profile_id": "mixed_interactive_batch_v1", "evidence_scope": "concurrent_physical_observed", "observed_request_count": 3, "dimensions": dimensions, "overall_state": "met_with_approved_exclusions"}
+    )
+
+
 def assignment_cache_status() -> dict[str, Any]:
     return validate_cache_status(
         {
@@ -1495,6 +1514,37 @@ def request_gateway_submission() -> dict[str, Any]:
     ).to_dict()
 
 
+def request_gateway_submission_v2() -> dict[str, Any]:
+    return InferenceSubmission(
+        prompt="synthetic compatibility prompt",
+        max_new_tokens=16,
+        qualification=request_gateway_binding(),
+        protocol=REQUEST_GATEWAY_PROTOCOL_V2,
+        workload_profile_id="interactive_chat_v1",
+        qos_class="interactive",
+    ).to_dict()
+
+
+def m16_runtime_status() -> dict[str, Any]:
+    return validate_m16_runtime_status(
+        {
+            "protocol": "mycelium.m16_runtime_status.v1",
+            "generated_at_monotonic_s": 100.0,
+            "deployment_id": "deployment-fixture",
+            "deployment_epoch": 16,
+            "topology_version": 7,
+            "graph_digest": "sha256:" + "6" * 64,
+            "queue": {"depth": 0, "maximum_items": 1024, "queued_bytes": 0, "maximum_bytes": 268435456, "interactive_depth": 0, "batch_depth": 0, "active_request_id": None},
+            "placements": [{"placement_id": "placement-fixture", "node_id": "node-fixture", "memory_capacity_bytes": 1000000, "reserved_memory_bytes": 0, "free_memory_bytes": 1000000, "kv_capacity_bytes": 500000, "reserved_kv_bytes": 0, "free_kv_bytes": 500000, "workspace_capacity_bytes": 250000, "reserved_workspace_bytes": 0, "free_workspace_bytes": 250000, "active_reservations": 0, "maximum_reservations": 64}],
+            "requests": [],
+            "incidents": [],
+            "batch_state": {"mode": "sequential_dispatch", "maximum_runtime_batch_size": 20, "observed_batches": [], "continuous_batching": False, "pipeline_overlap": False},
+            "claim_boundary": "bounded admission and sequential physical dispatch",
+            "performance_budgets": [],
+        }
+    )
+
+
 def request_event() -> dict[str, Any]:
     return StreamEvent(
         request_id="request-fixture",
@@ -1502,6 +1552,16 @@ def request_event() -> dict[str, Any]:
         kind="token",
         token_index=0,
         text="fixture-token",
+    ).to_dict()
+
+
+def request_event_v2() -> dict[str, Any]:
+    return StreamEvent(
+        request_id="request-fixture",
+        sequence=2,
+        kind="lifecycle",
+        phase="prefill",
+        protocol=REQUEST_EVENT_PROTOCOL_V2,
     ).to_dict()
 
 
@@ -1629,7 +1689,9 @@ def documents() -> dict[str, dict[str, Any]]:
             synthetic_route_qualification_fixture()
         ),
         "request-gateway-v1.json": request_gateway_submission(),
+        "request-gateway-v2.json": request_gateway_submission_v2(),
         "request-event-v1.json": request_event(),
+        "request-event-v2.json": request_event_v2(),
         "membership-signed-message-v1.json": membership_envelope(),
         "membership-join-request-v1.json": membership_message(
             JOIN_REQUEST_PROTOCOL
@@ -1674,6 +1736,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "live-route-incident-v1.json": live_route_incident(),
         "performance-budget-v1.json": performance_budget(),
         "performance-budget-v2.json": performance_budget_v2(),
+        "performance-budget-v3.json": performance_budget_v3(),
         "assignment-artifact-cache-v1.json": assignment_cache_status(),
         "assignment-materialization-v1.json": assignment_materialization(),
         "candidate-promotion-report-v1.json": candidate_promotion_report(),
@@ -1681,6 +1744,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "transport-path-observation-v1.json": transport_path_observation(),
         "m14-topology-projection-v1.json": m14_topology_projection(),
         "m15-plan-comparison-v1.json": m15_plan_comparison(),
+        "m16-runtime-status-v1.json": m16_runtime_status(),
         "product-snapshot-v1.json": product_snapshot(),
         "product-event-v1.json": product_event(),
         "execution-graph-v1.json": graph,

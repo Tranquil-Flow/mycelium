@@ -159,8 +159,8 @@ promote the rest of a composite capability.
 | 4.3 Directed cyclic topology | `qualified` | A complete six-edge activation-plane matrix across three physical hosts drove exact cycle selection; the winning cycle differs from canonical order and is opened into forward edges plus explicit decode loopback. |
 | 4.4 Phase/workload objectives | `qualified` | M15 compares three phase objectives over two content-free workload profiles on one frozen evidence snapshot, exposes robust/Pareto selection, and binds sequential physical observations to exact request-shape predictions and frozen budgets. Concurrent/batched execution remains M16. |
 | 4.5 Assignment-local artifacts | `partially_qualified` | M13 materializes and proves only each host's assigned shard plus shared static assets, with assignment-bound load proofs. Cache eviction, corruption recovery, concurrent staging, and full runtime memory/thermal admission are not qualified. |
-| 4.6 Progressive routing and immutable execution | `design_only` | A deployment graph is pinned, but request-scoped progressive prefill and `PathManifest` reservation are not serving. |
-| 4.7 Batching/scheduling/backpressure | `implemented_unintegrated` | Router/request bounds exist; no qualified product microbatch overlap, continuous batching, or QoS scheduling claim exists. |
+| 4.6 Progressive routing and immutable execution | `qualified` | M16 reserves every placement before dispatch, projects the progressive candidate, commits an immutable graph/topology-bound `PathManifest`, and releases all request resources on every terminal path. |
+| 4.7 Batching/scheduling/backpressure | `partially_qualified` | M16 physically qualifies bounded concurrent admission, interactive/batch QoS with aging, sequential dispatch, queue bounds, cancellation, and cleanup. Physical runtime batching, continuous batching, and pipeline overlap remain explicitly unclaimed. |
 | 4.8 Data-parallel stage replication | `implemented_unintegrated` | Planner/flow concepts exist; no live replica group or multi-track physical throughput proof exists. |
 | 4.9 Speculative decode | `design_only` | No promoted draft/target runtime path. |
 | 4.10 KV ownership/fault tolerance | `partially_qualified` | Stage-local KV ownership and cleanup are physically observed on homogeneous MLX routes. Any NumPy or Pixel placement downgrades the route to complete-context replay; standby/replay recovery is not implemented. |
@@ -212,6 +212,7 @@ references, not public release artifacts.
 | M13 | Signed evidence drove the physically deployed contiguous 1/1/22 allocation | `docs/handover/M13_PROGRESS_2026-08-10.md`; frozen planner snapshot in the M14 run bundle | Runtime resource admission remains M16 |
 | M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
+| M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no
 Router admission. The factual, arithmetic, and exact-format cases are distributed
@@ -281,11 +282,12 @@ signed membership + capability + load + directed-link evidence
 | M14 | Measured directed links drive honest cycle/order selection and physical decode loopback |
 | M15 | Separate prefill/decode and workload scenarios drive robust/Pareto plan comparison |
 | M16 | Resource admission, progressive prefill, immutable paths, bounded QoS scheduling and backpressure |
-| M17 | Data-parallel stage replicas and complete legal request tracks improve measured concurrency |
-| M18 | Traffic-aware liveness, scoped replanning, fenced KV standby or truthful replay recovery |
-| M19 | Optional speculative decode promoted only with target parity and measured end-to-end gain |
-| M20 | Heterogeneous invited participation and authenticated direct/relay operation without Tailscale dependency |
-| M21 | Complete planned UI, accessibility/performance/privacy gates, cold bootstrap, and sealed release closure |
+| M17 | Qualified multi-model catalog, swarm feasibility rejection, assignment-local acquisition, and user model selection |
+| M18 | Data-parallel stage replicas and complete legal request tracks improve measured concurrency |
+| M19 | Traffic-aware liveness, scoped replanning, fenced KV standby or truthful replay recovery |
+| M20 | Optional speculative decode promoted only with target parity and measured end-to-end gain |
+| M21 | Heterogeneous invited participation and authenticated direct/relay operation without Tailscale dependency |
+| M22 | Complete planned UI, accessibility/performance/privacy gates, cold bootstrap, and sealed release closure |
 
 ## Reviewer rules
 

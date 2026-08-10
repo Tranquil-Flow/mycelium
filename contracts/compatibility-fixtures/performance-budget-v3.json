@@ -1,0 +1,82 @@
+{
+  "budget_id": "m16-physical-v1",
+  "dimensions": [
+    {
+      "bound": 1000.0,
+      "dimension": "admission_latency_p95_ms",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1000.0,
+      "dimension": "queue_wait_p95_ms",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1000.0,
+      "dimension": "maximum_queue_depth",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1000.0,
+      "dimension": "completed_requests",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1000.0,
+      "dimension": "interactive_latency_regression_ratio",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1000.0,
+      "dimension": "batch_starvation_interval_ms",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1000.0,
+      "dimension": "cancellation_release_latency_ms",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "observed_within_bound",
+      "state": "met",
+      "unit": "milliseconds"
+    },
+    {
+      "bound": 1.0,
+      "dimension": "runtime_batch_size",
+      "evidence_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "observed": 1.0,
+      "reason": "sequential_dispatch_observed",
+      "state": "approved_exclusion",
+      "unit": "requests"
+    }
+  ],
+  "evidence_scope": "concurrent_physical_observed",
+  "observed_request_count": 3,
+  "overall_state": "met_with_approved_exclusions",
+  "profile_id": "mixed_interactive_batch_v1",
+  "protocol": "mycelium.performance_budget.v3"
+}

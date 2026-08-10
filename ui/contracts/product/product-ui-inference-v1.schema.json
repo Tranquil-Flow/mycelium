@@ -146,7 +146,8 @@
       "oneOf": [
         { "$ref": "#/$defs/status_event" },
         { "$ref": "#/$defs/token_event" },
-        { "$ref": "#/$defs/failed_event" }
+        { "$ref": "#/$defs/failed_event" },
+        { "$ref": "#/$defs/lifecycle_event" }
       ]
     },
     "status_event": {
@@ -154,7 +155,7 @@
       "additionalProperties": false,
       "required": ["protocol", "request_id", "sequence", "type"],
       "properties": {
-        "protocol": { "const": "mycelium.request_event.v1" },
+        "protocol": { "enum": ["mycelium.request_event.v1", "mycelium.request_event.v2"] },
         "request_id": { "$ref": "#/$defs/request_id" },
         "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
         "type": { "enum": ["accepted", "completed", "cancelled"] }
@@ -165,7 +166,7 @@
       "additionalProperties": false,
       "required": ["protocol", "request_id", "sequence", "type", "token_index", "text"],
       "properties": {
-        "protocol": { "const": "mycelium.request_event.v1" },
+        "protocol": { "enum": ["mycelium.request_event.v1", "mycelium.request_event.v2"] },
         "request_id": { "$ref": "#/$defs/request_id" },
         "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
         "type": { "const": "token" },
@@ -178,11 +179,23 @@
       "additionalProperties": false,
       "required": ["protocol", "request_id", "sequence", "type", "code"],
       "properties": {
-        "protocol": { "const": "mycelium.request_event.v1" },
+        "protocol": { "enum": ["mycelium.request_event.v1", "mycelium.request_event.v2"] },
         "request_id": { "$ref": "#/$defs/request_id" },
         "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
         "type": { "const": "failed" },
         "code": { "$ref": "#/$defs/safe_code" }
+      }
+    },
+    "lifecycle_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "sequence", "type", "phase"],
+      "properties": {
+        "protocol": { "const": "mycelium.request_event.v2" },
+        "request_id": { "$ref": "#/$defs/request_id" },
+        "sequence": { "$ref": "#/$defs/safe_nonnegative_integer" },
+        "type": { "const": "lifecycle" },
+        "phase": { "enum": ["admission", "queue", "prefill", "first_token", "decode", "completion"] }
       }
     }
   }

@@ -125,9 +125,27 @@ CONTRACT_SPECS = (
         ("mycelium_request_gateway/contracts.py",),
     ),
     ContractSpec(
+        "request-gateway-v2.json",
+        "mycelium.request_gateway.v2",
+        (
+            "mycelium_request_gateway/contracts.py",
+            "ui/web/src/app/contracts.ts",
+        ),
+    ),
+    ContractSpec(
         "request-event-v1.json",
         "mycelium.request_event.v1",
         ("mycelium_request_gateway/contracts.py",),
+    ),
+    ContractSpec(
+        "request-event-v2.json",
+        "mycelium.request_event.v2",
+        (
+            "mycelium_request_gateway/contracts.py",
+            "mycelium_request_gateway/service.py",
+            "mycelium_ui_gateway/validation.py",
+            "ui/web/src/app/contracts.ts",
+        ),
     ),
     ContractSpec(
         "membership-signed-message-v1.json",
@@ -272,6 +290,11 @@ CONTRACT_SPECS = (
         ("mycelium_performance_budget.py", "mycelium_layer_planner/workload_intelligence.py"),
     ),
     ContractSpec(
+        "performance-budget-v3.json",
+        "mycelium.performance_budget.v3",
+        ("mycelium_performance_budget.py", "mycelium_m16_runtime.py"),
+    ),
+    ContractSpec(
         "assignment-artifact-cache-v1.json",
         "mycelium.assignment_artifact_cache.v1",
         ("mycelium_assignment_cache.py",),
@@ -320,6 +343,16 @@ CONTRACT_SPECS = (
             "mycelium_layer_planner/workload_intelligence.py",
             "ui/web/src/features/liveRoute/m15Comparison.ts",
             "ui/web/src/features/liveRoute/M15WorkloadPanel.tsx",
+        ),
+    ),
+    ContractSpec(
+        "m16-runtime-status-v1.json",
+        "mycelium.m16_runtime_status.v1",
+        (
+            "mycelium_m16_runtime.py",
+            "mycelium_live/router_port.py",
+            "ui/web/src/features/liveRoute/m16Runtime.ts",
+            "ui/web/src/features/liveRoute/M16RuntimePanel.tsx",
         ),
     ),
     ContractSpec(

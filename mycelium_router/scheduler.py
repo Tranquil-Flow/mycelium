@@ -56,7 +56,12 @@ class HopScheduler:
          else self.config.interactive_base_priority
       )
       age = max(0.0, now - item.enqueued_at)
-      aging = age * self.config.aging_priority_per_second
+      aging_multiplier = (
+         self.config.batch_aging_multiplier
+         if item.qos_class == "batch"
+         else 1.0
+      )
+      aging = age * self.config.aging_priority_per_second * aging_multiplier
       deficit = max(0.0, min(1.0, item.deficit_ratio))
       deficit_boost = deficit * self.config.maximum_deficit_boost
       return base + aging + deficit_boost

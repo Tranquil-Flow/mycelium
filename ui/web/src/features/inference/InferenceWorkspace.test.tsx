@@ -18,6 +18,8 @@ import type {
 } from './deploymentClient';
 import m15Fixture from '../../../../../contracts/compatibility-fixtures/m15-plan-comparison-v1.json';
 import { decodeM15PlanComparison } from '../liveRoute/m15Comparison';
+import { decodeM16RuntimeStatus } from '../liveRoute/m16Runtime';
+import { m16RuntimeFixture } from '../liveRoute/m16Runtime.test';
 
 const NOW = 1_800_000_000_000;
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -235,7 +237,13 @@ describe('InferenceWorkspace', () => {
 
   it('shows honest route activity while waiting for the first token', async () => {
     const client = new WaitingWorkspaceClient(qualification(true));
-    const rendered = render(<InferenceWorkspace client={client} now={() => NOW + 1} />);
+    const rendered = render(
+      <InferenceWorkspace
+        client={client}
+        runtimeClient={{ load: async () => decodeM16RuntimeStatus(m16RuntimeFixture()) }}
+        now={() => NOW + 1}
+      />,
+    );
     fireEvent.change(screen.getByLabelText('Prompt'), {
       target: { value: 'wait for a real first token' },
     });
@@ -250,7 +258,9 @@ describe('InferenceWorkspace', () => {
     });
     expect(activity).toHaveTextContent('Waiting for first token');
     expect(activity).toHaveTextContent('Distributed prefill and first-token decode');
-    expect(activity).toHaveTextContent('per-stage timing is not currently exposed');
+    expect(activity).toHaveTextContent('Server phase queued');
+    expect(activity).toHaveTextContent('interactive QoS');
+    expect(activity).toHaveTextContent('1 path reservations');
     rendered.unmount();
   });
 
@@ -276,6 +286,11 @@ describe('InferenceWorkspace', () => {
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Completed'));
     expect(screen.getByRole('cell', { name: 'sustained_batch_v1 · batch · balanced' })).toBeVisible();
+    expect(client.submitted[0]).toMatchObject({
+      protocol: 'mycelium.request_gateway.v2',
+      workload_profile_id: 'sustained_batch_v1',
+      qos_class: 'batch',
+    });
     expect(window.sessionStorage.getItem('mycelium.inference.tab-session.v1')).toContain('sustained_batch_v1');
   });
 

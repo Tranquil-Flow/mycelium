@@ -13,6 +13,8 @@ import styles from './ProductNodesWorkspace.module.css';
 import { HttpLiveRouteStatusClient, type M13PlacementProjection, type M14TopologyProjection } from '../features/liveRoute/routeStatus';
 import { M13PlacementPanel } from '../features/liveRoute/M13PlacementPanel';
 import { M14TopologyPanel } from '../features/liveRoute/M14TopologyPanel';
+import { M16RuntimePanel } from '../features/liveRoute/M16RuntimePanel';
+import { HttpM16RuntimeClient, type M16RuntimeStatus } from '../features/liveRoute/m16Runtime';
 
 const fixtureStatus = makeProductSwarmFixture();
 
@@ -32,6 +34,7 @@ export function ProductNodesWorkspace({ sourceMode, snapshot, provisioning }: Pr
   const membership = useMemo(() => new SwarmMembershipAdapter(swarm), [swarm]);
   const [placement, setPlacement] = useState<M13PlacementProjection | null>(null);
   const [topology, setTopology] = useState<M14TopologyProjection | null>(null);
+  const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
   useEffect(() => {
     if (fixture) return;
     let active = true;
@@ -45,6 +48,11 @@ export function ProductNodesWorkspace({ sourceMode, snapshot, provisioning }: Pr
         setPlacement(null);
         setTopology(null);
       }
+    });
+    void new HttpM16RuntimeClient().load().then((status) => {
+      if (active) setRuntime(status);
+    }).catch(() => {
+      if (active) setRuntime(null);
     });
     return () => { active = false; };
   }, [fixture]);
@@ -78,6 +86,7 @@ export function ProductNodesWorkspace({ sourceMode, snapshot, provisioning }: Pr
       ) : null}
       {topology === null ? null : <M14TopologyPanel topology={topology} view="nodes" />}
       {placement === null ? null : <M13PlacementPanel placement={placement} view="nodes" />}
+      {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="nodes" />}
       {snapshot !== undefined && provisioning !== undefined ? <NodesWorkspace snapshot={snapshot} provisioning={provisioning} /> : null}
       <SwarmWorkspace
         key={`swarm-${sourceMode}`}

@@ -8,6 +8,7 @@ from mycelium_performance_budget import (
     PerformanceBudgetError,
     validate_performance_budget,
     validate_performance_budget_v2,
+    validate_performance_budget_v3,
 )
 
 
@@ -116,3 +117,26 @@ def test_performance_budget_v2_rejects_unknown_and_nonfinite_values() -> None:
     nonfinite["maximum_relative_model_error"]["ttft"] = float("inf")
     with pytest.raises(PerformanceBudgetError):
         validate_performance_budget_v2(nonfinite)
+
+
+def _budget_v3() -> dict:
+    names = [
+        "admission_latency_p95_ms", "queue_wait_p95_ms", "maximum_queue_depth",
+        "completed_requests", "interactive_latency_regression_ratio",
+        "batch_starvation_interval_ms", "cancellation_release_latency_ms",
+        "runtime_batch_size",
+    ]
+    dimensions = [
+        {"dimension": name, "state": "met", "bound": 1000.0, "observed": 1.0, "unit": "milliseconds", "evidence_digest": "sha256:" + "a" * 64, "reason": "observed_within_bound"}
+        for name in names
+    ]
+    dimensions[-1].update({"state": "approved_exclusion", "bound": 1.0, "observed": 1.0, "unit": "requests", "reason": "sequential_dispatch_observed"})
+    return {"protocol": "mycelium.performance_budget.v3", "budget_id": "m16-physical-v1", "profile_id": "mixed_interactive_batch_v1", "evidence_scope": "concurrent_physical_observed", "observed_request_count": 3, "dimensions": dimensions, "overall_state": "met_with_approved_exclusions"}
+
+
+def test_performance_budget_v3_closes_m16_dimensions_with_visible_batch_exclusion() -> None:
+    budget = _budget_v3()
+    assert validate_performance_budget_v3(copy.deepcopy(budget)) == budget
+    budget["dimensions"][-1]["observed"] = 2
+    with pytest.raises(PerformanceBudgetError):
+        validate_performance_budget_v3(budget)

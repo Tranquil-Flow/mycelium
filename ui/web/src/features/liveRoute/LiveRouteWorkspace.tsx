@@ -14,6 +14,8 @@ import {
   type M15ComparisonClient,
   type M15PlanComparison,
 } from './m15Comparison';
+import { M16RuntimePanel } from './M16RuntimePanel';
+import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from './m16Runtime';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -21,20 +23,25 @@ export interface LiveRouteWorkspaceProps {
   readonly freshness: 'current' | 'stale';
   readonly client?: LiveRouteStatusClient;
   readonly workloadClient?: M15ComparisonClient;
+  readonly runtimeClient?: M16RuntimeClient;
 }
 
 function metric(value: number | null, suffix = ' ms'): string {
   return value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
 }
 
-export function LiveRouteWorkspace({ view, qualification, freshness, client, workloadClient }: LiveRouteWorkspaceProps) {
+export function LiveRouteWorkspace({ view, qualification, freshness, client, workloadClient, runtimeClient }: LiveRouteWorkspaceProps) {
   const defaultClient = useMemo(() => new HttpLiveRouteStatusClient(), []);
   const defaultWorkloadClient = useMemo(() => new HttpM15ComparisonClient(), []);
+  const defaultRuntimeClient = useMemo(() => new HttpM16RuntimeClient(), []);
   const source = client ?? defaultClient;
   const workloadSource = workloadClient ?? defaultWorkloadClient;
+  const runtimeSource = runtimeClient ?? defaultRuntimeClient;
   const [status, setStatus] = useState<LiveRouteStatus | null>(null);
   const [workloadComparison, setWorkloadComparison] = useState<M15PlanComparison | null>(null);
   const [workloadUnavailable, setWorkloadUnavailable] = useState(false);
+  const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -62,6 +69,34 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       setWorkloadUnavailable(true);
     });
   }, [view, workloadSource]);
+
+  useEffect(() => {
+    let mounted = true;
+    let controller: AbortController | null = null;
+    const load = () => {
+      if (controller !== null) return;
+      const requestController = new AbortController();
+      controller = requestController;
+      void runtimeSource.load(requestController.signal).then((value) => {
+        if (!mounted) return;
+        setRuntime(value);
+        setRuntimeError(null);
+      }).catch((reason) => {
+        if (!mounted || requestController.signal.aborted) return;
+        setRuntime(null);
+        setRuntimeError(reason instanceof Error ? reason.message : 'm16_runtime_unavailable');
+      }).finally(() => {
+        if (controller === requestController) controller = null;
+      });
+    };
+    load();
+    const timer = window.setInterval(load, 1_000);
+    return () => {
+      mounted = false;
+      controller?.abort();
+      window.clearInterval(timer);
+    };
+  }, [runtimeSource]);
 
   if (status === null) {
     return (
@@ -94,9 +129,13 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
         <div><dt>Evidence</dt><dd>{freshness}</dd></div>
         <div><dt>Route identity</dt><dd>{status.route_identity_digest ?? 'Unavailable'}</dd></div>
       </dl>
+      {runtime === null && runtimeError !== null ? (
+        <p role="alert">M16 runtime evidence unavailable: {runtimeError}</p>
+      ) : null}
 
       {view === 'network' ? (
         <>
+          {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="network" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="network" />}
           {status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="network" />}
           <section className={styles.panel} aria-labelledby="live-pipeline-title">
@@ -116,7 +155,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'plans' ? (
-        <>{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
+        <>{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
           <p>This is observed physical execution, not a modeled alternative.</p>
           <dl className={styles.measurements}>
@@ -132,6 +171,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'readiness' ? (
         <>
+          {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="readiness" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="readiness" />}
           {status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="readiness" />}
           <section className={styles.panel} aria-labelledby="live-readiness-title">
@@ -150,7 +190,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'incidents' ? (
-        <section className={styles.panel} aria-labelledby="live-incidents-title">
+        <>{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
           <h2 id="live-incidents-title">Physical route incident log</h2>
           {status.counters.fatal === null && status.incidents.length === 0 ? (
             <p>No active physical route incident. All projected peers remain on the qualified topology.</p>
@@ -175,7 +215,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
               ))}
             </ol>
           ) : null}
-        </section>
+        </section></>
       ) : null}
     </section>
   );

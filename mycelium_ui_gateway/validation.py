@@ -12,7 +12,9 @@ from mycelium_request_gateway.contracts import is_public_model_id
 
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 REQUEST_PROTOCOL = "mycelium.request_gateway.v1"
+REQUEST_PROTOCOL_V2 = "mycelium.request_gateway.v2"
 REQUEST_EVENT_PROTOCOL = "mycelium.request_event.v1"
+REQUEST_EVENT_PROTOCOL_V2 = "mycelium.request_event.v2"
 OBSERVATORY_PROTOCOL = "mycelium.observatory_stream.v1"
 OBSERVATORY_PROJECTION_PROTOCOL = "mycelium.observatory.request_projection.v1"
 OBSERVATORY_STATUS_PROTOCOL = "mycelium.observatory.event_adapter_status.v1"
@@ -216,12 +218,16 @@ def valid_binding(document: object) -> bool:
 
 
 def validate_submission(document: Mapping[str, Any]) -> None:
-    if not _exact(document, {"protocol", "prompt", "max_new_tokens", "qualification"}):
+    protocol = document.get("protocol")
+    expected = {"protocol", "prompt", "max_new_tokens", "qualification"}
+    if protocol == REQUEST_PROTOCOL_V2:
+        expected.update({"workload_profile_id", "qos_class"})
+    if not _exact(document, expected):
         raise GatewayValidationError("invalid_inference_request")
     prompt = document["prompt"]
     max_new_tokens = document["max_new_tokens"]
     if (
-        document["protocol"] != REQUEST_PROTOCOL
+        protocol not in {REQUEST_PROTOCOL, REQUEST_PROTOCOL_V2}
         or not isinstance(prompt, str)
         or not prompt
         or len(prompt.encode("utf-8")) > 131_072
@@ -229,6 +235,11 @@ def validate_submission(document: Mapping[str, Any]) -> None:
         or isinstance(max_new_tokens, bool)
         or not 1 <= max_new_tokens <= 4_096
         or not valid_binding(document["qualification"])
+    ):
+        raise GatewayValidationError("invalid_inference_request")
+    if protocol == REQUEST_PROTOCOL_V2 and (
+        not _public_identifier(document["workload_profile_id"])
+        or document["qos_class"] not in {"interactive", "batch"}
     ):
         raise GatewayValidationError("invalid_inference_request")
 
@@ -583,13 +594,16 @@ def validate_stream_event(document: Mapping[str, Any], expected_id: str) -> tupl
         expected.update({"token_index", "text"})
     elif event_type == "failed":
         expected.add("code")
+    elif event_type == "lifecycle":
+        expected.add("phase")
     if not _exact(document, expected):
         raise GatewayValidationError("invalid_upstream_event")
     if (
-        document["protocol"] != REQUEST_EVENT_PROTOCOL
+        document["protocol"] not in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2}
         or document["request_id"] != expected_id
         or not safe_integer(document["sequence"])
-        or event_type not in {"accepted", "token", "completed", "cancelled", "failed"}
+        or event_type not in {"accepted", "token", "completed", "cancelled", "failed", "lifecycle"}
+        or (event_type == "lifecycle" and document["protocol"] != REQUEST_EVENT_PROTOCOL_V2)
     ):
         raise GatewayValidationError("invalid_upstream_event")
     if event_type == "token":
@@ -602,6 +616,15 @@ def validate_stream_event(document: Mapping[str, Any], expected_id: str) -> tupl
         ):
             raise GatewayValidationError("invalid_upstream_event")
     elif event_type == "failed" and not safe_code(document["code"]):
+        raise GatewayValidationError("invalid_upstream_event")
+    elif event_type == "lifecycle" and document["phase"] not in {
+        "admission",
+        "queue",
+        "prefill",
+        "first_token",
+        "decode",
+        "completion",
+    }:
         raise GatewayValidationError("invalid_upstream_event")
     return int(document["sequence"]), str(event_type)
 

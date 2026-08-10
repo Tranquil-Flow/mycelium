@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 import uuid
 
 from mycelium_router.contracts import ExecutionGraph, RequestContext
+from mycelium_m16_runtime import build_live_m16_runtime
 
 from .health import LIVE_QUALIFICATION_REFRESH_AFTER_MS
 from .route import LiveRoute, RouteCounters
@@ -35,6 +36,7 @@ class QualifiedDeploymentRuntime:
     placement_projection: Mapping[str, Any] | None = None
     topology_projection: Mapping[str, Any] | None = None
     workload_comparison: Mapping[str, Any] | None = None
+    m16_performance_budget: Mapping[str, Any] | None = None
 
 
 class LiveDeploymentRegistry:
@@ -57,13 +59,22 @@ class LiveDeploymentRegistry:
         if len({runtime.deployment_id for runtime in runtimes}) != len(runtimes):
             raise ValueError("deployment_registry_duplicate")
         self._runtimes = {runtime.deployment_id: runtime for runtime in runtimes}
-        self._routers = {
-            runtime.deployment_id: LiveRouterPort(
+        self._routers = {}
+        for runtime in runtimes:
+            coordinator = None
+            if isinstance(runtime.graph, ExecutionGraph):
+                coordinator = build_live_m16_runtime(
+                    runtime.graph,
+                    placement_projection=runtime.placement_projection,
+                    workload_comparison=runtime.workload_comparison,
+                )
+                if runtime.m16_performance_budget is not None:
+                    coordinator.attach_performance_budget(runtime.m16_performance_budget)
+            self._routers[runtime.deployment_id] = LiveRouterPort(
                 route=runtime.route,
                 execution_graph=runtime.graph,
+                runtime_coordinator=coordinator,
             )
-            for runtime in runtimes
-        }
         self._selected = runtimes[0].deployment_id
         self._requests: dict[str, str] = {}
         self._incidents: list[dict[str, Any]] = []
@@ -542,6 +553,12 @@ class LiveDeploymentRegistry:
 
         with self._lock:
             return copy.deepcopy(self._current().workload_comparison)
+
+    def m16_runtime_status(self) -> Mapping[str, Any] | None:
+        """Return admission and scheduling state for the selected deployment."""
+
+        with self._lock:
+            return self._routers[self._selected].runtime_status()
 
     def membership_status(self, *, qualification: Any | None) -> Mapping[str, Any]:
         with self._lock:

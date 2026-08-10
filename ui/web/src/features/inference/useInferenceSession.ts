@@ -282,6 +282,13 @@ export function inferenceSessionReducer(
           error_code: null,
         });
       }
+      if (action.event.type === 'lifecycle') {
+        return Object.freeze({
+          ...state,
+          last_applied_sequence: action.event.sequence,
+          error_code: null,
+        });
+      }
       const phase = action.event.type === 'failed' ? 'failed' : action.event.type;
       const errorCode = action.event.type === 'failed' ? action.event.code : null;
       return Object.freeze({
@@ -486,7 +493,13 @@ export function useInferenceSession({
         }
         let submission;
         try {
-          submission = buildInferenceSubmission(prompt, maxNewTokens, before.qualification, now());
+          submission = buildInferenceSubmission(
+            prompt,
+            maxNewTokens,
+            before.qualification,
+            now(),
+            workloadAttribution,
+          );
         } catch (error) {
           dispatch({ type: 'form_failed', reason: formReason(error) });
           return;
@@ -514,7 +527,13 @@ export function useInferenceSession({
           return;
         }
         try {
-          submission = buildInferenceSubmission(prompt, maxNewTokens, current, now());
+          submission = buildInferenceSubmission(
+            prompt,
+            maxNewTokens,
+            current,
+            now(),
+            workloadAttribution,
+          );
         } catch (error) {
           dispatch({ type: 'form_failed', reason: formReason(error) });
           return;

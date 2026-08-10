@@ -25,6 +25,7 @@ from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_bind
 from mycelium_layer_planner.serialization import route_plan_from_dict
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
+from mycelium_m16_runtime import validate_m16_runtime_status
 from mycelium_request_gateway.contracts import InferenceSubmission, StreamEvent
 from mycelium_topology_evidence import (
     validate_m14_topology_projection,
@@ -70,7 +71,9 @@ EXPECTED_PROTOCOLS = {
     "layer-load-proof-v1.json": "mycelium.layer_load_proof.v1",
     "route-qualification-v1.json": "mycelium.route_qualification.v1",
     "request-gateway-v1.json": "mycelium.request_gateway.v1",
+    "request-gateway-v2.json": "mycelium.request_gateway.v2",
     "request-event-v1.json": "mycelium.request_event.v1",
+    "request-event-v2.json": "mycelium.request_event.v2",
     "membership-signed-message-v1.json": "mycelium.membership.signed_message.v1",
     "membership-join-request-v1.json": "mycelium.membership.join_request.v1",
     "membership-join-acceptance-v1.json": "mycelium.membership.join_acceptance.v1",
@@ -99,6 +102,7 @@ EXPECTED_PROTOCOLS = {
     "live-route-incident-v1.json": "mycelium.live_route_incident.v1",
     "performance-budget-v1.json": "mycelium.performance_budget.v1",
     "performance-budget-v2.json": "mycelium.performance_budget.v2",
+    "performance-budget-v3.json": "mycelium.performance_budget.v3",
     "assignment-artifact-cache-v1.json": "mycelium.assignment_artifact_cache.v1",
     "assignment-materialization-v1.json": "mycelium.assignment_materialization.v1",
     "candidate-promotion-report-v1.json": "mycelium.candidate_promotion_report.v1",
@@ -106,6 +110,7 @@ EXPECTED_PROTOCOLS = {
     "transport-path-observation-v1.json": "mycelium.transport_path_observation.v1",
     "m14-topology-projection-v1.json": "mycelium.m14_topology_projection.v1",
     "m15-plan-comparison-v1.json": "mycelium.m15_plan_comparison.v1",
+    "m16-runtime-status-v1.json": "mycelium.m16_runtime_status.v1",
     "product-snapshot-v1.json": "mycelium.product_snapshot.v1",
     "product-event-v1.json": "mycelium.product_event.v1",
     "execution-graph-v1.json": "mycelium.execution_graph.v1",
@@ -555,6 +560,8 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
 
     submission_document = load_fixture("request-gateway-v1.json")
     assert InferenceSubmission.from_dict(submission_document).to_dict() == submission_document
+    submission_v2 = load_fixture("request-gateway-v2.json")
+    assert InferenceSubmission.from_dict(submission_v2).to_dict() == submission_v2
     event_document = load_fixture("request-event-v1.json")
     assert StreamEvent.from_dict(event_document).to_dict() == event_document
 
@@ -600,6 +607,11 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
         comparison["selected_candidate_id"] in comparison["pareto_candidate_ids"]
         for comparison in workload_comparison["comparisons"]
     )
+    runtime_status = validate_m16_runtime_status(
+        load_fixture("m16-runtime-status-v1.json")
+    )
+    assert runtime_status["batch_state"]["mode"] == "sequential_dispatch"
+    assert runtime_status["queue"]["depth"] == 0
 
     transport = load_fixture("router-wire-v1.json")
     golden_root = ROOT / "contracts" / "router-wire-golden"

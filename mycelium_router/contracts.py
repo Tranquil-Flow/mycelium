@@ -150,6 +150,7 @@ class RouterConfig:
    interactive_base_priority: float = 100.0
    batch_base_priority: float = 10.0
    aging_priority_per_second: float = 1.0
+   batch_aging_multiplier: float = 4.0
    maximum_deficit_boost: float = 50.0
    maximum_recovery_attempts: int = 3
    reservation_lease_seconds: float = 30.0

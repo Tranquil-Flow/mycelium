@@ -1,7 +1,9 @@
 export const PRODUCT_BOOTSTRAP_PROTOCOL = 'mycelium.product_ui.bootstrap.v1' as const;
 export const PRODUCT_OBSERVATORY_PROTOCOL = 'mycelium.product_ui.observatory.v1' as const;
 export const PRODUCT_INFERENCE_PROTOCOL = 'mycelium.request_gateway.v1' as const;
+export const PRODUCT_INFERENCE_SUBMISSION_PROTOCOL = 'mycelium.request_gateway.v2' as const;
 export const PRODUCT_INFERENCE_EVENT_PROTOCOL = 'mycelium.request_event.v1' as const;
+export const PRODUCT_INFERENCE_EVENT_PROTOCOL_V2 = 'mycelium.request_event.v2' as const;
 export const PRODUCT_SWARM_PROTOCOL = 'mycelium.product_ui.swarm.v1' as const;
 export const PRODUCT_ERROR_PROTOCOL = 'mycelium.product_ui.error.v1' as const;
 export const PRODUCT_QUALIFIER_AUTHORITY =
@@ -233,10 +235,17 @@ export interface ProductQualification {
 }
 
 export interface InferenceSubmission {
-  readonly protocol: typeof PRODUCT_INFERENCE_PROTOCOL;
+  readonly protocol: typeof PRODUCT_INFERENCE_SUBMISSION_PROTOCOL;
   readonly prompt: string;
   readonly max_new_tokens: number;
   readonly qualification: QualificationBinding;
+  readonly workload_profile_id: string;
+  readonly qos_class: 'interactive' | 'batch';
+}
+
+export interface InferenceWorkloadBinding {
+  readonly profile_id: string;
+  readonly qos_class: 'interactive' | 'batch';
 }
 
 export interface InferenceAcceptedResponse {
@@ -254,7 +263,7 @@ export interface InferenceCancelResponse {
 }
 
 interface InferenceEventBase {
-  readonly protocol: typeof PRODUCT_INFERENCE_EVENT_PROTOCOL;
+  readonly protocol: typeof PRODUCT_INFERENCE_EVENT_PROTOCOL | typeof PRODUCT_INFERENCE_EVENT_PROTOCOL_V2;
   readonly request_id: string;
   readonly sequence: number;
 }
@@ -266,7 +275,11 @@ export type InferenceEvent =
       readonly token_index: number;
       readonly text: string;
     })
-  | (InferenceEventBase & { readonly type: 'failed'; readonly code: string });
+  | (InferenceEventBase & { readonly type: 'failed'; readonly code: string })
+  | (InferenceEventBase & {
+      readonly type: 'lifecycle';
+      readonly phase: 'admission' | 'queue' | 'prefill' | 'first_token' | 'decode' | 'completion';
+    });
 
 export interface ProductErrorResponse {
   readonly protocol: typeof PRODUCT_ERROR_PROTOCOL;
@@ -636,6 +649,10 @@ export function buildInferenceSubmission(
   maxNewTokens: number,
   qualification: ProductQualification | null,
   nowUnixMs: number,
+  workload: InferenceWorkloadBinding = {
+    profile_id: 'interactive_chat_v1',
+    qos_class: 'interactive',
+  },
 ): InferenceSubmission {
   const blocked = inferenceBlockReason(qualification, nowUnixMs);
   if (blocked !== null) throw new ProductContractError('submission.qualification', blocked);
@@ -646,11 +663,19 @@ export function buildInferenceSubmission(
     return fail('submission.prompt', `Prompt exceeds ${MAX_PROMPT_UTF8_BYTES} UTF-8 bytes`);
   }
   const tokenCount = safeInteger(maxNewTokens, 'submission.max_new_tokens', 1, MAX_NEW_TOKENS);
+  const workloadProfileId = identifier(workload.profile_id, 'submission.workload_profile_id');
+  const qosClass = enumValue(
+    workload.qos_class,
+    ['interactive', 'batch'] as const,
+    'submission.qos_class',
+  );
   return Object.freeze({
-    protocol: PRODUCT_INFERENCE_PROTOCOL,
+    protocol: PRODUCT_INFERENCE_SUBMISSION_PROTOCOL,
     prompt,
     max_new_tokens: tokenCount,
     qualification: qualification!.binding,
+    workload_profile_id: workloadProfileId,
+    qos_class: qosClass,
   });
 }
 
@@ -658,7 +683,7 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
   const baseCandidate = record(value, 'inference_event');
   const type = enumValue(
     readOwn(baseCandidate, 'type', 'inference_event.type'),
-    ['accepted', 'token', 'completed', 'cancelled', 'failed'] as const,
+    ['accepted', 'token', 'completed', 'cancelled', 'failed', 'lifecycle'] as const,
     'inference_event.type',
   );
   const expected =
@@ -666,13 +691,19 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
       ? ['protocol', 'request_id', 'sequence', 'type', 'token_index', 'text']
       : type === 'failed'
         ? ['protocol', 'request_id', 'sequence', 'type', 'code']
+        : type === 'lifecycle'
+          ? ['protocol', 'request_id', 'sequence', 'type', 'phase']
         : ['protocol', 'request_id', 'sequence', 'type'];
   const candidate = exactRecord(value, expected, 'inference_event');
-  if (readOwn(candidate, 'protocol', 'inference_event.protocol') !== PRODUCT_INFERENCE_EVENT_PROTOCOL) {
+  const protocol = readOwn(candidate, 'protocol', 'inference_event.protocol');
+  if (protocol !== PRODUCT_INFERENCE_EVENT_PROTOCOL && protocol !== PRODUCT_INFERENCE_EVENT_PROTOCOL_V2) {
     return fail('inference_event.protocol', 'unsupported protocol');
   }
+  if (type === 'lifecycle' && protocol !== PRODUCT_INFERENCE_EVENT_PROTOCOL_V2) {
+    return fail('inference_event.protocol', 'lifecycle requires v2');
+  }
   const base = {
-    protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
+    protocol,
     request_id: requestIdentifier(
       readOwn(candidate, 'request_id', 'inference_event.request_id'),
       'inference_event.request_id',
@@ -703,6 +734,17 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
       ...base,
       type,
       code: safeCode(readOwn(candidate, 'code', 'inference_event.code'), 'inference_event.code'),
+    });
+  }
+  if (type === 'lifecycle') {
+    return Object.freeze({
+      ...base,
+      type,
+      phase: enumValue(
+        readOwn(candidate, 'phase', 'inference_event.phase'),
+        ['admission', 'queue', 'prefill', 'first_token', 'decode', 'completion'] as const,
+        'inference_event.phase',
+      ),
     });
   }
   return Object.freeze({ ...base, type });

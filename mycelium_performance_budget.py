@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 PROTOCOL = "mycelium.performance_budget.v1"
 PROTOCOL_V2 = "mycelium.performance_budget.v2"
+PROTOCOL_V3 = "mycelium.performance_budget.v3"
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}\Z")
 
@@ -176,10 +177,80 @@ def validate_performance_budget_v2(document: Mapping[str, Any]) -> dict[str, Any
         raise PerformanceBudgetError() from exc
 
 
+def validate_performance_budget_v3(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate observed M16 admission, queue, concurrency, and batch outcomes."""
+
+    expected = {
+        "protocol",
+        "budget_id",
+        "profile_id",
+        "evidence_scope",
+        "observed_request_count",
+        "dimensions",
+        "overall_state",
+    }
+    if not isinstance(document, Mapping) or set(document) != expected:
+        raise PerformanceBudgetError()
+    dimensions = document["dimensions"]
+    required = {
+        "admission_latency_p95_ms",
+        "queue_wait_p95_ms",
+        "maximum_queue_depth",
+        "completed_requests",
+        "interactive_latency_regression_ratio",
+        "batch_starvation_interval_ms",
+        "cancellation_release_latency_ms",
+        "runtime_batch_size",
+    }
+    fields = {"dimension", "state", "bound", "observed", "unit", "evidence_digest", "reason"}
+    if (
+        document["protocol"] != PROTOCOL_V3
+        or not _identifier(document["budget_id"])
+        or not _identifier(document["profile_id"])
+        or document["evidence_scope"] != "concurrent_physical_observed"
+        or not _positive_integer(document["observed_request_count"])
+        or not isinstance(dimensions, list)
+        or len(dimensions) != len(required)
+        or any(not isinstance(item, Mapping) or set(item) != fields for item in dimensions)
+        or {item["dimension"] for item in dimensions} != required
+        or any(
+            item["state"] not in {"met", "failed", "approved_exclusion"}
+            or not _nonnegative_number(item["bound"])
+            or not _nonnegative_number(item["observed"])
+            or not _identifier(item["unit"])
+            or not isinstance(item["evidence_digest"], str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", item["evidence_digest"]) is None
+            or not isinstance(item["reason"], str)
+            or not item["reason"]
+            for item in dimensions
+        )
+    ):
+        raise PerformanceBudgetError()
+    states = {item["state"] for item in dimensions}
+    expected_overall = (
+        "failed"
+        if "failed" in states
+        else "met_with_approved_exclusions"
+        if "approved_exclusion" in states
+        else "met"
+    )
+    if document["overall_state"] != expected_overall:
+        raise PerformanceBudgetError()
+    batch = next(item for item in dimensions if item["dimension"] == "runtime_batch_size")
+    if batch["state"] == "approved_exclusion" and batch["observed"] != 1:
+        raise PerformanceBudgetError()
+    try:
+        return json.loads(json.dumps(dict(document), sort_keys=True, separators=(",", ":"), allow_nan=False))
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise PerformanceBudgetError() from exc
+
+
 __all__ = [
     "PROTOCOL",
     "PROTOCOL_V2",
+    "PROTOCOL_V3",
     "PerformanceBudgetError",
     "validate_performance_budget",
     "validate_performance_budget_v2",
+    "validate_performance_budget_v3",
 ]

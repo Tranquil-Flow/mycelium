@@ -11,6 +11,7 @@ from mycelium_qualification.contracts import RouteQualificationV1
 from mycelium_qualification.evidence import sha256_document
 from mycelium_router.contracts import ExecutionGraph, RequestContext
 from mycelium_router.serialization import execution_graph_to_dict
+from mycelium_m16_runtime import M16AdmissionError
 
 from .contracts import AdmissionError, InferenceSubmission, qualification_binding
 from .qualification import QualificationSource
@@ -178,7 +179,7 @@ class RouterSessionBackend:
             prompt_token_ids=prompt_token_ids,
             max_new_tokens=submission.max_new_tokens,
             expected_new_tokens=submission.max_new_tokens,
-            qos_class="interactive",
+            qos_class=submission.qos_class or "interactive",
             admitted_at=float(now),
             target_ttft_ms=1_000.0,
             target_tpot_ms=100.0,
@@ -191,18 +192,23 @@ class RouterSessionBackend:
         try:
             if is_cancelled() or self._is_cancelled(request_id):
                 return "cancelled"
+            admission_kwargs: dict[str, object] = {
+                "excluded_placements": admission.excluded_placements,
+            }
+            if submission.workload_profile_id is not None:
+                admission_kwargs["workload_profile_id"] = submission.workload_profile_id
             if admission.graph is None:
                 admitted_id = self._router.admit(
                     request,
                     sink,
-                    excluded_placements=admission.excluded_placements,
+                    **admission_kwargs,
                 )
             else:
                 admitted_id = self._router.admit(
                     request,
                     sink,
-                    excluded_placements=admission.excluded_placements,
                     pinned_deployment=admission.graph,
+                    **admission_kwargs,
                 )
             if admitted_id != request_id:
                 raise AdmissionError("router_request_id_mismatch")
@@ -223,6 +229,10 @@ class RouterSessionBackend:
                 progressed = self._router.decode_one(request_id)
                 if not progressed and self._router.request_status(request_id) == "DECODING":
                     raise AdmissionError("router_decode_stalled")
+        except M16AdmissionError as exc:
+            if admitted:
+                self._cancel_once(request_id)
+            raise AdmissionError(exc.code) from exc
         except Exception:
             if admitted:
                 self._cancel_once(request_id)

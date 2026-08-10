@@ -335,6 +335,7 @@ class FakeLiveRoute:
         self._incidents: deque[dict[str, Any]] = deque(maxlen=64)
         self._placement_projection: dict[str, Any] | None = None
         self._topology_projection: dict[str, Any] | None = None
+        self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
 
     def open(self) -> RouteIdentity:
         if self._closed:
@@ -627,6 +628,7 @@ class PhysicalLiveRoute:
         self._open = False
         self._closed = False
         self._fatal: str | None = None
+        self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
         self._lock = threading.RLock()
 
     def _record_incident(
@@ -759,6 +761,24 @@ class PhysicalLiveRoute:
         with self._lock:
             comparison = getattr(self, "_workload_comparison", None)
             return None if comparison is None else json.loads(json.dumps(comparison))
+
+    def set_m16_runtime_source(
+        self,
+        source: Callable[[], Mapping[str, Any] | None],
+    ) -> None:
+        if not callable(source):
+            raise ValueError("m16_runtime_source_invalid")
+        with self._lock:
+            self._m16_runtime_source = source
+
+    def m16_runtime_status(self) -> Mapping[str, Any] | None:
+        # The coordinator owns its own lock. Reading the immutable source
+        # reference must remain available while physical inference holds the
+        # route lock, otherwise queue/admission UI would disappear precisely
+        # while it is most useful.
+        source = self._m16_runtime_source
+        document = None if source is None else source()
+        return None if document is None else json.loads(json.dumps(document))
 
     @property
     def startup_challenge(self) -> tuple[tuple[int, ...], tuple[int, ...]]:

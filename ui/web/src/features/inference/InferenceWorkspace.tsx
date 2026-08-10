@@ -22,6 +22,7 @@ import {
   type M15PlanComparison,
 } from '../liveRoute/m15Comparison';
 import { loadProductSettings } from '../settings/SettingsContext';
+import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from '../liveRoute/m16Runtime';
 
 const encoder = new TextEncoder();
 const activeModelDisplay = Object.freeze({
@@ -37,6 +38,7 @@ export interface InferenceWorkspaceProps {
   readonly sessionStore?: InferenceTabSessionStore | null;
   readonly deploymentClient?: DeploymentRegistryClient | null;
   readonly workloadClient?: M15ComparisonClient | null;
+  readonly runtimeClient?: M16RuntimeClient | null;
 }
 
 function phaseLabel(phase: ReturnType<typeof useInferenceSession>['phase']): string {
@@ -135,11 +137,13 @@ export function InferenceWorkspace({
   sessionStore,
   deploymentClient,
   workloadClient,
+  runtimeClient,
 }: InferenceWorkspaceProps) {
   const defaultClient = useMemo(() => new ProductInferenceClient(), []);
   const defaultSessionStore = useMemo(() => createBrowserInferenceTabSessionStore(), []);
   const defaultDeploymentClient = useMemo(() => new HttpDeploymentRegistryClient(), []);
   const defaultWorkloadClient = useMemo(() => new HttpM15ComparisonClient(), []);
+  const defaultRuntimeClient = useMemo(() => new HttpM16RuntimeClient(), []);
   const effectiveDeploymentClient = deploymentClient === undefined
     ? client === undefined ? defaultDeploymentClient : null
     : deploymentClient;
@@ -147,6 +151,9 @@ export function InferenceWorkspace({
   const effectiveWorkloadClient = workloadClient === undefined
     ? client === undefined ? defaultWorkloadClient : null
     : workloadClient;
+  const effectiveRuntimeClient = runtimeClient === undefined
+    ? client === undefined ? defaultRuntimeClient : null
+    : runtimeClient;
   const restored = useMemo(() => effectiveSessionStore?.load() ?? null, [effectiveSessionStore]);
   const session = useInferenceSession({
     client: client ?? defaultClient,
@@ -159,6 +166,8 @@ export function InferenceWorkspace({
   const [deploymentSwitching, setDeploymentSwitching] = useState(false);
   const [workloadComparison, setWorkloadComparison] = useState<M15PlanComparison | null>(null);
   const [workloadProfileId, setWorkloadProfileId] = useState(() => loadProductSettings().defaultWorkloadProfile);
+  const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const promptBytes = encoder.encode(prompt).byteLength;
   const promptReason = prompt.length === 0
     ? 'Prompt is required'
@@ -179,6 +188,9 @@ export function InferenceWorkspace({
     qualification?.binding.stage_load_proof_digests.length ?? 1,
   );
   const activity = activityCopy(session.phase, session.token_count, stageCount);
+  const activeRuntimeRequest = runtime?.requests.find(
+    (request) => request.request_id === session.accepted_request?.request_id,
+  ) ?? null;
 
   useEffect(() => {
     effectiveSessionStore?.save({
@@ -208,6 +220,34 @@ export function InferenceWorkspace({
       })
       .catch(() => setWorkloadComparison(null));
   }, [effectiveWorkloadClient, workloadProfileId]);
+
+  useEffect(() => {
+    if (effectiveRuntimeClient === null) return;
+    let mounted = true;
+    let controller: AbortController | null = null;
+    const load = () => {
+      if (controller !== null) return;
+      const requestController = new AbortController();
+      controller = requestController;
+      void effectiveRuntimeClient.load(requestController.signal)
+        .then((status) => {
+          if (!mounted) return;
+          setRuntime(status);
+          setRuntimeError(null);
+        })
+        .catch((reason) => {
+          if (!mounted || requestController.signal.aborted) return;
+          setRuntime(null);
+          setRuntimeError(reason instanceof Error ? reason.message : 'm16_runtime_unavailable');
+        })
+        .finally(() => {
+          if (controller === requestController) controller = null;
+        });
+    };
+    load();
+    const timer = window.setInterval(load, active ? 400 : 2_000);
+    return () => { mounted = false; controller?.abort(); window.clearInterval(timer); };
+  }, [active, effectiveRuntimeClient]);
 
   const selectDeployment = async (deploymentId: string): Promise<void> => {
     if (effectiveDeploymentClient === null || active || deploymentSwitching) return;
@@ -493,7 +533,13 @@ export function InferenceWorkspace({
                 />
               ))}
             </div>
-            <small>Live request activity; per-stage timing is not currently exposed.</small>
+            <small>
+              {activeRuntimeRequest === null
+                ? runtimeError === null
+                  ? 'Waiting for the runtime-owned admission projection.'
+                  : `Runtime admission projection unavailable: ${runtimeError}`
+                : `Server phase ${activeRuntimeRequest.phase} · ${activeRuntimeRequest.qos_class} QoS · ${activeRuntimeRequest.reservation_count} path reservations · topology v${activeRuntimeRequest.topology_version}`}
+            </small>
           </div>
         ) : null}
         <pre

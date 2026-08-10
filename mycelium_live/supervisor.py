@@ -27,6 +27,8 @@ from mycelium_qualification import (
 )
 from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_request_gateway.contracts import safe_qualification_projection
+from mycelium_m16_runtime import build_live_m16_runtime
+from mycelium_performance_budget import validate_performance_budget_v3
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
@@ -239,7 +241,24 @@ def build_live_stack(
     configure_stop_tokens = getattr(route, "set_stop_token_ids", None)
     if callable(configure_stop_tokens):
         configure_stop_tokens(stop_token_ids)
-    router = LiveRouterPort(route=route, execution_graph=execution_graph)
+    placement = _placement_projection(deployment_dir)
+    workload = _workload_comparison(deployment_dir)
+    coordinator = build_live_m16_runtime(
+        execution_graph,
+        placement_projection=placement,
+        workload_comparison=workload,
+    )
+    budget = _m16_performance_budget(deployment_dir)
+    if budget is not None:
+        coordinator.attach_performance_budget(budget)
+    router = LiveRouterPort(
+        route=route,
+        execution_graph=execution_graph,
+        runtime_coordinator=coordinator,
+    )
+    configure_runtime_source = getattr(route, "set_m16_runtime_source", None)
+    if callable(configure_runtime_source):
+        configure_runtime_source(router.runtime_status)
     health = RouteHealthSource(
         route=route,
         refresh=lambda: _qualify_open_route(route),
@@ -430,6 +449,22 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._send_bytes(
                     404,
                     _json_bytes({"error": "m15_plan_comparison_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
+        def _m16_runtime_status(self) -> None:
+            source = getattr(self.server.route, "m16_runtime_status", None)
+            document = source() if callable(source) else None
+            if document is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "m16_runtime_status_unavailable"}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -637,6 +672,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._status()
             elif parsed.path == "/__mycelium/m15-plan-comparison" and not parsed.query:
                 self._m15_plan_comparison()
+            elif parsed.path == "/__mycelium/m16-runtime-status" and not parsed.query:
+                self._m16_runtime_status()
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif parsed.path.startswith("/api/"):
@@ -728,6 +765,19 @@ def _workload_comparison(deployment_dir: Path) -> Mapping[str, Any] | None:
         raise ValueError("m15_plan_comparison_invalid") from exc
 
 
+def _m16_performance_budget(deployment_dir: Path) -> Mapping[str, Any] | None:
+    path = Path(deployment_dir) / "m16-performance-budget.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+        raise ValueError("m16_performance_budget_unsafe")
+    try:
+        document = json.loads(path.read_text("utf-8"))
+        return validate_performance_budget_v3(document)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+        raise ValueError("m16_performance_budget_invalid") from exc
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -784,6 +834,7 @@ def _qualified_runtime(
             placement_projection=_placement_projection(selected_deployment_dir),
             topology_projection=_topology_projection(selected_deployment_dir),
             workload_comparison=_workload_comparison(selected_deployment_dir),
+            m16_performance_budget=_m16_performance_budget(selected_deployment_dir),
         )
     except BaseException:
         route.close()

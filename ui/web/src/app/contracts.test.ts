@@ -329,6 +329,21 @@ describe('frozen product UI wire contracts', () => {
     }
   });
 
+  it('accepts a closed v2 lifecycle stream event', () => {
+    const event = {
+      protocol: 'mycelium.request_event.v2',
+      request_id: requestId,
+      sequence: 1,
+      type: 'lifecycle',
+      phase: 'prefill',
+    };
+    expect(definitionValidator(inferenceSchema, 'stream_event')(event)).toBe(true);
+    expect(decodeInferenceEvent(event)).toMatchObject({
+      type: 'lifecycle',
+      phase: 'prefill',
+    });
+  });
+
   it('validates accepted/cancel paths against the response request ID', () => {
     const accepted = decodeInferenceAccepted({
       protocol: PRODUCT_INFERENCE_PROTOCOL,

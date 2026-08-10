@@ -10,6 +10,9 @@ from typing import Callable, Protocol
 from .contracts import (
     AdmissionError,
     InferenceSubmission,
+    REQUEST_EVENT_PROTOCOL,
+    REQUEST_EVENT_PROTOCOL_V2,
+    REQUEST_GATEWAY_PROTOCOL_V2,
     StreamEvent,
     is_valid_request_id,
     safe_qualification_projection,
@@ -68,6 +71,8 @@ class _Session:
     worker_done: bool = False
     thread: threading.Thread | None = None
     outcome: str | None = None
+    event_protocol: str = REQUEST_EVENT_PROTOCOL
+    emitted_phases: set[str] = field(default_factory=set)
 
 
 class EventSubscription:
@@ -179,11 +184,21 @@ class RequestGatewayService:
                 captured=captured,
                 max_new_tokens=submission.max_new_tokens,
                 capacity=self._max_buffered_events,
+                event_protocol=(
+                    REQUEST_EVENT_PROTOCOL_V2
+                    if submission.protocol == REQUEST_GATEWAY_PROTOCOL_V2
+                    else REQUEST_EVENT_PROTOCOL
+                ),
             )
             with session.condition:
                 self._append_event_locked(
                     session,
-                    StreamEvent(request_id=request_id, sequence=0, kind="accepted"),
+                    StreamEvent(
+                        request_id=request_id,
+                        sequence=0,
+                        kind="accepted",
+                        protocol=session.event_protocol,
+                    ),
                 )
             thread = threading.Thread(
                 target=self._run,
@@ -277,6 +292,7 @@ class RequestGatewayService:
             if captured is None or submission is None:
                 raise AdmissionError("request_state_released")
             self._gate.revalidate(captured)
+            self._append_lifecycle(session, "admission")
             with session.condition:
                 if session.cancellation_started:
                     session.outcome = "cancelled"
@@ -289,6 +305,8 @@ class RequestGatewayService:
             if cancellation_started:
                 self._append_terminal(session, "cancelled")
                 return
+            self._append_lifecycle(session, "queue")
+            self._append_lifecycle(session, "prefill")
             outcome = self._backend.run(
                 session.request_id,
                 submission,
@@ -359,6 +377,10 @@ class RequestGatewayService:
         token_digest = hashlib.sha256(token_bytes).digest()
         del token_bytes
 
+        if token_index == 0:
+            self._append_lifecycle(session, "first_token")
+            self._append_lifecycle(session, "decode")
+
         while True:
             captured = session.captured
             if captured is None:
@@ -393,6 +415,7 @@ class RequestGatewayService:
                         kind="token",
                         token_index=token_index,
                         text=token_text,
+                        protocol=session.event_protocol,
                     )
                     self._append_event_locked(session, event)
                     session.token_digests.append(token_digest)
@@ -408,6 +431,7 @@ class RequestGatewayService:
         *,
         code: str | None = None,
     ) -> None:
+        self._append_lifecycle(session, "completion")
         with session.condition:
             if session.terminal_event is not None:
                 return
@@ -425,6 +449,7 @@ class RequestGatewayService:
                 sequence=session.latest_sequence + 1,
                 kind=kind,
                 code=code,
+                protocol=session.event_protocol,
             )
             self._append_event_locked(session, event)
             session.terminal_event = event
@@ -437,6 +462,28 @@ class RequestGatewayService:
                 }[kind]
             )
             session.condition.notify_all()
+
+    def _append_lifecycle(self, session: _Session, phase: str) -> None:
+        if session.event_protocol != REQUEST_EVENT_PROTOCOL_V2:
+            return
+        with session.condition:
+            if phase in session.emitted_phases or session.terminal_event is not None:
+                return
+            self._trim_acknowledged_replay_locked(
+                session,
+                target_size=session.capacity - 2,
+            )
+            if len(session.events) >= session.capacity - 1:
+                raise AdmissionError("event_backpressure")
+            event = StreamEvent(
+                request_id=session.request_id,
+                sequence=session.latest_sequence + 1,
+                kind="lifecycle",
+                phase=phase,
+                protocol=session.event_protocol,
+            )
+            self._append_event_locked(session, event)
+            session.emitted_phases.add(phase)
 
     @staticmethod
     def _append_event_locked(session: _Session, event: StreamEvent) -> None:

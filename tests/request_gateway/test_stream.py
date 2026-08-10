@@ -12,7 +12,12 @@ from typing import Any
 
 import pytest
 
-from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
+from mycelium_request_gateway.contracts import (
+    InferenceSubmission,
+    REQUEST_EVENT_PROTOCOL_V2,
+    REQUEST_GATEWAY_PROTOCOL_V2,
+    qualification_binding,
+)
 from mycelium_request_gateway.service import RequestGatewayService
 from test_core import MutableQualificationSource, _synthetic_qualification
 
@@ -149,6 +154,44 @@ def test_token_events_are_deterministic_and_terminal_is_exactly_once():
         assert sum(event.terminal for event in events) == 1
         assert service.cancel(request_id) is False
         assert service.terminal_event_count(request_id) == 1
+    finally:
+        service.close()
+
+
+def test_v2_stream_adds_bounded_lifecycle_events_without_changing_v1() -> None:
+    qualification = _synthetic_qualification()
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=ScriptedBackend(("one",)),
+        request_id_source=lambda: "stream-v2",
+        max_buffered_events=16,
+    )
+    submission = InferenceSubmission(
+        prompt="private v2 prompt",
+        max_new_tokens=1,
+        qualification=qualification_binding(qualification),
+        protocol=REQUEST_GATEWAY_PROTOCOL_V2,
+        workload_profile_id="interactive_chat_v1",
+        qos_class="interactive",
+    )
+    try:
+        request_id = service.submit(submission)
+        events = _drain(service.subscribe(request_id, last_event_id=None))
+
+        assert all(event.protocol == REQUEST_EVENT_PROTOCOL_V2 for event in events)
+        assert [event.phase for event in events if event.kind == "lifecycle"] == [
+            "admission",
+            "queue",
+            "prefill",
+            "first_token",
+            "decode",
+            "completion",
+        ]
+        assert [event.kind for event in events if event.kind != "lifecycle"] == [
+            "accepted",
+            "token",
+            "completed",
+        ]
     finally:
         service.close()
 

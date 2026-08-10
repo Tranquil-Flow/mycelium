@@ -13,7 +13,9 @@ from mycelium_qualification.contracts import (
 from mycelium_qualification.evidence import canonical_json_bytes, is_sha256_ref, sha256_bytes
 
 REQUEST_GATEWAY_PROTOCOL = "mycelium.request_gateway.v1"
+REQUEST_GATEWAY_PROTOCOL_V2 = "mycelium.request_gateway.v2"
 REQUEST_EVENT_PROTOCOL = "mycelium.request_event.v1"
+REQUEST_EVENT_PROTOCOL_V2 = "mycelium.request_event.v2"
 MAX_PROMPT_UTF8_BYTES = 131_072
 MAX_NEW_TOKENS = 4_096
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}")
@@ -192,9 +194,14 @@ class InferenceSubmission:
     max_new_tokens: int
     qualification: QualificationBinding
     protocol: str = REQUEST_GATEWAY_PROTOCOL
+    workload_profile_id: str | None = None
+    qos_class: str | None = None
 
     def __post_init__(self) -> None:
-        _require(self.protocol == REQUEST_GATEWAY_PROTOCOL, "unsupported_request_protocol")
+        _require(
+            self.protocol in {REQUEST_GATEWAY_PROTOCOL, REQUEST_GATEWAY_PROTOCOL_V2},
+            "unsupported_request_protocol",
+        )
         _require(isinstance(self.prompt, str) and bool(self.prompt), "invalid_prompt")
         _require(
             len(self.prompt.encode("utf-8")) <= MAX_PROMPT_UTF8_BYTES,
@@ -207,30 +214,52 @@ class InferenceSubmission:
             "invalid_max_new_tokens",
         )
         _require(isinstance(self.qualification, QualificationBinding), "invalid_qualification_binding")
+        if self.protocol == REQUEST_GATEWAY_PROTOCOL:
+            _require(
+                self.workload_profile_id is None and self.qos_class is None,
+                "invalid_workload_binding",
+            )
+        else:
+            _require(
+                isinstance(self.workload_profile_id, str)
+                and _REQUEST_ID_RE.fullmatch(self.workload_profile_id) is not None
+                and self.qos_class in {"interactive", "batch"},
+                "invalid_workload_binding",
+            )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        document = {
             "protocol": self.protocol,
             "prompt": self.prompt,
             "max_new_tokens": self.max_new_tokens,
             "qualification": self.qualification.to_dict(),
         }
+        if self.protocol == REQUEST_GATEWAY_PROTOCOL_V2:
+            document["workload_profile_id"] = self.workload_profile_id
+            document["qos_class"] = self.qos_class
+        return document
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> "InferenceSubmission":
+        _require(isinstance(document, Mapping), "invalid_submission")
+        protocol = document.get("protocol")
+        expected = {"protocol", "prompt", "max_new_tokens", "qualification"}
+        if protocol == REQUEST_GATEWAY_PROTOCOL_V2:
+            expected.update({"workload_profile_id", "qos_class"})
+        _require(set(document) == expected, "invalid_submission")
         _require(
-            isinstance(document, Mapping)
-            and set(document) == {"protocol", "prompt", "max_new_tokens", "qualification"},
-            "invalid_submission",
+            protocol in {REQUEST_GATEWAY_PROTOCOL, REQUEST_GATEWAY_PROTOCOL_V2},
+            "unsupported_request_protocol",
         )
-        _require(document["protocol"] == REQUEST_GATEWAY_PROTOCOL, "unsupported_request_protocol")
         qualification = document["qualification"]
         _require(isinstance(qualification, Mapping), "invalid_qualification_binding")
         return cls(
             prompt=document["prompt"],
             max_new_tokens=document["max_new_tokens"],
             qualification=QualificationBinding.from_dict(qualification),
-            protocol=document["protocol"],
+            protocol=protocol,
+            workload_profile_id=document.get("workload_profile_id"),
+            qos_class=document.get("qos_class"),
         )
 
 
@@ -244,6 +273,7 @@ class StreamEvent:
     token_index: int | None = None
     text: str | None = None
     code: str | None = None
+    phase: str | None = None
     protocol: str = REQUEST_EVENT_PROTOCOL
 
     def __post_init__(self) -> None:
@@ -257,29 +287,51 @@ class StreamEvent:
             and self.sequence >= 0,
             "invalid_stream_event",
         )
-        _require(
-            self.kind in {"accepted", "token", "completed", "cancelled", "failed"},
-            "invalid_stream_event",
-        )
+        _require(self.protocol in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2}, "invalid_stream_event")
+        allowed_kinds = {"accepted", "token", "completed", "cancelled", "failed"}
+        if self.protocol == REQUEST_EVENT_PROTOCOL_V2:
+            allowed_kinds.add("lifecycle")
+        _require(self.kind in allowed_kinds, "invalid_stream_event")
         if self.kind == "token":
             _require(
                 isinstance(self.token_index, int)
                 and not isinstance(self.token_index, bool)
                 and self.token_index >= 0
                 and isinstance(self.text, str)
-                and self.code is None,
+                and self.code is None
+                and self.phase is None,
                 "invalid_stream_event",
             )
         elif self.kind == "failed":
             _require(
                 self.token_index is None
                 and self.text is None
-                and is_safe_error_code(self.code),
+                and is_safe_error_code(self.code)
+                and self.phase is None,
+                "invalid_stream_event",
+            )
+        elif self.kind == "lifecycle":
+            _require(
+                self.protocol == REQUEST_EVENT_PROTOCOL_V2
+                and self.token_index is None
+                and self.text is None
+                and self.code is None
+                and self.phase in {
+                    "admission",
+                    "queue",
+                    "prefill",
+                    "first_token",
+                    "decode",
+                    "completion",
+                },
                 "invalid_stream_event",
             )
         else:
             _require(
-                self.token_index is None and self.text is None and self.code is None,
+                self.token_index is None
+                and self.text is None
+                and self.code is None
+                and self.phase is None,
                 "invalid_stream_event",
             )
 
@@ -299,14 +351,19 @@ class StreamEvent:
             document["text"] = self.text
         elif self.kind == "failed":
             document["code"] = self.code
+        elif self.kind == "lifecycle":
+            document["phase"] = self.phase
         return document
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> "StreamEvent":
         _require(isinstance(document, Mapping), "invalid_stream_event")
-        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "text", "code"}
+        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "text", "code", "phase"}
         _require(set(document).issubset(allowed), "invalid_stream_event")
-        _require(document.get("protocol") == REQUEST_EVENT_PROTOCOL, "invalid_stream_event")
+        _require(
+            document.get("protocol") in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2},
+            "invalid_stream_event",
+        )
         kind_value = document.get("type")
         _require(isinstance(kind_value, str), "invalid_stream_event")
         kind = kind_value
@@ -315,6 +372,8 @@ class StreamEvent:
             required.update({"token_index", "text"})
         elif kind == "failed":
             required.add("code")
+        elif kind == "lifecycle":
+            required.add("phase")
         _require(set(document) == required, "invalid_stream_event")
         return cls(
             request_id=document["request_id"],
@@ -323,5 +382,6 @@ class StreamEvent:
             token_index=document.get("token_index"),
             text=document.get("text"),
             code=document.get("code"),
+            phase=document.get("phase"),
             protocol=document["protocol"],
         )
