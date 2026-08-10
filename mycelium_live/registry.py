@@ -13,6 +13,7 @@ import uuid
 
 from mycelium_router.contracts import ExecutionGraph, RequestContext
 from mycelium_m16_runtime import build_live_m16_runtime
+from mycelium_model_catalog import enrich_model_operation_lifecycle
 
 from .health import LIVE_QUALIFICATION_REFRESH_AFTER_MS
 from .route import LiveRoute, RouteCounters
@@ -27,6 +28,7 @@ class DeploymentSelectionError(RuntimeError):
 class QualifiedDeploymentRuntime:
     deployment_id: str
     model_id: str
+    model_revision: str
     quantization: str
     qualified_at_unix_ms: int
     route: LiveRoute
@@ -37,6 +39,7 @@ class QualifiedDeploymentRuntime:
     topology_projection: Mapping[str, Any] | None = None
     workload_comparison: Mapping[str, Any] | None = None
     m16_performance_budget: Mapping[str, Any] | None = None
+    model_operation: Mapping[str, Any] | None = None
 
 
 class LiveDeploymentRegistry:
@@ -470,6 +473,7 @@ class LiveDeploymentRegistry:
                     {
                         "deployment_id": runtime.deployment_id,
                         "model_id": runtime.model_id,
+                        "model_revision": runtime.model_revision,
                         "quantization": runtime.quantization,
                         "topology_size": len(runtime.graph.stages),
                         "health": (
@@ -481,6 +485,24 @@ class LiveDeploymentRegistry:
                     for runtime in self._runtimes.values()
                 ],
             }
+
+    def m17_model_operation(self) -> Mapping[str, Any] | None:
+        """Return the selected deployment's bounded M17 planning projection."""
+
+        with self._lock:
+            document = self._current().model_operation
+            if document is None:
+                return None
+            return enrich_model_operation_lifecycle(
+                document,
+                self.registry_status(),
+            )
+
+    def m17_swarm_evidence(self) -> Mapping[str, Any]:
+        """Capture current signed resources without changing deployment selection."""
+
+        with self._lock:
+            return self._current().route.m17_swarm_evidence()
 
     def _persist(self, status: Mapping[str, Any] | None = None) -> None:
         path = self._state_path

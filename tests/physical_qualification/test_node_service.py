@@ -1638,6 +1638,16 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
             time.sleep(0.02)
         assert first_after_cancel["runtime"]["active_state_count"] == 0
         assert second_after_cancel["runtime"]["active_state_count"] == 0
+        for snapshot in (first_after_cancel, second_after_cancel):
+            resources = snapshot["host_resources"]
+            assert resources["protocol"] == "mycelium.host_resource_snapshot.v1"
+            assert resources["valid_until_unix_ms"] > resources["observed_at_unix_ms"]
+            assert resources["available_memory_bytes"] > 0
+            assert resources["rss_bytes"] > 0
+            assert resources["disk_free_bytes"] > 0
+            assert resources["runtime_build_digest"].startswith("sha256:")
+            assert resources["resource_digest"].startswith("sha256:")
+            assert resources["route_ready"] is False
         assert first_after_cancel["transport_pending_delivery_count"] == 0
         assert second_after_cancel["transport_pending_delivery_count"] == 0
         assert first_after_cancel["transport_cancellation_cleanup_complete"] is True

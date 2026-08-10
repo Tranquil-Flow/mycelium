@@ -8,35 +8,13 @@ import math
 import uuid
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+from model_adapters import (
+    GPT2_DECODER_TENSOR_SUFFIXES as GPT2_DECODER_TENSOR_SUFFIXES,
+    QWEN2_DECODER_TENSOR_SUFFIXES as QWEN2_DECODER_TENSOR_SUFFIXES,
+    QWEN3_DECODER_TENSOR_SUFFIXES as QWEN3_DECODER_TENSOR_SUFFIXES,
+)
+
 MLX_RUNTIME_BASE_FIELDS = frozenset({"backend", "dtype", "quantization"})
-GPT2_DECODER_TENSOR_SUFFIXES = (
-    "ln_1.weight",
-    "ln_1.bias",
-    "attn.c_attn.weight",
-    "attn.c_attn.bias",
-    "attn.c_proj.weight",
-    "attn.c_proj.bias",
-    "ln_2.weight",
-    "ln_2.bias",
-    "mlp.c_fc.weight",
-    "mlp.c_fc.bias",
-    "mlp.c_proj.weight",
-    "mlp.c_proj.bias",
-)
-QWEN2_DECODER_TENSOR_SUFFIXES = (
-    "input_layernorm.weight",
-    "self_attn.q_proj.weight",
-    "self_attn.q_proj.bias",
-    "self_attn.k_proj.weight",
-    "self_attn.k_proj.bias",
-    "self_attn.v_proj.weight",
-    "self_attn.v_proj.bias",
-    "self_attn.o_proj.weight",
-    "post_attention_layernorm.weight",
-    "mlp.gate_proj.weight",
-    "mlp.up_proj.weight",
-    "mlp.down_proj.weight",
-)
 NORMALIZED_MLX_RUNTIME_FIELDS = frozenset(
     {*MLX_RUNTIME_BASE_FIELDS, "architecture", "model_config"}
 )
@@ -72,6 +50,7 @@ QWEN2_MODEL_CONFIG_FIELDS = frozenset(
         "tie_word_embeddings",
     }
 )
+QWEN3_MODEL_CONFIG_FIELDS = QWEN2_MODEL_CONFIG_FIELDS
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
 SUPPORTED_NUMPY_DTYPES = frozenset({"float32"})
 _RUNTIME_IDENTITY_FIELDS = frozenset(
@@ -236,6 +215,28 @@ def normalize_qwen2_model_config(
     return normalized
 
 
+def normalize_qwen3_model_config(
+    config: Mapping[str, Any], *, expected_layers: int
+) -> dict[str, Any]:
+    """Extract the exact Qwen3 dense decoder subset executable by Mycelium."""
+
+    normalized = normalize_qwen2_model_config(
+        config, expected_layers=expected_layers
+    )
+    if config.get("attention_bias", False) is not False:
+        raise ValueError("runtime qwen3 attention_bias must be false")
+    attention_dropout = config.get("attention_dropout", 0.0)
+    if attention_dropout != 0 and attention_dropout != 0.0:
+        raise ValueError("runtime qwen3 attention_dropout must be zero")
+    if config.get("rope_scaling") is not None:
+        raise ValueError("runtime qwen3 rope_scaling is unsupported")
+    if config.get("use_sliding_window", False) is not False:
+        raise ValueError("runtime qwen3 sliding-window attention is unsupported")
+    if config.get("sliding_window") is not None:
+        raise ValueError("runtime qwen3 sliding_window must be null")
+    return normalized
+
+
 def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     architecture = runtime.get("architecture")
     model_config = runtime.get("model_config")
@@ -257,7 +258,16 @@ def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, di
             model_config,
             expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
         )
-    raise ValueError("unsupported runtime architecture; expected gpt2 or qwen2")
+    if architecture == "qwen3":
+        if set(model_config) != QWEN3_MODEL_CONFIG_FIELDS:
+            raise ValueError(
+                "qwen3 architecture model_config fields do not match the normalized runtime contract"
+            )
+        return architecture, normalize_qwen3_model_config(
+            model_config,
+            expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+        )
+    raise ValueError("unsupported runtime architecture; expected gpt2, qwen2, or qwen3")
 
 
 def validate_normalized_mlx_runtime(runtime: Any) -> dict[str, Any]:

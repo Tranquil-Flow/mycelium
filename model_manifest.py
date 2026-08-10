@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from model_adapters import adapter_for_config
-from runtime_contracts import normalize_gpt2_model_config, normalize_qwen2_model_config
+from runtime_contracts import (
+   normalize_gpt2_model_config,
+   normalize_qwen2_model_config,
+   normalize_qwen3_model_config,
+)
 
 
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -214,6 +218,13 @@ def compile_model_manifest(
       runtime_model = {
          "architecture": "qwen2",
          "model_config": normalize_qwen2_model_config(
+            config, expected_layers=num_layers
+         ),
+      }
+   elif adapter.architecture == "qwen3" and _is_causal_lm(config):
+      runtime_model = {
+         "architecture": "qwen3",
+         "model_config": normalize_qwen3_model_config(
             config, expected_layers=num_layers
          ),
       }

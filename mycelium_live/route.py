@@ -335,6 +335,7 @@ class FakeLiveRoute:
         self._incidents: deque[dict[str, Any]] = deque(maxlen=64)
         self._placement_projection: dict[str, Any] | None = None
         self._topology_projection: dict[str, Any] | None = None
+        self._model_operation: dict[str, Any] | None = None
         self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
 
     def open(self) -> RouteIdentity:
@@ -624,6 +625,10 @@ class PhysicalLiveRoute:
         self._incidents: deque[dict[str, Any]] = deque(maxlen=64)
         self._incident_sequence = 0
         self._stop_token_ids: frozenset[int] = frozenset()
+        self._placement_projection: dict[str, Any] | None = None
+        self._topology_projection: dict[str, Any] | None = None
+        self._workload_comparison: dict[str, Any] | None = None
+        self._model_operation: dict[str, Any] | None = None
         self._command_sequence = 0
         self._open = False
         self._closed = False
@@ -761,6 +766,55 @@ class PhysicalLiveRoute:
         with self._lock:
             comparison = getattr(self, "_workload_comparison", None)
             return None if comparison is None else json.loads(json.dumps(comparison))
+
+    def set_m17_model_operation(
+        self, document: Mapping[str, Any] | None
+    ) -> None:
+        """Attach the privacy-reduced catalog/feasibility projection."""
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._model_operation = (
+                None if document is None else json.loads(json.dumps(dict(document)))
+            )
+
+    def m17_model_operation(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_model_operation", None)
+            return None if document is None else json.loads(json.dumps(document))
+
+    def m17_swarm_evidence(self) -> Mapping[str, Any]:
+        """Capture one fresh set of independently signed node resource observations."""
+
+        with self._lock:
+            if self._closed or not self._open or not self.is_alive():
+                raise RuntimeError("m17_swarm_evidence_unavailable")
+            before = len(self._signed_observations)
+            self._snapshot_all()
+            captured = self._signed_observations[before:]
+            by_node: dict[str, dict[str, Any]] = {}
+            for signed in captured:
+                observation = signed.get("observation")
+                if (
+                    isinstance(observation, Mapping)
+                    and observation.get("event") == "snapshot"
+                    and isinstance(observation.get("node_id"), str)
+                ):
+                    by_node[str(observation["node_id"])] = signed
+            if set(by_node) != set(self._sessions):
+                raise RuntimeError("m17_swarm_evidence_incomplete")
+            return {
+                "protocol": "mycelium.live_swarm_resource_observations.v1",
+                "captured_at_unix_ms": int(time.time() * 1_000),
+                "deployment_id": self._graph.deployment_id,
+                "model_id": self._graph.model_id,
+                "resolved_commit": self._graph.resolved_commit,
+                "placement": json.loads(json.dumps(self._placement_projection)),
+                "topology": json.loads(json.dumps(self._topology_projection)),
+                "signed_snapshots": [by_node[node_id] for node_id in sorted(by_node)],
+                "route_ready": False,
+            }
 
     def set_m16_runtime_source(
         self,

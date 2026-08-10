@@ -106,7 +106,7 @@ def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
     model_type = config.get("model_type")
     if model_type == "gpt2":
         return GPT2PromptCodec.from_deployment(deployment_dir)
-    if model_type == "qwen2":
+    if model_type in {"qwen2", "qwen3"}:
         return Qwen2PromptCodec.from_deployment(deployment_dir)
     raise RuntimeError(f"unsupported_prompt_codec:{model_type!r}")
 

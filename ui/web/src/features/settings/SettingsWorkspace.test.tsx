@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsProvider } from './SettingsContext';
 import { SettingsWorkspace } from './SettingsWorkspace';
 import fixture from '../../../../../contracts/compatibility-fixtures/m15-plan-comparison-v1.json';
@@ -44,5 +44,28 @@ describe('SettingsWorkspace', () => {
     await waitFor(() => expect(localStorage.getItem('mycelium.product-ui.preferences.v1')).toContain('sustained_batch_v1'));
     expect(screen.getByText(/future inference requests/i)).toBeInTheDocument();
     expect(screen.getByText(/does not imply.*admission.*queueing.*batching/i)).toBeInTheDocument();
+  });
+
+  it('stores only a qualifier-listed model deployment preference', async () => {
+    const registry = {
+      protocol: 'mycelium.live_deployment_registry.v1' as const,
+      selected_deployment_id: 'deployment-a', switching_allowed: true,
+      deployments: [
+        { deployment_id: 'deployment-a', model_id: 'Qwen/Qwen2.5-0.5B-Instruct', model_revision: 'a'.repeat(40), quantization: 'int8-weight-only', topology_size: 2, health: 'qualified' as const, qualified_at_unix_ms: 1, qualification_id: `sha256:${'a'.repeat(64)}` },
+        { deployment_id: 'deployment-b', model_id: 'Qwen/Qwen3-8B', model_revision: 'b'.repeat(40), quantization: 'bfloat16', topology_size: 3, health: 'unavailable' as const, qualified_at_unix_ms: 2, qualification_id: `sha256:${'b'.repeat(64)}` },
+      ],
+    };
+    const select = vi.fn(async () => registry);
+    const deploymentClient = { status: async () => registry, select };
+    render(<SettingsProvider><SettingsWorkspace deploymentClient={deploymentClient} /></SettingsProvider>);
+
+    const selector = await screen.findByRole('combobox', { name: /preferred qualified model and deployment/i });
+    expect(selector).toHaveTextContent('Qwen/Qwen2.5-0.5B-Instruct');
+    expect(selector).not.toHaveTextContent('Qwen/Qwen3-8B');
+    fireEvent.change(selector, { target: { value: 'deployment-a' } });
+
+    await waitFor(() => expect(select).toHaveBeenCalledWith('deployment-a'));
+    await waitFor(() => expect(localStorage.getItem('mycelium.product-ui.preferences.v1')).toContain('deployment-a'));
+    expect(screen.getByText(/never rebinds an in-flight request/i)).toBeInTheDocument();
   });
 });

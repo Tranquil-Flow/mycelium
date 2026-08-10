@@ -24,7 +24,9 @@ import type {
 import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
+import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
+import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
 import {
@@ -70,6 +72,7 @@ const defaultSource = createObservatorySource({ source_mode: 'fixture' });
 const emptyFeatureRegistry = createProductFeatureRegistry([]);
 const fixtureInferenceClient = new FixtureInferenceClient();
 const liveM15ComparisonClient = new HttpM15ComparisonClient();
+const liveDeploymentRegistryClient = new HttpDeploymentRegistryClient();
 const recordedLifecycleProjections = Object.freeze(
   LIFECYCLE_STATE_ORDER.map((state) => projectLifecycle(preparingFixture({ state }))),
 );
@@ -285,7 +288,7 @@ export default function App({
     content = <>
       <ProductEvidenceSummary compact />
       <ProductEvidenceSettings />
-      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} />
+      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} />
     </>;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
@@ -314,7 +317,7 @@ export default function App({
           <>
             <ProductEvidenceSummary compact />
             {activeView === 'nodes' ? (
-              <ProductNodesWorkspace sourceMode="live" />
+              <><ProductNodesWorkspace sourceMode="live" /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
               <LiveRouteWorkspace
                 view={activeView}

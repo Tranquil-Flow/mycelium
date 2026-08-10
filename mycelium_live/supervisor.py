@@ -474,6 +474,46 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "application/json; charset=utf-8",
             )
 
+        def _m17_model_operation(self) -> None:
+            source = getattr(self.server.route, "m17_model_operation", None)
+            document = source() if callable(source) else None
+            if document is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "m17_model_operation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
+        def _m17_swarm_evidence(self) -> None:
+            source = getattr(self.server.route, "m17_swarm_evidence", None)
+            if not callable(source):
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "m17_swarm_evidence_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            try:
+                document = source()
+            except RuntimeError as exc:
+                self._send_bytes(
+                    503,
+                    _json_bytes({"error": str(exc)}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
         def _select_deployment(self) -> None:
             select = getattr(self.server.route, "select", None)
             if not callable(select):
@@ -674,6 +714,10 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._m15_plan_comparison()
             elif parsed.path == "/__mycelium/m16-runtime-status" and not parsed.query:
                 self._m16_runtime_status()
+            elif parsed.path == "/__mycelium/m17-model-operation" and not parsed.query:
+                self._m17_model_operation()
+            elif parsed.path == "/__mycelium/m17-swarm-evidence" and not parsed.query:
+                self._m17_swarm_evidence()
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif parsed.path.startswith("/api/"):
@@ -778,6 +822,21 @@ def _m16_performance_budget(deployment_dir: Path) -> Mapping[str, Any] | None:
         raise ValueError("m16_performance_budget_invalid") from exc
 
 
+def _m17_model_operation(deployment_dir: Path) -> Mapping[str, Any] | None:
+    path = Path(deployment_dir) / "m17-model-operation.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+        raise ValueError("m17_model_operation_unsafe")
+    try:
+        document = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError("m17_model_operation_invalid") from exc
+    if not isinstance(document, dict) or document.get("protocol") != "mycelium.model_operation.v1":
+        raise ValueError("m17_model_operation_invalid")
+    return document
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -825,6 +884,7 @@ def _qualified_runtime(
         return QualifiedDeploymentRuntime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,
+            model_revision=identity.resolved_commit,
             quantization="int8-weight-only",
             qualified_at_unix_ms=qualification.issued_at_unix_ms,
             route=route,
@@ -835,6 +895,7 @@ def _qualified_runtime(
             topology_projection=_topology_projection(selected_deployment_dir),
             workload_comparison=_workload_comparison(selected_deployment_dir),
             m16_performance_budget=_m16_performance_budget(selected_deployment_dir),
+            model_operation=_m17_model_operation(selected_deployment_dir),
         )
     except BaseException:
         route.close()
@@ -951,6 +1012,7 @@ def run_physical_server(
             topology=_topology_projection(selected_deployment_dir),
             workload_comparison=_workload_comparison(selected_deployment_dir),
         )
+        route.set_m17_model_operation(_m17_model_operation(selected_deployment_dir))
         stack = build_live_stack(
             route=route,
             deployment_dir=selected_deployment_dir,

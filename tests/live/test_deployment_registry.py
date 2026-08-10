@@ -32,6 +32,7 @@ def _runtime(index: int) -> QualifiedDeploymentRuntime:
     return QualifiedDeploymentRuntime(
         deployment_id=f"deployment-{index}",
         model_id=f"Qwen/model-{index}",
+        model_revision=f"{index}" * 40,
         quantization="int8-weight-only",
         qualified_at_unix_ms=1_000 + index,
         route=route,

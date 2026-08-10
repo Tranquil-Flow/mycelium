@@ -408,6 +408,45 @@ def test_candidate_promotion_and_rollback_posts_are_same_origin_and_bounded(
         thread.join(timeout=5)
 
 
+def test_m17_swarm_evidence_endpoint_is_read_only_and_fail_closed(tmp_path: Path) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    expected = {
+        "protocol": "mycelium.live_swarm_resource_observations.v1",
+        "signed_snapshots": [],
+        "route_ready": False,
+    }
+    calls = []
+    route = SimpleNamespace(
+        m17_swarm_evidence=lambda: calls.append("snapshot") or expected,
+    )
+
+    async def app(*_args):
+        raise AssertionError("m17_swarm_evidence_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=route,
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/m17-swarm-evidence")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == expected
+        assert calls == ["snapshot"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

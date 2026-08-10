@@ -135,6 +135,12 @@ def _validate_assignment(assignment: dict[str, Any]) -> None:
       raise ValueError("assignment requires expected_tensor_prefixes")
 
 
+def validate_provisioning_assignment(assignment: dict[str, Any]) -> None:
+   """Public fail-closed validator shared by acquisition and verification."""
+
+   _validate_assignment(assignment)
+
+
 def fetch_huggingface_file(
    model_id: str,
    revision: str,

@@ -6,6 +6,49 @@ from dataclasses import dataclass
 from typing import Any
 
 
+GPT2_DECODER_TENSOR_SUFFIXES = (
+   "ln_1.weight",
+   "ln_1.bias",
+   "attn.c_attn.weight",
+   "attn.c_attn.bias",
+   "attn.c_proj.weight",
+   "attn.c_proj.bias",
+   "ln_2.weight",
+   "ln_2.bias",
+   "mlp.c_fc.weight",
+   "mlp.c_fc.bias",
+   "mlp.c_proj.weight",
+   "mlp.c_proj.bias",
+)
+QWEN2_DECODER_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "self_attn.q_proj.weight",
+   "self_attn.q_proj.bias",
+   "self_attn.k_proj.weight",
+   "self_attn.k_proj.bias",
+   "self_attn.v_proj.weight",
+   "self_attn.v_proj.bias",
+   "self_attn.o_proj.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.weight",
+   "mlp.down_proj.weight",
+)
+QWEN3_DECODER_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "self_attn.q_proj.weight",
+   "self_attn.q_norm.weight",
+   "self_attn.k_proj.weight",
+   "self_attn.k_norm.weight",
+   "self_attn.v_proj.weight",
+   "self_attn.o_proj.weight",
+   "post_attention_layernorm.weight",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.weight",
+   "mlp.down_proj.weight",
+)
+
+
 @dataclass(frozen=True)
 class ModelAdapter:
    architecture: str
@@ -15,6 +58,12 @@ class ModelAdapter:
    tied_lm_head_source: tuple[str, ...] = ()
    alternate_block_prefix_templates: tuple[str, ...] = ()
    supported_architectures: tuple[str, ...] = ()
+   decoder_tensor_suffixes: tuple[str, ...] = ()
+   runtime_backends: tuple[str, ...] = ()
+
+   @property
+   def runtime_supported(self) -> bool:
+      return bool(self.decoder_tensor_suffixes and self.runtime_backends)
 
    def layer_count(self, config: dict[str, Any]) -> int:
       for field in self.layer_count_fields:
@@ -65,6 +114,8 @@ ADAPTERS = {
       },
       tied_lm_head_source=("transformer.wte.", "wte."),
       alternate_block_prefix_templates=("h.{layer}.",),
+      decoder_tensor_suffixes=GPT2_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy"),
    ),
    "bloom": ModelAdapter(
       architecture="bloom",
@@ -147,6 +198,14 @@ for _model_type in (
       block_prefix_template="model.layers.{layer}.",
       components=_MODEL_LAYERS_COMPONENTS,
       tied_lm_head_source=("model.embed_tokens.",),
+      decoder_tensor_suffixes=(
+         QWEN2_DECODER_TENSOR_SUFFIXES
+         if _model_type == "qwen2"
+         else QWEN3_DECODER_TENSOR_SUFFIXES
+         if _model_type == "qwen3"
+         else ()
+      ),
+      runtime_backends=("mlx", "numpy") if _model_type in {"qwen2", "qwen3"} else (),
    )
 
 
@@ -155,3 +214,12 @@ def adapter_for_config(config: dict[str, Any]) -> ModelAdapter:
    if not isinstance(model_type, str) or model_type not in ADAPTERS:
       raise ValueError(f"unsupported model_type: {model_type!r}")
    return ADAPTERS[model_type]
+
+
+def adapter_for_runtime(architecture: str) -> ModelAdapter:
+   """Return the one adapter authorized to define runtime tensor ownership."""
+
+   adapter = ADAPTERS.get(architecture)
+   if adapter is None or not adapter.runtime_supported:
+      raise ValueError(f"runtime adapter unavailable: {architecture!r}")
+   return adapter

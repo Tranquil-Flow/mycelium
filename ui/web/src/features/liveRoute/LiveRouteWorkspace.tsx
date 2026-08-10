@@ -16,6 +16,12 @@ import {
 } from './m15Comparison';
 import { M16RuntimePanel } from './M16RuntimePanel';
 import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from './m16Runtime';
+import { M17ModelOperationPanel } from './M17ModelOperationPanel';
+import {
+  HttpM17ModelOperationClient,
+  type M17ModelOperation,
+  type M17ModelOperationClient,
+} from './m17ModelOperation';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -24,24 +30,28 @@ export interface LiveRouteWorkspaceProps {
   readonly client?: LiveRouteStatusClient;
   readonly workloadClient?: M15ComparisonClient;
   readonly runtimeClient?: M16RuntimeClient;
+  readonly modelOperationClient?: M17ModelOperationClient;
 }
 
 function metric(value: number | null, suffix = ' ms'): string {
   return value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
 }
 
-export function LiveRouteWorkspace({ view, qualification, freshness, client, workloadClient, runtimeClient }: LiveRouteWorkspaceProps) {
+export function LiveRouteWorkspace({ view, qualification, freshness, client, workloadClient, runtimeClient, modelOperationClient }: LiveRouteWorkspaceProps) {
   const defaultClient = useMemo(() => new HttpLiveRouteStatusClient(), []);
   const defaultWorkloadClient = useMemo(() => new HttpM15ComparisonClient(), []);
   const defaultRuntimeClient = useMemo(() => new HttpM16RuntimeClient(), []);
+  const defaultModelOperationClient = useMemo(() => new HttpM17ModelOperationClient(), []);
   const source = client ?? defaultClient;
   const workloadSource = workloadClient ?? defaultWorkloadClient;
   const runtimeSource = runtimeClient ?? defaultRuntimeClient;
+  const modelOperationSource = modelOperationClient ?? defaultModelOperationClient;
   const [status, setStatus] = useState<LiveRouteStatus | null>(null);
   const [workloadComparison, setWorkloadComparison] = useState<M15PlanComparison | null>(null);
   const [workloadUnavailable, setWorkloadUnavailable] = useState(false);
   const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [modelOperation, setModelOperation] = useState<M17ModelOperation | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -97,6 +107,15 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       window.clearInterval(timer);
     };
   }, [runtimeSource]);
+
+  useEffect(() => {
+    if (view !== 'plans' && view !== 'readiness' && view !== 'incidents') return;
+    const controller = new AbortController();
+    void modelOperationSource.load(controller.signal)
+      .then(setModelOperation)
+      .catch(() => setModelOperation(null));
+    return () => controller.abort();
+  }, [modelOperationSource, view]);
 
   if (status === null) {
     return (
@@ -155,7 +174,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'plans' ? (
-        <>{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
+        <>{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
           <p>This is observed physical execution, not a modeled alternative.</p>
           <dl className={styles.measurements}>
@@ -171,6 +190,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'readiness' ? (
         <>
+          {modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="readiness" />}
           {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="readiness" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="readiness" />}
           {status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="readiness" />}
@@ -190,7 +210,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'incidents' ? (
-        <>{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
+        <>{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="incidents" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
           <h2 id="live-incidents-title">Physical route incident log</h2>
           {status.counters.fatal === null && status.incidents.length === 0 ? (
             <p>No active physical route incident. All projected peers remain on the qualified topology.</p>

@@ -317,6 +317,7 @@ def _qwen2_block_with_kv(
    config: Mapping[str, Any],
    position: int,
    past: tuple[mx.array, mx.array] | None,
+   architecture: str = "qwen2",
 ) -> tuple[mx.array, tuple[mx.array, mx.array]]:
    n_head = int(config["n_head"])
    n_kv_head = int(config["n_kv_head"])
@@ -329,17 +330,32 @@ def _qwen2_block_with_kv(
    )
    query = _qwen2_linear(
       normalized, tensors[prefix + "self_attn.q_proj.weight"]
-   ) + tensors[prefix + "self_attn.q_proj.bias"]
+   )
    key = _qwen2_linear(
       normalized, tensors[prefix + "self_attn.k_proj.weight"]
-   ) + tensors[prefix + "self_attn.k_proj.bias"]
+   )
    value = _qwen2_linear(
       normalized, tensors[prefix + "self_attn.v_proj.weight"]
-   ) + tensors[prefix + "self_attn.v_proj.bias"]
+   )
+   if architecture == "qwen2":
+      query = query + tensors[prefix + "self_attn.q_proj.bias"]
+      key = key + tensors[prefix + "self_attn.k_proj.bias"]
+      value = value + tensors[prefix + "self_attn.v_proj.bias"]
    batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
    query = query.reshape(batch, sequence, n_head, head_dim).transpose(0, 2, 1, 3)
    key = key.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
    value = value.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+   if architecture == "qwen3":
+      query = _rms_norm(
+         query,
+         tensors[prefix + "self_attn.q_norm.weight"],
+         float(config["rms_norm_epsilon"]),
+      )
+      key = _rms_norm(
+         key,
+         tensors[prefix + "self_attn.k_norm.weight"],
+         float(config["rms_norm_epsilon"]),
+      )
    query, key = _qwen2_rope_at_position(
       query,
       key,
@@ -887,7 +903,7 @@ class MLXRuntimePort:
       tensors = loaded.tensors
       start = stage.layer_range.start_layer
       end = stage.layer_range.end_layer_exclusive
-      if runtime["architecture"] == "qwen2":
+      if runtime["architecture"] in {"qwen2", "qwen3"}:
          if "input_embedding" in stage.component_roles:
             if token_ids is None or hidden_states is not None:
                _reject("entry_stage_requires_token_ids")
@@ -907,6 +923,7 @@ class MLXRuntimePort:
                config,
                position,
                past_layers.get(layer),
+               runtime["architecture"],
             )
             next_layers[layer] = layer_kv
          if "final_norm" in stage.component_roles:

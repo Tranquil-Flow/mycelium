@@ -146,6 +146,9 @@ signed membership + capability + load + directed-link evidence
 
 ### 4.5 Assignment-local artifacts and runtime admission
 
+- Model discovery, compatibility, swarm feasibility, provisioning, loading,
+  qualification, active selection, unavailability, and retirement are distinct
+  states with distinct authorities; discovery never implies readiness.
 - Each node receives only tensors and shared assets authorized for its stage. The
   complete checkpoint is not copied to every peer.
 - Model, revision, manifest, quantization, tensor names/shapes/dtypes/digests,
@@ -155,6 +158,9 @@ signed membership + capability + load + directed-link evidence
   context length, concurrency, KV budget, and power/thermal constraints where the
   device exposes them.
 - A node may be a member without being eligible for activation placement.
+- A model that cannot fit one complete compatible track under declared
+  context/concurrency/headroom is rejected before transfer. The system never silently
+  substitutes a model, quantization, context limit, or peer set.
 
 ### 4.6 Progressive routing and immutable execution
 
@@ -308,16 +314,19 @@ The implementation plan elaborates these gates:
   objectives produce explainable A/B plans.
 - **M16 — Runtime control:** resource admission, progressive prefill, immutable paths,
   bounded batching, QoS, and backpressure work physically.
-- **M17 — Replicated throughput:** data-parallel stage replicas and legal flow tracks
+- **M17 — Multi-model operation:** immutable model catalog, swarm feasibility,
+  assignment-local content-addressed provisioning, qualification, and user selection
+  work for multiple real models while oversized/incompatible models fail before transfer.
+- **M18 — Replicated throughput:** data-parallel stage replicas and legal flow tracks
   improve measured multi-request capacity.
-- **M18 — Recovery:** traffic-aware liveness, scoped replanning, KV standby/replay,
+- **M19 — Recovery:** traffic-aware liveness, scoped replanning, KV standby/replay,
   drain/recovery/circuit-break outcomes work and are replayable.
-- **M19 — Speculative decode:** an optional measured draft/target overlay improves a
+- **M20 — Speculative decode:** an optional measured draft/target overlay improves a
   qualified workload or remains honestly disabled.
-- **M20 — Internet-native heterogeneous swarm:** unified signed membership,
+- **M21 — Internet-native heterogeneous swarm:** unified signed membership,
   EndpointID trust, direct/relay observability, and eligible native peer classes work
   without Tailscale as a product dependency.
-- **M21 — Full product closure:** all rich UI behavior, accessibility, performance,
+- **M22 — Full product closure:** all rich UI behavior, accessibility, performance,
   privacy/security, physical qualification, cold bootstrap, and operator runbooks pass
   as one release gate.
 

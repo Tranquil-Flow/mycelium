@@ -117,12 +117,14 @@ describe('InferenceWorkspace', () => {
       deployments: [
         {
           deployment_id: 'deployment-a', model_id: 'Qwen/Qwen2.5-0.5B-Instruct',
+          model_revision: 'a'.repeat(40),
           quantization: 'int8-weight-only', topology_size: 2, health: 'qualified',
           qualified_at_unix_ms: NOW,
           qualification_id: 'qualification-a',
         },
         {
           deployment_id: 'deployment-b', model_id: 'Qwen/Qwen2.5-1.5B-Instruct',
+          model_revision: 'b'.repeat(40),
           quantization: 'int8-weight-only', topology_size: 2, health: 'qualified',
           qualified_at_unix_ms: NOW + 1,
           qualification_id: 'qualification-b',

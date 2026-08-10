@@ -68,6 +68,7 @@ def test_browser_network_is_confined_to_read_only_source_and_typed_action_client
         (UI_ROOT / "web" / "src" / "features" / "deviceLab" / "deviceLabClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "deploymentClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m17ModelOperation.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
             (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
             (UI_ROOT / "web" / "src" / "features" / "productEvidence" / "source.ts").resolve(),

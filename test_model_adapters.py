@@ -2,9 +2,19 @@
 import unittest
 
 import model_manifest as mm
+from model_adapters import adapter_for_runtime
 
 
 class ModelAdapterFamilyTests(unittest.TestCase):
+   def test_runtime_adapter_is_the_tensor_ownership_authority(self):
+      qwen3 = adapter_for_runtime("qwen3")
+      self.assertEqual(qwen3.block_prefix_template, "model.layers.{layer}.")
+      self.assertIn("self_attn.q_norm.weight", qwen3.decoder_tensor_suffixes)
+      self.assertEqual(qwen3.runtime_backends, ("mlx", "numpy"))
+
+      with self.assertRaisesRegex(ValueError, "runtime adapter unavailable"):
+         adapter_for_runtime("llama")
+
    def compile_family(self, model_type, prefix, config_extra=None):
       config = {"model_type": model_type, "num_hidden_layers": 2}
       if config_extra:

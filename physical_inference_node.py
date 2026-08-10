@@ -15,7 +15,10 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
+import resource
 import select
+import shutil
 import signal
 import stat
 import subprocess
@@ -106,6 +109,161 @@ def _plain_json(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     raise NodeCommandError("nonserializable_observation")
+
+
+def _bounded_command_output(command: list[str]) -> str | None:
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0 or len(completed.stdout) > 64 * 1024:
+        return None
+    return completed.stdout
+
+
+def _host_available_memory_bytes() -> int:
+    if sys.platform.startswith("linux"):
+        try:
+            values = {
+                key.rstrip(":"): int(value) * 1024
+                for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines()
+                if len(parts := line.split()) >= 2
+                for key, value in [parts[:2]]
+                if value.isdigit()
+            }
+        except OSError:
+            values = {}
+        if values.get("MemAvailable", 0) > 0:
+            return values["MemAvailable"]
+    if sys.platform == "darwin":
+        output = _bounded_command_output(["/usr/bin/vm_stat"])
+        if output:
+            page_match = re.search(r"page size of (\d+) bytes", output)
+            page_size = int(page_match.group(1)) if page_match else 4096
+            pages = 0
+            for label in (
+                "Pages free",
+                "Pages inactive",
+                "Pages speculative",
+                "Pages purgeable",
+            ):
+                match = re.search(rf"^{re.escape(label)}:\s+(\d+)\.", output, re.MULTILINE)
+                if match:
+                    pages += int(match.group(1))
+            if pages > 0:
+                return pages * page_size
+    try:
+        return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except (OSError, ValueError):
+        return 0
+
+
+def _process_rss_bytes() -> int:
+    if sys.platform.startswith("linux"):
+        try:
+            resident_pages = int(Path("/proc/self/statm").read_text().split()[1])
+            return resident_pages * int(os.sysconf("SC_PAGE_SIZE"))
+        except (OSError, ValueError, IndexError):
+            pass
+    if sys.platform == "darwin":
+        output = _bounded_command_output(
+            ["/bin/ps", "-o", "rss=", "-p", str(os.getpid())]
+        )
+        if output and output.strip().isdigit():
+            return int(output.strip()) * 1024
+    maximum = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(maximum if sys.platform == "darwin" else maximum * 1024)
+
+
+def _host_swap_used_bytes() -> int:
+    if sys.platform.startswith("linux"):
+        try:
+            values = {
+                key.rstrip(":"): int(value) * 1024
+                for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines()
+                if len(parts := line.split()) >= 2
+                for key, value in [parts[:2]]
+                if value.isdigit()
+            }
+        except OSError:
+            return 0
+        return max(0, values.get("SwapTotal", 0) - values.get("SwapFree", 0))
+    if sys.platform == "darwin":
+        output = _bounded_command_output(["/usr/sbin/sysctl", "-n", "vm.swapusage"])
+        if output:
+            match = re.search(r"used = ([0-9.]+)([MGT])", output)
+            if match:
+                multiplier = {"M": 2**20, "G": 2**30, "T": 2**40}[match.group(2)]
+                return int(float(match.group(1)) * multiplier)
+    return 0
+
+
+def _host_thermal_state() -> str | None:
+    if sys.platform.startswith("linux"):
+        temperatures: list[int] = []
+        for path in Path("/sys/class/thermal").glob("thermal_zone*/temp"):
+            try:
+                temperatures.append(int(path.read_text(encoding="utf-8").strip()))
+            except (OSError, ValueError):
+                continue
+        if temperatures:
+            peak = max(temperatures)
+            if peak >= 95_000:
+                return "critical"
+            if peak >= 85_000:
+                return "serious"
+            return "nominal"
+    return None
+
+
+def _host_power_state() -> str | None:
+    if sys.platform == "darwin":
+        output = _bounded_command_output(["/usr/bin/pmset", "-g", "batt"])
+        if output:
+            charge = re.search(r"(\d+)%", output)
+            if "AC Power" in output:
+                return "external"
+            if charge and int(charge.group(1)) <= 5:
+                return "critical_battery"
+            return "battery"
+    if sys.platform.startswith("linux"):
+        supplies = sorted(Path("/sys/class/power_supply").glob("BAT*"))
+        if supplies:
+            try:
+                capacity = int((supplies[0] / "capacity").read_text().strip())
+                status = (supplies[0] / "status").read_text().strip().lower()
+            except (OSError, ValueError):
+                return None
+            if status in {"charging", "full"}:
+                return "external"
+            return "critical_battery" if capacity <= 5 else "battery"
+    return None
+
+
+def _runtime_build_digest(backend: str) -> str:
+    names = [
+        "physical_inference_node.py",
+        "runtime_loader.py",
+        "model_adapters.py",
+        "numpy_runtime.py",
+        "mycelium_router/mlx_runtime.py" if backend == "mlx" else "mycelium_router/numpy_runtime.py",
+    ]
+    digest = hashlib.sha256()
+    digest.update(sys.version.encode("utf-8"))
+    for name in names:
+        path = Path(__file__).resolve().parent / name
+        digest.update(name.encode("utf-8"))
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"missing")
+    return "sha256:" + digest.hexdigest()
 
 
 def execution_graph_from_document(document: Any) -> ExecutionGraph:
@@ -514,6 +672,7 @@ class PhysicalNodeService:
         self.device_states: PublishedDeviceStateProvider | None = None
         self.capacity: SQLiteQualificationCapacityPort | None = None
         self.runtime: Any = None
+        self.runtime_identity: dict[str, str] | None = None
         self.sidecar: NativeSidecarProcess | None = None
         self.transport: IrohTransport | None = None
         self.router: Router | None = None
@@ -650,6 +809,69 @@ class PhysicalNodeService:
             "signature": self.signer.sign(statement),
             "verification_key": self.signer.public_key_record(),
         }
+
+    def _host_resources(self) -> dict[str, Any]:
+        _require(self.runtime_identity is not None, "runtime_identity_unavailable")
+        runtime_identity = self.runtime_identity
+        backend = runtime_identity["backend"]
+        from model_adapters import ADAPTERS
+
+        supported_architectures = sorted(
+            adapter.architecture
+            for adapter in ADAPTERS.values()
+            if backend in adapter.runtime_backends
+        )
+        supported_dtypes = {"float32", "float16", "bfloat16"}
+        supported_quantizations = {
+            "none",
+            "float32",
+            "float16",
+            "bfloat16",
+            "int8-weight-only",
+        }
+        supported_dtypes.add(runtime_identity["dtype"])
+        supported_quantizations.add(runtime_identity["quantization"])
+        supported_decode_modes = (
+            ["complete_context_replay", "stage_local_kv"]
+            if backend == "mlx"
+            else ["complete_context_replay"]
+        )
+        object_root = self.artifact_root / ".mycelium" / "objects" / "sha256"
+        cached_content_digests = sorted(
+            f"sha256:{path.name}"
+            for path in object_root.iterdir()
+            if path.is_file() and re.fullmatch(r"[0-9a-f]{64}", path.name)
+        ) if object_root.is_dir() else []
+        _require(
+            len(cached_content_digests) <= 4096,
+            "cached_content_digest_limit_exceeded",
+        )
+        disk = shutil.disk_usage(self.artifact_root)
+        now_unix_ms = int(time.time() * 1_000)
+        document: dict[str, Any] = {
+            "protocol": "mycelium.host_resource_snapshot.v1",
+            "observed_at_unix_ms": now_unix_ms,
+            "valid_until_unix_ms": now_unix_ms + 120_000,
+            "backend": backend,
+            "supported_architectures": supported_architectures,
+            "supported_dtypes": sorted(supported_dtypes),
+            "supported_quantizations": sorted(supported_quantizations),
+            "supported_decode_modes": supported_decode_modes,
+            "runtime_build_digest": _runtime_build_digest(backend),
+            "available_memory_bytes": _host_available_memory_bytes(),
+            "rss_bytes": _process_rss_bytes(),
+            "swap_used_bytes": _host_swap_used_bytes(),
+            "disk_free_bytes": disk.free,
+            "disk_total_bytes": disk.total,
+            "cached_content_digests": cached_content_digests,
+            "thermal_state": _host_thermal_state(),
+            "power_state": _host_power_state(),
+            "route_ready": False,
+        }
+        document["resource_digest"] = "sha256:" + hashlib.sha256(
+            canonical_json_bytes(document)
+        ).hexdigest()
+        return document
 
     def _new_sidecar_process(self) -> NativeSidecarProcess:
         return NativeSidecarProcess(
@@ -878,6 +1100,7 @@ class PhysicalNodeService:
         report: dict[str, Any] | None = None
         pixel_stage: Any = None
         parent_assignment_digest: str | None = None
+        loaded_runtime_identity: dict[str, str]
         if "pixel_stage_pack_file" in data:
             from layer_assignment import (
                 LAYER_ASSIGNMENT_PROTOCOL,
@@ -918,6 +1141,12 @@ class PhysicalNodeService:
                 canonical_json_bytes(assignment)
             ).hexdigest()
             stage_pack_digest = pixel_pack["pack_digest"]
+            loaded_runtime_identity = {
+                "backend": "pixel-stdlib",
+                "dtype": "float32",
+                "quantization": "none",
+                "architecture": "pixel_stage",
+            }
         elif "stage_pack_file" in data:
             from stage_pack import artifact_report_for_loader, verify_stage_pack
 
@@ -979,6 +1208,20 @@ class PhysicalNodeService:
                 == placement.load_proof_digest,
                 "placement_load_proof_mismatch",
             )
+            proof_runtime_identity = load_proof_document.get("runtime_identity")
+            _require(
+                isinstance(proof_runtime_identity, dict)
+                and all(
+                    isinstance(proof_runtime_identity.get(field), str)
+                    and bool(proof_runtime_identity[field])
+                    for field in ("backend", "dtype", "quantization", "architecture")
+                ),
+                "invalid_runtime_identity",
+            )
+            loaded_runtime_identity = {
+                field: proof_runtime_identity[field]
+                for field in ("backend", "dtype", "quantization", "architecture")
+            }
         topology = PublishedTopologyProvider(graph)
         device_provider = PublishedDeviceStateProvider(topology, states)
         capacity = SQLiteQualificationCapacityPort(
@@ -1009,6 +1252,7 @@ class PhysicalNodeService:
         self.device_states = device_provider
         self.capacity = capacity
         self.runtime = runtime
+        self.runtime_identity = loaded_runtime_identity
         self.sidecar = sidecar
         self.endpoint_id = ready["endpoint_id"]
         self.endpoint_addr = ready["endpoint_addr"]
@@ -1146,6 +1390,7 @@ class PhysicalNodeService:
         details: dict[str, Any] = {
             "runtime": self.runtime.kv_snapshot(),
             "capacity": None if self.capacity is None else _plain_json(self.capacity.snapshot()),
+            "host_resources": self._host_resources(),
             "transport": None,
         }
         if self.transport is not None:

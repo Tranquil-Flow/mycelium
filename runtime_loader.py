@@ -29,7 +29,7 @@ from typing import Any, BinaryIO, Mapping, NoReturn
 import numpy as np
 
 from layer_assignment import validate_assignment_identity
-from model_adapters import ADAPTERS
+from model_adapters import adapter_for_runtime
 from numpy_runtime import (
     NumpyRuntimeError,
     NumpyStageBackend,
@@ -38,8 +38,6 @@ from numpy_runtime import (
     quantize_qwen2_numpy_tensors,
 )
 from runtime_contracts import (
-    GPT2_DECODER_TENSOR_SUFFIXES,
-    QWEN2_DECODER_TENSOR_SUFFIXES,
     SUPPORTED_NUMPY_DTYPES,
     validate_assignment_stage_boundaries,
     validate_loaded_stage_authentication,
@@ -264,7 +262,10 @@ def _validate_range_and_prefixes(
         isinstance(value, str) and value for value in prefixes
     ):
         raise _fail("assignment expected tensor prefixes are invalid")
-    adapter = ADAPTERS[architecture]
+    try:
+        adapter = adapter_for_runtime(architecture)
+    except ValueError as exc:
+        raise _fail("runtime architecture adapter unavailable") from exc
     candidates = (
         adapter.block_prefix_template,
         *adapter.alternate_block_prefix_templates,
@@ -387,11 +388,11 @@ def _validate_component_ownership(
             raise _fail(f"duplicate tensor ownership without an explicit alias: {key}")
 
     decoder_keys = component_keys["decoder"]
-    suffixes = (
-        GPT2_DECODER_TENSOR_SUFFIXES
-        if architecture == "gpt2"
-        else QWEN2_DECODER_TENSOR_SUFFIXES
-    )
+    try:
+        adapter = adapter_for_runtime(architecture)
+    except ValueError as exc:
+        raise _fail("runtime architecture adapter unavailable") from exc
+    suffixes = adapter.decoder_tensor_suffixes
     expected_decoder_keys = sorted(
         prefix + suffix for prefix in prefixes for suffix in suffixes
     )
@@ -1008,20 +1009,32 @@ def _validate_qwen2_shapes(
     kv_hidden = config["n_kv_head"] * config["head_dim"]
     if "input_embedding" in components:
         _expect_shape(tensors, "model.embed_tokens.weight", (config["vocab_size"], hidden))
-    suffix_shapes = {
+    suffix_shapes: dict[str, tuple[int, ...]] = {
         "input_layernorm.weight": (hidden,),
         "self_attn.q_proj.weight": (hidden, hidden),
-        "self_attn.q_proj.bias": (hidden,),
         "self_attn.k_proj.weight": (kv_hidden, hidden),
-        "self_attn.k_proj.bias": (kv_hidden,),
         "self_attn.v_proj.weight": (kv_hidden, hidden),
-        "self_attn.v_proj.bias": (kv_hidden,),
         "self_attn.o_proj.weight": (hidden, hidden),
         "post_attention_layernorm.weight": (hidden,),
         "mlp.gate_proj.weight": (inner, hidden),
         "mlp.up_proj.weight": (inner, hidden),
         "mlp.down_proj.weight": (hidden, inner),
     }
+    if runtime["architecture"] == "qwen2":
+        suffix_shapes.update(
+            {
+                "self_attn.q_proj.bias": (hidden,),
+                "self_attn.k_proj.bias": (kv_hidden,),
+                "self_attn.v_proj.bias": (kv_hidden,),
+            }
+        )
+    else:
+        suffix_shapes.update(
+            {
+                "self_attn.q_norm.weight": (config["head_dim"],),
+                "self_attn.k_norm.weight": (config["head_dim"],),
+            }
+        )
     for layer in range(start, end):
         prefix = f"model.layers.{layer}."
         for suffix, shape in suffix_shapes.items():
@@ -1196,6 +1209,7 @@ def _qwen2_block(
     prefix: str,
     config: Mapping[str, Any],
     mx: Any,
+    architecture: str = "qwen2",
 ) -> Any:
     n_head = int(config["n_head"])
     n_kv_head = int(config["n_kv_head"])
@@ -1208,15 +1222,29 @@ def _qwen2_block(
         mx,
     )
     query = _qwen2_linear(normalized, tensors[prefix + "self_attn.q_proj.weight"], mx)
-    query = query + tensors[prefix + "self_attn.q_proj.bias"]
     key = _qwen2_linear(normalized, tensors[prefix + "self_attn.k_proj.weight"], mx)
-    key = key + tensors[prefix + "self_attn.k_proj.bias"]
     value = _qwen2_linear(normalized, tensors[prefix + "self_attn.v_proj.weight"], mx)
-    value = value + tensors[prefix + "self_attn.v_proj.bias"]
+    if architecture == "qwen2":
+        query = query + tensors[prefix + "self_attn.q_proj.bias"]
+        key = key + tensors[prefix + "self_attn.k_proj.bias"]
+        value = value + tensors[prefix + "self_attn.v_proj.bias"]
     batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
     query = query.reshape(batch, sequence, n_head, head_dim).transpose(0, 2, 1, 3)
     key = key.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
     value = value.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+    if architecture == "qwen3":
+        query = _rms_norm(
+            query,
+            tensors[prefix + "self_attn.q_norm.weight"],
+            float(config["rms_norm_epsilon"]),
+            mx,
+        )
+        key = _rms_norm(
+            key,
+            tensors[prefix + "self_attn.k_norm.weight"],
+            float(config["rms_norm_epsilon"]),
+            mx,
+        )
     query, key = _qwen2_rope(query, key, float(config["rope_theta"]), mx)
     repeats = n_head // n_kv_head
     key = mx.repeat(key, repeats, axis=1)
@@ -1329,7 +1357,12 @@ def _run_qwen2_probe(
         ).astype(_runtime_dtypes()[runtime["dtype"]])
     for layer in range(start, end):
         hidden = _qwen2_block(
-            hidden, tensors, f"model.layers.{layer}.", config, mx
+            hidden,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            mx,
+            runtime["architecture"],
         )
     if "final_norm" in components:
         hidden = _rms_norm(
@@ -1445,7 +1478,7 @@ def execute_loaded_stage(
     transformer_key = f"transformer.h.{start}.ln_1.weight"
     plain_key = f"h.{start}.ln_1.weight"
     qwen_key = f"model.layers.{start}.input_layernorm.weight"
-    if runtime["architecture"] == "qwen2" and qwen_key in tensors:
+    if runtime["architecture"] in {"qwen2", "qwen3"} and qwen_key in tensors:
         namespace = "model."
     elif transformer_key in tensors and plain_key not in tensors:
         namespace = "transformer."
@@ -1502,7 +1535,7 @@ def execute_loaded_stage(
             or not bool(mx.all(token_ids < config["vocab_size"]).item())
         ):
             reject("token_bounds_exceeded")
-        if runtime["architecture"] == "qwen2":
+        if runtime["architecture"] in {"qwen2", "qwen3"}:
             hidden = _qwen2_embedding(
                 tensors["model.embed_tokens.weight"], token_ids, mx
             )
@@ -1534,9 +1567,14 @@ def execute_loaded_stage(
     if not bool(mx.all(mx.isfinite(hidden)).item()):
         reject("nonfinite_hidden_states")
     for layer in range(start, end):
-        if runtime["architecture"] == "qwen2":
+        if runtime["architecture"] in {"qwen2", "qwen3"}:
             hidden = _qwen2_block(
-                hidden, tensors, f"model.layers.{layer}.", config, mx
+                hidden,
+                tensors,
+                f"model.layers.{layer}.",
+                config,
+                mx,
+                runtime["architecture"],
             )
         else:
             hidden = _gpt2_block(
@@ -1548,7 +1586,7 @@ def execute_loaded_stage(
                 mx,
             )
     if "final_norm" in components:
-        if runtime["architecture"] == "qwen2":
+        if runtime["architecture"] in {"qwen2", "qwen3"}:
             hidden = _rms_norm(
                 hidden,
                 tensors["model.norm.weight"],
@@ -1579,7 +1617,7 @@ def execute_loaded_stage(
             reject("invalid_loaded_stage_aliases")
         hidden = (
             _qwen2_linear(hidden, tensors[head_keys[0]], mx)
-            if runtime["architecture"] == "qwen2"
+            if runtime["architecture"] in {"qwen2", "qwen3"}
             else mx.matmul(hidden, tensors[head_keys[0]].transpose(1, 0))
         )
     mx.eval(hidden)
@@ -1657,7 +1695,7 @@ def _digest_probe_output(array: Any, runtime: Mapping[str, Any]) -> str:
     every probe position instead of raw floating-point bytes.
     """
 
-    if runtime["architecture"] != "qwen2" or runtime["backend"] != "numpy":
+    if runtime["architecture"] not in {"qwen2", "qwen3"} or runtime["backend"] != "numpy":
         return _digest_array(array)
     values = np.asarray(array)
     top_count = min(8, values.shape[-1])
@@ -1799,7 +1837,7 @@ def load_assignment_stage(
             runtime["backend"],
         )
         if (
-            runtime["architecture"] == "qwen2"
+            runtime["architecture"] in {"qwen2", "qwen3"}
             and runtime["quantization"] == "int8-weight-only"
         ):
             tensors = (
@@ -1808,7 +1846,7 @@ def load_assignment_stage(
                 else quantize_qwen2_numpy_tensors(tensors)
             )
         components = list(assignment["components"])
-        if runtime["architecture"] == "qwen2":
+        if runtime["architecture"] in {"qwen2", "qwen3"}:
             _validate_qwen2_shapes(
                 tensors, runtime, start, end, components, aliases
             )
@@ -1847,7 +1885,7 @@ def load_assignment_stage(
         )
         runtime_identity = _actual_runtime_identity(runtime)
         if runtime["backend"] == _MLX_RUNTIME_BACKEND:
-            if runtime["architecture"] == "qwen2":
+            if runtime["architecture"] in {"qwen2", "qwen3"}:
                 probe_output = _run_qwen2_probe(
                     tensors, runtime, start, end, components, aliases
                 )

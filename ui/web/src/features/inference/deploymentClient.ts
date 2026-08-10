@@ -1,6 +1,7 @@
 export interface QualifiedDeploymentSummary {
   readonly deployment_id: string;
   readonly model_id: string;
+  readonly model_revision: string;
   readonly quantization: string;
   readonly topology_size: number;
   readonly health: 'qualified' | 'unavailable';
@@ -34,9 +35,10 @@ function decode(value: unknown): DeploymentRegistryStatus {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) throw new Error('invalid_registry');
     const record = item as Record<string, unknown>;
     if (
-      Object.keys(record).sort().join(',') !== 'deployment_id,health,model_id,qualification_id,qualified_at_unix_ms,quantization,topology_size' ||
+      Object.keys(record).sort().join(',') !== 'deployment_id,health,model_id,model_revision,qualification_id,qualified_at_unix_ms,quantization,topology_size' ||
       typeof record.deployment_id !== 'string' ||
       typeof record.model_id !== 'string' ||
+      !/^[0-9a-f]{40}$/.test(String(record.model_revision)) ||
       typeof record.quantization !== 'string' ||
       !Number.isSafeInteger(record.topology_size) ||
       (record.health !== 'qualified' && record.health !== 'unavailable') ||

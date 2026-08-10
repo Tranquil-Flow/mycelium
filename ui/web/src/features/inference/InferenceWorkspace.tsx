@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import {
   MAX_NEW_TOKENS,
   MAX_PROMPT_UTF8_BYTES,
@@ -23,6 +23,7 @@ import {
 } from '../liveRoute/m15Comparison';
 import { loadProductSettings } from '../settings/SettingsContext';
 import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from '../liveRoute/m16Runtime';
+import { M17ModelOperationSourcePanel } from '../liveRoute/M17ModelOperationSourcePanel';
 
 const encoder = new TextEncoder();
 const activeModelDisplay = Object.freeze({
@@ -192,7 +193,7 @@ export function InferenceWorkspace({
     (request) => request.request_id === session.accepted_request?.request_id,
   ) ?? null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     effectiveSessionStore?.save({
       prompt,
       max_new_tokens: maxNewTokens,
@@ -375,7 +376,7 @@ export function InferenceWorkspace({
                 {deploymentRegistry !== null
                   ? deploymentRegistry.deployments.map((item) => (
                       <option key={item.deployment_id} value={item.deployment_id} disabled={item.health !== 'qualified'}>
-                        {item.model_id} · {item.quantization} · {item.topology_size} stages
+                        {item.model_id} · {item.model_revision.slice(0, 8)} · {item.quantization} · {item.topology_size} stages
                       </option>
                     ))
                   : qualification !== null
@@ -497,6 +498,8 @@ export function InferenceWorkspace({
           </dl>
         </aside>
       </div>
+
+      {client === undefined ? <M17ModelOperationSourcePanel view="inference" /> : null}
 
       <section className={styles.outputPanel} aria-labelledby="output-title">
         <div className={styles.sectionHeading}>

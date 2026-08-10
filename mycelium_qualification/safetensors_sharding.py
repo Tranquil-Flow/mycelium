@@ -242,14 +242,14 @@ def shard_qwen2_checkpoint(
     shard_count: int,
     layer_ranges: Sequence[range] | None = None,
 ) -> dict[str, Any]:
-    """Copy a pinned Qwen2 checkpoint into one static and N layer-only shards."""
+    """Copy a pinned dense Qwen2/Qwen3 checkpoint into static and layer shards."""
 
     source_root = Path(source_root).resolve(strict=True)
     destination_root = Path(destination_root)
     if destination_root.exists():
         _reject("stage_shard_destination_exists")
     config = _load_json(source_root / "config.json")
-    if config.get("model_type") != "qwen2":
+    if config.get("model_type") not in {"qwen2", "qwen3"}:
         _reject("stage_shard_architecture_unsupported")
     num_layers = config.get("num_hidden_layers")
     if not isinstance(num_layers, int) or isinstance(num_layers, bool):

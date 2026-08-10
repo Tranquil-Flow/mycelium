@@ -1,8 +1,10 @@
 from collections import deque
 import threading
+from types import SimpleNamespace
 
 import pytest
 
+import mycelium_live.route as live_route_module
 from mycelium_live.route import FakeLiveRoute, PhysicalLiveRoute
 
 
@@ -79,6 +81,29 @@ def test_close_makes_route_permanently_not_alive():
     route = FakeLiveRoute(scripted_tokens=(1,))
     route.open()
     route.close()
+
+
+def test_physical_route_initializes_optional_public_projections(monkeypatch) -> None:
+    graph = SimpleNamespace(topology_version=1)
+    monkeypatch.setattr(
+        live_route_module,
+        "execution_graph_from_document",
+        lambda _document: graph,
+    )
+    route = PhysicalLiveRoute(
+        controller=SimpleNamespace(peers=()),
+        endpoints={},
+        run_plan={
+            "nodes": [
+                {"node_id": "node-0", "configure": {"graph": {}}},
+            ],
+        },
+    )
+
+    assert route._placement_projection is None
+    assert route._topology_projection is None
+    assert route._workload_comparison is None
+    assert route._model_operation is None
     assert route.is_alive() is False
     route.close()
 
