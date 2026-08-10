@@ -2,8 +2,11 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { LiveRouteWorkspace } from './LiveRouteWorkspace';
 import { liveRouteStatusFixture } from './routeStatusTestFixture';
+import m15Fixture from '../../../../../contracts/compatibility-fixtures/m15-plan-comparison-v1.json';
+import { decodeM15PlanComparison } from './m15Comparison';
 
 const client = { load: async () => liveRouteStatusFixture() };
+const workloadClient = { load: async () => decodeM15PlanComparison(structuredClone(m15Fixture)) };
 
 describe('LiveRouteWorkspace', () => {
   it('renders the ordered physical graph and per-peer counter delta', async () => {
@@ -29,11 +32,13 @@ describe('LiveRouteWorkspace', () => {
         qualification={null}
         freshness="current"
         client={client}
+        workloadClient={workloadClient}
       />,
     );
 
     expect(await screen.findByText('Qualified deployment measurement')).toBeInTheDocument();
     expect(screen.getByText(/observed physical execution/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Workload-aware plan frontier/i })).toBeInTheDocument();
     expect(screen.getByText('140.0 ms')).toBeInTheDocument();
     expect(screen.getByText('25.0 ms')).toBeInTheDocument();
   });

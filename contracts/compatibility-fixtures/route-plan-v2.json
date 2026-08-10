@@ -77,20 +77,32 @@
     "scenarios": [
       {
         "confidence": 1.0,
+        "decode_compute_ms": 40.29584,
         "decode_payload_bytes": 256,
+        "decode_transfer_ms": 1.4027200000000002,
+        "expected_response_ms": 9006.641439999998,
         "name": "interactive-c1",
         "output_goodput_tps": 23.981643490806402,
+        "prefill_compute_ms": 40.57184,
         "prefill_payload_bytes": 17920,
+        "prefill_transfer_ms": 0.8792,
+        "required_memory_bytes": 240291840.0,
         "single_request_tps": 23.981643490806402,
         "tpot_ms": 41.69855999999999,
         "ttft_ms": 41.45104
       },
       {
         "confidence": 1.0,
+        "decode_compute_ms": 41.17136,
         "decode_payload_bytes": 256,
+        "decode_transfer_ms": 1.4027200000000002,
+        "expected_response_ms": 9195.753759999998,
         "name": "interactive-c4",
         "output_goodput_tps": 48.57745772789629,
+        "prefill_compute_ms": 41.44736,
         "prefill_payload_bytes": 17920,
+        "prefill_transfer_ms": 0.8792,
+        "required_memory_bytes": 241167360.0,
         "single_request_tps": 23.48846997985629,
         "tpot_ms": 42.574079999999995,
         "ttft_ms": 42.32656

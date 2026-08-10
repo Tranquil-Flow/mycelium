@@ -46,6 +46,8 @@ from mycelium_layer_planner.gossip_adapter import (
 )
 from mycelium_layer_planner.planner import plan_snapshot
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
+from mycelium_layer_planner.workload import empirical_interactive_chat, sustained_batch
+from mycelium_layer_planner.workload_intelligence import attach_m15_observations, build_m15_plan_comparison
 from mycelium_layer_planner.replan_simulator import simulate_bundle
 from mycelium_layer_planner.serialization import route_plan_to_dict
 from mycelium_membership import (
@@ -64,7 +66,7 @@ from mycelium_membership import (
     sign_membership_message,
     validate_membership_message,
 )
-from mycelium_performance_budget import validate_performance_budget
+from mycelium_performance_budget import validate_performance_budget, validate_performance_budget_v2
 from mycelium_product_spine import (
     ENTITY_KINDS,
     validate_product_event,
@@ -966,6 +968,30 @@ def performance_budget() -> dict[str, Any]:
     )
 
 
+def performance_budget_v2() -> dict[str, Any]:
+    return validate_performance_budget_v2(
+        {
+            "protocol": "mycelium.performance_budget.v2",
+            "budget_id": "m15-interactive-sequential-v1",
+            "profile_id": "interactive_chat_v1",
+            "minimum_sample_size": 1,
+            "ttft_ms_maximum": 5_000.0,
+            "tpot_ms_maximum": 2_000.0,
+            "minimum_output_tokens_per_second": 0.5,
+            "maximum_frames_per_request": 64,
+            "maximum_relative_model_error": {"ttft": 1.0, "tpot": 1.0, "throughput": 1.0},
+            "execution_scope": "sequential_observed",
+            "peak_memory_budget_state": "approved_exclusion",
+            "energy_thermal_budget_state": "approved_exclusion",
+            "reconnect_budget_state": "approved_exclusion",
+            "queueing_budget_state": "deferred_to_m16",
+            "admission_latency_budget_state": "deferred_to_m16",
+            "concurrency_budget_state": "deferred_to_m16",
+            "batch_shape_budget_state": "deferred_to_m16",
+        }
+    )
+
+
 def assignment_cache_status() -> dict[str, Any]:
     return validate_cache_status(
         {
@@ -1150,6 +1176,42 @@ def m14_topology_projection() -> dict[str, Any]:
         promotion=None,
         exclusions=("path_transition_not_observed_within_budget",),
     )
+
+
+def m15_plan_comparison() -> dict[str, Any]:
+    snapshot = planner_snapshot()
+    snapshot["evidence_bundle_digest"] = "sha256:" + "f" * 64
+    profiles = (
+        empirical_interactive_chat(concurrency_points=(1, 4)),
+        sustained_batch(concurrency_points=(1, 4)),
+    )
+    projected = build_m15_plan_comparison(
+        snapshot,
+        profiles,
+    )
+    budgets = []
+    observations = []
+    for index, profile in enumerate(profiles):
+        budget = performance_budget_v2()
+        budget["budget_id"] = f"m15-{profile.name}-fixture"
+        budget["profile_id"] = profile.name
+        budget["maximum_relative_model_error"] = {"ttft": 100.0, "tpot": 100.0, "throughput": 100.0}
+        budgets.append(budget)
+        observations.append(
+            {
+                "profile_id": profile.name,
+                "request_id": f"request-{profile.name}-fixture",
+                "context_tokens": 72 + index,
+                "output_tokens": 8,
+                "runtime_backends": ["fixture"],
+                "topology_version": 1,
+                "placement": [{"node_id": "node-a", "start": 0, "end": 24}],
+                "counters_before": {"frames_sent": index * 20, "frames_received": index * 20, "applied_operation_count": index * 18},
+                "counters_after": {"frames_sent": (index + 1) * 20, "frames_received": (index + 1) * 20, "applied_operation_count": (index + 1) * 18},
+                "observed": {"ttft_ms": 1_000.0, "tpot_ms": 500.0, "output_goodput_tps": 2.0},
+            }
+        )
+    return attach_m15_observations(projected, snapshot, budgets, observations)
 
 
 def product_snapshot() -> dict[str, Any]:
@@ -1611,12 +1673,14 @@ def documents() -> dict[str, dict[str, Any]]:
         "product-ui-swarm-v1.json": product_swarm_status(),
         "live-route-incident-v1.json": live_route_incident(),
         "performance-budget-v1.json": performance_budget(),
+        "performance-budget-v2.json": performance_budget_v2(),
         "assignment-artifact-cache-v1.json": assignment_cache_status(),
         "assignment-materialization-v1.json": assignment_materialization(),
         "candidate-promotion-report-v1.json": candidate_promotion_report(),
         "m13-placement-projection-v1.json": m13_placement_projection(),
         "transport-path-observation-v1.json": transport_path_observation(),
         "m14-topology-projection-v1.json": m14_topology_projection(),
+        "m15-plan-comparison-v1.json": m15_plan_comparison(),
         "product-snapshot-v1.json": product_snapshot(),
         "product-event-v1.json": product_event(),
         "execution-graph-v1.json": graph,

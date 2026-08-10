@@ -13,6 +13,7 @@ from mycelium_live.route import FakeLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
     LiveObservatoryApplication,
     _placement_projection,
+    _workload_comparison,
     _qualify_open_route,
     _validate_route_identity,
     build_live_stack,
@@ -424,3 +425,22 @@ def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     target.symlink_to(fixture)
     with pytest.raises(ValueError, match="unsafe"):
         _placement_projection(tmp_path)
+
+
+def test_optional_m15_comparison_loader_fails_closed(tmp_path: Path) -> None:
+    assert _workload_comparison(tmp_path) is None
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "compatibility-fixtures"
+        / "m15-plan-comparison-v1.json"
+    )
+    target = tmp_path / "m15-plan-comparison.json"
+    target.write_bytes(fixture.read_bytes())
+
+    assert _workload_comparison(tmp_path)["protocol"] == "mycelium.m15_plan_comparison.v1"
+
+    target.unlink()
+    target.symlink_to(fixture)
+    with pytest.raises(ValueError, match="unsafe"):
+        _workload_comparison(tmp_path)

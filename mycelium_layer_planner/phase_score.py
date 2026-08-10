@@ -17,7 +17,9 @@ class PhaseScore:
     tpot_ms: float
     single_request_tps: float
     output_goodput_tps: float
+    prefill_compute_ms: float
     prefill_network_ms: float
+    decode_compute_ms: float
     decode_network_ms: float
     prefill_loopback_ms: float
     decode_loopback_ms: float
@@ -25,6 +27,7 @@ class PhaseScore:
     prefill_payload_bytes: int
     decode_payload_bytes: int
     expected_response_ms: float
+    required_memory_bytes: float
     confidence: float
 
 
@@ -96,7 +99,9 @@ def score_phases(
         tpot_ms=tpot,
         single_request_tps=single_tps,
         output_goodput_tps=goodput,
+        prefill_compute_ms=prefill_compute,
         prefill_network_ms=prefill_network,
+        decode_compute_ms=decode_compute,
         decode_network_ms=decode_network,
         prefill_loopback_ms=0.0,
         decode_loopback_ms=decode_loopback,
@@ -104,5 +109,6 @@ def score_phases(
         prefill_payload_bytes=prefill_payload,
         decode_payload_bytes=decode_payload,
         expected_response_ms=expected_response_ms(ttft, tpot, workload.output_tokens),
+        required_memory_bytes=sum(stage.cost.required_memory_bytes for stage in stages),
         confidence=min(confidences),
     )

@@ -267,6 +267,11 @@ CONTRACT_SPECS = (
         ("mycelium_performance_budget.py",),
     ),
     ContractSpec(
+        "performance-budget-v2.json",
+        "mycelium.performance_budget.v2",
+        ("mycelium_performance_budget.py", "mycelium_layer_planner/workload_intelligence.py"),
+    ),
+    ContractSpec(
         "assignment-artifact-cache-v1.json",
         "mycelium.assignment_artifact_cache.v1",
         ("mycelium_assignment_cache.py",),
@@ -306,6 +311,15 @@ CONTRACT_SPECS = (
             "mycelium_topology_evidence.py",
             "ui/web/src/features/liveRoute/routeStatus.ts",
             "ui/web/src/features/liveRoute/M14TopologyPanel.tsx",
+        ),
+    ),
+    ContractSpec(
+        "m15-plan-comparison-v1.json",
+        "mycelium.m15_plan_comparison.v1",
+        (
+            "mycelium_layer_planner/workload_intelligence.py",
+            "ui/web/src/features/liveRoute/m15Comparison.ts",
+            "ui/web/src/features/liveRoute/M15WorkloadPanel.tsx",
         ),
     ),
     ContractSpec(

@@ -134,8 +134,14 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             "tpot_ms": score.tpot_ms,
             "single_request_tps": score.single_request_tps,
             "output_goodput_tps": score.output_goodput_tps,
+            "prefill_compute_ms": score.prefill_compute_ms,
+            "prefill_transfer_ms": score.prefill_network_ms,
+            "decode_compute_ms": score.decode_compute_ms,
+            "decode_transfer_ms": score.decode_network_ms + score.decode_loopback_ms,
             "prefill_payload_bytes": score.prefill_payload_bytes,
             "decode_payload_bytes": score.decode_payload_bytes,
+            "expected_response_ms": score.expected_response_ms,
+            "required_memory_bytes": score.required_memory_bytes,
             "confidence": score.confidence,
         }
         for score in primary.scenario_scores

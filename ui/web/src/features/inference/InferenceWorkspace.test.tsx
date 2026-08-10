@@ -16,6 +16,8 @@ import type {
   DeploymentRegistryClient,
   DeploymentRegistryStatus,
 } from './deploymentClient';
+import m15Fixture from '../../../../../contracts/compatibility-fixtures/m15-plan-comparison-v1.json';
+import { decodeM15PlanComparison } from '../liveRoute/m15Comparison';
 
 const NOW = 1_800_000_000_000;
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -250,6 +252,31 @@ describe('InferenceWorkspace', () => {
     expect(activity).toHaveTextContent('Distributed prefill and first-token decode');
     expect(activity).toHaveTextContent('per-stage timing is not currently exposed');
     rendered.unmount();
+  });
+
+  it('attributes history to the selected M15 workload, QoS, and robust policy', async () => {
+    const client = new WorkspaceClient(qualification(true));
+    client.streams.push([
+      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 0, type: 'accepted' },
+      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 1, type: 'token', token_index: 0, text: 'batch output' },
+      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 2, type: 'completed' },
+    ]);
+    render(
+      <InferenceWorkspace
+        client={client}
+        workloadClient={{ load: async () => decodeM15PlanComparison(structuredClone(m15Fixture)) }}
+        now={() => NOW + 1}
+      />,
+    );
+    const workload = await screen.findByLabelText('Workload and QoS policy');
+    fireEvent.change(workload, { target: { value: 'sustained_batch_v1' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'batch-attributed prompt' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start inference' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Start inference' }));
+
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Completed'));
+    expect(screen.getByRole('cell', { name: 'sustained_batch_v1 · batch · balanced' })).toBeVisible();
+    expect(window.sessionStorage.getItem('mycelium.inference.tab-session.v1')).toContain('sustained_batch_v1');
   });
 
   it('restores completed output and history after the workspace is remounted', async () => {

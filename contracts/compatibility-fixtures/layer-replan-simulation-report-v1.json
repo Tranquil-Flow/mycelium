@@ -1,5 +1,5 @@
 {
-  "base_plan_digest": "sha256:9927e3943b56c705badddc283c7f852ad941e18716bcedb0d4af2ea2a72c680d",
+  "base_plan_digest": "sha256:66b53aa1e212495482b92e09b825eb975d0acdb56a379987051c02ed681f8bd6",
   "cases": [
     {
       "action": "existing_track_intent",
@@ -162,20 +162,32 @@
           "scenarios": [
             {
               "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
               "decode_payload_bytes": 256,
+              "decode_transfer_ms": 7.307840000000001,
+              "expected_response_ms": 1591.4282,
               "name": "interactive-c1",
               "output_goodput_tps": 135.85406013444117,
+              "prefill_compute_ms": 3.71,
               "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 5.1376,
+              "required_memory_bytes": 240291840.0,
               "single_request_tps": 135.85406013444117,
               "tpot_ms": 7.3608400000000005,
               "ttft_ms": 8.8476
             },
             {
               "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
               "decode_payload_bytes": 256,
+              "decode_transfer_ms": 7.307840000000001,
+              "expected_response_ms": 1591.4282,
               "name": "interactive-c4",
               "output_goodput_tps": 370.3484237971083,
+              "prefill_compute_ms": 3.71,
               "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 5.1376,
+              "required_memory_bytes": 241167360.0,
               "single_request_tps": 135.85406013444117,
               "tpot_ms": 7.3608400000000005,
               "ttft_ms": 8.8476
@@ -264,7 +276,7 @@
         "snapshot_digest": "sha256:c95c059ae9aa4cae688eeb0741bf26d400f292d55197e8d7e2b69a329d4bb89a",
         "workload_name": "interactive_chat_v1"
       },
-      "candidate_plan_digest": "sha256:f1caa3457123025c3254c4298685701f6dfc08ca3f5167ca718f8d2ddb3ef447",
+      "candidate_plan_digest": "sha256:8e45f6ee62849a2d9d07bec74a70538f5deeb58a2c49a3c5a1ceb00803481ada",
       "capacity_gain_fraction": -0.2935344152794448,
       "escalation_order": [
         "successor_standby_candidate",
@@ -461,20 +473,32 @@
           "scenarios": [
             {
               "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
               "decode_payload_bytes": 256,
+              "decode_transfer_ms": 5.807840000000001,
+              "expected_response_ms": 1267.9282,
               "name": "interactive-c1",
               "output_goodput_tps": 170.62400611516438,
+              "prefill_compute_ms": 3.71,
               "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 4.1376,
+              "required_memory_bytes": 240291840.0,
               "single_request_tps": 170.62400611516438,
               "tpot_ms": 5.86084,
               "ttft_ms": 7.8476
             },
             {
               "confidence": 1.0,
+              "decode_compute_ms": 0.053000000000000005,
               "decode_payload_bytes": 256,
+              "decode_transfer_ms": 5.807840000000001,
+              "expected_response_ms": 1267.9282,
               "name": "interactive-c4",
               "output_goodput_tps": 454.51239909824733,
+              "prefill_compute_ms": 3.71,
               "prefill_payload_bytes": 17920,
+              "prefill_transfer_ms": 4.1376,
+              "required_memory_bytes": 241167360.0,
               "single_request_tps": 170.62400611516438,
               "tpot_ms": 5.86084,
               "ttft_ms": 7.8476
@@ -574,7 +598,7 @@
         "snapshot_digest": "sha256:2452db9c216eae5b9df44198a521cbe71cb823ea32879001ff82b056ec01bbbc",
         "workload_name": "interactive_chat_v1"
       },
-      "candidate_plan_digest": "sha256:0830ad92306f458a119f2ded8d598a2f3e56738a1ed75afd790acfcef4c42f71",
+      "candidate_plan_digest": "sha256:84ac3bba8f51f4c4a5de936d8c6cb4577e933265a138a4332f5f90ffa79ac582",
       "capacity_gain_fraction": 0.7108555541513963,
       "escalation_order": [
         "full_replan"

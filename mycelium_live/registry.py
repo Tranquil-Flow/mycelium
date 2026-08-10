@@ -34,6 +34,7 @@ class QualifiedDeploymentRuntime:
     qualification: Any
     placement_projection: Mapping[str, Any] | None = None
     topology_projection: Mapping[str, Any] | None = None
+    workload_comparison: Mapping[str, Any] | None = None
 
 
 class LiveDeploymentRegistry:
@@ -535,6 +536,12 @@ class LiveDeploymentRegistry:
                 *incidents,
             ][-64:]
             return status
+
+    def m15_plan_comparison(self) -> Mapping[str, Any] | None:
+        """Return the selected deployment's privacy-reduced M15 planner intent."""
+
+        with self._lock:
+            return copy.deepcopy(self._current().workload_comparison)
 
     def membership_status(self, *, qualification: Any | None) -> Mapping[str, Any]:
         with self._lock:

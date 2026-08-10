@@ -24,6 +24,7 @@ from mycelium_layer_planner.replan_simulator import simulate_bundle
 from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_binding
 from mycelium_layer_planner.serialization import route_plan_from_dict
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
+from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
 from mycelium_request_gateway.contracts import InferenceSubmission, StreamEvent
 from mycelium_topology_evidence import (
     validate_m14_topology_projection,
@@ -97,12 +98,14 @@ EXPECTED_PROTOCOLS = {
     "product-ui-swarm-v1.json": "mycelium.product_ui.swarm.v1",
     "live-route-incident-v1.json": "mycelium.live_route_incident.v1",
     "performance-budget-v1.json": "mycelium.performance_budget.v1",
+    "performance-budget-v2.json": "mycelium.performance_budget.v2",
     "assignment-artifact-cache-v1.json": "mycelium.assignment_artifact_cache.v1",
     "assignment-materialization-v1.json": "mycelium.assignment_materialization.v1",
     "candidate-promotion-report-v1.json": "mycelium.candidate_promotion_report.v1",
     "m13-placement-projection-v1.json": "mycelium.m13_placement_projection.v1",
     "transport-path-observation-v1.json": "mycelium.transport_path_observation.v1",
     "m14-topology-projection-v1.json": "mycelium.m14_topology_projection.v1",
+    "m15-plan-comparison-v1.json": "mycelium.m15_plan_comparison.v1",
     "product-snapshot-v1.json": "mycelium.product_snapshot.v1",
     "product-event-v1.json": "mycelium.product_event.v1",
     "execution-graph-v1.json": "mycelium.execution_graph.v1",
@@ -589,6 +592,14 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
         load_fixture("m14-topology-projection-v1.json")
     )
     assert len(topology["edges"]) == 6
+    workload_comparison = validate_m15_plan_comparison(
+        load_fixture("m15-plan-comparison-v1.json")
+    )
+    assert len(workload_comparison["comparisons"]) == 2
+    assert all(
+        comparison["selected_candidate_id"] in comparison["pareto_candidate_ids"]
+        for comparison in workload_comparison["comparisons"]
+    )
 
     transport = load_fixture("router-wire-v1.json")
     golden_root = ROOT / "contracts" / "router-wire-golden"

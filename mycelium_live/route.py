@@ -734,6 +734,7 @@ class PhysicalLiveRoute:
         *,
         placement: Mapping[str, Any] | None,
         topology: Mapping[str, Any] | None,
+        workload_comparison: Mapping[str, Any] | None = None,
     ) -> None:
         """Attach validated deployment projections to single-route status."""
 
@@ -746,6 +747,18 @@ class PhysicalLiveRoute:
             self._topology_projection = (
                 None if topology is None else json.loads(json.dumps(dict(topology)))
             )
+            self._workload_comparison = (
+                None
+                if workload_comparison is None
+                else json.loads(json.dumps(dict(workload_comparison)))
+            )
+
+    def m15_plan_comparison(self) -> Mapping[str, Any] | None:
+        """Return detached workload-planner intent, never route authority."""
+
+        with self._lock:
+            comparison = getattr(self, "_workload_comparison", None)
+            return None if comparison is None else json.loads(json.dumps(comparison))
 
     @property
     def startup_challenge(self) -> tuple[tuple[int, ...], tuple[int, ...]]:

@@ -8,22 +8,33 @@ import {
 import styles from './LiveRouteWorkspace.module.css';
 import { M13PlacementPanel } from './M13PlacementPanel';
 import { M14TopologyPanel } from './M14TopologyPanel';
+import { M15WorkloadPanel } from './M15WorkloadPanel';
+import {
+  HttpM15ComparisonClient,
+  type M15ComparisonClient,
+  type M15PlanComparison,
+} from './m15Comparison';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
   readonly qualification: ObservatoryAdapterQualification | null;
   readonly freshness: 'current' | 'stale';
   readonly client?: LiveRouteStatusClient;
+  readonly workloadClient?: M15ComparisonClient;
 }
 
 function metric(value: number | null, suffix = ' ms'): string {
   return value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
 }
 
-export function LiveRouteWorkspace({ view, qualification, freshness, client }: LiveRouteWorkspaceProps) {
+export function LiveRouteWorkspace({ view, qualification, freshness, client, workloadClient }: LiveRouteWorkspaceProps) {
   const defaultClient = useMemo(() => new HttpLiveRouteStatusClient(), []);
+  const defaultWorkloadClient = useMemo(() => new HttpM15ComparisonClient(), []);
   const source = client ?? defaultClient;
+  const workloadSource = workloadClient ?? defaultWorkloadClient;
   const [status, setStatus] = useState<LiveRouteStatus | null>(null);
+  const [workloadComparison, setWorkloadComparison] = useState<M15PlanComparison | null>(null);
+  const [workloadUnavailable, setWorkloadUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -40,6 +51,17 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client }: L
     // The status source is fixed for this mounted workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source]);
+
+  useEffect(() => {
+    if (view !== 'plans') return;
+    void workloadSource.load().then((comparison) => {
+      setWorkloadComparison(comparison);
+      setWorkloadUnavailable(false);
+    }).catch(() => {
+      setWorkloadComparison(null);
+      setWorkloadUnavailable(true);
+    });
+  }, [view, workloadSource]);
 
   if (status === null) {
     return (
@@ -94,7 +116,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client }: L
       ) : null}
 
       {view === 'plans' ? (
-        <>{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
+        <>{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
           <p>This is observed physical execution, not a modeled alternative.</p>
           <dl className={styles.measurements}>

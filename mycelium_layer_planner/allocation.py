@@ -74,6 +74,14 @@ def stage_cost(
     return StageCost(True, prefill, decode, spill_penalty, required, spill_bytes, service_work)
 
 
+def _objective_cost(cost: StageCost, policy: PlanningPolicy) -> float:
+    if policy.objective == "prefill_ttft":
+        return cost.effective_prefill_ms
+    if policy.objective == "decode_tpot":
+        return cost.effective_decode_ms
+    return cost.service_work_ms
+
+
 def allocate_layers(
     ordered_nodes: Sequence[NodeCapability],
     model: ModelIdentity,
@@ -101,7 +109,7 @@ def allocate_layers(
                 cost = stage_cost(node, take, model, workload, policy)
                 if not cost.feasible:
                     continue
-                candidate = (max(prior[0], cost.service_work_ms), prior[1] + (take,))
+                candidate = (max(prior[0], _objective_cost(cost, policy)), prior[1] + (take,))
                 if best is None or candidate < best:
                     best = candidate
             if best is not None:

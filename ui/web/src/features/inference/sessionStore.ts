@@ -8,6 +8,7 @@ import type {
   InferenceHistoryEntry,
   InferencePhase,
   InferenceSessionState,
+  WorkloadAttribution,
 } from './types';
 
 const STORAGE_KEY = 'mycelium.inference.tab-session.v1';
@@ -100,6 +101,26 @@ function decodeBinding(value: unknown): QualificationBinding | null {
   });
 }
 
+function decodeWorkloadAttribution(value: unknown): WorkloadAttribution | null {
+  const item = record(value);
+  if (item === null) return null;
+  const profileId = safeString(item.profile_id, 128);
+  const qosClass = safeString(item.qos_class, 16);
+  const policyId = safeString(item.planner_policy_id, 32);
+  if (
+    profileId === null || profileId.length === 0 ||
+    !['interactive', 'batch'].includes(qosClass ?? '') ||
+    !['balanced', 'decode_tpot', 'prefill_ttft'].includes(policyId ?? '') ||
+    item.attribution_scope !== 'client_visible_planner_intent'
+  ) return null;
+  return Object.freeze({
+    profile_id: profileId,
+    qos_class: qosClass as WorkloadAttribution['qos_class'],
+    planner_policy_id: policyId as WorkloadAttribution['planner_policy_id'],
+    attribution_scope: 'client_visible_planner_intent',
+  });
+}
+
 function decodeHistory(value: unknown): readonly InferenceHistoryEntry[] | null {
   if (!Array.isArray(value) || value.length > MAX_HISTORY_ITEMS) return null;
   const decoded: InferenceHistoryEntry[] = [];
@@ -120,6 +141,9 @@ function decodeHistory(value: unknown): readonly InferenceHistoryEntry[] | null 
       ? ''
       : safeString(item.response, MAX_OUTPUT_CHARS);
     const errorCode = item.error_code === null ? null : safeString(item.error_code, 64);
+    const workloadAttribution = item.workload_attribution === undefined
+      ? undefined
+      : decodeWorkloadAttribution(item.workload_attribution);
     if (
       requestId === null || requestId.length === 0 ||
       terminalState === null || !TERMINAL_STATES.has(terminalState) ||
@@ -127,6 +151,7 @@ function decodeHistory(value: unknown): readonly InferenceHistoryEntry[] | null 
       deploymentId === null || deploymentId.length === 0 ||
       modelId === null || modelId.length === 0 || prompt === null || response === null ||
       (errorCode !== null && !SAFE_ERROR_CODE.test(errorCode))
+      || (item.workload_attribution !== undefined && workloadAttribution === null)
     ) {
       return null;
     }
@@ -141,6 +166,7 @@ function decodeHistory(value: unknown): readonly InferenceHistoryEntry[] | null 
       deployment_id: deploymentId,
       model_id: modelId,
       error_code: errorCode,
+      ...(workloadAttribution == null ? {} : { workload_attribution: workloadAttribution }),
     }));
   }
   if (new Set(decoded.map((entry) => entry.request_id)).size !== decoded.length) return null;
@@ -173,6 +199,9 @@ function decodeSession(value: unknown): InferenceSessionState | null {
     ? null
     : safeInteger(item.started_at_unix_ms, 0, Number.MAX_SAFE_INTEGER);
   const history = decodeHistory(item.history);
+  const capturedWorkloadAttribution = item.captured_workload_attribution === undefined || item.captured_workload_attribution === null
+    ? null
+    : decodeWorkloadAttribution(item.captured_workload_attribution);
   if (
     phase === null || !PHASES.has(phase) ||
     (item.accepted_request !== null && accepted === null) ||
@@ -183,6 +212,7 @@ function decodeSession(value: unknown): InferenceSessionState | null {
     (item.started_at_unix_ms !== null && startedAt === null) || history === null ||
     tokenCount > requestedMax ||
     (accepted === null) !== (binding === null)
+    || (item.captured_workload_attribution !== undefined && item.captured_workload_attribution !== null && capturedWorkloadAttribution === null)
   ) {
     return null;
   }
@@ -203,6 +233,7 @@ function decodeSession(value: unknown): InferenceSessionState | null {
     cancellation_requested: false,
     started_at_unix_ms: startedAt,
     history,
+    captured_workload_attribution: capturedWorkloadAttribution,
   });
 }
 
@@ -234,6 +265,7 @@ function serializedSnapshot(snapshot: InferenceTabSnapshot): string {
       error_code: snapshot.session.error_code,
       started_at_unix_ms: snapshot.session.started_at_unix_ms,
       history: snapshot.session.history,
+      captured_workload_attribution: snapshot.session.captured_workload_attribution ?? null,
     },
   });
 }

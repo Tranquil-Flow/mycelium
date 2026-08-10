@@ -19,6 +19,7 @@ import uuid
 from mycelium_demo.product_stack import build_loopback_product_stack
 from mycelium_product_spine import ProductEvidenceApplication, ProductProjector
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
+from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
 from mycelium_topology_evidence import validate_m14_topology_projection
 from mycelium_qualification import (
     issue_live_route_qualification,
@@ -422,6 +423,22 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "application/json; charset=utf-8",
             )
 
+        def _m15_plan_comparison(self) -> None:
+            source = getattr(self.server.route, "m15_plan_comparison", None)
+            document = source() if callable(source) else None
+            if document is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "m15_plan_comparison_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
         def _select_deployment(self) -> None:
             select = getattr(self.server.route, "select", None)
             if not callable(select):
@@ -618,6 +635,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             parsed = urlsplit(self.path)
             if parsed.path == "/__mycelium/live-status" and not parsed.query:
                 self._status()
+            elif parsed.path == "/__mycelium/m15-plan-comparison" and not parsed.query:
+                self._m15_plan_comparison()
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif parsed.path.startswith("/api/"):
@@ -693,6 +712,22 @@ def _topology_projection(deployment_dir: Path) -> Mapping[str, Any] | None:
         raise ValueError("m14_topology_projection_invalid") from exc
 
 
+def _workload_comparison(deployment_dir: Path) -> Mapping[str, Any] | None:
+    path = Path(deployment_dir) / "m15-plan-comparison.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+        raise ValueError("m15_plan_comparison_unsafe")
+    try:
+        document = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError("m15_plan_comparison_invalid") from exc
+    try:
+        return validate_m15_plan_comparison(document)
+    except ValueError as exc:
+        raise ValueError("m15_plan_comparison_invalid") from exc
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -748,6 +783,7 @@ def _qualified_runtime(
             qualification=qualification,
             placement_projection=_placement_projection(selected_deployment_dir),
             topology_projection=_topology_projection(selected_deployment_dir),
+            workload_comparison=_workload_comparison(selected_deployment_dir),
         )
     except BaseException:
         route.close()
@@ -862,6 +898,7 @@ def run_physical_server(
         route.set_public_projections(
             placement=_placement_projection(selected_deployment_dir),
             topology=_topology_projection(selected_deployment_dir),
+            workload_comparison=_workload_comparison(selected_deployment_dir),
         )
         stack = build_live_stack(
             route=route,

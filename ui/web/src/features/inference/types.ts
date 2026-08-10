@@ -16,6 +16,13 @@ export type InferencePhase =
   | 'cancelled'
   | 'failed';
 
+export interface WorkloadAttribution {
+  readonly profile_id: string;
+  readonly qos_class: 'interactive' | 'batch';
+  readonly planner_policy_id: 'balanced' | 'decode_tpot' | 'prefill_ttft';
+  readonly attribution_scope: 'client_visible_planner_intent';
+}
+
 export interface InferenceHistoryEntry {
   readonly request_id: string;
   readonly prompt: string;
@@ -27,6 +34,7 @@ export interface InferenceHistoryEntry {
   readonly deployment_id: string;
   readonly model_id: string;
   readonly error_code: string | null;
+  readonly workload_attribution?: WorkloadAttribution;
 }
 
 export interface InferenceSessionState {
@@ -46,6 +54,7 @@ export interface InferenceSessionState {
   readonly cancellation_requested: boolean;
   readonly started_at_unix_ms: number | null;
   readonly history: readonly InferenceHistoryEntry[];
+  readonly captured_workload_attribution?: WorkloadAttribution | null;
 }
 
 export const TERMINAL_INFERENCE_PHASES = new Set<InferencePhase>([

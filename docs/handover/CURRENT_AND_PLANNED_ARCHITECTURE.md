@@ -2,7 +2,7 @@
 
 **Status:** Canonical review entry point, 2026-08-10. This document supersedes the
 operational status in `ASTRA_CURRENT.md`; the older file remains historical
-provenance. M14 is the current implemented tranche; M15 is next.
+provenance. M15 is the current implemented tranche; M16 is next.
 
 ## Read this first
 
@@ -19,10 +19,11 @@ Review these sources in order:
 6. `docs/reviews/2026-08-10-external-review-status.md` for independent findings and
    their disposition.
 
-Repository baseline: branch `integration/wave8-two-device-g4`, HEAD
-`533d107810eda951a60e373b5c94b95840249923`. The M7-M11 tranche is staged but
-uncommitted. The two implementation plans are intentionally untracked pending
-review. Never infer a source revision from an evidence timestamp alone.
+Repository baseline: branch `integration/wave8-two-device-g4`. Milestone commits are
+`e8654cb` (M0-M11), `27a3478` (M12), `d6249c1` (M13), and `2ff804d` (M14); M15 is
+recorded by `docs/handover/M15_PROGRESS_2026-08-10.md`. The two implementation plans
+remain intentionally untracked pending review. Never infer a source revision from an
+evidence timestamp alone.
 
 For Astra: review the staged working-tree diff in addition to the recorded HEAD.
 Private evidence paths in this document are host-local and may not resolve on another
@@ -108,6 +109,19 @@ The resulting mixed MLX/NumPy/MLX allocation is 1/1/22 layers and uses
 qualified. Continuous topology re-optimization, replication, and scoped replanning
 remain later milestones.
 
+M15 evaluates `balanced`, `prefill_ttft`, and `decode_tpot` contiguous-allocation
+objectives against the same frozen M13/M14 evidence for content-free interactive and
+sustained/batch workload profiles. Deterministic minimax normalized regret selects a
+robust winner and preserves the Pareto frontier and signed deltas. The current
+physical capability matrix happens to produce the same 1/1/22 allocation under all
+three objectives; a heterogeneous pure-planner case proves the objectives can produce
+different allocations without changing topology or evidence. Two sequential browser
+requests are bound to exact-shape predictions and physical TTFT, TPOT, goodput,
+placement, runtime, topology, and frame counters. The first-generation model errors
+are large and displayed as such; they pass only the explicitly frozen broad M15
+calibration bound and are not relabelled as accurate predictions. Admission,
+concurrency, queueing, and batch-shape execution remain M16.
+
 Peers are trusted operator-controlled devices. SSH and Tailscale currently provide
 staging and reachability; activation traffic uses native Iroh. Tailscale is not a
 protocol requirement, but it is presently an operational dependency for peers on
@@ -143,7 +157,7 @@ promote the rest of a composite capability.
 | 4.1 Evidence-driven planning | `qualified` | One signed, source-bound M13 bundle coherently supplies membership, status, runtime/decode mode, memory tiers, and required directed edges to the selected live candidate; stale or mismatched evidence fails closed. |
 | 4.2 Capability-aware contiguous allocation | `qualified` | Deterministic contiguous DP selected the M13 two-Mac 15/9 split and the M14 measured-order three-host 1/1/22 split. Compute-only and fast-memory-only physical A/B inputs produced distinct allocations with `planner_v2` provenance. |
 | 4.3 Directed cyclic topology | `qualified` | A complete six-edge activation-plane matrix across three physical hosts drove exact cycle selection; the winning cycle differs from canonical order and is opened into forward edges plus explicit decode loopback. |
-| 4.4 Phase/workload objectives | `implemented_unintegrated` | TTFT/TPOT are measured separately; workload scenario selection does not drive live placement. |
+| 4.4 Phase/workload objectives | `qualified` | M15 compares three phase objectives over two content-free workload profiles on one frozen evidence snapshot, exposes robust/Pareto selection, and binds sequential physical observations to exact request-shape predictions and frozen budgets. Concurrent/batched execution remains M16. |
 | 4.5 Assignment-local artifacts | `partially_qualified` | M13 materializes and proves only each host's assigned shard plus shared static assets, with assignment-bound load proofs. Cache eviction, corruption recovery, concurrent staging, and full runtime memory/thermal admission are not qualified. |
 | 4.6 Progressive routing and immutable execution | `design_only` | A deployment graph is pinned, but request-scoped progressive prefill and `PathManifest` reservation are not serving. |
 | 4.7 Batching/scheduling/backpressure | `implemented_unintegrated` | Router/request bounds exist; no qualified product microbatch overlap, continuous batching, or QoS scheduling claim exists. |
@@ -162,10 +176,14 @@ The shell has eight stable workspaces: Inference, Device Lab, Network, Nodes, Pl
 Readiness, Incidents, and Settings. Inference uses the product/request gateway.
 The product snapshot/event spine is the shared privacy-reduced source for Nodes,
 Readiness, and Incidents, while bounded same-origin live route/deployment endpoints
-remain action/status adapters for Inference. M13 placement and M14 topology
-projections give Plans, Network, Nodes, and Readiness the same planner inputs,
-measured directed links, candidate cycles, selected order, allocation, connection
-reuse, evidence digests, and promotion outcome after refresh.
+remain action/status adapters for Inference. M13 placement, M14 topology, and M15
+workload/calibration projections give Plans, Network, Nodes, and Readiness the same
+planner inputs, measured directed links, candidate cycles, selected order, allocation,
+connection reuse, evidence digests, workload assumptions, policy frontier, and
+modeled-versus-observed errors after refresh. Inference records workload/QoS/policy
+attribution in tab-session history. Settings exposes only the profiles in the current
+M15 projection as defaults for future requests and explicitly withholds M16
+queueing/batching claims.
 
 Prompt and response text may persist only in bounded browser tab-session history.
 Observatory/status projections must not contain prompts, decoded output, token arrays,
@@ -191,6 +209,9 @@ references, not public release artifacts.
 | M10 | Registry persistence, atomic selection, history attribution, and failover paths implemented | `/Users/evinova-self/mycelium-physical-run/m10-deployment-registry.json`; registry tests | Seal one failover/restart transcript and source binding |
 | M11 | Pixel Device Lab proof, eight-section browser checks, and fresh stable-peer inference/cancellation demonstrated | `/Users/evinova-self/mycelium-physical-run/m11-device-lab/pixel8-physical-proof.json`; M8 review status; test/runbook records | Rebuild/reprove current 1.5B availability, decide persistent seed identity, and create the coherent release manifest |
 | M12 | Closed for the operator-approved two-Mac scope: durable authority generation 2, signed rotation acknowledgements, invite-free node resume, unified product projections, and post-restart browser inference/history | `/Users/evinova-self/mycelium-physical-run/m12-resume-proof-20260810`; `docs/handover/M12_PROGRESS_2026-08-10.md` | Different-network Mac and Android/Termux remain explicitly deferred conformance work; they are not inference-stage proofs |
+| M13 | Signed evidence drove the physically deployed contiguous 1/1/22 allocation | `docs/handover/M13_PROGRESS_2026-08-10.md`; frozen planner snapshot in the M14 run bundle | Runtime resource admission remains M16 |
+| M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
+| M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no
 Router admission. The factual, arithmetic, and exact-format cases are distributed

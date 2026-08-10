@@ -16,6 +16,12 @@ import {
   type DeploymentRegistryClient,
   type DeploymentRegistryStatus,
 } from './deploymentClient';
+import {
+  HttpM15ComparisonClient,
+  type M15ComparisonClient,
+  type M15PlanComparison,
+} from '../liveRoute/m15Comparison';
+import { loadProductSettings } from '../settings/SettingsContext';
 
 const encoder = new TextEncoder();
 const activeModelDisplay = Object.freeze({
@@ -30,6 +36,7 @@ export interface InferenceWorkspaceProps {
   readonly externalBlockReason?: string | null;
   readonly sessionStore?: InferenceTabSessionStore | null;
   readonly deploymentClient?: DeploymentRegistryClient | null;
+  readonly workloadClient?: M15ComparisonClient | null;
 }
 
 function phaseLabel(phase: ReturnType<typeof useInferenceSession>['phase']): string {
@@ -127,14 +134,19 @@ export function InferenceWorkspace({
   externalBlockReason = null,
   sessionStore,
   deploymentClient,
+  workloadClient,
 }: InferenceWorkspaceProps) {
   const defaultClient = useMemo(() => new ProductInferenceClient(), []);
   const defaultSessionStore = useMemo(() => createBrowserInferenceTabSessionStore(), []);
   const defaultDeploymentClient = useMemo(() => new HttpDeploymentRegistryClient(), []);
+  const defaultWorkloadClient = useMemo(() => new HttpM15ComparisonClient(), []);
   const effectiveDeploymentClient = deploymentClient === undefined
     ? client === undefined ? defaultDeploymentClient : null
     : deploymentClient;
   const effectiveSessionStore = sessionStore === undefined ? defaultSessionStore : sessionStore;
+  const effectiveWorkloadClient = workloadClient === undefined
+    ? client === undefined ? defaultWorkloadClient : null
+    : workloadClient;
   const restored = useMemo(() => effectiveSessionStore?.load() ?? null, [effectiveSessionStore]);
   const session = useInferenceSession({
     client: client ?? defaultClient,
@@ -145,6 +157,8 @@ export function InferenceWorkspace({
   const [maxNewTokens, setMaxNewTokens] = useState(restored?.max_new_tokens ?? 8);
   const [deploymentRegistry, setDeploymentRegistry] = useState<DeploymentRegistryStatus | null>(null);
   const [deploymentSwitching, setDeploymentSwitching] = useState(false);
+  const [workloadComparison, setWorkloadComparison] = useState<M15PlanComparison | null>(null);
+  const [workloadProfileId, setWorkloadProfileId] = useState(() => loadProductSettings().defaultWorkloadProfile);
   const promptBytes = encoder.encode(prompt).byteLength;
   const promptReason = prompt.length === 0
     ? 'Prompt is required'
@@ -183,6 +197,18 @@ export function InferenceWorkspace({
     return () => controller.abort();
   }, [effectiveDeploymentClient]);
 
+  useEffect(() => {
+    if (effectiveWorkloadClient === null) return;
+    void effectiveWorkloadClient.load()
+      .then((comparison) => {
+        setWorkloadComparison(comparison);
+        if (!comparison.profiles.some((profile) => profile.profile_id === workloadProfileId)) {
+          setWorkloadProfileId(comparison.profiles[0].profile_id);
+        }
+      })
+      .catch(() => setWorkloadComparison(null));
+  }, [effectiveWorkloadClient, workloadProfileId]);
+
   const selectDeployment = async (deploymentId: string): Promise<void> => {
     if (effectiveDeploymentClient === null || active || deploymentSwitching) return;
     setDeploymentSwitching(true);
@@ -198,7 +224,21 @@ export function InferenceWorkspace({
   const submit = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault();
     if (formBlockReason !== null) return;
-    await session.start(prompt, maxNewTokens);
+    const profile = workloadComparison?.profiles.find((item) => item.profile_id === workloadProfileId);
+    const comparison = workloadComparison?.comparisons.find((item) => item.profile_id === workloadProfileId);
+    const candidate = comparison?.candidates.find((item) => item.candidate_id === comparison.selected_candidate_id);
+    await session.start(
+      prompt,
+      maxNewTokens,
+      profile === undefined || candidate === undefined
+        ? undefined
+        : {
+            profile_id: profile.profile_id,
+            qos_class: profile.scenarios[0].qos_class,
+            planner_policy_id: candidate.policy_id,
+            attribution_scope: 'client_visible_planner_intent',
+          },
+    );
   };
 
   const promptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -259,6 +299,24 @@ export function InferenceWorkspace({
           </div>
 
           <div className={styles.controls}>
+            <label className={styles.field}>
+              <span>Workload and QoS policy</span>
+              <select
+                value={workloadProfileId}
+                disabled={active || workloadComparison === null}
+                onChange={(event) => setWorkloadProfileId(event.currentTarget.value)}
+                aria-label="Workload and QoS policy"
+              >
+                {workloadComparison === null
+                  ? <option value="interactive_chat_v1">M15 workload policy unavailable</option>
+                  : workloadComparison.profiles.map((profile) => {
+                      const comparison = workloadComparison.comparisons.find((item) => item.profile_id === profile.profile_id)!;
+                      const policy = comparison.selected_candidate_id.slice(profile.profile_id.length + 1);
+                      return <option key={profile.profile_id} value={profile.profile_id}>{profile.profile_id} · {profile.scenarios[0].qos_class} · {policy}</option>;
+                    })}
+              </select>
+              <small className={styles.fieldHelp}>Client-visible M15 planner attribution; runtime admission and queueing remain M16.</small>
+            </label>
             <label className={styles.field}>
               <span>Active qualified model and deployment</span>
               <select
@@ -480,6 +538,7 @@ export function InferenceWorkspace({
                   <th scope="col">Response</th>
                   <th scope="col">Model</th>
                   <th scope="col">Deployment</th>
+                  <th scope="col">Workload / QoS / policy</th>
                   <th scope="col">Terminal state</th>
                   <th scope="col">Token count</th>
                   <th scope="col">Public error</th>
@@ -507,6 +566,7 @@ export function InferenceWorkspace({
                         : entry.model_id}
                     </td>
                     <td>{entry.deployment_id}</td>
+                    <td>{entry.workload_attribution === undefined ? 'Not attributed' : `${entry.workload_attribution.profile_id} · ${entry.workload_attribution.qos_class} · ${entry.workload_attribution.planner_policy_id}`}</td>
                     <td>{entry.terminal_state}</td>
                     <td>{entry.token_count}</td>
                     <td>{entry.error_code ?? 'None'}</td>

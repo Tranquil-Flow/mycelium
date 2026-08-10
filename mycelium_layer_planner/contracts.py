@@ -154,6 +154,10 @@ class WorkloadScenario:
     arrival_rate_rps: Optional[float] = None
     system_prefix_tokens: int = 0
     history_tokens: int = 0
+    prompt_p95_tokens: Optional[int] = None
+    output_p95_tokens: Optional[int] = None
+    batch_size: int = 1
+    qos_class: str = "interactive"
 
     def __post_init__(self) -> None:
         if not self.name or self.prompt_tokens < 0 or self.output_tokens <= 0 or self.concurrency <= 0:
@@ -164,6 +168,12 @@ class WorkloadScenario:
             raise ValueError("invalid workload scaling")
         if self.arrival_rate_rps is not None and self.arrival_rate_rps < 0:
             raise ValueError("arrival rate must be non-negative")
+        if self.prompt_p95_tokens is not None and self.prompt_p95_tokens < self.prompt_tokens:
+            raise ValueError("prompt p95 must not be smaller than prompt p50")
+        if self.output_p95_tokens is not None and self.output_p95_tokens < self.output_tokens:
+            raise ValueError("output p95 must not be smaller than output p50")
+        if self.batch_size <= 0 or self.qos_class not in {"interactive", "batch"}:
+            raise ValueError("invalid workload batch or QoS class")
 
     @property
     def effective_prompt_tokens(self) -> int:
@@ -224,6 +234,8 @@ class PlanningPolicy:
             raise ValueError("fallback bandwidth must be positive")
         if not 0 <= self.memory_reserve_fraction < 1:
             raise ValueError("memory reserve must be in [0, 1)")
+        if self.objective not in {"slo_goodput", "balanced", "prefill_ttft", "decode_tpot"}:
+            raise ValueError("unknown planning objective")
 
 
 @dataclass(frozen=True)

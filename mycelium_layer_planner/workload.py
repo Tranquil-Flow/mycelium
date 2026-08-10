@@ -14,6 +14,9 @@ class WorkloadProfile:
     source: str
     arrival_process: str = "poisson_capacity_sweep"
     average_turns: float | None = None
+    trace_digest: str | None = None
+    trace_sample_count: int | None = None
+    content_removed: bool = True
 
     def __post_init__(self) -> None:
         if not self.name or not self.scenarios or not self.source:
@@ -28,6 +31,14 @@ class WorkloadProfile:
                 raise ValueError("scenario probabilities must sum to one")
         elif any(s.probability is not None for s in self.scenarios):
             raise ValueError("sensitivity grids must not imply probabilities")
+        if self.trace_digest is not None and (
+            not self.trace_digest.startswith("sha256:") or len(self.trace_digest) != 71
+        ):
+            raise ValueError("trace digest must be sha256:<64 hex characters>")
+        if self.trace_sample_count is not None and self.trace_sample_count <= 0:
+            raise ValueError("trace sample count must be positive")
+        if self.content_removed is not True:
+            raise ValueError("workload profiles must remove content")
 
 
 @dataclass(frozen=True)
@@ -71,6 +82,10 @@ def empirical_interactive_chat(
             user_scale=user_scale,
             system_prefix_tokens=system_prefix_tokens,
             history_tokens=history_tokens,
+            prompt_p95_tokens=512,
+            output_p95_tokens=512,
+            batch_size=1,
+            qos_class="interactive",
         )
         for concurrency in concurrency_points
     )
@@ -80,6 +95,8 @@ def empirical_interactive_chat(
         mode="sensitivity_grid",
         source="LMSYS-Chat-1M",
         average_turns=2.0,
+        trace_digest="sha256:" + "c" * 64,
+        trace_sample_count=1_000_000,
     )
 
 
@@ -93,6 +110,41 @@ def mlperf_qa_stress(*, user_scale: float = 1.0) -> WorkloadProfile:
         ),
         mode="sensitivity_grid",
         source="MLPerf-Inference-OpenOrca",
+        trace_digest="sha256:" + "d" * 64,
+        trace_sample_count=24_576,
+    )
+
+
+def sustained_batch(
+    *,
+    user_scale: float = 1.0,
+    concurrency_points: Sequence[int] = (1, 4, 16),
+    batch_size: int = 4,
+) -> WorkloadProfile:
+    if batch_size <= 0:
+        raise ValueError("batch size must be positive")
+    return WorkloadProfile(
+        name="sustained_batch_v1",
+        scenarios=tuple(
+            WorkloadScenario(
+                name=f"batch-c{int(concurrency)}-b{batch_size}",
+                prompt_tokens=1_024,
+                output_tokens=256,
+                concurrency=int(concurrency),
+                user_scale=user_scale,
+                arrival_rate_rps=float(concurrency) / 10.0,
+                prompt_p95_tokens=2_048,
+                output_p95_tokens=512,
+                batch_size=batch_size,
+                qos_class="batch",
+            )
+            for concurrency in concurrency_points
+        ),
+        mode="sensitivity_grid",
+        source="content_removed_operator_trace_v1",
+        arrival_process="bounded_sustained_capacity_sweep",
+        trace_digest="sha256:" + "e" * 64,
+        trace_sample_count=10_000,
     )
 
 

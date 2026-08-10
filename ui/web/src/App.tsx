@@ -25,6 +25,7 @@ import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
+import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
 import {
   ProductEvidenceSettings,
@@ -68,6 +69,7 @@ export interface AppProps {
 const defaultSource = createObservatorySource({ source_mode: 'fixture' });
 const emptyFeatureRegistry = createProductFeatureRegistry([]);
 const fixtureInferenceClient = new FixtureInferenceClient();
+const liveM15ComparisonClient = new HttpM15ComparisonClient();
 const recordedLifecycleProjections = Object.freeze(
   LIFECYCLE_STATE_ORDER.map((state) => projectLifecycle(preparingFixture({ state }))),
 );
@@ -283,7 +285,7 @@ export default function App({
     content = <>
       <ProductEvidenceSummary compact />
       <ProductEvidenceSettings />
-      <SettingsWorkspace />
+      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} />
     </>;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;

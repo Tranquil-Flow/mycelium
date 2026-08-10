@@ -17,6 +17,7 @@ import {
   isTerminalInferencePhase,
   type InferenceHistoryEntry,
   type InferenceSessionState,
+  type WorkloadAttribution,
 } from './types';
 
 const QUALIFICATION_CHANGED_REASON =
@@ -42,6 +43,7 @@ type SessionAction =
       readonly prompt: string;
       readonly max_new_tokens: number;
       readonly now: number;
+      readonly workload_attribution?: WorkloadAttribution;
     }
   | { readonly type: 'accepted'; readonly request: InferenceAcceptedResponse }
   | { readonly type: 'event'; readonly event: InferenceEvent; readonly now: number }
@@ -72,6 +74,7 @@ const initialState: InferenceSessionState = Object.freeze({
   cancellation_requested: false,
   started_at_unix_ms: null,
   history: Object.freeze([]),
+  captured_workload_attribution: null,
 });
 
 function restoreInitialState(
@@ -172,6 +175,9 @@ function terminalHistory(
       deployment_id: state.captured_binding.deployment_id,
       model_id: state.captured_binding.model_id,
       error_code: errorCode,
+      ...(state.captured_workload_attribution === null || state.captured_workload_attribution === undefined
+        ? {}
+        : { workload_attribution: Object.freeze({ ...state.captured_workload_attribution }) }),
     },
     ...state.history,
   ].slice(0, 20));
@@ -235,6 +241,9 @@ export function inferenceSessionReducer(
         form_error: null,
         cancellation_requested: false,
         started_at_unix_ms: action.now,
+        captured_workload_attribution: action.workload_attribution === undefined
+          ? null
+          : Object.freeze({ ...action.workload_attribution }),
       });
     case 'accepted':
       return isTerminalInferencePhase(state.phase)
@@ -343,7 +352,11 @@ function formReason(error: unknown): string {
 export interface InferenceSessionController extends InferenceSessionState {
   readonly can_submit: boolean;
   readonly submit_block_reason: string | null;
-  readonly start: (prompt: string, maxNewTokens: number) => Promise<void>;
+  readonly start: (
+    prompt: string,
+    maxNewTokens: number,
+    workloadAttribution?: WorkloadAttribution,
+  ) => Promise<void>;
   readonly resume: () => Promise<void>;
   readonly cancel: () => Promise<void>;
   readonly reload_qualification: () => Promise<void>;
@@ -452,7 +465,11 @@ export function useInferenceSession({
   );
 
   const start = useCallback(
-    async (prompt: string, maxNewTokens: number): Promise<void> => {
+    async (
+      prompt: string,
+      maxNewTokens: number,
+      workloadAttribution?: WorkloadAttribution,
+    ): Promise<void> => {
       if (startPromiseRef.current !== null) return startPromiseRef.current;
       const operation = (async () => {
         const before = stateRef.current;
@@ -508,6 +525,7 @@ export function useInferenceSession({
           prompt,
           max_new_tokens: maxNewTokens,
           now: now(),
+          workload_attribution: workloadAttribution,
         });
         try {
           const accepted = await client.submit(submission);

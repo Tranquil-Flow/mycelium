@@ -1,0 +1,684 @@
+{
+  "calibration_state": "observed",
+  "claim_boundary": "planner intent and phase-separated predictions; no runtime readiness, concurrent execution, queueing, batching, or release claim",
+  "comparisons": [
+    {
+      "candidates": [
+        {
+          "allocation": [
+            {
+              "end": 2,
+              "node_id": "node-a",
+              "start": 0
+            },
+            {
+              "end": 4,
+              "node_id": "node-b",
+              "start": 2
+            }
+          ],
+          "candidate_id": "interactive_chat_v1:balanced",
+          "deltas_from_selected": [
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "interactive-c1",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            },
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "interactive-c4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            }
+          ],
+          "objective": "balanced",
+          "pareto": true,
+          "policy_id": "balanced",
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 40.29584,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 9006.641439999998,
+              "output_goodput_tps": 23.981643490806402,
+              "prefill_compute_ms": 40.57184,
+              "prefill_transfer_ms": 0.8792,
+              "required_memory_bytes": 240291840.0,
+              "scenario_id": "interactive-c1",
+              "tpot_ms": 41.69855999999999,
+              "ttft_ms": 41.45104
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 41.17136,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 9195.753759999998,
+              "output_goodput_tps": 48.57745772789629,
+              "prefill_compute_ms": 41.44736,
+              "prefill_transfer_ms": 0.8792,
+              "required_memory_bytes": 241167360.0,
+              "scenario_id": "interactive-c4",
+              "tpot_ms": 42.574079999999995,
+              "ttft_ms": 42.32656
+            }
+          ],
+          "selected": true,
+          "worst_normalized_regret": 0.0,
+          "worst_regret_metric": "ttft_ms",
+          "worst_regret_scenario_id": "interactive-c4"
+        },
+        {
+          "allocation": [
+            {
+              "end": 2,
+              "node_id": "node-a",
+              "start": 0
+            },
+            {
+              "end": 4,
+              "node_id": "node-b",
+              "start": 2
+            }
+          ],
+          "candidate_id": "interactive_chat_v1:decode_tpot",
+          "deltas_from_selected": [
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "interactive-c1",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            },
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "interactive-c4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            }
+          ],
+          "objective": "decode_tpot",
+          "pareto": true,
+          "policy_id": "decode_tpot",
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 40.29584,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 9006.641439999998,
+              "output_goodput_tps": 23.981643490806402,
+              "prefill_compute_ms": 40.57184,
+              "prefill_transfer_ms": 0.8792,
+              "required_memory_bytes": 240291840.0,
+              "scenario_id": "interactive-c1",
+              "tpot_ms": 41.69855999999999,
+              "ttft_ms": 41.45104
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 41.17136,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 9195.753759999998,
+              "output_goodput_tps": 48.57745772789629,
+              "prefill_compute_ms": 41.44736,
+              "prefill_transfer_ms": 0.8792,
+              "required_memory_bytes": 241167360.0,
+              "scenario_id": "interactive-c4",
+              "tpot_ms": 42.574079999999995,
+              "ttft_ms": 42.32656
+            }
+          ],
+          "selected": false,
+          "worst_normalized_regret": 0.0,
+          "worst_regret_metric": "ttft_ms",
+          "worst_regret_scenario_id": "interactive-c4"
+        },
+        {
+          "allocation": [
+            {
+              "end": 2,
+              "node_id": "node-a",
+              "start": 0
+            },
+            {
+              "end": 4,
+              "node_id": "node-b",
+              "start": 2
+            }
+          ],
+          "candidate_id": "interactive_chat_v1:prefill_ttft",
+          "deltas_from_selected": [
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "interactive-c1",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            },
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "interactive-c4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            }
+          ],
+          "objective": "prefill_ttft",
+          "pareto": true,
+          "policy_id": "prefill_ttft",
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 40.29584,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 9006.641439999998,
+              "output_goodput_tps": 23.981643490806402,
+              "prefill_compute_ms": 40.57184,
+              "prefill_transfer_ms": 0.8792,
+              "required_memory_bytes": 240291840.0,
+              "scenario_id": "interactive-c1",
+              "tpot_ms": 41.69855999999999,
+              "ttft_ms": 41.45104
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 41.17136,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 9195.753759999998,
+              "output_goodput_tps": 48.57745772789629,
+              "prefill_compute_ms": 41.44736,
+              "prefill_transfer_ms": 0.8792,
+              "required_memory_bytes": 241167360.0,
+              "scenario_id": "interactive-c4",
+              "tpot_ms": 42.574079999999995,
+              "ttft_ms": 42.32656
+            }
+          ],
+          "selected": false,
+          "worst_normalized_regret": 0.0,
+          "worst_regret_metric": "ttft_ms",
+          "worst_regret_scenario_id": "interactive-c4"
+        }
+      ],
+      "pareto_candidate_ids": [
+        "interactive_chat_v1:balanced",
+        "interactive_chat_v1:decode_tpot",
+        "interactive_chat_v1:prefill_ttft"
+      ],
+      "profile_id": "interactive_chat_v1",
+      "selected_candidate_id": "interactive_chat_v1:balanced",
+      "selection_mode": "minimax_normalized_regret",
+      "winning_metric": "ttft_ms",
+      "winning_scenario_id": "interactive-c4"
+    },
+    {
+      "candidates": [
+        {
+          "allocation": [
+            {
+              "end": 2,
+              "node_id": "node-a",
+              "start": 0
+            },
+            {
+              "end": 4,
+              "node_id": "node-b",
+              "start": 2
+            }
+          ],
+          "candidate_id": "sustained_batch_v1:balanced",
+          "deltas_from_selected": [
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "batch-c1-b4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            },
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "batch-c4-b4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            }
+          ],
+          "objective": "balanced",
+          "pareto": true,
+          "policy_id": "balanced",
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 41.31472,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 10984.3928,
+              "output_goodput_tps": 23.409642525394784,
+              "prefill_compute_ms": 45.40672000000001,
+              "prefill_transfer_ms": 3.3214400000000004,
+              "required_memory_bytes": 241310720.0,
+              "scenario_id": "batch-c1-b4",
+              "tpot_ms": 42.717439999999996,
+              "ttft_ms": 48.72816000000001
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 45.24688,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 11994.957919999999,
+              "output_goodput_tps": 44.20194276378836,
+              "prefill_compute_ms": 49.33888,
+              "prefill_transfer_ms": 3.3214400000000004,
+              "required_memory_bytes": 245242880.0,
+              "scenario_id": "batch-c4-b4",
+              "tpot_ms": 46.64959999999999,
+              "ttft_ms": 52.660320000000006
+            }
+          ],
+          "selected": true,
+          "worst_normalized_regret": 0.0,
+          "worst_regret_metric": "ttft_ms",
+          "worst_regret_scenario_id": "batch-c4-b4"
+        },
+        {
+          "allocation": [
+            {
+              "end": 2,
+              "node_id": "node-a",
+              "start": 0
+            },
+            {
+              "end": 4,
+              "node_id": "node-b",
+              "start": 2
+            }
+          ],
+          "candidate_id": "sustained_batch_v1:decode_tpot",
+          "deltas_from_selected": [
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "batch-c1-b4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            },
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "batch-c4-b4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            }
+          ],
+          "objective": "decode_tpot",
+          "pareto": true,
+          "policy_id": "decode_tpot",
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 41.31472,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 10984.3928,
+              "output_goodput_tps": 23.409642525394784,
+              "prefill_compute_ms": 45.40672000000001,
+              "prefill_transfer_ms": 3.3214400000000004,
+              "required_memory_bytes": 241310720.0,
+              "scenario_id": "batch-c1-b4",
+              "tpot_ms": 42.717439999999996,
+              "ttft_ms": 48.72816000000001
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 45.24688,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 11994.957919999999,
+              "output_goodput_tps": 44.20194276378836,
+              "prefill_compute_ms": 49.33888,
+              "prefill_transfer_ms": 3.3214400000000004,
+              "required_memory_bytes": 245242880.0,
+              "scenario_id": "batch-c4-b4",
+              "tpot_ms": 46.64959999999999,
+              "ttft_ms": 52.660320000000006
+            }
+          ],
+          "selected": false,
+          "worst_normalized_regret": 0.0,
+          "worst_regret_metric": "ttft_ms",
+          "worst_regret_scenario_id": "batch-c4-b4"
+        },
+        {
+          "allocation": [
+            {
+              "end": 2,
+              "node_id": "node-a",
+              "start": 0
+            },
+            {
+              "end": 4,
+              "node_id": "node-b",
+              "start": 2
+            }
+          ],
+          "candidate_id": "sustained_batch_v1:prefill_ttft",
+          "deltas_from_selected": [
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "batch-c1-b4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            },
+            {
+              "output_goodput_tps": 0.0,
+              "scenario_id": "batch-c4-b4",
+              "tpot_ms": 0.0,
+              "ttft_ms": 0.0
+            }
+          ],
+          "objective": "prefill_ttft",
+          "pareto": true,
+          "policy_id": "prefill_ttft",
+          "scenarios": [
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 41.31472,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 10984.3928,
+              "output_goodput_tps": 23.409642525394784,
+              "prefill_compute_ms": 45.40672000000001,
+              "prefill_transfer_ms": 3.3214400000000004,
+              "required_memory_bytes": 241310720.0,
+              "scenario_id": "batch-c1-b4",
+              "tpot_ms": 42.717439999999996,
+              "ttft_ms": 48.72816000000001
+            },
+            {
+              "confidence": 1.0,
+              "decode_compute_ms": 45.24688,
+              "decode_transfer_ms": 1.4027200000000002,
+              "expected_response_ms": 11994.957919999999,
+              "output_goodput_tps": 44.20194276378836,
+              "prefill_compute_ms": 49.33888,
+              "prefill_transfer_ms": 3.3214400000000004,
+              "required_memory_bytes": 245242880.0,
+              "scenario_id": "batch-c4-b4",
+              "tpot_ms": 46.64959999999999,
+              "ttft_ms": 52.660320000000006
+            }
+          ],
+          "selected": false,
+          "worst_normalized_regret": 0.0,
+          "worst_regret_metric": "ttft_ms",
+          "worst_regret_scenario_id": "batch-c4-b4"
+        }
+      ],
+      "pareto_candidate_ids": [
+        "sustained_batch_v1:balanced",
+        "sustained_batch_v1:decode_tpot",
+        "sustained_batch_v1:prefill_ttft"
+      ],
+      "profile_id": "sustained_batch_v1",
+      "selected_candidate_id": "sustained_batch_v1:balanced",
+      "selection_mode": "minimax_normalized_regret",
+      "winning_metric": "ttft_ms",
+      "winning_scenario_id": "batch-c4-b4"
+    }
+  ],
+  "deferred_to_m16": [
+    "admission_latency",
+    "batch_shape",
+    "concurrency",
+    "queueing"
+  ],
+  "evidence_bundle_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "observations": [
+    {
+      "absolute_relative_error": {
+        "throughput": 0.9170227200000001,
+        "tpot": 11.05149168543486,
+        "ttft": 23.239932671163015
+      },
+      "budget_results": {
+        "admission_latency": "deferred_to_m16",
+        "batch_shape": "deferred_to_m16",
+        "concurrency": "deferred_to_m16",
+        "energy_thermal": "approved_exclusion",
+        "frames": "met",
+        "model_throughput": "met",
+        "model_tpot": "met",
+        "model_ttft": "met",
+        "peak_memory": "approved_exclusion",
+        "queueing": "deferred_to_m16",
+        "reconnect": "approved_exclusion",
+        "throughput": "met",
+        "tpot": "met",
+        "ttft": "met"
+      },
+      "context_tokens": 72,
+      "counters_after": {
+        "applied_operation_count": 18,
+        "frames_received": 20,
+        "frames_sent": 20
+      },
+      "counters_before": {
+        "applied_operation_count": 0,
+        "frames_received": 0,
+        "frames_sent": 0
+      },
+      "observed": {
+        "output_goodput_tps": 2.0,
+        "tpot_ms": 500.0,
+        "ttft_ms": 1000.0
+      },
+      "output_tokens": 8,
+      "overall_state": "met",
+      "placement": [
+        {
+          "end": 24,
+          "node_id": "node-a",
+          "start": 0
+        }
+      ],
+      "prediction": {
+        "output_goodput_tps": 24.10298337086972,
+        "scenario_id": "exact_observed_shape",
+        "tpot_ms": 41.48863999999999,
+        "ttft_ms": 41.254239999999996
+      },
+      "profile_id": "interactive_chat_v1",
+      "request_id": "request-interactive_chat_v1-fixture",
+      "runtime_backends": [
+        "fixture"
+      ],
+      "selected_candidate_id": "interactive_chat_v1:balanced",
+      "signed_error": {
+        "output_goodput_tps": -22.10298337086972,
+        "tpot_ms": 458.51136,
+        "ttft_ms": 958.74576
+      },
+      "topology_version": 1
+    },
+    {
+      "absolute_relative_error": {
+        "throughput": 0.917020672,
+        "tpot": 11.051194244426757,
+        "ttft": 23.235477326450713
+      },
+      "budget_results": {
+        "admission_latency": "deferred_to_m16",
+        "batch_shape": "deferred_to_m16",
+        "concurrency": "deferred_to_m16",
+        "energy_thermal": "approved_exclusion",
+        "frames": "met",
+        "model_throughput": "met",
+        "model_tpot": "met",
+        "model_ttft": "met",
+        "peak_memory": "approved_exclusion",
+        "queueing": "deferred_to_m16",
+        "reconnect": "approved_exclusion",
+        "throughput": "met",
+        "tpot": "met",
+        "ttft": "met"
+      },
+      "context_tokens": 73,
+      "counters_after": {
+        "applied_operation_count": 36,
+        "frames_received": 40,
+        "frames_sent": 40
+      },
+      "counters_before": {
+        "applied_operation_count": 18,
+        "frames_received": 20,
+        "frames_sent": 20
+      },
+      "observed": {
+        "output_goodput_tps": 2.0,
+        "tpot_ms": 500.0,
+        "ttft_ms": 1000.0
+      },
+      "output_tokens": 8,
+      "overall_state": "met",
+      "placement": [
+        {
+          "end": 24,
+          "node_id": "node-a",
+          "start": 0
+        }
+      ],
+      "prediction": {
+        "output_goodput_tps": 24.102388488853514,
+        "scenario_id": "exact_observed_shape",
+        "tpot_ms": 41.489664,
+        "ttft_ms": 41.261824000000004
+      },
+      "profile_id": "sustained_batch_v1",
+      "request_id": "request-sustained_batch_v1-fixture",
+      "runtime_backends": [
+        "fixture"
+      ],
+      "selected_candidate_id": "sustained_batch_v1:balanced",
+      "signed_error": {
+        "output_goodput_tps": -22.102388488853514,
+        "tpot_ms": 458.510336,
+        "ttft_ms": 958.738176
+      },
+      "topology_version": 1
+    }
+  ],
+  "performance_budgets": [
+    {
+      "admission_latency_budget_state": "deferred_to_m16",
+      "batch_shape_budget_state": "deferred_to_m16",
+      "budget_id": "m15-interactive_chat_v1-fixture",
+      "concurrency_budget_state": "deferred_to_m16",
+      "energy_thermal_budget_state": "approved_exclusion",
+      "execution_scope": "sequential_observed",
+      "maximum_frames_per_request": 64,
+      "maximum_relative_model_error": {
+        "throughput": 100.0,
+        "tpot": 100.0,
+        "ttft": 100.0
+      },
+      "minimum_output_tokens_per_second": 0.5,
+      "minimum_sample_size": 1,
+      "peak_memory_budget_state": "approved_exclusion",
+      "profile_id": "interactive_chat_v1",
+      "protocol": "mycelium.performance_budget.v2",
+      "queueing_budget_state": "deferred_to_m16",
+      "reconnect_budget_state": "approved_exclusion",
+      "tpot_ms_maximum": 2000.0,
+      "ttft_ms_maximum": 5000.0
+    },
+    {
+      "admission_latency_budget_state": "deferred_to_m16",
+      "batch_shape_budget_state": "deferred_to_m16",
+      "budget_id": "m15-sustained_batch_v1-fixture",
+      "concurrency_budget_state": "deferred_to_m16",
+      "energy_thermal_budget_state": "approved_exclusion",
+      "execution_scope": "sequential_observed",
+      "maximum_frames_per_request": 64,
+      "maximum_relative_model_error": {
+        "throughput": 100.0,
+        "tpot": 100.0,
+        "ttft": 100.0
+      },
+      "minimum_output_tokens_per_second": 0.5,
+      "minimum_sample_size": 1,
+      "peak_memory_budget_state": "approved_exclusion",
+      "profile_id": "sustained_batch_v1",
+      "protocol": "mycelium.performance_budget.v2",
+      "queueing_budget_state": "deferred_to_m16",
+      "reconnect_budget_state": "approved_exclusion",
+      "tpot_ms_maximum": 2000.0,
+      "ttft_ms_maximum": 5000.0
+    }
+  ],
+  "planner_snapshot_digest": "sha256:00c7a36e84ddbacec779f75246d735c7e9ac50a0fe459c5259dd1ce0aecae13a",
+  "profiles": [
+    {
+      "arrival_process": "poisson_capacity_sweep",
+      "content_removed": true,
+      "mode": "sensitivity_grid",
+      "profile_digest": "sha256:98e9662a97859f96b967e6760d6afd0be06d803138f307b675e2cfc8dbb0b5ca",
+      "profile_id": "interactive_chat_v1",
+      "scenarios": [
+        {
+          "arrival_rate_rps": null,
+          "batch_size": 1,
+          "modeled_concurrency": 1,
+          "output_p50_tokens": 215,
+          "output_p95_tokens": 512,
+          "probability": null,
+          "prompt_p50_tokens": 70,
+          "prompt_p95_tokens": 512,
+          "qos_class": "interactive",
+          "scenario_id": "interactive-c1"
+        },
+        {
+          "arrival_rate_rps": null,
+          "batch_size": 1,
+          "modeled_concurrency": 4,
+          "output_p50_tokens": 215,
+          "output_p95_tokens": 512,
+          "probability": null,
+          "prompt_p50_tokens": 70,
+          "prompt_p95_tokens": 512,
+          "qos_class": "interactive",
+          "scenario_id": "interactive-c4"
+        }
+      ],
+      "source": "LMSYS-Chat-1M",
+      "trace_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "trace_sample_count": 1000000
+    },
+    {
+      "arrival_process": "bounded_sustained_capacity_sweep",
+      "content_removed": true,
+      "mode": "sensitivity_grid",
+      "profile_digest": "sha256:1e80d1e49b9bf600833b2b23daecc1e211886ed4b7d41cd7fe50d9d7bb1123fb",
+      "profile_id": "sustained_batch_v1",
+      "scenarios": [
+        {
+          "arrival_rate_rps": 0.1,
+          "batch_size": 4,
+          "modeled_concurrency": 1,
+          "output_p50_tokens": 256,
+          "output_p95_tokens": 512,
+          "probability": null,
+          "prompt_p50_tokens": 1024,
+          "prompt_p95_tokens": 2048,
+          "qos_class": "batch",
+          "scenario_id": "batch-c1-b4"
+        },
+        {
+          "arrival_rate_rps": 0.4,
+          "batch_size": 4,
+          "modeled_concurrency": 4,
+          "output_p50_tokens": 256,
+          "output_p95_tokens": 512,
+          "probability": null,
+          "prompt_p50_tokens": 1024,
+          "prompt_p95_tokens": 2048,
+          "qos_class": "batch",
+          "scenario_id": "batch-c4-b4"
+        }
+      ],
+      "source": "content_removed_operator_trace_v1",
+      "trace_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "trace_sample_count": 10000
+    }
+  ],
+  "protocol": "mycelium.m15_plan_comparison.v1",
+  "route_ready": false
+}
