@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import stat
 import subprocess
@@ -10,10 +11,31 @@ from pathlib import Path
 import pytest
 
 from layer_assignment import validate_assignment_identity
+from mycelium_assignment_cache import validate_cache_status, validate_materialization_report
+from mycelium_candidate_promotion import validate_candidate_promotion_report
+from mycelium_gateway.semantic import (
+    decode_observatory_event,
+    decode_observatory_snapshot,
+)
 from mycelium_gossip.evidence_bundle import evidence_bundle_from_dict
+from mycelium_gossip.signed_bundle import validate_signed_evidence_bundle
+from mycelium_membership import JOIN_REQUEST_PROTOCOL, verify_join_request
+from mycelium_layer_planner.replan_simulator import simulate_bundle
 from mycelium_layer_planner.gossip_adapter import validate_planner_snapshot_binding
 from mycelium_layer_planner.serialization import route_plan_from_dict
+from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_request_gateway.contracts import InferenceSubmission, StreamEvent
+from mycelium_topology_evidence import (
+    validate_m14_topology_projection,
+    validate_transport_path_observation,
+)
+from mycelium_router.serialization import (
+    execution_graph_from_dict,
+    path_manifest_from_dict,
+    path_manifest_to_dict,
+)
+from mycelium_router.validation import validate_manifest
+from mycelium_router.wire import decode_frame
 from planner_assignment import validate_control_plane_tranche
 from route_contract import validate_manual_provisioning_route_v1
 from runtime_contracts import GPT2_DECODER_TENSOR_SUFFIXES
@@ -41,12 +63,56 @@ EXPECTED_PROTOCOLS = {
     "gossip-router-view-v1.json": "mycelium.gossip.router_view.v1",
     "gossip-allocator-view-v1.json": "mycelium.gossip.allocator_view.v1",
     "gossip-evidence-bundle-v1.json": "mycelium.gossip.evidence_bundle.v1",
+    "signed-gossip-evidence-bundle-v1.json": "mycelium.gossip.signed_evidence_bundle.v1",
     "layer-planner-snapshot-v1.json": "mycelium.layer_planner_snapshot.v1",
     "control-plane-tranche-v1.json": "mycelium.control_plane_tranche.v1",
     "layer-load-proof-v1.json": "mycelium.layer_load_proof.v1",
     "route-qualification-v1.json": "mycelium.route_qualification.v1",
     "request-gateway-v1.json": "mycelium.request_gateway.v1",
     "request-event-v1.json": "mycelium.request_event.v1",
+    "membership-signed-message-v1.json": "mycelium.membership.signed_message.v1",
+    "membership-join-request-v1.json": "mycelium.membership.join_request.v1",
+    "membership-join-acceptance-v1.json": "mycelium.membership.join_acceptance.v1",
+    "membership-resume-request-v1.json": "mycelium.membership.resume_request.v1",
+    "membership-resume-acceptance-v1.json": (
+        "mycelium.membership.resume_acceptance.v1"
+    ),
+    "membership-capability-report-v1.json": "mycelium.membership.capability_report.v1",
+    "membership-link-probe-report-v1.json": "mycelium.membership.link_probe_report.v1",
+    "membership-heartbeat-v1.json": "mycelium.membership.heartbeat.v1",
+    "membership-lease-renewal-v1.json": "mycelium.membership.lease_renewal.v1",
+    "membership-assignment-offer-v1.json": "mycelium.membership.assignment_offer.v1",
+    "membership-assignment-result-v1.json": "mycelium.membership.assignment_result.v1",
+    "membership-drain-ack-v1.json": "mycelium.membership.drain_ack.v1",
+    "membership-seed-rotation-ack-v1.json": (
+        "mycelium.membership.seed_rotation_ack.v1"
+    ),
+    "seed-operator-inventory-v1.json": "mycelium.seed_operator_inventory.v1",
+    "seed-operator-revocation-v1.json": "mycelium.seed_operator_revocation.v1",
+    "seed-key-transition-v1.json": "mycelium.seed_key_transition.v1",
+    "seed-operator-rotation-v1.json": "mycelium.seed_operator_rotation.v1",
+    "seed-backup-v1.json": "mycelium.seed_backup.v1",
+    "capacity-profile-v1.json": "mycelium.capacity_profile.v1",
+    "link-state-v1.json": "mycelium.link_state.v1",
+    "product-ui-swarm-v1.json": "mycelium.product_ui.swarm.v1",
+    "live-route-incident-v1.json": "mycelium.live_route_incident.v1",
+    "performance-budget-v1.json": "mycelium.performance_budget.v1",
+    "assignment-artifact-cache-v1.json": "mycelium.assignment_artifact_cache.v1",
+    "assignment-materialization-v1.json": "mycelium.assignment_materialization.v1",
+    "candidate-promotion-report-v1.json": "mycelium.candidate_promotion_report.v1",
+    "m13-placement-projection-v1.json": "mycelium.m13_placement_projection.v1",
+    "transport-path-observation-v1.json": "mycelium.transport_path_observation.v1",
+    "m14-topology-projection-v1.json": "mycelium.m14_topology_projection.v1",
+    "product-snapshot-v1.json": "mycelium.product_snapshot.v1",
+    "product-event-v1.json": "mycelium.product_event.v1",
+    "execution-graph-v1.json": "mycelium.execution_graph.v1",
+    "path-manifest-v1.json": "mycelium.path_manifest.v1",
+    "live-route-status-v1.json": "mycelium.live_route_status.v1",
+    "router-wire-v1.json": "mycelium.router_wire.v1",
+    "layer-replan-simulation-report-v1.json": "mycelium.layer_replan_simulation_report.v1",
+    "product-ui-bootstrap-v1.json": "mycelium.product_ui.bootstrap.v1",
+    "observatory-snapshot-v1.json": "mycelium.observatory.snapshot.v1",
+    "observatory-event-v1.json": "mycelium.observatory.event.v1",
 }
 
 
@@ -452,6 +518,17 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
 
     evidence_bundle = load_fixture("gossip-evidence-bundle-v1.json")
     evidence_bundle_from_dict(evidence_bundle)
+    signed_bundle = load_fixture("signed-gossip-evidence-bundle-v1.json")
+    validated_signed_bundle = validate_signed_evidence_bundle(
+        signed_bundle,
+        expected_verification_key_digest=signed_bundle["verification_key"][
+            "verification_key_digest"
+        ],
+        now_unix_ms=2_000,
+    )
+    assert validated_signed_bundle.bundle.evidence_bundle_digest == evidence_bundle[
+        "evidence_bundle_digest"
+    ]
     planner_snapshot = load_fixture("layer-planner-snapshot-v1.json")
     validate_planner_snapshot_binding(planner_snapshot, evidence_bundle)
     tranche = load_fixture("control-plane-tranche-v1.json")
@@ -477,3 +554,57 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     assert InferenceSubmission.from_dict(submission_document).to_dict() == submission_document
     event_document = load_fixture("request-event-v1.json")
     assert StreamEvent.from_dict(event_document).to_dict() == event_document
+
+    membership = load_fixture("membership-signed-message-v1.json")
+    assert verify_join_request(membership, now=1_100.0)["protocol"] == JOIN_REQUEST_PROTOCOL
+
+    graph_document = load_fixture("execution-graph-v1.json")
+    graph = execution_graph_from_dict(graph_document)
+    path_document = load_fixture("path-manifest-v1.json")
+    path = path_manifest_from_dict(path_document)
+    assert path_manifest_to_dict(validate_manifest(path, graph)) == path_document
+
+    runtime_status = load_fixture("live-route-status-v1.json")
+    assert runtime_status["simulated"] is False
+    assert runtime_status["decode_mode"] == "stage_local_kv"
+    assert all(peer["active_kv_state_count"] == 0 for peer in runtime_status["peers"])
+
+    validate_cache_status(load_fixture("assignment-artifact-cache-v1.json"))
+    validate_materialization_report(load_fixture("assignment-materialization-v1.json"))
+    promotion = validate_candidate_promotion_report(
+        load_fixture("candidate-promotion-report-v1.json")
+    )
+    assert promotion["decision"] == "promote"
+    placement = validate_m13_placement_projection(
+        load_fixture("m13-placement-projection-v1.json")
+    )
+    assert placement["placement_provenance"] == "planner_v2"
+    transport_observation = validate_transport_path_observation(
+        load_fixture("transport-path-observation-v1.json"),
+        now_unix_ms=2_000,
+        require_resolved=True,
+    )
+    assert transport_observation["measurement_source"] == "iroh_activation_plane"
+    topology = validate_m14_topology_projection(
+        load_fixture("m14-topology-projection-v1.json")
+    )
+    assert len(topology["edges"]) == 6
+
+    transport = load_fixture("router-wire-v1.json")
+    golden_root = ROOT / "contracts" / "router-wire-golden"
+    assert transport == json.loads((golden_root / "index.json").read_text(encoding="utf-8"))
+    for frame in transport["frames"]:
+        payload = (golden_root / frame["file"]).read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == frame["frame_sha256"]
+        assert type(decode_frame(payload).message).__name__ == frame["message_type"]
+
+    recovery = load_fixture("layer-replan-simulation-report-v1.json")
+    simulated_recovery = json.loads(
+        json.dumps(simulate_bundle(ROOT / "scenarios" / "product-v1-replanning.json"))
+    )
+    assert recovery == simulated_recovery
+
+    semantic_snapshot = load_fixture("observatory-snapshot-v1.json")
+    assert decode_observatory_snapshot(semantic_snapshot) == semantic_snapshot
+    semantic_event = load_fixture("observatory-event-v1.json")
+    assert decode_observatory_event(semantic_event) == semantic_event
