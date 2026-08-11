@@ -113,6 +113,7 @@ _TESTS = frozenset(
 _REVIEWER = frozenset(
     {
         "bundle_version",
+        "bundle_manifest_digest",
         "preflight_idempotent",
         "surrogate_verified",
         "external_network",
@@ -371,6 +372,7 @@ def validate_release_evidence(document: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError("m22_release_evidence_invalid")
         reviewer = _closed(result["reviewer"], _REVIEWER)
         _text(reviewer["bundle_version"])
+        _sha(reviewer["bundle_manifest_digest"])
         for key in (
             "preflight_idempotent",
             "surrogate_verified",
