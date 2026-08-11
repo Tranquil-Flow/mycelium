@@ -746,12 +746,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 document = json.loads(body)
                 if (
                     not isinstance(document, dict)
-                    or set(document) != {"model_id", "revision"}
-                    or not isinstance(document["model_id"], str)
-                    or not isinstance(document["revision"], str)
+                    or set(document) != {"decision"}
+                    or not isinstance(document["decision"], dict)
                 ):
                     raise ValueError
-                status = preparation.start(document["model_id"], document["revision"])
+                status = preparation.start(document["decision"])
             except ModelPreparationError as exc:
                 self._send_bytes(
                     409,

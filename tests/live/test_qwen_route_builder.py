@@ -171,7 +171,12 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
         "operation_digest": "sha256:" + "a" * 64,
         "feasibility_digest": "sha256:" + "c" * 64,
         "representation_digest": "sha256:" + "d" * 64,
+        "source_quantization": "bfloat16",
+        "serving_dtype": "float32",
         "serving_quantization": "int8-weight-only",
+        "conversion_authorized": True,
+        "owner_decision_digest": "sha256:" + "e" * 64,
+        "preparation_binding_digest": "pending",
         "evidence_generation": 2,
         "evidence_valid_until_unix_ms": 9_999_999_999_999,
         "stages": [
@@ -198,6 +203,15 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
         ],
         "download_authorized": False,
     }
+    document["preparation_binding_digest"] = builder._digest(
+        builder._bytes(
+            {
+                "feasibility_digest": document["feasibility_digest"],
+                "owner_decision_digest": document["owner_decision_digest"],
+                "representation_digest": document["representation_digest"],
+            }
+        )
+    )
     path = tmp_path / "authorization.json"
     path.write_text(json.dumps(document), encoding="utf-8")
 
@@ -212,6 +226,28 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
     assert [(item.start, item.stop) for item in ranges or ()] == [(0, 30), (30, 36)]
 
     document["stages"][1]["backend"] = "mlx"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="model_preparation_authorization_invalid"):
+        builder._preparation_authorization(
+            path,
+            model_id=model_id,
+            resolved_commit=revision,
+            topology=topology,
+        )
+
+    document["stages"][1]["backend"] = "numpy"
+    document["conversion_authorized"] = False
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="model_preparation_authorization_invalid"):
+        builder._preparation_authorization(
+            path,
+            model_id=model_id,
+            resolved_commit=revision,
+            topology=topology,
+        )
+
+    document["conversion_authorized"] = True
+    document["preparation_binding_digest"] = "sha256:" + "f" * 64
     path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(RuntimeError, match="model_preparation_authorization_invalid"):
         builder._preparation_authorization(

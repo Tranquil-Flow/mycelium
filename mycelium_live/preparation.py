@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
+import hashlib
+import json
 import re
 import threading
 import time
@@ -12,6 +14,7 @@ from typing import Any, Callable, Mapping
 
 PREPARATION_PROTOCOL = "mycelium.model_preparation.v1"
 AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v1"
+REPRESENTATION_DECISION_PROTOCOL = "mycelium.model_representation_decision.v1"
 _PHASES = {
     "validating_capacity",
     "compiling_assignments",
@@ -23,6 +26,16 @@ _STATES = {"idle", "preparing", "succeeded", "failed"}
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _REVISION = re.compile(r"[0-9a-f]{40}\Z")
 _SAFE_REASON = re.compile(r"[a-z][a-z0-9_]{0,127}\Z")
+_DECISION_FIELDS = {
+    "protocol",
+    "model_id",
+    "revision",
+    "source_quantization",
+    "serving_dtype",
+    "serving_quantization",
+    "representation_digest",
+    "conversion_authorized",
+}
 
 
 class ModelPreparationError(RuntimeError):
@@ -51,6 +64,17 @@ def _detached(value: Mapping[str, Any]) -> dict[str, Any]:
     return copy.deepcopy(dict(value))
 
 
+def _digest(value: object) -> str:
+    payload = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
 def _public_reason(exc: BaseException) -> str:
     code = getattr(exc, "code", None)
     if not isinstance(code, str):
@@ -61,10 +85,31 @@ def _public_reason(exc: BaseException) -> str:
 def _authorization(
     operation: Mapping[str, Any],
     *,
-    model_id: str,
-    revision: str,
+    decision: Mapping[str, Any],
     now_unix_ms: int,
 ) -> dict[str, Any]:
+    if set(decision) != _DECISION_FIELDS:
+        raise ModelPreparationError("model_representation_decision_invalid")
+    model_id = decision.get("model_id")
+    revision = decision.get("revision")
+    if (
+        decision.get("protocol") != REPRESENTATION_DECISION_PROTOCOL
+        or not isinstance(model_id, str)
+        or not model_id
+        or len(model_id) > 256
+        or not isinstance(revision, str)
+        or _REVISION.fullmatch(revision) is None
+        or not isinstance(decision.get("source_quantization"), str)
+        or not decision["source_quantization"]
+        or not isinstance(decision.get("serving_dtype"), str)
+        or not decision["serving_dtype"]
+        or not isinstance(decision.get("serving_quantization"), str)
+        or not decision["serving_quantization"]
+        or not isinstance(decision.get("representation_digest"), str)
+        or _DIGEST.fullmatch(decision["representation_digest"]) is None
+        or type(decision.get("conversion_authorized")) is not bool
+    ):
+        raise ModelPreparationError("model_representation_decision_invalid")
     if operation.get("protocol") != "mycelium.model_operation.v1":
         raise ModelPreparationError("model_operation_unavailable")
     catalog = operation.get("catalog")
@@ -146,6 +191,8 @@ def _authorization(
     operation_digest = operation.get("operation_digest")
     feasibility_digest = report.get("feasibility_digest")
     representation_digest = report.get("representation_digest")
+    source_quantization = report.get("source_quantization")
+    serving_dtype = report.get("serving_dtype")
     serving_quantization = report.get("serving_quantization")
     evidence_generation = report.get("evidence_generation")
     catalog_generation = operation.get("catalog_generation")
@@ -156,11 +203,36 @@ def _authorization(
         or _DIGEST.fullmatch(feasibility_digest) is None
         or not isinstance(representation_digest, str)
         or _DIGEST.fullmatch(representation_digest) is None
-        or serving_quantization != "int8-weight-only"
+        or not isinstance(source_quantization, str)
+        or not source_quantization
+        or not isinstance(serving_dtype, str)
+        or not serving_dtype
+        or not isinstance(serving_quantization, str)
+        or not serving_quantization
         or type(evidence_generation) is not int
         or type(catalog_generation) is not int
     ):
         raise ModelPreparationError("model_operation_invalid")
+    representation_fields = (
+        "source_quantization",
+        "serving_dtype",
+        "serving_quantization",
+        "representation_digest",
+    )
+    if any(decision[field] != report[field] for field in representation_fields):
+        raise ModelPreparationError("model_representation_decision_mismatch")
+    conversion_required = source_quantization != serving_quantization
+    if conversion_required and decision["conversion_authorized"] is not True:
+        raise ModelPreparationError("model_representation_conversion_not_authorized")
+    owner_decision = _detached(decision)
+    owner_decision_digest = _digest(owner_decision)
+    preparation_binding_digest = _digest(
+        {
+            "feasibility_digest": feasibility_digest,
+            "owner_decision_digest": owner_decision_digest,
+            "representation_digest": representation_digest,
+        }
+    )
     return {
         "protocol": AUTHORIZATION_PROTOCOL,
         "model_id": model_id,
@@ -169,7 +241,12 @@ def _authorization(
         "operation_digest": operation_digest,
         "feasibility_digest": feasibility_digest,
         "representation_digest": representation_digest,
+        "source_quantization": source_quantization,
+        "serving_dtype": serving_dtype,
         "serving_quantization": serving_quantization,
+        "conversion_authorized": decision["conversion_authorized"],
+        "owner_decision_digest": owner_decision_digest,
+        "preparation_binding_digest": preparation_binding_digest,
         "evidence_generation": evidence_generation,
         "evidence_valid_until_unix_ms": valid_until,
         "stages": frozen_stages,
@@ -216,6 +293,16 @@ class LocalModelPreparation:
             "phase": self._phase,
             "model_id": self._model_id,
             "revision": self._revision,
+            "representation_digest": (
+                None
+                if self._authorization is None
+                else self._authorization["representation_digest"]
+            ),
+            "owner_decision_digest": (
+                None
+                if self._authorization is None
+                else self._authorization["owner_decision_digest"]
+            ),
             "candidate_id": self._candidate_id,
             "topology_size": self._topology_size,
             "transfer_bytes": self._transfer_bytes,
@@ -244,15 +331,11 @@ class LocalModelPreparation:
                 self._verified_bytes = max(0, int(verified_bytes))
             self._generation += 1
 
-    def start(self, model_id: str, revision: str) -> Mapping[str, Any]:
-        if (
-            not isinstance(model_id, str)
-            or not model_id
-            or len(model_id) > 256
-            or not isinstance(revision, str)
-            or _REVISION.fullmatch(revision) is None
-        ):
-            raise ModelPreparationError("model_identity_invalid")
+    def start(self, decision: Mapping[str, Any]) -> Mapping[str, Any]:
+        if not isinstance(decision, Mapping):
+            raise ModelPreparationError("model_representation_decision_invalid")
+        model_id = decision.get("model_id")
+        revision = decision.get("revision")
         with self._lock:
             if self._state == "preparing":
                 if self._model_id == model_id and self._revision == revision:
@@ -263,8 +346,7 @@ class LocalModelPreparation:
             raise ModelPreparationError("model_operation_unavailable")
         authorization = _authorization(
             operation,
-            model_id=model_id,
-            revision=revision,
+            decision=decision,
             now_unix_ms=self._clock(),
         )
         with self._lock:
@@ -331,5 +413,6 @@ __all__ = [
     "LocalModelPreparation",
     "ModelPreparationError",
     "PREPARATION_PROTOCOL",
+    "REPRESENTATION_DECISION_PROTOCOL",
     "PreparationResult",
 ]

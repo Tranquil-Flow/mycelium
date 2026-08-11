@@ -1,7 +1,8 @@
+import { useState } from 'react';
 import type { DeploymentActivationStatus } from '../liveRoute/deploymentActivation';
 import type { M17ModelOperation } from '../liveRoute/m17ModelOperation';
 import type { ModelCapacityRefreshStatus } from './modelCapacityRefresh';
-import type { ModelPreparationStatus } from './modelPreparation';
+import type { ModelPreparationStatus, ModelRepresentationDecision } from './modelPreparation';
 import { projectModelCatalogControls, type ModelCatalogRow } from './modelCatalogControl';
 import styles from '../liveRoute/LiveRouteWorkspace.module.css';
 
@@ -10,9 +11,26 @@ function bytes(value: number): string {
   return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value / 2 ** 30)} GiB`;
 }
 
-function Row({ row, busy, onActivate, onUnload, onPrepare }: { readonly row: ModelCatalogRow; readonly busy: boolean; readonly onActivate: (candidateId: string) => void; readonly onUnload: (candidateId: string) => void; readonly onPrepare: (modelId: string, revision: string) => void }) {
+function Row({ row, busy, onActivate, onUnload, onPrepare }: { readonly row: ModelCatalogRow; readonly busy: boolean; readonly onActivate: (candidateId: string) => void; readonly onUnload: (candidateId: string) => void; readonly onPrepare: (decision: ModelRepresentationDecision) => void }) {
   const report = row.feasibility;
   const candidate = row.candidate;
+  const [reviewing, setReviewing] = useState(false);
+  const [conversionAuthorized, setConversionAuthorized] = useState(false);
+  const representationBound = report?.source_quantization !== undefined
+    && report.serving_dtype !== undefined
+    && report.serving_quantization !== undefined
+    && report.representation_digest !== undefined;
+  const conversionRequired = representationBound && report.source_quantization !== report.serving_quantization;
+  const decision = representationBound ? {
+    protocol: 'mycelium.model_representation_decision.v1' as const,
+    model_id: row.entry.model_id,
+    revision: row.entry.revision,
+    source_quantization: report.source_quantization!,
+    serving_dtype: report.serving_dtype!,
+    serving_quantization: report.serving_quantization!,
+    representation_digest: report.representation_digest!,
+    conversion_authorized: conversionRequired ? conversionAuthorized : false,
+  } : null;
   return <tr>
     <th scope="row">{row.entry.model_id}<small> · {row.entry.revision.slice(0, 8)}</small></th>
     <td>{row.entry.quantization}{report?.serving_quantization === undefined || report.serving_quantization === row.entry.quantization ? null : <> → {report.serving_quantization}</>}<small> · {row.entry.num_layers ?? 'unknown'} layers · {bytes(row.entry.weight_bytes)}</small></td>
@@ -24,7 +42,14 @@ function Row({ row, busy, onActivate, onUnload, onPrepare }: { readonly row: Mod
     </td>
     <td>{(row.action === 'activate' || row.action === 'retry') && candidate !== null ? <button type="button" disabled={busy} onClick={() => onActivate(candidate.candidate_id)}>
       {row.action === 'retry' ? 'Retry qualification' : 'Activate and qualify'}
-    </button> : row.action === 'prepare' || row.action === 'retry_prepare' ? <button type="button" disabled={busy} onClick={() => onPrepare(row.entry.model_id, row.entry.revision)}>{row.action === 'retry_prepare' ? 'Retry preparation' : 'Prepare on swarm'}</button> : row.availability === 'qualified' && candidate !== null ? <button type="button" disabled={busy} onClick={() => onUnload(candidate.candidate_id)}>Unload from memory</button> : row.availability === 'qualified' ? 'Select above' : row.availability === 'active' ? 'Selected' : row.availability === 'preparing' ? 'In progress' : 'No action available'}</td>
+    </button> : row.action === 'prepare' || row.action === 'retry_prepare' ? !representationBound ? 'Representation binding unavailable' : <div>
+      <button type="button" disabled={busy} onClick={() => setReviewing((value) => !value)}>{reviewing ? 'Close representation review' : 'Review representation'}</button>
+      {!reviewing ? null : <div role="group" aria-label={`Representation authorization for ${row.entry.model_id}`}>
+        <p><strong>Exact representation</strong><small> · revision {row.entry.revision.slice(0, 8)} · {report!.source_quantization} → {report!.serving_quantization} ({report!.serving_dtype}) · {report!.representation_digest!.slice(0, 15)}…</small></p>
+        {conversionRequired ? <label><input type="checkbox" checked={conversionAuthorized} onChange={(event) => setConversionAuthorized(event.target.checked)} /> I authorize creating this exact derived representation.</label> : <p>No representation conversion is required.</p>}
+        <button type="button" disabled={busy || (conversionRequired && !conversionAuthorized)} onClick={() => decision === null ? undefined : onPrepare(decision)}>{conversionRequired ? 'Authorize representation and prepare' : 'Confirm representation and prepare'}</button>
+      </div>}
+    </div> : row.availability === 'qualified' && candidate !== null ? <button type="button" disabled={busy} onClick={() => onUnload(candidate.candidate_id)}>Unload from memory</button> : row.availability === 'qualified' ? 'Select above' : row.availability === 'active' ? 'Selected' : row.availability === 'preparing' ? 'In progress' : 'No action available'}</td>
   </tr>;
 }
 
@@ -51,7 +76,7 @@ export function ModelCatalogControlPanel({
   readonly capacityRefresh: ModelCapacityRefreshStatus | null;
   readonly onRecheckCapacity: () => void;
   readonly preparation?: ModelPreparationStatus | null;
-  readonly onPrepare?: (modelId: string, revision: string) => void;
+  readonly onPrepare?: (decision: ModelRepresentationDecision) => void;
 }) {
   const rows = projectModelCatalogControls(operation, activation, nowUnixMs, preparation ?? null);
   const prominent = rows.filter((row) => row.prominent);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a pinned, int8 Qwen2.5 live-route bundle for two or more hosts."""
+"""Build a pinned, authorization-bound dense Qwen live-route bundle."""
 
 # ruff: noqa: E402 -- direct script execution needs the repository on sys.path.
 
@@ -175,7 +175,12 @@ def _preparation_authorization(
         "operation_digest",
         "feasibility_digest",
         "representation_digest",
+        "source_quantization",
+        "serving_dtype",
         "serving_quantization",
+        "conversion_authorized",
+        "owner_decision_digest",
+        "preparation_binding_digest",
         "evidence_generation",
         "evidence_valid_until_unix_ms",
         "stages",
@@ -205,10 +210,40 @@ def _preparation_authorization(
             r"sha256:[0-9a-f]{64}", str(document.get("representation_digest", ""))
         )
         is None
-        or document.get("serving_quantization") != "int8-weight-only"
+        or not isinstance(document.get("source_quantization"), str)
+        or not isinstance(document.get("serving_dtype"), str)
+        or document.get("serving_dtype") not in {"float16", "float32"}
+        or document.get("serving_quantization") not in {"none", "int8-weight-only"}
+        or type(document.get("conversion_authorized")) is not bool
+        or re.fullmatch(
+            r"sha256:[0-9a-f]{64}", str(document.get("owner_decision_digest", ""))
+        )
+        is None
+        or re.fullmatch(
+            r"sha256:[0-9a-f]{64}", str(document.get("preparation_binding_digest", ""))
+        )
+        is None
+        or (
+            document.get("source_quantization") != document.get("serving_quantization")
+            and document.get("conversion_authorized") is not True
+        )
         or not isinstance(stages, list)
         or len(stages) != len(topology)
     ):
+        raise RuntimeError("model_preparation_authorization_invalid")
+    expected_binding_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            canonical_json(
+                {
+                    "feasibility_digest": document["feasibility_digest"],
+                    "owner_decision_digest": document["owner_decision_digest"],
+                    "representation_digest": document["representation_digest"],
+                }
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    if document["preparation_binding_digest"] != expected_binding_digest:
         raise RuntimeError("model_preparation_authorization_invalid")
     ranges: list[range] = []
     cursor = 0
@@ -931,6 +966,16 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         resolved_commit=resolved_commit,
         topology=topology,
     )
+    runtime_dtype = (
+        "float32"
+        if preparation_authorization is None
+        else preparation_authorization["serving_dtype"]
+    )
+    runtime_quantization = (
+        "int8-weight-only"
+        if preparation_authorization is None
+        else preparation_authorization["serving_quantization"]
+    )
     deployment_id = getattr(args, "deployment_id", None) or str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -993,11 +1038,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 requested_revision="main",
                 resolved_commit=resolved_commit,
             ),
-            runtime_dtype="float32",
+            runtime_dtype=runtime_dtype,
             runtime_backends_by_node={
                 node_id: runtime_backends[node_id] for node_id in prepare_node_ids
             },
-            runtime_quantization="int8-weight-only",
+            runtime_quantization=runtime_quantization,
             deployment_id=deployment_id,
             layer_ranges=prepare_ranges,
             control_plane_binding=(
@@ -1009,7 +1054,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                         "operation_digest"
                     ],
                     "planner_snapshot_digest": preparation_authorization[
-                        "feasibility_digest"
+                        "preparation_binding_digest"
                     ],
                     "snapshot_generation": preparation_authorization[
                         "evidence_generation"
@@ -1059,8 +1104,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     runtime_by_node = {
         node_id: {
             "backend": backend,
-            "dtype": "float32",
-            "quantization": "int8-weight-only",
+            "dtype": runtime_dtype,
+            "quantization": runtime_quantization,
         }
         for node_id, backend in runtime_backends.items()
     }
@@ -1402,7 +1447,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 manifest_digest="sha256:"
                 + prepared.manifest["manifest_digest"]["value"],
                 format=prepared.manifest["format"],
-                quantization="int8-weight-only",
+                quantization=runtime_quantization,
                 tensor_digest=tensor_digest,
                 size_bytes=path.stat().st_size,
             )
@@ -1540,7 +1585,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     node_transfer_manifests = _node_transfer_manifests(transfer_manifest, packs)
     plan = copy.deepcopy(template)
     plan["run_id"] = run_id
-    plan["plan_id"] = f"{route_label}-{model_slug}-int8-{len(topology)}-host"
+    representation_slug = re.sub(
+        r"[^a-z0-9]+", "-", runtime_quantization.lower()
+    ).strip("-")
+    plan["plan_id"] = (
+        f"{route_label}-{model_slug}-{representation_slug}-{len(topology)}-host"
+    )
     plan["now_unix_ms"] = int(now * 1_000)
     plan["controller"].update(
         {
@@ -1561,7 +1611,17 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "run_id": run_id,
         "model_id": model_id,
         "resolved_commit": resolved_commit,
-        "quantization": "int8-weight-only",
+        "quantization": runtime_quantization,
+        "representation_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization["representation_digest"]
+        ),
+        "owner_decision_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization["owner_decision_digest"]
+        ),
         "layer_ranges": [assignment["range"] for assignment in assignments],
         "runtime_backends": [
             assignment["runtime"]["backend"] for assignment in assignments

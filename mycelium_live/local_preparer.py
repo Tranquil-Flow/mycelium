@@ -74,7 +74,9 @@ def _topology_from_template(
             peer = peers[node_id]
             runtime = runtime_nodes[node_id]
             assignment = json.loads(
-                (source_root / runtime["configure"]["assignment_file"]).read_text("utf-8")
+                (source_root / runtime["configure"]["assignment_file"]).read_text(
+                    "utf-8"
+                )
             )
             endpoint_id = endpoint_ids.get(node_id)
             if not endpoint_id:
@@ -129,20 +131,26 @@ class LocalCandidatePreparer:
         self._repo = Path(repo_root).resolve(strict=True)
         self._cache = Path(cache_root).resolve(strict=True)
         self._template = Path(template_plan).resolve(strict=True)
-        self._workspace = _private_directory(workspace_root, "model_preparation_root_unsafe", create=True)
-        self._candidates = _private_directory(candidate_root, "candidate_plan_root_unsafe")
+        self._workspace = _private_directory(
+            workspace_root, "model_preparation_root_unsafe", create=True
+        )
+        self._candidates = _private_directory(
+            candidate_root, "candidate_plan_root_unsafe"
+        )
         self._python = python_executable
         self._run = run
 
-    def _snapshot(self, model_id: str, revision: str) -> Path:
+    def _snapshot(self, model_id: str, revision: str) -> tuple[Path, str]:
         matches = [
             entry
             for entry in scan_huggingface_cache(self._cache)
-            if entry.model_id == model_id and entry.revision == revision and entry.compatible
+            if entry.model_id == model_id
+            and entry.revision == revision
+            and entry.compatible
         ]
         if len(matches) != 1:
             raise ModelPreparationError("local_model_snapshot_unavailable")
-        return matches[0].snapshot_path.resolve(strict=True)
+        return matches[0].snapshot_path.resolve(strict=True), matches[0].quantization
 
     def _execute(
         self,
@@ -182,17 +190,19 @@ class LocalCandidatePreparer:
     ) -> PreparationResult:
         model_id = str(authorization["model_id"])
         revision = str(authorization["revision"])
-        snapshot = self._snapshot(model_id, revision)
-        attempt = self._workspace / (
-            revision[:12] + "-" + uuid.uuid4().hex[:12]
-        )
+        snapshot, source_quantization = self._snapshot(model_id, revision)
+        if source_quantization != authorization.get("source_quantization"):
+            raise ModelPreparationError("model_source_representation_changed")
+        attempt = self._workspace / (revision[:12] + "-" + uuid.uuid4().hex[:12])
         attempt.mkdir(mode=0o700)
         authorization_path = attempt / "authorization.json"
         topology_path = attempt / "topology.json"
         authorization_path.write_bytes(_canonical(authorization))
         os.chmod(authorization_path, 0o600)
         template = json.loads(self._template.read_text("utf-8"))
-        topology_path.write_bytes(_canonical(_topology_from_template(template, authorization)))
+        topology_path.write_bytes(
+            _canonical(_topology_from_template(template, authorization))
+        )
         os.chmod(topology_path, 0o600)
         output_root = attempt / "candidate"
 
@@ -251,7 +261,11 @@ class LocalCandidatePreparer:
         shutil.copyfile(plan_path, temporary)
         os.chmod(temporary, 0o600)
         if destination.exists():
-            if destination.is_symlink() or hashlib.sha256(destination.read_bytes()).digest() != hashlib.sha256(temporary.read_bytes()).digest():
+            if (
+                destination.is_symlink()
+                or hashlib.sha256(destination.read_bytes()).digest()
+                != hashlib.sha256(temporary.read_bytes()).digest()
+            ):
                 temporary.unlink(missing_ok=True)
                 raise ModelPreparationError("candidate_plan_conflict")
             temporary.unlink(missing_ok=True)

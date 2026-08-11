@@ -12,7 +12,7 @@ import {
 } from '../liveRoute/m17ModelOperation';
 import { ModelCatalogControlPanel } from './ModelCatalogControlPanel';
 import { HttpModelCapacityRefreshClient, type ModelCapacityRefreshClient, type ModelCapacityRefreshStatus } from './modelCapacityRefresh';
-import { HttpModelPreparationClient, type ModelPreparationClient, type ModelPreparationStatus } from './modelPreparation';
+import { HttpModelPreparationClient, type ModelPreparationClient, type ModelPreparationStatus, type ModelRepresentationDecision } from './modelPreparation';
 
 export function ModelCatalogControlSource({
   operationClient,
@@ -101,14 +101,14 @@ export function ModelCatalogControlSource({
     }
   };
 
-  const prepare = async (modelId: string, revision: string): Promise<void> => {
+  const prepare = async (decision: ModelRepresentationDecision): Promise<void> => {
     try {
-      setPreparation(await preparationApi.start(modelId, revision)); setError(null);
+      setPreparation(await preparationApi.start(decision)); setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'model_preparation_failed');
     }
   };
 
-  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(modelId, revision) => void prepare(modelId, revision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
+  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(decision) => void prepare(decision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
   return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading model catalog and deployment status…' : `Model controls are unavailable (${error}). Existing qualified inference remains usable.`}</section>;
 }

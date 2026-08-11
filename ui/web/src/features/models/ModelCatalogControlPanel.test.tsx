@@ -58,11 +58,25 @@ describe('ModelCatalogControlPanel', () => {
     expect(screen.getByRole('button', { name: 'Rechecking capacity…' })).toBeDisabled();
   });
 
-  it('prepares a feasible local model without conflating preparation and activation', () => {
+  it('requires an exact affirmative representation decision before conversion and preparation', () => {
     const prepare = vi.fn();
     render(<ModelCatalogControlPanel operation={operation} activation={{ ...activation, candidates: [] }} capacityRefresh={null} preparation={null} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onPrepare={prepare} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Prepare on swarm' }));
-    expect(prepare).toHaveBeenCalledWith('Qwen/Ready', revision);
+    fireEvent.click(screen.getByRole('button', { name: 'Review representation' }));
+    const authorize = screen.getByRole('button', { name: 'Authorize representation and prepare' });
+    expect(authorize).toBeDisabled();
+    expect(screen.getByText(/bfloat16 → int8-weight-only \(float32\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /I authorize creating this exact derived representation/ }));
+    fireEvent.click(authorize);
+    expect(prepare).toHaveBeenCalledWith({
+      protocol: 'mycelium.model_representation_decision.v1',
+      model_id: 'Qwen/Ready',
+      revision,
+      source_quantization: 'bfloat16',
+      serving_dtype: 'float32',
+      serving_quantization: 'int8-weight-only',
+      representation_digest: digest,
+      conversion_authorized: true,
+    });
     expect(screen.getByText(/no action here downloads a model/i)).toBeInTheDocument();
   });
 });
