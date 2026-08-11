@@ -11,7 +11,7 @@ Prompt/output history survived workspace navigation, refresh, and supervisor res
 - Operator runbook: `docs/live-mvp-operator-runbook.md`
 - Reviewer entry point: `docs/release/astras-macbook-reviewer.md`
 - Release UI audit: `docs/release/m22-ui-requirements.v1.json`
-- Milestone commits: M12 `27a3478`, M13 `d6249c1`, M14 `2ff804d`, M15 `7d3b420`, M16 `b565e0d`, M17 `e739f54`, M18 `0761a97`, M19 `a6294aa`, M20 `26d863a`, M21 `b7f01e2`, M22 baseline `4b8be84`; managed closure is this commit.
+- Milestone commits: M12 `27a3478`, M13 `d6249c1`, M14 `2ff804d`, M15 `7d3b420`, M16 `b565e0d`, M17 `e739f54`, M18 `0761a97`, M19 `a6294aa`, M20 `26d863a`, M21 `b7f01e2`, M22 baseline `4b8be84`; managed restart closure `26fae02`; reviewer identity and packaging fixes `096022f`, `5438f7c`.
 - Private operator evidence: `m22-release-20260811/m22-release.json`, SBOM, transport matrix, bounded plan, service packages, and reviewer bundle.
 
 Qwen3-8B is locally complete and its dense `qwen3` adapter is verified for manifest
@@ -19,8 +19,12 @@ ownership, MLX/NumPy parity, int8 weight-only execution, and stage-local KV. It 
 correctly blocked because the measured swarm cannot fit a safe exact contiguous
 allocation. Managed launchd/systemd child recovery, persistent restart budgets,
 coordinator restart, three-member renewal, and post-restart inference are digest-bound
-and verified. The release gate remains withheld only until an external-network
-surrogate reviewer passes.
+and verified. A separately enrolled macOS reviewer surrogate was assigned layers
+`[22,35)`, passed the four-category quality gate and an arbitrary browser prompt,
+and retained request history across refresh; its revoked-identity predecessor also
+passed the negative-access check. That surrogate shared the hotspot with the other
+hosts, so the release gate remains withheld only until the same reviewer procedure
+passes from a genuinely different network.
 
 Future decisions remain separately scoped: stronger incremental KV, continuous
 batching, autoscaling, tensor/hybrid parallelism, and quantized Qwen3 qualification.
