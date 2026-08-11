@@ -167,6 +167,12 @@ request.
 
 ## 8. UI contract
 
+- **Model catalog control:** one data-driven projection joins immutable local catalog
+  identity, lifecycle, current feasibility, and prepared-deployment activation state.
+  Discovery is visibly distinct from compatibility, fit, preparation, qualification,
+  and active selection. Only a prepared deployment can be activated, and only a
+  qualified deployment can enter the inference selector. Refresh and activation never
+  authorize a download.
 - **Inference:** qualified model/deployment selector, immutable revision and
   representation, capacity/context envelope, active versus requested choice, and
   history bound to the exact deployment.
@@ -186,6 +192,12 @@ request.
 Navigation, refresh, reconnect, and Back/Forward preserve catalog generation,
 selection, progress, rejection reason, and bounded request history. Unknown or stale
 state is never rendered as zero, healthy, or ready.
+
+Adding a member does not itself make a model runnable. The UI links model capacity to
+member enrollment, but a new member contributes only after fresh capability evidence,
+feasibility planning, artifact preparation, route loading, and qualification. An
+expired feasible or infeasible report is shown as requiring a new capacity check, not
+as a current admission result.
 
 ## 9. Verification gate
 

@@ -74,7 +74,11 @@ traffic-aware liveness and scoped recovery.
 
 ## Current deployments and topology
 
-The live registry currently contains three independent qualified deployments:
+The operator currently has three independently prepared deployment identities. The
+live registry is dynamic: at the 2026-08-11 restart, 0.5B and 1.5B were qualified and
+the 3B route was discoverable as a prepared candidate. Explicit no-restart activation
+then qualified the 3B route while preserving 0.5B as the selected default. The product
+reconstructs this state from the backend and does not assume a fixed number of models:
 
 | Model | Quantization | Stage 0 | Stage 1 | Purpose |
 | --- | --- | --- | --- | --- |
@@ -105,6 +109,13 @@ new deployment or downloads artifacts. Activation is single-flight, reports boun
 progress, is retryable after failure, and preserves the incumbent route. This closes
 the gateway-restart gap for prepared deployments, not the remaining automatic M17
 feasibility, assignment-local acquisition, or lifecycle-convergence gates.
+
+The live Inference and Settings workspaces now present one model catalog control that
+joins immutable local identities, lifecycle state, feasibility evidence, and prepared
+activation candidates. Qualified models alone populate the inference selector;
+prepared models expose explicit activation; compatible or capacity-blocked local
+models remain visible with bounded reasons. Stale capacity results are never treated
+as current, and catalog refresh never downloads model data.
 
 ## Current planning, trust, and network authority
 

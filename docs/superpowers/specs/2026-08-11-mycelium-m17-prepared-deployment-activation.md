@@ -55,12 +55,14 @@ with HTTP 202. Repeating activation for a registered deployment is idempotent.
 
 ## UI
 
-Inference, Plans, Readiness, and Incidents show one product-language "Prepared
-deployments" surface. It identifies the model/revision and route size, reports live
-phase progress, permits activation only for prepared or failed candidates, and polls
-while work is active. When qualification completes it refreshes the model selector;
-the user still explicitly chooses the new model. Refresh and navigation reconstruct
-state from the backend.
+Inference and Settings show one product-language model catalog surface, derived from
+the catalog, lifecycle, feasibility, and activation authorities rather than a fixed
+model list. It identifies model/revision, representation, route size, current swarm
+fit, and live activation phase. It permits activation only for prepared or failed
+candidates and polls while work is active. When qualification completes it refreshes
+the model selector; the user still explicitly chooses the new model. Refresh and
+navigation reconstruct state from the backend. Internal milestone names are not
+product labels.
 
 ## Verification gate
 

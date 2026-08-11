@@ -23,11 +23,10 @@ import {
 } from '../liveRoute/m15Comparison';
 import { loadProductSettings } from '../settings/SettingsContext';
 import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from '../liveRoute/m16Runtime';
-import { M17ModelOperationSourcePanel } from '../liveRoute/M17ModelOperationSourcePanel';
+import { ModelCatalogControlSource } from '../models/ModelCatalogControlSource';
 import { M18ReplicationSourcePanel } from '../liveRoute/M18ReplicationSourcePanel';
 import { M19RecoverySourcePanel } from '../liveRoute/M19RecoverySourcePanel';
 import { M20SpeculationSourcePanel } from '../liveRoute/M20SpeculationSourcePanel';
-import { PreparedDeploymentsSourcePanel } from '../liveRoute/PreparedDeploymentsSourcePanel';
 import { DEPLOYMENTS_CHANGED_EVENT } from '../liveRoute/deploymentActivation';
 
 const encoder = new TextEncoder();
@@ -525,8 +524,7 @@ export function InferenceWorkspace({
         </aside>
       </div>
 
-      {client === undefined ? <M17ModelOperationSourcePanel view="inference" /> : null}
-      {client === undefined ? <PreparedDeploymentsSourcePanel view="inference" hideUnavailable /> : null}
+      {client === undefined ? <ModelCatalogControlSource /> : null}
       {client === undefined ? <M20SpeculationSourcePanel view="inference" hideUnavailable /> : null}
       {client === undefined ? <M19RecoverySourcePanel view="inference" hideUnavailable /> : null}
       {client === undefined ? <M18ReplicationSourcePanel view="inference" hideUnavailable /> : null}

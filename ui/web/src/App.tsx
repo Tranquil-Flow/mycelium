@@ -28,6 +28,7 @@ import { HttpDeploymentRegistryClient } from './features/inference/deploymentCli
 import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
+import { ModelCatalogControlSource } from './features/models/ModelCatalogControlSource';
 import { M21HeterogeneousSourcePanel } from './features/liveRoute/M21HeterogeneousSourcePanel';
 import { M22ReleaseSourcePanel } from './features/liveRoute/M22ReleaseSourcePanel';
 import { M23KvSourcePanel } from './features/liveRoute/M23KvSourcePanel';
@@ -300,6 +301,7 @@ export default function App({
       {source.source_mode === 'live' ? <M22ReleaseSourcePanel view="settings" hideUnavailable /> : null}
       {source.source_mode === 'live' ? <M21HeterogeneousSourcePanel view="settings" hideUnavailable /> : null}
       <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} speculationClient={source.source_mode === 'live' ? liveM20SpeculationClient : null} />
+      {source.source_mode === 'live' ? <ModelCatalogControlSource /> : null}
     </>;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
