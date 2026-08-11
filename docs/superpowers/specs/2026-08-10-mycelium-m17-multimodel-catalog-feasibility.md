@@ -19,11 +19,14 @@ read existing caches; it may never repair them from the network implicitly.
 M17 does not add tensor parallelism or claim that GGUF/llama.cpp RPC is equivalent to
 Mycelium's contiguous stage pipeline. Data-parallel stage replication remains M18.
 
-The priority useful-model target is the already-local `Qwen/Qwen3-8B` BF16 snapshot.
-Its dense Qwen3 adapter must model bias-free Q/K/V projections, per-head Q/K RMS
-normalization, grouped-query attention, RoPE, stage-local KV, and untied output head
-explicitly. It may enter selection only after local manifest/load/parity and physical
-qualification gates pass; local presence and a feasible allocation are not enough.
+The priority physical usefulness target is the largest already-local model admitted by
+fresh swarm evidence. At the current measured generation that is
+`Qwen/Qwen2.5-7B-Instruct`; `Qwen/Qwen3-8B` is rejected by serving-representation load
+peak. Its dense Qwen3 adapter still models bias-free Q/K/V projections, per-head Q/K
+RMS normalization, grouped-query attention, RoPE, stage-local KV, and untied output
+head explicitly. Either model may enter selection only after local
+manifest/load/parity and physical qualification gates pass; local presence and a
+source-weight fit are not enough.
 
 ## 2. Authorities and lifecycle
 
@@ -94,6 +97,13 @@ quantizes or substitutes a representation. Promotion requires an independent,
 non-participating reference under a frozen exact-token or model-specific error/quality
 tolerance plus measured memory/performance benefit.
 
+The implemented preparation choice is an explicitly catalogued
+`mycelium.rowwise_symmetric_int8.v1` serving representation with float32 runtime
+compute. Its representation digest binds the source artifact, quantizer, runtime
+dtype, resident bytes, and modeled conversion-load peak. The UI shows the source to
+serving transition before preparation; this is not an implicit change made after the
+user selects the model.
+
 ## 5. Swarm feasibility
 
 `mycelium.model_feasibility.v1` binds one catalog entry, workload profile, signed
@@ -105,7 +115,8 @@ positive half-open layer range.
 Per-node feasibility includes:
 
 - exact assigned weight/static component bytes;
-- activation and workspace peak;
+- exact resident representation bytes, modeled source-conversion load peak, and
+  activation/workspace requirements;
 - bounded KV for declared context, output, batch, and concurrency;
 - runtime reserve/headroom, observed RSS and swap pressure;
 - local disk needed for missing content plus staging overhead;
@@ -207,8 +218,9 @@ as a current admission result.
 2. A read-only local inventory proves no network requests or cache mutation. Incomplete
    local snapshots remain incomplete and name every missing requirement.
 3. Pure feasibility tests cover exact fit, one-byte-over limit, KV/context pressure,
-   disk pressure, backend/quantization mismatch, missing directed edge, stale evidence,
-   deterministic allocation, and no silent fallback.
+   disk pressure, representation load-peak pressure, backend/quantization mismatch,
+   missing directed edge, stale evidence, deterministic allocation, and no silent
+   fallback.
 4. Provisioning tests prove minimal covering shards, target-owned roots, concurrent
    deduplication, interrupted resume, warm zero-byte reuse, corruption quarantine,
    bounded retry classification, load proof, and incumbent rollback.

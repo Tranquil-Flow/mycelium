@@ -22,8 +22,14 @@ states. The active deployment is never changed by preparation failure.
   local cache; it never accepts paths or checkpoint bytes from the browser.
 - Work starts only from a current `feasible` report with
   `provisioning_authorized=true`. Model identity, evidence generation, feasibility
-  digest, stage order, layer ranges, backend, and decode mode are frozen in a private
-  preparation authorization document.
+  digest, serving-representation digest, source and serving quantization, stage order,
+  layer ranges, backend, and decode mode are frozen in a private preparation
+  authorization document.
+- Feasibility accounts separately for steady-state resident memory and the modeled
+  peak while the loader materializes float32 source tensors and the row-wise int8
+  serving representation. The larger value, plus runtime workspace, is the admission
+  requirement. A source checkpoint that fits but cannot be converted safely is
+  rejected as `insufficient_load_memory` before model copying or peer staging.
 - A changed/expired capacity generation fails before model copying or peer staging.
 - The assignment compiler binds the authorization digest into every assignment.
 - Preparation rewrites a local dense Qwen checkpoint into assignment-addressable
@@ -55,8 +61,8 @@ download is authorized.
 ## Verification gate
 
 1. Contract tests cover closed request/status shapes, path privacy, stale evidence,
-   identity mismatch, incompatible/infeasible models, single-flight, and bounded
-   public failures.
+   identity or representation mismatch, incompatible/infeasible models,
+   source-fit/load-peak rejection, single-flight, and bounded public failures.
 2. Builder tests prove the exact feasibility stage order/ranges/backends are used and
    the authorization digest is assignment-bound.
 3. Acquisition/staging tests prove assignment-local manifests, no download, warm

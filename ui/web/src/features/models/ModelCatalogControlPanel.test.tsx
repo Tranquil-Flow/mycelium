@@ -10,7 +10,7 @@ const entry = (model_id: string, state: 'compatible' | 'discovered' = 'compatibl
 const operation: M17ModelOperation = {
   protocol: 'mycelium.model_operation.v1', catalog_generation: 7, catalog_digest: digest,
   entries: [entry('Qwen/Ready'), entry('Qwen/Other', 'discovered')],
-  feasibility_reports: [{ model_id: 'Qwen/Ready', revision, state: 'feasible', planner: 'capability_aware_contiguous_exact_weight_dp', stages: [], reasons: [], evidence_generation: 1, evidence_valid_until_unix_ms: 2_000, evaluated_at_unix_ms: 500, provisioning_authorized: true, maximum_qualified_context_tokens: 4096, maximum_qualified_concurrency: 1, cached_artifact_bytes: 1_073_741_824, missing_artifact_bytes: 0, modeled_transfer_ms: 0, modeled_execution_ms: null, resource_bottleneck: { kind: 'execution', node_id: null, headroom_bytes: null, reason: null }, required_directed_edges: [], feasibility_digest: digest }],
+  feasibility_reports: [{ model_id: 'Qwen/Ready', revision, state: 'feasible', planner: 'capability_aware_contiguous_exact_weight_dp', stages: [], reasons: [], evidence_generation: 1, evidence_valid_until_unix_ms: 2_000, evaluated_at_unix_ms: 500, provisioning_authorized: true, maximum_qualified_context_tokens: 4096, maximum_qualified_concurrency: 1, cached_artifact_bytes: 1_073_741_824, missing_artifact_bytes: 0, modeled_transfer_ms: 0, modeled_execution_ms: null, resource_bottleneck: { kind: 'execution', node_id: null, headroom_bytes: null, reason: null }, required_directed_edges: [], feasibility_digest: digest, source_quantization: 'bfloat16', serving_quantization: 'int8-weight-only', serving_dtype: 'float32', representation_digest: digest }],
   selection_authority: 'qualified_deployment_registry', download_policy: 'operator_approval_required',
   lifecycle: { protocol: 'mycelium.model_lifecycle.v1', catalog_digest: digest, models: [
     { model_id: 'Qwen/Ready', revision, artifact_digest: digest, state: 'feasible', authority: 'capability_aware_planner', reason: 'swarm_capacity_feasible', evidence_ref: digest, deployment_ids: [], active_deployment_id: null, selectable: false },
@@ -26,6 +26,7 @@ describe('ModelCatalogControlPanel', () => {
     expect(screen.getByRole('heading', { name: 'Model catalog' })).toBeInTheDocument();
     expect(screen.getAllByText('Ready to activate')).toHaveLength(2);
     expect(screen.getByText(/No action here downloads a model/)).toBeInTheDocument();
+    expect(screen.getByText(/bfloat16 → int8-weight-only/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Activate and qualify' }));
     expect(activate).toHaveBeenCalledWith('candidate-ready');
     expect(screen.getByRole('link', { name: 'Add or inspect swarm devices' })).toHaveAttribute('href', '#nodes');

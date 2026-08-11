@@ -97,7 +97,10 @@ def _authorization(
     if len(matching_reports) != 1:
         raise ModelPreparationError("model_capacity_not_evaluated")
     report = matching_reports[0]
-    if report.get("state") != "feasible" or report.get("provisioning_authorized") is not True:
+    if (
+        report.get("state") != "feasible"
+        or report.get("provisioning_authorized") is not True
+    ):
         raise ModelPreparationError("model_does_not_fit")
     valid_until = report.get("evidence_valid_until_unix_ms")
     if type(valid_until) is not int or valid_until < now_unix_ms:
@@ -142,6 +145,8 @@ def _authorization(
         cursor = end
     operation_digest = operation.get("operation_digest")
     feasibility_digest = report.get("feasibility_digest")
+    representation_digest = report.get("representation_digest")
+    serving_quantization = report.get("serving_quantization")
     evidence_generation = report.get("evidence_generation")
     catalog_generation = operation.get("catalog_generation")
     if (
@@ -149,6 +154,9 @@ def _authorization(
         or _DIGEST.fullmatch(operation_digest) is None
         or not isinstance(feasibility_digest, str)
         or _DIGEST.fullmatch(feasibility_digest) is None
+        or not isinstance(representation_digest, str)
+        or _DIGEST.fullmatch(representation_digest) is None
+        or serving_quantization != "int8-weight-only"
         or type(evidence_generation) is not int
         or type(catalog_generation) is not int
     ):
@@ -160,6 +168,8 @@ def _authorization(
         "catalog_generation": catalog_generation,
         "operation_digest": operation_digest,
         "feasibility_digest": feasibility_digest,
+        "representation_digest": representation_digest,
+        "serving_quantization": serving_quantization,
         "evidence_generation": evidence_generation,
         "evidence_valid_until_unix_ms": valid_until,
         "stages": frozen_stages,
@@ -221,7 +231,9 @@ class LocalModelPreparation:
         with self._lock:
             return _detached(self._status_locked())
 
-    def _progress(self, phase: str, transfer_bytes: int | None, verified_bytes: int | None) -> None:
+    def _progress(
+        self, phase: str, transfer_bytes: int | None, verified_bytes: int | None
+    ) -> None:
         if phase not in _PHASES:
             raise ModelPreparationError("model_preparation_phase_invalid")
         with self._lock:
@@ -272,7 +284,9 @@ class LocalModelPreparation:
             self._completed_at = None
             self._authorization = authorization
             self._generation += 1
-            worker = threading.Thread(target=self._run, name="mycelium-model-preparation", daemon=True)
+            worker = threading.Thread(
+                target=self._run, name="mycelium-model-preparation", daemon=True
+            )
             self._worker = worker
             worker.start()
             return _detached(self._status_locked())

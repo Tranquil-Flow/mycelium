@@ -123,11 +123,7 @@ def _m18_runtime_kv_bytes(
         or track_membership_count < 1
     ):
         raise RuntimeError("m18_model_context_capacity_invalid")
-    return (
-        max(context_tokens, qualification_token_count)
-        * 32
-        * track_membership_count
-    )
+    return max(context_tokens, qualification_token_count) * 32 * track_membership_count
 
 
 def _route_label(args: argparse.Namespace) -> str:
@@ -178,6 +174,8 @@ def _preparation_authorization(
         "catalog_generation",
         "operation_digest",
         "feasibility_digest",
+        "representation_digest",
+        "serving_quantization",
         "evidence_generation",
         "evidence_valid_until_unix_ms",
         "stages",
@@ -195,8 +193,19 @@ def _preparation_authorization(
         or not isinstance(document.get("evidence_generation"), int)
         or not isinstance(document.get("evidence_valid_until_unix_ms"), int)
         or document["evidence_valid_until_unix_ms"] < int(time.time() * 1_000)
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", str(document.get("operation_digest", ""))) is None
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", str(document.get("feasibility_digest", ""))) is None
+        or re.fullmatch(
+            r"sha256:[0-9a-f]{64}", str(document.get("operation_digest", ""))
+        )
+        is None
+        or re.fullmatch(
+            r"sha256:[0-9a-f]{64}", str(document.get("feasibility_digest", ""))
+        )
+        is None
+        or re.fullmatch(
+            r"sha256:[0-9a-f]{64}", str(document.get("representation_digest", ""))
+        )
+        is None
+        or document.get("serving_quantization") != "int8-weight-only"
         or not isinstance(stages, list)
         or len(stages) != len(topology)
     ):
@@ -227,7 +236,9 @@ def _preparation_authorization(
             or start != cursor
             or end <= start
             or not isinstance(stage.get("assignment_files"), list)
-            or not all(isinstance(item, str) and item for item in stage["assignment_files"])
+            or not all(
+                isinstance(item, str) and item for item in stage["assignment_files"]
+            )
             or type(stage.get("assignment_artifact_bytes")) is not int
             or stage["assignment_artifact_bytes"] < 0
         ):
@@ -848,7 +859,11 @@ def _streaming_challenge(
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Challenge a large candidate with at most one stage's weights resident."""
 
-    if not assignments or len(assignments) != len(reports) or len(assignments) != len(runtime_backends):
+    if (
+        not assignments
+        or len(assignments) != len(reports)
+        or len(assignments) != len(runtime_backends)
+    ):
         raise RuntimeError("challenge_runtime_count_mismatch")
     prompt = codec.encode("Reply with exactly the word ready.")
     context = prompt
@@ -990,9 +1005,15 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 if preparation_authorization is None
                 else {
                     "protocol": "mycelium.control_plane_binding.v1",
-                    "evidence_bundle_digest": preparation_authorization["operation_digest"],
-                    "planner_snapshot_digest": preparation_authorization["feasibility_digest"],
-                    "snapshot_generation": preparation_authorization["evidence_generation"],
+                    "evidence_bundle_digest": preparation_authorization[
+                        "operation_digest"
+                    ],
+                    "planner_snapshot_digest": preparation_authorization[
+                        "feasibility_digest"
+                    ],
+                    "snapshot_generation": preparation_authorization[
+                        "evidence_generation"
+                    ],
                     "swarm_id": "live-qualified-swarm",
                     "deployment_id": deployment_id,
                     "deployment_epoch": 1,
@@ -1679,7 +1700,11 @@ def main() -> int:
         help="refresh code and repin manifests in an existing output root",
     )
     args = parser.parse_args()
-    result = refresh_runtime_closure(args) if args.refresh_runtime_closure_only else build(args)
+    result = (
+        refresh_runtime_closure(args)
+        if args.refresh_runtime_closure_only
+        else build(args)
+    )
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -37,6 +37,8 @@ def _operation(*, valid_until: int = 2_000, state: str = "feasible") -> dict:
                 "evidence_valid_until_unix_ms": valid_until,
                 "evidence_generation": 8,
                 "feasibility_digest": "sha256:" + "c" * 64,
+                "representation_digest": "sha256:" + "d" * 64,
+                "serving_quantization": "int8-weight-only",
                 "stages": [
                     {
                         "stage_index": 0,
@@ -104,7 +106,10 @@ def test_preparation_freezes_fresh_authority_and_publishes_only_after_success() 
     assert status["activation_started"] is False
     assert published == [True]
     assert captured[0]["download_authorized"] is False
-    assert [(item["start_layer"], item["end_layer_exclusive"]) for item in captured[0]["stages"]] == [(0, 30), (30, 36)]
+    assert [
+        (item["start_layer"], item["end_layer_exclusive"])
+        for item in captured[0]["stages"]
+    ] == [(0, 30), (30, 36)]
 
 
 @pytest.mark.parametrize(
@@ -124,6 +129,22 @@ def test_preparation_rejects_before_preparer(operation: dict, reason: str) -> No
     with pytest.raises(ModelPreparationError, match=reason):
         service.start(MODEL_ID, REVISION)
     assert called == []
+    assert service.status()["state"] == "idle"
+
+
+@pytest.mark.parametrize("field", ["representation_digest", "serving_quantization"])
+def test_preparation_rejects_unbound_serving_representation(field: str) -> None:
+    operation = _operation()
+    del operation["feasibility_reports"][0][field]
+    service = LocalModelPreparation(
+        operation_source=lambda: operation,
+        preparer=lambda *_args: None,  # type: ignore[arg-type,return-value]
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    with pytest.raises(ModelPreparationError, match="model_operation_invalid"):
+        service.start(MODEL_ID, REVISION)
+
     assert service.status()["state"] == "idle"
 
 

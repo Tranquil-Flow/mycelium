@@ -58,6 +58,7 @@ function humanReason(value: string): string {
   const reasons: Readonly<Record<string, string>> = Object.freeze({
     insufficient_disk: `Not enough disk space${subject ? ` on ${subject}` : ''}`,
     insufficient_memory: `Not enough safe memory${subject ? ` on ${subject}` : ''}`,
+    insufficient_load_memory: `Not enough memory to load this representation${subject ? ` on ${subject}` : ''}`,
     missing_weight_artifact: 'Model weights are incomplete in the local cache',
     missing_tokenizer: 'Tokenizer files are incomplete in the local cache',
     runtime_adapter_unavailable: `No compatible inference runtime${subject ? ` for ${subject}` : ''}`,

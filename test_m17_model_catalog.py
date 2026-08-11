@@ -52,6 +52,7 @@ def _model_snapshot(
     model_type: str = "qwen2",
     include_weight: bool = True,
     weight_bytes: int = 1_024,
+    matrix_tensors: bool = False,
 ) -> Path:
     model_root = root / model_name
     snapshot = model_root / "snapshots" / REVISION
@@ -84,16 +85,19 @@ def _model_snapshot(
     )
     if include_weight:
         tensor_names = [
-            f"model.layers.{layer}.self_attn.q_proj.weight"
-            for layer in range(4)
+            f"model.layers.{layer}.self_attn.q_proj.weight" for layer in range(4)
         ]
         cursor = 0
         header: dict[str, object] = {}
         for index, name in enumerate(tensor_names):
-            end = weight_bytes if index == len(tensor_names) - 1 else (index + 1) * weight_bytes // 4
+            end = (
+                weight_bytes
+                if index == len(tensor_names) - 1
+                else (index + 1) * weight_bytes // 4
+            )
             header[name] = {
                 "dtype": "U8",
-                "shape": [end - cursor],
+                "shape": [1, end - cursor] if matrix_tensors else [end - cursor],
                 "data_offsets": [cursor, end],
             }
             cursor = end
@@ -145,8 +149,8 @@ def _swarm_evidence(
             valid_until_unix_ms=valid_until_unix_ms,
             backend=backend,
             supported_architectures=("qwen2", "qwen3"),
-            supported_dtypes=("bfloat16",),
-            supported_quantizations=("bfloat16",),
+            supported_dtypes=("bfloat16", "float32"),
+            supported_quantizations=("bfloat16", "int8-weight-only"),
             supported_decode_modes=("complete_context_replay", "stage_local_kv"),
             decode_modes_by_architecture={
                 "qwen2": ("complete_context_replay", "stage_local_kv"),
@@ -216,7 +220,9 @@ def _evaluate(
     )
 
 
-def test_read_only_catalog_discovers_complete_runtime_compatible_snapshot(tmp_path: Path) -> None:
+def test_read_only_catalog_discovers_complete_runtime_compatible_snapshot(
+    tmp_path: Path,
+) -> None:
     snapshot = _model_snapshot(tmp_path)
     before = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*"))
 
@@ -235,7 +241,9 @@ def test_read_only_catalog_discovers_complete_runtime_compatible_snapshot(tmp_pa
     assert str(tmp_path) not in serialized
 
 
-def test_incomplete_snapshot_names_missing_shard_and_never_repairs_it(tmp_path: Path) -> None:
+def test_incomplete_snapshot_names_missing_shard_and_never_repairs_it(
+    tmp_path: Path,
+) -> None:
     snapshot = _model_snapshot(tmp_path, include_weight=False)
 
     (entry,) = scan_huggingface_cache(tmp_path)
@@ -245,7 +253,9 @@ def test_incomplete_snapshot_names_missing_shard_and_never_repairs_it(tmp_path: 
     assert not (snapshot / "model-00001-of-00001.safetensors").exists()
 
 
-def test_unsupported_runtime_family_is_discovered_but_not_compatible(tmp_path: Path) -> None:
+def test_unsupported_runtime_family_is_discovered_but_not_compatible(
+    tmp_path: Path,
+) -> None:
     _model_snapshot(tmp_path, model_type="llama")
 
     (entry,) = scan_huggingface_cache(tmp_path)
@@ -254,7 +264,9 @@ def test_unsupported_runtime_family_is_discovered_but_not_compatible(tmp_path: P
     assert "runtime_adapter_unavailable:llama" in entry.reasons
 
 
-def test_catalog_is_deterministic_and_separates_snapshot_revisions(tmp_path: Path) -> None:
+def test_catalog_is_deterministic_and_separates_snapshot_revisions(
+    tmp_path: Path,
+) -> None:
     _model_snapshot(tmp_path)
     model_root = tmp_path / "models--Qwen--Qwen2.5-3B-Instruct"
     second = model_root / "snapshots" / ("c" * 40)
@@ -267,7 +279,9 @@ def test_catalog_is_deterministic_and_separates_snapshot_revisions(tmp_path: Pat
 
     assert first == second_document
     assert len(first["entries"]) == 2
-    assert first["entries"][0]["artifact_digest"] != first["entries"][1]["artifact_digest"]
+    assert (
+        first["entries"][0]["artifact_digest"] != first["entries"][1]["artifact_digest"]
+    )
 
 
 def test_feasibility_uses_existing_contiguous_dp_and_does_not_authorize_provisioning(
@@ -282,7 +296,10 @@ def test_feasibility_uses_existing_contiguous_dp_and_does_not_authorize_provisio
     assert report["protocol"] == MODEL_FEASIBILITY_PROTOCOL
     assert report["planner"] == "capability_aware_contiguous_exact_weight_dp"
     assert report["state"] == "feasible"
-    assert [(stage["start_layer"], stage["end_layer_exclusive"]) for stage in report["stages"]] == [
+    assert [
+        (stage["start_layer"], stage["end_layer_exclusive"])
+        for stage in report["stages"]
+    ] == [
         (0, 2),
         (2, 4),
     ]
@@ -317,6 +334,59 @@ def test_model_one_byte_over_total_swarm_capacity_fails_before_provisioning(
     assert report["stages"] == []
     assert report["provisioning_authorized"] is False
     assert "no_feasible_contiguous_exact_weight_allocation" in report["reasons"]
+
+
+def test_int8_serving_feasibility_accounts_for_transient_conversion_peak(
+    tmp_path: Path,
+) -> None:
+    _model_snapshot(tmp_path, weight_bytes=4_096, matrix_tensors=True)
+    (entry,) = scan_huggingface_cache(tmp_path)
+    constrained = (_node("node-a", 9_000), _node("node-b", 9_000))
+
+    source_report = _evaluate(entry, constrained)
+    serving_report = evaluate_model_feasibility(
+        entry,
+        ordered_nodes=constrained,
+        workload=_workload(),
+        policy=PlanningPolicy(memory_reserve_fraction=0),
+        evidence=_swarm_evidence(constrained),
+        evaluated_at_unix_ms=1_000,
+        required_decode_mode="stage_local_kv",
+        serving_quantization="int8-weight-only",
+    )
+
+    assert source_report["state"] == "feasible"
+    assert serving_report["state"] == "infeasible"
+    assert "insufficient_load_memory:node-a" in serving_report["reasons"]
+    assert serving_report["serving_quantization"] == "int8-weight-only"
+    assert serving_report["serving_dtype"] == "float32"
+    assert serving_report["representation_digest"] != entry.artifact_digest
+
+    roomy = (_node("node-a", 20_000), _node("node-b", 20_000))
+    admitted = evaluate_model_feasibility(
+        entry,
+        ordered_nodes=roomy,
+        workload=_workload(),
+        policy=PlanningPolicy(memory_reserve_fraction=0),
+        evidence=_swarm_evidence(roomy),
+        evaluated_at_unix_ms=1_000,
+        required_decode_mode="stage_local_kv",
+        serving_quantization="int8-weight-only",
+    )
+    assert admitted["state"] == "feasible"
+    assert all(
+        stage["load_peak_weight_bytes"] > stage["resident_layer_weight_bytes"]
+        for stage in admitted["stages"]
+    )
+    assert all(stage["dtype"] == "float32" for stage in admitted["stages"])
+    assert all(
+        stage["required_memory_bytes"]
+        == max(
+            stage["resident_required_memory_bytes"],
+            stage["load_peak_required_memory_bytes"],
+        )
+        for stage in admitted["stages"]
+    )
 
 
 def test_incompatible_model_is_rejected_without_running_planner(tmp_path: Path) -> None:
@@ -432,7 +502,9 @@ def test_backend_quantization_and_disk_pressure_fail_closed(tmp_path: Path) -> N
     assert disk["provisioning_authorized"] is False
 
 
-def test_missing_required_directed_loopback_rejects_complete_track(tmp_path: Path) -> None:
+def test_missing_required_directed_loopback_rejects_complete_track(
+    tmp_path: Path,
+) -> None:
     _model_snapshot(tmp_path)
     (entry,) = scan_huggingface_cache(tmp_path)
     nodes = (_node("node-a", 8_192), _node("node-b", 8_192))
@@ -471,7 +543,9 @@ def test_decode_mode_is_checked_for_the_candidate_architecture(tmp_path: Path) -
     assert "decode_mode_unsupported:node-a:stage_local_kv" in report["reasons"]
 
 
-def test_capability_drift_invalidates_a_previously_feasible_report(tmp_path: Path) -> None:
+def test_capability_drift_invalidates_a_previously_feasible_report(
+    tmp_path: Path,
+) -> None:
     _model_snapshot(tmp_path)
     (entry,) = scan_huggingface_cache(tmp_path)
     nodes = (_node("node-a", 20_000),)
@@ -496,7 +570,9 @@ def test_capability_drift_invalidates_a_previously_feasible_report(tmp_path: Pat
         validate_feasibility_currency(report, drifted, evaluated_at_unix_ms=1_100)
 
 
-def test_signed_live_resource_observation_round_trips_to_closed_swarm_evidence() -> None:
+def test_signed_live_resource_observation_round_trips_to_closed_swarm_evidence() -> (
+    None
+):
     signer = generate_ed25519_signer(endpoint_id="endpoint-a")
     resources = {
         "protocol": "mycelium.host_resource_snapshot.v1",
@@ -518,9 +594,9 @@ def test_signed_live_resource_observation_round_trips_to_closed_swarm_evidence()
         "power_state": "external",
         "route_ready": False,
     }
-    resources["resource_digest"] = "sha256:" + hashlib.sha256(
-        canonical_json_bytes(resources)
-    ).hexdigest()
+    resources["resource_digest"] = (
+        "sha256:" + hashlib.sha256(canonical_json_bytes(resources)).hexdigest()
+    )
     observation = {
         "protocol": "mycelium.physical_node_observation.v1",
         "event": "snapshot",

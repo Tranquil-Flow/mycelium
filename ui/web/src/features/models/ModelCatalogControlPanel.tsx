@@ -15,7 +15,7 @@ function Row({ row, busy, onActivate, onPrepare }: { readonly row: ModelCatalogR
   const candidate = row.candidate;
   return <tr>
     <th scope="row">{row.entry.model_id}<small> · {row.entry.revision.slice(0, 8)}</small></th>
-    <td>{row.entry.quantization}<small> · {row.entry.num_layers ?? 'unknown'} layers · {bytes(row.entry.weight_bytes)}</small></td>
+    <td>{row.entry.quantization}{report?.serving_quantization === undefined || report.serving_quantization === row.entry.quantization ? null : <> → {report.serving_quantization}</>}<small> · {row.entry.num_layers ?? 'unknown'} layers · {bytes(row.entry.weight_bytes)}</small></td>
     <td><strong>{row.status_label}</strong><small> · {row.detail}</small></td>
     <td>{report === null ? 'Not evaluated' : report.state === 'feasible'
       ? `${report.stages.length} stages · ${report.maximum_qualified_context_tokens.toLocaleString()} token context`

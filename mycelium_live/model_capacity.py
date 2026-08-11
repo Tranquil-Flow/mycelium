@@ -25,7 +25,9 @@ from scripts.assemble_m17_swarm_evidence import assemble
 
 
 CAPACITY_REFRESH_PROTOCOL = "mycelium.model_capacity_refresh.v1"
-_PHASES = frozenset({"capturing_resources", "scanning_local_models", "evaluating_models", "publishing"})
+_PHASES = frozenset(
+    {"capturing_resources", "scanning_local_models", "evaluating_models", "publishing"}
+)
 _SAFE_REASON = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 
 
@@ -127,6 +129,7 @@ def recompute_model_operation(
             evidence=evidence,
             evaluated_at_unix_ms=evaluated_at_unix_ms,
             required_decode_mode=required_decode_mode,
+            serving_quantization="int8-weight-only",
         )
         for entry in entries
         if entry.compatible
@@ -203,7 +206,9 @@ class ModelCapacityRefresh:
                 self._completed_at = self._clock()
                 self._operation_digest = str(operation["operation_digest"])
                 self._catalog_generation = int(operation["catalog_generation"])
-                self._evaluated_model_count = len(reports) if isinstance(reports, list) else 0
+                self._evaluated_model_count = (
+                    len(reports) if isinstance(reports, list) else 0
+                )
                 self._reason_code = None
                 self._generation += 1
         except BaseException as exc:

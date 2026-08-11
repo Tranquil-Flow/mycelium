@@ -88,6 +88,10 @@ export interface M17FeasibilityReport {
   readonly resource_bottleneck: M17ResourceBottleneck;
   readonly required_directed_edges: readonly M17DirectedEdge[];
   readonly feasibility_digest: string;
+  readonly source_quantization?: string;
+  readonly serving_quantization?: string;
+  readonly serving_dtype?: string;
+  readonly representation_digest?: string;
 }
 
 export type M17LifecycleState =
@@ -242,6 +246,8 @@ function feasibility(value: unknown, path: string): M17FeasibilityReport {
   });
   const revision = text(item.revision, `${path}.revision`);
   const digest = text(item.feasibility_digest, `${path}.feasibility_digest`);
+  const representationDigest = item.representation_digest === undefined ? undefined : text(item.representation_digest, `${path}.representation_digest`);
+  if (representationDigest !== undefined && !SHA256.test(representationDigest)) throw new TypeError(`${path}.representation_digest is invalid`);
   if (!COMMIT.test(revision) || !SHA256.test(digest)) throw new TypeError(`${path} identity is invalid`);
   if (typeof item.provisioning_authorized !== 'boolean') throw new TypeError(`${path}.provisioning_authorized is invalid`);
   if (item.provisioning_authorized !== (item.state === 'feasible')) throw new TypeError(`${path}.provisioning authority is invalid`);
@@ -291,6 +297,10 @@ function feasibility(value: unknown, path: string): M17FeasibilityReport {
     resource_bottleneck: resourceBottleneck,
     required_directed_edges: Object.freeze(requiredEdges),
     feasibility_digest: digest,
+    source_quantization: item.source_quantization === undefined ? undefined : text(item.source_quantization, `${path}.source_quantization`),
+    serving_quantization: item.serving_quantization === undefined ? undefined : text(item.serving_quantization, `${path}.serving_quantization`),
+    serving_dtype: item.serving_dtype === undefined ? undefined : text(item.serving_dtype, `${path}.serving_dtype`),
+    representation_digest: representationDigest,
   });
 }
 

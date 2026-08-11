@@ -145,12 +145,15 @@ def test_m14_measured_cycle_can_define_noncanonical_physical_order(
 
 
 def test_m14_topology_exclusions_do_not_enter_m13_node_exclusions() -> None:
-    assert builder._placement_exclusions(
-        {
-            "protocol": "mycelium.m14_physical_candidate.v1",
-            "exclusions": ["path_transition_not_observed_within_budget"],
-        }
-    ) == []
+    assert (
+        builder._placement_exclusions(
+            {
+                "protocol": "mycelium.m14_physical_candidate.v1",
+                "exclusions": ["path_transition_not_observed_within_budget"],
+            }
+        )
+        == []
+    )
 
 
 def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -> None:
@@ -167,6 +170,8 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
         "catalog_generation": 3,
         "operation_digest": "sha256:" + "a" * 64,
         "feasibility_digest": "sha256:" + "c" * 64,
+        "representation_digest": "sha256:" + "d" * 64,
+        "serving_quantization": "int8-weight-only",
         "evidence_generation": 2,
         "evidence_valid_until_unix_ms": 9_999_999_999_999,
         "stages": [
@@ -218,11 +223,14 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
 
 
 def test_m18_kv_admission_covers_model_context_not_only_startup_prompt() -> None:
-    assert builder._m18_runtime_kv_bytes(
-        {"max_position_embeddings": 32_768},
-        qualification_token_count=76,
-        track_membership_count=1,
-    ) == 1_048_576
+    assert (
+        builder._m18_runtime_kv_bytes(
+            {"max_position_embeddings": 32_768},
+            qualification_token_count=76,
+            track_membership_count=1,
+        )
+        == 1_048_576
+    )
 
 
 @pytest.mark.parametrize(
@@ -387,9 +395,7 @@ def test_runtime_closure_includes_transitive_planner_packages(tmp_path: Path) ->
         path.write_text(f"# {relative}\n", encoding="utf-8")
     template = {
         "controller": {
-            "transfer_manifest": {
-                "files": [{"path": "physical_inference_node.py"}]
-            }
+            "transfer_manifest": {"files": [{"path": "physical_inference_node.py"}]}
         }
     }
 
@@ -478,9 +484,10 @@ def test_membership_snapshot_preserves_planner_v2_provenance() -> None:
         placement_provenance="planner_v2",
     )
 
-    assert snapshot["assignment_offers"][0]["message"][
-        "placement_provenance"
-    ] == "planner_v2"
+    assert (
+        snapshot["assignment_offers"][0]["message"]["placement_provenance"]
+        == "planner_v2"
+    )
 
 
 def test_membership_snapshot_sorts_peer_records_independently_of_route_order() -> None:
@@ -496,11 +503,12 @@ def test_membership_snapshot_sorts_peer_records_independently_of_route_order() -
     snapshot = builder._membership_snapshot(
         assignments=assignments,
         packs=[
-            {"stage_pack_digest": "sha256:" + str(index + 1) * 64}
-            for index in range(3)
+            {"stage_pack_digest": "sha256:" + str(index + 1) * 64} for index in range(3)
         ],
         graph_document={"protocol": "graph.v1", "stages": []},
-        endpoint_ids={node_id: f"endpoint-{node_id}" for node_id in ("node-0", "node-1", "node-2")},
+        endpoint_ids={
+            node_id: f"endpoint-{node_id}" for node_id in ("node-0", "node-1", "node-2")
+        },
         now=1_000.0,
         route_label="m14",
         placement_provenance="planner_v2",
@@ -511,8 +519,7 @@ def test_membership_snapshot_sorts_peer_records_independently_of_route_order() -
         for envelope in snapshot["assignment_offers"]
     }
     assert [
-        record["node_id"]
-        for record in by_recipient["node-0"]["peer_endpoint_records"]
+        record["node_id"] for record in by_recipient["node-0"]["peer_endpoint_records"]
     ] == ["node-1", "node-2"]
 
 
@@ -520,9 +527,7 @@ def test_m13_control_plane_extracts_exact_track_ranges(tmp_path: Path) -> None:
     document = {
         "protocol": "mycelium.m13_physical_candidate.v1",
         "signed_evidence_bundle": {
-            "evidence_bundle": {
-                "deployment": {"deployment_id": "deployment-0"}
-            }
+            "evidence_bundle": {"deployment": {"deployment_id": "deployment-0"}}
         },
         "planner_snapshot": {},
         "route_plan": {
@@ -619,14 +624,17 @@ def test_live_route_reissues_membership_against_current_clock(tmp_path: Path) ->
     assert envelope["message"]["expires_at"] == 13_600.0
     assert refreshed["seed_key_digest"] == signer.verification_key_digest
     assert envelope["message"]["generation"] == 7
-    assert verify_membership_message(
-        envelope,
-        now=10_001.0,
-        expected_key_digest=refreshed["seed_key_digest"],
-        expected_protocol=ASSIGNMENT_OFFER_PROTOCOL,
-        expected_swarm_id=refreshed["swarm_id"],
-        expected_recipient_node_id="node-0",
-    )["recipient_node_id"] == "node-0"
+    assert (
+        verify_membership_message(
+            envelope,
+            now=10_001.0,
+            expected_key_digest=refreshed["seed_key_digest"],
+            expected_protocol=ASSIGNMENT_OFFER_PROTOCOL,
+            expected_swarm_id=refreshed["swarm_id"],
+            expected_recipient_node_id="node-0",
+        )["recipient_node_id"]
+        == "node-0"
+    )
 
     restarted_signer = load_or_create_node_signer(signer_path)
     restarted = _refresh_membership_snapshot(
@@ -654,8 +662,7 @@ def test_live_route_replaces_stale_plan_peer_records_from_membership_authority(
             for index in range(2)
         ],
         packs=[
-            {"stage_pack_digest": "sha256:" + str(index + 1) * 64}
-            for index in range(2)
+            {"stage_pack_digest": "sha256:" + str(index + 1) * 64} for index in range(2)
         ],
         graph_document={"protocol": "graph.v1", "stages": []},
         endpoint_ids={"node-0": "stale-0", "node-1": "stale-1"},

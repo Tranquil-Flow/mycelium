@@ -22,6 +22,8 @@ function fixture() {
     feasibility_reports: [{
       protocol: 'mycelium.model_feasibility.v1', model_id: 'Qwen/Qwen3-8B', revision,
       state: 'feasible', planner: 'capability_aware_contiguous_exact_weight_dp',
+      source_quantization: 'bfloat16', serving_quantization: 'int8-weight-only',
+      serving_dtype: 'float32', representation_digest: `sha256:${'1'.repeat(64)}`,
       evidence_generation: 15, reasons: [], feasibility_digest: `sha256:${'d'.repeat(64)}`,
       evidence_valid_until_unix_ms: 2_000_000_000_000,
       evaluated_at_unix_ms: 1_900_000_000_000,
@@ -70,6 +72,8 @@ describe('M17 model operation projection', () => {
     const operation = decodeM17ModelOperation(fixture());
     expect(operation.entries[0].state).toBe('compatible');
     expect(operation.feasibility_reports[0].state).toBe('feasible');
+    expect(operation.feasibility_reports[0].serving_quantization).toBe('int8-weight-only');
+    expect(operation.feasibility_reports[0].serving_dtype).toBe('float32');
     expect(operation.selection_authority).toBe('qualified_deployment_registry');
     expect(operation.lifecycle.models[0].state).toBe('feasible');
     expect(operation.route_ready).toBe(false);

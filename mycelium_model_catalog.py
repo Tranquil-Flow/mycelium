@@ -155,7 +155,9 @@ def _safetensors_header(path: Path) -> dict[str, dict[str, Any]]:
         if (
             not isinstance(offsets, list)
             or len(offsets) != 2
-            or not all(isinstance(item, int) and not isinstance(item, bool) for item in offsets)
+            or not all(
+                isinstance(item, int) and not isinstance(item, bool) for item in offsets
+            )
             or offsets[0] < 0
             or offsets[1] <= offsets[0]
         ):
@@ -224,7 +226,10 @@ def _tensor_accounting(
         for component, prefixes in adapter.components.items():
             if component == "decoder":
                 continue
-            if any("{layer}" not in prefix and tensor_name.startswith(prefix) for prefix in prefixes):
+            if any(
+                "{layer}" not in prefix and tensor_name.startswith(prefix)
+                for prefix in prefixes
+            ):
                 component_bytes[component] += size
                 matched = True
                 break
@@ -234,12 +239,130 @@ def _tensor_accounting(
         errors.append("incomplete_layer_tensor_accounting")
         return (), 0, 0, 0, tuple(errors)
     entry_static = component_bytes.get("input_embedding", 0)
-    final_static = sum(
-        size for name, size in component_bytes.items() if name != "input_embedding"
-    ) + other_static_bytes
+    final_static = (
+        sum(size for name, size in component_bytes.items() if name != "input_embedding")
+        + other_static_bytes
+    )
     if config.get("tie_word_embeddings") is True:
         final_static += entry_static
-    return tuple(layer_bytes), entry_static, final_static, other_static_bytes, tuple(errors)
+    return (
+        tuple(layer_bytes),
+        entry_static,
+        final_static,
+        other_static_bytes,
+        tuple(errors),
+    )
+
+
+def _int8_runtime_accounting(
+    *,
+    snapshot: Path,
+    required_weight_files: Sequence[str],
+    weight_map: dict[str, str],
+    config: dict[str, Any],
+) -> tuple[tuple[int, ...], int, int, tuple[int, ...], int, int]:
+    """Return exact resident and transient-load bytes for rowwise int8 serving."""
+
+    try:
+        adapter = adapter_for_config(config)
+        adapter.validate_architectures(config)
+        num_layers = adapter.layer_count(config)
+    except ValueError:
+        return (), 0, 0, (), 0, 0
+    headers = {
+        filename: _safetensors_header(snapshot / filename)
+        for filename in required_weight_files
+        if (snapshot / filename).is_file()
+    }
+    if not weight_map and len(headers) == 1:
+        filename, header = next(iter(headers.items()))
+        weight_map = {name: filename for name in header}
+    if not weight_map or len(headers) != len(required_weight_files):
+        return (), 0, 0, (), 0, 0
+    resident_layers = [0] * num_layers
+    load_layers = [0] * num_layers
+    resident_components = {name: 0 for name in adapter.components if name != "decoder"}
+    load_components = dict(resident_components)
+    resident_other = 0
+    load_other = 0
+    for tensor_name, filename in weight_map.items():
+        record = headers[filename][tensor_name]
+        shape = record.get("shape")
+        if (
+            not isinstance(shape, list)
+            or not shape
+            or not all(type(item) is int and item > 0 for item in shape)
+        ):
+            return (), 0, 0, (), 0, 0
+        elements = 1
+        for extent in shape:
+            elements *= extent
+        unquantized_bytes = elements * 4
+        resident_bytes = (
+            elements + shape[0] * 4
+            if len(shape) == 2 and tensor_name.endswith(".weight")
+            else unquantized_bytes
+        )
+        load_bytes = unquantized_bytes + resident_bytes
+        matched = False
+        for layer in range(num_layers):
+            prefixes = tuple(
+                template.format(layer=layer)
+                for template in (
+                    adapter.block_prefix_template,
+                    *adapter.alternate_block_prefix_templates,
+                )
+            )
+            if tensor_name.startswith(prefixes):
+                resident_layers[layer] += resident_bytes
+                load_layers[layer] += load_bytes
+                matched = True
+                break
+        if matched:
+            continue
+        for component, prefixes in adapter.components.items():
+            if component == "decoder":
+                continue
+            if any(
+                "{layer}" not in prefix and tensor_name.startswith(prefix)
+                for prefix in prefixes
+            ):
+                resident_components[component] += resident_bytes
+                load_components[component] += load_bytes
+                matched = True
+                break
+        if not matched:
+            resident_other += resident_bytes
+            load_other += load_bytes
+    if any(size <= 0 for size in resident_layers) or any(
+        size <= 0 for size in load_layers
+    ):
+        return (), 0, 0, (), 0, 0
+    resident_entry = resident_components.get("input_embedding", 0)
+    load_entry = load_components.get("input_embedding", 0)
+    resident_final = (
+        sum(
+            size
+            for name, size in resident_components.items()
+            if name != "input_embedding"
+        )
+        + resident_other
+    )
+    load_final = (
+        sum(size for name, size in load_components.items() if name != "input_embedding")
+        + load_other
+    )
+    if config.get("tie_word_embeddings") is True:
+        resident_final += resident_entry
+        load_final += load_entry
+    return (
+        tuple(resident_layers),
+        resident_entry,
+        resident_final,
+        tuple(load_layers),
+        load_entry,
+        load_final,
+    )
 
 
 @dataclass(frozen=True)
@@ -266,6 +389,12 @@ class LocalModelEntry:
     entry_static_bytes: int
     final_static_bytes: int
     other_static_bytes: int
+    int8_layer_weight_bytes: tuple[int, ...]
+    int8_entry_static_bytes: int
+    int8_final_static_bytes: int
+    int8_load_layer_bytes: tuple[int, ...]
+    int8_load_entry_static_bytes: int
+    int8_load_final_static_bytes: int
     required_files: tuple[str, ...]
     present_files: tuple[str, ...]
     file_records: tuple[dict[str, object], ...]
@@ -281,6 +410,25 @@ class LocalModelEntry:
         return self.state == "compatible"
 
     def projection(self) -> dict[str, object]:
+        representation = {
+            "quantization": "int8-weight-only",
+            "quantizer": "mycelium.rowwise_symmetric_int8.v1",
+            "runtime_dtype": "float32",
+            "resident_weight_bytes": (
+                sum(self.int8_layer_weight_bytes)
+                + self.int8_entry_static_bytes
+                + self.int8_final_static_bytes
+            ),
+            "load_peak_weight_bytes": (
+                sum(self.int8_load_layer_bytes)
+                + self.int8_load_entry_static_bytes
+                + self.int8_load_final_static_bytes
+            ),
+            "preparation_required": True,
+        }
+        representation["representation_digest"] = _digest(
+            {"artifact_digest": self.artifact_digest, **representation}
+        )
         return {
             "model_id": self.model_id,
             "revision": self.revision,
@@ -301,6 +449,9 @@ class LocalModelEntry:
             "entry_static_bytes": self.entry_static_bytes,
             "final_static_bytes": self.final_static_bytes,
             "other_static_bytes": self.other_static_bytes,
+            "serving_representations": [representation]
+            if self.int8_layer_weight_bytes
+            else [],
             "exact_tensor_accounting": bool(self.layer_weight_bytes),
             "required_file_count": len(self.required_files),
             "present_file_count": len(self.present_files),
@@ -359,8 +510,10 @@ class NodeFeasibilityEvidence:
             "supported_decode_modes",
         ):
             values = getattr(self, name)
-            if not values or len(values) != len(set(values)) or any(
-                not value or value != value.strip() for value in values
+            if (
+                not values
+                or len(values) != len(set(values))
+                or any(not value or value != value.strip() for value in values)
             ):
                 raise ValueError(f"node feasibility evidence {name} is invalid")
         for name in (
@@ -393,7 +546,9 @@ class NodeFeasibilityEvidence:
                 or any(not mode or mode != mode.strip() for mode in modes)
                 or any(mode not in self.supported_decode_modes for mode in modes)
             ):
-                raise ValueError("node feasibility architecture decode modes are invalid")
+                raise ValueError(
+                    "node feasibility architecture decode modes are invalid"
+                )
 
     def projection(self) -> dict[str, object]:
         return {
@@ -451,7 +606,11 @@ class DirectedEdgeFeasibilityEvidence:
             raise ValueError("directed feasibility edge freshness is invalid")
         for name in ("goodput_Bps", "rtt_ms", "jitter_ms", "loss_ratio"):
             value = getattr(self, name)
-            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or value < 0
+            ):
                 raise ValueError(f"directed feasibility edge {name} is invalid")
         if self.goodput_Bps <= 0 or self.loss_ratio > 1:
             raise ValueError("directed feasibility edge capacity is invalid")
@@ -488,7 +647,9 @@ class SwarmFeasibilityEvidence:
 
     def __post_init__(self) -> None:
         if type(self.generation) is not int or self.generation <= 0:
-            raise ValueError("swarm evidence generation must be a positive exact integer")
+            raise ValueError(
+                "swarm evidence generation must be a positive exact integer"
+            )
         for name in (
             "evidence_digest",
             "signature_set_digest",
@@ -501,7 +662,9 @@ class SwarmFeasibilityEvidence:
             type(self.placement_snapshot_generation) is not int
             or self.placement_snapshot_generation <= 0
         ):
-            raise ValueError("placement snapshot generation must be a positive exact integer")
+            raise ValueError(
+                "placement snapshot generation must be a positive exact integer"
+            )
         if (
             type(self.observed_at_unix_ms) is not int
             or type(self.valid_until_unix_ms) is not int
@@ -515,7 +678,10 @@ class SwarmFeasibilityEvidence:
         edge_ids = [(edge.src, edge.dst) for edge in self.directed_edges]
         if len(edge_ids) != len(set(edge_ids)):
             raise ValueError("duplicate directed feasibility edge")
-        if any(edge.src not in node_ids or edge.dst not in node_ids for edge in self.directed_edges):
+        if any(
+            edge.src not in node_ids or edge.dst not in node_ids
+            for edge in self.directed_edges
+        ):
             raise ValueError("directed feasibility edge references an unknown node")
 
     def projection(self) -> dict[str, object]:
@@ -554,9 +720,11 @@ def swarm_feasibility_evidence_from_document(
         "topology_digest",
         "route_ready",
     }
-    if set(document) != expected or document.get("protocol") != (
-        "mycelium.swarm_feasibility_evidence.v1"
-    ) or document.get("route_ready") is not False:
+    if (
+        set(document) != expected
+        or document.get("protocol") != ("mycelium.swarm_feasibility_evidence.v1")
+        or document.get("route_ready") is not False
+    ):
         raise ValueError("swarm feasibility evidence document is invalid")
     nodes_value = document.get("nodes")
     edges_value = document.get("directed_edges")
@@ -647,9 +815,13 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         try:
             index = _read_json(index_path)
             raw_weight_map = index.get("weight_map")
-            if not isinstance(raw_weight_map, dict) or not raw_weight_map or not all(
-                isinstance(key, str) and isinstance(value, str)
-                for key, value in raw_weight_map.items()
+            if (
+                not isinstance(raw_weight_map, dict)
+                or not raw_weight_map
+                or not all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in raw_weight_map.items()
+                )
             ):
                 reasons.append("invalid_or_empty_weight_map")
             else:
@@ -686,7 +858,11 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         if name.endswith((".safetensors", ".bin")):
             weight_bytes += size
 
-    model_type = config.get("model_type") if isinstance(config.get("model_type"), str) else "unknown"
+    model_type = (
+        config.get("model_type")
+        if isinstance(config.get("model_type"), str)
+        else "unknown"
+    )
     architectures = config.get("architectures")
     architecture = (
         architectures[0]
@@ -710,7 +886,11 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         reasons.append(f"runtime_adapter_unavailable:{model_type}")
 
     hidden_size = config.get("hidden_size")
-    if not isinstance(hidden_size, int) or isinstance(hidden_size, bool) or hidden_size <= 0:
+    if (
+        not isinstance(hidden_size, int)
+        or isinstance(hidden_size, bool)
+        or hidden_size <= 0
+    ):
         hidden_size = None
     kv_heads = config.get("num_key_value_heads") or config.get("num_attention_heads")
     if not isinstance(kv_heads, int) or isinstance(kv_heads, bool) or kv_heads <= 0:
@@ -734,6 +914,19 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         other_static_bytes,
         accounting_errors,
     ) = _tensor_accounting(
+        snapshot=snapshot,
+        required_weight_files=required_weight_files,
+        weight_map=weight_map,
+        config=config,
+    )
+    (
+        int8_layer_weight_bytes,
+        int8_entry_static_bytes,
+        int8_final_static_bytes,
+        int8_load_layer_bytes,
+        int8_load_entry_static_bytes,
+        int8_load_final_static_bytes,
+    ) = _int8_runtime_accounting(
         snapshot=snapshot,
         required_weight_files=required_weight_files,
         weight_map=weight_map,
@@ -802,6 +995,12 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         entry_static_bytes=entry_static_bytes,
         final_static_bytes=final_static_bytes,
         other_static_bytes=other_static_bytes,
+        int8_layer_weight_bytes=int8_layer_weight_bytes,
+        int8_entry_static_bytes=int8_entry_static_bytes,
+        int8_final_static_bytes=int8_final_static_bytes,
+        int8_load_layer_bytes=int8_load_layer_bytes,
+        int8_load_entry_static_bytes=int8_load_entry_static_bytes,
+        int8_load_final_static_bytes=int8_load_final_static_bytes,
         required_files=tuple(sorted(set(required_files))),
         present_files=tuple(sorted(present_files)),
         file_records=tuple(file_records),
@@ -865,7 +1064,11 @@ def model_identity(entry: LocalModelEntry) -> ModelIdentity:
         "head_dim": entry.head_dim,
     }
     missing = sorted(name for name, value in required.items() if value is None)
-    if missing or entry.weight_bytes <= 0 or len(entry.layer_weight_bytes) != entry.num_layers:
+    if (
+        missing
+        or entry.weight_bytes <= 0
+        or len(entry.layer_weight_bytes) != entry.num_layers
+    ):
         raise ValueError(f"model entry lacks planning metadata: {', '.join(missing)}")
     return ModelIdentity(
         model_id=entry.model_id,
@@ -888,6 +1091,7 @@ def _exact_allocation(
     policy: PlanningPolicy,
     evidence: SwarmFeasibilityEvidence,
     required_decode_mode: str,
+    serving_quantization: str | None,
 ) -> tuple[
     bool,
     list[dict[str, object]],
@@ -1005,6 +1209,28 @@ def _exact_allocation(
         if stage_index == len(nodes) - 1:
             static_bytes += entry.final_static_bytes
         layer_bytes = prefix[end] - prefix[start]
+        resident_layer_bytes = layer_bytes
+        resident_static_bytes = static_bytes
+        load_peak_weight_bytes = layer_bytes + static_bytes
+        representation_digest: str | None = None
+        if serving_quantization == "int8-weight-only":
+            if (
+                len(entry.int8_layer_weight_bytes) != entry.num_layers
+                or len(entry.int8_load_layer_bytes) != entry.num_layers
+            ):
+                reject(stage_index, start, end, "serving_representation_unavailable")
+                return None
+            resident_layer_bytes = sum(entry.int8_layer_weight_bytes[start:end])
+            load_peak_weight_bytes = sum(entry.int8_load_layer_bytes[start:end])
+            resident_static_bytes = 0
+            if stage_index == 0:
+                resident_static_bytes += entry.int8_entry_static_bytes
+                load_peak_weight_bytes += entry.int8_load_entry_static_bytes
+            if stage_index == len(nodes) - 1:
+                resident_static_bytes += entry.int8_final_static_bytes
+                load_peak_weight_bytes += entry.int8_load_final_static_bytes
+            representation = entry.projection()["serving_representations"][0]
+            representation_digest = str(representation["representation_digest"])
         kv_bytes = (
             model.kv_bytes_per_layer_token
             * layer_count
@@ -1019,15 +1245,24 @@ def _exact_allocation(
         available_memory = min(node.total_memory_bytes, resource.available_memory_bytes)
         runtime_reserve = int(available_memory * policy.memory_reserve_fraction)
         memory_limit = available_memory - runtime_reserve
-        required = (
-            layer_bytes
-            + static_bytes
+        resident_required = (
+            resident_layer_bytes
+            + resident_static_bytes
             + kv_bytes
             + activation_bytes
             + node.workspace_bytes
         )
+        load_peak_required = load_peak_weight_bytes + node.workspace_bytes
+        required = max(resident_required, load_peak_required)
         if required > memory_limit:
-            reject(stage_index, start, end, "insufficient_memory")
+            reject(
+                stage_index,
+                start,
+                end,
+                "insufficient_load_memory"
+                if load_peak_required > resident_required
+                else "insufficient_memory",
+            )
             return None
         try:
             files = assignment_files(start, end, stage_index)
@@ -1055,7 +1290,11 @@ def _exact_allocation(
         spill_penalty = (
             spill_bytes / node.spill_bandwidth_Bps * 1_000.0 if spill_bytes else 0.0
         )
-        prefill = node.prefill_ms_per_layer_token * layer_count * workload.effective_prompt_tokens
+        prefill = (
+            node.prefill_ms_per_layer_token
+            * layer_count
+            * workload.effective_prompt_tokens
+        )
         decode = node.decode_ms_per_layer_token * layer_count
         service_work = (
             prefill
@@ -1068,7 +1307,7 @@ def _exact_allocation(
             objective = decode + spill_penalty
         else:
             objective = service_work
-        fixed_without_kv = required - kv_bytes
+        fixed_without_kv = resident_required - kv_bytes
         kv_per_context = (
             model.kv_bytes_per_layer_token
             * layer_count
@@ -1090,7 +1329,7 @@ def _exact_allocation(
                 workload.batch_size,
             )
         )
-        fixed_without_dynamic = required - kv_bytes - activation_bytes
+        fixed_without_dynamic = resident_required - kv_bytes - activation_bytes
         maximum_concurrency = (
             max(0, (memory_limit - fixed_without_dynamic) // per_concurrency)
             if per_concurrency
@@ -1103,6 +1342,12 @@ def _exact_allocation(
             "end_layer_exclusive": end,
             "layer_weight_bytes": layer_bytes,
             "static_weight_bytes": static_bytes,
+            "resident_layer_weight_bytes": resident_layer_bytes,
+            "resident_static_weight_bytes": resident_static_bytes,
+            "load_peak_weight_bytes": load_peak_weight_bytes,
+            "resident_required_memory_bytes": int(resident_required),
+            "load_peak_required_memory_bytes": int(load_peak_required),
+            "representation_digest": representation_digest,
             "activation_bytes": activation_bytes,
             "kv_bytes": kv_bytes,
             "workspace_bytes": node.workspace_bytes,
@@ -1122,8 +1367,11 @@ def _exact_allocation(
             "assignment_files": [str(record["name"]) for record in files],
             "backend": resource.backend,
             "runtime_build_digest": resource.runtime_build_digest,
-            "dtype": entry.quantization,
-            "quantization": entry.quantization,
+            "dtype": "float32"
+            if serving_quantization == "int8-weight-only"
+            else entry.quantization,
+            "source_quantization": entry.quantization,
+            "quantization": serving_quantization or entry.quantization,
             "decode_mode": required_decode_mode,
             "thermal_state": resource.thermal_state,
             "power_state": resource.power_state,
@@ -1155,9 +1403,7 @@ def _exact_allocation(
     selected = dp.get((len(nodes), model.num_layers))
     if selected is None:
         diagnostics = {"no_feasible_contiguous_exact_weight_allocation"}
-        diagnostics.update(
-            f"{item['reason']}:{item['node_id']}" for item in rejected
-        )
+        diagnostics.update(f"{item['reason']}:{item['node_id']}" for item in rejected)
         return (
             False,
             [],
@@ -1184,6 +1430,7 @@ def _preflight_feasibility(
     *,
     evaluated_at_unix_ms: int,
     required_decode_mode: str,
+    serving_quantization: str | None,
 ) -> tuple[str, ...]:
     reasons: list[str] = []
     if evaluated_at_unix_ms > evidence.valid_until_unix_ms:
@@ -1207,12 +1454,20 @@ def _preflight_feasibility(
         if resource.backend not in adapter.runtime_backends:
             reasons.append(f"backend_unsupported:{node.node_id}:{resource.backend}")
         if entry.adapter_id not in resource.supported_architectures:
-            reasons.append(f"architecture_unsupported:{node.node_id}:{entry.adapter_id}")
-        if entry.quantization not in resource.supported_dtypes:
-            reasons.append(f"dtype_unsupported:{node.node_id}:{entry.quantization}")
-        if entry.quantization not in resource.supported_quantizations:
             reasons.append(
-                f"quantization_unsupported:{node.node_id}:{entry.quantization}"
+                f"architecture_unsupported:{node.node_id}:{entry.adapter_id}"
+            )
+        runtime_dtype = (
+            "float32"
+            if serving_quantization == "int8-weight-only"
+            else entry.quantization
+        )
+        runtime_quantization = serving_quantization or entry.quantization
+        if runtime_dtype not in resource.supported_dtypes:
+            reasons.append(f"dtype_unsupported:{node.node_id}:{runtime_dtype}")
+        if runtime_quantization not in resource.supported_quantizations:
+            reasons.append(
+                f"quantization_unsupported:{node.node_id}:{runtime_quantization}"
             )
         architecture_modes = resource.decode_modes_by_architecture.get(
             entry.adapter_id,
@@ -1234,8 +1489,7 @@ def _preflight_feasibility(
             reasons.append(f"power_pressure:{node.node_id}:{resource.power_state}")
     edge_by_pair = {(edge.src, edge.dst): edge for edge in evidence.directed_edges}
     required_pairs = [
-        (node_ids[index], node_ids[index + 1])
-        for index in range(len(node_ids) - 1)
+        (node_ids[index], node_ids[index + 1]) for index in range(len(node_ids) - 1)
     ]
     if len(node_ids) > 1:
         required_pairs.append((node_ids[-1], node_ids[0]))
@@ -1265,6 +1519,7 @@ def evaluate_model_feasibility(
     evidence: SwarmFeasibilityEvidence,
     evaluated_at_unix_ms: int,
     required_decode_mode: str,
+    serving_quantization: str | None = None,
 ) -> dict[str, object]:
     """Evaluate one immutable model against one fresh signed swarm generation."""
 
@@ -1272,6 +1527,8 @@ def evaluate_model_feasibility(
         raise ValueError("feasibility evaluation time must be a positive exact integer")
     if not required_decode_mode or required_decode_mode != required_decode_mode.strip():
         raise ValueError("required decode mode is invalid")
+    if serving_quantization not in {None, "int8-weight-only"}:
+        raise ValueError("serving quantization is invalid")
     reasons: list[str] = []
     stages: list[dict[str, object]] = []
     rejected_candidates: list[dict[str, object]] = []
@@ -1288,6 +1545,7 @@ def evaluate_model_feasibility(
                 evidence,
                 evaluated_at_unix_ms=evaluated_at_unix_ms,
                 required_decode_mode=required_decode_mode,
+                serving_quantization=serving_quantization,
             )
         )
         if reasons:
@@ -1307,11 +1565,10 @@ def evaluate_model_feasibility(
                 policy,
                 evidence,
                 required_decode_mode,
+                serving_quantization,
             )
             reasons.extend(diagnostics)
-    cached_artifact_bytes = sum(
-        int(stage["cached_artifact_bytes"]) for stage in stages
-    )
+    cached_artifact_bytes = sum(int(stage["cached_artifact_bytes"]) for stage in stages)
     missing_artifact_bytes = sum(
         int(stage["missing_artifact_bytes"]) for stage in stages
     )
@@ -1341,8 +1598,7 @@ def evaluate_model_feasibility(
     node_ids = [node.node_id for node in ordered_nodes]
     edge_by_pair = {(edge.src, edge.dst): edge for edge in evidence.directed_edges}
     required_pairs = [
-        (node_ids[index], node_ids[index + 1])
-        for index in range(len(node_ids) - 1)
+        (node_ids[index], node_ids[index + 1]) for index in range(len(node_ids) - 1)
     ]
     if len(node_ids) > 1:
         required_pairs.append((node_ids[-1], node_ids[0]))
@@ -1351,6 +1607,17 @@ def evaluate_model_feasibility(
         "model_id": entry.model_id,
         "revision": entry.revision,
         "artifact_digest": entry.artifact_digest,
+        "source_quantization": entry.quantization,
+        "serving_quantization": serving_quantization or entry.quantization,
+        "serving_dtype": "float32"
+        if serving_quantization == "int8-weight-only"
+        else entry.quantization,
+        "representation_digest": (
+            entry.projection()["serving_representations"][0]["representation_digest"]
+            if serving_quantization == "int8-weight-only"
+            and entry.int8_layer_weight_bytes
+            else entry.artifact_digest
+        ),
         "evidence_digest": evidence.evidence_digest,
         "evidence_generation": evidence.generation,
         "evidence_signature_set_digest": evidence.signature_set_digest,
@@ -1382,7 +1649,9 @@ def evaluate_model_feasibility(
             if pair in edge_by_pair
         ],
         "rejected_candidates": rejected_candidates,
-        "reasons": sorted({_bounded_reason(reason) for reason in reasons})[:_MAX_REASONS],
+        "reasons": sorted({_bounded_reason(reason) for reason in reasons})[
+            :_MAX_REASONS
+        ],
         "provisioning_authorized": feasible,
         "route_ready": False,
         "qualification_evaluated": False,
@@ -1412,7 +1681,10 @@ def validate_feasibility_currency(
         raise ValueError("capability_evidence_drift")
     if evaluated_at_unix_ms > current_evidence.valid_until_unix_ms:
         raise ValueError("stale_swarm_evidence")
-    if report.get("state") != "feasible" or report.get("provisioning_authorized") is not True:
+    if (
+        report.get("state") != "feasible"
+        or report.get("provisioning_authorized") is not True
+    ):
         raise ValueError("feasibility_does_not_authorize_provisioning")
 
 
@@ -1490,7 +1762,9 @@ _LIFECYCLE_ORDER = {
 }
 
 
-def _projected_catalog_entries(catalog: Mapping[str, object]) -> list[dict[str, object]]:
+def _projected_catalog_entries(
+    catalog: Mapping[str, object],
+) -> list[dict[str, object]]:
     entries = catalog.get("entries")
     if not isinstance(entries, list) or len(entries) > _MAX_ENTRIES:
         raise ValueError("model lifecycle catalog entries are invalid")
@@ -1529,9 +1803,10 @@ def model_lifecycle_document(
     if catalog.get("protocol") != MODEL_CATALOG_PROTOCOL:
         raise ValueError("model lifecycle requires a model catalog")
     catalog_digest = catalog.get("catalog_digest")
-    if not isinstance(catalog_digest, str) or re.fullmatch(
-        r"sha256:[0-9a-f]{64}", catalog_digest
-    ) is None:
+    if (
+        not isinstance(catalog_digest, str)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", catalog_digest) is None
+    ):
         raise ValueError("model lifecycle catalog digest is invalid")
     entries = _projected_catalog_entries(catalog)
     identities = {(str(item["model_id"]), str(item["revision"])) for item in entries}
@@ -1590,7 +1865,10 @@ def model_lifecycle_document(
     }
     active_deployment: dict[tuple[str, str], str] = {}
     if deployment_registry is not None:
-        if deployment_registry.get("protocol") != "mycelium.live_deployment_registry.v1":
+        if (
+            deployment_registry.get("protocol")
+            != "mycelium.live_deployment_registry.v1"
+        ):
             raise ValueError("model lifecycle deployment registry is invalid")
         deployments = deployment_registry.get("deployments")
         selected = deployment_registry.get("selected_deployment_id")
