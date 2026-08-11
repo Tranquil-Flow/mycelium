@@ -885,6 +885,27 @@ class PhysicalLiveRoute:
             document = getattr(self, "_m20_speculative_runtime", None)
             return None if document is None else json.loads(json.dumps(document))
 
+    def set_m21_heterogeneous_evidence(
+        self, document: Mapping[str, Any] | None
+    ) -> None:
+        """Attach privacy-reduced M21 membership and physical-route evidence."""
+
+        from mycelium_m21_heterogeneous import validate_heterogeneous_evidence
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._m21_heterogeneous = (
+                None
+                if document is None
+                else validate_heterogeneous_evidence(document)
+            )
+
+    def m21_heterogeneous(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m21_heterogeneous", None)
+            return None if document is None else json.loads(json.dumps(document))
+
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
         """Capture one fresh set of independently signed node resource observations."""
 

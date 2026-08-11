@@ -27,6 +27,7 @@ import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
+import { M21HeterogeneousSourcePanel } from './features/liveRoute/M21HeterogeneousSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
 import { HttpM20SpeculationClient } from './features/liveRoute/m20Speculation';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
@@ -284,12 +285,14 @@ export default function App({
   if (activeView === 'lab') {
     content = <>
       <ProductEvidenceSummary compact />
+      {source.source_mode === 'live' ? <M21HeterogeneousSourcePanel view="lab" hideUnavailable /> : null}
       <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />
     </>;
   } else if (activeView === 'settings') {
     content = <>
       <ProductEvidenceSummary compact />
       <ProductEvidenceSettings />
+      {source.source_mode === 'live' ? <M21HeterogeneousSourcePanel view="settings" hideUnavailable /> : null}
       <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} speculationClient={source.source_mode === 'live' ? liveM20SpeculationClient : null} />
     </>;
   } else if (rendered.state === 'loading') {
@@ -319,7 +322,7 @@ export default function App({
           <>
             <ProductEvidenceSummary compact />
             {activeView === 'nodes' ? (
-              <><ProductNodesWorkspace sourceMode="live" /><M17ModelOperationSourcePanel view="nodes" /></>
+              <><M21HeterogeneousSourcePanel view="nodes" hideUnavailable /><ProductNodesWorkspace sourceMode="live" /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
               <LiveRouteWorkspace
                 view={activeView}

@@ -577,6 +577,37 @@ def test_m20_evidence_endpoints_are_read_only(tmp_path: Path) -> None:
         thread.join(timeout=5)
 
 
+def test_m21_evidence_endpoint_is_read_only(tmp_path: Path) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    evidence = {"protocol": "mycelium.m21_heterogeneous_swarm.v1"}
+    calls: list[str] = []
+    route = SimpleNamespace(
+        m21_heterogeneous=lambda: calls.append("m21_heterogeneous") or evidence
+    )
+
+    async def app(*_args):
+        raise AssertionError("m21_projection_reached_asgi")
+
+    server = create_server(
+        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/m21-heterogeneous")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == evidence
+        assert calls == ["m21_heterogeneous"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

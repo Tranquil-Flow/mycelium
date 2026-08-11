@@ -39,6 +39,7 @@ from mycelium_m20_speculation import (
     validate_speculative_plan,
     validate_speculative_runtime,
 )
+from mycelium_m21_heterogeneous import validate_heterogeneous_evidence
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
@@ -758,6 +759,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._m18_projection("m20_speculative_plan", "m20_speculative_plan_unavailable")
             elif parsed.path == "/__mycelium/m20-speculative-runtime" and not parsed.query:
                 self._m18_projection("m20_speculative_runtime", "m20_speculative_runtime_unavailable")
+            elif parsed.path == "/__mycelium/m21-heterogeneous" and not parsed.query:
+                self._m18_projection("m21_heterogeneous", "m21_heterogeneous_unavailable")
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif parsed.path.startswith("/api/"):
@@ -942,6 +945,15 @@ def _m20_evidence(deployment_dir: Path) -> tuple[Mapping[str, Any] | None, ...]:
     )
 
 
+def _m21_evidence(deployment_dir: Path) -> Mapping[str, Any] | None:
+    return _m19_projection(
+        deployment_dir,
+        "m21-heterogeneous.json",
+        validate_heterogeneous_evidence,
+        "m21_heterogeneous",
+    )
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -993,6 +1005,7 @@ def _qualified_runtime(
         )
         m20_plan, m20_runtime = _m20_evidence(selected_deployment_dir)
         route.set_m20_speculative_evidence(plan=m20_plan, runtime=m20_runtime)
+        route.set_m21_heterogeneous_evidence(_m21_evidence(selected_deployment_dir))
         return QualifiedDeploymentRuntime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,
@@ -1143,6 +1156,7 @@ def run_physical_server(
         )
         m20_plan, m20_runtime = _m20_evidence(selected_deployment_dir)
         route.set_m20_speculative_evidence(plan=m20_plan, runtime=m20_runtime)
+        route.set_m21_heterogeneous_evidence(_m21_evidence(selected_deployment_dir))
         stack = build_live_stack(
             route=route,
             deployment_dir=selected_deployment_dir,
