@@ -1,0 +1,31 @@
+{
+  "protocol": "mycelium.deployment_residency_physical_gate.v1",
+  "observed_at_unix_ms": 1786467195000,
+  "source_commit": "5b876403f15a8af75b7453f00a5762c0e5be0ae2",
+  "candidate": {
+    "deployment_id": "f91a3ad0-1e1a-41f2-be1b-1c102ff8546e",
+    "model_id": "Qwen/Qwen2.5-3B-Instruct",
+    "model_revision": "aa8e72537993ba99e69dfaafa59ed015b17504d1",
+    "plan_digest": "sha256:7ae2fe076394a56f2eb5ee0ddc916d17a51e65633b20b2caf060dd01a1228d83",
+    "topology_size": 3,
+    "state_before": "qualified",
+    "state_after": "prepared",
+    "prepared_plan_retained": true
+  },
+  "residency": {
+    "local_stage_rss_kib_before": 6319824,
+    "local_stage_process_present_after": false,
+    "remote_stage_process_present_after": {
+      "node-1": false,
+      "node-2": false
+    },
+    "model_files_deleted": false
+  },
+  "selection": {
+    "selected_deployment_id_before": "81d479dc-2e56-56f9-b40b-fb157c78ac57",
+    "selected_deployment_id_after": "81d479dc-2e56-56f9-b40b-fb157c78ac57",
+    "selected_model_id_after": "Qwen/Qwen2.5-0.5B-Instruct"
+  },
+  "terminal_status_sha256": "sha256:03894e28ab395b5d0c6ac06a156633bcd10de25c6376a364b4c2bc3f8f1f3e42",
+  "route_ready": false
+}

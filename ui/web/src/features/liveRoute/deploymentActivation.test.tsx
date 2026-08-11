@@ -44,6 +44,7 @@ describe('prepared deployment activation', () => {
   });
 
   it('renders qualification progress and keeps selection explicit', () => {
+    const unload = vi.fn();
     const activating = {
       ...status({
         state: 'activating',
@@ -56,8 +57,9 @@ describe('prepared deployment activation', () => {
     expect(screen.getByText(/Running the distributed startup challenge/)).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute('value', '3');
 
-    rerender(<PreparedDeploymentsPanel status={status({ state: 'qualified', completed_steps: 4 })} view="plans" activatingCandidateId={null} error={null} onActivate={() => undefined} />);
-    expect(screen.getByText('Select it in Inference')).toBeInTheDocument();
+    rerender(<PreparedDeploymentsPanel status={status({ state: 'qualified', completed_steps: 4 })} view="plans" activatingCandidateId={null} error={null} onActivate={() => undefined} onUnload={unload} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Unload from memory' }));
+    expect(unload).toHaveBeenCalledWith('candidate-a');
     expect(screen.queryByRole('button', { name: /activate/i })).not.toBeInTheDocument();
   });
 });

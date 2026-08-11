@@ -1,4 +1,5 @@
 """Qualify and serve the persistent physical route on loopback."""
+
 from __future__ import annotations
 
 import argparse
@@ -481,14 +482,20 @@ def _handler() -> type[BaseHTTPRequestHandler]:
 
         def _serve_static(self, path: str) -> None:
             root = self.server.static_root.resolve()
-            relative = "index.html" if path in {"/", "/index.html"} else unquote(path.lstrip("/"))
+            relative = (
+                "index.html"
+                if path in {"/", "/index.html"}
+                else unquote(path.lstrip("/"))
+            )
             candidate = (root / relative).resolve()
             if root not in candidate.parents or not candidate.is_file():
                 candidate = root / "index.html"
             if not candidate.is_file():
                 self._send_bytes(404, b"not found", "text/plain; charset=utf-8")
                 return
-            content_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+            content_type = (
+                mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+            )
             self._send_bytes(200, candidate.read_bytes(), content_type)
 
         def _status(self) -> None:
@@ -590,6 +597,54 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 return
             self._send_bytes(
                 202,
+                _json_bytes(status),
+                "application/json; charset=utf-8",
+            )
+
+        def _unload_deployment_activation(self) -> None:
+            activation = self.server.activation
+            if activation is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "deployment_activation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            body = self._read_body(limit=4_096)
+            if body is None:
+                return
+            try:
+                document = json.loads(body)
+                if (
+                    not isinstance(document, dict)
+                    or set(document) != {"candidate_id"}
+                    or not isinstance(document["candidate_id"], str)
+                ):
+                    raise ValueError
+                status = activation.unload(document["candidate_id"])
+            except DeploymentActivationError as exc:
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": exc.code}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_activation_request"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
                 _json_bytes(status),
                 "application/json; charset=utf-8",
             )
@@ -830,7 +885,7 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     400,
                     _json_bytes({"error": "invalid_request"}),
                     "application/json; charset=utf-8",
-            )
+                )
                 return
             try:
                 document = json.loads(body)
@@ -862,10 +917,18 @@ def _handler() -> type[BaseHTTPRequestHandler]:
         def _promote_candidate(self) -> None:
             promote = getattr(self.server.route, "promote_candidate", None)
             if not callable(promote):
-                self._send_bytes(404, _json_bytes({"error": "candidate_registry_unavailable"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "candidate_registry_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
                 return
             if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
-                self._send_bytes(403, _json_bytes({"error": "origin_mismatch"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
                 return
             body = self._read_body(limit=256 * 1024)
             if body is None:
@@ -874,27 +937,50 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 document = json.loads(body)
                 status = promote(document)
             except DeploymentSelectionError as exc:
-                self._send_bytes(409, _json_bytes({"error": str(exc)}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": str(exc)}),
+                    "application/json; charset=utf-8",
+                )
                 return
             except (TypeError, ValueError, json.JSONDecodeError):
-                self._send_bytes(400, _json_bytes({"error": "invalid_candidate_report"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_candidate_report"}),
+                    "application/json; charset=utf-8",
+                )
                 return
-            self._send_bytes(200, _json_bytes(status), "application/json; charset=utf-8")
+            self._send_bytes(
+                200, _json_bytes(status), "application/json; charset=utf-8"
+            )
 
         def _canary_candidate(self) -> None:
             canary = getattr(self.server.route, "canary_candidate", None)
             if not callable(canary):
-                self._send_bytes(404, _json_bytes({"error": "candidate_registry_unavailable"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "candidate_registry_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
                 return
             if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
-                self._send_bytes(403, _json_bytes({"error": "origin_mismatch"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
                 return
             body = self._read_body(limit=16_384)
             if body is None:
                 return
             try:
                 document = json.loads(body)
-                if set(document) != {"candidate_deployment_id", "case_id", "prompt", "max_new_tokens"}:
+                if set(document) != {
+                    "candidate_deployment_id",
+                    "case_id",
+                    "prompt",
+                    "max_new_tokens",
+                }:
                     raise ValueError
                 result = canary(
                     document["candidate_deployment_id"],
@@ -903,20 +989,38 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     max_new_tokens=document["max_new_tokens"],
                 )
             except DeploymentSelectionError as exc:
-                self._send_bytes(409, _json_bytes({"error": str(exc)}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": str(exc)}),
+                    "application/json; charset=utf-8",
+                )
                 return
             except (TypeError, ValueError, json.JSONDecodeError):
-                self._send_bytes(400, _json_bytes({"error": "invalid_candidate_canary"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_candidate_canary"}),
+                    "application/json; charset=utf-8",
+                )
                 return
-            self._send_bytes(200, _json_bytes(result), "application/json; charset=utf-8")
+            self._send_bytes(
+                200, _json_bytes(result), "application/json; charset=utf-8"
+            )
 
         def _rollback_candidate(self) -> None:
             rollback = getattr(self.server.route, "rollback_candidate", None)
             if not callable(rollback):
-                self._send_bytes(404, _json_bytes({"error": "candidate_registry_unavailable"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "candidate_registry_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
                 return
             if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
-                self._send_bytes(403, _json_bytes({"error": "origin_mismatch"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
                 return
             body = self._read_body(limit=4_096)
             if body is None:
@@ -929,12 +1033,22 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     document["candidate_deployment_id"], reason=document["reason"]
                 )
             except DeploymentSelectionError as exc:
-                self._send_bytes(409, _json_bytes({"error": str(exc)}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": str(exc)}),
+                    "application/json; charset=utf-8",
+                )
                 return
             except (TypeError, ValueError, json.JSONDecodeError):
-                self._send_bytes(400, _json_bytes({"error": "invalid_candidate_rollback"}), "application/json; charset=utf-8")
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_candidate_rollback"}),
+                    "application/json; charset=utf-8",
+                )
                 return
-            self._send_bytes(200, _json_bytes(status), "application/json; charset=utf-8")
+            self._send_bytes(
+                200, _json_bytes(status), "application/json; charset=utf-8"
+            )
 
         def _asgi(self) -> None:
             parsed = urlsplit(self.path)
@@ -961,7 +1075,9 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 if message.get("type") == "http.response.start":
                     self.send_response(int(message["status"]))
                     for name, value in message.get("headers", ()):
-                        self.send_header(name.decode("latin-1"), value.decode("latin-1"))
+                        self.send_header(
+                            name.decode("latin-1"), value.decode("latin-1")
+                        )
                     self._security_headers()
                     self.end_headers()
                     response_started = True
@@ -1012,28 +1128,47 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             elif parsed.path == "/__mycelium/m18-replica-plan" and not parsed.query:
                 self._m18_projection("m18_replica_plan", "m18_replica_plan_unavailable")
             elif parsed.path == "/__mycelium/m18-replica-runtime" and not parsed.query:
-                self._m18_projection("m18_replica_runtime", "m18_replica_runtime_unavailable")
+                self._m18_projection(
+                    "m18_replica_runtime", "m18_replica_runtime_unavailable"
+                )
             elif parsed.path == "/__mycelium/m19-liveness" and not parsed.query:
                 self._m18_projection("m19_liveness", "m19_liveness_unavailable")
             elif parsed.path == "/__mycelium/m19-recovery-plan" and not parsed.query:
-                self._m18_projection("m19_recovery_plan", "m19_recovery_plan_unavailable")
+                self._m18_projection(
+                    "m19_recovery_plan", "m19_recovery_plan_unavailable"
+                )
             elif parsed.path == "/__mycelium/m19-recovery-runtime" and not parsed.query:
-                self._m18_projection("m19_recovery_runtime", "m19_recovery_runtime_unavailable")
+                self._m18_projection(
+                    "m19_recovery_runtime", "m19_recovery_runtime_unavailable"
+                )
             elif parsed.path == "/__mycelium/m20-speculative-plan" and not parsed.query:
-                self._m18_projection("m20_speculative_plan", "m20_speculative_plan_unavailable")
-            elif parsed.path == "/__mycelium/m20-speculative-runtime" and not parsed.query:
-                self._m18_projection("m20_speculative_runtime", "m20_speculative_runtime_unavailable")
+                self._m18_projection(
+                    "m20_speculative_plan", "m20_speculative_plan_unavailable"
+                )
+            elif (
+                parsed.path == "/__mycelium/m20-speculative-runtime"
+                and not parsed.query
+            ):
+                self._m18_projection(
+                    "m20_speculative_runtime", "m20_speculative_runtime_unavailable"
+                )
             elif parsed.path == "/__mycelium/m21-heterogeneous" and not parsed.query:
-                self._m18_projection("m21_heterogeneous", "m21_heterogeneous_unavailable")
+                self._m18_projection(
+                    "m21_heterogeneous", "m21_heterogeneous_unavailable"
+                )
             elif parsed.path == "/__mycelium/m22-release" and not parsed.query:
                 self._m18_projection("m22_release", "m22_release_unavailable")
             elif parsed.path == "/__mycelium/m23-kv" and not parsed.query:
                 self._m18_projection("m23_kv", "m23_kv_unavailable")
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
-            elif parsed.path == "/__mycelium/deployment-activation" and not parsed.query:
+            elif (
+                parsed.path == "/__mycelium/deployment-activation" and not parsed.query
+            ):
                 self._deployment_activation_status()
-            elif parsed.path == "/__mycelium/model-capacity-refresh" and not parsed.query:
+            elif (
+                parsed.path == "/__mycelium/model-capacity-refresh" and not parsed.query
+            ):
                 self._model_capacity_refresh_status()
             elif parsed.path == "/__mycelium/model-preparation" and not parsed.query:
                 self._model_preparation_status()
@@ -1046,11 +1181,25 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             parsed = urlsplit(self.path)
             if parsed.path == "/__mycelium/deployments/select" and not parsed.query:
                 self._select_deployment()
-            elif parsed.path == "/__mycelium/deployment-activation/start" and not parsed.query:
+            elif (
+                parsed.path == "/__mycelium/deployment-activation/start"
+                and not parsed.query
+            ):
                 self._start_deployment_activation()
-            elif parsed.path == "/__mycelium/model-capacity-refresh/start" and not parsed.query:
+            elif (
+                parsed.path == "/__mycelium/deployment-activation/unload"
+                and not parsed.query
+            ):
+                self._unload_deployment_activation()
+            elif (
+                parsed.path == "/__mycelium/model-capacity-refresh/start"
+                and not parsed.query
+            ):
                 self._start_model_capacity_refresh()
-            elif parsed.path == "/__mycelium/model-preparation/start" and not parsed.query:
+            elif (
+                parsed.path == "/__mycelium/model-preparation/start"
+                and not parsed.query
+            ):
                 self._start_model_preparation()
             elif parsed.path == "/__mycelium/candidates/canary" and not parsed.query:
                 self._canary_candidate()
@@ -1152,7 +1301,13 @@ def _m16_performance_budget(deployment_dir: Path) -> Mapping[str, Any] | None:
     try:
         document = json.loads(path.read_text("utf-8"))
         return validate_performance_budget_v3(document)
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
         raise ValueError("m16_performance_budget_invalid") from exc
 
 
@@ -1161,7 +1316,11 @@ def _m17_model_operation(
     *,
     explicit_path: Path | None = None,
 ) -> Mapping[str, Any] | None:
-    path = Path(explicit_path) if explicit_path is not None else Path(deployment_dir) / "m17-model-operation.json"
+    path = (
+        Path(explicit_path)
+        if explicit_path is not None
+        else Path(deployment_dir) / "m17-model-operation.json"
+    )
     if not path.exists():
         if explicit_path is not None:
             raise ValueError("m17_model_operation_missing")
@@ -1172,7 +1331,10 @@ def _m17_model_operation(
         document = json.loads(path.read_text("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("m17_model_operation_invalid") from exc
-    if not isinstance(document, dict) or document.get("protocol") != "mycelium.model_operation.v1":
+    if (
+        not isinstance(document, dict)
+        or document.get("protocol") != "mycelium.model_operation.v1"
+    ):
         raise ValueError("m17_model_operation_invalid")
     return document
 
@@ -1186,7 +1348,13 @@ def _m18_replica_plan(deployment_dir: Path) -> Mapping[str, Any] | None:
     try:
         document = json.loads(path.read_text("utf-8"))
         return validate_replica_plan(document)
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
         raise ValueError("m18_replica_plan_invalid") from exc
 
 
@@ -1199,7 +1367,13 @@ def _m18_replica_runtime(deployment_dir: Path) -> Mapping[str, Any] | None:
     try:
         document = json.loads(path.read_text("utf-8"))
         return validate_replica_runtime(document)
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
         raise ValueError("m18_replica_runtime_invalid") from exc
 
 
@@ -1213,15 +1387,33 @@ def _m19_projection(
         raise ValueError(f"{error_name}_unsafe")
     try:
         return validator(json.loads(path.read_text("utf-8")))
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
         raise ValueError(f"{error_name}_invalid") from exc
 
 
 def _m19_evidence(deployment_dir: Path) -> tuple[Mapping[str, Any] | None, ...]:
     return (
-        _m19_projection(deployment_dir, "m19-liveness.json", validate_liveness, "m19_liveness"),
-        _m19_projection(deployment_dir, "m19-recovery-plan.json", validate_recovery_plan, "m19_recovery_plan"),
-        _m19_projection(deployment_dir, "m19-recovery-runtime.json", validate_recovery_runtime, "m19_recovery_runtime"),
+        _m19_projection(
+            deployment_dir, "m19-liveness.json", validate_liveness, "m19_liveness"
+        ),
+        _m19_projection(
+            deployment_dir,
+            "m19-recovery-plan.json",
+            validate_recovery_plan,
+            "m19_recovery_plan",
+        ),
+        _m19_projection(
+            deployment_dir,
+            "m19-recovery-runtime.json",
+            validate_recovery_runtime,
+            "m19_recovery_runtime",
+        ),
     )
 
 
@@ -1441,7 +1633,9 @@ def run_registry_server(
             model_preparation = LocalModelPreparation(
                 operation_source=registry.m17_model_operation,
                 preparer=preparer,
-                on_candidate_published=activation.refresh if activation is not None else None,
+                on_candidate_published=activation.refresh
+                if activation is not None
+                else None,
             )
         stack = build_registry_stack(
             registry=registry,
@@ -1641,7 +1835,9 @@ class _DiscardSink:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python3.14 -m mycelium_demo serve --mode live")
+    parser = argparse.ArgumentParser(
+        prog="python3.14 -m mycelium_demo serve --mode live"
+    )
     parser.add_argument("--operator-plan", type=Path, required=True, action="append")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
@@ -1683,7 +1879,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise SystemExit("port must be from 1 through 65535")
     if len(args.operator_plan) == 1 and args.candidate_plan_root is None:
         if args.registry_state is not None:
-            raise SystemExit("--registry-state requires multiple --operator-plan values")
+            raise SystemExit(
+                "--registry-state requires multiple --operator-plan values"
+            )
         return run_physical_server(
             operator_plan=args.operator_plan[0],
             host=args.host,

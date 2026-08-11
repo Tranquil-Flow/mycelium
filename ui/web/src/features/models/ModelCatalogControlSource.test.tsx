@@ -24,7 +24,7 @@ describe('ModelCatalogControlSource', () => {
     const operationClient: M17ModelOperationClient = { load: vi.fn(async () => ({}) as unknown as Promise<M17ModelOperation>) };
     const status = vi.fn().mockResolvedValueOnce(prepared).mockResolvedValue(qualified);
     const activate = vi.fn(async () => activating);
-    const activationClient: DeploymentActivationClient = { status, activate };
+    const activationClient: DeploymentActivationClient = { status, activate, unload: vi.fn(async () => prepared) };
     const changed = vi.fn();
     window.addEventListener(DEPLOYMENTS_CHANGED_EVENT, changed);
     render(<ModelCatalogControlSource operationClient={operationClient} activationClient={activationClient} now={() => 1_000} />);

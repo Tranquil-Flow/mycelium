@@ -42,6 +42,15 @@ describe('ModelCatalogControlPanel', () => {
     expect(screen.getByRole('button', { name: 'Activate and qualify' })).toBeDisabled();
   });
 
+  it('can release a qualified prepared route without changing the selected model', () => {
+    const unload = vi.fn();
+    const qualifiedActivation: DeploymentActivationStatus = { ...activation, candidates: [{ ...activation.candidates[0], state: 'qualified', completed_steps: 4 }] };
+    const qualifiedOperation: M17ModelOperation = { ...operation, lifecycle: { ...operation.lifecycle, models: [{ ...operation.lifecycle.models[0], state: 'qualified', selectable: true }, operation.lifecycle.models[1]] } };
+    render(<ModelCatalogControlPanel operation={qualifiedOperation} activation={qualifiedActivation} capacityRefresh={null} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onUnload={unload} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Unload from memory' }));
+    expect(unload).toHaveBeenCalledWith('candidate-ready');
+  });
+
   it('runs an explicit local-only capacity recheck and explains progress', () => {
     const recheck = vi.fn();
     render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={{ protocol: 'mycelium.model_capacity_refresh.v1', generation: 2, state: 'refreshing', phase: 'evaluating_models', started_at_unix_ms: 1_000, completed_at_unix_ms: null, operation_digest: null, catalog_generation: null, evaluated_model_count: 0, reason_code: null, download_authorized: false, provisioning_started: false }} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={recheck} />);

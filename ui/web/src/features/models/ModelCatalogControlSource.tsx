@@ -83,6 +83,16 @@ export function ModelCatalogControlSource({
     }
   };
 
+  const unload = async (candidateId: string): Promise<void> => {
+    try {
+      const next = await activations.unload(candidateId);
+      setActivation(next); setError(null);
+      window.dispatchEvent(new Event(DEPLOYMENTS_CHANGED_EVENT));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'deployment_unload_failed');
+    }
+  };
+
   const recheckCapacity = async (): Promise<void> => {
     try {
       setCapacityRefresh(await capacity.start()); setError(null);
@@ -99,6 +109,6 @@ export function ModelCatalogControlSource({
     }
   };
 
-  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onPrepare={(modelId, revision) => void prepare(modelId, revision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
+  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(modelId, revision) => void prepare(modelId, revision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
   return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading model catalog and deployment status…' : `Model controls are unavailable (${error}). Existing qualified inference remains usable.`}</section>;
 }

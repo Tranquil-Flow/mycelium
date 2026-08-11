@@ -1,4 +1,5 @@
 """Atomic selection across independently qualified live deployments."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -75,6 +76,7 @@ class LiveDeploymentRegistry:
         self._promotion_previous: dict[str, str] = {}
         self._promotion_reports: dict[str, Mapping[str, Any]] = {}
         self._candidate_canaries: set[str] = set()
+        self._draining: set[str] = set()
         self._thread_binding = threading.local()
         self._lock = threading.RLock()
         self._qualification_refresher = qualification_refresher
@@ -114,11 +116,9 @@ class LiveDeploymentRegistry:
         if (
             not runtime.route.is_alive()
             or getattr(qualification, "route_ready", None) is not True
-            or getattr(qualification, "deployment_id", None)
-            != runtime.deployment_id
+            or getattr(qualification, "deployment_id", None) != runtime.deployment_id
             or getattr(qualification, "model_id", None) != runtime.model_id
-            or getattr(runtime.graph, "deployment_id", None)
-            != runtime.deployment_id
+            or getattr(runtime.graph, "deployment_id", None) != runtime.deployment_id
         ):
             raise DeploymentSelectionError("deployment_not_qualified")
         router = self._router_for(runtime)
@@ -130,6 +130,43 @@ class LiveDeploymentRegistry:
             status = self.registry_status()
             self._persist(status)
             return status
+
+    def unload_qualified_runtime(self, deployment_id: str) -> Mapping[str, Any]:
+        """Close and forget one non-selected, idle qualified runtime."""
+
+        if not isinstance(deployment_id, str) or not deployment_id:
+            raise DeploymentSelectionError("deployment_unknown")
+        with self._lock:
+            runtime = self._runtimes.get(deployment_id)
+            if runtime is None:
+                raise DeploymentSelectionError("deployment_unknown")
+            if deployment_id == self._selected:
+                raise DeploymentSelectionError("deployment_unload_selected")
+            if deployment_id in self._draining:
+                raise DeploymentSelectionError("deployment_unload_busy")
+            if (
+                deployment_id in self._candidate_canaries
+                or deployment_id in self._requests.values()
+            ):
+                raise DeploymentSelectionError("deployment_unload_busy")
+            self._draining.add(deployment_id)
+        error: BaseException | None = None
+        try:
+            runtime.route.close()
+        except BaseException as exc:
+            error = exc
+        with self._lock:
+            self._draining.discard(deployment_id)
+            if error is None:
+                self._runtimes.pop(deployment_id, None)
+                self._routers.pop(deployment_id, None)
+                self._promotion_previous.pop(deployment_id, None)
+                self._promotion_reports.pop(deployment_id, None)
+            status = self.registry_status()
+            self._persist(status)
+        if error is not None:
+            raise DeploymentSelectionError("deployment_unload_failed") from error
+        return status
 
     def _restored_selection(self) -> str | None:
         path = self._state_path
@@ -164,8 +201,7 @@ class LiveDeploymentRegistry:
             self._qualification_refresher is None
             or self._requests
             or type(issued_at) is not int
-            or self._clock_unix_ms() - issued_at
-            < LIVE_QUALIFICATION_REFRESH_AFTER_MS
+            or self._clock_unix_ms() - issued_at < LIVE_QUALIFICATION_REFRESH_AFTER_MS
         ):
             return runtime
         try:
@@ -271,9 +307,7 @@ class LiveDeploymentRegistry:
     def release_request(self, request_id: str) -> None:
         with self._lock:
             deployment_id = self._requests.pop(request_id, None)
-            router = (
-                None if deployment_id is None else self._routers.get(deployment_id)
-            )
+            router = None if deployment_id is None else self._routers.get(deployment_id)
         if router is not None:
             router.release_request(request_id)
 
@@ -281,10 +315,15 @@ class LiveDeploymentRegistry:
         with self._lock:
             if deployment_id not in self._runtimes:
                 raise DeploymentSelectionError("deployment_unknown")
+            if deployment_id in self._draining:
+                raise DeploymentSelectionError("deployment_unload_busy")
             if self._requests:
                 raise DeploymentSelectionError("deployment_switch_busy")
             target = self._runtimes[deployment_id]
-            if not target.route.is_alive() or target.qualification.route_ready is not True:
+            if (
+                not target.route.is_alive()
+                or target.qualification.route_ready is not True
+            ):
                 raise DeploymentSelectionError("deployment_not_qualified")
             previous = self._current()
             self._selected = deployment_id
@@ -340,7 +379,10 @@ class LiveDeploymentRegistry:
                 raise DeploymentSelectionError("deployment_unknown")
             if candidate_id in self._candidate_canaries:
                 raise DeploymentSelectionError("candidate_canary_active")
-            if not target.route.is_alive() or target.qualification.route_ready is not True:
+            if (
+                not target.route.is_alive()
+                or target.qualification.route_ready is not True
+            ):
                 raise DeploymentSelectionError("deployment_not_qualified")
             self._promotion_previous[candidate_id] = incumbent_id
             self._promotion_reports[candidate_id] = copy.deepcopy(validated)
@@ -391,7 +433,10 @@ class LiveDeploymentRegistry:
             runtime = self._runtimes.get(candidate_id)
             if runtime is None:
                 raise DeploymentSelectionError("deployment_unknown")
-            if not runtime.route.is_alive() or runtime.qualification.route_ready is not True:
+            if (
+                not runtime.route.is_alive()
+                or runtime.qualification.route_ready is not True
+            ):
                 raise DeploymentSelectionError("deployment_not_qualified")
             if candidate_id in self._candidate_canaries:
                 raise DeploymentSelectionError("candidate_canary_active")
@@ -464,7 +509,9 @@ class LiveDeploymentRegistry:
             with self._lock:
                 self._candidate_canaries.discard(candidate_id)
 
-    def rollback_candidate(self, candidate_id: str, *, reason: str) -> Mapping[str, Any]:
+    def rollback_candidate(
+        self, candidate_id: str, *, reason: str
+    ) -> Mapping[str, Any]:
         """Restore the captured incumbent while admitted requests keep their original router."""
 
         with self._lock:
@@ -554,6 +601,7 @@ class LiveDeploymentRegistry:
                 runtime
                 for runtime in self._runtimes.values()
                 if runtime.route.is_alive()
+                and runtime.deployment_id not in self._draining
                 and runtime.placement_projection is not None
                 and runtime.topology_projection is not None
             ]
@@ -629,12 +677,8 @@ class LiveDeploymentRegistry:
         with self._lock:
             if placement is not None and report is not None:
                 placement["promotion"] = {
-                    "candidate_deployment_id": report[
-                        "candidate_deployment_id"
-                    ],
-                    "incumbent_deployment_id": report[
-                        "incumbent_deployment_id"
-                    ],
+                    "candidate_deployment_id": report["candidate_deployment_id"],
+                    "incumbent_deployment_id": report["incumbent_deployment_id"],
                     "decision": report["decision"],
                     "reasons": copy.deepcopy(report["reasons"]),
                     "sample_size": report["metrics"]["sample_size"],
@@ -643,11 +687,7 @@ class LiveDeploymentRegistry:
             status["topology"] = topology
             route_incidents = status.get("incidents", [])
             status["incidents"] = [
-                *(
-                    list(route_incidents)
-                    if isinstance(route_incidents, list)
-                    else []
-                ),
+                *(list(route_incidents) if isinstance(route_incidents, list) else []),
                 *incidents,
             ][-64:]
             return status
@@ -666,9 +706,7 @@ class LiveDeploymentRegistry:
 
     def membership_status(self, *, qualification: Any | None) -> Mapping[str, Any]:
         with self._lock:
-            return self._current().route.membership_status(
-                qualification=qualification
-            )
+            return self._current().route.membership_status(qualification=qualification)
 
     def mint_native_invite(
         self,

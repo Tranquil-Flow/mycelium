@@ -80,6 +80,20 @@ def test_registry_starts_with_one_runtime_and_adds_qualified_standby() -> None:
     assert registry.current_deployment().deployment_id == "deployment-1"
 
 
+def test_registry_unloads_only_an_idle_non_selected_runtime() -> None:
+    selected = _runtime(0)
+    standby = _runtime(1)
+    registry = LiveDeploymentRegistry([selected, standby])
+
+    status = registry.unload_qualified_runtime("deployment-1")
+
+    assert standby.route.is_alive() is False
+    assert [item["deployment_id"] for item in status["deployments"]] == ["deployment-0"]
+    assert status["selected_deployment_id"] == "deployment-0"
+    with pytest.raises(DeploymentSelectionError, match="deployment_unload_selected"):
+        registry.unload_qualified_runtime("deployment-0")
+
+
 def test_registry_capacity_evidence_uses_richest_live_planned_route() -> None:
     small = replace(
         _runtime(0),
@@ -88,9 +102,7 @@ def test_registry_capacity_evidence_uses_richest_live_planned_route() -> None:
     )
     rich = replace(
         _runtime(1),
-        placement_projection={
-            "nodes": [{"node_id": "node-a"}, {"node_id": "node-b"}]
-        },
+        placement_projection={"nodes": [{"node_id": "node-a"}, {"node_id": "node-b"}]},
         topology_projection={"decision": {"opened_order": ["node-a", "node-b"]}},
     )
     small.route.m17_swarm_evidence = lambda: {"deployment_id": "small"}  # type: ignore[attr-defined,method-assign]
@@ -188,7 +200,9 @@ def test_registry_persists_atomic_public_selection_state(tmp_path: Path) -> None
     assert not list(state_path.parent.glob("*.tmp"))
 
 
-def test_registry_restores_last_qualified_selection_after_restart(tmp_path: Path) -> None:
+def test_registry_restores_last_qualified_selection_after_restart(
+    tmp_path: Path,
+) -> None:
     state_path = tmp_path / "state" / "deployments.json"
     first = LiveDeploymentRegistry([_runtime(0), _runtime(1)], state_path=state_path)
     first.select("deployment-1")

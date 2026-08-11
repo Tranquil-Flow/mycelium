@@ -1,5 +1,6 @@
 export const DEPLOYMENT_ACTIVATION_PATH = '/__mycelium/deployment-activation';
 export const DEPLOYMENT_ACTIVATION_START_PATH = '/__mycelium/deployment-activation/start';
+export const DEPLOYMENT_ACTIVATION_UNLOAD_PATH = '/__mycelium/deployment-activation/unload';
 export const DEPLOYMENTS_CHANGED_EVENT = 'mycelium:deployments-changed';
 
 export type DeploymentActivationState =
@@ -42,6 +43,7 @@ export type DeploymentActivationStatus = Readonly<{
 export interface DeploymentActivationClient {
   status(signal?: AbortSignal): Promise<DeploymentActivationStatus>;
   activate(candidateId: string, signal?: AbortSignal): Promise<DeploymentActivationStatus>;
+  unload(candidateId: string, signal?: AbortSignal): Promise<DeploymentActivationStatus>;
 }
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
@@ -150,6 +152,15 @@ export class HttpDeploymentActivationClient implements DeploymentActivationClien
 
   async activate(candidateId: string, signal?: AbortSignal): Promise<DeploymentActivationStatus> {
     return this.request(DEPLOYMENT_ACTIVATION_START_PATH, {
+      method: 'POST',
+      signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ candidate_id: candidateId }),
+    });
+  }
+
+  async unload(candidateId: string, signal?: AbortSignal): Promise<DeploymentActivationStatus> {
+    return this.request(DEPLOYMENT_ACTIVATION_UNLOAD_PATH, {
       method: 'POST',
       signal,
       headers: { 'content-type': 'application/json' },

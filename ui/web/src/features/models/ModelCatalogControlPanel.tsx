@@ -10,7 +10,7 @@ function bytes(value: number): string {
   return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value / 2 ** 30)} GiB`;
 }
 
-function Row({ row, busy, onActivate, onPrepare }: { readonly row: ModelCatalogRow; readonly busy: boolean; readonly onActivate: (candidateId: string) => void; readonly onPrepare: (modelId: string, revision: string) => void }) {
+function Row({ row, busy, onActivate, onUnload, onPrepare }: { readonly row: ModelCatalogRow; readonly busy: boolean; readonly onActivate: (candidateId: string) => void; readonly onUnload: (candidateId: string) => void; readonly onPrepare: (modelId: string, revision: string) => void }) {
   const report = row.feasibility;
   const candidate = row.candidate;
   return <tr>
@@ -24,7 +24,7 @@ function Row({ row, busy, onActivate, onPrepare }: { readonly row: ModelCatalogR
     </td>
     <td>{(row.action === 'activate' || row.action === 'retry') && candidate !== null ? <button type="button" disabled={busy} onClick={() => onActivate(candidate.candidate_id)}>
       {row.action === 'retry' ? 'Retry qualification' : 'Activate and qualify'}
-    </button> : row.action === 'prepare' || row.action === 'retry_prepare' ? <button type="button" disabled={busy} onClick={() => onPrepare(row.entry.model_id, row.entry.revision)}>{row.action === 'retry_prepare' ? 'Retry preparation' : 'Prepare on swarm'}</button> : row.availability === 'qualified' ? 'Select above' : row.availability === 'active' ? 'Selected' : row.availability === 'preparing' ? 'In progress' : 'No action available'}</td>
+    </button> : row.action === 'prepare' || row.action === 'retry_prepare' ? <button type="button" disabled={busy} onClick={() => onPrepare(row.entry.model_id, row.entry.revision)}>{row.action === 'retry_prepare' ? 'Retry preparation' : 'Prepare on swarm'}</button> : row.availability === 'qualified' && candidate !== null ? <button type="button" disabled={busy} onClick={() => onUnload(candidate.candidate_id)}>Unload from memory</button> : row.availability === 'qualified' ? 'Select above' : row.availability === 'active' ? 'Selected' : row.availability === 'preparing' ? 'In progress' : 'No action available'}</td>
   </tr>;
 }
 
@@ -34,6 +34,7 @@ export function ModelCatalogControlPanel({
   nowUnixMs,
   error,
   onActivate,
+  onUnload = () => undefined,
   onRefresh,
   capacityRefresh,
   onRecheckCapacity,
@@ -45,6 +46,7 @@ export function ModelCatalogControlPanel({
   readonly nowUnixMs: number;
   readonly error: string | null;
   readonly onActivate: (candidateId: string) => void;
+  readonly onUnload?: (candidateId: string) => void;
   readonly onRefresh: () => void;
   readonly capacityRefresh: ModelCapacityRefreshStatus | null;
   readonly onRecheckCapacity: () => void;
@@ -76,12 +78,12 @@ export function ModelCatalogControlPanel({
     </dl>
     <div className={styles.tableWrap}><table>
       <thead><tr><th>Model</th><th>Local artifact</th><th>Availability</th><th>Swarm fit</th><th>Action</th></tr></thead>
-      <tbody>{prominent.map((row) => <Row key={row.identity} row={row} busy={busy} onActivate={onActivate} onPrepare={onPrepare} />)}</tbody>
+      <tbody>{prominent.map((row) => <Row key={row.identity} row={row} busy={busy} onActivate={onActivate} onUnload={onUnload} onPrepare={onPrepare} />)}</tbody>
     </table></div>
     {other.length === 0 ? null : <details><summary>Show {other.length} other local model {other.length === 1 ? 'identity' : 'identities'}</summary>
       <div className={styles.tableWrap}><table>
         <thead><tr><th>Model</th><th>Local artifact</th><th>Availability</th><th>Swarm fit</th><th>Action</th></tr></thead>
-        <tbody>{other.map((row) => <Row key={row.identity} row={row} busy={busy} onActivate={onActivate} onPrepare={onPrepare} />)}</tbody>
+        <tbody>{other.map((row) => <Row key={row.identity} row={row} busy={busy} onActivate={onActivate} onUnload={onUnload} onPrepare={onPrepare} />)}</tbody>
       </table></div>
     </details>}
     {activation.invalid_candidate_count === 0 ? null : <p role="alert">{activation.invalid_candidate_count} unsafe or invalid prepared route {activation.invalid_candidate_count === 1 ? 'was' : 'were'} rejected.</p>}

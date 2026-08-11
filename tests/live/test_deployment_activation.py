@@ -152,6 +152,31 @@ def test_prepared_candidate_qualifies_without_selecting_or_exposing_paths(
     assert registry.registry_status()["selected_deployment_id"] != graph.deployment_id
 
 
+def test_qualified_candidate_can_be_unloaded_and_reactivated(tmp_path: Path) -> None:
+    graph_holder = {}
+
+    def loader(_plan: Path, progress):
+        progress("opening_route")
+        progress("qualifying_route")
+        return _runtime(graph_holder["graph"])
+
+    activation, graph, _state_root, registry = _activation(tmp_path, loader)
+    graph_holder["graph"] = graph
+    candidate_id = activation.status()["candidates"][0]["candidate_id"]
+    activation.activate(candidate_id)
+    assert _wait_terminal(activation)["candidates"][0]["state"] == "qualified"
+
+    unloaded = activation.unload(candidate_id)
+
+    assert unloaded["candidates"][0]["state"] == "prepared"
+    assert all(
+        item["deployment_id"] != graph.deployment_id
+        for item in registry.registry_status()["deployments"]
+    )
+    activation.activate(candidate_id)
+    assert _wait_terminal(activation)["candidates"][0]["state"] == "qualified"
+
+
 def test_activation_failure_is_retryable_and_keeps_incumbent(tmp_path: Path) -> None:
     graph_holder = {}
     fail = True
@@ -186,9 +211,9 @@ def test_activation_rejects_unsafe_root_and_graph_disagreement(tmp_path: Path) -
     graph = _graph_document()
     path = _plan(root, tmp_path / "workspace", graph, "candidate.json")
     payload = json.loads(path.read_text())
-    payload["controller"]["run_plan"]["nodes"][1]["configure"]["graph"][
-        "model_id"
-    ] = "Qwen/different"
+    payload["controller"]["run_plan"]["nodes"][1]["configure"]["graph"]["model_id"] = (
+        "Qwen/different"
+    )
     path.write_text(json.dumps(payload), encoding="utf-8")
     incumbent = _runtime(
         execution_graph_from_dict(
@@ -219,8 +244,7 @@ def test_activation_rejects_unsafe_root_and_graph_disagreement(tmp_path: Path) -
 def test_activation_status_contract_is_closed() -> None:
     fixture = json.loads(
         (
-            ROOT
-            / "contracts/compatibility-fixtures/deployment-activation-v1.json"
+            ROOT / "contracts/compatibility-fixtures/deployment-activation-v1.json"
         ).read_text()
     )
     validate_activation_status(fixture)

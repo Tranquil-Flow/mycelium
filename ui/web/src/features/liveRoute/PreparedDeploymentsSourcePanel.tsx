@@ -65,7 +65,22 @@ export function PreparedDeploymentsSourcePanel({
     }
   };
 
-  if (status !== null) return <PreparedDeploymentsPanel status={status} view={view} activatingCandidateId={activatingCandidateId} error={error} onActivate={(candidateId) => void activate(candidateId)} />;
+  const unload = async (candidateId: string): Promise<void> => {
+    if (activatingCandidateId !== null) return;
+    setActivatingCandidateId(candidateId);
+    try {
+      const next = await source.unload(candidateId);
+      setStatus(next);
+      setError(null);
+      window.dispatchEvent(new Event(DEPLOYMENTS_CHANGED_EVENT));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'deployment_unload_failed');
+    } finally {
+      setActivatingCandidateId(null);
+    }
+  };
+
+  if (status !== null) return <PreparedDeploymentsPanel status={status} view={view} activatingCandidateId={activatingCandidateId} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} />;
   if (hideUnavailable && error !== null) return null;
   return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading prepared deployments…' : `Prepared deployment activation is unavailable (${error}).`}</section>;
 }

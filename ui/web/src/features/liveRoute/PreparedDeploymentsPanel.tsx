@@ -31,12 +31,14 @@ export function PreparedDeploymentsPanel({
   activatingCandidateId,
   error,
   onActivate,
+  onUnload = () => undefined,
 }: {
   readonly status: DeploymentActivationStatus;
   readonly view: PreparedDeploymentsView;
   readonly activatingCandidateId: string | null;
   readonly error: string | null;
   readonly onActivate: (candidateId: string) => void;
+  readonly onUnload?: (candidateId: string) => void;
 }) {
   return (
     <section className={styles.panel} aria-labelledby={`prepared-deployments-${view}`}>
@@ -73,7 +75,7 @@ export function PreparedDeploymentsPanel({
                   disabled={status.busy_candidate_id !== null || activatingCandidateId !== null}
                   onClick={() => onActivate(candidate.candidate_id)}
                 >{activatingCandidateId === candidate.candidate_id ? 'Starting…' : candidate.state === 'failed' ? 'Retry activation' : 'Activate deployment'}</button>
-              ) : candidate.state === 'qualified' ? 'Select it in Inference' : candidate.state === 'active' ? 'Currently selected' : candidate.state === 'activating' ? 'Activation in progress' : 'Unavailable'}</td>
+              ) : candidate.state === 'qualified' ? <button type="button" disabled={status.busy_candidate_id !== null || activatingCandidateId !== null} onClick={() => onUnload(candidate.candidate_id)}>Unload from memory</button> : candidate.state === 'active' ? 'Currently selected' : candidate.state === 'activating' ? 'Activation in progress' : 'Unavailable'}</td>
             </tr>;
           })}</tbody>
         </table></div>

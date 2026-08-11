@@ -137,7 +137,10 @@ def validate_activation_status(document: Mapping[str, Any]) -> None:
             "plan_digest",
         )
         if (
-            not all(isinstance(candidate.get(key), str) and candidate.get(key) for key in strings)
+            not all(
+                isinstance(candidate.get(key), str) and candidate.get(key)
+                for key in strings
+            )
             or candidate_id in seen
             or candidate_id != candidate.get("deployment_id")
             or _REVISION.fullmatch(candidate["model_revision"]) is None
@@ -153,7 +156,11 @@ def validate_activation_status(document: Mapping[str, Any]) -> None:
         ):
             raise ValueError("deployment_activation_candidate_invalid")
         if state == "activating":
-            if phase not in _PHASES or reason is not None or completed != _PHASES[phase]:
+            if (
+                phase not in _PHASES
+                or reason is not None
+                or completed != _PHASES[phase]
+            ):
                 raise ValueError("deployment_activation_candidate_invalid")
             activating.append(candidate_id)
         elif state in {"qualified", "active"}:
@@ -230,7 +237,11 @@ def _prepared(path: Path) -> PreparedDeployment:
         raise
     except (OSError, RunnerError, TypeError, ValueError, RecursionError) as exc:
         code = getattr(exc, "code", "candidate_plan_invalid")
-        public = code if isinstance(code, str) and _SAFE_CODE.fullmatch(code) else "candidate_plan_invalid"
+        public = (
+            code
+            if isinstance(code, str) and _SAFE_CODE.fullmatch(code)
+            else "candidate_plan_invalid"
+        )
         raise DeploymentActivationError(public) from exc
     digest = "sha256:" + hashlib.sha256(plan_bytes).hexdigest()
     return PreparedDeployment(
@@ -312,13 +323,9 @@ class PreparedDeploymentActivation:
     def refresh(self) -> Mapping[str, Any]:
         candidates, invalid = self._discover()
         with self._lock:
-            if (
-                {
-                    key: value.plan_digest for key, value in self._candidates.items()
-                }
-                != {key: value.plan_digest for key, value in candidates.items()}
-                or invalid != self._invalid_candidate_count
-            ):
+            if {key: value.plan_digest for key, value in self._candidates.items()} != {
+                key: value.plan_digest for key, value in candidates.items()
+            } or invalid != self._invalid_candidate_count:
                 self._generation += 1
             self._candidates = candidates
             self._invalid_candidate_count = invalid
@@ -374,7 +381,9 @@ class PreparedDeploymentActivation:
                     "plan_digest": candidate.plan_digest,
                     "state": state,
                     "phase": phase,
-                    "completed_steps": 4 if state in {"qualified", "active"} else _PHASES.get(phase, 0),
+                    "completed_steps": 4
+                    if state in {"qualified", "active"}
+                    else _PHASES.get(phase, 0),
                     "total_steps": 4,
                     "reason_code": reason,
                 }
@@ -399,7 +408,10 @@ class PreparedDeploymentActivation:
             raise DeploymentActivationError("activation_state_root_unsafe")
         destination = snapshots / f"{candidate.plan_digest[7:]}.json"
         if destination.exists():
-            if destination.is_symlink() or destination.read_bytes() != candidate.plan_bytes:
+            if (
+                destination.is_symlink()
+                or destination.read_bytes() != candidate.plan_bytes
+            ):
                 raise DeploymentActivationError("candidate_snapshot_conflict")
             return destination
         descriptor = os.open(
@@ -419,7 +431,11 @@ class PreparedDeploymentActivation:
         return destination
 
     def activate(self, candidate_id: str) -> Mapping[str, Any]:
-        if not isinstance(candidate_id, str) or not candidate_id or len(candidate_id) > 255:
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or len(candidate_id) > 255
+        ):
             raise DeploymentActivationError("candidate_id_invalid")
         self.refresh()
         with self._lock:
@@ -452,6 +468,39 @@ class PreparedDeploymentActivation:
             )
             self._worker = worker
             worker.start()
+            return self._status_locked()
+
+    def unload(self, candidate_id: str) -> Mapping[str, Any]:
+        """Unload one candidate-backed standby while retaining its immutable plan."""
+
+        if (
+            not isinstance(candidate_id, str)
+            or not candidate_id
+            or len(candidate_id) > 255
+        ):
+            raise DeploymentActivationError("candidate_id_invalid")
+        self.refresh()
+        with self._lock:
+            candidate = self._candidates.get(candidate_id)
+            if candidate is None:
+                raise DeploymentActivationError("candidate_unknown")
+            if self._busy_candidate_id is not None:
+                raise DeploymentActivationError("activation_busy")
+        try:
+            self._registry.unload_qualified_runtime(candidate.deployment_id)
+        except Exception as exc:
+            code = getattr(exc, "code", str(exc))
+            if code not in {
+                "deployment_unknown",
+                "deployment_unload_selected",
+                "deployment_unload_busy",
+                "deployment_unload_failed",
+            }:
+                code = "deployment_unload_failed"
+            raise DeploymentActivationError(code) from exc
+        with self._lock:
+            self._attempts.pop(candidate_id, None)
+            self._generation += 1
             return self._status_locked()
 
     def _progress(self, candidate: PreparedDeployment, phase: str) -> None:

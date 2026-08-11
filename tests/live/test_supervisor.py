@@ -592,9 +592,7 @@ def test_m20_evidence_endpoints_are_read_only(tmp_path: Path) -> None:
     (static_root / "index.html").write_text("ok", encoding="utf-8")
     evidence = {
         "m20_speculative_plan": {"protocol": "mycelium.m20_speculative_plan.v1"},
-        "m20_speculative_runtime": {
-            "protocol": "mycelium.m20_speculative_runtime.v1"
-        },
+        "m20_speculative_runtime": {"protocol": "mycelium.m20_speculative_runtime.v1"},
     }
     calls: list[str] = []
     route = SimpleNamespace(
@@ -666,9 +664,7 @@ def test_m22_release_endpoint_is_read_only(tmp_path: Path) -> None:
     (static_root / "index.html").write_text("ok", encoding="utf-8")
     evidence = {"protocol": "mycelium.m22_release_closure.v1"}
     calls: list[str] = []
-    route = SimpleNamespace(
-        m22_release=lambda: calls.append("m22_release") or evidence
-    )
+    route = SimpleNamespace(m22_release=lambda: calls.append("m22_release") or evidence)
 
     async def app(*_args):
         raise AssertionError("m22_projection_reached_asgi")
@@ -737,6 +733,7 @@ def test_deployment_activation_endpoints_are_same_origin_and_closed_shape(
     activation = SimpleNamespace(
         status=lambda: calls.append("status") or status,
         activate=lambda candidate_id: calls.append(candidate_id) or status,
+        unload=lambda candidate_id: calls.append(f"unload:{candidate_id}") or status,
     )
 
     async def app(*_args):
@@ -755,6 +752,45 @@ def test_deployment_activation_endpoints_are_same_origin_and_closed_shape(
     try:
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
         connection.request("GET", "/__mycelium/deployment-activation")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/deployment-activation/unload",
+            body=json.dumps({"candidate_id": "deployment-candidate", "force": True}),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read()) == {"error": "invalid_activation_request"}
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/deployment-activation/unload",
+            body=json.dumps({"candidate_id": "deployment-candidate"}),
+            headers={"content-type": "application/json", "origin": "https://evil.test"},
+        )
+        response = connection.getresponse()
+        assert response.status == 403
+        assert json.loads(response.read()) == {"error": "origin_mismatch"}
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/deployment-activation/unload",
+            body=json.dumps({"candidate_id": "deployment-candidate"}),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
         response = connection.getresponse()
         assert response.status == 200
         assert json.loads(response.read()) == status
@@ -797,7 +833,11 @@ def test_deployment_activation_endpoints_are_same_origin_and_closed_shape(
         response = connection.getresponse()
         assert response.status == 403
         assert json.loads(response.read()) == {"error": "origin_mismatch"}
-        assert calls == ["status", "deployment-candidate"]
+        assert calls == [
+            "status",
+            "unload:deployment-candidate",
+            "deployment-candidate",
+        ]
     finally:
         server.shutdown()
         server.server_close()
