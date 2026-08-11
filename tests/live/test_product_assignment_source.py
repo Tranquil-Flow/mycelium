@@ -28,6 +28,7 @@ def test_physical_route_projects_only_validated_assignment_and_load_bindings() -
                 placements=(
                     SimpleNamespace(
                         assignment_id="assignment-a",
+                        placement_id="stage-a-primary",
                         load_proof_digest="sha256:" + "c" * 64,
                     ),
                 ),
@@ -39,7 +40,7 @@ def test_physical_route_projects_only_validated_assignment_and_load_bindings() -
         {
             "assignment_id": "assignment-a",
             "node_id": "node-a",
-            "stage_id": "stage-a",
+            "stage_id": "stage-a-primary",
             "membership_generation": 4,
             "load_generation": 17,
             "assignment_digest": "sha256:" + "a" * 64,

@@ -43,6 +43,7 @@ from mycelium_qualification.physical_deployment import (
     LocalModelSource,
     build_execution_graph,
     build_physical_device_states,
+    build_replicated_execution_graph,
     prepare_assignment_artifacts,
 )
 from mycelium_qualification.safetensors_sharding import shard_qwen2_checkpoint
@@ -57,9 +58,16 @@ from runtime_loader import (
     execute_loaded_stage,
     load_assignment_stage,
 )
-from planner_assignment import compile_bound_layer_assignments
-from stage_pack import compile_stage_pack, verify_stage_pack
-from weight_provisioning import artifact_report_errors
+from planner_assignment import (
+    compile_bound_layer_assignments,
+    compile_bound_replica_assignments,
+)
+from stage_pack import (
+    artifact_report_for_loader,
+    compile_stage_pack,
+    verify_stage_pack,
+)
+from weight_provisioning import artifact_report_errors, provision_assignment
 
 
 MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -91,6 +99,32 @@ _RUNTIME_PACKAGE_CLOSURE = (
     "mycelium_gossip",
     "mycelium_layer_planner",
 )
+
+
+def _m18_runtime_kv_bytes(
+    model_config: Mapping[str, Any],
+    *,
+    qualification_token_count: int,
+    track_membership_count: int,
+) -> int:
+    """Size Router admission for the model context, not one startup prompt."""
+
+    context_tokens = model_config.get("max_position_embeddings")
+    if (
+        not isinstance(context_tokens, int)
+        or isinstance(context_tokens, bool)
+        or not 1 <= context_tokens <= 1_048_576
+        or not isinstance(qualification_token_count, int)
+        or qualification_token_count < 1
+        or not isinstance(track_membership_count, int)
+        or track_membership_count < 1
+    ):
+        raise RuntimeError("m18_model_context_capacity_invalid")
+    return (
+        max(context_tokens, qualification_token_count)
+        * 32
+        * track_membership_count
+    )
 
 
 def _route_label(args: argparse.Namespace) -> str:
@@ -150,37 +184,59 @@ def _m13_control_plane(
         "topology_decision",
         "topology_projection",
     }
+    m18_expected = expected | {"admitted_node_ids", "replica_gain_evidence"}
     if not isinstance(document, dict) or frozenset(document) not in {
         frozenset(expected),
         frozenset(m14_expected),
+        frozenset(m18_expected),
     }:
         raise RuntimeError("m13_control_plane_invalid")
     if document.get("protocol") not in {
         "mycelium.m13_physical_candidate.v1",
         "mycelium.m14_physical_candidate.v1",
+        "mycelium.m18_physical_candidate.v1",
     }:
         raise RuntimeError("m13_control_plane_invalid")
     signed = document.get("signed_evidence_bundle")
     route = document.get("route_plan")
     if not isinstance(signed, dict) or not isinstance(route, dict):
         raise RuntimeError("m13_control_plane_invalid")
-    if signed.get("evidence_bundle", {}).get("deployment", {}).get(
-        "deployment_id"
-    ) != deployment_id:
+    if (
+        signed.get("evidence_bundle", {}).get("deployment", {}).get("deployment_id")
+        != deployment_id
+    ):
         raise RuntimeError("m13_control_plane_deployment_mismatch")
+    placement_records = route.get("placements", [])
     placements = {
         placement.get("placement_id"): placement
-        for placement in route.get("placements", [])
-        if isinstance(placement, dict) and placement.get("primary") is True
+        for placement in placement_records
+        if isinstance(placement, dict)
     }
     tracks = route.get("legal_tracks")
-    if not isinstance(tracks, list) or len(tracks) != 1:
+    if not isinstance(tracks, list) or not tracks:
         raise RuntimeError("m13_control_plane_route_invalid")
-    ordered = [placements.get(item) for item in tracks[0].get("placement_ids", [])]
-    if [item.get("node_id") if isinstance(item, dict) else None for item in ordered] != list(
-        node_ids
-    ):
-        raise RuntimeError("m13_control_plane_node_order_mismatch")
+    if document["protocol"] == "mycelium.m18_physical_candidate.v1":
+        by_node = {
+            placement.get("node_id"): placement
+            for placement in placement_records
+            if isinstance(placement, dict)
+        }
+        if set(by_node) != set(node_ids) or len(by_node) != len(placement_records):
+            raise RuntimeError("m13_control_plane_node_order_mismatch")
+        ordered = [by_node[node_id] for node_id in node_ids]
+        if len(tracks) < 2:
+            raise RuntimeError("m13_control_plane_route_invalid")
+    else:
+        primary = {
+            placement_id: placement
+            for placement_id, placement in placements.items()
+            if placement.get("primary") is True
+        }
+        ordered = [primary.get(item) for item in tracks[0].get("placement_ids", [])]
+        if [
+            item.get("node_id") if isinstance(item, dict) else None for item in ordered
+        ] != list(node_ids):
+            raise RuntimeError("m13_control_plane_node_order_mismatch")
     ranges = []
     for placement in ordered:
         layer_range = placement.get("layer_range")
@@ -199,11 +255,21 @@ def _validate_m13_control_plane(
     manifest: dict[str, Any],
 ) -> None:
     signed = document["signed_evidence_bundle"]
-    trusted_digest = signed.get("verification_key", {}).get(
-        "verification_key_digest"
-    )
+    trusted_digest = signed.get("verification_key", {}).get("verification_key_digest")
     captured = signed.get("statement", {}).get("captured_at_unix_ms")
     if not isinstance(trusted_digest, str) or type(captured) is not int:
+        raise RuntimeError("m13_control_plane_invalid")
+    admitted_raw = document.get("admitted_node_ids")
+    admitted_node_ids = (
+        None
+        if admitted_raw is None
+        else tuple(admitted_raw)
+        if isinstance(admitted_raw, list)
+        and admitted_raw
+        and all(isinstance(item, str) and item for item in admitted_raw)
+        else ()
+    )
+    if admitted_node_ids == ():
         raise RuntimeError("m13_control_plane_invalid")
     snapshot = planner_snapshot_from_signed_evidence(
         signed,
@@ -213,6 +279,7 @@ def _validate_m13_control_plane(
         workload=document["workload"],
         policy=document["policy"],
         quantization=document["quantization"],
+        admitted_node_ids=admitted_node_ids,
     )
     route = route_plan_to_dict(
         plan_signed_evidence(
@@ -223,6 +290,7 @@ def _validate_m13_control_plane(
             workload=document["workload"],
             policy=document["policy"],
             quantization=document["quantization"],
+            admitted_node_ids=admitted_node_ids,
         )
     )
     normalized_route = json.loads(canonical_json(route))
@@ -234,12 +302,12 @@ def _validate_m13_control_plane(
     expected_model = {
         "model_id": manifest["model_id"],
         "revision": manifest["resolved_commit"],
-        "weight_digest": (
-            "sha256:" + manifest["manifest_digest"]["value"]
-        ),
+        "weight_digest": ("sha256:" + manifest["manifest_digest"]["value"]),
         "num_layers": manifest["num_layers"],
     }
-    if any(document["model"].get(key) != value for key, value in expected_model.items()):
+    if any(
+        document["model"].get(key) != value for key, value in expected_model.items()
+    ):
         raise RuntimeError("m13_control_plane_model_mismatch")
 
 
@@ -298,9 +366,7 @@ def _target_proof(
     proof = copy.deepcopy(base_proof)
     proof["assignment_id"] = assignment["assignment_id"]
     proof["node_id"] = assignment["node_id"]
-    proof["control_plane_binding"] = copy.deepcopy(
-        assignment["control_plane_binding"]
-    )
+    proof["control_plane_binding"] = copy.deepcopy(assignment["control_plane_binding"])
     proof["stage_pack_digest"] = pack["stage_pack_digest"]
     proof["stage_pack_verification_digest"] = verification[
         "stage_pack_verification_digest"
@@ -308,9 +374,7 @@ def _target_proof(
     return proof
 
 
-def _copy_runtime_closure(
-    repo: Path, bundle: Path, template: dict[str, Any]
-) -> None:
+def _copy_runtime_closure(repo: Path, bundle: Path, template: dict[str, Any]) -> None:
     paths = {
         record["path"]
         for record in template["controller"]["transfer_manifest"]["files"]
@@ -337,7 +401,9 @@ def _copy_runtime_closure(
 
 def _transfer_manifest(bundle: Path) -> dict[str, Any]:
     records = []
-    for path in sorted(candidate for candidate in bundle.rglob("*") if candidate.is_file()):
+    for path in sorted(
+        candidate for candidate in bundle.rglob("*") if candidate.is_file()
+    ):
         relative = str(path.relative_to(bundle))
         payload = path.read_bytes()
         records.append(
@@ -371,8 +437,7 @@ def _node_transfer_manifests(
     manifests: dict[str, Any] = {}
     for pack in packs:
         owned = {
-            f"deployment/{artifact['upstream_path']}"
-            for artifact in pack["artifacts"]
+            f"deployment/{artifact['upstream_path']}" for artifact in pack["artifacts"]
         }
         allowed = common | owned
         manifests[pack["node_id"]] = {
@@ -446,12 +511,9 @@ def _topology_nodes(
         raise RuntimeError("topology_node_id_invalid")
     if len(set(node_ids)) != len(node_ids):
         raise RuntimeError("topology_node_id_duplicate")
-    if (
-        node_ids != sorted(node_ids)
-        and (
-            topology_path is None
-            or document.get("placement_order_authority") != "m14_measured_cycle"
-        )
+    if node_ids != sorted(node_ids) and (
+        topology_path is None
+        or document.get("placement_order_authority") != "m14_measured_cycle"
     ):
         raise RuntimeError("topology_order_must_match_node_ids")
     endpoint_ids = [node["endpoint_id"] for node in nodes]
@@ -465,9 +527,7 @@ def _topology_nodes(
     backends = [node["runtime_backend"] for node in nodes]
     if any(backend not in {"mlx", "numpy"} for backend in backends):
         raise RuntimeError("topology_runtime_backend_unsupported")
-    if any(
-        node["process_transport"] not in {"local", "ssh"} for node in nodes
-    ):
+    if any(node["process_transport"] not in {"local", "ssh"} for node in nodes):
         raise RuntimeError("topology_process_transport_invalid")
     local_count = sum(node["process_transport"] == "local" for node in nodes)
     if local_count != 1:
@@ -589,9 +649,7 @@ def _membership_snapshot(
 ) -> dict[str, Any]:
     if not _ROUTE_LABEL_PATTERN.fullmatch(route_label):
         raise RuntimeError("route_label_invalid")
-    signer = generate_ed25519_signer(
-        endpoint_id=f"{route_label}-qwen-seed-endpoint"
-    )
+    signer = generate_ed25519_signer(endpoint_id=f"{route_label}-qwen-seed-endpoint")
     graph_digest = _digest(_bytes(graph_document))
     swarm_id = f"mycelium-{route_label}-qwen-multi-host"
     offers = []
@@ -646,8 +704,8 @@ def _challenge(
     loaded: list[Any],
     runtime_backends: list[str],
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    if len(loaded) < 2:
-        raise RuntimeError("challenge_requires_two_or_more_stages")
+    if not loaded:
+        raise RuntimeError("challenge_requires_one_or_more_stages")
     if len(runtime_backends) != len(loaded):
         raise RuntimeError("challenge_runtime_count_mismatch")
     context = codec.encode("Reply with exactly the word ready.")
@@ -704,28 +762,60 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     deployment_root.mkdir(parents=True)
     topology = _topology_nodes(template, args.topology)
     node_ids = tuple(node["node_id"] for node in topology)
-    runtime_backends = {
-        node["node_id"]: node["runtime_backend"] for node in topology
-    }
-    deployment_id = str(
+    runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
+    deployment_id = getattr(args, "deployment_id", None) or str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
-            "mycelium:" + ":".join(
-                (route_label, model_id, resolved_commit, *node_ids)
-            ),
+            "mycelium:" + ":".join((route_label, model_id, resolved_commit, *node_ids)),
         )
     )
+    try:
+        if str(uuid.UUID(deployment_id)) != deployment_id:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError("deployment_id_invalid") from exc
     m13_document, planned_ranges = _m13_control_plane(
-        getattr(args, "m14_control_plane", None)
+        getattr(args, "m18_control_plane", None)
+        or getattr(args, "m14_control_plane", None)
         or getattr(args, "m13_control_plane", None),
         node_ids=node_ids,
         deployment_id=deployment_id,
     )
+    is_m18 = (
+        m13_document is not None
+        and m13_document["protocol"] == "mycelium.m18_physical_candidate.v1"
+    )
+    if is_m18:
+        primary_track = m13_document["route_plan"]["legal_tracks"][0]["placement_ids"]
+        placement_intent = {
+            item["placement_id"]: item
+            for item in m13_document["route_plan"]["placements"]
+        }
+        prepare_node_ids = tuple(
+            placement_intent[item]["node_id"] for item in primary_track
+        )
+        prepare_ranges = tuple(
+            range(
+                placement_intent[item]["layer_range"]["start"],
+                placement_intent[item]["layer_range"]["end"],
+            )
+            for item in primary_track
+        )
+        if len(prepare_node_ids) == 1:
+            # The generic artifact preparer requires a multi-node route. For a
+            # complete-model replica plan, use an inert balanced preparation only
+            # to materialize the local model; replica-bound assignments below are
+            # still compiled from the signed M18 route.
+            prepare_node_ids = node_ids
+            prepare_ranges = None
+    else:
+        prepare_node_ids = node_ids
+        prepare_ranges = planned_ranges
 
     def prepare(model_root: Path) -> Any:
         return prepare_assignment_artifacts(
             deployment_root,
-            node_ids=node_ids,
+            node_ids=prepare_node_ids,
             model_source=LocalModelSource(
                 root=model_root,
                 model_id=model_id,
@@ -733,10 +823,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 resolved_commit=resolved_commit,
             ),
             runtime_dtype="float32",
-            runtime_backends_by_node=runtime_backends,
+            runtime_backends_by_node={
+                node_id: runtime_backends[node_id] for node_id in prepare_node_ids
+            },
             runtime_quantization="int8-weight-only",
             deployment_id=deployment_id,
-            layer_ranges=planned_ranges,
+            layer_ranges=prepare_ranges,
         )
 
     stage_sharding = None
@@ -769,9 +861,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         }
         for node in topology
     ]
-    staging_roots = {
-        node["node_id"]: node["staging_root"] for node in topology
-    }
+    staging_roots = {node["node_id"]: node["staging_root"] for node in topology}
     cache_roots = {
         node_id: f"{root}/deployment" for node_id, root in staging_roots.items()
     }
@@ -796,38 +886,150 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     else:
         _validate_m13_control_plane(m13_document, manifest=prepared.manifest)
         expected_runtime = m13_document["planner_snapshot"].get("node_runtime")
-        expected_modes = {
-            value.get("decode_mode")
-            for value in expected_runtime.values()
-            if isinstance(value, dict)
-        } if isinstance(expected_runtime, dict) else set()
+        expected_modes = (
+            {
+                value.get("decode_mode")
+                for value in expected_runtime.values()
+                if isinstance(value, dict)
+            }
+            if isinstance(expected_runtime, dict)
+            else set()
+        )
         required_mode = (
             "complete_context_replay"
             if "numpy" in runtime_backends.values()
             else "stage_local_kv"
         )
+        accepted_modes = {required_mode}
+        if is_m18 and set(runtime_backends.values()) == {"mlx"}:
+            accepted_modes.add("complete_context_replay")
         if (
             not isinstance(expected_runtime, dict)
-            or expected_modes != {required_mode}
+            or len(expected_modes) != 1
+            or not expected_modes <= accepted_modes
             or any(
                 expected_runtime.get(node_id, {}).get("backend") != backend
                 for node_id, backend in runtime_backends.items()
             )
         ):
             raise RuntimeError("m13_control_plane_runtime_mismatch")
-        assignments = compile_bound_layer_assignments(
-            route_plan=m13_document["route_plan"],
-            planner_snapshot=m13_document["planner_snapshot"],
-            evidence_bundle=m13_document["signed_evidence_bundle"]["evidence_bundle"],
-            manifest=prepared.manifest,
-            deployment_id=deployment_id,
-            deployment_epoch=1,
-            cache_roots=cache_roots,
-            runtime_by_node=runtime_by_node,
-        )
+        if is_m18:
+            assignments_by_placement = compile_bound_replica_assignments(
+                route_plan=m13_document["route_plan"],
+                planner_snapshot=m13_document["planner_snapshot"],
+                evidence_bundle=m13_document["signed_evidence_bundle"][
+                    "evidence_bundle"
+                ],
+                manifest=prepared.manifest,
+                deployment_id=deployment_id,
+                deployment_epoch=1,
+                cache_roots=cache_roots,
+                runtime_by_node=runtime_by_node,
+            )
+            placement_by_node = {
+                assignment["node_id"]: placement_id
+                for placement_id, assignment in assignments_by_placement.items()
+            }
+            if set(placement_by_node) != set(node_ids):
+                raise RuntimeError("m18_control_plane_assignment_mismatch")
+            placement_ids = [placement_by_node[node_id] for node_id in node_ids]
+            assignments = [
+                assignments_by_placement[placement_id] for placement_id in placement_ids
+            ]
+            local_assignments_by_placement = compile_bound_replica_assignments(
+                route_plan=m13_document["route_plan"],
+                planner_snapshot=m13_document["planner_snapshot"],
+                evidence_bundle=m13_document["signed_evidence_bundle"][
+                    "evidence_bundle"
+                ],
+                manifest=prepared.manifest,
+                deployment_id=deployment_id,
+                deployment_epoch=1,
+                cache_roots={node_id: str(deployment_root) for node_id in node_ids},
+                runtime_by_node=runtime_by_node,
+            )
+            local_assignments = [
+                local_assignments_by_placement[placement_id]
+                for placement_id in placement_ids
+            ]
+        else:
+            assignments = compile_bound_layer_assignments(
+                route_plan=m13_document["route_plan"],
+                planner_snapshot=m13_document["planner_snapshot"],
+                evidence_bundle=m13_document["signed_evidence_bundle"][
+                    "evidence_bundle"
+                ],
+                manifest=prepared.manifest,
+                deployment_id=deployment_id,
+                deployment_epoch=1,
+                cache_roots=cache_roots,
+                runtime_by_node=runtime_by_node,
+            )
+    if is_m18:
+
+        def local_fetch(
+            model_id: str,
+            revision: str,
+            filename: str,
+            cache_root: Path,
+            *,
+            local_files_only: bool,
+        ) -> tuple[Path, bool]:
+            del model_id, revision, cache_root, local_files_only
+            return deployment_root / filename, True
+
+        local_provisioning_reports = [
+            provision_assignment(
+                assignment,
+                fetch_file=local_fetch,
+                local_files_only=True,
+            )
+            for assignment in local_assignments
+        ]
+        local_packs = [
+            compile_stage_pack(assignment, prepared.manifest, report)
+            for assignment, report in zip(
+                local_assignments, local_provisioning_reports, strict=True
+            )
+        ]
+        local_verifications = [
+            verify_stage_pack(
+                pack,
+                assignment=assignment,
+                manifest=prepared.manifest,
+            )
+            for assignment, pack in zip(local_assignments, local_packs, strict=True)
+        ]
+        local_reports = [
+            artifact_report_for_loader(
+                pack,
+                verification,
+                assignment=assignment,
+                manifest=prepared.manifest,
+            )
+            for assignment, pack, verification in zip(
+                local_assignments,
+                local_packs,
+                local_verifications,
+                strict=True,
+            )
+        ]
+        base_loaded = [
+            load_assignment_stage(assignment, report, load_generation=LOAD_GENERATION)
+            for assignment, report in zip(local_assignments, local_reports, strict=True)
+        ]
+        report_sources = local_reports
+    else:
+        base_loaded = [
+            load_assignment_stage(assignment, report, load_generation=LOAD_GENERATION)
+            for assignment, report in zip(
+                prepared.assignments, prepared.reports, strict=True
+            )
+        ]
+        report_sources = prepared.reports
     target_reports = [
         _target_report(report, assignment)
-        for report, assignment in zip(prepared.reports, assignments, strict=True)
+        for report, assignment in zip(report_sources, assignments, strict=True)
     ]
     packs = [
         compile_stage_pack(
@@ -848,14 +1050,6 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         for assignment, pack in zip(assignments, packs, strict=True)
     ]
 
-    base_loaded = [
-        load_assignment_stage(
-            assignment, report, load_generation=LOAD_GENERATION
-        )
-        for assignment, report in zip(
-            prepared.assignments, prepared.reports, strict=True
-        )
-    ]
     proofs = [
         _target_proof(
             json.loads(canonical_json(loaded.proof)),
@@ -867,20 +1061,77 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             base_loaded, assignments, packs, verifications, strict=True
         )
     ]
-    graph = build_execution_graph(
-        assignments, proofs, link_scheme="iroh", runtime_scheme="iroh"
-    )
+    if (
+        m13_document is not None
+        and m13_document["protocol"] == "mycelium.m18_physical_candidate.v1"
+    ):
+        graph = build_replicated_execution_graph(
+            dict(zip(placement_ids, assignments, strict=True)),
+            dict(zip(placement_ids, proofs, strict=True)),
+            m13_document["route_plan"],
+            link_scheme="iroh",
+            runtime_scheme="iroh",
+        )
+    else:
+        graph = build_execution_graph(
+            assignments, proofs, link_scheme="iroh", runtime_scheme="iroh"
+        )
     graph_document = _physical_graph_document(graph)
     device_states = {
         node_id: asdict(state)
         for node_id, state in build_physical_device_states(graph).items()
     }
     codec = Qwen2PromptCodec.from_deployment(deployment_root)
+    if (
+        m13_document is not None
+        and m13_document["protocol"] == "mycelium.m18_physical_candidate.v1"
+    ):
+        primary_track = m13_document["route_plan"]["legal_tracks"][0]["placement_ids"]
+        loaded_by_node = {
+            assignment["node_id"]: loaded
+            for assignment, loaded in zip(assignments, base_loaded, strict=True)
+        }
+        assignment_by_placement = dict(zip(placement_ids, assignments, strict=True))
+        challenge_loaded = [
+            loaded_by_node[assignment_by_placement[item]["node_id"]]
+            for item in primary_track
+        ]
+        challenge_backends = [
+            assignment_by_placement[item]["runtime"]["backend"]
+            for item in primary_track
+        ]
+    else:
+        challenge_loaded = base_loaded
+        challenge_backends = [
+            assignment["runtime"]["backend"] for assignment in assignments
+        ]
     challenge_prompt, challenge_output = _challenge(
         codec,
-        base_loaded,
-        [assignment["runtime"]["backend"] for assignment in assignments],
+        challenge_loaded,
+        challenge_backends,
     )
+    if is_m18:
+        model_config = json.loads(
+            (deployment_root / "config.json").read_text(encoding="utf-8")
+        )
+        if not isinstance(model_config, dict):
+            raise RuntimeError("m18_model_context_capacity_invalid")
+        qualification_token_count = len(challenge_prompt) + len(challenge_output)
+        track_membership_count = {
+            placement_id: sum(
+                placement_id in track["placement_ids"]
+                for track in m13_document["route_plan"]["legal_tracks"]
+            )
+            for placement_id in placement_ids
+        }
+        for placement_id, assignment in zip(placement_ids, assignments, strict=True):
+            device_states[assignment["node_id"]]["available_kv_bytes"] = (
+                _m18_runtime_kv_bytes(
+                    model_config,
+                    qualification_token_count=qualification_token_count,
+                    track_membership_count=track_membership_count[placement_id],
+                )
+            )
 
     control = bundle / "control"
     _write_document(control / "model-manifest.json", prepared.manifest)
@@ -898,9 +1149,22 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         _write_document(control / f"node-{index}-load-proof.json", proof)
     materializations: dict[str, dict[str, Any]] = {}
     if m13_document is not None:
-        _write_document(control / "m13-signed-evidence-bundle.json", m13_document["signed_evidence_bundle"])
-        _write_document(control / "m13-planner-snapshot.json", m13_document["planner_snapshot"])
-        _write_document(control / "m13-route-plan.json", m13_document["route_plan"])
+        milestone = (
+            "m18"
+            if m13_document["protocol"] == "mycelium.m18_physical_candidate.v1"
+            else "m13"
+        )
+        _write_document(
+            control / f"{milestone}-signed-evidence-bundle.json",
+            m13_document["signed_evidence_bundle"],
+        )
+        _write_document(
+            control / f"{milestone}-planner-snapshot.json",
+            m13_document["planner_snapshot"],
+        )
+        _write_document(
+            control / f"{milestone}-route-plan.json", m13_document["route_plan"]
+        )
         cache_files = sorted(deployment_root.glob("*.safetensors"))
         cache = AssignmentArtifactCache(
             output_root / "artifact-cache",
@@ -911,7 +1175,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             tensor_digest = _file_digest(path)
             key = ArtifactObjectKey(
                 model_revision=prepared.manifest["resolved_commit"],
-                manifest_digest="sha256:" + prepared.manifest["manifest_digest"]["value"],
+                manifest_digest="sha256:"
+                + prepared.manifest["manifest_digest"]["value"],
                 format=prepared.manifest["format"],
                 quantization="int8-weight-only",
                 tensor_digest=tensor_digest,
@@ -936,21 +1201,31 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 control / f"{assignment['node_id']}-assignment-materialization.json",
                 materialization,
             )
-        _write_document(control / "m13-assignment-cache-status.json", cache.status())
-        projection = build_m13_placement_projection(
-            planner_snapshot=m13_document["planner_snapshot"],
-            route_plan=m13_document["route_plan"],
-            assignments=assignments,
-            materializations_by_node=materializations,
-            load_proof_digests_by_node={
-                assignment["node_id"]: layer_load_proof_digest(proof)
-                for assignment, proof in zip(assignments, proofs, strict=True)
-            },
-            promotion_report=None,
-            exclusions=_placement_exclusions(m13_document),
-            ab_deltas=m13_document["ab_deltas"],
+        _write_document(
+            control / f"{milestone}-assignment-cache-status.json", cache.status()
         )
-        _write_document(deployment_root / "m13-placement-projection.json", projection)
+        if m13_document["protocol"] == "mycelium.m18_physical_candidate.v1":
+            _write_document(
+                deployment_root / "m18-planner-route.json",
+                m13_document["route_plan"],
+            )
+        else:
+            projection = build_m13_placement_projection(
+                planner_snapshot=m13_document["planner_snapshot"],
+                route_plan=m13_document["route_plan"],
+                assignments=assignments,
+                materializations_by_node=materializations,
+                load_proof_digests_by_node={
+                    assignment["node_id"]: layer_load_proof_digest(proof)
+                    for assignment, proof in zip(assignments, proofs, strict=True)
+                },
+                promotion_report=None,
+                exclusions=_placement_exclusions(m13_document),
+                ab_deltas=m13_document["ab_deltas"],
+            )
+            _write_document(
+                deployment_root / "m13-placement-projection.json", projection
+            )
         if m13_document["protocol"] == "mycelium.m14_physical_candidate.v1":
             _write_document(
                 control / "m14-transport-observations.json",
@@ -1017,9 +1292,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 },
             }
         )
-    run_id = f"{route_label}-qwen-" + time.strftime(
-        "%Y%m%dT%H%M%SZ", time.gmtime(now)
-    )
+    run_id = f"{route_label}-qwen-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
     peers = refresh_peer_identities(
         peers,
         run_id,
@@ -1038,11 +1311,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "expected_token_ids": list(challenge_output),
     }
     transfer_manifest = _transfer_manifest(bundle)
-    node_transfer_manifests = (
-        _node_transfer_manifests(transfer_manifest, packs)
-        if stage_sharding is not None
-        else None
-    )
+    node_transfer_manifests = _node_transfer_manifests(transfer_manifest, packs)
     plan = copy.deepcopy(template)
     plan["run_id"] = run_id
     plan["plan_id"] = f"{route_label}-{model_slug}-int8-{len(topology)}-host"
@@ -1055,11 +1324,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "membership_snapshot": membership,
             "run_plan": run_plan,
             "transfer_manifest": transfer_manifest,
-            **(
-                {"node_transfer_manifests": node_transfer_manifests}
-                if node_transfer_manifests is not None
-                else {}
-            ),
+            "node_transfer_manifests": node_transfer_manifests,
         }
     )
     operator_plan = output_root / "operator-plan.json"
@@ -1072,25 +1337,27 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "resolved_commit": resolved_commit,
         "quantization": "int8-weight-only",
         "layer_ranges": [assignment["range"] for assignment in assignments],
-        "runtime_backends": [assignment["runtime"]["backend"] for assignment in assignments],
+        "runtime_backends": [
+            assignment["runtime"]["backend"] for assignment in assignments
+        ],
         "challenge_prompt_token_count": len(challenge_prompt),
         "challenge_output_token_ids": list(challenge_output),
         "challenge_output_text": "".join(
             codec.decode_token(token_id) for token_id in challenge_output
         ),
         "transfer_file_count": len(transfer_manifest["files"]),
-        "transfer_bytes": sum(record["size_bytes"] for record in transfer_manifest["files"]),
-        "per_node_transfer_bytes": (
-            {
-                node_id: sum(record["size_bytes"] for record in manifest["files"])
-                for node_id, manifest in node_transfer_manifests["manifests"].items()
-            }
-            if node_transfer_manifests is not None
-            else None
+        "transfer_bytes": sum(
+            record["size_bytes"] for record in transfer_manifest["files"]
         ),
+        "per_node_transfer_bytes": {
+            node_id: sum(record["size_bytes"] for record in manifest["files"])
+            for node_id, manifest in node_transfer_manifests["manifests"].items()
+        },
         "stage_sharding": stage_sharding,
         "placement_provenance": (
-            "planner_v2" if m13_document is not None else "target_local_physical_preload"
+            "planner_v2"
+            if m13_document is not None
+            else "target_local_physical_preload"
         ),
         "planner_snapshot_digest": (
             None
@@ -1104,12 +1371,63 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def refresh_runtime_closure(args: argparse.Namespace) -> dict[str, Any]:
+    """Refresh repository code in an existing bundle and repin its manifests."""
+
+    repo = Path(__file__).resolve().parents[1]
+    template = json.loads(args.template_plan.read_text("utf-8"))
+    output_root = args.output_root.resolve()
+    bundle = output_root / "transfer-bundle"
+    if not bundle.is_dir():
+        raise RuntimeError("runtime_refresh_bundle_missing")
+    _copy_runtime_closure(repo, bundle, template)
+    transfer_manifest = _transfer_manifest(bundle)
+    packs = [
+        json.loads(path.read_text("utf-8"))
+        for path in sorted((bundle / "control").glob("node-*-stage-pack.json"))
+    ]
+    if not packs:
+        raise RuntimeError("runtime_refresh_stage_packs_missing")
+    node_transfer_manifests = _node_transfer_manifests(transfer_manifest, packs)
+    plan = copy.deepcopy(template)
+    plan["controller"]["source_root"] = str(bundle)
+    plan["controller"]["transfer_manifest"] = transfer_manifest
+    plan["controller"]["node_transfer_manifests"] = node_transfer_manifests
+    operator_plan = output_root / "operator-plan.json"
+    _write_document(operator_plan, plan)
+
+    report_path = output_root / "build-report.json"
+    report = json.loads(report_path.read_text("utf-8"))
+    report["operator_plan"] = str(operator_plan)
+    report["transfer_file_count"] = len(transfer_manifest["files"])
+    report["transfer_bytes"] = sum(
+        record["size_bytes"] for record in transfer_manifest["files"]
+    )
+    report["per_node_transfer_bytes"] = {
+        node_id: sum(record["size_bytes"] for record in manifest["files"])
+        for node_id, manifest in node_transfer_manifests["manifests"].items()
+    }
+    report["runtime_closure_refreshed"] = True
+    _write_document(report_path, report)
+    return {
+        "protocol": "mycelium.runtime_closure_refresh.v1",
+        "operator_plan": str(operator_plan),
+        "transfer_file_count": report["transfer_file_count"],
+        "transfer_bytes": report["transfer_bytes"],
+        "route_ready": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--template-plan", type=Path, required=True)
     parser.add_argument("--model-root", type=Path, required=True)
     parser.add_argument("--model-id", default=MODEL_ID)
     parser.add_argument("--resolved-commit", default=MODEL_COMMIT)
+    parser.add_argument(
+        "--deployment-id",
+        help="reuse the deployment UUID bound into signed physical evidence",
+    )
     parser.add_argument(
         "--stage-sharded",
         action="store_true",
@@ -1136,7 +1454,19 @@ def main() -> int:
         type=Path,
         help="signed M14 topology/placement authority extending the M13 control plane",
     )
-    print(json.dumps(build(parser.parse_args()), sort_keys=True))
+    parser.add_argument(
+        "--m18-control-plane",
+        type=Path,
+        help="signed M18 replica placement authority with two or more legal tracks",
+    )
+    parser.add_argument(
+        "--refresh-runtime-closure-only",
+        action="store_true",
+        help="refresh code and repin manifests in an existing output root",
+    )
+    args = parser.parse_args()
+    result = refresh_runtime_closure(args) if args.refresh_runtime_closure_only else build(args)
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 

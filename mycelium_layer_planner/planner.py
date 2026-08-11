@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import fields
+from dataclasses import asdict, fields
 from typing import Any, Mapping
 
 from .contracts import (
@@ -148,7 +148,11 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
     ]
     metrics: dict[str, Any] = {
         "scenarios": scenario_metrics,
+        "primary_request_capacity_rps": replicated.primary_capacity_rps,
         "replicated_request_capacity_rps": replicated.flow.admitted,
+        "replica_capacity_gain_rps": (
+            replicated.flow.admitted - replicated.primary_capacity_rps
+        ),
         "replicated_output_capacity_tps": replicated.flow.admitted * representative.output_tokens,
         "unmet_capacity_sweep_demand_rps": replicated.flow.unmet_demand,
     }
@@ -185,6 +189,21 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
         "admitted_node_ids": list(admitted_node_ids),
         "unplaced_node_ids": list(primary.unplaced_node_ids),
         "accepted_replica_nodes": list(replicated.accepted_replica_nodes),
+        "replication": {
+            "authority": "capability_aware_replica_flow_planner",
+            "minimum_gain_fraction": policy.minimum_replica_gain_fraction,
+            "uncertainty_fraction": policy.replica_uncertainty_fraction,
+            "candidate_decisions": [
+                asdict(decision) for decision in replicated.candidate_decisions
+            ],
+            "zero_flow_removed_placement_ids": list(
+                replicated.zero_flow_removed_placement_ids
+            ),
+            "request_routing_semantics": "one_complete_track_per_request",
+            "kv_locality": "request_track_pinned_no_migration",
+            "parallelism_label": "data_parallel_request_routing",
+            "route_ready": False,
+        },
         "excluded_nodes": dict(graph.exclusions),
         "workload": {
             "name": profile.name,

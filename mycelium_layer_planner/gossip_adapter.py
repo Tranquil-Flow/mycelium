@@ -367,6 +367,7 @@ def planner_snapshot_from_signed_evidence(
     workload: Mapping[str, Any],
     policy: Mapping[str, Any],
     quantization: str,
+    admitted_node_ids: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Build the serving candidate only from trusted, current, atomic evidence."""
 
@@ -409,6 +410,15 @@ def planner_snapshot_from_signed_evidence(
         "valid_until_unix_ms": validated.statement["valid_until_unix_ms"],
         "capacity_profiles_digest": validated.statement["capacity_profiles_digest"],
     }
+    if admitted_node_ids is not None:
+        known = {node["node_id"] for node in nodes}
+        if (
+            not admitted_node_ids
+            or len(set(admitted_node_ids)) != len(admitted_node_ids)
+            or not set(admitted_node_ids) <= known
+        ):
+            raise ValueError("admitted_node_ids must be a unique non-empty evidence subset")
+        snapshot["admitted_node_ids"] = list(admitted_node_ids)
     planner_snapshot_digest(snapshot)
     return snapshot
 
@@ -422,6 +432,7 @@ def plan_signed_evidence(
     workload: Mapping[str, Any],
     policy: Mapping[str, Any],
     quantization: str,
+    admitted_node_ids: tuple[str, ...] | None = None,
 ) -> RoutePlanV2:
     snapshot = planner_snapshot_from_signed_evidence(
         signed_evidence,
@@ -431,6 +442,7 @@ def plan_signed_evidence(
         workload=workload,
         policy=policy,
         quantization=quantization,
+        admitted_node_ids=admitted_node_ids,
     )
     plan = plan_snapshot(snapshot)
     if plan.snapshot_digest != planner_snapshot_digest(snapshot):

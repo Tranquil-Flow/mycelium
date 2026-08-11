@@ -1,7 +1,9 @@
 """Lifecycle seam for a physical inference route that outlives one request."""
+
 from __future__ import annotations
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import hashlib
 import json
@@ -222,9 +224,10 @@ def _load_live_seed_authority(
             authority_generation = int(binding["authority_generation"])
         except ValueError as exc:
             raise LiveSeedStateError("live_seed_database_identity_missing") from exc
-        if authority_generation < 1 or str(authority_generation) != binding[
-            "authority_generation"
-        ]:
+        if (
+            authority_generation < 1
+            or str(authority_generation) != binding["authority_generation"]
+        ):
             raise LiveSeedStateError("live_seed_database_identity_missing")
         try:
             signer = load_bound_seed_signer(
@@ -246,9 +249,7 @@ def _load_live_seed_authority(
         pseudonym_path = lease.path / "identity" / PRODUCT_PSEUDONYM_KEY_FILE
         if pseudonym_path.exists() or pseudonym_path.is_symlink():
             try:
-                pseudonym_salt = load_product_pseudonym_salt(
-                    lease.path / "identity"
-                )
+                pseudonym_salt = load_product_pseudonym_salt(lease.path / "identity")
             except SeedAuthorityError as exc:
                 raise LiveSeedStateError("live_seed_product_identity_invalid") from exc
         elif authority_generation == 1:
@@ -304,6 +305,7 @@ class LiveRoute(Protocol):
         request_id: str,
         sink: TokenSink,
         cancel_requested: Callable[[], bool] | None = None,
+        selected_placement_ids: Sequence[str] | None = None,
     ) -> InferenceResult: ...
 
     def release_request(self, request_id: str) -> None: ...
@@ -357,6 +359,7 @@ class FakeLiveRoute:
         request_id: str,
         sink: TokenSink,
         cancel_requested: Callable[[], bool] | None = None,
+        selected_placement_ids: Sequence[str] | None = None,
     ) -> InferenceResult:
         if not self.is_alive():
             raise RuntimeError("route_not_open")
@@ -384,7 +387,8 @@ class FakeLiveRoute:
                     {
                         "node_id": "fake-node",
                         "frames_sent": after.frames_sent - before.frames_sent,
-                        "frames_received": after.frames_received - before.frames_received,
+                        "frames_received": after.frames_received
+                        - before.frames_received,
                         "applied_operation_count": (
                             after.applied_operation_count
                             - before.applied_operation_count
@@ -568,9 +572,7 @@ def _refresh_membership_snapshot(
             for node_id, other in sorted(route_members.items())
             if node_id != recipient
         ]
-        refreshed_offers.append(
-            sign_membership_message(signer=signer, message=message)
-        )
+        refreshed_offers.append(sign_membership_message(signer=signer, message=message))
     return {
         **dict(snapshot),
         "seed_key_digest": signer.verification_key_digest,
@@ -621,6 +623,7 @@ class PhysicalLiveRoute:
         self._request_inputs: dict[str, tuple[int, ...]] = {}
         self._request_outputs: dict[str, tuple[int, ...]] = {}
         self._request_limits: dict[str, int] = {}
+        self._request_entry_nodes: dict[str, str] = {}
         self._recent_inferences: deque[dict[str, Any]] = deque(maxlen=64)
         self._incidents: deque[dict[str, Any]] = deque(maxlen=64)
         self._incident_sequence = 0
@@ -686,9 +689,7 @@ class PhysicalLiveRoute:
                 seed_node_id=authority.seed_node_id,
                 members=authority.members,
             )
-            peers = tuple(
-                PeerIdentity(**item) for item in controller_document["peers"]
-            )
+            peers = tuple(PeerIdentity(**item) for item in controller_document["peers"])
             controller = QualificationController(
                 mode=controller_document["mode"],
                 peers=peers,
@@ -728,9 +729,7 @@ class PhysicalLiveRoute:
         """Stop future generations before emitting a model terminator token."""
 
         if any(
-            not isinstance(token_id, int)
-            or isinstance(token_id, bool)
-            or token_id < 0
+            not isinstance(token_id, int) or isinstance(token_id, bool) or token_id < 0
             for token_id in token_ids
         ):
             raise ValueError("invalid_stop_token_ids")
@@ -767,9 +766,7 @@ class PhysicalLiveRoute:
             comparison = getattr(self, "_workload_comparison", None)
             return None if comparison is None else json.loads(json.dumps(comparison))
 
-    def set_m17_model_operation(
-        self, document: Mapping[str, Any] | None
-    ) -> None:
+    def set_m17_model_operation(self, document: Mapping[str, Any] | None) -> None:
         """Attach the privacy-reduced catalog/feasibility projection."""
 
         with self._lock:
@@ -783,6 +780,38 @@ class PhysicalLiveRoute:
         with self._lock:
             document = getattr(self, "_model_operation", None)
             return None if document is None else json.loads(json.dumps(document))
+
+    def set_m18_replica_plan(self, document: Mapping[str, Any] | None) -> None:
+        """Attach validated Planner-owned M18 replica intent."""
+
+        from mycelium_m18_replication import validate_replica_plan
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._replica_plan = (
+                None if document is None else validate_replica_plan(document)
+            )
+
+    def m18_replica_plan(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_replica_plan", None)
+            return None if document is None else json.loads(json.dumps(document))
+
+    def set_m18_replica_runtime_source(
+        self, source: Callable[[], Mapping[str, Any] | None]
+    ) -> None:
+        if not callable(source):
+            raise ValueError("m18_replica_runtime_source_invalid")
+        with self._lock:
+            self._m18_replica_runtime_source = source
+
+    def m18_replica_runtime(self) -> Mapping[str, Any] | None:
+        from mycelium_m18_replication import validate_replica_runtime
+
+        source = getattr(self, "_m18_replica_runtime_source", None)
+        document = None if source is None else source()
+        return None if document is None else validate_replica_runtime(document)
 
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
         """Capture one fresh set of independently signed node resource observations."""
@@ -1034,19 +1063,25 @@ class PhysicalLiveRoute:
                 command="snapshot",
                 payload={},
             )
-            observation = self._verify_observation(
-                node_id, response, event="snapshot"
-            )
+            observation = self._verify_observation(node_id, response, event="snapshot")
             snapshots[node_id] = observation
             fatal = observation["details"].get("transport_fatal_error")
             if fatal is not None:
                 self._fatal = str(fatal.get("code", "transport_fatal"))
         self._last_snapshots = snapshots
 
-    def _cancellation_cleanup_complete(self) -> bool:
-        if set(self._last_snapshots) != set(self._sessions):
+    def _cancellation_cleanup_complete(
+        self, participating_node_ids: frozenset[str] | None = None
+    ) -> bool:
+        required = (
+            frozenset(self._sessions)
+            if participating_node_ids is None
+            else participating_node_ids
+        )
+        if not required or not required <= set(self._last_snapshots):
             return False
-        for observation in self._last_snapshots.values():
+        for node_id in required:
+            observation = self._last_snapshots[node_id]
             details = observation.get("details")
             if not isinstance(details, Mapping):
                 return False
@@ -1060,11 +1095,13 @@ class PhysicalLiveRoute:
                 return False
         return True
 
-    def _wait_for_cancellation_cleanup(self) -> None:
+    def _wait_for_cancellation_cleanup(
+        self, participating_node_ids: frozenset[str]
+    ) -> None:
         deadline = time.monotonic() + 5.0
         while True:
             self._snapshot_all()
-            if self._cancellation_cleanup_complete():
+            if self._cancellation_cleanup_complete(participating_node_ids):
                 return
             if time.monotonic() >= deadline:
                 raise RuntimeError("route_cancellation_cleanup_timeout")
@@ -1078,6 +1115,7 @@ class PhysicalLiveRoute:
         request_id: str,
         sink: TokenSink,
         cancel_requested: Callable[[], bool] | None = None,
+        selected_placement_ids: Sequence[str] | None = None,
     ) -> InferenceResult:
         with self._lock:
             if not self.is_alive():
@@ -1090,7 +1128,45 @@ class PhysicalLiveRoute:
                 or not request_id
             ):
                 raise ValueError("invalid_inference_request")
-            entry_node_id = self._plan["entry_node_id"]
+            graph = getattr(self, "_graph", None)
+            if graph is None:
+                if selected_placement_ids is not None:
+                    raise ValueError("invalid_selected_placement_ids")
+                entry_node_id = self._plan["entry_node_id"]
+                excluded_placement_ids: list[str] = []
+                participating_node_ids = frozenset(self._sessions)
+            else:
+                selected = (
+                    tuple(selected_placement_ids)
+                    if selected_placement_ids is not None
+                    else tuple(
+                        stage.placements[0].placement_id for stage in graph.stages
+                    )
+                )
+                if len(selected) != len(graph.stages) or len(set(selected)) != len(
+                    selected
+                ):
+                    raise ValueError("invalid_selected_placement_ids")
+                selected_placements = []
+                for stage, placement_id in zip(graph.stages, selected, strict=True):
+                    matches = [
+                        placement
+                        for placement in stage.placements
+                        if placement.placement_id == placement_id
+                    ]
+                    if len(matches) != 1:
+                        raise ValueError("invalid_selected_placement_ids")
+                    selected_placements.append(matches[0])
+                entry_node_id = selected_placements[0].node_id
+                participating_node_ids = frozenset(
+                    placement.node_id for placement in selected_placements
+                )
+                excluded_placement_ids = [
+                    placement.placement_id
+                    for stage in graph.stages
+                    for placement in stage.placements
+                    if placement.placement_id not in selected
+                ]
             before_peers = self._peer_counters()
             started_at = time.monotonic()
             prefill_completed_at: float | None = None
@@ -1103,10 +1179,13 @@ class PhysicalLiveRoute:
                 "expected_new_tokens": max_new_tokens,
             }
             try:
+                start_payload: dict[str, Any] = {"request": request}
+                if excluded_placement_ids:
+                    start_payload["excluded_placement_ids"] = excluded_placement_ids
                 started_response = self._sessions[entry_node_id].send(
                     command_id=self._command_id(entry_node_id, "infer-start"),
                     command="infer_start",
-                    payload={"request": request},
+                    payload=start_payload,
                 )
                 observation = self._verify_observation(
                     entry_node_id,
@@ -1187,7 +1266,7 @@ class PhysicalLiveRoute:
                     )
                 output = output[:max_new_tokens]
                 if cancelled_for_stop or cancelled_for_request:
-                    self._wait_for_cancellation_cleanup()
+                    self._wait_for_cancellation_cleanup(participating_node_ids)
                 else:
                     self._snapshot_all()
                 if self._fatal is not None:
@@ -1212,6 +1291,7 @@ class PhysicalLiveRoute:
             self._request_outputs[request_id] = output
             self._request_inputs[request_id] = tuple(token_ids)
             self._request_limits[request_id] = max_new_tokens
+            self._request_entry_nodes[request_id] = entry_node_id
             completed_at = time.monotonic()
             after_peers = self._peer_counters()
             first_token_at = token_times[0] if token_times else None
@@ -1260,6 +1340,425 @@ class PhysicalLiveRoute:
             )
             return InferenceResult(request_id=request_id, token_ids=output)
 
+    def qualify_replica_concurrency(
+        self,
+        requests: Sequence[Sequence[int]],
+        *,
+        max_new_tokens: int,
+        request_id_prefix: str,
+    ) -> Mapping[str, Any]:
+        """Run two overlapping requests and expose their immutable Router tracks.
+
+        This is a qualification seam, not the browser request gateway. It keeps
+        both requests admitted at once, advances decode round-robin, and returns
+        privacy-reduced path and timing evidence for the M18 physical gate.
+        """
+
+        with self._lock:
+            if not self.is_alive():
+                raise RuntimeError("route_not_open")
+            if (
+                len(requests) != 2
+                or not isinstance(max_new_tokens, int)
+                or isinstance(max_new_tokens, bool)
+                or max_new_tokens < 2
+                or not isinstance(request_id_prefix, str)
+                or not request_id_prefix
+            ):
+                raise ValueError("invalid_replica_qualification_request")
+            normalized = tuple(tuple(tokens) for tokens in requests)
+            if any(
+                not tokens
+                or any(
+                    not isinstance(token, int) or isinstance(token, bool) or token < 0
+                    for token in tokens
+                )
+                for tokens in normalized
+            ):
+                raise ValueError("invalid_replica_qualification_request")
+
+            if (
+                len(self._graph.stages) == 1
+                and len(self._graph.stages[0].placements) >= 2
+            ):
+                entry_node_ids = tuple(
+                    placement.node_id
+                    for placement in self._graph.stages[0].placements[:2]
+                )
+            else:
+                entry_node_ids = (self._plan["entry_node_id"],) * 2
+            before_peers = self._peer_counters()
+            started_at = time.monotonic()
+            admission_barrier = threading.Barrier(2)
+
+            def execute_track(
+                index: int, token_ids: tuple[int, ...], entry_node_id: str
+            ) -> dict[str, Any]:
+                request_id = f"{request_id_prefix}-{index}"
+                request = {
+                    **self._plan["request"],
+                    "request_id": request_id,
+                    "prompt_token_ids": list(token_ids),
+                    "max_new_tokens": max_new_tokens,
+                    "expected_new_tokens": max_new_tokens,
+                }
+                payload: dict[str, Any] = {"request": request}
+                if len(self._graph.stages) == 1:
+                    local_placements = tuple(
+                        placement
+                        for placement in self._graph.stages[0].placements
+                        if placement.node_id == entry_node_id
+                    )
+                    if len(local_placements) != 1:
+                        raise RuntimeError("replica_entry_placement_invalid")
+                    selected_placement_id = local_placements[0].placement_id
+                    payload["excluded_placement_ids"] = [
+                        placement.placement_id
+                        for placement in self._graph.stages[0].placements
+                        if placement.placement_id != selected_placement_id
+                    ]
+                command_started_offset_ms = (
+                    time.monotonic() - started_at
+                ) * 1_000.0
+                try:
+                    try:
+                        response = self._sessions[entry_node_id].send(
+                            command_id=self._command_id(
+                                entry_node_id, "replica-infer-start"
+                            ),
+                            command="infer_start",
+                            payload=payload,
+                        )
+                        observation = self._verify_observation(
+                            entry_node_id,
+                            response,
+                            event="inference_started",
+                        )
+                    except BaseException as exc:
+                        remote_code = getattr(exc, "remote_code", None)
+                        code = (
+                            remote_code if isinstance(remote_code, str) else str(exc)
+                        )
+                        raise RuntimeError(
+                            f"replica_admission_rejected:{entry_node_id}:{code}"
+                        ) from exc
+                    details = observation.get("details")
+                    path = (
+                        details.get("path") if isinstance(details, Mapping) else None
+                    )
+                    output = self._output_tokens(observation)
+                    if (
+                        not isinstance(path, Mapping)
+                        or not isinstance(path.get("path_id"), str)
+                        or not isinstance(path.get("path_attempt"), int)
+                        or not isinstance(path.get("placement_ids"), list)
+                        or not path["placement_ids"]
+                        or any(
+                            not isinstance(item, str) or not item
+                            for item in path["placement_ids"]
+                        )
+                    ):
+                        raise RuntimeError("replica_qualification_path_missing")
+                    record = {
+                        "request_id": request_id,
+                        "initial_status": details.get("status"),
+                        "status": details.get("status"),
+                        "output": output,
+                        "path_id": path["path_id"],
+                        "path_attempt": path["path_attempt"],
+                        "placement_ids": tuple(path["placement_ids"]),
+                        "entry_node_id": entry_node_id,
+                        "admitted_offset_ms": (
+                            time.monotonic() - started_at
+                        )
+                        * 1_000.0,
+                    }
+                    admission_barrier.wait()
+                    record["decode_started_offset_ms"] = (
+                        time.monotonic() - started_at
+                    ) * 1_000.0
+                    while (
+                        record["status"] == "DECODING"
+                        and len(record["output"]) < max_new_tokens
+                    ):
+                        response = self._sessions[record["entry_node_id"]].send(
+                        command_id=self._command_id(
+                            record["entry_node_id"], "replica-infer-decode"
+                        ),
+                        command="infer_decode",
+                        payload={"request_id": record["request_id"], "count": 1},
+                    )
+                        observation = self._verify_observation(
+                            record["entry_node_id"],
+                            response,
+                            event="inference_decoded",
+                        )
+                        output = self._output_tokens(observation)
+                        if len(output) <= len(record["output"]):
+                            if observation["details"].get("status") == "COMPLETED":
+                                record["status"] = "COMPLETED"
+                                break
+                            raise RuntimeError("replica_qualification_decode_stalled")
+                        record["output"] = output
+                        record["status"] = observation["details"].get("status")
+                    record["completed_offset_ms"] = (
+                        time.monotonic() - started_at
+                    ) * 1_000.0
+                    record["active_compute_elapsed_ms"] = (
+                        record["admitted_offset_ms"]
+                        - command_started_offset_ms
+                        + record["completed_offset_ms"]
+                        - record["decode_started_offset_ms"]
+                    )
+                    return record
+                except BaseException:
+                    admission_barrier.abort()
+                    raise
+
+            with ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="m18-replica"
+            ) as executor:
+                futures = [
+                    executor.submit(execute_track, index, token_ids, entry_node_id)
+                    for index, (token_ids, entry_node_id) in enumerate(
+                        zip(normalized, entry_node_ids, strict=True)
+                    )
+                ]
+                records = [future.result() for future in futures]
+
+            overlapping_at_admission = (
+                all(record["initial_status"] == "DECODING" for record in records)
+                and max(record["admitted_offset_ms"] for record in records)
+                < min(record["completed_offset_ms"] for record in records)
+            )
+
+            self._snapshot_all()
+            after_peers = self._peer_counters()
+            completed_at = time.monotonic()
+            tracks = [record["placement_ids"] for record in records]
+            for record, tokens in zip(records, normalized, strict=True):
+                request_id = record["request_id"]
+                self._request_inputs[request_id] = tokens
+                self._request_outputs[request_id] = tuple(record["output"])
+                self._request_limits[request_id] = max_new_tokens
+                self._request_entry_nodes[request_id] = record["entry_node_id"]
+            return {
+                "protocol": "mycelium.physical_replica_concurrency.v1",
+                "deployment_id": self._graph.deployment_id,
+                "request_count": 2,
+                "overlapping_at_admission": overlapping_at_admission,
+                "distinct_tracks": tracks[0] != tracks[1],
+                "elapsed_ms": (completed_at - started_at) * 1_000.0,
+                "requests": [
+                    {
+                        "request_id": record["request_id"],
+                        "path_id": record["path_id"],
+                        "path_attempt": record["path_attempt"],
+                        "entry_node_id": record["entry_node_id"],
+                        "placement_ids": list(record["placement_ids"]),
+                        "prompt_token_count": len(tokens),
+                        "output_token_count": len(record["output"]),
+                        "output_digest": "sha256:"
+                        + hashlib.sha256(
+                            json.dumps(
+                                list(record["output"]), separators=(",", ":")
+                            ).encode("utf-8")
+                        ).hexdigest(),
+                        "admitted_offset_ms": record["admitted_offset_ms"],
+                        "active_compute_elapsed_ms": record[
+                            "active_compute_elapsed_ms"
+                        ],
+                    }
+                    for record, tokens in zip(records, normalized, strict=True)
+                ],
+                "peer_counter_deltas": [
+                    {
+                        "node_id": node_id,
+                        "frames_sent": after_peers[node_id]["frames_sent"]
+                        - before_peers[node_id]["frames_sent"],
+                        "frames_received": after_peers[node_id]["frames_received"]
+                        - before_peers[node_id]["frames_received"],
+                        "applied_operation_count": after_peers[node_id][
+                            "applied_operation_count"
+                        ]
+                        - before_peers[node_id]["applied_operation_count"],
+                    }
+                    for node_id in sorted(after_peers)
+                ],
+                "route_ready": False,
+            }
+
+    def measure_replica_saturation(
+        self,
+        token_ids: Sequence[int],
+        *,
+        expected_output_token_ids: Sequence[int],
+        request_counts_by_node: Mapping[str, int],
+        request_id_prefix: str,
+    ) -> Mapping[str, Any]:
+        """Measure weighted steady-state throughput across complete local replicas."""
+
+        with self._lock:
+            if not self.is_alive() or len(self._graph.stages) != 1:
+                raise RuntimeError("replica_saturation_unavailable")
+            placements = self._graph.stages[0].placements
+            placement_by_node = {placement.node_id: placement for placement in placements}
+            if (
+                len(placement_by_node) < 2
+                or set(request_counts_by_node) != set(placement_by_node)
+                or any(
+                    not isinstance(count, int)
+                    or isinstance(count, bool)
+                    or count < 1
+                    or count > 64
+                    for count in request_counts_by_node.values()
+                )
+                or not request_id_prefix
+            ):
+                raise ValueError("invalid_replica_saturation_request")
+            prompt = tuple(token_ids)
+            expected_output = tuple(expected_output_token_ids)
+            if not prompt or not expected_output:
+                raise ValueError("invalid_replica_saturation_request")
+
+            started_at = time.monotonic()
+            start_barrier = threading.Barrier(len(placement_by_node))
+
+            def execute_node(node_id: str) -> list[dict[str, Any]]:
+                placement = placement_by_node[node_id]
+                excluded = [
+                    candidate.placement_id
+                    for candidate in placements
+                    if candidate.placement_id != placement.placement_id
+                ]
+                records: list[dict[str, Any]] = []
+                try:
+                    start_barrier.wait()
+                    for ordinal in range(request_counts_by_node[node_id]):
+                        request_id = f"{request_id_prefix}-{node_id}-{ordinal}"
+                        request = {
+                            **self._plan["request"],
+                            "request_id": request_id,
+                            "prompt_token_ids": list(prompt),
+                            "max_new_tokens": len(expected_output),
+                            "expected_new_tokens": len(expected_output),
+                        }
+                        request_started = time.monotonic()
+                        response = self._sessions[node_id].send(
+                            command_id=self._command_id(
+                                node_id, "replica-saturation-start"
+                            ),
+                            command="infer_start",
+                            payload={
+                                "request": request,
+                                "excluded_placement_ids": excluded,
+                            },
+                        )
+                        observation = self._verify_observation(
+                            node_id, response, event="inference_started"
+                        )
+                        details = observation.get("details")
+                        path = (
+                            details.get("path")
+                            if isinstance(details, Mapping)
+                            else None
+                        )
+                        output = self._output_tokens(observation)
+                        status = (
+                            details.get("status")
+                            if isinstance(details, Mapping)
+                            else None
+                        )
+                        if (
+                            not isinstance(path, Mapping)
+                            or path.get("placement_ids") != [placement.placement_id]
+                        ):
+                            raise RuntimeError("replica_saturation_path_invalid")
+                        while status == "DECODING" and len(output) < len(
+                            expected_output
+                        ):
+                            response = self._sessions[node_id].send(
+                                command_id=self._command_id(
+                                    node_id, "replica-saturation-decode"
+                                ),
+                                command="infer_decode",
+                                payload={"request_id": request_id, "count": 1},
+                            )
+                            observation = self._verify_observation(
+                                node_id, response, event="inference_decoded"
+                            )
+                            next_output = self._output_tokens(observation)
+                            if len(next_output) <= len(output):
+                                raise RuntimeError("replica_saturation_decode_stalled")
+                            output = next_output
+                            status = observation["details"].get("status")
+                        if output != expected_output:
+                            raise RuntimeError("replica_saturation_token_mismatch")
+                        records.append(
+                            {
+                                "request_id": request_id,
+                                "node_id": node_id,
+                                "path_id": path["path_id"],
+                                "path_attempt": path["path_attempt"],
+                                "placement_ids": [placement.placement_id],
+                                "elapsed_ms": (
+                                    time.monotonic() - request_started
+                                )
+                                * 1_000.0,
+                                "output_token_count": len(output),
+                                "output_digest": "sha256:"
+                                + hashlib.sha256(
+                                    json.dumps(
+                                        list(output), separators=(",", ":")
+                                    ).encode("utf-8")
+                                ).hexdigest(),
+                            }
+                        )
+                    return records
+                except BaseException:
+                    start_barrier.abort()
+                    raise
+
+            with ThreadPoolExecutor(
+                max_workers=len(placement_by_node),
+                thread_name_prefix="m18-saturation",
+            ) as executor:
+                futures = {
+                    node_id: executor.submit(execute_node, node_id)
+                    for node_id in sorted(placement_by_node)
+                }
+                records_by_node = {
+                    node_id: future.result() for node_id, future in futures.items()
+                }
+            self._snapshot_all()
+            elapsed_ms = (time.monotonic() - started_at) * 1_000.0
+            request_count = sum(request_counts_by_node.values())
+            return {
+                "protocol": "mycelium.physical_replica_saturation.v1",
+                "deployment_id": self._graph.deployment_id,
+                "request_count": request_count,
+                "elapsed_ms": elapsed_ms,
+                "throughput_rps": request_count * 1_000.0 / elapsed_ms,
+                "request_counts_by_node": dict(sorted(request_counts_by_node.items())),
+                "tracks": [
+                    {
+                        "node_id": node_id,
+                        "placement_id": placement_by_node[node_id].placement_id,
+                        "request_count": len(records),
+                        "request_elapsed_ms": [
+                            record["elapsed_ms"] for record in records
+                        ],
+                    }
+                    for node_id, records in records_by_node.items()
+                ],
+                "requests": [
+                    record
+                    for node_id in sorted(records_by_node)
+                    for record in records_by_node[node_id]
+                ],
+                "route_ready": False,
+            }
+
     def release_request(self, request_id: str) -> None:
         """Forget prompt/output token material after the gateway releases a request."""
 
@@ -1267,6 +1766,7 @@ class PhysicalLiveRoute:
             self._request_inputs.pop(request_id, None)
             self._request_outputs.pop(request_id, None)
             self._request_limits.pop(request_id, None)
+            self._request_entry_nodes.pop(request_id, None)
 
     def _peer_counters(self) -> dict[str, dict[str, int]]:
         counters: dict[str, dict[str, int]] = {}
@@ -1277,9 +1777,7 @@ class PhysicalLiveRoute:
             runtime = details.get("runtime", {})
             counters[node_id] = {
                 "frames_sent": int(transport.get("remote_frames_sent", 0)),
-                "frames_received": int(
-                    transport.get("remote_frames_received", 0)
-                ),
+                "frames_received": int(transport.get("remote_frames_received", 0)),
                 "applied_operation_count": int(
                     runtime.get("applied_operation_count", 0)
                 ),
@@ -1339,9 +1837,7 @@ class PhysicalLiveRoute:
                         "node_id": placement.node_id,
                         "runtime_backend": placement.runtime_backend,
                         "start_layer": stage.layer_range.start_layer,
-                        "end_layer_exclusive": (
-                            stage.layer_range.end_layer_exclusive
-                        ),
+                        "end_layer_exclusive": (stage.layer_range.end_layer_exclusive),
                         "component_roles": list(stage.component_roles),
                     }
                     stages.append(projected)
@@ -1403,16 +1899,12 @@ class PhysicalLiveRoute:
                 "model_id": self._graph.model_id,
                 "topology_version": self._graph.topology_version,
                 "decode_mode": (
-                    next(iter(decode_modes))
-                    if len(decode_modes) == 1
-                    else "mixed"
+                    next(iter(decode_modes)) if len(decode_modes) == 1 else "mixed"
                 ),
                 "counters": {
                     "frames_sent": aggregate.frames_sent,
                     "frames_received": aggregate.frames_received,
-                    "applied_operation_count": (
-                        aggregate.applied_operation_count
-                    ),
+                    "applied_operation_count": (aggregate.applied_operation_count),
                     "fatal": aggregate.fatal,
                 },
                 "stages": stages,
@@ -1421,9 +1913,7 @@ class PhysicalLiveRoute:
                 "incidents": list(self._incidents),
             }
             if self._placement_projection is not None:
-                status["placement"] = json.loads(
-                    json.dumps(self._placement_projection)
-                )
+                status["placement"] = json.loads(json.dumps(self._placement_projection))
             if self._topology_projection is not None:
                 status["topology"] = json.loads(json.dumps(self._topology_projection))
             return status
@@ -1510,7 +2000,10 @@ class PhysicalLiveRoute:
         if not isinstance(offers, list):
             raise LiveSeedStateError("live_assignment_authority_unavailable")
         placement_by_assignment = {
-            placement.assignment_id: (stage.stage_id, placement.load_proof_digest)
+            placement.assignment_id: (
+                placement.placement_id,
+                placement.load_proof_digest,
+            )
             for stage in self._graph.stages
             for placement in stage.placements
         }
@@ -1547,19 +2040,54 @@ class PhysicalLiveRoute:
     def live_attestation(self, *, request_id: str) -> dict[str, Any]:
         if request_id not in self._request_outputs or not self.is_alive():
             raise RuntimeError("live_attestation_unavailable")
+        selected: dict[tuple[str, str], dict[str, Any]] = {}
+        request_observations: list[dict[str, Any]] = []
+        for envelope in self._signed_observations:
+            observation = envelope.get("observation")
+            if not isinstance(observation, Mapping):
+                continue
+            node_id = observation.get("node_id")
+            event = observation.get("event")
+            details = observation.get("details")
+            if not isinstance(node_id, str) or not isinstance(event, str):
+                continue
+            if event in {"configured", "started", "snapshot"}:
+                selected[(node_id, event)] = envelope
+            elif (
+                event in {"inference_started", "inference_decoded"}
+                and isinstance(details, Mapping)
+                and details.get("request_id") == request_id
+            ):
+                request_observations.append(envelope)
+        required = {
+            (node_id, event)
+            for node_id in self._sessions
+            for event in ("configured", "started", "snapshot")
+        }
+        if set(selected) != required or not request_observations:
+            raise RuntimeError("live_attestation_observation_window_incomplete")
+        signed_observations = [
+            *(
+                selected[(node_id, event)]
+                for event in ("configured", "started")
+                for node_id in sorted(self._sessions)
+            ),
+            *request_observations,
+            *(selected[(node_id, "snapshot")] for node_id in sorted(self._sessions)),
+        ]
         return {
             "protocol": "mycelium.live_route_attestation.v1",
             "captured_at_unix_ms": int(time.time() * 1_000),
             "run_id": self._plan["run_id"],
-            "entry_node_id": self._plan["entry_node_id"],
+            "entry_node_id": self._request_entry_nodes.get(
+                request_id, self._plan["entry_node_id"]
+            ),
             "request_id": request_id,
             "prompt_token_ids": list(self._request_inputs[request_id]),
             "max_new_tokens": self._request_limits[request_id],
             "execution_graph": execution_graph_to_dict(self._graph),
             "output_token_ids": list(self._request_outputs[request_id]),
-            "signed_observations": json.loads(
-                json.dumps(self._signed_observations)
-            ),
+            "signed_observations": json.loads(json.dumps(signed_observations)),
             "counters": {
                 "frames_sent": self.counters().frames_sent,
                 "frames_received": self.counters().frames_received,
@@ -1573,9 +2101,22 @@ class PhysicalLiveRoute:
         with self._lock:
             identity = self._identities.get(node_id)
             process_id = None if identity is None else identity.get("process_id")
-            if not isinstance(process_id, int) or isinstance(process_id, bool) or process_id <= 0:
+            if (
+                not isinstance(process_id, int)
+                or isinstance(process_id, bool)
+                or process_id <= 0
+            ):
                 raise RuntimeError("peer_process_identity_unavailable")
             return process_id
+
+    def diagnostic_stderr(self, node_id: str) -> str:
+        """Return a bounded worker traceback for a failed qualification run."""
+
+        with self._lock:
+            session = self._sessions.get(node_id)
+            if session is None:
+                return ""
+            return session.stderr.decode("utf-8", errors="replace")[-4_096:]
 
     def is_alive(self) -> bool:
         return (

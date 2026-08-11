@@ -269,6 +269,43 @@ def issue_live_route_qualification(
     stage_bindings: list[StageQualificationBinding] = []
     transport_records: list[dict[str, Any]] = []
     runtime_records: list[dict[str, Any]] = []
+    inference_started = _select(
+        signed,
+        node_id=entry_node_id,
+        event="inference_started",
+        request_id=live["request_id"],
+    )
+    path = inference_started["details"].get("path")
+    if any(len(stage.placements) > 1 for stage in graph.stages):
+        if not isinstance(path, Mapping) or not isinstance(
+            path.get("placement_ids"), list
+        ):
+            _reject("live_path_binding_invalid")
+        selected_placement_ids = tuple(path["placement_ids"])
+    else:
+        selected_placement_ids = tuple(
+            stage.placements[0].placement_id for stage in graph.stages
+        )
+    stage_by_placement = {
+        placement.placement_id: stage.stage_id
+        for stage in graph.stages
+        for placement in stage.placements
+    }
+    if (
+        len(selected_placement_ids) != len(graph.stages)
+        or len(set(selected_placement_ids)) != len(selected_placement_ids)
+        or tuple(stage_by_placement.get(item) for item in selected_placement_ids)
+        != tuple(stage.stage_id for stage in graph.stages)
+    ):
+        _reject("live_path_binding_invalid")
+    selected_placement_set = set(selected_placement_ids)
+    selected_node_ids = {
+        placement.node_id
+        for stage in graph.stages
+        for placement in stage.placements
+        if placement.placement_id in selected_placement_set
+    }
+    requires_remote_transport = len(selected_node_ids) > 1
     for node_id, (stage, placement) in placements.items():
         configured_observation = _select(
             signed, node_id=node_id, event="configured"
@@ -312,51 +349,56 @@ def issue_live_route_qualification(
             snapshot_details.get("transport"), "live_snapshot_invalid"
         )
         runtime = _mapping(snapshot_details.get("runtime"), "live_snapshot_invalid")
+        selected = placement.placement_id in selected_placement_set
         if (
             snapshot_details.get("transport_fatal_error") is not None
             or transport.get("local_node_id") != node_id
             or transport.get("peer_node_id") not in set(placements) - {node_id}
-            or transport.get("remote_frames_sent", 0) <= 0
-            or transport.get("remote_frames_received", 0) <= 0
+            or (
+                selected
+                and requires_remote_transport
+                and transport.get("remote_frames_sent", 0) <= 0
+            )
+            or (
+                selected
+                and requires_remote_transport
+                and transport.get("remote_frames_received", 0) <= 0
+            )
             or transport.get("route_ready") is not False
             or runtime.get("active_state_count") != 0
             or runtime.get("mode") != details.get("runtime_mode")
-            or runtime.get("applied_operation_count", 0) <= 0
+            or (selected and runtime.get("applied_operation_count", 0) <= 0)
         ):
             _reject("live_snapshot_invalid")
         configured[node_id] = configured_observation
         snapshots[node_id] = snapshot_observation
         transport_records.append(transport)
         runtime_records.append(runtime)
-        reservation_id = f"live:{live['run_id']}:{placement.assignment_id}"
-        stage_bindings.append(
-            StageQualificationBinding(
-                stage_id=stage.stage_id,
-                placement_id=placement.placement_id,
-                assignment_id=placement.assignment_id,
-                node_id=node_id,
-                stage_signature=placement.stage_signature,
-                load_proof_digest=placement.load_proof_digest,
-                stage_probe_result_digest=sha256_document(configured_observation),
-                endpoint_id=configured_observation["endpoint_id"],
-                process_id=configured_observation["process_id"],
-                process_host_id=configured_observation["host_id"],
-                tensor_scope_digest=sha256_document(
-                    {
-                        "assignment_id": placement.assignment_id,
-                        "runtime_mode": details.get("runtime_mode"),
-                    }
-                ),
-                reservation_id=reservation_id,
+        if selected:
+            reservation_id = f"live:{live['run_id']}:{placement.assignment_id}"
+            stage_bindings.append(
+                StageQualificationBinding(
+                    stage_id=stage.stage_id,
+                    placement_id=placement.placement_id,
+                    assignment_id=placement.assignment_id,
+                    node_id=node_id,
+                    stage_signature=placement.stage_signature,
+                    load_proof_digest=placement.load_proof_digest,
+                    stage_probe_result_digest=sha256_document(
+                        configured_observation
+                    ),
+                    endpoint_id=configured_observation["endpoint_id"],
+                    process_id=configured_observation["process_id"],
+                    process_host_id=configured_observation["host_id"],
+                    tensor_scope_digest=sha256_document(
+                        {
+                            "assignment_id": placement.assignment_id,
+                            "runtime_mode": details.get("runtime_mode"),
+                        }
+                    ),
+                    reservation_id=reservation_id,
+                )
             )
-        )
-
-    inference_started = _select(
-        signed,
-        node_id=entry_node_id,
-        event="inference_started",
-        request_id=live["request_id"],
-    )
     inference_decoded = _select_many(
         signed,
         node_id=entry_node_id,
@@ -409,20 +451,22 @@ def issue_live_route_qualification(
         counters.get("frames_sent") != expected_frames_sent
         or counters.get("frames_received") != expected_frames_received
         or counters.get("applied_operation_count") != expected_operations
-        or expected_frames_sent <= 0
-        or expected_frames_received <= 0
+        or (requires_remote_transport and expected_frames_sent <= 0)
+        or (requires_remote_transport and expected_frames_received <= 0)
         or expected_operations <= 0
     ):
         _reject("live_counters_invalid")
 
+    stage_order = {stage.stage_id: index for index, stage in enumerate(graph.stages)}
     stage_bindings_tuple = tuple(
-        sorted(stage_bindings, key=lambda item: item.stage_id)
+        sorted(stage_bindings, key=lambda item: stage_order[item.stage_id])
     )
     path_manifest = {
         "entry_node_id": entry_node_id,
         "request_id": live["request_id"],
         "prompt_token_ids": list(prompt_tokens),
         "ordered_stage_ids": [stage.stage_id for stage in graph.stages],
+        "ordered_placement_ids": list(selected_placement_ids),
     }
     endpoint_set = [
         {"node_id": item.node_id, "endpoint_id": item.endpoint_id}
@@ -455,7 +499,11 @@ def issue_live_route_qualification(
         "deployment_id": graph.deployment_id,
         "deployment_epoch": graph.deployment_epoch,
         "topology_version": graph.topology_version,
-        "placement_provenance": "frozen_fixture",
+        "placement_provenance": (
+            "planner_v2"
+            if any(len(stage.placements) > 1 for stage in graph.stages)
+            else "frozen_fixture"
+        ),
         "model_id": graph.model_id,
         "resolved_commit": graph.resolved_commit,
         "manifest_digest": graph.manifest_digest,
@@ -520,10 +568,12 @@ def issue_live_route_qualification(
         "evidence_manifest_digest": attestation_digest,
         "qualified_by": QUALIFIER_AUTHORITY,
         "claim_boundary": (
-            "current live inference only: exact graph, distinct signed physical node/process/endpoint "
-            "identity, startup token parity, positive bidirectional transport frames, zero active "
-            "runtime state, and no transport fatal passed; readiness remains valid only while the "
-            "publishing RouteHealthSource observes both node processes alive"
+            "current live inference only: exact graph and selected placement path, distinct signed "
+            "physical node/process/endpoint identity, startup token parity, positive selected-stage "
+            "work, zero active runtime state, and no transport fatal passed; positive bidirectional "
+            "transport frames are required when the selected path spans physical nodes; readiness "
+            "remains valid only while the publishing RouteHealthSource observes all graph node "
+            "processes alive"
         ),
     }
     record = object.__new__(RouteQualificationV1)

@@ -24,6 +24,7 @@ import {
 import { loadProductSettings } from '../settings/SettingsContext';
 import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from '../liveRoute/m16Runtime';
 import { M17ModelOperationSourcePanel } from '../liveRoute/M17ModelOperationSourcePanel';
+import { M18ReplicationSourcePanel } from '../liveRoute/M18ReplicationSourcePanel';
 
 const encoder = new TextEncoder();
 const activeModelDisplay = Object.freeze({
@@ -500,6 +501,7 @@ export function InferenceWorkspace({
       </div>
 
       {client === undefined ? <M17ModelOperationSourcePanel view="inference" /> : null}
+      {client === undefined ? <M18ReplicationSourcePanel view="inference" hideUnavailable /> : null}
 
       <section className={styles.outputPanel} aria-labelledby="output-title">
         <div className={styles.sectionHeading}>

@@ -12,6 +12,7 @@ import pytest
 from mycelium_live.route import FakeLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
     LiveObservatoryApplication,
+    _m18_replica_plan,
     _placement_projection,
     _workload_comparison,
     _qualify_open_route,
@@ -43,10 +44,7 @@ def test_build_live_stack_returns_app_and_health_source(
         "node-a",
         "node-b",
     ]
-    assert all(
-        node["membership_state"] == "assigned"
-        for node in swarm["native_nodes"]
-    )
+    assert all(node["membership_state"] == "assigned" for node in swarm["native_nodes"])
 
 
 def test_health_publishes_after_challenge(deployment_dir, qualified_route) -> None:
@@ -67,7 +65,9 @@ def test_health_publishes_after_challenge(deployment_dir, qualified_route) -> No
     )
 
 
-def test_observatory_projection_is_browser_safe(deployment_dir, qualified_route) -> None:
+def test_observatory_projection_is_browser_safe(
+    deployment_dir, qualified_route
+) -> None:
     qualification, graph = qualified_route
     route = FakeLiveRoute(scripted_tokens=(4599,))
     route.open()
@@ -304,16 +304,18 @@ def test_candidate_promotion_and_rollback_posts_are_same_origin_and_bounded(
     calls = []
 
     route = SimpleNamespace(
-        canary_candidate=lambda candidate_id, **values: calls.append(
-            ("canary", candidate_id, values)
-        )
-        or {"candidate_deployment_id": candidate_id, **values},
-        promote_candidate=lambda report: calls.append(("promote", report))
-        or {"selected_deployment_id": report["candidate_deployment_id"]},
-        rollback_candidate=lambda candidate_id, *, reason: calls.append(
-            ("rollback", candidate_id, reason)
-        )
-        or {"selected_deployment_id": "incumbent"},
+        canary_candidate=lambda candidate_id, **values: (
+            calls.append(("canary", candidate_id, values))
+            or {"candidate_deployment_id": candidate_id, **values}
+        ),
+        promote_candidate=lambda report: (
+            calls.append(("promote", report))
+            or {"selected_deployment_id": report["candidate_deployment_id"]}
+        ),
+        rollback_candidate=lambda candidate_id, *, reason: (
+            calls.append(("rollback", candidate_id, reason))
+            or {"selected_deployment_id": "incumbent"}
+        ),
     )
 
     async def app(*_args):
@@ -357,9 +359,7 @@ def test_candidate_promotion_and_rollback_posts_are_same_origin_and_bounded(
         )
         response = connection.getresponse()
         assert response.status == 200
-        assert json.loads(response.read()) == {
-            "selected_deployment_id": "candidate"
-        }
+        assert json.loads(response.read()) == {"selected_deployment_id": "candidate"}
 
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
         connection.request(
@@ -375,16 +375,17 @@ def test_candidate_promotion_and_rollback_posts_are_same_origin_and_bounded(
         )
         response = connection.getresponse()
         assert response.status == 200
-        assert json.loads(response.read()) == {
-            "selected_deployment_id": "incumbent"
-        }
+        assert json.loads(response.read()) == {"selected_deployment_id": "incumbent"}
 
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
         connection.request(
             "POST",
             "/__mycelium/candidates/promote",
             body=json.dumps(report),
-            headers={"content-type": "application/json", "origin": "https://attacker.invalid"},
+            headers={
+                "content-type": "application/json",
+                "origin": "https://attacker.invalid",
+            },
         )
         response = connection.getresponse()
         assert response.status == 403
@@ -408,7 +409,9 @@ def test_candidate_promotion_and_rollback_posts_are_same_origin_and_bounded(
         thread.join(timeout=5)
 
 
-def test_m17_swarm_evidence_endpoint_is_read_only_and_fail_closed(tmp_path: Path) -> None:
+def test_m17_swarm_evidence_endpoint_is_read_only_and_fail_closed(
+    tmp_path: Path,
+) -> None:
     static_root = tmp_path / "dist"
     static_root.mkdir()
     (static_root / "index.html").write_text("ok", encoding="utf-8")
@@ -447,6 +450,47 @@ def test_m17_swarm_evidence_endpoint_is_read_only_and_fail_closed(tmp_path: Path
         thread.join(timeout=5)
 
 
+def test_m18_plan_and_runtime_endpoints_are_read_only(tmp_path: Path) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    plan = {"protocol": "mycelium.replica_plan.v1", "route_ready": False}
+    runtime = {"protocol": "mycelium.replica_runtime.v1", "requests": []}
+    calls: list[str] = []
+    route = SimpleNamespace(
+        m18_replica_plan=lambda: calls.append("plan") or plan,
+        m18_replica_runtime=lambda: calls.append("runtime") or runtime,
+    )
+
+    async def app(*_args):
+        raise AssertionError("m18_projection_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=route,
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for path, expected in (
+            ("/__mycelium/m18-replica-plan", plan),
+            ("/__mycelium/m18-replica-runtime", runtime),
+        ):
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", path)
+            response = connection.getresponse()
+            assert response.status == 200
+            assert json.loads(response.read()) == expected
+        assert calls == ["plan", "runtime"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (
@@ -477,9 +521,24 @@ def test_optional_m15_comparison_loader_fails_closed(tmp_path: Path) -> None:
     target = tmp_path / "m15-plan-comparison.json"
     target.write_bytes(fixture.read_bytes())
 
-    assert _workload_comparison(tmp_path)["protocol"] == "mycelium.m15_plan_comparison.v1"
+    assert (
+        _workload_comparison(tmp_path)["protocol"] == "mycelium.m15_plan_comparison.v1"
+    )
 
     target.unlink()
     target.symlink_to(fixture)
     with pytest.raises(ValueError, match="unsafe"):
         _workload_comparison(tmp_path)
+
+
+def test_optional_m18_replica_plan_loader_fails_closed(tmp_path: Path) -> None:
+    assert _m18_replica_plan(tmp_path) is None
+    target = tmp_path / "m18-replica-plan.json"
+    target.write_text('{"protocol":"wrong"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="m18_replica_plan_invalid"):
+        _m18_replica_plan(tmp_path)
+
+    target.unlink()
+    target.symlink_to(Path(__file__))
+    with pytest.raises(ValueError, match="m18_replica_plan_unsafe"):
+        _m18_replica_plan(tmp_path)

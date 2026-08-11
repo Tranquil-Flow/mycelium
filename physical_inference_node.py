@@ -6,6 +6,7 @@ sidecar logs remain on stderr. Every command is bound to one immutable run,
 deployment, and node identity. Private signing and sidecar key material never
 enters a serialization-facing object.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -94,14 +95,19 @@ def _validated_endpoint_secret_file(value: Path | None) -> Path | None:
     return value
 
 
-def _exact_fields(document: Any, expected: set[str] | frozenset[str], code: str) -> dict[str, Any]:
+def _exact_fields(
+    document: Any, expected: set[str] | frozenset[str], code: str
+) -> dict[str, Any]:
     _require(isinstance(document, dict) and set(document) == set(expected), code)
     return document
 
 
 def _plain_json(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
-        return {field.name: _plain_json(getattr(value, field.name)) for field in fields(value)}
+        return {
+            field.name: _plain_json(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, Mapping):
         return {str(key): _plain_json(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
@@ -132,7 +138,9 @@ def _host_available_memory_bytes() -> int:
         try:
             values = {
                 key.rstrip(":"): int(value) * 1024
-                for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines()
+                for line in Path("/proc/meminfo")
+                .read_text(encoding="utf-8")
+                .splitlines()
                 if len(parts := line.split()) >= 2
                 for key, value in [parts[:2]]
                 if value.isdigit()
@@ -153,7 +161,9 @@ def _host_available_memory_bytes() -> int:
                 "Pages speculative",
                 "Pages purgeable",
             ):
-                match = re.search(rf"^{re.escape(label)}:\s+(\d+)\.", output, re.MULTILINE)
+                match = re.search(
+                    rf"^{re.escape(label)}:\s+(\d+)\.", output, re.MULTILINE
+                )
                 if match:
                     pages += int(match.group(1))
             if pages > 0:
@@ -186,7 +196,9 @@ def _host_swap_used_bytes() -> int:
         try:
             values = {
                 key.rstrip(":"): int(value) * 1024
-                for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines()
+                for line in Path("/proc/meminfo")
+                .read_text(encoding="utf-8")
+                .splitlines()
                 if len(parts := line.split()) >= 2
                 for key, value in [parts[:2]]
                 if value.isdigit()
@@ -252,7 +264,9 @@ def _runtime_build_digest(backend: str) -> str:
         "runtime_loader.py",
         "model_adapters.py",
         "numpy_runtime.py",
-        "mycelium_router/mlx_runtime.py" if backend == "mlx" else "mycelium_router/numpy_runtime.py",
+        "mycelium_router/mlx_runtime.py"
+        if backend == "mlx"
+        else "mycelium_router/numpy_runtime.py",
     ]
     digest = hashlib.sha256()
     digest.update(sys.version.encode("utf-8"))
@@ -285,7 +299,10 @@ def execution_graph_from_document(document: Any) -> ExecutionGraph:
         "protocol",
     }
     root = _exact_fields(document, root_fields, "invalid_execution_graph_fields")
-    _require(root["protocol"] == "mycelium.execution_graph.v1", "invalid_execution_graph_protocol")
+    _require(
+        root["protocol"] == "mycelium.execution_graph.v1",
+        "invalid_execution_graph_protocol",
+    )
     _require(isinstance(root["stages"], list), "invalid_execution_graph_stages")
     stages: list[Stage] = []
     for stage_document in root["stages"]:
@@ -308,7 +325,9 @@ def execution_graph_from_document(document: Any) -> ExecutionGraph:
             },
             "invalid_stage_cost_fields",
         )
-        _require(isinstance(stage_data["component_roles"], list), "invalid_component_roles")
+        _require(
+            isinstance(stage_data["component_roles"], list), "invalid_component_roles"
+        )
         _require(isinstance(stage_data["placements"], list), "invalid_placements")
         placements: list[Placement] = []
         for placement_document in stage_data["placements"]:
@@ -394,9 +413,13 @@ def device_states_from_document(
     states: dict[str, DeviceState] = {}
     now = time.time() if observed_at is None else observed_at
     for node_id, state_document in document.items():
-        state_data = _exact_fields(state_document, expected, "invalid_device_state_fields")
+        state_data = _exact_fields(
+            state_document, expected, "invalid_device_state_fields"
+        )
         _require(state_data["node_id"] == node_id, "device_state_key_mismatch")
-        _require(isinstance(state_data["neighbor_rtt_ms"], dict), "invalid_neighbor_rtt")
+        _require(
+            isinstance(state_data["neighbor_rtt_ms"], dict), "invalid_neighbor_rtt"
+        )
         _require(
             isinstance(state_data["neighbor_bandwidth_bytes_per_second"], dict),
             "invalid_neighbor_bandwidth",
@@ -499,17 +522,20 @@ class NativeSidecarProcess:
         if self.local_only:
             command.append("--local-only")
         if self.endpoint_secret_file is not None:
-            command.extend(
-                ["--endpoint-secret-file", str(self.endpoint_secret_file)]
-            )
+            command.extend(["--endpoint-secret-file", str(self.endpoint_secret_file)])
         return command
 
     def start(self) -> dict[str, Any]:
         _require(self.process is None, "sidecar_already_started")
-        _require(self.binary.is_file() and os.access(self.binary, os.X_OK), "sidecar_binary_unavailable")
+        _require(
+            self.binary.is_file() and os.access(self.binary, os.X_OK),
+            "sidecar_binary_unavailable",
+        )
         self.socket_root.mkdir(parents=True, exist_ok=False)
         self._socket_root_created = True
-        _require(len(os.fsencode(self.socket_path)) < 100, "sidecar_socket_path_too_long")
+        _require(
+            len(os.fsencode(self.socket_path)) < 100, "sidecar_socket_path_too_long"
+        )
         material = os.urandom(32)
         read_fd, write_fd = os.pipe()
         try:
@@ -539,7 +565,9 @@ class NativeSidecarProcess:
         self.process = process
         try:
             assert process.stdout is not None
-            readable, _, _ = select.select([process.stdout], [], [], self.startup_timeout)
+            readable, _, _ = select.select(
+                [process.stdout], [], [], self.startup_timeout
+            )
             _require(bool(readable), "sidecar_start_timeout")
             line = process.stdout.readline()
             _require(bool(line), "sidecar_exited_before_ready")
@@ -553,10 +581,15 @@ class NativeSidecarProcess:
                 and ready["endpoint_addr"].get("id") == ready["endpoint_id"],
                 "invalid_sidecar_ready_record",
             )
-            client = SidecarClient(self.socket_path, material, timeout=self.startup_timeout)
+            client = SidecarClient(
+                self.socket_path, material, timeout=self.startup_timeout
+            )
             try:
                 client.connect()
-                _require(client.endpoint_id == ready["endpoint_id"], "sidecar_endpoint_mismatch")
+                _require(
+                    client.endpoint_id == ready["endpoint_id"],
+                    "sidecar_endpoint_mismatch",
+                )
                 client.ping()
             finally:
                 client.close()
@@ -650,7 +683,9 @@ class PhysicalNodeService:
             (deployment_id, "invalid_deployment_id"),
             (node_id, "invalid_node_id"),
         ):
-            _require(isinstance(value, str) and bool(value) and value == value.strip(), code)
+            _require(
+                isinstance(value, str) and bool(value) and value == value.strip(), code
+            )
         _require(command_timeout > 0, "invalid_command_timeout")
         self.run_id = run_id
         self.deployment_id = deployment_id
@@ -795,7 +830,9 @@ class PhysicalNodeService:
             "route_ready": False,
         }
 
-    def _signed_result(self, event: str, details: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    def _signed_result(
+        self, event: str, details: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
         _require(self.signer is not None, "signer_not_ready")
         statement = {
             "protocol": NODE_OBSERVATION_PROTOCOL,
@@ -837,11 +874,15 @@ class PhysicalNodeService:
             else ["complete_context_replay"]
         )
         object_root = self.artifact_root / ".mycelium" / "objects" / "sha256"
-        cached_content_digests = sorted(
-            f"sha256:{path.name}"
-            for path in object_root.iterdir()
-            if path.is_file() and re.fullmatch(r"[0-9a-f]{64}", path.name)
-        ) if object_root.is_dir() else []
+        cached_content_digests = (
+            sorted(
+                f"sha256:{path.name}"
+                for path in object_root.iterdir()
+                if path.is_file() and re.fullmatch(r"[0-9a-f]{64}", path.name)
+            )
+            if object_root.is_dir()
+            else []
+        )
         _require(
             len(cached_content_digests) <= 4096,
             "cached_content_digest_limit_exceeded",
@@ -868,9 +909,9 @@ class PhysicalNodeService:
             "power_state": _host_power_state(),
             "route_ready": False,
         }
-        document["resource_digest"] = "sha256:" + hashlib.sha256(
-            canonical_json_bytes(document)
-        ).hexdigest()
+        document["resource_digest"] = (
+            "sha256:" + hashlib.sha256(canonical_json_bytes(document)).hexdigest()
+        )
         return document
 
     def _new_sidecar_process(self) -> NativeSidecarProcess:
@@ -915,7 +956,10 @@ class PhysicalNodeService:
             "assignment_id": placement.assignment_id,
         }
         _require(
-            all(assignment.get(field) == expected for field, expected in expected_scalars.items()),
+            all(
+                assignment.get(field) == expected
+                for field, expected in expected_scalars.items()
+            ),
             "pixel_assignment_pack_mismatch",
         )
         _require(
@@ -1087,15 +1131,32 @@ class PhysicalNodeService:
             "invalid_load_generation",
         )
         graph = execution_graph_from_document(data["graph"])
-        _require(graph.deployment_id == self.deployment_id, "graph_deployment_id_mismatch")
+        _require(
+            graph.deployment_id == self.deployment_id, "graph_deployment_id_mismatch"
+        )
         states = device_states_from_document(
             data["device_states"],
             observed_at=self._clock.now(),
         )
-        _require(set(states) == {placement.node_id for stage in graph.stages for placement in stage.placements}, "device_state_node_mismatch")
-        assignment = self._safe_document(data["assignment_file"], "invalid_assignment_file")
-        _require(assignment.get("deployment_id") == self.deployment_id, "assignment_deployment_id_mismatch")
-        _require(assignment.get("node_id") == self.node_id, "assignment_node_id_mismatch")
+        _require(
+            set(states)
+            == {
+                placement.node_id
+                for stage in graph.stages
+                for placement in stage.placements
+            },
+            "device_state_node_mismatch",
+        )
+        assignment = self._safe_document(
+            data["assignment_file"], "invalid_assignment_file"
+        )
+        _require(
+            assignment.get("deployment_id") == self.deployment_id,
+            "assignment_deployment_id_mismatch",
+        )
+        _require(
+            assignment.get("node_id") == self.node_id, "assignment_node_id_mismatch"
+        )
         stage_pack_digest: str | None = None
         report: dict[str, Any] | None = None
         pixel_stage: Any = None
@@ -1137,9 +1198,9 @@ class PhysicalNodeService:
                 pixel_stage.document["run_id"] == self.run_id,
                 "pixel_stage_run_id_mismatch",
             )
-            parent_assignment_digest = "sha256:" + hashlib.sha256(
-                canonical_json_bytes(assignment)
-            ).hexdigest()
+            parent_assignment_digest = (
+                "sha256:" + hashlib.sha256(canonical_json_bytes(assignment)).hexdigest()
+            )
             stage_pack_digest = pixel_pack["pack_digest"]
             loaded_runtime_identity = {
                 "backend": "pixel-stdlib",
@@ -1154,7 +1215,9 @@ class PhysicalNodeService:
                 data["manifest_file"],
                 "invalid_manifest_file",
             )
-            pack = self._safe_document(data["stage_pack_file"], "invalid_stage_pack_file")
+            pack = self._safe_document(
+                data["stage_pack_file"], "invalid_stage_pack_file"
+            )
             try:
                 verification = verify_stage_pack(
                     pack,
@@ -1179,11 +1242,15 @@ class PhysicalNodeService:
             (stage, placement)
             for stage in graph.stages
             for placement in stage.placements
-            if placement.node_id == self.node_id and placement.lifecycle_state == "ACTIVE"
+            if placement.node_id == self.node_id
+            and placement.lifecycle_state == "ACTIVE"
         ]
         _require(len(local_bindings) == 1, "invalid_local_placement_count")
         graph_stage, placement = local_bindings[0]
-        _require(placement.assignment_id == assignment.get("assignment_id"), "placement_assignment_mismatch")
+        _require(
+            placement.assignment_id == assignment.get("assignment_id"),
+            "placement_assignment_mismatch",
+        )
         if pixel_stage is not None:
             self._validate_pixel_assignment_binding(
                 assignment,
@@ -1389,7 +1456,9 @@ class PhysicalNodeService:
         assert self.runtime is not None
         details: dict[str, Any] = {
             "runtime": self.runtime.kv_snapshot(),
-            "capacity": None if self.capacity is None else _plain_json(self.capacity.snapshot()),
+            "capacity": None
+            if self.capacity is None
+            else _plain_json(self.capacity.snapshot()),
             "host_resources": self._host_resources(),
             "transport": None,
         }
@@ -1397,14 +1466,14 @@ class PhysicalNodeService:
             details["transport"] = _plain_json(self.transport.evidence())
             fatal = self.transport.fatal_error
             details["transport_fatal_error"] = (
-                None
-                if fatal is None
-                else {"code": fatal.code, "detail": fatal.detail}
+                None if fatal is None else {"code": fatal.code, "detail": fatal.detail}
             )
             details["transport_worker_threads"] = self.transport.worker_threads_alive
             details["transport_dispatcher_phase"] = self.transport.dispatcher_phase
             details["transport_outbound_trace"] = list(self.transport.outbound_trace)
-            details["transport_pending_delivery_count"] = self.transport.pending_delivery_count
+            details["transport_pending_delivery_count"] = (
+                self.transport.pending_delivery_count
+            )
             cancellation = self._last_cancellation or self.transport.last_cancellation
             details["transport_cancellation_cleanup_complete"] = (
                 False
@@ -1418,8 +1487,14 @@ class PhysicalNodeService:
 
     def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = _exact_fields(payload, {"request_id"}, "invalid_cancel_fields")
-        _require(isinstance(data["request_id"], str) and bool(data["request_id"]), "invalid_request_id")
-        _require(self.state == "RUNNING" and self.router is not None, "invalid_state_for_cancel")
+        _require(
+            isinstance(data["request_id"], str) and bool(data["request_id"]),
+            "invalid_request_id",
+        )
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_cancel",
+        )
         request_id = data["request_id"]
         router = self.router
         assert router is not None
@@ -1441,7 +1516,9 @@ class PhysicalNodeService:
         except KeyError:
             status_after = "UNKNOWN"
         sink = self._sinks.get(request_id)
-        observed_token_count = len(sink.token_ids) if sink is not None else pre_cancel_token_count
+        observed_token_count = (
+            len(sink.token_ids) if sink is not None else pre_cancel_token_count
+        )
         post_cancel_token_count = max(0, observed_token_count - pre_cancel_token_count)
         result = {
             "cancelled": bool(cancelled),
@@ -1458,10 +1535,16 @@ class PhysicalNodeService:
                 "path_id": path_id,
                 "path_attempt": path_attempt,
             }
-        return self._signed_result("cancelled", {"request_id": request_id, "result": _plain_json(result)})
+        return self._signed_result(
+            "cancelled", {"request_id": request_id, "result": _plain_json(result)}
+        )
 
     def _infer_start(self, payload: dict[str, Any]) -> dict[str, Any]:
-        data = _exact_fields(payload, {"request"}, "invalid_infer_start_fields")
+        _require(
+            set(payload) in ({"request"}, {"request", "excluded_placement_ids"}),
+            "invalid_infer_start_fields",
+        )
+        data = payload
         request_data = _exact_fields(
             data["request"],
             {
@@ -1479,7 +1562,10 @@ class PhysicalNodeService:
             },
             "invalid_request_fields",
         )
-        _require(isinstance(request_data["prompt_token_ids"], list), "invalid_prompt_token_ids")
+        _require(
+            isinstance(request_data["prompt_token_ids"], list),
+            "invalid_prompt_token_ids",
+        )
         request = RequestContext(
             **{
                 **request_data,
@@ -1487,10 +1573,27 @@ class PhysicalNodeService:
                 "admitted_at": self._clock.now(),
             }
         )
-        _require(self.state == "RUNNING" and self.router is not None, "invalid_state_for_infer_start")
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_infer_start",
+        )
+        excluded_placement_ids = data.get("excluded_placement_ids", [])
+        _require(
+            isinstance(excluded_placement_ids, list)
+            and all(
+                isinstance(item, str) and bool(item)
+                for item in excluded_placement_ids
+            )
+            and len(excluded_placement_ids) == len(set(excluded_placement_ids)),
+            "invalid_excluded_placement_ids",
+        )
         _require(request.request_id not in self._sinks, "duplicate_request_id")
         sink = _CaptureSink()
-        request_id = self.router.start_distributed_prefill(request, sink)
+        request_id = self.router.start_distributed_prefill(
+            request,
+            sink,
+            excluded_placements=frozenset(excluded_placement_ids),
+        )
         _require(request_id == request.request_id, "request_id_changed")
         self._sinks[request_id] = sink
         deadline = time.monotonic() + min(
@@ -1504,25 +1607,42 @@ class PhysicalNodeService:
             time.sleep(0.01)
             status = self.router.request_status(request_id)
         _require(status != "PREFILL", "prefill_completion_timeout")
+        record = self.router.get_request(request_id)
+        manifest = record.manifest
         return self._signed_result(
             "inference_started",
             {
                 "request_id": request_id,
                 "status": status,
                 "output": sink.snapshot(),
+                "path": {
+                    "path_id": manifest.path_id,
+                    "path_attempt": manifest.path_attempt,
+                    "placement_ids": [
+                        hop.placement_id for hop in manifest.ordered_hops
+                    ],
+                },
             },
         )
 
     def _infer_decode(self, payload: dict[str, Any]) -> dict[str, Any]:
-        data = _exact_fields(payload, {"request_id", "count"}, "invalid_infer_decode_fields")
-        _require(isinstance(data["request_id"], str) and bool(data["request_id"]), "invalid_request_id")
+        data = _exact_fields(
+            payload, {"request_id", "count"}, "invalid_infer_decode_fields"
+        )
+        _require(
+            isinstance(data["request_id"], str) and bool(data["request_id"]),
+            "invalid_request_id",
+        )
         _require(
             isinstance(data["count"], int)
             and not isinstance(data["count"], bool)
             and 1 <= data["count"] <= 128,
             "invalid_decode_count",
         )
-        _require(self.state == "RUNNING" and self.router is not None, "invalid_state_for_infer_decode")
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_infer_decode",
+        )
         sink = self._sinks.get(data["request_id"])
         _require(sink is not None, "unknown_request_id")
         dispatched = 0
@@ -1541,7 +1661,10 @@ class PhysicalNodeService:
                 and status not in {"COMPLETED", "FAILED", "CANCELLED"}
                 and time.monotonic() < deadline
             ):
-                if self.transport is not None and self.transport.fatal_error is not None:
+                if (
+                    self.transport is not None
+                    and self.transport.fatal_error is not None
+                ):
                     raise NodeCommandError(self.transport.fatal_error.code)
                 time.sleep(0.01)
                 status = self.router.request_status(data["request_id"])
@@ -1586,7 +1709,10 @@ class PhysicalNodeService:
             {"node_id", "endpoint_id", "endpoint_addr", "generation"},
             "invalid_peer_fields",
         )
-        _require(self.state == "RUNNING" and self.transport is not None, "invalid_state_for_rotate")
+        _require(
+            self.state == "RUNNING" and self.transport is not None,
+            "invalid_state_for_rotate",
+        )
         try:
             peer = PeerBinding(**peer_data)
             self.transport.rotate_peer(peer)
@@ -1627,10 +1753,17 @@ class PhysicalNodeService:
 
     def dispatch(self, command: Any) -> dict[str, Any]:
         document = _exact_fields(command, _COMMAND_FIELDS, "invalid_command_fields")
-        _require(document["protocol"] == NODE_CONTROL_PROTOCOL, "invalid_command_protocol")
-        _require(isinstance(document["command_id"], str) and bool(document["command_id"]), "invalid_command_id")
+        _require(
+            document["protocol"] == NODE_CONTROL_PROTOCOL, "invalid_command_protocol"
+        )
+        _require(
+            isinstance(document["command_id"], str) and bool(document["command_id"]),
+            "invalid_command_id",
+        )
         _require(document["run_id"] == self.run_id, "run_id_mismatch")
-        _require(document["deployment_id"] == self.deployment_id, "deployment_id_mismatch")
+        _require(
+            document["deployment_id"] == self.deployment_id, "deployment_id_mismatch"
+        )
         _require(isinstance(document["command"], str), "invalid_command")
         _require(isinstance(document["payload"], dict), "invalid_command_payload")
         handlers = {
@@ -1745,24 +1878,47 @@ def main() -> int:
         for raw_line in sys.stdin.buffer:
             command_id = "unknown"
             if len(raw_line) > MAX_COMMAND_BYTES:
-                _emit(_response(service, command_id=command_id, ok=False, error_code="command_too_large"))
+                _emit(
+                    _response(
+                        service,
+                        command_id=command_id,
+                        ok=False,
+                        error_code="command_too_large",
+                    )
+                )
                 continue
             try:
                 command = canonical_json_loads(raw_line.rstrip(b"\n"), path="stdin")
-                if isinstance(command, dict) and isinstance(command.get("command_id"), str):
+                if isinstance(command, dict) and isinstance(
+                    command.get("command_id"), str
+                ):
                     command_id = command["command_id"]
                 with _command_deadline(service.command_timeout):
                     result = service.dispatch(command)
                 _emit(_response(service, command_id=command_id, ok=True, result=result))
             except NodeCommandError as exc:
-                _emit(_response(service, command_id=command_id, ok=False, error_code=exc.code))
+                _emit(
+                    _response(
+                        service, command_id=command_id, ok=False, error_code=exc.code
+                    )
+                )
                 if exc.code == "command_timeout":
                     service.close()
                     return 3
             except BaseException as exc:
-                print(f"physical-node command failed: {type(exc).__name__}", file=sys.stderr)
+                print(
+                    f"physical-node command failed: {type(exc).__name__}",
+                    file=sys.stderr,
+                )
                 traceback.print_exc(file=sys.stderr)
-                _emit(_response(service, command_id=command_id, ok=False, error_code="node_command_failed"))
+                _emit(
+                    _response(
+                        service,
+                        command_id=command_id,
+                        ok=False,
+                        error_code="node_command_failed",
+                    )
+                )
             if service.stop_requested:
                 return 0
         service.close()

@@ -14,10 +14,12 @@ from mycelium_qualification.physical_deployment import (
     LocalModelSource,
     PhysicalDeploymentError,
     build_execution_graph,
+    build_replicated_execution_graph,
     build_physical_device_states,
     compile_local_model_manifest,
     prepare_physical_deployment,
 )
+from layer_assignment import assignment_id_for
 from runtime_loader import RuntimeLoadError, execute_loaded_stage, load_assignment_stage
 from two_process_runtime_qualification import (
     SHARD_NAMES,
@@ -41,9 +43,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(_canonical_json(payload) + "\n", encoding="utf-8")
 
 
-def _write_dialogpt_style_monolithic_source(
-    root: Path, *, n_layer: int = 5
-) -> None:
+def _write_dialogpt_style_monolithic_source(root: Path, *, n_layer: int = 5) -> None:
     root.mkdir()
     config = _model_config(n_positions=16)
     config["n_layer"] = n_layer
@@ -115,9 +115,10 @@ def test_prepare_physical_deployment_is_offline_deterministic_and_exact(
         assert pack["assignment_id"] == assignment["assignment_id"]
         assert verification["stage_pack_digest"] == pack["stage_pack_digest"]
         assert report["stage_pack_digest"] == pack["stage_pack_digest"]
-        assert report["stage_pack_verification_digest"] == verification[
-            "stage_pack_verification_digest"
-        ]
+        assert (
+            report["stage_pack_verification_digest"]
+            == verification["stage_pack_verification_digest"]
+        )
         assert verification["ready_for_load"] is True
         assert verification["route_ready"] is False
     assert first.reference_assignment["range"] == {
@@ -213,9 +214,10 @@ def test_prepared_assignments_and_independent_reference_load_and_execute(
         strict=True,
     ):
         assert stage.proof["stage_pack_digest"] == pack["stage_pack_digest"]
-        assert stage.proof["stage_pack_verification_digest"] == verification[
-            "stage_pack_verification_digest"
-        ]
+        assert (
+            stage.proof["stage_pack_verification_digest"]
+            == verification["stage_pack_verification_digest"]
+        )
     assert loaded_reference.proof["loaded_range"] == {
         "start_layer": 0,
         "end_layer_exclusive": 2,
@@ -260,6 +262,140 @@ def test_prepare_physical_deployment_rejects_reuse_and_bad_nodes(
     assert not (tmp_path / "bad-nodes").exists()
 
 
+def test_replicated_execution_graph_retains_alternative_complete_tracks(
+    tmp_path: Path,
+) -> None:
+    deployment = prepare_physical_deployment(tmp_path / "replicated")
+    loaded = [
+        load_assignment_stage(assignment, report, load_generation=17)
+        for assignment, report in zip(
+            deployment.assignments,
+            deployment.artifact_reports,
+            strict=True,
+        )
+    ]
+    entry = copy.deepcopy(deployment.assignments[0])
+    primary = copy.deepcopy(deployment.assignments[1])
+    replica = copy.deepcopy(primary)
+    replica["node_id"] = "node-c"
+    replica["artifact_cache_root"] = "/tmp/node-c"
+    replica["assignment_id"] = assignment_id_for(replica)
+    assignments = {"p0": entry, "p1": primary, "r1": replica}
+    proofs = {
+        "p0": loaded[0].proof,
+        "p1": loaded[1].proof,
+        "r1": loaded[1].proof,
+    }
+    route = {
+        "protocol": "mycelium.route_plan.v2",
+        "placements": [
+            {
+                "placement_id": "p0",
+                "replica_group_id": "group-0",
+                "node_id": "node-a",
+                "layer_range": {"start": 0, "end": 1},
+                "primary": True,
+            },
+            {
+                "placement_id": "p1",
+                "replica_group_id": "group-1",
+                "node_id": "node-b",
+                "layer_range": {"start": 1, "end": 2},
+                "primary": True,
+            },
+            {
+                "placement_id": "r1",
+                "replica_group_id": "group-1",
+                "node_id": "node-c",
+                "layer_range": {"start": 1, "end": 2},
+                "primary": False,
+            },
+        ],
+        "forward_edges": [
+            {"src_placement_id": "p0", "dst_placement_id": "p1"},
+            {"src_placement_id": "p0", "dst_placement_id": "r1"},
+        ],
+        "loopbacks": [
+            {"src_placement_id": "p1", "dst_placement_id": "p0"},
+            {"src_placement_id": "r1", "dst_placement_id": "p0"},
+        ],
+    }
+
+    graph = build_replicated_execution_graph(assignments, proofs, route)
+
+    assert len(graph.stages) == 2
+    assert [item.placement_id for item in graph.stages[1].placements] == ["p1", "r1"]
+    assert {(edge.from_placement_id, edge.to_placement_id) for edge in graph.edges} == {
+        ("p0", "p1"),
+        ("p0", "r1"),
+    }
+    assert set(build_physical_device_states(graph)) == {"node-a", "node-b", "node-c"}
+
+
+def test_replicated_execution_graph_supports_complete_model_replica_tracks(
+    tmp_path: Path,
+) -> None:
+    deployment = prepare_physical_deployment(tmp_path / "full-replicas")
+    loaded = load_assignment_stage(
+        deployment.assignments[0], deployment.artifact_reports[0], load_generation=17
+    )
+    assignments = {}
+    proofs = {}
+    for placement_id, node_id in (
+        ("full-primary", "node-a"),
+        ("full-replica", "node-b"),
+    ):
+        assignment = copy.deepcopy(deployment.assignments[0])
+        assignment["node_id"] = node_id
+        assignment["range"] = {
+            "start_layer": 0,
+            "end_layer_exclusive": 2,
+            "layer_count": 2,
+        }
+        assignment["components"] = [
+            "input_embedding",
+            "decoder",
+            "final_norm",
+            "lm_head",
+        ]
+        assignment["assignment_id"] = assignment_id_for(assignment)
+        assignments[placement_id] = assignment
+        proofs[placement_id] = loaded.proof
+    route = {
+        "protocol": "mycelium.route_plan.v2",
+        "placements": [
+            {
+                "placement_id": "full-primary",
+                "replica_group_id": "full-model",
+                "node_id": "node-a",
+                "layer_range": {"start": 0, "end": 2},
+                "primary": True,
+            },
+            {
+                "placement_id": "full-replica",
+                "replica_group_id": "full-model",
+                "node_id": "node-b",
+                "layer_range": {"start": 0, "end": 2},
+                "primary": False,
+            },
+        ],
+        "forward_edges": [],
+        "loopbacks": [],
+    }
+
+    graph = build_replicated_execution_graph(assignments, proofs, route)
+
+    assert len(graph.stages) == 1
+    assert graph.edges == ()
+    assert {
+        (edge.from_placement_id, edge.to_placement_id, edge.link_id)
+        for edge in graph.loopback_edges
+    } == {
+        ("full-primary", "full-primary", "local:node-a"),
+        ("full-replica", "full-replica", "local:node-b"),
+    }
+
+
 def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
     tmp_path: Path,
 ) -> None:
@@ -295,9 +431,7 @@ def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
     assert deployment.manifest["requested_revision"] == "local-main"
     assert deployment.manifest["resolved_commit"] == "f" * 40
     assert deployment.manifest["num_layers"] == 5
-    assert deployment.manifest["component_aliases"] == {
-        "lm_head": "input_embedding"
-    }
+    assert deployment.manifest["component_aliases"] == {"lm_head": "input_embedding"}
     assert deployment.model_source is not None
     assert deployment.model_source["format"] == "safetensors_monolithic"
     assert [item["path"] for item in deployment.manifest["files"]] == [
@@ -352,7 +486,9 @@ def test_prepare_physical_deployment_accepts_local_monolithic_gpt2_source(
     mx.eval(split_logits, reference_logits)
     assert tuple(split_logits.shape) == (1, 3, 7)
     assert str(split_logits.dtype) == "mlx.core.float16"
-    assert bool(mx.allclose(split_logits, reference_logits, rtol=1e-3, atol=1e-3).item())
+    assert bool(
+        mx.allclose(split_logits, reference_logits, rtol=1e-3, atol=1e-3).item()
+    )
 
     graph = build_execution_graph(
         deployment.assignments,
@@ -432,9 +568,7 @@ def test_prepare_physical_deployment_accepts_local_sharded_gpt2_source(
     assert deployment.model_source is not None
     assert deployment.model_source["format"] == "safetensors_sharded"
     assert tuple(item["range"] for item in deployment.assignments) == EXPECTED_RANGES
-    assert [item["path"] for item in deployment.manifest["files"]] == list(
-        SHARD_NAMES
-    )
+    assert [item["path"] for item in deployment.manifest["files"]] == list(SHARD_NAMES)
     for shard_name in SHARD_NAMES:
         copied = deployment.root / shard_name
         _assert_private_regular_file(copied)

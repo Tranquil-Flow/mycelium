@@ -14,6 +14,7 @@ from .route import InferenceCancelled, LiveRoute
 @dataclass
 class _Pending:
     request: RequestContext | None = None
+    placement_ids: tuple[str, ...] | None = None
     tokens: list[tuple[int, int]] = field(default_factory=list)
     cursor: int = 0
     terminal_status: str | None = None
@@ -79,7 +80,10 @@ class LiveRouterPort:
                 )
             if not isinstance(profile, str):
                 raise M16AdmissionError("workload_not_qualified")
-            coordinator.admit(request, workload_profile_id=profile)
+            manifest = coordinator.admit(request, workload_profile_id=profile)
+            pending.placement_ids = tuple(
+                hop.placement_id for hop in manifest.ordered_hops
+            )
         with self._lock:
             if request.request_id in self._pending:
                 if coordinator is not None:
@@ -138,12 +142,16 @@ class LiveRouterPort:
                     self_outer._changed.notify_all()
 
         try:
+            route_options: dict[str, object] = {}
+            if pending.placement_ids is not None:
+                route_options["selected_placement_ids"] = pending.placement_ids
             self._route.infer(
                 request.prompt_token_ids,
                 max_new_tokens=request.max_new_tokens,
                 request_id=request_id,
                 sink=_Collector(),
                 cancel_requested=pending.cancellation_requested.is_set,
+                **route_options,
             )
         except InferenceCancelled:
             terminal = "CANCELLED"

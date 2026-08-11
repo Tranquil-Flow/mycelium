@@ -14,6 +14,7 @@ import uuid
 from mycelium_router.contracts import ExecutionGraph, RequestContext
 from mycelium_m16_runtime import build_live_m16_runtime
 from mycelium_model_catalog import enrich_model_operation_lifecycle
+from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
 
 from .health import LIVE_QUALIFICATION_REFRESH_AFTER_MS
 from .route import LiveRoute, RouteCounters
@@ -40,6 +41,8 @@ class QualifiedDeploymentRuntime:
     workload_comparison: Mapping[str, Any] | None = None
     m16_performance_budget: Mapping[str, Any] | None = None
     model_operation: Mapping[str, Any] | None = None
+    replica_plan: Mapping[str, Any] | None = None
+    replica_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
 
 
 class LiveDeploymentRegistry:
@@ -503,6 +506,21 @@ class LiveDeploymentRegistry:
 
         with self._lock:
             return self._current().route.m17_swarm_evidence()
+
+    def m18_replica_plan(self) -> Mapping[str, Any] | None:
+        """Return selected deployment's bounded Planner-owned replica intent."""
+
+        with self._lock:
+            document = self._current().replica_plan
+            return None if document is None else validate_replica_plan(document)
+
+    def m18_replica_runtime(self) -> Mapping[str, Any] | None:
+        """Return selected deployment's Router-owned request-track ledger."""
+
+        with self._lock:
+            source = self._current().replica_runtime_source
+        document = None if source is None else source()
+        return None if document is None else validate_replica_runtime(document)
 
     def _persist(self, status: Mapping[str, Any] | None = None) -> None:
         path = self._state_path

@@ -103,7 +103,12 @@ def planner_model(model_manifest: dict) -> dict:
     }
 
 
-def bundle(model_manifest: dict, *, epoch: int = 3):
+def bundle(
+    model_manifest: dict,
+    *,
+    epoch: int = 3,
+    node_ids: tuple[str, ...] = ("node-a", "node-b"),
+):
     clock = Clock()
     store = VersionedRecordStore("swarm-a", monotonic=clock)
     service = GossipService(
@@ -115,7 +120,7 @@ def bundle(model_manifest: dict, *, epoch: int = 3):
         registry=store,
         monotonic=clock,
     )
-    for node_id in ("node-a", "node-b"):
+    for node_id in node_ids:
         status = status_payload(node_id, free_bytes=40_000_000)
         status["performance"] = copy.deepcopy(PERFORMANCE)
         store.apply(make_record(RecordKind.PROFILE, node_id=node_id, ttl_ms=10_000, payload=profile_payload(node_id)))
@@ -124,15 +129,18 @@ def bundle(model_manifest: dict, *, epoch: int = 3):
         service.submit_liveness(
             LivenessEvent(LivenessKind.PUT, "swarm-a", node_id, 1, f"boot-{node_id}-1", clock())
         )
-    for src, dst in (("node-a", "node-b"), ("node-b", "node-a")):
-        store.apply(
-            make_record(
-                RecordKind.LINK,
-                node_id=src,
-                ttl_ms=10_000,
-                payload=link_payload(src, dst),
+    for src in node_ids:
+        for dst in node_ids:
+            if src == dst:
+                continue
+            store.apply(
+                make_record(
+                    RecordKind.LINK,
+                    node_id=src,
+                    ttl_ms=10_000,
+                    payload=link_payload(src, dst),
+                )
             )
-        )
     service.drain()
     return service.capture_evidence_bundle(
         deployment_id=DEPLOYMENT_ID,
@@ -292,3 +300,58 @@ def test_rejects_gap_overlap_and_duplicate_node() -> None:
         compile_tranche(
             model_manifest=model_manifest, evidence=evidence, snapshot=snapshot, route=duplicate
         )
+
+
+def test_m18_replica_assignment_adapter_preserves_complete_tracks_and_group_ownership() -> None:
+    model_manifest = manifest()
+    evidence_value = bundle(
+        model_manifest,
+        node_ids=("node-a", "node-b", "node-c"),
+    )
+    evidence = evidence_bundle_to_dict(evidence_value)
+    policy = {
+        **POLICY,
+        "replica_budget": 1,
+        "minimum_replica_gain_fraction": 0.01,
+    }
+    snapshot = planner_snapshot_from_evidence_bundle(
+        evidence_value,
+        model=planner_model(model_manifest),
+        workload=WORKLOAD,
+        policy=policy,
+    )
+    snapshot["admitted_node_ids"] = ["node-a", "node-b"]
+    from mycelium_layer_planner.planner import plan_snapshot
+
+    route = route_plan_to_dict(plan_snapshot(snapshot))
+    assert len(route["legal_tracks"]) >= 2
+    assignments = pa.compile_bound_replica_assignments(
+        route_plan=route,
+        planner_snapshot=snapshot,
+        evidence_bundle=evidence,
+        manifest=model_manifest,
+        deployment_id=DEPLOYMENT_ID,
+        deployment_epoch=3,
+        cache_roots={node: f"/tmp/{node}" for node in ("node-a", "node-b", "node-c")},
+        runtime_by_node={node: RUNTIME for node in ("node-a", "node-b", "node-c")},
+    )
+
+    assert set(assignments) == {
+        item["placement_id"] for item in route["placements"]
+    }
+    replica_groups: dict[str, list[dict]] = {}
+    for placement in route["placements"]:
+        replica_groups.setdefault(placement["replica_group_id"], []).append(placement)
+    replicated = next(members for members in replica_groups.values() if len(members) > 1)
+    assert len(
+        {
+            tuple(assignments[item["placement_id"]]["components"])
+            for item in replicated
+        }
+    ) == 1
+    assert len(
+        {
+            tuple(assignments[item["placement_id"]]["range"].values())
+            for item in replicated
+        }
+    ) == 1

@@ -153,6 +153,14 @@ def test_m14_topology_exclusions_do_not_enter_m13_node_exclusions() -> None:
     ) == []
 
 
+def test_m18_kv_admission_covers_model_context_not_only_startup_prompt() -> None:
+    assert builder._m18_runtime_kv_bytes(
+        {"max_position_embeddings": 32_768},
+        qualification_token_count=76,
+        track_membership_count=1,
+    ) == 1_048_576
+
+
 @pytest.mark.parametrize(
     ("nodes", "error"),
     [

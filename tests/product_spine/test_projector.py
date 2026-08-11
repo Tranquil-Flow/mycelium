@@ -230,7 +230,7 @@ def test_assignment_and_load_proof_bind_current_member_stage_and_qualification()
         {
             "assignment_id": f"assignment-{index}",
             "node_id": f"node-{'a' if index == 0 else 'b'}",
-            "stage_id": f"stage-00{index}",
+            "stage_id": f"stage-00{index}-primary",
             "membership_generation": 1,
             "load_generation": 17,
             "assignment_digest": "sha256:" + ("a" if index == 0 else "b") * 64,
@@ -263,4 +263,33 @@ def test_assignment_and_load_proof_bind_current_member_stage_and_qualification()
     assert any(
         item["dimension"] == "artifacts" and item["state"] == "ready"
         for item in snapshot["readiness"]
+    )
+
+
+def test_replica_placements_are_distinct_parallel_stage_entities() -> None:
+    route = _route()
+    primary = dict(route["stages"][0])
+    replica = {
+        **primary,
+        "node_id": "node-b",
+        "placement_id": "stage-000-replica-node-b",
+    }
+    route["stages"] = [primary, replica]
+    route["peers"][0]["placements"] = [primary]
+    route["peers"][1]["placements"] = [replica]
+
+    snapshot = ProductProjector(pseudonym_salt=b"x" * 32).project(
+        members=[_member("node-a"), _member("node-b")],
+        route_status=route,
+        qualification=_qualification(),
+        now_unix_ms=1_500_000,
+    )
+
+    stages = [entity for entity in snapshot["entities"] if entity["kind"] == "stage"]
+    assert {stage["entity_id"] for stage in stages} == {
+        "stage-000-primary",
+        "stage-000-replica-node-b",
+    }
+    assert not any(
+        entity["kind"] == "directed_link" for entity in snapshot["entities"]
     )

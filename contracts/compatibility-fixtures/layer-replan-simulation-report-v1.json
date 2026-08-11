@@ -1,5 +1,5 @@
 {
-  "base_plan_digest": "sha256:66b53aa1e212495482b92e09b825eb975d0acdb56a379987051c02ed681f8bd6",
+  "base_plan_digest": "sha256:1b1fa5a005c0af462c336019a13f1f6b99930ce4e480848068ee9925e166110d",
   "cases": [
     {
       "action": "existing_track_intent",
@@ -18,8 +18,7 @@
       "recommendation": "router_builder_validate_existing_track",
       "snapshot_generation": 2,
       "surviving_track_ids": [
-        "track-000",
-        "track-002"
+        "track-000"
       ],
       "urgency": "immediate"
     },
@@ -70,6 +69,78 @@
             "admitted_node_count=4",
             "topology_cycle_cost_ms=6.9"
           ],
+          "replication": {
+            "authority": "capability_aware_replica_flow_planner",
+            "candidate_decisions": [
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-000-replica-n5",
+                "proposed_admitted_rps": 2.101151094615674,
+                "raw_gain_rps": 0.37860028625703124,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.34074025763132815
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-001-replica-n5",
+                "proposed_admitted_rps": 1.722550808358643,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-002-replica-n5",
+                "proposed_admitted_rps": 1.722550808358643,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": true,
+                "baseline_admitted_rps": 1.722550808358643,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.08612754041793215,
+                "node_id": "n5",
+                "placement_id": "stage-003-replica-n5",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.9953604442288084,
+                "reason": "accepted_positive_robust_gain",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 0.8958243998059277
+              }
+            ],
+            "kv_locality": "request_track_pinned_no_migration",
+            "minimum_gain_fraction": 0.05,
+            "parallelism_label": "data_parallel_request_routing",
+            "request_routing_semantics": "one_complete_track_per_request",
+            "route_ready": false,
+            "uncertainty_fraction": 0.1,
+            "zero_flow_removed_placement_ids": []
+          },
           "speculative": {
             "enabled": false,
             "target_fallback": true
@@ -157,6 +228,8 @@
           }
         ],
         "metrics": {
+          "primary_request_capacity_rps": 1.722550808358643,
+          "replica_capacity_gain_rps": 0.9953604442288084,
           "replicated_output_capacity_tps": 584.350919306302,
           "replicated_request_capacity_rps": 2.7179112525874514,
           "scenarios": [
@@ -276,8 +349,8 @@
         "snapshot_digest": "sha256:c95c059ae9aa4cae688eeb0741bf26d400f292d55197e8d7e2b69a329d4bb89a",
         "workload_name": "interactive_chat_v1"
       },
-      "candidate_plan_digest": "sha256:8e45f6ee62849a2d9d07bec74a70538f5deeb58a2c49a3c5a1ceb00803481ada",
-      "capacity_gain_fraction": -0.2935344152794448,
+      "candidate_plan_digest": "sha256:a584a13c7c9797ebbcb2a3b2e35046a27caf995bc1c1e82bba6836ca43db8c96",
+      "capacity_gain_fraction": -0.2915763446551339,
       "escalation_order": [
         "successor_standby_candidate",
         "full_replan"
@@ -307,8 +380,7 @@
       "recommendation": "router_builder_validate_existing_track",
       "snapshot_generation": 4,
       "surviving_track_ids": [
-        "track-001",
-        "track-002"
+        "track-001"
       ],
       "urgency": "immediate"
     },
@@ -358,6 +430,318 @@
             "admitted_node_count=4",
             "topology_cycle_cost_ms=5.4"
           ],
+          "replication": {
+            "authority": "capability_aware_replica_flow_planner",
+            "candidate_decisions": [
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-000-replica-n4",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.6039000939909522,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.543510084591857
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-001-replica-n4",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-002-replica-n4",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n4",
+                "placement_id": "stage-003-replica-n4",
+                "proposed_admitted_rps": 3.8365619669551423,
+                "raw_gain_rps": 1.7225508083586432,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 1.5502957275227789
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-000-replica-n5",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.6039000939909522,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.543510084591857
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-001-replica-n5",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-002-replica-n5",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n5",
+                "placement_id": "stage-003-replica-n5",
+                "proposed_admitted_rps": 3.5674268599044567,
+                "raw_gain_rps": 1.4534157013079576,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 1.308074131177162
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-000-replica-n6",
+                "proposed_admitted_rps": 2.7179112525874514,
+                "raw_gain_rps": 0.6039000939909522,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.543510084591857
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-001-replica-n6",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-002-replica-n6",
+                "proposed_admitted_rps": 2.114011158596499,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": true,
+                "baseline_admitted_rps": 2.114011158596499,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 0,
+                "minimum_required_gain_rps": 0.10570055792982497,
+                "node_id": "n6",
+                "placement_id": "stage-003-replica-n6",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 1.733184389736588,
+                "reason": "accepted_positive_robust_gain",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 1.559865950762929
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-000-replica-n4",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-001-replica-n4",
+                "proposed_admitted_rps": 5.5597307580569995,
+                "raw_gain_rps": 1.7125352097239124,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 1.5412816887515213
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-002-replica-n4",
+                "proposed_admitted_rps": 6.581995871772189,
+                "raw_gain_rps": 2.7348003234391016,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 2.4613202910951917
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n4",
+                "placement_id": "stage-003-replica-n4",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-000-replica-n5",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-000",
+                "robust_gain_rps": 0.0
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-001-replica-n5",
+                "proposed_admitted_rps": 5.292429283094543,
+                "raw_gain_rps": 1.4452337347614557,
+                "reason": "lower_ranked_candidate",
+                "replica_group_id": "stage-001",
+                "robust_gain_rps": 1.3007103612853101
+              },
+              {
+                "accepted": true,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-002-replica-n5",
+                "proposed_admitted_rps": 6.581995871772189,
+                "raw_gain_rps": 2.7348003234391016,
+                "reason": "accepted_positive_robust_gain",
+                "replica_group_id": "stage-002",
+                "robust_gain_rps": 2.4613202910951917
+              },
+              {
+                "accepted": false,
+                "baseline_admitted_rps": 3.847195548333087,
+                "failure_domain": "unknown",
+                "failure_domain_warning": "failure_domain_unknown",
+                "iteration": 1,
+                "minimum_required_gain_rps": 0.19235977741665436,
+                "node_id": "n5",
+                "placement_id": "stage-003-replica-n5",
+                "proposed_admitted_rps": 3.847195548333087,
+                "raw_gain_rps": 0.0,
+                "reason": "gain_below_threshold",
+                "replica_group_id": "stage-003",
+                "robust_gain_rps": 0.0
+              }
+            ],
+            "kv_locality": "request_track_pinned_no_migration",
+            "minimum_gain_fraction": 0.05,
+            "parallelism_label": "data_parallel_request_routing",
+            "request_routing_semantics": "one_complete_track_per_request",
+            "route_ready": false,
+            "uncertainty_fraction": 0.1,
+            "zero_flow_removed_placement_ids": []
+          },
           "speculative": {
             "enabled": false,
             "target_fallback": true
@@ -468,6 +852,8 @@
           }
         ],
         "metrics": {
+          "primary_request_capacity_rps": 2.114011158596499,
+          "replica_capacity_gain_rps": 4.46798471317569,
           "replicated_output_capacity_tps": 1415.1291124310205,
           "replicated_request_capacity_rps": 6.581995871772189,
           "scenarios": [
@@ -598,8 +984,8 @@
         "snapshot_digest": "sha256:2452db9c216eae5b9df44198a521cbe71cb823ea32879001ff82b056ec01bbbc",
         "workload_name": "interactive_chat_v1"
       },
-      "candidate_plan_digest": "sha256:84ac3bba8f51f4c4a5de936d8c6cb4577e933265a138a4332f5f90ffa79ac582",
-      "capacity_gain_fraction": 0.7108555541513963,
+      "candidate_plan_digest": "sha256:544e9103b49994a70cb8832d100499be5c15b79142f3ac472b2da64fb4e2a604",
+      "capacity_gain_fraction": 0.7155974355331315,
       "escalation_order": [
         "full_replan"
       ],
@@ -612,8 +998,7 @@
       "snapshot_generation": 5,
       "surviving_track_ids": [
         "track-000",
-        "track-001",
-        "track-002"
+        "track-001"
       ],
       "urgency": "deferred"
     }

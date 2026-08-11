@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 from .allocation import stage_cost
@@ -12,6 +12,23 @@ from .primary_plan import PrimaryPlan
 
 
 @dataclass(frozen=True)
+class ReplicaCandidateDecision:
+    iteration: int
+    placement_id: str
+    node_id: str
+    replica_group_id: str
+    accepted: bool
+    reason: str
+    baseline_admitted_rps: float
+    proposed_admitted_rps: float
+    raw_gain_rps: float
+    robust_gain_rps: float
+    minimum_required_gain_rps: float
+    failure_domain: str
+    failure_domain_warning: str | None
+
+
+@dataclass(frozen=True)
 class ReplicationResult:
     frozen_primary_order: tuple[str, ...]
     groups: tuple[tuple[str, ...], ...]
@@ -20,6 +37,9 @@ class ReplicationResult:
     loopback_edges: tuple[FlowEdge, ...]
     flow: FlowResult
     accepted_replica_nodes: tuple[str, ...]
+    candidate_decisions: tuple[ReplicaCandidateDecision, ...]
+    zero_flow_removed_placement_ids: tuple[str, ...]
+    primary_capacity_rps: float
     iterations: int
 
 
@@ -132,15 +152,41 @@ def replicate_stages(
     unused = set(primary.unplaced_node_ids)
     accepted: list[str] = []
     forward, loops, current = _solve(groups, placements, graph, model, workload, policy)
+    primary_capacity_rps = current.admitted
+    decisions: list[ReplicaCandidateDecision] = []
     iterations = 0
     while unused and iterations < policy.replica_budget:
         best = None
+        evaluated: list[tuple[tuple[object, ...], ReplicaCandidateDecision]] = []
         for node_id in sorted(unused):
             node = graph.nodes[node_id]
             for group_index, group in enumerate(groups):
                 template = placements[group[0]]
                 cost = stage_cost(node, template.layer_range.count, model, workload, policy)
                 if not cost.feasible or cost.service_work_ms <= 0:
+                    decisions.append(
+                        ReplicaCandidateDecision(
+                            iteration=iterations,
+                            placement_id=f"stage-{group_index:03}-replica-{node_id}",
+                            node_id=node_id,
+                            replica_group_id=template.replica_group_id,
+                            accepted=False,
+                            reason=f"resource_{cost.diagnostic or 'infeasible'}",
+                            baseline_admitted_rps=current.admitted,
+                            proposed_admitted_rps=current.admitted,
+                            raw_gain_rps=0.0,
+                            robust_gain_rps=0.0,
+                            minimum_required_gain_rps=(
+                                current.admitted * policy.minimum_replica_gain_fraction
+                            ),
+                            failure_domain=node.region,
+                            failure_domain_warning=(
+                                "failure_domain_unknown"
+                                if node.region == "unknown"
+                                else None
+                            ),
+                        )
+                    )
                     continue
                 placement_id = f"stage-{group_index:03}-replica-{node_id}"
                 proposal = StagePlacement(
@@ -165,7 +211,20 @@ def replicate_stages(
                     policy,
                 )
                 gain = proposal_flow.admitted - current.admitted
+                uncertainty = max(
+                    policy.replica_uncertainty_fraction,
+                    1.0 - node.calibration_confidence,
+                )
+                robust_gain = max(0.0, gain * (1.0 - uncertainty))
+                minimum_gain = current.admitted * policy.minimum_replica_gain_fraction
+                primary_node = graph.nodes[template.node_id]
+                failure_domain_warning = None
+                if node.region == "unknown" or primary_node.region == "unknown":
+                    failure_domain_warning = "failure_domain_unknown"
+                elif node.region == primary_node.region:
+                    failure_domain_warning = "shared_failure_domain"
                 candidate = (
+                    robust_gain,
                     gain,
                     -proposal_flow.unmet_demand,
                     placement_id,
@@ -175,11 +234,47 @@ def replicate_stages(
                     proposal_loops,
                     proposal_flow,
                 )
-                if best is None or candidate[:3] > best[:3]:
+                decision = ReplicaCandidateDecision(
+                    iteration=iterations,
+                    placement_id=placement_id,
+                    node_id=node_id,
+                    replica_group_id=template.replica_group_id,
+                    accepted=False,
+                    reason=(
+                        "gain_below_threshold"
+                        if robust_gain <= max(NUMERIC_EPSILON, minimum_gain)
+                        else "lower_ranked_candidate"
+                    ),
+                    baseline_admitted_rps=current.admitted,
+                    proposed_admitted_rps=proposal_flow.admitted,
+                    raw_gain_rps=gain,
+                    robust_gain_rps=robust_gain,
+                    minimum_required_gain_rps=minimum_gain,
+                    failure_domain=node.region,
+                    failure_domain_warning=failure_domain_warning,
+                )
+                evaluated.append((candidate, decision))
+                if best is None or candidate[:4] > best[:4]:
                     best = candidate
-        if best is None or best[0] <= NUMERIC_EPSILON:
+        if best is None or best[0] <= max(
+            NUMERIC_EPSILON,
+            current.admitted * policy.minimum_replica_gain_fraction,
+        ):
+            decisions.extend(decision for _candidate, decision in evaluated)
             break
-        _, _, _, proposal, groups, forward, loops, current = best
+        _, _, _, selected_id, proposal, groups, forward, loops, current = best
+        decisions.extend(
+            replace(
+                decision,
+                accepted=decision.placement_id == selected_id,
+                reason=(
+                    "accepted_positive_robust_gain"
+                    if decision.placement_id == selected_id
+                    else decision.reason
+                ),
+            )
+            for _candidate, decision in evaluated
+        )
         placements[proposal.placement_id] = proposal
         unused.remove(proposal.node_id)
         accepted.append(proposal.node_id)
@@ -202,5 +297,8 @@ def replicate_stages(
         loopback_edges=loops,
         flow=current,
         accepted_replica_nodes=tuple(accepted),
+        candidate_decisions=tuple(decisions),
+        zero_flow_removed_placement_ids=tuple(sorted(removable)),
+        primary_capacity_rps=primary_capacity_rps,
         iterations=iterations,
     )

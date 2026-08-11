@@ -35,6 +35,15 @@ def _safe_code(value: object, fallback: str) -> str:
     return fallback
 
 
+def _stage_entity_id(stage: Mapping[str, Any], index: int) -> str:
+    """Use the physical placement identity when one logical stage has replicas."""
+
+    placement_id = stage.get("placement_id")
+    if isinstance(placement_id, str) and placement_id:
+        return placement_id
+    return str(stage.get("stage_id", f"stage-{index}"))
+
+
 def _binding(
     *,
     deployment_id: str | None = None,
@@ -536,7 +545,7 @@ class ProductProjector:
                 if not isinstance(stage, Mapping):
                     continue
                 raw_node_id = stage.get("node_id")
-                stage_id = str(stage.get("stage_id", f"stage-{index}"))
+                stage_id = _stage_entity_id(stage, index)
                 entities.append(
                     {
                         "entity_id": stage_id,
@@ -586,9 +595,9 @@ class ProductProjector:
                         }
                     )
             stage_ids = {
-                str(stage.get("stage_id"))
-                for stage in stages
-                if isinstance(stage, Mapping) and isinstance(stage.get("stage_id"), str)
+                _stage_entity_id(stage, index)
+                for index, stage in enumerate(stages)
+                if isinstance(stage, Mapping)
             }
             seen_assignment_ids: set[str] = set()
             seen_load_proof_ids: set[str] = set()
@@ -719,6 +728,13 @@ class ProductProjector:
                     destination_stage,
                     Mapping,
                 ):
+                    continue
+                if (
+                    isinstance(source_stage.get("stage_id"), str)
+                    and source_stage.get("stage_id") == destination_stage.get("stage_id")
+                ):
+                    # Replica placements are parallel alternatives, not an
+                    # activation-plane hop between devices.
                     continue
                 source_device = public_member_ids.get(
                     str(source_stage.get("node_id"))

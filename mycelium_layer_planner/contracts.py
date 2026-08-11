@@ -210,6 +210,8 @@ class PlanningPolicy:
     clustered_max_nodes: int = 128
     search_candidate_budget: int = 100_000
     replica_budget: int = 32
+    minimum_replica_gain_fraction: float = 0.05
+    replica_uncertainty_fraction: float = 0.1
     conservative_bandwidth_Bps: Optional[float] = 1_000_000.0
     exclude_missing_bandwidth: bool = False
     jitter_guard_sigma: float = 2.0
@@ -230,6 +232,10 @@ class PlanningPolicy:
             raise ValueError("search thresholds must be positive and nondecreasing")
         if self.search_candidate_budget <= 0 or self.replica_budget < 0:
             raise ValueError("invalid planning budget")
+        if not 0 <= self.minimum_replica_gain_fraction <= 1:
+            raise ValueError("minimum replica gain fraction must be in [0, 1]")
+        if not 0 <= self.replica_uncertainty_fraction < 1:
+            raise ValueError("replica uncertainty fraction must be in [0, 1)")
         if self.conservative_bandwidth_Bps is not None and self.conservative_bandwidth_Bps <= 0:
             raise ValueError("fallback bandwidth must be positive")
         if not 0 <= self.memory_reserve_fraction < 1:

@@ -29,6 +29,7 @@ from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_request_gateway.contracts import safe_qualification_projection
 from mycelium_m16_runtime import build_live_m16_runtime
 from mycelium_performance_budget import validate_performance_budget_v3
+from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
@@ -514,6 +515,22 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "application/json; charset=utf-8",
             )
 
+        def _m18_projection(self, method_name: str, error_name: str) -> None:
+            source = getattr(self.server.route, method_name, None)
+            document = source() if callable(source) else None
+            if document is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": error_name}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
         def _select_deployment(self) -> None:
             select = getattr(self.server.route, "select", None)
             if not callable(select):
@@ -718,6 +735,10 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._m17_model_operation()
             elif parsed.path == "/__mycelium/m17-swarm-evidence" and not parsed.query:
                 self._m17_swarm_evidence()
+            elif parsed.path == "/__mycelium/m18-replica-plan" and not parsed.query:
+                self._m18_projection("m18_replica_plan", "m18_replica_plan_unavailable")
+            elif parsed.path == "/__mycelium/m18-replica-runtime" and not parsed.query:
+                self._m18_projection("m18_replica_runtime", "m18_replica_runtime_unavailable")
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif parsed.path.startswith("/api/"):
@@ -837,6 +858,32 @@ def _m17_model_operation(deployment_dir: Path) -> Mapping[str, Any] | None:
     return document
 
 
+def _m18_replica_plan(deployment_dir: Path) -> Mapping[str, Any] | None:
+    path = Path(deployment_dir) / "m18-replica-plan.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+        raise ValueError("m18_replica_plan_unsafe")
+    try:
+        document = json.loads(path.read_text("utf-8"))
+        return validate_replica_plan(document)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+        raise ValueError("m18_replica_plan_invalid") from exc
+
+
+def _m18_replica_runtime(deployment_dir: Path) -> Mapping[str, Any] | None:
+    path = Path(deployment_dir) / "m18-replica-runtime.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+        raise ValueError("m18_replica_runtime_unsafe")
+    try:
+        document = json.loads(path.read_text("utf-8"))
+        return validate_replica_runtime(document)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+        raise ValueError("m18_replica_runtime_invalid") from exc
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -881,6 +928,7 @@ def _qualified_runtime(
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         codec = prompt_codec_from_deployment(selected_deployment_dir)
         route.set_stop_token_ids(getattr(codec, "stop_token_ids", frozenset()))
+        replica_runtime = _m18_replica_runtime(selected_deployment_dir)
         return QualifiedDeploymentRuntime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,
@@ -896,6 +944,12 @@ def _qualified_runtime(
             workload_comparison=_workload_comparison(selected_deployment_dir),
             m16_performance_budget=_m16_performance_budget(selected_deployment_dir),
             model_operation=_m17_model_operation(selected_deployment_dir),
+            replica_plan=_m18_replica_plan(selected_deployment_dir),
+            replica_runtime_source=(
+                None
+                if replica_runtime is None
+                else lambda document=replica_runtime: document
+            ),
         )
     except BaseException:
         route.close()
@@ -1013,6 +1067,12 @@ def run_physical_server(
             workload_comparison=_workload_comparison(selected_deployment_dir),
         )
         route.set_m17_model_operation(_m17_model_operation(selected_deployment_dir))
+        route.set_m18_replica_plan(_m18_replica_plan(selected_deployment_dir))
+        replica_runtime = _m18_replica_runtime(selected_deployment_dir)
+        if replica_runtime is not None:
+            route.set_m18_replica_runtime_source(
+                lambda document=replica_runtime: document
+            )
         stack = build_live_stack(
             route=route,
             deployment_dir=selected_deployment_dir,

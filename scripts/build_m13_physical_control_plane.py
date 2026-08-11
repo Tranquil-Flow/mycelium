@@ -126,6 +126,9 @@ def _compile(
     captured_at_unix_ms: int,
     signer: Any,
     authority_generation: int,
+    workload_override: dict[str, Any] | None = None,
+    policy_override: dict[str, Any] | None = None,
+    admitted_node_ids: tuple[str, ...] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     swarm_id = measurements["swarm_id"]
     def clock() -> float:
@@ -141,13 +144,13 @@ def _compile(
         monotonic=clock,
     )
     model = _model(manifest)
-    workload = {
+    workload = workload_override or {
         "preset": "interactive_chat_v1",
         "concurrency_points": [1],
         "user_scale": 1,
         "context_bucket": "interactive-4k",
     }
-    policy = {
+    policy = policy_override or {
         "memory_reserve_fraction": 0,
         "replica_budget": 0,
         "ttft_slo_ms": 1_000_000.0,
@@ -295,6 +298,7 @@ def _compile(
         workload=workload,
         policy=policy,
         quantization="int8-weight-only",
+        admitted_node_ids=admitted_node_ids,
     )
     route = route_plan_to_dict(
         plan_signed_evidence(
@@ -305,6 +309,7 @@ def _compile(
             workload=workload,
             policy=policy,
             quantization="int8-weight-only",
+            admitted_node_ids=admitted_node_ids,
         )
     )
     return signed, snapshot, route

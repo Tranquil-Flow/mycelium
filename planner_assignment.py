@@ -180,6 +180,188 @@ def product_route_to_manual_provisioning_route(
     return manual
 
 
+def _replica_track_to_manual_provisioning_route(
+    *,
+    route_plan: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    track: Mapping[str, Any],
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Project exactly one complete M18 track into the existing loader contract."""
+
+    placement_ids = track.get("placement_ids")
+    if (
+        not isinstance(placement_ids, list)
+        or not placement_ids
+        or len(set(placement_ids)) != len(placement_ids)
+    ):
+        raise ValueError("replica track placement_ids must be unique and non-empty")
+    placements_raw = route_plan.get("placements")
+    if not isinstance(placements_raw, list) or not placements_raw:
+        raise ValueError("route placements must be non-empty")
+    placements = {
+        item.get("placement_id"): item
+        for item in placements_raw
+        if isinstance(item, Mapping) and isinstance(item.get("placement_id"), str)
+    }
+    if len(placements) != len(placements_raw):
+        raise ValueError("route placement IDs must be unique and non-empty")
+    expected_start = 0
+    seen_groups: set[str] = set()
+    seen_nodes: set[str] = set()
+    manual_stages: list[dict[str, Any]] = []
+    for placement_id in placement_ids:
+        placement = placements.get(placement_id)
+        if placement is None:
+            raise ValueError(f"replica track references unknown placement {placement_id}")
+        group_id = placement.get("replica_group_id")
+        node_id = placement.get("node_id")
+        layer_range = placement.get("layer_range")
+        if not isinstance(group_id, str) or not group_id or group_id in seen_groups:
+            raise ValueError("replica track must select one placement per group")
+        if not isinstance(node_id, str) or not node_id or node_id in seen_nodes:
+            raise ValueError("replica track must use one placement per node")
+        if not isinstance(layer_range, Mapping):
+            raise ValueError("replica track layer range is invalid")
+        start, end = layer_range.get("start"), layer_range.get("end")
+        if (
+            type(start) is not int
+            or type(end) is not int
+            or start != expected_start
+            or end <= start
+        ):
+            raise ValueError("replica track contains a layer gap or overlap")
+        seen_groups.add(group_id)
+        seen_nodes.add(node_id)
+        manual_stages.append(
+            {
+                "node_id": node_id,
+                "range": {
+                    "start_layer": start,
+                    "end_layer_exclusive": end,
+                    "layer_count": end - start,
+                },
+            }
+        )
+        expected_start = end
+    if expected_start != manifest.get("num_layers"):
+        raise ValueError("replica track contains a layer gap or overlap")
+    manual = {
+        "ok": True,
+        "protocol": "mycelium.manual_provisioning_route.v1",
+        "source_protocol": "mycelium.route_plan.v2",
+        "model": {
+            "model_id": manifest["model_id"],
+            "num_layers": manifest["num_layers"],
+            "manifest_digest": mm.manifest_digest_ref(dict(manifest)),
+            "resolved_commit": manifest["resolved_commit"],
+        },
+        "route": manual_stages,
+        "node_order": [stage["node_id"] for stage in manual_stages],
+        "claim_boundary": (
+            "one complete replica track projected for assignment-local provisioning; "
+            "runtime qualification remains separate"
+        ),
+    }
+    validate_manual_provisioning_route_v1(manual)
+    return manual, tuple(placement_ids)
+
+
+def compile_bound_replica_assignments(
+    *,
+    route_plan: Mapping[str, Any] | RoutePlanV2,
+    planner_snapshot: Mapping[str, Any],
+    evidence_bundle: Mapping[str, Any],
+    manifest: dict[str, Any],
+    deployment_id: str,
+    deployment_epoch: int,
+    cache_roots: dict[str, str],
+    runtime_by_node: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Compile every unique placement from complete M18 legal tracks.
+
+    Shared placements are compiled once and must have identical assignment identity
+    wherever a track references them. Replica placements retain the exact same layer
+    and component ownership as their group primary through the normal assignment
+    compiler.
+    """
+
+    route_wire = _route_wire(route_plan)
+    bundle, snapshot_digest = _validate_lineage(
+        route_plan=route_wire,
+        planner_snapshot=planner_snapshot,
+        evidence_bundle=evidence_bundle,
+        manifest=manifest,
+        deployment_id=deployment_id,
+        deployment_epoch=deployment_epoch,
+    )
+    tracks = route_wire.get("legal_tracks")
+    if not isinstance(tracks, list) or len(tracks) < 2:
+        raise ValueError("replica assignment requires two or more legal tracks")
+    binding = {
+        "protocol": CONTROL_PLANE_BINDING_PROTOCOL,
+        "evidence_bundle_digest": bundle["evidence_bundle_digest"],
+        "planner_snapshot_digest": snapshot_digest,
+        "snapshot_generation": bundle["snapshot_generation"],
+        "swarm_id": bundle["swarm_id"],
+        "deployment_id": deployment_id,
+        "deployment_epoch": deployment_epoch,
+    }
+    by_placement: dict[str, dict[str, Any]] = {}
+    for track in tracks:
+        if not isinstance(track, Mapping) or not isinstance(
+            track.get("traffic_fraction"), (int, float)
+        ) or track["traffic_fraction"] <= 0:
+            raise ValueError("replica assignment track is invalid")
+        manual, placement_ids = _replica_track_to_manual_provisioning_route(
+            route_plan=route_wire,
+            manifest=manifest,
+            track=track,
+        )
+        assignments = compile_layer_assignments(
+            route_plan=manual,
+            manifest=manifest,
+            deployment_id=deployment_id,
+            deployment_epoch=deployment_epoch,
+            cache_roots=cache_roots,
+            runtime_by_node=runtime_by_node,
+            control_plane_binding=binding,
+        )
+        for placement_id, assignment in zip(
+            placement_ids, assignments, strict=True
+        ):
+            existing = by_placement.get(placement_id)
+            if existing is not None and existing != assignment:
+                raise ValueError("shared replica placement compiled inconsistently")
+            by_placement[placement_id] = assignment
+    planned_ids = {
+        item.get("placement_id")
+        for item in route_wire.get("placements", [])
+        if isinstance(item, Mapping)
+    }
+    if set(by_placement) != planned_ids:
+        raise ValueError("replica plan contains an unprovisioned zero-flow placement")
+    groups: dict[str, list[Mapping[str, Any]]] = {}
+    for item in route_wire["placements"]:
+        groups.setdefault(item["replica_group_id"], []).append(item)
+    for group_id, members in groups.items():
+        ranges = {
+            (
+                item["layer_range"]["start"],
+                item["layer_range"]["end"],
+            )
+            for item in members
+        }
+        assignment_components = {
+            tuple(by_placement[item["placement_id"]]["components"])
+            for item in members
+        }
+        if len(ranges) != 1 or len(assignment_components) != 1:
+            raise ValueError(f"replica group ownership mismatch: {group_id}")
+    for assignment in by_placement.values():
+        validate_assignment_identity(assignment)
+    return by_placement
+
+
 def compile_bound_layer_assignments(
     *,
     route_plan: Mapping[str, Any] | RoutePlanV2,

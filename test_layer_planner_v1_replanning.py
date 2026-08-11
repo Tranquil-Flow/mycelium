@@ -90,7 +90,7 @@ class ReplanningTests(unittest.TestCase):
         )
         self.assertEqual(assessment.action, "existing_track_intent")
         self.assertEqual(assessment.urgency, "immediate")
-        self.assertEqual(assessment.surviving_track_ids, ("track-000", "track-002"))
+        self.assertEqual(assessment.surviving_track_ids, ("track-000",))
         self.assertTrue(assessment.external_readiness_required)
         self.assertEqual(assessment.escalation_order, ())
 
@@ -147,7 +147,7 @@ class ReplanningTests(unittest.TestCase):
             self.event("edge_unavailable", edges=(("n2", "n3"),)),
         )
         self.assertEqual(assessment.action, "existing_track_intent")
-        self.assertEqual(assessment.surviving_track_ids, ("track-001", "track-002"))
+        self.assertEqual(assessment.surviving_track_ids, ("track-001",))
 
         reverse = assess_topology_event(
             self.plan,

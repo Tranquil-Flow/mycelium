@@ -183,6 +183,7 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
     class ControlledRoute:
         def __init__(self) -> None:
             self.started: list[str] = []
+            self.selected: dict[str, tuple[str, ...]] = {}
             self.gates: dict[str, threading.Event] = {}
             self.released: list[str] = []
             self.route_lock = threading.Lock()
@@ -190,9 +191,19 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
         def is_alive(self) -> bool:
             return True
 
-        def infer(self, _tokens, *, request_id, sink, cancel_requested, **_kwargs):
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            sink,
+            cancel_requested,
+            selected_placement_ids,
+            **_kwargs,
+        ):
             with self.route_lock:
                 self.started.append(request_id)
+                self.selected[request_id] = tuple(selected_placement_ids)
                 gate = self.gates.setdefault(request_id, threading.Event())
                 while not gate.wait(0.01):
                     if cancel_requested():
@@ -223,6 +234,7 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
 
     port.admit(_request("batch-active", "batch"), Sink(), workload_profile_id="sustained_batch_v1")
     wait_for(lambda: route.started == ["batch-active"])
+    assert route.selected["batch-active"] == ("placement-a", "placement-b")
     port.admit(_request("batch-queued", "batch"), Sink(), workload_profile_id="sustained_batch_v1")
     port.admit(_request("interactive-queued"), Sink(), workload_profile_id="interactive_chat_v1")
 

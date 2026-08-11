@@ -969,6 +969,17 @@
         "admitted_node_count=2",
         "topology_cycle_cost_ms=2"
       ],
+      "replication": {
+        "authority": "capability_aware_replica_flow_planner",
+        "candidate_decisions": [],
+        "kv_locality": "request_track_pinned_no_migration",
+        "minimum_gain_fraction": 0.05,
+        "parallelism_label": "data_parallel_request_routing",
+        "request_routing_semantics": "one_complete_track_per_request",
+        "route_ready": false,
+        "uncertainty_fraction": 0.1,
+        "zero_flow_removed_placement_ids": []
+      },
       "speculative": {
         "enabled": false,
         "target_fallback": true
@@ -1014,6 +1025,8 @@
       }
     ],
     "metrics": {
+      "primary_request_capacity_rps": 4.197297611905551,
+      "replica_capacity_gain_rps": 0.0,
       "replicated_output_capacity_tps": 902.4189865596935,
       "replicated_request_capacity_rps": 4.197297611905551,
       "scenarios": [

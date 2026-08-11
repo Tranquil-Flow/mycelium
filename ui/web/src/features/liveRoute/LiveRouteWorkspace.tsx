@@ -22,6 +22,7 @@ import {
   type M17ModelOperation,
   type M17ModelOperationClient,
 } from './m17ModelOperation';
+import { M18ReplicationSourcePanel } from './M18ReplicationSourcePanel';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -154,6 +155,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'network' ? (
         <>
+          <M18ReplicationSourcePanel view="network" hideUnavailable />
           {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="network" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="network" />}
           {status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="network" />}
@@ -174,7 +176,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'plans' ? (
-        <>{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
+        <><M18ReplicationSourcePanel view="plans" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
           <p>This is observed physical execution, not a modeled alternative.</p>
           <dl className={styles.measurements}>
@@ -190,6 +192,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'readiness' ? (
         <>
+          <M18ReplicationSourcePanel view="readiness" hideUnavailable />
           {modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="readiness" />}
           {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="readiness" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="readiness" />}
@@ -210,7 +213,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'incidents' ? (
-        <>{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="incidents" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
+        <><M18ReplicationSourcePanel view="incidents" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="incidents" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
           <h2 id="live-incidents-title">Physical route incident log</h2>
           {status.counters.fatal === null && status.incidents.length === 0 ? (
             <p>No active physical route incident. All projected peers remain on the qualified topology.</p>
