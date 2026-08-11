@@ -28,6 +28,7 @@ import { HttpDeploymentRegistryClient } from './features/inference/deploymentCli
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
+import { HttpM20SpeculationClient } from './features/liveRoute/m20Speculation';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
 import {
   ProductEvidenceSettings,
@@ -73,6 +74,7 @@ const emptyFeatureRegistry = createProductFeatureRegistry([]);
 const fixtureInferenceClient = new FixtureInferenceClient();
 const liveM15ComparisonClient = new HttpM15ComparisonClient();
 const liveDeploymentRegistryClient = new HttpDeploymentRegistryClient();
+const liveM20SpeculationClient = new HttpM20SpeculationClient();
 const recordedLifecycleProjections = Object.freeze(
   LIFECYCLE_STATE_ORDER.map((state) => projectLifecycle(preparingFixture({ state }))),
 );
@@ -288,7 +290,7 @@ export default function App({
     content = <>
       <ProductEvidenceSummary compact />
       <ProductEvidenceSettings />
-      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} />
+      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} speculationClient={source.source_mode === 'live' ? liveM20SpeculationClient : null} />
     </>;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;

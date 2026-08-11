@@ -168,6 +168,9 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             float(timing.get("proposal_transfer_ms", 0.0)),
             runtime_supported=bool(timing.get("runtime_supported", False)),
             proposal_payload_bytes=int(timing.get("proposal_payload_bytes", 16)),
+            material_gain_threshold=float(
+                timing.get("material_gain_threshold", 0.10)
+            ),
         )
         speculative_diagnostics = {
             "enabled": result.enabled,
@@ -175,6 +178,9 @@ def plan_snapshot(snapshot: Mapping[str, Any]) -> RoutePlanV2:
             "reason": result.reason,
             "target_fallback": result.target_fallback,
             "expected_accepted_tokens": result.expected_accepted_tokens,
+            "expected_committed_tokens": result.expected_committed_tokens,
+            "predicted_gain_fraction": result.predicted_gain_fraction,
+            "material_gain_threshold": result.material_gain_threshold,
             "draft_kv_owner": result.draft_kv_owner,
             "target_kv_owner": result.target_kv_owner,
         }

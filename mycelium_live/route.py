@@ -852,6 +852,39 @@ class PhysicalLiveRoute:
             document = getattr(self, "_m19_recovery_runtime", None)
             return None if document is None else json.loads(json.dumps(document))
 
+    def set_m20_speculative_evidence(
+        self,
+        *,
+        plan: Mapping[str, Any] | None,
+        runtime: Mapping[str, Any] | None,
+    ) -> None:
+        """Attach M20 evidence without changing target-only route authority."""
+
+        from mycelium_m20_speculation import (
+            validate_speculative_plan,
+            validate_speculative_runtime,
+        )
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._m20_speculative_plan = (
+                None if plan is None else validate_speculative_plan(plan)
+            )
+            self._m20_speculative_runtime = (
+                None if runtime is None else validate_speculative_runtime(runtime)
+            )
+
+    def m20_speculative_plan(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m20_speculative_plan", None)
+            return None if document is None else json.loads(json.dumps(document))
+
+    def m20_speculative_runtime(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m20_speculative_runtime", None)
+            return None if document is None else json.loads(json.dumps(document))
+
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
         """Capture one fresh set of independently signed node resource observations."""
 

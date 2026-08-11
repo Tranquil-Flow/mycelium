@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { M15ComparisonClient, M15PlanComparison } from '../liveRoute/m15Comparison';
 import type { DeploymentRegistryClient, DeploymentRegistryStatus } from '../inference/deploymentClient';
+import type { M20SpeculationClient, M20SpeculativePlan } from '../liveRoute/m20Speculation';
 import { useProductSettings } from './SettingsContext';
 import styles from '../membership/Membership.module.css';
 
-export function SettingsWorkspace({ workloadClient = null, deploymentClient = null }: { readonly workloadClient?: M15ComparisonClient | null; readonly deploymentClient?: DeploymentRegistryClient | null }) {
+export function SettingsWorkspace({ workloadClient = null, deploymentClient = null, speculationClient = null }: { readonly workloadClient?: M15ComparisonClient | null; readonly deploymentClient?: DeploymentRegistryClient | null; readonly speculationClient?: M20SpeculationClient | null }) {
   const { settings, update, reset } = useProductSettings();
   const [comparison, setComparison] = useState<M15PlanComparison | null>(null);
   const [registry, setRegistry] = useState<DeploymentRegistryStatus | null>(null);
   const [deploymentError, setDeploymentError] = useState<string | null>(null);
+  const [speculativePlan, setSpeculativePlan] = useState<M20SpeculativePlan | null>(null);
   useEffect(() => {
     if (workloadClient === null) return;
     let active = true;
@@ -30,6 +32,15 @@ export function SettingsWorkspace({ workloadClient = null, deploymentClient = nu
     });
     return () => controller.abort();
   }, [deploymentClient, settings.preferredDeploymentId, update]);
+  useEffect(() => {
+    if (speculationClient === null) return;
+    const controller = new AbortController();
+    void speculationClient.load(controller.signal).then(([plan]) => {
+      setSpeculativePlan(plan);
+      if (plan.decision.state !== 'qualified_enabled' && settings.preferSpeculativeDecoding) update({ preferSpeculativeDecoding: false });
+    }).catch(() => { if (!controller.signal.aborted) setSpeculativePlan(null); });
+    return () => controller.abort();
+  }, [settings.preferSpeculativeDecoding, speculationClient, update]);
 
   const selectPreferredDeployment = async (deploymentId: string) => {
     if (deploymentClient === null || registry === null || deploymentId.length === 0) {
@@ -67,6 +78,10 @@ export function SettingsWorkspace({ workloadClient = null, deploymentClient = nu
       </select></label>
       <p>Only deployments currently accepted by the qualifier are offered. Changing this preference atomically changes future admissions and never rebinds an in-flight request.</p>
       {deploymentError === null ? null : <p role="alert">Model preference not changed: {deploymentError}</p>}
+    </section>
+    <section className={styles.panel} aria-labelledby="speculative-default-title"><h3 id="speculative-default-title">Qualified speculative decoding</h3>
+      <label><input type="checkbox" checked={settings.preferSpeculativeDecoding} disabled={speculativePlan?.decision.state !== 'qualified_enabled'} onChange={(event) => update({ preferSpeculativeDecoding: event.target.checked })} /> Prefer the qualified draft overlay for future requests</label>
+      <p>{speculativePlan === null ? 'M20 qualification unavailable.' : speculativePlan.decision.state === 'qualified_enabled' ? `${speculativePlan.draft.model_id} may draft for ${speculativePlan.target.model_id}; the target remains authoritative.` : `Disabled: ${speculativePlan.decision.reason.replaceAll('_', ' ')}. Target-only inference remains active.`}</p>
     </section>
     <button type="button" onClick={reset}>Reset local preferences</button>
   </div>;

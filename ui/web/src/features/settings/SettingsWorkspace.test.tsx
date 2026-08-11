@@ -4,6 +4,8 @@ import { SettingsProvider } from './SettingsContext';
 import { SettingsWorkspace } from './SettingsWorkspace';
 import fixture from '../../../../../contracts/compatibility-fixtures/m15-plan-comparison-v1.json';
 import { decodeM15PlanComparison } from '../liveRoute/m15Comparison';
+import { decodeM20SpeculativePlan, decodeM20SpeculativeRuntime } from '../liveRoute/m20Speculation';
+import { m20PlanFixture, m20RuntimeFixture } from '../liveRoute/m20SpeculationFixtures';
 
 describe('SettingsWorkspace', () => {
   beforeEach(() => localStorage.clear());
@@ -44,6 +46,14 @@ describe('SettingsWorkspace', () => {
     await waitFor(() => expect(localStorage.getItem('mycelium.product-ui.preferences.v1')).toContain('sustained_batch_v1'));
     expect(screen.getByText(/future inference requests/i)).toBeInTheDocument();
     expect(screen.getByText(/does not imply.*admission.*queueing.*batching/i)).toBeInTheDocument();
+  });
+
+  it('keeps speculative preference disabled with the measured M20 reason', async () => {
+    const speculationClient = { load: async () => [decodeM20SpeculativePlan(structuredClone(m20PlanFixture)), decodeM20SpeculativeRuntime(structuredClone(m20RuntimeFixture))] as const };
+    render(<SettingsProvider><SettingsWorkspace speculationClient={speculationClient} /></SettingsProvider>);
+    const preference = await screen.findByRole('checkbox', { name: /prefer the qualified draft overlay/i });
+    expect(preference).toBeDisabled();
+    expect(screen.getByText(/batched target verification unavailable/i)).toBeInTheDocument();
   });
 
   it('stores only a qualifier-listed model deployment preference', async () => {

@@ -24,6 +24,7 @@ import {
 } from './m17ModelOperation';
 import { M18ReplicationSourcePanel } from './M18ReplicationSourcePanel';
 import { M19RecoverySourcePanel } from './M19RecoverySourcePanel';
+import { M20SpeculationSourcePanel } from './M20SpeculationSourcePanel';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -178,7 +179,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'plans' ? (
-        <><M19RecoverySourcePanel view="plans" hideUnavailable /><M18ReplicationSourcePanel view="plans" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
+        <><M20SpeculationSourcePanel view="plans" hideUnavailable /><M19RecoverySourcePanel view="plans" hideUnavailable /><M18ReplicationSourcePanel view="plans" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
           <p>This is observed physical execution, not a modeled alternative.</p>
           <dl className={styles.measurements}>
@@ -194,6 +195,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'readiness' ? (
         <>
+          <M20SpeculationSourcePanel view="readiness" hideUnavailable />
           <M19RecoverySourcePanel view="readiness" hideUnavailable />
           <M18ReplicationSourcePanel view="readiness" hideUnavailable />
           {modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="readiness" />}
