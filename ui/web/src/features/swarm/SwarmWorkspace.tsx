@@ -14,10 +14,21 @@ export interface SwarmWorkspaceProps {
   readonly concealNetworkIdentity?: boolean;
   readonly readOnly?: boolean;
   readonly readOnlyReason?: string;
+  readonly targetDeviceEnrollment?: boolean;
+  readonly supportsBrowserProbes?: boolean;
 }
 
+const ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  member_in_active_route: 'This node is serving the active route. Select or stop that deployment before revoking it.',
+  member_unknown: 'That member is no longer present in the durable membership authority.',
+  swarm_operator_unavailable: 'Owner enrollment is not configured on this live server.',
+  join_on_target_device_required: 'Use the signed invite bundle on the device being added.',
+  capability_not_supported: 'This live server does not support that enrollment capability.',
+};
+
 function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message.length > 0 ? error.message : 'swarm_request_failed';
+  const code = error instanceof Error && error.message.length > 0 ? error.message : 'swarm_request_failed';
+  return ERROR_MESSAGES[code] ?? code.replaceAll('_', ' ');
 }
 
 function InviteCard({ invite, now }: { invite: SwarmInviteResponse; now: number }) {
@@ -26,6 +37,15 @@ function InviteCard({ invite, now }: { invite: SwarmInviteResponse; now: number 
   const title = invite.capability === 'native_inference_node'
     ? 'Active native-node invite'
     : 'Active browser-probe invite';
+  const downloadInvite = () => {
+    const blob = new Blob([`${invite.invite_code}\n`], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'mycelium-native-node.invite.json';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
   return (
     <section className={styles.invite} role="region" aria-label={title}>
       <div>
@@ -35,8 +55,11 @@ function InviteCard({ invite, now }: { invite: SwarmInviteResponse; now: number 
       <code>{invite.invite_code}</code>
       <div className={styles.actions}>
         <button type="button" onClick={() => void navigator.clipboard.writeText(invite.invite_code)}>
-          Copy invite code
+          Copy signed invite bundle
         </button>
+        {invite.capability === 'native_inference_node' ? (
+          <button type="button" onClick={downloadInvite}>Download invite file</button>
+        ) : null}
         <button type="button" onClick={() => void navigator.clipboard.writeText(qrPayload)}>
           Copy QR payload
         </button>
@@ -52,6 +75,8 @@ export function SwarmWorkspace({
   concealNetworkIdentity = false,
   readOnly = false,
   readOnlyReason = 'Enrollment and membership changes are unavailable in offline evidence mode.',
+  targetDeviceEnrollment = false,
+  supportsBrowserProbes = true,
 }: SwarmWorkspaceProps) {
   const defaultClient = useMemo(() => new HttpSwarmClient({ now }), [now]);
   const swarmClient = client ?? defaultClient;
@@ -237,12 +262,19 @@ export function SwarmWorkspace({
         <aside className={styles.panel} aria-labelledby="enroll-title">
           <p className={styles.eyebrow}>Coordinator enrollment</p>
           <h2 id="enroll-title">Invite or join</h2>
-          <p>Invites are bounded, single-use enrollment material. They are never stored by this page.</p>
+          <p>Invites are bounded, single-use enrollment material. They are never persisted by this page.</p>
           {readOnly ? <p role="status">{readOnlyReason}</p> : null}
           <button type="button" onClick={() => void createInvite('native_inference_node')} disabled={busy || readOnly}>
             Create native-node invite
           </button>
-          <form className={styles.join} onSubmit={(event) => void join(event)}>
+          {targetDeviceEnrollment ? (
+            <div className={styles.join}>
+              <strong>Complete enrollment on the new device</strong>
+              <p>Download the signed invite file, copy it to the device, then start its native Mycelium node with that file. The device supplies its own identity and capabilities to the seed.</p>
+              <code>python3.14 -m mycelium_node --seed-invite mycelium-native-node.invite.json --data-dir &lt;private-state-dir&gt; --node-id &lt;unique-name&gt; --advertise https://&lt;reachable-address&gt; --sidecar-path &lt;iroh-sidecar&gt;</code>
+              <p>After joining, refresh inventory. The scheduler must re-evaluate capacity and placement before the node can serve a model stage.</p>
+            </div>
+          ) : <form className={styles.join} onSubmit={(event) => void join(event)}>
             <label>
               <span>Invite code</span>
               <input
@@ -266,13 +298,13 @@ export function SwarmWorkspace({
               />
             </label>
             <button type="submit" disabled={busy || readOnly || inviteCode.length < 16}>Join swarm</button>
-          </form>
+          </form>}
         </aside>
       </div>
 
       {invite !== null ? <InviteCard invite={invite} now={now()} /> : null}
 
-      <details className={styles.developer}>
+      {supportsBrowserProbes ? <details className={styles.developer}>
         <summary>Developer/probe browser workers</summary>
         <div>
           <p>Synthetic matrix probe only. Browser work cannot set model, stage, inference, or route readiness.</p>
@@ -281,7 +313,7 @@ export function SwarmWorkspace({
             Create browser-probe invite
           </button>
         </div>
-      </details>
+      </details> : null}
 
       <footer className={styles.boundary}>
         Route readiness is qualifier-owned. Enrollment does not establish physical qualification and does not mutate Router state.

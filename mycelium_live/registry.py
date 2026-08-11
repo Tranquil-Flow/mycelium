@@ -606,6 +606,34 @@ class LiveDeploymentRegistry:
                 qualification=qualification
             )
 
+    def mint_native_invite(
+        self,
+        *,
+        seed_url: str,
+        ttl_seconds: int,
+        nonce: str,
+    ) -> Mapping[str, Any]:
+        """Delegate enrollment to the selected route's shared seed authority."""
+
+        with self._lock:
+            source = getattr(self._current().route, "mint_native_invite", None)
+            if not callable(source):
+                raise RuntimeError("live_seed_authority_unavailable")
+            return source(
+                seed_url=seed_url,
+                ttl_seconds=ttl_seconds,
+                nonce=nonce,
+            )
+
+    def revoke_native_member(self, member_id: str) -> Mapping[str, Any]:
+        """Delegate standby-member fencing to the selected route authority."""
+
+        with self._lock:
+            source = getattr(self._current().route, "revoke_native_member", None)
+            if not callable(source):
+                raise RuntimeError("live_seed_authority_unavailable")
+            return source(member_id)
+
     def product_membership_records(self) -> tuple[dict[str, Any], ...]:
         with self._lock:
             source = getattr(self._current().route, "product_membership_records", None)

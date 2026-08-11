@@ -147,7 +147,7 @@ describe('InferenceWorkspace', () => {
       />,
     );
 
-    const selector = await screen.findByLabelText('Active qualified model and deployment');
+    const selector = await screen.findByLabelText('Model');
     await waitFor(() => expect(selector).toBeEnabled());
     fireEvent.change(selector, { target: { value: 'deployment-b' } });
 

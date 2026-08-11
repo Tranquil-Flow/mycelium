@@ -8,5 +8,5 @@ export function M19RecoverySourcePanel({ view, client, hideUnavailable = false }
   useEffect(() => { let mounted = true; let controller: AbortController | null = null; const load = () => { if (controller !== null) return; const current = new AbortController(); controller = current; void source.load(current.signal).then((value) => { if (mounted) { setEvidence(value); setError(null); } }).catch((reason) => { if (mounted && !current.signal.aborted) { setEvidence(null); setError(reason instanceof Error ? reason.message : 'm19_recovery_unavailable'); } }).finally(() => { if (controller === current) controller = null; }); }; load(); const timer = window.setInterval(load, 2_000); return () => { mounted = false; controller?.abort(); window.clearInterval(timer); }; }, [source]);
   if (evidence !== null) return <M19RecoveryPanel liveness={evidence[0]} plan={evidence[1]} runtime={evidence[2]} view={view} />;
   if (hideUnavailable) return null;
-  return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading M19 recovery evidence…' : `M19 recovery evidence unavailable: ${error}`}</section>;
+  return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading recovery evidence…' : `Recovery evidence unavailable: ${error}`}</section>;
 }

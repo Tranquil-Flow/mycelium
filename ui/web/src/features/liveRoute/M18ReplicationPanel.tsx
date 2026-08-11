@@ -11,8 +11,8 @@ export function M18ReplicationPanel({ plan, runtime, view }: { readonly plan: M1
   const accepted = plan.candidate_decisions.filter((item) => item.accepted);
   const rejected = plan.candidate_decisions.filter((item) => !item.accepted);
   const latestRequests = runtime?.requests.slice(-8) ?? [];
-  return <section className={styles.panel} aria-label={`M18 ${view} replicated throughput evidence`}>
-    <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>M18 · replicated throughput</p><h2>{view === 'plans' ? 'Capability-aware replica plan' : view === 'network' ? 'Complete legal request tracks' : view === 'nodes' ? 'Replica placements by node' : view === 'readiness' ? 'Replica qualification lifecycle' : view === 'incidents' ? 'Replica degradation evidence' : 'Immutable request-track attribution'}</h2></div><span className={styles.evidenceBadge}>data parallel</span></div>
+  return <section className={styles.panel} aria-label={`${view} replicated throughput evidence`}>
+    <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>Replicated throughput</p><h2>{view === 'plans' ? 'Capability-aware replica plan' : view === 'network' ? 'Complete legal request tracks' : view === 'nodes' ? 'Replica placements by node' : view === 'readiness' ? 'Replica qualification lifecycle' : view === 'incidents' ? 'Replica degradation evidence' : 'Immutable request-track attribution'}</h2></div><span className={styles.evidenceBadge}>data parallel</span></div>
     <p>Requests are distributed across complete tracks. A single request is never tensor-split across replicas, and its KV remains pinned to its admitted track.</p>
     {view === 'plans' ? <>
       <dl className={styles.measurements}>
@@ -34,7 +34,7 @@ export function M18ReplicationPanel({ plan, runtime, view }: { readonly plan: M1
       {runtime?.throughput ? <p><strong>Physical throughput:</strong> {runtime.throughput.baseline_throughput_rps.toFixed(3)} → {runtime.throughput.replicated_throughput_rps.toFixed(3)} req/s across {runtime.throughput.replicated_request_count} flow-weighted requests; gate {runtime.throughput.passed ? 'passed' : 'failed'}.</p> : null}
     </> : null}
     {view === 'incidents' ? runtime === null || runtime.incidents.length === 0 ? <p>No replica runtime incident is attached. This does not turn Planner intent into a qualified route.</p> : <ol>{runtime.incidents.map((incident) => <li key={incident.incident_id}><strong>{incident.kind.replaceAll('_', ' ')}</strong> · {short(incident.track_id)} · {incident.reason}; recovery claimed: no</li>)}</ol> : null}
-    {view === 'inference' ? latestRequests.length === 0 ? <p>No retained M18 request-track binding yet.</p> : <div className={styles.tableWrap}><table><thead><tr><th>Request</th><th>Track</th><th>Immutable placement sequence</th><th>Phase</th><th>KV</th></tr></thead><tbody>{latestRequests.map((request) => <tr key={request.request_id}><th scope="row">{request.request_id}</th><td>{short(request.track_id)}</td><td>{request.placement_ids.join(' → ')}</td><td>{request.terminal_state ?? request.phase}</td><td>track pinned</td></tr>)}</tbody></table></div> : null}
+    {view === 'inference' ? latestRequests.length === 0 ? <p>No retained replica request-track binding yet.</p> : <div className={styles.tableWrap}><table><thead><tr><th>Request</th><th>Track</th><th>Immutable placement sequence</th><th>Phase</th><th>KV</th></tr></thead><tbody>{latestRequests.map((request) => <tr key={request.request_id}><th scope="row">{request.request_id}</th><td>{short(request.track_id)}</td><td>{request.placement_ids.join(' → ')}</td><td>{request.terminal_state ?? request.phase}</td><td>track pinned</td></tr>)}</tbody></table></div> : null}
     <p><small>{plan.claim_boundary}</small></p>
   </section>;
 }

@@ -41,14 +41,12 @@ describe('product shell feature slots', () => {
     for (const name of [
       /create native-node invite/i,
       /create browser-probe invite/i,
-      /create single-use invite/i,
-      /join with invite code/i,
       /leave fixture-native-node/i,
     ]) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
-    expect(await screen.findByRole('button', { name: /revoke fixture-native-node/i })).toBeDisabled();
     expect(screen.getAllByText(/unavailable in offline evidence mode/i).length).toBeGreaterThan(0);
+    await waitFor(() => expect(window.location.hash).toBe('#nodes'));
   });
 
   it('lazy-loads only the active registered feature module', async () => {

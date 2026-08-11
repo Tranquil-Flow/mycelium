@@ -5,7 +5,7 @@ function number(value: number, digits = 1): string { return value.toFixed(digits
 
 export function M15WorkloadPanel({ comparison }: { readonly comparison: M15PlanComparison }) {
   return (
-    <section className={styles.panel} aria-label="M15 workload-aware plan comparison">
+    <section className={styles.panel} aria-label="Workload-aware plan comparison">
       <h2>Workload-aware plan frontier</h2>
       <p><strong>Modeled planner intent</strong> · {comparison.calibration_state.replaceAll('_', ' ')} · never runtime readiness</p>
       {comparison.comparisons.map((matrix) => {
@@ -35,7 +35,7 @@ export function M15WorkloadPanel({ comparison }: { readonly comparison: M15PlanC
                   </table>
                 </div>
                 <p><strong>Frame counters:</strong> {observation.counters_before.frames_sent}/{observation.counters_before.frames_received} → {observation.counters_after.frames_sent}/{observation.counters_after.frames_received} sent/received.</p>
-                <p><strong>Approved exclusions:</strong> peak memory, energy/thermal, reconnect. <strong>M16 boundary:</strong> admission latency, batch shape, concurrency, queueing.</p>
+                <p><strong>Approved exclusions:</strong> peak memory, energy/thermal, reconnect. <strong>Runtime boundary:</strong> admission latency, batch shape, concurrency, queueing.</p>
               </div>
             )}
             <div className={styles.tableWrap}>
@@ -50,7 +50,7 @@ export function M15WorkloadPanel({ comparison }: { readonly comparison: M15PlanC
           </article>
         );
       })}
-      <p><strong>Deferred to M16:</strong> {comparison.deferred_to_m16.join(', ')}.</p>
+      <p><strong>Handled by runtime control:</strong> {comparison.deferred_to_m16.join(', ')}.</p>
     </section>
   );
 }

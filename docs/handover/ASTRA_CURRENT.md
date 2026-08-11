@@ -1,11 +1,10 @@
 # Mycelium — historical Astra handoff
 
-> **Superseded 2026-08-10.** Do not use the operational status or commands below as
-> the current handoff. Start with
-> `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md`, then read
-> `docs/handover/M14_PROGRESS_2026-08-10.md`, then
-> `docs/reviews/2026-08-10-external-review-status.md`. The remainder of this file is
-> retained unchanged as July provenance.
+> **Superseded 2026-08-11.** Do not use the operational status or commands below as
+> the current handoff. Start with `docs/handover/ASTRA_M22_HANDOVER.md`, then
+> `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md`, and finally
+> `docs/handover/M23_PROGRESS_2026-08-11.md`. The remainder of this file is retained
+> unchanged as July provenance.
 
 Status: current cross-host handoff, published 2026-07-30.
 

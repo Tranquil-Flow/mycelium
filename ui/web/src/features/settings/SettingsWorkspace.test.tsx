@@ -45,7 +45,7 @@ describe('SettingsWorkspace', () => {
     fireEvent.change(selector, { target: { value: 'sustained_batch_v1' } });
     await waitFor(() => expect(localStorage.getItem('mycelium.product-ui.preferences.v1')).toContain('sustained_batch_v1'));
     expect(screen.getByText(/future inference requests/i)).toBeInTheDocument();
-    expect(screen.getByText(/does not imply.*admission.*queueing.*batching/i)).toBeInTheDocument();
+    expect(screen.getByText(/does not.*bypass.*admission.*queueing.*batching/i)).toBeInTheDocument();
   });
 
   it('keeps speculative preference disabled with the measured M20 reason', async () => {

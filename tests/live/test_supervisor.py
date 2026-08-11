@@ -12,6 +12,7 @@ import pytest
 from mycelium_live.route import FakeLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
     LiveObservatoryApplication,
+    LiveSwarmCoordinator,
     _m18_replica_plan,
     _placement_projection,
     _workload_comparison,
@@ -22,6 +23,7 @@ from mycelium_live.supervisor import (
     run_physical_server,
 )
 from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
+from mycelium_ui_gateway.coordinator import CoordinatorError
 from mycelium_ui_gateway.validation import validate_observatory_envelope
 from physical_inference_qualification import ControllerError
 
@@ -63,6 +65,56 @@ def test_health_publishes_after_challenge(deployment_dir, qualified_route) -> No
         node["membership_state"] == "qualified"
         for node in stack.app._coordinator.status()["native_nodes"]
     )
+
+
+def test_live_swarm_coordinator_mints_target_device_bundle() -> None:
+    class MembershipSource:
+        def membership_status(self, *, qualification):
+            assert qualification == "qualified"
+            return {
+                "protocol": "mycelium.product_ui.swarm.v1",
+                "native_nodes": [],
+                "browser_workers": [],
+            }
+
+        def mint_native_invite(self, *, seed_url, ttl_seconds, nonce):
+            assert seed_url == "https://seed.example.test"
+            assert ttl_seconds == 300
+            assert nonce.startswith("product-ui-")
+            return {"protocol": "mycelium.invite_bundle.v1", "token": "signed-token"}
+
+    coordinator = LiveSwarmCoordinator(
+        MembershipSource(),
+        SimpleNamespace(current=lambda: "qualified"),
+        seed_url="https://seed.example.test",
+    )
+
+    result = coordinator.create_invite(
+        {
+            "protocol": "mycelium.product_ui.swarm.v1",
+            "action": "create_invite",
+            "capability": "native_inference_node",
+            "expires_in_seconds": 300,
+        }
+    )
+
+    assert result["capability"] == "native_inference_node"
+    assert json.loads(result["invite_code"])["token"] == "signed-token"
+    assert result["invite_id"].startswith("product-ui-")
+
+
+def test_live_swarm_coordinator_rejects_in_browser_join() -> None:
+    source = SimpleNamespace(membership_status=lambda **_kwargs: {})
+    coordinator = LiveSwarmCoordinator(
+        source,
+        SimpleNamespace(current=lambda: None),
+        seed_url="https://seed.example.test",
+    )
+
+    with pytest.raises(CoordinatorError) as caught:
+        coordinator.join({})
+
+    assert getattr(caught.value, "code", None) == "join_on_target_device_required"
 
 
 def test_observatory_projection_is_browser_safe(

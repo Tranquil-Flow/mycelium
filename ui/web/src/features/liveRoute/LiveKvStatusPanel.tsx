@@ -69,7 +69,7 @@ export function LiveKvStatusPanel({ view, freshness, client }: LiveKvStatusPanel
     <section className={styles.panel} aria-label="Distributed decode status">
       <div className={styles.panelTitlebar}>
         <div>
-          <p className={styles.eyebrow}>M23 stage-local KV</p>
+          <p className={styles.eyebrow}>Stage-local KV cache</p>
           <h2>Distributed decode status</h2>
         </div>
         <strong className={styles.evidenceBadge}>

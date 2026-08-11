@@ -4,6 +4,7 @@ import { M17ModelOperationPanel } from './M17ModelOperationPanel';
 import type { M17ModelOperation } from './m17ModelOperation';
 
 const rejection = "architecture_adapter:unsupported model_type: 'qwen3_moe'";
+const readableRejection = "Architecture adapter unavailable: unsupported model_type: 'qwen3_moe'";
 const revision = 'a'.repeat(40);
 const digest = (character: string) => `sha256:${character.repeat(64)}`;
 const richStage = {
@@ -64,7 +65,7 @@ describe('M17 model operation UI convergence', () => {
   for (const view of ['plans', 'readiness', 'inference', 'incidents'] as const) {
     it(`shows the same fail-closed reason in ${view}`, () => {
       render(<M17ModelOperationPanel operation={operation} view={view} />);
-      expect(screen.getByText(rejection)).toBeInTheDocument();
+      expect(screen.getByText(readableRejection)).toBeInTheDocument();
     });
   }
 

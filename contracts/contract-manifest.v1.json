@@ -70,8 +70,8 @@
         },
         {
           "path": "mycelium_live/registry.py",
-          "sha256": "cd260611567f868b41918295e356befa6fcb37833e7912c2088f7e43eef96408",
-          "size_bytes": 27233
+          "sha256": "770fd9257846af49113f9f2e0c3cf521ecb0d69157ce34b7701b6412cc8dc52e",
+          "size_bytes": 28229
         }
       ],
       "protocol": "mycelium.candidate_promotion_report.v1"
@@ -375,13 +375,13 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "5fa910277fae19ae709d5bbc0c632db4d0c09d447f8f78b950ac88569ebe8aa8",
-          "size_bytes": 97508
+          "sha256": "5e5883c76523e48b7939b0a266cc177a6041b8ebd6c3b6c5feffb23802b38293",
+          "size_bytes": 105369
         },
         {
           "path": "mycelium_live/registry.py",
-          "sha256": "cd260611567f868b41918295e356befa6fcb37833e7912c2088f7e43eef96408",
-          "size_bytes": 27233
+          "sha256": "770fd9257846af49113f9f2e0c3cf521ecb0d69157ce34b7701b6412cc8dc52e",
+          "size_bytes": 28229
         }
       ],
       "protocol": "mycelium.live_route_incident.v1"
@@ -389,19 +389,19 @@
     {
       "fixture": {
         "path": "contracts/compatibility-fixtures/live-route-status-v1.json",
-        "sha256": "9d17ccf9626b2f47019c9c586988d693dd1b0cfed7e7582d6df656c6518390cc",
-        "size_bytes": 2386
+        "sha256": "2c2c30ac69b508371f93d7dbcc5be72a9b7dea86a69fd798291abdb8e29524db",
+        "size_bytes": 3448
       },
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "5fa910277fae19ae709d5bbc0c632db4d0c09d447f8f78b950ac88569ebe8aa8",
-          "size_bytes": 97508
+          "sha256": "5e5883c76523e48b7939b0a266cc177a6041b8ebd6c3b6c5feffb23802b38293",
+          "size_bytes": 105369
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "1ed86098cf779dbe1f1b46033d9ea42c26fba186d6a6303180beae0e6515d8a8",
-          "size_bytes": 33815
+          "sha256": "92ebe8bac016130b3677b9b6a1cd808ea4d52bbefa61efdb8daa26e6de54a86d",
+          "size_bytes": 36586
         }
       ],
       "protocol": "mycelium.live_route_status.v1"
@@ -420,13 +420,13 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "1ed86098cf779dbe1f1b46033d9ea42c26fba186d6a6303180beae0e6515d8a8",
-          "size_bytes": 33815
+          "sha256": "92ebe8bac016130b3677b9b6a1cd808ea4d52bbefa61efdb8daa26e6de54a86d",
+          "size_bytes": 36586
         },
         {
           "path": "ui/web/src/features/liveRoute/M13PlacementPanel.tsx",
-          "sha256": "92532486f52ca95a1d827f02c88ed7e884079defe36bed31ed4db1b993514e5f",
-          "size_bytes": 4490
+          "sha256": "ad16294cc853d399768ba34f9c24c157590c6f7c05479c08d09a11ab3821eaa0",
+          "size_bytes": 4486
         }
       ],
       "protocol": "mycelium.m13_placement_projection.v1"
@@ -445,13 +445,13 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "1ed86098cf779dbe1f1b46033d9ea42c26fba186d6a6303180beae0e6515d8a8",
-          "size_bytes": 33815
+          "sha256": "92ebe8bac016130b3677b9b6a1cd808ea4d52bbefa61efdb8daa26e6de54a86d",
+          "size_bytes": 36586
         },
         {
           "path": "ui/web/src/features/liveRoute/M14TopologyPanel.tsx",
-          "sha256": "7df9f2fa42e773f74e28b73a1b0ae716f96e62a0c95102637800d5a6cd13bdde",
-          "size_bytes": 9674
+          "sha256": "697772331ea707d5aa21371297e0062cb3b153d9d817111f6a22126751dd0dcc",
+          "size_bytes": 9679
         }
       ],
       "protocol": "mycelium.m14_topology_projection.v1"
@@ -475,8 +475,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/M15WorkloadPanel.tsx",
-          "sha256": "e4a139e87656ac29b354b844b548af1f459a359af4650033c652ab69e6bd37c5",
-          "size_bytes": 4900
+          "sha256": "c117f8d89215daa3eb406d5419ff4ab337502ec14633d99e1800893f8ea62299",
+          "size_bytes": 4911
         }
       ],
       "protocol": "mycelium.m15_plan_comparison.v1"
@@ -505,11 +505,41 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/M16RuntimePanel.tsx",
-          "sha256": "4d40689db5699162d052e4228140b79c4b08aaaebc4dc2636662cc49f6d4d81c",
-          "size_bytes": 3358
+          "sha256": "b828e798a91f70135ef71ba725dbf14d99491809ca90241c2dcfa8c8f4c59512",
+          "size_bytes": 3347
         }
       ],
       "protocol": "mycelium.m16_runtime_status.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/m23-kv-gate-v1.json",
+        "sha256": "21dd576bdcc449c1e5ef8972fef5e0e301b1354b35b6a0390159a4c8a07468fa",
+        "size_bytes": 1411
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_m23_kv.py",
+          "sha256": "712cd835edd153db38e3cbb6b9b002660c0e29a233b20aa88b7e8b1c313e197b",
+          "size_bytes": 5456
+        },
+        {
+          "path": "scripts/run_m23_kv_gate.py",
+          "sha256": "6a458403b586043ace15650ae7a62bcfa3e06e6a7fcf396d7ddd3ba982b8cbb6",
+          "size_bytes": 17447
+        },
+        {
+          "path": "ui/web/src/features/liveRoute/m23Kv.ts",
+          "sha256": "5206af7190d44f49861ad8cc5c511956ea368da9206b438717f0694e77220962",
+          "size_bytes": 6308
+        },
+        {
+          "path": "ui/web/src/features/liveRoute/M23KvPanel.tsx",
+          "sha256": "c730a9f7b59113f4f118fdf04682e56a5fbc08d43cae27e084e432fba92da85e",
+          "size_bytes": 2664
+        }
+      ],
+      "protocol": "mycelium.m23_heterogeneous_kv_gate.v1"
     },
     {
       "fixture": {
@@ -950,8 +980,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "5fa910277fae19ae709d5bbc0c632db4d0c09d447f8f78b950ac88569ebe8aa8",
-          "size_bytes": 97508
+          "sha256": "5e5883c76523e48b7939b0a266cc177a6041b8ebd6c3b6c5feffb23802b38293",
+          "size_bytes": 105369
         }
       ],
       "protocol": "mycelium.product_ui.swarm.v1"

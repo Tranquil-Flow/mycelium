@@ -111,6 +111,7 @@ EXPECTED_PROTOCOLS = {
     "m14-topology-projection-v1.json": "mycelium.m14_topology_projection.v1",
     "m15-plan-comparison-v1.json": "mycelium.m15_plan_comparison.v1",
     "m16-runtime-status-v1.json": "mycelium.m16_runtime_status.v1",
+    "m23-kv-gate-v1.json": "mycelium.m23_heterogeneous_kv_gate.v1",
     "product-snapshot-v1.json": "mycelium.product_snapshot.v1",
     "product-event-v1.json": "mycelium.product_event.v1",
     "execution-graph-v1.json": "mycelium.execution_graph.v1",

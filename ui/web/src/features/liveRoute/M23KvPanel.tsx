@@ -9,8 +9,8 @@ function bytes(value: number): string {
 
 export function M23KvPanel({ evidence, view }: { readonly evidence: M23KvEvidence; readonly view: M23KvView }) {
   const improvement = `${(evidence.measurements.tpot_improvement_ratio * 100).toFixed(1)}%`;
-  return <section className={styles.panel} aria-label={`M23 heterogeneous KV gate for ${view}`}>
-    <p className={styles.eyebrow}>M23 · heterogeneous stage-local KV</p>
+  return <section className={styles.panel} aria-label={`Heterogeneous KV gate for ${view}`}>
+    <p className={styles.eyebrow}>Heterogeneous stage-local KV</p>
     <h2>{evidence.promotion_state === 'qualified' ? 'Stage-local KV qualified' : 'Stage-local KV withheld'}</h2>
     {view === 'inference' && <dl className={styles.measurements}><div><dt>Measured TPOT</dt><dd>{evidence.measurements.kv_tpot_ms.toFixed(1)} ms</dd></div><div><dt>Replay baseline</dt><dd>{evidence.measurements.replay_tpot_ms.toFixed(1)} ms</dd></div><div><dt>Improvement</dt><dd>{improvement}</dd></div></dl>}
     {view === 'nodes' && <dl className={styles.measurements}><div><dt>One-token decode</dt><dd>{evidence.gates.one_token_decode_every_stage ? 'Verified on every stage' : 'Not verified'}</dd></div><div><dt>Physical counters</dt><dd>{evidence.gates.all_stages_advanced_physical_counters ? 'Advanced on every stage' : 'Not verified'}</dd></div><div><dt>KV cleanup</dt><dd>{evidence.gates.kv_active_then_terminally_released ? 'Active then released to zero' : 'Not verified'}</dd></div></dl>}

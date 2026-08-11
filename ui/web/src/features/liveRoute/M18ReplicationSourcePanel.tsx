@@ -27,5 +27,5 @@ export function M18ReplicationSourcePanel({ view, client, hideUnavailable = fals
   }, [source]);
   if (plan !== null) return <M18ReplicationPanel plan={plan} runtime={runtime} view={view} />;
   if (hideUnavailable) return null;
-  return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading M18 replica evidence…' : `M18 replica evidence unavailable: ${error}`}</section>;
+  return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading replica evidence…' : `Replica evidence unavailable: ${error}`}</section>;
 }

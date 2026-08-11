@@ -356,6 +356,16 @@ CONTRACT_SPECS = (
         ),
     ),
     ContractSpec(
+        "m23-kv-gate-v1.json",
+        "mycelium.m23_heterogeneous_kv_gate.v1",
+        (
+            "mycelium_m23_kv.py",
+            "scripts/run_m23_kv_gate.py",
+            "ui/web/src/features/liveRoute/m23Kv.ts",
+            "ui/web/src/features/liveRoute/M23KvPanel.tsx",
+        ),
+    ),
+    ContractSpec(
         "product-snapshot-v1.json",
         "mycelium.product_snapshot.v1",
         (

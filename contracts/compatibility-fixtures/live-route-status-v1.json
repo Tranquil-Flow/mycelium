@@ -22,11 +22,9 @@
       "decode_operation_count": 8,
       "frames_received": 0,
       "frames_sent": 0,
-      "node_id": "node-a",
       "last_release_reason": "normal_completion",
+      "node_id": "node-a",
       "peak_kv_bytes": 4096,
-      "prefill_input_token_count": 9,
-      "prefill_operation_count": 1,
       "placements": [
         {
           "component_roles": [
@@ -41,10 +39,17 @@
           "start_layer": 0
         }
       ],
-      "release_counts": {"normal_completion": 1},
+      "prefill_input_token_count": 9,
+      "prefill_operation_count": 1,
+      "release_counts": {
+        "normal_completion": 1
+      },
       "release_state": "released",
-      "supported_decode_modes": ["complete_context_replay", "stage_local_kv"],
-      "retained_result_count": 0
+      "retained_result_count": 0,
+      "supported_decode_modes": [
+        "complete_context_replay",
+        "stage_local_kv"
+      ]
     },
     {
       "activation_output_bytes": 8192,
@@ -58,11 +63,9 @@
       "decode_operation_count": 8,
       "frames_received": 0,
       "frames_sent": 0,
-      "node_id": "node-b",
       "last_release_reason": "normal_completion",
+      "node_id": "node-b",
       "peak_kv_bytes": 4096,
-      "prefill_input_token_count": 9,
-      "prefill_operation_count": 1,
       "placements": [
         {
           "component_roles": [
@@ -78,10 +81,17 @@
           "start_layer": 2
         }
       ],
-      "release_counts": {"normal_completion": 1},
+      "prefill_input_token_count": 9,
+      "prefill_operation_count": 1,
+      "release_counts": {
+        "normal_completion": 1
+      },
       "release_state": "released",
-      "supported_decode_modes": ["complete_context_replay", "stage_local_kv"],
-      "retained_result_count": 0
+      "retained_result_count": 0,
+      "supported_decode_modes": [
+        "complete_context_replay",
+        "stage_local_kv"
+      ]
     }
   ],
   "protocol": "mycelium.live_route_status.v1",

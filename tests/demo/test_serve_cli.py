@@ -123,6 +123,8 @@ def test_live_serve_delegates_to_qualified_physical_runtime(tmp_path: Path) -> N
             str(operator_plan),
             "--seed-state-root",
             str(tmp_path / "seed"),
+            "--seed-url",
+            "https://seed.example.test",
         ],
         live_server_main=lambda argv: calls.append(list(argv)) or 17,
         process_runner=lambda *args, **kwargs: pytest.fail("fixture process must not start"),
@@ -140,6 +142,8 @@ def test_live_serve_delegates_to_qualified_physical_runtime(tmp_path: Path) -> N
             str(operator_plan),
             "--seed-state-root",
             str(tmp_path / "seed"),
+            "--seed-url",
+            "https://seed.example.test",
         ]
     ]
 
@@ -156,6 +160,8 @@ def test_live_serve_forwards_deployment_and_static_arguments(tmp_path: Path) -> 
             str(tmp_path / "operator-plan.json"),
             "--deployment-dir",
             str(tmp_path / "deployment"),
+            "--model-operation-file",
+            str(tmp_path / "model-operation.json"),
             "--static-root",
             str(tmp_path / "static"),
             "--seed-state-root",
@@ -176,6 +182,8 @@ def test_live_serve_forwards_deployment_and_static_arguments(tmp_path: Path) -> 
             str(tmp_path / "operator-plan.json"),
             "--deployment-dir",
             str(tmp_path / "deployment"),
+            "--model-operation-file",
+            str(tmp_path / "model-operation.json"),
             "--static-root",
             str(tmp_path / "static"),
             "--seed-state-root",

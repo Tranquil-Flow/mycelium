@@ -3,7 +3,7 @@ import styles from './LiveRouteWorkspace.module.css';
 
 export function M13PlacementPanel({ placement, view }: { readonly placement: M13PlacementProjection; readonly view: 'plans' | 'network' | 'nodes' | 'readiness' }) {
   return (
-    <section className={styles.panel} aria-label={`M13 ${view} placement evidence`}>
+    <section className={styles.panel} aria-label={`${view} placement evidence`}>
       <h2>Evidence-driven placement</h2>
       <p><strong>{placement.placement_provenance}</strong> · signed snapshot generation {placement.snapshot_generation} · authority generation {placement.authority_generation}</p>
       <dl className={styles.measurements}>

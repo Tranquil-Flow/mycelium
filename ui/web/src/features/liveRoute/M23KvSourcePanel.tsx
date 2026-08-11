@@ -10,5 +10,5 @@ export function M23KvSourcePanel({ view, client, hideUnavailable = false }: { re
   useEffect(() => { const controller = new AbortController(); void source.load(controller.signal).then((value) => { setEvidence(value); setUnavailable(false); }).catch(() => { if (!controller.signal.aborted) setUnavailable(true); }); return () => controller.abort(); }, [source]);
   if (evidence !== null) return <M23KvPanel evidence={evidence} view={view} />;
   if (hideUnavailable) return null;
-  return <section aria-label={`M23 heterogeneous KV gate for ${view}`}><h2>Stage-local KV evidence unavailable</h2><p role={unavailable ? 'alert' : 'status'}>{unavailable ? 'M23 evidence is not attached to this deployment.' : 'Loading M23 evidence…'}</p></section>;
+  return <section aria-label={`Heterogeneous KV gate for ${view}`}><h2>Stage-local KV evidence unavailable</h2><p role={unavailable ? 'alert' : 'status'}>{unavailable ? 'Stage-local KV evidence is not attached to this deployment.' : 'Loading stage-local KV evidence…'}</p></section>;
 }

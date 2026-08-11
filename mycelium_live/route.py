@@ -20,6 +20,7 @@ from mycelium_membership.contracts import (
     peer_runtime_is_activation_eligible,
     sign_membership_message,
 )
+from mycelium_invite import mint_invite_bundle
 from mycelium_node.process import PrivateDirectoryLease, private_directory_lease
 from mycelium_seed.authority import (
     PRODUCT_PSEUDONYM_KEY_FILE,
@@ -29,6 +30,7 @@ from mycelium_seed.authority import (
     load_product_pseudonym_salt,
 )
 from mycelium_seed.state import SeedStateError, SqliteSeedState
+from mycelium_seed.operator import SeedOperatorError, revoke_seed_member
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 from mycelium_router.contracts import ExecutionGraph
 from mycelium_router.serialization import execution_graph_to_dict
@@ -632,6 +634,8 @@ class PhysicalLiveRoute:
         self._topology_projection: dict[str, Any] | None = None
         self._workload_comparison: dict[str, Any] | None = None
         self._model_operation: dict[str, Any] | None = None
+        self._deployment_qualification: Any | None = None
+        self._deployment_quantization = "int8-weight-only"
         self._command_sequence = 0
         self._open = False
         self._closed = False
@@ -776,10 +780,62 @@ class PhysicalLiveRoute:
                 None if document is None else json.loads(json.dumps(dict(document)))
             )
 
+    def set_deployment_qualification(
+        self,
+        qualification: Any,
+        *,
+        quantization: str = "int8-weight-only",
+    ) -> None:
+        """Expose one qualified deployment through the same read model as a registry."""
+
+        if qualification.deployment_id != self._graph.deployment_id:
+            raise ValueError("qualification_deployment_mismatch")
+        if qualification.model_id != self._graph.model_id:
+            raise ValueError("qualification_model_mismatch")
+        if not isinstance(quantization, str) or not quantization:
+            raise ValueError("qualification_quantization_invalid")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._deployment_qualification = qualification
+            self._deployment_quantization = quantization
+
+    def registry_status(self) -> Mapping[str, Any]:
+        """Describe a single-route server without pretending another model is selectable."""
+
+        with self._lock:
+            qualification = self._deployment_qualification
+            if qualification is None:
+                raise RuntimeError("deployment_qualification_unavailable")
+            qualified = self.is_alive() and qualification.route_ready is True
+            return {
+                "protocol": "mycelium.live_deployment_registry.v1",
+                "selected_deployment_id": self._graph.deployment_id,
+                "switching_allowed": False,
+                "deployments": [
+                    {
+                        "deployment_id": self._graph.deployment_id,
+                        "model_id": self._graph.model_id,
+                        "model_revision": self._graph.resolved_commit,
+                        "quantization": self._deployment_quantization,
+                        "topology_size": len(self._graph.stages),
+                        "health": "qualified" if qualified else "unavailable",
+                        "qualified_at_unix_ms": qualification.issued_at_unix_ms,
+                        "qualification_id": qualification.qualification_id,
+                    }
+                ],
+            }
+
     def m17_model_operation(self) -> Mapping[str, Any] | None:
         with self._lock:
             document = getattr(self, "_model_operation", None)
-            return None if document is None else json.loads(json.dumps(document))
+            if document is None:
+                return None
+            if self._deployment_qualification is None:
+                return json.loads(json.dumps(document))
+            from mycelium_model_catalog import enrich_model_operation_lifecycle
+
+            return enrich_model_operation_lifecycle(document, self.registry_status())
 
     def set_m18_replica_plan(self, document: Mapping[str, Any] | None) -> None:
         """Attach validated Planner-owned M18 replica intent."""
@@ -2180,6 +2236,61 @@ class PhysicalLiveRoute:
             "native_nodes": native_nodes,
             "browser_workers": browser_workers,
         }
+
+    def mint_native_invite(
+        self,
+        *,
+        seed_url: str,
+        ttl_seconds: int,
+        nonce: str,
+    ) -> Mapping[str, Any]:
+        """Mint a target-device bundle from the live durable seed authority."""
+
+        authority = self._seed_authority
+        if authority is None:
+            raise LiveSeedStateError("live_seed_authority_unavailable")
+        authority.state_root.revalidate()
+        return mint_invite_bundle(
+            signer=authority.signer,
+            swarm_id=authority.swarm_id,
+            seed_url=seed_url,
+            ttl_seconds=ttl_seconds,
+            nonce=nonce,
+            issued_at=time.time(),
+        )
+
+    def revoke_native_member(self, member_id: str) -> Mapping[str, Any]:
+        """Fence a standby member without silently invalidating an active route."""
+
+        authority = self._seed_authority
+        if authority is None:
+            raise LiveSeedStateError("live_seed_authority_unavailable")
+        placed = {
+            placement.node_id
+            for stage in self._graph.stages
+            for placement in stage.placements
+        }
+        if member_id in placed and self.is_alive():
+            raise LiveSeedStateError("member_in_active_route")
+        member = next(
+            (
+                item
+                for item in authority.current_members()
+                if item["node_id"] == member_id
+            ),
+            None,
+        )
+        if member is None:
+            raise LiveSeedStateError("member_unknown")
+        try:
+            return revoke_seed_member(
+                authority.state_root.path,
+                node_id=member_id,
+                expected_generation=int(member["generation"]),
+                reason="product-ui-owner-revocation",
+            )
+        except SeedOperatorError as exc:
+            raise LiveSeedStateError(exc.code) from exc
 
     def product_membership_records(self) -> tuple[dict[str, Any], ...]:
         authority = self._seed_authority

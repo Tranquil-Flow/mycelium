@@ -6,8 +6,8 @@ const metric = (value: number | null, suffix = '') => value === null ? 'not meas
 
 export function M20SpeculationPanel({ plan, runtime, view }: { readonly plan: M20SpeculativePlan; readonly runtime: M20SpeculativeRuntime; readonly view: M20SpeculationView }) {
   const enabled = plan.decision.state === 'qualified_enabled';
-  return <section className={styles.panel} aria-label={`M20 ${view} speculative decoding evidence`}>
-    <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>M20 · target-authoritative speculation</p><h2>{view === 'plans' ? 'Draft / target promotion gate' : view === 'readiness' ? 'Speculative qualification' : 'Optional draft overlay'}</h2></div><span className={styles.evidenceBadge}>{enabled ? 'qualified' : 'target-only'}</span></div>
+  return <section className={styles.panel} aria-label={`${view} speculative decoding evidence`}>
+    <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>Target-authoritative speculation</p><h2>{view === 'plans' ? 'Draft / target promotion gate' : view === 'readiness' ? 'Speculative qualification' : 'Optional draft overlay'}</h2></div><span className={styles.evidenceBadge}>{enabled ? 'qualified' : 'target-only'}</span></div>
     <dl className={styles.measurements}>
       <div><dt>Target</dt><dd>{plan.target.model_id}</dd></div>
       <div><dt>Draft candidate</dt><dd>{plan.draft.model_id}</dd></div>

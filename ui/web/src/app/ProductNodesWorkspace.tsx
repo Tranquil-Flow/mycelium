@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ProductSourceMode } from './contracts';
-import { FixtureSwarmClient, SwarmMembershipAdapter } from './membershipSwarmAdapter';
-import { AdminWorkspace } from '../features/admin/AdminWorkspace';
-import { OnboardingWizard } from '../features/membership/OnboardingWizard';
+import { FixtureSwarmClient } from './membershipSwarmAdapter';
 import { useProductSettings } from '../features/settings/SettingsContext';
 import { NodesWorkspace } from '../features/nodes/NodesWorkspace';
 import { HttpSwarmClient } from '../features/swarm/SwarmClient';
@@ -33,7 +31,6 @@ export function ProductNodesWorkspace({ sourceMode, snapshot, provisioning }: Pr
     ? 'Enrollment and membership changes are unavailable in offline evidence mode.'
     : 'Native enrollment is operator-only: issue one owner-only signed bundle per device from the durable seed.';
   const swarm = useMemo(() => fixture ? new FixtureSwarmClient(fixtureStatus) : new HttpSwarmClient(), [fixture]);
-  const membership = useMemo(() => new SwarmMembershipAdapter(swarm), [swarm]);
   const [placement, setPlacement] = useState<M13PlacementProjection | null>(null);
   const [topology, setTopology] = useState<M14TopologyProjection | null>(null);
   const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
@@ -97,20 +94,10 @@ export function ProductNodesWorkspace({ sourceMode, snapshot, provisioning }: Pr
         client={swarm}
         initialStatus={fixture ? fixtureStatus : undefined}
         concealNetworkIdentity={settings.concealNetworkIdentity}
-        readOnly
+        readOnly={fixture}
         readOnlyReason={readOnlyReason}
-      />
-      <OnboardingWizard
-        key={`onboarding-${sourceMode}`}
-        client={membership}
-        readOnly
-        readOnlyReason={readOnlyReason}
-      />
-      <AdminWorkspace
-        key={`admin-${sourceMode}`}
-        client={membership}
-        readOnly
-        readOnlyReason={readOnlyReason}
+        targetDeviceEnrollment={!fixture}
+        supportsBrowserProbes={fixture}
       />
     </div>
   );

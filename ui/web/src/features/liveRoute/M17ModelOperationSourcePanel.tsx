@@ -47,6 +47,6 @@ export function M17ModelOperationSourcePanel({
 
   if (operation !== null) return <M17ModelOperationPanel operation={operation} view={view} />;
   return <section role={error === null ? 'status' : 'alert'}>
-    {error === null ? 'Loading M17 model lifecycle…' : `M17 model lifecycle unavailable: ${error}`}
+    {error === null ? 'Loading local model availability…' : `Local model availability is not attached to this server (${error}). The active qualified model remains usable.`}
   </section>;
 }

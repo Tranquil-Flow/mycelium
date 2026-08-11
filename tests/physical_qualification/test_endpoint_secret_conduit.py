@@ -63,6 +63,7 @@ def _service(
         sidecar_local_only=True,
         command_timeout=1.0,
         endpoint_secret_file=endpoint_secret_file,
+        requested_decode_mode=None,
     )
 
 
@@ -100,6 +101,7 @@ def test_main_passes_exact_endpoint_secret_path_to_service(
         sidecar_local_only=True,
         command_timeout=1.0,
         endpoint_secret_file=endpoint_secret_file,
+        decode_mode=None,
     )
     captured: dict[str, Any] = {}
 

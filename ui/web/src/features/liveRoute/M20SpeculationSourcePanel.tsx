@@ -8,5 +8,5 @@ export function M20SpeculationSourcePanel({ view, client, hideUnavailable = fals
   useEffect(() => { const controller = new AbortController(); void source.load(controller.signal).then((value) => { setEvidence(value); setError(null); }).catch((reason) => { if (!controller.signal.aborted) { setEvidence(null); setError(reason instanceof Error ? reason.message : 'm20_speculation_unavailable'); } }); return () => controller.abort(); }, [source]);
   if (evidence !== null) return <M20SpeculationPanel plan={evidence[0]} runtime={evidence[1]} view={view} />;
   if (hideUnavailable) return null;
-  return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading M20 speculative evidence…' : `M20 speculative evidence unavailable: ${error}`}</section>;
+  return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading speculative-decoding evidence…' : `Speculative-decoding evidence unavailable: ${error}`}</section>;
 }

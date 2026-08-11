@@ -85,6 +85,7 @@ from mycelium_request_gateway.contracts import (
     StreamEvent,
 )
 from mycelium_m16_runtime import validate_m16_runtime_status
+from mycelium_m23_kv import PROTOCOL as M23_KV_PROTOCOL, validate_m23_kv_evidence
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
     complete_directed_observation_matrix,
@@ -1352,9 +1353,24 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
                 "frames_received": 0,
                 "applied_operation_count": 0,
                 "decode_mode": "stage_local_kv",
+                "architecture": "qwen2",
+                "supported_decode_modes": [
+                    "complete_context_replay",
+                    "stage_local_kv",
+                ],
                 "active_kv_state_count": 0,
+                "active_kv_bytes": 0,
+                "peak_kv_bytes": 4096,
+                "prefill_operation_count": 1,
+                "prefill_input_token_count": 9,
+                "decode_operation_count": 8,
+                "decode_input_token_count": 8,
+                "activation_output_bytes": 8192,
+                "current_position": None,
+                "release_state": "released",
+                "last_release_reason": "normal_completion",
                 "retained_result_count": 0,
-                "release_counts": {},
+                "release_counts": {"normal_completion": 1},
             }
         )
     identity_digest = hashlib.sha256(canonical_bytes(graph_document)).hexdigest()
@@ -1650,6 +1666,49 @@ def seed_key_transition() -> dict[str, Any]:
     }
 
 
+def m23_kv_gate() -> dict[str, Any]:
+    """Return the deterministic, privacy-reduced example for the physical KV gate."""
+
+    document: dict[str, Any] = {
+        "protocol": M23_KV_PROTOCOL,
+        "generated_at_unix_ms": 1_786_444_951_137,
+        "replay_capture_digest": "sha256:b84c89571f778eb9b186b0f25f512e5e4b47fce862495c0cdf7365b70e61088f",
+        "kv_capture_digest": "sha256:051938cfcf2c2adf75b45e515d8b0242b3edb911a543ce86b7af1c20ec198665",
+        "gates": {
+            "same_route_model_stages_hosts": True,
+            "same_prompt_and_budget": True,
+            "exact_output_parity": True,
+            "one_token_decode_every_stage": True,
+            "all_stages_advanced_physical_counters": True,
+            "kv_active_then_terminally_released": True,
+            "no_fatal_or_cleanup_failure": True,
+            "measured_tpot_improvement": True,
+        },
+        "implemented": True,
+        "performance_qualified": True,
+        "promotion_state": "qualified",
+        "measurements": {
+            "replay_tpot_ms": 8_609.932042018045,
+            "kv_tpot_ms": 978.0590410227887,
+            "tpot_delta_ms": -7_631.873000995256,
+            "tpot_improvement_ratio": 0.8864033959560097,
+            "replay_activation_output_bytes": 5_226_720,
+            "kv_activation_output_bytes": 1_327_272,
+            "activation_byte_delta": -3_899_448,
+            "replay_total_ms": 29_266.844415978994,
+            "kv_total_ms": 6_691.240000014659,
+        },
+        "claim_boundary": (
+            "One fixed-prompt A/B on the same three physical hosts and stage allocation; "
+            "performance qualification is limited to this measured route and workload."
+        ),
+    }
+    document["evidence_digest"] = "sha256:" + hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return validate_m23_kv_evidence(document)
+
+
 def seed_operator_rotation() -> dict[str, Any]:
     return {
         "protocol": SEED_OPERATOR_ROTATION_PROTOCOL,
@@ -1745,6 +1804,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "m14-topology-projection-v1.json": m14_topology_projection(),
         "m15-plan-comparison-v1.json": m15_plan_comparison(),
         "m16-runtime-status-v1.json": m16_runtime_status(),
+        "m23-kv-gate-v1.json": m23_kv_gate(),
         "product-snapshot-v1.json": product_snapshot(),
         "product-event-v1.json": product_event(),
         "execution-graph-v1.json": graph,

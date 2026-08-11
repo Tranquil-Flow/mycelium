@@ -7,7 +7,7 @@ import { m21HeterogeneousFixture } from './m21HeterogeneousFixtures';
 describe('M21HeterogeneousPanel', () => {
   it('shows eligible heterogeneous runtimes and the excluded browser class', () => {
     render(<M21HeterogeneousPanel evidence={decodeM21Heterogeneous(structuredClone(m21HeterogeneousFixture))} view="nodes" />);
-    const panel = screen.getByLabelText(/M21 nodes heterogeneous swarm evidence/i);
+    const panel = screen.getByLabelText(/nodes heterogeneous swarm evidence/i);
     expect(within(panel).getByText('mac_mlx_iroh')).toBeInTheDocument();
     expect(within(panel).getByText('linux_numpy_iroh')).toBeInTheDocument();
     expect(within(panel).getByText(/ineligible · activation protocol unavailable/i)).toBeInTheDocument();

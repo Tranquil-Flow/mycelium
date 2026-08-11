@@ -168,6 +168,7 @@ export function InferenceWorkspace({
   const [maxNewTokens, setMaxNewTokens] = useState(restored?.max_new_tokens ?? 8);
   const [deploymentRegistry, setDeploymentRegistry] = useState<DeploymentRegistryStatus | null>(null);
   const [deploymentSwitching, setDeploymentSwitching] = useState(false);
+  const [deploymentError, setDeploymentError] = useState<string | null>(null);
   const [workloadComparison, setWorkloadComparison] = useState<M15PlanComparison | null>(null);
   const [workloadProfileId, setWorkloadProfileId] = useState(() => loadProductSettings().defaultWorkloadProfile);
   const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
@@ -259,7 +260,10 @@ export function InferenceWorkspace({
     try {
       const next = await effectiveDeploymentClient.select(deploymentId);
       setDeploymentRegistry(next);
+      setDeploymentError(null);
       await session.reload_qualification();
+    } catch (reason) {
+      setDeploymentError(reason instanceof Error ? reason.message.replaceAll('_', ' ') : 'Model switch rejected');
     } finally {
       setDeploymentSwitching(false);
     }
@@ -352,17 +356,17 @@ export function InferenceWorkspace({
                 aria-label="Workload and QoS policy"
               >
                 {workloadComparison === null
-                  ? <option value="interactive_chat_v1">M15 workload policy unavailable</option>
+                  ? <option value="interactive_chat_v1">Workload policies unavailable</option>
                   : workloadComparison.profiles.map((profile) => {
                       const comparison = workloadComparison.comparisons.find((item) => item.profile_id === profile.profile_id)!;
                       const policy = comparison.selected_candidate_id.slice(profile.profile_id.length + 1);
                       return <option key={profile.profile_id} value={profile.profile_id}>{profile.profile_id} · {profile.scenarios[0].qos_class} · {policy}</option>;
                     })}
               </select>
-              <small className={styles.fieldHelp}>Client-visible M15 planner attribution; runtime admission and queueing remain M16.</small>
+              <small className={styles.fieldHelp}>Shows the planner policy requested by this client; runtime admission and queueing remain independently enforced.</small>
             </label>
             <label className={styles.field}>
-              <span>Active qualified model and deployment</span>
+              <span>Model</span>
               <select
                 value={deploymentRegistry?.selected_deployment_id ?? (qualification === null ? 'unavailable' : qualification.binding.deployment_id)}
                 disabled={
@@ -373,9 +377,11 @@ export function InferenceWorkspace({
                   deploymentRegistry.deployments.filter((item) => item.health === 'qualified').length < 2
                 }
                 onChange={(event) => void selectDeployment(event.currentTarget.value)}
-                aria-label="Active qualified model and deployment"
+                aria-label="Model"
               >
-                <option value="unavailable">Qualification unavailable</option>
+                {qualification === null && deploymentRegistry === null
+                  ? <option value="unavailable" disabled>Qualification unavailable</option>
+                  : null}
                 {deploymentRegistry !== null
                   ? deploymentRegistry.deployments.map((item) => (
                       <option key={item.deployment_id} value={item.deployment_id} disabled={item.health !== 'qualified'}>
@@ -388,9 +394,12 @@ export function InferenceWorkspace({
               </select>
               <small className={styles.fieldHelp}>
                 {deploymentRegistry === null
-                  ? 'Read-only until multiple qualified deployments are live.'
-                  : 'Switching is atomic and disabled while a request is active.'}
+                  ? `Using ${activeModelName}. This server has not published a selectable model registry.`
+                  : deploymentRegistry.deployments.filter((item) => item.health === 'qualified').length < 2
+                    ? `Using ${activeModelName}. It is the only model currently qualified for this swarm; other local models appear below with their exact availability reason.`
+                    : 'Choose any currently qualified model. Switching is atomic and disabled while a request is active.'}
               </small>
+              {deploymentError === null ? null : <small className={styles.error} role="alert">Model not changed: {deploymentError}</small>}
             </label>
             <label className={styles.field}>
               <span>Maximum new tokens</span>

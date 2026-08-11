@@ -67,9 +67,9 @@ export function SettingsWorkspace({ workloadClient = null, deploymentClient = nu
     <section className={styles.panel} aria-labelledby="privacy-title"><h3 id="privacy-title">Privacy</h3><label><input type="checkbox" checked={settings.concealNetworkIdentity} onChange={(event) => update({ concealNetworkIdentity: event.target.checked })} /> Conceal endpoint and network identity by default</label><p>Same-origin product APIs remain mandatory. No upstream bearer token is exposed to browser code.</p></section>
     <section className={styles.panel} aria-labelledby="workload-default-title"><h3 id="workload-default-title">Qualified workload default</h3>
       <label>Default workload and QoS profile<select aria-label="Default workload and QoS profile" value={settings.defaultWorkloadProfile} disabled={comparison === null} onChange={(event) => update({ defaultWorkloadProfile: event.target.value })}>
-        {comparison === null ? <option value="interactive_chat_v1">Live M15 profiles unavailable</option> : comparison.profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id}>{profile.profile_id} · {profile.scenarios[0].qos_class}</option>)}
+        {comparison === null ? <option value="interactive_chat_v1">Live workload profiles unavailable</option> : comparison.profiles.map((profile) => <option key={profile.profile_id} value={profile.profile_id}>{profile.profile_id} · {profile.scenarios[0].qos_class}</option>)}
       </select></label>
-      <p>This local preference applies only to future inference requests. It does not change an active request and does not imply that M16 admission, queueing, or batching exists.</p>
+      <p>This local preference applies only to future inference requests. It does not change an active request or bypass runtime admission, queueing, or batching limits.</p>
     </section>
     <section className={styles.panel} aria-labelledby="model-default-title"><h3 id="model-default-title">Qualified model preference</h3>
       <label>Preferred model for future requests<select aria-label="Preferred qualified model and deployment" value={settings.preferredDeploymentId ?? ''} disabled={registry === null || !registry.switching_allowed} onChange={(event) => void selectPreferredDeployment(event.currentTarget.value)}>
@@ -81,7 +81,7 @@ export function SettingsWorkspace({ workloadClient = null, deploymentClient = nu
     </section>
     <section className={styles.panel} aria-labelledby="speculative-default-title"><h3 id="speculative-default-title">Qualified speculative decoding</h3>
       <label><input type="checkbox" checked={settings.preferSpeculativeDecoding} disabled={speculativePlan?.decision.state !== 'qualified_enabled'} onChange={(event) => update({ preferSpeculativeDecoding: event.target.checked })} /> Prefer the qualified draft overlay for future requests</label>
-      <p>{speculativePlan === null ? 'M20 qualification unavailable.' : speculativePlan.decision.state === 'qualified_enabled' ? `${speculativePlan.draft.model_id} may draft for ${speculativePlan.target.model_id}; the target remains authoritative.` : `Disabled: ${speculativePlan.decision.reason.replaceAll('_', ' ')}. Target-only inference remains active.`}</p>
+      <p>{speculativePlan === null ? 'Speculative-decoding qualification unavailable.' : speculativePlan.decision.state === 'qualified_enabled' ? `${speculativePlan.draft.model_id} may draft for ${speculativePlan.target.model_id}; the target remains authoritative.` : `Disabled: ${speculativePlan.decision.reason.replaceAll('_', ' ')}. Target-only inference remains active.`}</p>
     </section>
     <button type="button" onClick={reset}>Reset local preferences</button>
   </div>;

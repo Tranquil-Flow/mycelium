@@ -34,9 +34,9 @@ export function M14TopologyPanel({ topology, view }: { readonly topology: M14Top
   const nodePositions = useMemo(() => positions(opened, layout), [layout, opened]);
 
   return (
-    <section className={styles.panel} aria-label={`M14 ${view} topology evidence`}>
+    <section className={styles.panel} aria-label={`${view} measured topology evidence`}>
       <div className={styles.panelTitlebar}>
-        <div><p className={styles.eyebrow}>M14 measured topology</p><h2>Directed activation path intelligence</h2></div>
+        <div><p className={styles.eyebrow}>Measured network topology</p><h2>Directed activation path intelligence</h2></div>
         <span className={styles.evidenceBadge}>{topology.measurement_source.replaceAll('_', ' ')}</span>
       </div>
       <p>
@@ -80,7 +80,7 @@ export function M14TopologyPanel({ topology, view }: { readonly topology: M14Top
 
       {view === 'readiness' ? (
         <>
-          <h3>M14 topology acceptance gates</h3>
+          <h3>Topology acceptance gates</h3>
           <dl className={styles.measurements}>
             <div><dt>Directed matrix</dt><dd>{topology.edges.length} / {opened.length * (opened.length - 1)} edges</dd></div>
             <div><dt>Resolved paths</dt><dd>Complete</dd></div>

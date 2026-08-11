@@ -10,5 +10,5 @@ export function M22ReleaseSourcePanel({ view, client, hideUnavailable = false }:
   useEffect(() => { const controller = new AbortController(); void source.load(controller.signal).then((value) => { setEvidence(value); setUnavailable(false); }).catch(() => { if (!controller.signal.aborted) setUnavailable(true); }); return () => controller.abort(); }, [source]);
   if (evidence !== null) return <M22ReleasePanel evidence={evidence} view={view} />;
   if (hideUnavailable) return null;
-  return <section aria-label={`M22 release closure for ${view}`}><h2>Release closure unavailable</h2><p role={unavailable ? 'alert' : 'status'}>{unavailable ? 'M22 evidence is not attached to this deployment.' : 'Loading M22 release evidence…'}</p></section>;
+  return <section aria-label={`Release closure for ${view}`}><h2>Release closure unavailable</h2><p role={unavailable ? 'alert' : 'status'}>{unavailable ? 'Release evidence is not attached to this deployment.' : 'Loading release evidence…'}</p></section>;
 }

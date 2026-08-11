@@ -97,8 +97,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--tls-key", type=Path)
     serve.add_argument("--operator-plan", type=Path, action="append")
     serve.add_argument("--deployment-dir", type=Path)
+    serve.add_argument("--model-operation-file", type=Path)
     serve.add_argument("--registry-state", type=Path)
     serve.add_argument("--seed-state-root", type=Path)
+    serve.add_argument("--seed-url")
     return parser
 
 
@@ -113,6 +115,7 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         result.extend(("--operator-plan", str(operator_plan)))
     optional_paths = (
         ("--deployment-dir", args.deployment_dir),
+        ("--model-operation-file", args.model_operation_file),
         ("--static-root", args.static_root),
         ("--registry-state", args.registry_state),
         ("--seed-state-root", args.seed_state_root),
@@ -120,6 +123,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
     for flag, value in optional_paths:
         if value is not None:
             result.extend((flag, str(value)))
+    if args.seed_url is not None:
+        result.extend(("--seed-url", args.seed_url))
     return result
 
 
@@ -137,7 +142,9 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.operator_plan,
             args.seed_state_root,
             args.deployment_dir,
+            args.model_operation_file,
             args.registry_state,
+            args.seed_url,
         )
     )
 

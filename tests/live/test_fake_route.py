@@ -108,6 +108,59 @@ def test_physical_route_initializes_optional_public_projections(monkeypatch) -> 
     route.close()
 
 
+def test_single_physical_route_publishes_one_honest_qualified_model(monkeypatch) -> None:
+    graph = SimpleNamespace(
+        topology_version=1,
+        deployment_id="deployment-1",
+        model_id="Qwen/Qwen2.5-3B-Instruct",
+        resolved_commit="a" * 40,
+        stages=(SimpleNamespace(), SimpleNamespace(), SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "execution_graph_from_document",
+        lambda _document: graph,
+    )
+    route = PhysicalLiveRoute(
+        controller=SimpleNamespace(peers=()),
+        endpoints={},
+        run_plan={
+            "nodes": [
+                {"node_id": "node-0", "configure": {"graph": {}}},
+            ],
+        },
+    )
+    route._open = True
+    route._sessions = {"node-0": SimpleNamespace(returncode=None)}
+    route.set_deployment_qualification(
+        SimpleNamespace(
+            deployment_id="deployment-1",
+            model_id="Qwen/Qwen2.5-3B-Instruct",
+            route_ready=True,
+            issued_at_unix_ms=1234,
+            qualification_id="sha256:" + "b" * 64,
+        )
+    )
+
+    status = route.registry_status()
+
+    assert status["switching_allowed"] is False
+    assert status["selected_deployment_id"] == "deployment-1"
+    assert status["deployments"] == [
+        {
+            "deployment_id": "deployment-1",
+            "model_id": "Qwen/Qwen2.5-3B-Instruct",
+            "model_revision": "a" * 40,
+            "quantization": "int8-weight-only",
+            "topology_size": 3,
+            "health": "qualified",
+            "qualified_at_unix_ms": 1234,
+            "qualification_id": "sha256:" + "b" * 64,
+        }
+    ]
+    route.close()
+
+
 def test_physical_route_propagates_route_wide_decode_mode_to_node_command() -> None:
     route = object.__new__(PhysicalLiveRoute)
     route._peers = {

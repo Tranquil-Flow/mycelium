@@ -17,8 +17,9 @@ describe('ProductNodesWorkspace', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/up to 64 unique, short-lived, single-use/i)).toBeInTheDocument();
     expect(screen.getByText(/joining never changes the active route/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/native enrollment is operator-only/i).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /create native-node invite/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /create native-node invite/i })).toBeEnabled();
+    expect(screen.getByText(/complete enrollment on the new device/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /create browser-probe invite/i })).not.toBeInTheDocument();
   });
 
   it('does not claim live onboarding readiness for a fixture', () => {

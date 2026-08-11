@@ -4,8 +4,8 @@ import styles from './LiveRouteWorkspace.module.css';
 export type M22ReleaseView = 'inference' | 'lab' | 'network' | 'nodes' | 'plans' | 'readiness' | 'incidents' | 'settings';
 
 export function M22ReleasePanel({ evidence, view }: { readonly evidence: M22ReleaseEvidence; readonly view: M22ReleaseView }) {
-  return <section className={styles.panel} aria-label={`M22 release closure for ${view}`}>
-    <p className={styles.eyebrow}>M22 · release closure</p>
+  return <section className={styles.panel} aria-label={`Release closure for ${view}`}>
+    <p className={styles.eyebrow}>Release evidence</p>
     <h2>{evidence.gate_state === 'qualified' ? 'Release gate qualified' : 'Release gate withheld'}</h2>
     {view === 'inference' && <dl className={styles.measurements}><div><dt>Useful model</dt><dd>{evidence.model.model_id} · {evidence.model.parameter_class}</dd></div><div><dt>Physical completion</dt><dd>{evidence.physical.request_completed ? `${evidence.physical.output_token_count} output tokens` : 'Not proven'}</dd></div><div><dt>Local cache</dt><dd>{evidence.model.local_cache_reused && !evidence.model.network_download_performed ? 'Reused · no download' : 'Not proven'}</dd></div></dl>}
     {view === 'network' && <dl className={styles.measurements}><div><dt>Physical participants</dt><dd>{evidence.physical.participant_count}</dd></div><div><dt>Runtime classes</dt><dd>{evidence.physical.runtime_class_count}</dd></div><div><dt>Activation transport</dt><dd>{evidence.physical.activation_transport}</dd></div><div><dt>Tailscale product dependency</dt><dd>{evidence.physical.tailscale_product_dependency ? 'Yes' : 'No'}</dd></div></dl>}

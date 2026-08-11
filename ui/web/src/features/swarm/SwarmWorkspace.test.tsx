@@ -92,7 +92,7 @@ describe('SwarmWorkspace', () => {
     expect(within(invite).getByText(/expires in 30s/i)).toBeInTheDocument();
     expect(client.createInvite).toHaveBeenCalledWith('native_inference_node', 300);
 
-    fireEvent.click(within(invite).getByRole('button', { name: /copy invite code/i }));
+    fireEvent.click(within(invite).getByRole('button', { name: /copy signed invite bundle/i }));
     fireEvent.click(within(invite).getByRole('button', { name: /copy qr payload/i }));
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
     expect(writeText.mock.calls[1][0]).toMatch(/^mycelium:\/\/join\?code=/);
@@ -179,7 +179,7 @@ describe('SwarmWorkspace', () => {
     const client = fakeClient({ status: vi.fn(async () => { throw new Error('status_unavailable'); }) });
     render(<SwarmWorkspace client={client} now={() => NOW} />);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('status_unavailable');
+    expect(await screen.findByRole('alert')).toHaveTextContent('status unavailable');
     expect(screen.getByText(/no unverified device status is introduced/i)).toBeInTheDocument();
     expect(screen.queryByText('native-private')).not.toBeInTheDocument();
   });

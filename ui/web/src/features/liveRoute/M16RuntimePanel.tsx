@@ -3,11 +3,11 @@ import styles from './LiveRouteWorkspace.module.css';
 
 export function M16RuntimePanel({ runtime, view }: { readonly runtime: M16RuntimeStatus; readonly view: 'network' | 'plans' | 'readiness' | 'incidents' | 'nodes' }) {
   if (view === 'incidents') {
-    return <section className={styles.panel} aria-label="M16 admission incidents"><h2>M16 admission and cleanup incidents</h2>{runtime.incidents.length === 0 ? <p>No admission, backpressure, expiry, or cleanup incident recorded.</p> : <ol>{runtime.incidents.map((incident) => <li key={incident.incident_id}><strong>{incident.kind.replaceAll('_', ' ')}</strong> · {incident.state} · {incident.request_id}</li>)}</ol>}</section>;
+    return <section className={styles.panel} aria-label="Admission incidents"><h2>Admission and cleanup incidents</h2>{runtime.incidents.length === 0 ? <p>No admission, backpressure, expiry, or cleanup incident recorded.</p> : <ol>{runtime.incidents.map((incident) => <li key={incident.incident_id}><strong>{incident.kind.replaceAll('_', ' ')}</strong> · {incident.state} · {incident.request_id}</li>)}</ol>}</section>;
   }
   return (
-    <section className={styles.panel} aria-label={`M16 ${view} runtime`}>
-      <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>M16 · resource admission and scheduling</p><h2>{view === 'plans' ? 'Bounded workload scheduler' : view === 'network' ? 'Pinned path reservations' : view === 'nodes' ? 'Per-placement resource ledger' : 'Runtime admission readiness'}</h2></div><span className={styles.evidenceBadge}>{runtime.batch_state.mode.replaceAll('_', ' ')}</span></div>
+    <section className={styles.panel} aria-label={`${view} runtime control`}>
+      <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>Resource admission and scheduling</p><h2>{view === 'plans' ? 'Bounded workload scheduler' : view === 'network' ? 'Pinned path reservations' : view === 'nodes' ? 'Per-placement resource ledger' : 'Runtime admission readiness'}</h2></div><span className={styles.evidenceBadge}>{runtime.batch_state.mode.replaceAll('_', ' ')}</span></div>
       <dl className={styles.measurements}>
         <div><dt>Queue</dt><dd>{runtime.queue.depth} / {runtime.queue.maximum_items}</dd></div>
         <div><dt>Interactive / batch</dt><dd>{runtime.queue.interactive_depth} / {runtime.queue.batch_depth}</dd></div>

@@ -82,7 +82,7 @@ describe('Network Observatory', () => {
     expect(screen.getByRole('button', { name: /start inference/i })).toBeDisabled();
     fireEvent.click(screen.getByRole('link', { name: /nodes/i }));
     expect(await screen.findByRole('heading', { name: /nodes and swarm/i })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: /join a trusted swarm/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /invite or join/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('link', { name: /settings/i }));
     expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();

@@ -209,12 +209,19 @@ class LiveObservatoryApplication:
         await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
-class ReadOnlySwarmCoordinator:
-    """Project the durable membership authority without exposing mutation."""
+class LiveSwarmCoordinator:
+    """Project membership and expose bounded owner-authorized mutations."""
 
-    def __init__(self, membership_source: Any, health: RouteHealthSource) -> None:
+    def __init__(
+        self,
+        membership_source: Any,
+        health: RouteHealthSource,
+        *,
+        seed_url: str | None = None,
+    ) -> None:
         self._health = health
         self._membership_source = membership_source
+        self._seed_url = seed_url
         if not callable(getattr(membership_source, "membership_status", None)):
             raise ValueError("live_membership_source_required")
 
@@ -223,14 +230,61 @@ class ReadOnlySwarmCoordinator:
             qualification=self._health.current()
         )
 
-    def create_invite(self, _document: Mapping[str, Any]) -> Mapping[str, Any]:
-        raise CoordinatorError("swarm_read_only")
+    def create_invite(self, document: Mapping[str, Any]) -> Mapping[str, Any]:
+        if document.get("capability") != "native_inference_node":
+            raise CoordinatorError("capability_not_supported")
+        if self._seed_url is None:
+            raise CoordinatorError("swarm_operator_unavailable")
+        source = getattr(self._membership_source, "mint_native_invite", None)
+        if not callable(source):
+            raise CoordinatorError("swarm_operator_unavailable")
+        ttl_seconds = document.get("expires_in_seconds")
+        if type(ttl_seconds) is not int or not 30 <= ttl_seconds <= 300:
+            raise CoordinatorError("invite_ttl_invalid")
+        nonce = f"product-ui-{secrets.token_hex(16)}"
+        try:
+            bundle = source(
+                seed_url=self._seed_url,
+                ttl_seconds=ttl_seconds,
+                nonce=nonce,
+            )
+            invite_code = json.dumps(
+                bundle,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            expires_at = int((time.time() + ttl_seconds) * 1_000)
+        except Exception as exc:
+            code = getattr(exc, "code", "invite_mint_failed")
+            raise CoordinatorError(str(code)) from None
+        return {
+            "protocol": "mycelium.product_ui.swarm.v1",
+            "invite_id": nonce,
+            "invite_code": invite_code,
+            "capability": "native_inference_node",
+            "expires_at_unix_ms": expires_at,
+        }
 
     def join(self, _document: Mapping[str, Any]) -> Mapping[str, Any]:
-        raise CoordinatorError("swarm_read_only")
+        raise CoordinatorError("join_on_target_device_required")
 
-    def leave(self, _document: Mapping[str, Any]) -> Mapping[str, Any]:
-        raise CoordinatorError("swarm_read_only")
+    def leave(self, document: Mapping[str, Any]) -> Mapping[str, Any]:
+        source = getattr(self._membership_source, "revoke_native_member", None)
+        if not callable(source):
+            raise CoordinatorError("swarm_operator_unavailable")
+        member_id = document.get("member_id")
+        try:
+            source(member_id)
+        except Exception as exc:
+            code = getattr(exc, "code", "member_revoke_failed")
+            raise CoordinatorError(str(code)) from None
+        return {
+            "protocol": "mycelium.product_ui.swarm.v1",
+            "member_id": member_id,
+            "left": True,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +301,7 @@ def build_live_stack(
     execution_graph: Any,
     bearer_token: str,
     product_state_root: Path | None = None,
+    seed_url: str | None = None,
 ) -> LiveStack:
     """Compose the production browser and request gateways around a live route."""
     codec = prompt_codec_from_deployment(deployment_dir)
@@ -288,7 +343,7 @@ def build_live_stack(
         codec=codec,
         observatory_app=LiveObservatoryApplication(health),
         product_app=product_app,
-        swarm_coordinator=ReadOnlySwarmCoordinator(route, health),
+        swarm_coordinator=LiveSwarmCoordinator(route, health, seed_url=seed_url),
         request_bearer_token=bearer_token,
     )
     return LiveStack(app=app, health=health, route=route)
@@ -299,6 +354,7 @@ def build_registry_stack(
     registry: LiveDeploymentRegistry,
     bearer_token: str,
     product_state_root: Path | None = None,
+    seed_url: str | None = None,
 ) -> LiveStack:
     """Compose the product stack around multiple already-qualified routes."""
 
@@ -312,7 +368,7 @@ def build_registry_stack(
             registry,
             state_root=product_state_root,
         ),
-        swarm_coordinator=ReadOnlySwarmCoordinator(registry, registry),
+        swarm_coordinator=LiveSwarmCoordinator(registry, registry, seed_url=seed_url),
         request_bearer_token=bearer_token,
     )
     return LiveStack(app=app, health=registry, route=registry)
@@ -871,9 +927,15 @@ def _m16_performance_budget(deployment_dir: Path) -> Mapping[str, Any] | None:
         raise ValueError("m16_performance_budget_invalid") from exc
 
 
-def _m17_model_operation(deployment_dir: Path) -> Mapping[str, Any] | None:
-    path = Path(deployment_dir) / "m17-model-operation.json"
+def _m17_model_operation(
+    deployment_dir: Path,
+    *,
+    explicit_path: Path | None = None,
+) -> Mapping[str, Any] | None:
+    path = Path(explicit_path) if explicit_path is not None else Path(deployment_dir) / "m17-model-operation.json"
     if not path.exists():
+        if explicit_path is not None:
+            raise ValueError("m17_model_operation_missing")
         return None
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
         raise ValueError("m17_model_operation_unsafe")
@@ -1010,6 +1072,7 @@ def _qualified_runtime(
     *,
     seed_state_root: Path,
     deployment_dir: Path | None = None,
+    model_operation_file: Path | None = None,
 ) -> QualifiedDeploymentRuntime:
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
@@ -1046,7 +1109,10 @@ def _qualified_runtime(
             topology_projection=_topology_projection(selected_deployment_dir),
             workload_comparison=_workload_comparison(selected_deployment_dir),
             m16_performance_budget=_m16_performance_budget(selected_deployment_dir),
-            model_operation=_m17_model_operation(selected_deployment_dir),
+            model_operation=_m17_model_operation(
+                selected_deployment_dir,
+                explicit_path=model_operation_file,
+            ),
             replica_plan=_m18_replica_plan(selected_deployment_dir),
             replica_runtime_source=(
                 None
@@ -1067,6 +1133,8 @@ def run_registry_server(
     static_root: Path | None = None,
     registry_state: Path | None = None,
     seed_state_root: Path,
+    model_operation_file: Path | None = None,
+    seed_url: str | None = None,
 ) -> int:
     """Open, qualify, and serve two or more immutable deployments."""
 
@@ -1079,7 +1147,11 @@ def run_registry_server(
     try:
         for plan in operator_plans:
             runtimes.append(
-                _qualified_runtime(plan, seed_state_root=seed_state_root)
+                _qualified_runtime(
+                    plan,
+                    seed_state_root=seed_state_root,
+                    model_operation_file=model_operation_file,
+                )
             )
         registry = LiveDeploymentRegistry(
             runtimes,
@@ -1090,6 +1162,7 @@ def run_registry_server(
             registry=registry,
             bearer_token=secrets.token_urlsafe(32),
             product_state_root=seed_state_root,
+            seed_url=seed_url,
         )
         server = create_server(
             app=stack.app,
@@ -1147,8 +1220,10 @@ def run_physical_server(
     host: str,
     port: int,
     deployment_dir: Path | None = None,
+    model_operation_file: Path | None = None,
     static_root: Path | None = None,
     seed_state_root: Path,
+    seed_url: str | None = None,
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
@@ -1162,6 +1237,7 @@ def run_physical_server(
         _validate_route_identity(identity, route.execution_graph)
 
         qualification = _qualify_open_route(route)
+        route.set_deployment_qualification(qualification)
 
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         route.set_public_projections(
@@ -1169,7 +1245,12 @@ def run_physical_server(
             topology=_topology_projection(selected_deployment_dir),
             workload_comparison=_workload_comparison(selected_deployment_dir),
         )
-        route.set_m17_model_operation(_m17_model_operation(selected_deployment_dir))
+        route.set_m17_model_operation(
+            _m17_model_operation(
+                selected_deployment_dir,
+                explicit_path=model_operation_file,
+            )
+        )
         route.set_m18_replica_plan(_m18_replica_plan(selected_deployment_dir))
         replica_runtime = _m18_replica_runtime(selected_deployment_dir)
         if replica_runtime is not None:
@@ -1191,6 +1272,7 @@ def run_physical_server(
             execution_graph=route.execution_graph,
             bearer_token=secrets.token_urlsafe(32),
             product_state_root=seed_state_root,
+            seed_url=seed_url,
         )
         stack.health.publish(qualification)
         server = create_server(
@@ -1252,9 +1334,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--deployment-dir", type=Path)
+    parser.add_argument("--model-operation-file", type=Path)
     parser.add_argument("--static-root", type=Path)
     parser.add_argument("--registry-state", type=Path)
     parser.add_argument("--seed-state-root", type=Path, required=True)
+    parser.add_argument(
+        "--seed-url",
+        help="network URL advertised by the live durable seed; enables owner enrollment",
+    )
     return parser
 
 
@@ -1270,8 +1357,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             deployment_dir=args.deployment_dir,
+            model_operation_file=args.model_operation_file,
             static_root=args.static_root,
             seed_state_root=args.seed_state_root,
+            seed_url=args.seed_url,
         )
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
@@ -1282,6 +1371,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         static_root=args.static_root,
         registry_state=args.registry_state,
         seed_state_root=args.seed_state_root,
+        model_operation_file=args.model_operation_file,
+        seed_url=args.seed_url,
     )
 
 

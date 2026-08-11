@@ -97,7 +97,7 @@ function NetworkProjection({ snapshot }: { readonly snapshot: ProductSnapshot })
         {stages.map((stage) => <tr key={stage.entity_id}><th scope="row">{stage.label}</th><td>[{attribute(stage, 'start_layer')}, {attribute(stage, 'end_layer_exclusive')})</td><td>{placements.get(stage.entity_id) ?? 'Unknown-location tray'}</td><td>{attribute(stage, 'decode_mode')}</td></tr>)}
       </tbody></table>
     </section> : null}
-    {showPhysical ? <section className="panel"><h2>Physical directed links</h2><p>{links.length === 0 ? 'No activation-plane links are declared.' : `${links.length} directed route link${links.length === 1 ? '' : 's'} declared; connectivity remains unknown until M14 measurement evidence.`}</p></section> : null}
+    {showPhysical ? <section className="panel"><h2>Physical directed links</h2><p>{links.length === 0 ? 'No activation-plane links are declared.' : `${links.length} directed route link${links.length === 1 ? '' : 's'} declared; connectivity remains unknown until measured topology evidence is attached.`}</p></section> : null}
   </>;
 }
 
@@ -120,7 +120,7 @@ function PlansProjection({ snapshot }: { readonly snapshot: ProductSnapshot }) {
   const assignments = entities(snapshot, 'assignment');
   return <section className="panel"><p className="eyebrow violet">Placement provenance</p><h2>Operator-selected deployment</h2>
     {routes.map((route) => <dl key={route.entity_id}><div><dt>Route</dt><dd>{route.entity_id}</dd></div><div><dt>Model</dt><dd>{attribute(route, 'model_id')}</dd></div><div><dt>Provenance</dt><dd>{attribute(route, 'placement_provenance')}</dd></div><div><dt>Decode mode</dt><dd>{attribute(route, 'decode_mode')}</dd></div></dl>)}
-    <p role="status">Capability-aware planner output is unsupported until M13. No fixture planner result is presented as live.</p>
+    <p role="status">Capability-aware planner output is unavailable in fixture mode. No fixture planner result is presented as live.</p>
     <p>{assignments.length} validated operator assignment{assignments.length === 1 ? '' : 's'} bound to the current product snapshot.</p>
   </section>;
 }

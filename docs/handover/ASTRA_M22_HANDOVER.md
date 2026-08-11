@@ -1,30 +1,38 @@
-# Astra M22 handover
+# Astra current handover
 
-Mycelium now runs qualified contiguous pipeline inference over three physical hosts
-and two runtime classes using EndpointID-authenticated Iroh. The measured M22 route
-allocates Qwen2.5-3B-Instruct layers `[0,22)`, `[22,35)`, and `[35,36)`; a browser
-request returned a useful seven-token answer and advanced every stage’s counters.
-Prompt/output history survived workspace navigation, refresh, and supervisor restart.
+Mycelium now serves Qwen2.5-3B-Instruct through a qualified, three-host physical
+pipeline over EndpointID-authenticated Iroh. Layers are contiguous: macOS/MLX
+`[0,22)`, macOS/MLX `[22,35)`, and Linux/NumPy `[35,36)`. Browser prompts stream
+real model output; every stage advances counters. Incremental decode retains
+stage-local KV state and reduces measured token latency by 88.64% versus complete
+context replay. Prompt/output history survives navigation and refresh in its tab.
 
-- Governing architecture: `docs/superpowers/specs/2026-08-09-mycelium-astra-architecture-product-design.md`
-- M22 closure spec: `docs/superpowers/specs/2026-08-11-mycelium-m22-release-closure.md`
+The live demo is registry-driven rather than fixture-pinned. Its model selector is
+populated from qualified deployments (currently Qwen2.5 0.5B and 1.5B), and a
+selection changes the active route atomically. The Nodes workspace reads durable
+seed membership, mints signed short-lived enrollment bundles for arbitrary native
+devices, and permits safe revocation of standby members. Joining runs on the target
+device so its identity and capabilities cannot be forged by the browser.
+
+Start here:
+
+- Current and planned architecture: `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md`
+- Governing product architecture: `docs/superpowers/specs/2026-08-09-mycelium-astra-architecture-product-design.md`
+- Latest physical/KV evidence: `docs/handover/M23_PROGRESS_2026-08-11.md`
 - Operator runbook: `docs/live-mvp-operator-runbook.md`
-- Reviewer entry point: `docs/release/astras-macbook-reviewer.md`
-- Release UI audit: `docs/release/m22-ui-requirements.v1.json`
-- Milestone commits: M12 `27a3478`, M13 `d6249c1`, M14 `2ff804d`, M15 `7d3b420`, M16 `b565e0d`, M17 `e739f54`, M18 `0761a97`, M19 `a6294aa`, M20 `26d863a`, M21 `b7f01e2`, M22 baseline `4b8be84`; managed restart closure `26fae02`; reviewer identity and packaging fixes `096022f`, `5438f7c`.
-- Private operator evidence: `m22-release-20260811/m22-release.json`, SBOM, transport matrix, bounded plan, service packages, and reviewer bundle.
+- External reviewer procedure: `docs/release/astras-macbook-reviewer.md`
+- Release UI contract: `docs/release/m22-ui-requirements.v1.json`
 
-Qwen3-8B is locally complete and its dense `qwen3` adapter is verified for manifest
-ownership, MLX/NumPy parity, int8 weight-only execution, and stage-local KV. It remains
-correctly blocked because the measured swarm cannot fit a safe exact contiguous
-allocation. Managed launchd/systemd child recovery, persistent restart budgets,
-coordinator restart, three-member renewal, and post-restart inference are digest-bound
-and verified. A separately enrolled macOS reviewer surrogate was assigned layers
-`[22,35)`, passed the four-category quality gate and an arbitrary browser prompt,
-and retained request history across refresh; its revoked-identity predecessor also
-passed the negative-access check. That surrogate shared the hotspot with the other
-hosts, so the release gate remains withheld only until the same reviewer procedure
-passes from a genuinely different network.
+The UI exposes membership, directed topology, contiguous allocation, runtime
+admission, local-model feasibility, recovery/replication/speculation evidence,
+release gates, and live per-stage KV state in product language. Qwen3-8B is locally
+complete and its dense adapter passes MLX/NumPy, int8, parity, and stage-local-KV
+tests, but selection remains correctly blocked by current safe contiguous capacity.
+No model download is authorized implicitly.
 
-Future decisions remain separately scoped: stronger incremental KV, continuous
-batching, autoscaling, tensor/hybrid parallelism, and quantized Qwen3 qualification.
+Release remains withheld for one honest reason: the reviewer route passed from a
+separately enrolled Mac on the same hotspot, not a genuinely different network.
+Repeat the reviewer procedure externally before changing that gate.
+
+Future decisions remain separately scoped: continuous batching, autoscaling,
+tensor/hybrid parallelism, and quantized Qwen3 qualification.
