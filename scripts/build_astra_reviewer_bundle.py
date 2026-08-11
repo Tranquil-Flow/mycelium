@@ -27,6 +27,7 @@ def _runtime_files(sidecar: Path) -> dict[str, Path]:
                     files[str(child.relative_to(ROOT))] = child
     for relative in (
         "scripts/astra_reviewer_preflight.py",
+        "scripts/package_m22_service.py",
         "release/python-requirements.lock",
         "docs/release/astras-macbook-reviewer.md",
     ):

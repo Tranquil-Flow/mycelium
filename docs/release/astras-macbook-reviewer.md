@@ -11,8 +11,24 @@ EndpointID-authenticated Iroh is the product transport.
 3. Run `python3 runtime/scripts/astra_reviewer_preflight.py --invite-bundle INVITE`.
    Success means coordinator identity verified, Apple-silicon/MLX/resource checks pass,
    and `activation_eligible=true`. It does not mean route qualification.
-4. Start the packaged launchd node service. First run consumes the invitation; later
-   runs resume the same durable identity and advance its incarnation/generation.
+4. Save the operator-supplied `service-config.json`, then build and install its durable
+   launchd package (replace `SERVICE_ID` with the config's `service_id`):
+
+   ```sh
+   python3 runtime/scripts/package_m22_service.py \
+     --config service-config.json --output-root "$PWD/service-package"
+   mkdir -p "$HOME/Library/LaunchAgents"
+   cp "service-package/org.mycelium.SERVICE_ID.plist" \
+     "$HOME/Library/LaunchAgents/org.mycelium.SERVICE_ID.plist"
+   launchctl bootstrap "gui/$(id -u)" \
+     "$HOME/Library/LaunchAgents/org.mycelium.SERVICE_ID.plist"
+   launchctl enable "gui/$(id -u)/org.mycelium.SERVICE_ID"
+   launchctl kickstart -k "gui/$(id -u)/org.mycelium.SERVICE_ID"
+   ```
+
+   First run consumes the invitation; later runs resume the same durable identity and
+   advance its incarnation/generation. The generated service uses the bounded,
+   persistent restart budget recorded in `service-package-manifest.json`.
 5. In Device Lab/Nodes, confirm the pseudonymous reviewer is online but still distinct
    from route eligibility. The planner then reports its exact layer range, required and
    cached bytes, runtime/load proof, and any rejection reason.
