@@ -9,6 +9,7 @@ import argparse
 from collections.abc import Mapping
 import copy
 from dataclasses import asdict
+import gc
 import hashlib
 import json
 from pathlib import Path
@@ -100,6 +101,7 @@ _RUNTIME_PACKAGE_CLOSURE = (
     "mycelium_gossip",
     "mycelium_layer_planner",
 )
+_PREPARATION_AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v1"
 
 
 def _m18_runtime_kv_bytes(
@@ -154,6 +156,85 @@ def _model_identity(args: argparse.Namespace) -> tuple[str, str, str]:
     if not model_slug:
         raise RuntimeError("model_id_invalid")
     return model_id, resolved_commit, model_slug
+
+
+def _preparation_authorization(
+    path: Path | None,
+    *,
+    model_id: str,
+    resolved_commit: str,
+    topology: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, tuple[range, ...] | None]:
+    if path is None:
+        return None, None
+    try:
+        document = json.loads(Path(path).read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("model_preparation_authorization_invalid") from exc
+    expected = {
+        "protocol",
+        "model_id",
+        "revision",
+        "catalog_generation",
+        "operation_digest",
+        "feasibility_digest",
+        "evidence_generation",
+        "evidence_valid_until_unix_ms",
+        "stages",
+        "download_authorized",
+    }
+    stages = document.get("stages") if isinstance(document, dict) else None
+    if (
+        not isinstance(document, dict)
+        or set(document) != expected
+        or document.get("protocol") != _PREPARATION_AUTHORIZATION_PROTOCOL
+        or document.get("model_id") != model_id
+        or document.get("revision") != resolved_commit
+        or document.get("download_authorized") is not False
+        or not isinstance(document.get("catalog_generation"), int)
+        or not isinstance(document.get("evidence_generation"), int)
+        or not isinstance(document.get("evidence_valid_until_unix_ms"), int)
+        or document["evidence_valid_until_unix_ms"] < int(time.time() * 1_000)
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", str(document.get("operation_digest", ""))) is None
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", str(document.get("feasibility_digest", ""))) is None
+        or not isinstance(stages, list)
+        or len(stages) != len(topology)
+    ):
+        raise RuntimeError("model_preparation_authorization_invalid")
+    ranges: list[range] = []
+    cursor = 0
+    for index, (stage, node) in enumerate(zip(stages, topology, strict=True)):
+        if not isinstance(stage, dict) or set(stage) != {
+            "stage_index",
+            "node_id",
+            "start_layer",
+            "end_layer_exclusive",
+            "backend",
+            "decode_mode",
+            "assignment_files",
+            "assignment_artifact_bytes",
+        }:
+            raise RuntimeError("model_preparation_authorization_invalid")
+        start = stage.get("start_layer")
+        end = stage.get("end_layer_exclusive")
+        if (
+            stage.get("stage_index") != index
+            or stage.get("node_id") != node["node_id"]
+            or stage.get("backend") != node["runtime_backend"]
+            or not isinstance(stage.get("decode_mode"), str)
+            or type(start) is not int
+            or type(end) is not int
+            or start != cursor
+            or end <= start
+            or not isinstance(stage.get("assignment_files"), list)
+            or not all(isinstance(item, str) and item for item in stage["assignment_files"])
+            or type(stage.get("assignment_artifact_bytes")) is not int
+            or stage["assignment_artifact_bytes"] < 0
+        ):
+            raise RuntimeError("model_preparation_authorization_invalid")
+        ranges.append(range(start, end))
+        cursor = end
+    return document, tuple(ranges)
 
 
 def _m13_control_plane(
@@ -704,6 +785,8 @@ def _challenge(
     codec: Qwen2PromptCodec,
     loaded: list[Any],
     runtime_backends: list[str],
+    *,
+    generated_token_count: int = 4,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     if not loaded:
         raise RuntimeError("challenge_requires_one_or_more_stages")
@@ -711,7 +794,7 @@ def _challenge(
         raise RuntimeError("challenge_runtime_count_mismatch")
     context = codec.encode("Reply with exactly the word ready.")
     generated: list[int] = []
-    for _ in range(4):
+    for _ in range(generated_token_count):
         stage_output: Any = None
         for index, (stage, backend) in enumerate(
             zip(loaded, runtime_backends, strict=True)
@@ -750,6 +833,69 @@ def _challenge(
     return codec.encode("Reply with exactly the word ready."), tuple(generated)
 
 
+def _release_runtime_memory() -> None:
+    gc.collect()
+    clear_cache = getattr(mx, "clear_cache", None)
+    if callable(clear_cache):
+        clear_cache()
+
+
+def _streaming_challenge(
+    codec: Qwen2PromptCodec,
+    assignments: list[dict[str, Any]],
+    reports: list[dict[str, Any]],
+    runtime_backends: list[str],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Challenge a large candidate with at most one stage's weights resident."""
+
+    if not assignments or len(assignments) != len(reports) or len(assignments) != len(runtime_backends):
+        raise RuntimeError("challenge_runtime_count_mismatch")
+    prompt = codec.encode("Reply with exactly the word ready.")
+    context = prompt
+    stage_output: Any = None
+    for index, (assignment, report, backend) in enumerate(
+        zip(assignments, reports, runtime_backends, strict=True)
+    ):
+        loaded = load_assignment_stage(
+            assignment,
+            report,
+            load_generation=LOAD_GENERATION,
+        )
+        try:
+            if backend == "mlx":
+                stage_output = (
+                    execute_loaded_stage(
+                        loaded,
+                        token_ids=mx.array((context,), dtype=mx.int32),
+                    )
+                    if index == 0
+                    else execute_loaded_stage(
+                        loaded,
+                        hidden_states=mx.array(stage_output, dtype=mx.float32),
+                    )
+                )
+                mx.eval(stage_output)
+            elif backend == "numpy":
+                stage_output = (
+                    execute_loaded_numpy_stage(
+                        loaded,
+                        token_ids=np.asarray((context,), dtype=np.int64),
+                    )
+                    if index == 0
+                    else execute_loaded_numpy_stage(
+                        loaded,
+                        hidden_states=np.asarray(stage_output),
+                    )
+                )
+            else:
+                raise RuntimeError("challenge_runtime_backend_unsupported")
+        finally:
+            del loaded
+            _release_runtime_memory()
+    token_id = quantized_greedy_token_id(stage_output[0, -1, :].tolist())
+    return prompt, (token_id,)
+
+
 def build(args: argparse.Namespace) -> dict[str, Any]:
     repo = Path(__file__).resolve().parents[1]
     route_label = _route_label(args)
@@ -764,6 +910,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     topology = _topology_nodes(template, args.topology)
     node_ids = tuple(node["node_id"] for node in topology)
     runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
+    preparation_authorization, preparation_ranges = _preparation_authorization(
+        getattr(args, "model_preparation_authorization", None),
+        model_id=model_id,
+        resolved_commit=resolved_commit,
+        topology=topology,
+    )
     deployment_id = getattr(args, "deployment_id", None) or str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -809,6 +961,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             # still compiled from the signed M18 route.
             prepare_node_ids = node_ids
             prepare_ranges = None
+    elif preparation_ranges is not None:
+        prepare_node_ids = node_ids
+        prepare_ranges = preparation_ranges
     else:
         prepare_node_ids = node_ids
         prepare_ranges = planned_ranges
@@ -830,6 +985,19 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             runtime_quantization="int8-weight-only",
             deployment_id=deployment_id,
             layer_ranges=prepare_ranges,
+            control_plane_binding=(
+                None
+                if preparation_authorization is None
+                else {
+                    "protocol": "mycelium.control_plane_binding.v1",
+                    "evidence_bundle_digest": preparation_authorization["operation_digest"],
+                    "planner_snapshot_digest": preparation_authorization["feasibility_digest"],
+                    "snapshot_generation": preparation_authorization["evidence_generation"],
+                    "swarm_id": "live-qualified-swarm",
+                    "deployment_id": deployment_id,
+                    "deployment_epoch": 1,
+                }
+            ),
         )
 
     stage_sharding = None
@@ -1021,6 +1189,21 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             for assignment, report in zip(local_assignments, local_reports, strict=True)
         ]
         report_sources = local_reports
+    elif preparation_authorization is not None:
+        base_loaded = []
+        base_proof_documents = []
+        for assignment, report in zip(
+            prepared.assignments, prepared.reports, strict=True
+        ):
+            loaded = load_assignment_stage(
+                assignment,
+                report,
+                load_generation=LOAD_GENERATION,
+            )
+            base_proof_documents.append(json.loads(canonical_json(loaded.proof)))
+            del loaded
+            _release_runtime_memory()
+        report_sources = prepared.reports
     else:
         base_loaded = [
             load_assignment_stage(assignment, report, load_generation=LOAD_GENERATION)
@@ -1052,15 +1235,20 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         for assignment, pack in zip(assignments, packs, strict=True)
     ]
 
+    proof_documents = (
+        base_proof_documents
+        if preparation_authorization is not None
+        else [json.loads(canonical_json(loaded.proof)) for loaded in base_loaded]
+    )
     proofs = [
         _target_proof(
-            json.loads(canonical_json(loaded.proof)),
+            proof_document,
             assignment,
             pack,
             verification,
         )
-        for loaded, assignment, pack, verification in zip(
-            base_loaded, assignments, packs, verifications, strict=True
+        for proof_document, assignment, pack, verification in zip(
+            proof_documents, assignments, packs, verifications, strict=True
         )
     ]
     if (
@@ -1107,11 +1295,19 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         challenge_backends = [
             assignment["runtime"]["backend"] for assignment in assignments
         ]
-    challenge_prompt, challenge_output = _challenge(
-        codec,
-        challenge_loaded,
-        challenge_backends,
-    )
+    if preparation_authorization is not None:
+        challenge_prompt, challenge_output = _streaming_challenge(
+            codec,
+            list(prepared.assignments),
+            list(prepared.reports),
+            challenge_backends,
+        )
+    else:
+        challenge_prompt, challenge_output = _challenge(
+            codec,
+            challenge_loaded,
+            challenge_backends,
+        )
     if is_m18:
         model_config = json.loads(
             (deployment_root / "config.json").read_text(encoding="utf-8")
@@ -1136,6 +1332,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             )
 
     control = bundle / "control"
+    if preparation_authorization is not None:
+        _write_document(
+            control / "model-preparation-authorization.json",
+            preparation_authorization,
+        )
     _write_document(control / "model-manifest.json", prepared.manifest)
     _write_document(control / "execution-graph.json", graph_document)
     _write_document(control / "device-states.json", device_states)
@@ -1254,6 +1455,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         placement_provenance=(
             "planner_v2"
             if m13_document is not None
+            else "capability_aware_contiguous_exact_weight_dp"
+            if preparation_authorization is not None
             else "target_local_physical_preload"
         ),
     )
@@ -1359,12 +1562,16 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "placement_provenance": (
             "planner_v2"
             if m13_document is not None
+            else "capability_aware_contiguous_exact_weight_dp"
+            if preparation_authorization is not None
             else "target_local_physical_preload"
         ),
         "planner_snapshot_digest": (
-            None
-            if m13_document is None
-            else m13_document["route_plan"]["snapshot_digest"]
+            m13_document["route_plan"]["snapshot_digest"]
+            if m13_document is not None
+            else preparation_authorization["feasibility_digest"]
+            if preparation_authorization is not None
+            else None
         ),
         "assignment_materializations": materializations,
         "route_ready": False,
@@ -1460,6 +1667,11 @@ def main() -> int:
         "--m18-control-plane",
         type=Path,
         help="signed M18 replica placement authority with two or more legal tracks",
+    )
+    parser.add_argument(
+        "--model-preparation-authorization",
+        type=Path,
+        help="fresh local-only model feasibility authorization used as layer authority",
     )
     parser.add_argument(
         "--refresh-runtime-closure-only",

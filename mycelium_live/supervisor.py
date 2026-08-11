@@ -53,6 +53,8 @@ from .model_capacity import (
     ModelCapacityRefreshError,
     recompute_model_operation,
 )
+from .local_preparer import LocalCandidatePreparer
+from .preparation import LocalModelPreparation, ModelPreparationError
 from .registry import (
     DeploymentSelectionError,
     LiveDeploymentRegistry,
@@ -430,6 +432,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     static_root: Path
     activation: PreparedDeploymentActivation | None
     capacity_refresh: ModelCapacityRefresh | None
+    model_preparation: LocalModelPreparation | None
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -641,6 +644,70 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._send_bytes(
                     400,
                     _json_bytes({"error": "invalid_capacity_refresh_request"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                202,
+                _json_bytes(status),
+                "application/json; charset=utf-8",
+            )
+
+        def _model_preparation_status(self) -> None:
+            preparation = self.server.model_preparation
+            if preparation is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "model_preparation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(preparation.status()),
+                "application/json; charset=utf-8",
+            )
+
+        def _start_model_preparation(self) -> None:
+            preparation = self.server.model_preparation
+            if preparation is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "model_preparation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            body = self._read_body(limit=1_024)
+            if body is None:
+                return
+            try:
+                document = json.loads(body)
+                if (
+                    not isinstance(document, dict)
+                    or set(document) != {"model_id", "revision"}
+                    or not isinstance(document["model_id"], str)
+                    or not isinstance(document["revision"], str)
+                ):
+                    raise ValueError
+                status = preparation.start(document["model_id"], document["revision"])
+            except ModelPreparationError as exc:
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": exc.code}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_model_preparation_request"}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -968,6 +1035,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._deployment_activation_status()
             elif parsed.path == "/__mycelium/model-capacity-refresh" and not parsed.query:
                 self._model_capacity_refresh_status()
+            elif parsed.path == "/__mycelium/model-preparation" and not parsed.query:
+                self._model_preparation_status()
             elif parsed.path.startswith("/api/"):
                 self._asgi()
             else:
@@ -981,6 +1050,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._start_deployment_activation()
             elif parsed.path == "/__mycelium/model-capacity-refresh/start" and not parsed.query:
                 self._start_model_capacity_refresh()
+            elif parsed.path == "/__mycelium/model-preparation/start" and not parsed.query:
+                self._start_model_preparation()
             elif parsed.path == "/__mycelium/candidates/canary" and not parsed.query:
                 self._canary_candidate()
             elif parsed.path == "/__mycelium/candidates/promote" and not parsed.query:
@@ -1005,6 +1076,7 @@ def create_server(
     port: int,
     activation: PreparedDeploymentActivation | None = None,
     capacity_refresh: ModelCapacityRefresh | None = None,
+    model_preparation: LocalModelPreparation | None = None,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -1017,6 +1089,7 @@ def create_server(
     server.static_root = static_root
     server.activation = activation
     server.capacity_refresh = capacity_refresh
+    server.model_preparation = model_preparation
     return server
 
 
@@ -1300,6 +1373,8 @@ def run_registry_server(
     seed_url: str | None = None,
     candidate_plan_root: Path | None = None,
     model_cache_root: Path | None = None,
+    model_preparation_template_plan: Path | None = None,
+    model_preparation_root: Path | None = None,
 ) -> int:
     """Open, qualify, and serve one or more immutable deployments."""
 
@@ -1310,6 +1385,7 @@ def run_registry_server(
     registry: LiveDeploymentRegistry | None = None
     activation: PreparedDeploymentActivation | None = None
     capacity_refresh: ModelCapacityRefresh | None = None
+    model_preparation: LocalModelPreparation | None = None
     startup_complete = False
     try:
         for plan in operator_plans:
@@ -1349,6 +1425,24 @@ def run_registry_server(
                 ),
                 operation_sink=registry.set_m17_model_operation,
             )
+        if model_preparation_template_plan is not None:
+            if model_cache_root is None or candidate_plan_root is None:
+                raise ValueError("model_preparation_requires_cache_and_candidate_roots")
+            preparation_root = model_preparation_root or (
+                Path(seed_state_root) / "model-preparation"
+            )
+            preparer = LocalCandidatePreparer(
+                repo_root=ROOT,
+                cache_root=model_cache_root,
+                template_plan=model_preparation_template_plan,
+                workspace_root=preparation_root,
+                candidate_root=candidate_plan_root,
+            )
+            model_preparation = LocalModelPreparation(
+                operation_source=registry.m17_model_operation,
+                preparer=preparer,
+                on_candidate_published=activation.refresh if activation is not None else None,
+            )
         stack = build_registry_stack(
             registry=registry,
             bearer_token=secrets.token_urlsafe(32),
@@ -1363,6 +1457,7 @@ def run_registry_server(
             port=port,
             activation=activation,
             capacity_refresh=capacity_refresh,
+            model_preparation=model_preparation,
         )
         startup_complete = True
         stop = threading.Event()
@@ -1395,6 +1490,8 @@ def run_registry_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        if model_preparation is not None:
+            model_preparation.close()
         if capacity_refresh is not None:
             capacity_refresh.close()
         if activation is not None:
@@ -1564,6 +1661,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="private directory of operator-prepared deployment plans",
     )
     parser.add_argument(
+        "--model-preparation-template-plan",
+        type=Path,
+        help="private physical plan supplying the current peer/runtime topology",
+    )
+    parser.add_argument(
+        "--model-preparation-root",
+        type=Path,
+        help="owner-only workspace retaining built local model candidates",
+    )
+    parser.add_argument(
         "--seed-url",
         help="network URL advertised by the live durable seed; enables owner enrollment",
     )
@@ -1601,6 +1708,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed_url=args.seed_url,
         candidate_plan_root=args.candidate_plan_root,
         model_cache_root=args.model_cache_root,
+        model_preparation_template_plan=args.model_preparation_template_plan,
+        model_preparation_root=args.model_preparation_root,
     )
 
 

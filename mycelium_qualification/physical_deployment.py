@@ -1396,6 +1396,7 @@ def prepare_assignment_artifacts(
     deployment_id: str = DEPLOYMENT_ID,
     deployment_epoch: int = DEPLOYMENT_EPOCH,
     layer_ranges: Sequence[range] | None = None,
+    control_plane_binding: Mapping[str, Any] | None = None,
 ) -> _PreparedAssignments:
     """Build, compile, provision, and verify exact offline assignments."""
 
@@ -1446,9 +1447,10 @@ def prepare_assignment_artifacts(
                 }
                 for node in route["node_order"]
             },
-            control_plane_binding=_control_plane_binding(
-                deployment_id,
-                deployment_epoch,
+            control_plane_binding=(
+                copy.deepcopy(dict(control_plane_binding))
+                if control_plane_binding is not None
+                else _control_plane_binding(deployment_id, deployment_epoch)
             ),
         )
         if len(assignments) != len(node_ids):

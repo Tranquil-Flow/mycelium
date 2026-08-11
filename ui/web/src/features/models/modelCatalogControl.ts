@@ -9,6 +9,7 @@ import type {
   M17LifecycleModel,
   M17ModelOperation,
 } from '../liveRoute/m17ModelOperation';
+import type { ModelPreparationStatus } from './modelPreparation';
 
 export type ModelCatalogAvailability =
   | 'active'
@@ -16,6 +17,8 @@ export type ModelCatalogAvailability =
   | 'activating'
   | 'ready_to_activate'
   | 'activation_failed'
+  | 'preparing'
+  | 'preparation_failed'
   | 'fits_swarm'
   | 'needs_capacity_check'
   | 'does_not_fit'
@@ -32,7 +35,7 @@ export interface ModelCatalogRow {
   readonly availability: ModelCatalogAvailability;
   readonly status_label: string;
   readonly detail: string;
-  readonly action: 'activate' | 'retry' | null;
+  readonly action: 'activate' | 'retry' | 'prepare' | 'retry_prepare' | null;
   readonly prominent: boolean;
 }
 
@@ -92,6 +95,7 @@ export function projectModelCatalogControls(
   operation: M17ModelOperation,
   activation: DeploymentActivationStatus,
   nowUnixMs: number,
+  preparation: ModelPreparationStatus | null = null,
 ): readonly ModelCatalogRow[] {
   const lifecycle = new Map(operation.lifecycle.models.map((model) => [identity(model.model_id, model.revision), model]));
   const feasibility = new Map(operation.feasibility_reports.map((report) => [identity(report.model_id, report.revision), report]));
@@ -102,6 +106,7 @@ export function projectModelCatalogControls(
     if (model === undefined) throw new TypeError(`catalog lifecycle is missing ${key}`);
     const report = feasibility.get(key) ?? null;
     const candidate = candidates.get(key) ?? null;
+    const isPreparation = preparation?.model_id === entry.model_id && preparation.revision === entry.revision;
     let availability: ModelCatalogAvailability;
     let statusLabel: string;
     let detail: string;
@@ -117,12 +122,22 @@ export function projectModelCatalogControls(
       availability = 'ready_to_activate'; statusLabel = 'Ready to activate'; detail = `Prepared across ${candidate.topology_size} physical ${candidate.topology_size === 1 ? 'stage' : 'stages'}; activation will not download anything.`; action = 'activate';
     } else if (candidate?.state === 'failed') {
       availability = 'activation_failed'; statusLabel = 'Activation failed'; detail = humanReason(candidate.reason_code ?? 'activation_failed'); action = 'retry';
+    } else if (isPreparation && preparation?.state === 'preparing') {
+      availability = 'preparing'; statusLabel = 'Preparing on swarm'; detail = preparation.phase === 'validating_capacity' ? 'Freezing the current capacity decision.'
+        : preparation.phase === 'compiling_assignments' ? 'Splitting the model into assignment-owned stages.'
+          : preparation.phase === 'verifying_local_artifacts' ? 'Verifying local model files and tensor ownership.'
+            : preparation.phase === 'staging_peers' ? 'Transferring and verifying only each peer’s assigned model files.'
+              : 'Publishing the immutable candidate plan.';
+    } else if (isPreparation && preparation?.state === 'failed') {
+      availability = 'preparation_failed'; statusLabel = 'Preparation failed'; detail = humanReason(preparation.reason_code ?? 'model_preparation_failed'); action = 'retry_prepare';
+    } else if (isPreparation && preparation?.state === 'succeeded') {
+      availability = 'preparing'; statusLabel = 'Prepared route published'; detail = 'Refreshing activation status; qualification has not started.';
     } else if (report !== null && report.evidence_valid_until_unix_ms < nowUnixMs) {
       availability = 'needs_capacity_check'; statusLabel = 'Recheck required'; detail = report.state === 'feasible'
         ? 'The last capacity result has expired; no provisioning or transfer is authorized.'
         : 'The last capacity rejection has expired; recheck after devices or their resources change.';
     } else if (report?.state === 'feasible') {
-      availability = 'fits_swarm'; statusLabel = 'Fits this swarm'; detail = 'A safe contiguous layer allocation exists, but no prepared deployment is available to qualify yet.';
+      availability = 'fits_swarm'; statusLabel = 'Fits this swarm'; detail = 'A safe contiguous layer allocation exists and can be prepared from local files without a download.'; action = 'prepare';
     } else if (report?.state === 'infeasible') {
       availability = 'does_not_fit'; statusLabel = 'Does not fit'; detail = humanReason(report.reasons[0] ?? 'No feasible allocation');
     } else if (entry.state === 'compatible') {
@@ -143,7 +158,7 @@ export function projectModelCatalogControls(
       status_label: statusLabel,
       detail,
       action,
-      prominent: candidate !== null || report !== null || model.selectable,
+      prominent: candidate !== null || report !== null || model.selectable || isPreparation,
     });
   }));
 }

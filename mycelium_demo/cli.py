@@ -102,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--registry-state", type=Path)
     serve.add_argument("--seed-state-root", type=Path)
     serve.add_argument("--candidate-plan-root", type=Path)
+    serve.add_argument("--model-preparation-template-plan", type=Path)
+    serve.add_argument("--model-preparation-root", type=Path)
     serve.add_argument("--seed-url")
     return parser
 
@@ -123,6 +125,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         ("--registry-state", args.registry_state),
         ("--seed-state-root", args.seed_state_root),
         ("--candidate-plan-root", args.candidate_plan_root),
+        ("--model-preparation-template-plan", args.model_preparation_template_plan),
+        ("--model-preparation-root", args.model_preparation_root),
     )
     for flag, value in optional_paths:
         if value is not None:
@@ -150,6 +154,8 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.model_cache_root,
             args.registry_state,
             args.candidate_plan_root,
+            args.model_preparation_template_plan,
+            args.model_preparation_root,
             args.seed_url,
         )
     )

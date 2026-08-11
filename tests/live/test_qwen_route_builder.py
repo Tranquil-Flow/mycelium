@@ -153,6 +153,70 @@ def test_m14_topology_exclusions_do_not_enter_m13_node_exclusions() -> None:
     ) == []
 
 
+def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -> None:
+    model_id = "Qwen/Qwen3-8B"
+    revision = "b" * 40
+    topology = [
+        _topology_node(0, backend="mlx"),
+        _topology_node(1, backend="numpy"),
+    ]
+    document = {
+        "protocol": "mycelium.model_preparation_authorization.v1",
+        "model_id": model_id,
+        "revision": revision,
+        "catalog_generation": 3,
+        "operation_digest": "sha256:" + "a" * 64,
+        "feasibility_digest": "sha256:" + "c" * 64,
+        "evidence_generation": 2,
+        "evidence_valid_until_unix_ms": 9_999_999_999_999,
+        "stages": [
+            {
+                "stage_index": 0,
+                "node_id": "node-0",
+                "start_layer": 0,
+                "end_layer_exclusive": 30,
+                "backend": "mlx",
+                "decode_mode": "complete_context_replay",
+                "assignment_files": ["model-1.safetensors"],
+                "assignment_artifact_bytes": 100,
+            },
+            {
+                "stage_index": 1,
+                "node_id": "node-1",
+                "start_layer": 30,
+                "end_layer_exclusive": 36,
+                "backend": "numpy",
+                "decode_mode": "complete_context_replay",
+                "assignment_files": ["model-2.safetensors"],
+                "assignment_artifact_bytes": 40,
+            },
+        ],
+        "download_authorized": False,
+    }
+    path = tmp_path / "authorization.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+
+    actual, ranges = builder._preparation_authorization(
+        path,
+        model_id=model_id,
+        resolved_commit=revision,
+        topology=topology,
+    )
+
+    assert actual == document
+    assert [(item.start, item.stop) for item in ranges or ()] == [(0, 30), (30, 36)]
+
+    document["stages"][1]["backend"] = "mlx"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="model_preparation_authorization_invalid"):
+        builder._preparation_authorization(
+            path,
+            model_id=model_id,
+            resolved_commit=revision,
+            topology=topology,
+        )
+
+
 def test_m18_kv_admission_covers_model_context_not_only_startup_prompt() -> None:
     assert builder._m18_runtime_kv_bytes(
         {"max_position_embeddings": 32_768},
@@ -237,6 +301,56 @@ def test_startup_challenge_executes_every_stage_for_every_token(monkeypatch) -> 
     assert output == (2, 2, 2, 2)
     assert mlx_calls == ["first", "middle"] * 4
     assert numpy_calls == ["last"] * 4
+
+
+def test_large_candidate_challenge_loads_only_one_stage_at_a_time(monkeypatch) -> None:
+    alive: list[str] = []
+    maximum = 0
+
+    class Loaded:
+        def __init__(self, name: str) -> None:
+            nonlocal maximum
+            self.name = name
+            alive.append(name)
+            maximum = max(maximum, len(alive))
+
+        def __del__(self) -> None:
+            if self.name in alive:
+                alive.remove(self.name)
+
+    monkeypatch.setattr(
+        builder,
+        "load_assignment_stage",
+        lambda assignment, _report, **_kwargs: Loaded(assignment["node_id"]),
+    )
+    monkeypatch.setattr(builder, "_release_runtime_memory", lambda: None)
+    monkeypatch.setattr(
+        builder,
+        "execute_loaded_stage",
+        lambda _loaded, token_ids=None, hidden_states=None: (
+            builder.mx.ones((1, len(token_ids), 3), dtype=builder.mx.float32)
+            if token_ids is not None
+            else hidden_states
+        ),
+    )
+    monkeypatch.setattr(
+        builder,
+        "execute_loaded_numpy_stage",
+        lambda _loaded, hidden_states: np.asarray(hidden_states),
+    )
+    monkeypatch.setattr(builder, "quantized_greedy_token_id", lambda _logits: 2)
+    codec = SimpleNamespace(encode=lambda _prompt: (11, 12))
+
+    prompt, output = builder._streaming_challenge(
+        codec,
+        [{"node_id": "node-0"}, {"node_id": "node-1"}],
+        [{}, {}],
+        ["mlx", "numpy"],
+    )
+
+    assert prompt == (11, 12)
+    assert output == (2,)
+    assert maximum == 1
 
 
 def test_remote_identity_program_matches_controller_derivation_locally() -> None:

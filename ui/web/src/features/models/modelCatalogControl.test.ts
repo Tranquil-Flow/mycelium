@@ -76,7 +76,7 @@ describe('projectModelCatalogControls', () => {
     expect(rows.map((row) => [row.entry.model_id, row.availability, row.action])).toEqual([
       ['active', 'active', null],
       ['prepared', 'ready_to_activate', 'activate'],
-      ['feasible', 'fits_swarm', null],
+      ['feasible', 'fits_swarm', 'prepare'],
       ['large', 'does_not_fit', null],
       ['unsupported', 'unsupported', null],
     ]);

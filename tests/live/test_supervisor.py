@@ -877,6 +877,86 @@ def test_model_capacity_refresh_endpoints_are_same_origin_and_closed_shape(
         thread.join(timeout=5)
 
 
+def test_model_preparation_endpoints_accept_only_public_identity(
+    tmp_path: Path,
+) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    status = {
+        "protocol": "mycelium.model_preparation.v1",
+        "generation": 1,
+        "state": "idle",
+    }
+    calls: list[object] = []
+    preparation = SimpleNamespace(
+        status=lambda: calls.append("status") or status,
+        start=lambda model_id, revision: calls.append((model_id, revision)) or status,
+    )
+
+    async def app(*_args):
+        raise AssertionError("model_preparation_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        model_preparation=preparation,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    revision = "b" * 40
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/model-preparation")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/model-preparation/start",
+            body=json.dumps({"model_id": "Qwen/Qwen3-8B", "revision": revision}),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 202
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/model-preparation/start",
+            body=json.dumps(
+                {
+                    "model_id": "Qwen/Qwen3-8B",
+                    "revision": revision,
+                    "snapshot_path": "/private/model",
+                }
+            ),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read()) == {
+            "error": "invalid_model_preparation_request"
+        }
+        assert calls == ["status", ("Qwen/Qwen3-8B", revision)]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

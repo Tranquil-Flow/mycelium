@@ -47,4 +47,12 @@ describe('ModelCatalogControlPanel', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/does not download or provision/);
     expect(screen.getByRole('button', { name: 'Rechecking capacity…' })).toBeDisabled();
   });
+
+  it('prepares a feasible local model without conflating preparation and activation', () => {
+    const prepare = vi.fn();
+    render(<ModelCatalogControlPanel operation={operation} activation={{ ...activation, candidates: [] }} capacityRefresh={null} preparation={null} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onPrepare={prepare} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare on swarm' }));
+    expect(prepare).toHaveBeenCalledWith('Qwen/Ready', revision);
+    expect(screen.getByText(/no action here downloads a model/i)).toBeInTheDocument();
+  });
 });

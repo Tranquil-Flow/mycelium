@@ -128,6 +128,22 @@ feasible allocations for the five compatible local Qwen identities, including
 Qwen2.5-7B and Qwen3-8B. This supersedes the expired capacity rejection only; neither
 larger model is prepared, loaded, qualified, or selectable yet.
 
+The catalog now also exposes a separate local-only preparation operation. A browser
+can submit only one catalog model ID and immutable revision; the supervisor freezes a
+fresh feasible allocation, resolves the owner-configured local cache and physical
+topology, builds assignment-addressable stage shards, verifies them, stages only each
+peer's allowed files, and atomically publishes a candidate for the existing activation
+gate. Progress and bounded failure are reconstructable after navigation while paths,
+addresses, and command diagnostics stay private. Preparation never downloads,
+activates, qualifies, or selects. The first physical Qwen3-8B attempts failed closed
+in local candidate construction before peer transfer: the legacy loader's transient
+BF16-to-int8 materialization peak exceeded the coordinator's safe memory even after
+the challenge was changed from all-stages-resident to one-stage-at-a-time. No candidate
+was published and the incumbent remained qualified. This invalidates any claim that
+the current 8B feasibility estimate proves load-peak admission; the planner/runtime
+representation identity and measured load workspace must converge before another 8B
+promotion attempt.
+
 ## Current planning, trust, and network authority
 
 M13 made one signed, source-bound Gossip evidence bundle authoritative for placement.
@@ -246,7 +262,7 @@ references, not public release artifacts.
 | M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
-| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, fail-closed selection, live capacity refresh, and prepared-deployment activation implemented | M17 model-operation endpoint/UI and catalog/parity suites; `mycelium.model_capacity_refresh.v1`; `mycelium.deployment_activation.v1`; live 0.5B/1.5B start plus no-restart 3B qualification | Feasibility-to-preparation/provisioning convergence and acquisition failure matrix remain open; fresh three-host evidence now finds Qwen3-8B feasible, but it is not prepared, loaded, qualified, or selectable |
+| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, fail-closed selection, live capacity refresh, local-only assignment preparation, and prepared-deployment activation implemented | M17 model-operation endpoint/UI and catalog/parity suites; `mycelium.model_capacity_refresh.v1`; `mycelium.model_preparation.v1`; `mycelium.deployment_activation.v1`; live 0.5B/1.5B start plus no-restart 3B qualification | Physical 8B preparation exposed an unmodeled BF16-to-int8 load peak and failed before transfer/publication; representation identity, measured load-workspace admission, successful larger-model preparation/qualification, and the remaining acquisition failure matrix stay open |
 | M18 | Qualified replica planning/runtime evidence and concurrency attribution completed | M18 replica plan/runtime endpoints and UI | Continuous batching and pipeline overlap remain unclaimed |
 | M19 | Traffic-aware liveness, scoped recovery evidence, and fenced recovery paths completed | M19 liveness/recovery endpoints and UI | Cross-backend live KV migration remains unclaimed |
 | M20 | Target-authoritative speculative planning/runtime evidence completed | M20 speculative plan/runtime endpoints and UI | Promotion remains workload- and target-parity-bound |
