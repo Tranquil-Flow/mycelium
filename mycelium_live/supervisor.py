@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit
 import uuid
 
 from mycelium_demo.product_stack import build_loopback_product_stack
+from mycelium_governance import governance_readiness
 from mycelium_product_spine import ProductEvidenceApplication, ProductProjector
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
@@ -434,6 +435,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     activation: PreparedDeploymentActivation | None
     capacity_refresh: ModelCapacityRefresh | None
     model_preparation: LocalModelPreparation | None
+    governance_projection: Mapping[str, Any] | None
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -720,6 +722,21 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             self._send_bytes(
                 200,
                 _json_bytes(preparation.status()),
+                "application/json; charset=utf-8",
+            )
+
+        def _governance_readiness(self) -> None:
+            projection = self.server.governance_projection
+            if projection is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "governance_readiness_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(projection),
                 "application/json; charset=utf-8",
             )
 
@@ -1171,6 +1188,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._model_capacity_refresh_status()
             elif parsed.path == "/__mycelium/model-preparation" and not parsed.query:
                 self._model_preparation_status()
+            elif parsed.path == "/__mycelium/governance-readiness" and not parsed.query:
+                self._governance_readiness()
             elif parsed.path.startswith("/api/"):
                 self._asgi()
             else:
@@ -1225,6 +1244,7 @@ def create_server(
     activation: PreparedDeploymentActivation | None = None,
     capacity_refresh: ModelCapacityRefresh | None = None,
     model_preparation: LocalModelPreparation | None = None,
+    governance_projection: Mapping[str, Any] | None = None,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -1238,6 +1258,7 @@ def create_server(
     server.activation = activation
     server.capacity_refresh = capacity_refresh
     server.model_preparation = model_preparation
+    server.governance_projection = governance_projection
     return server
 
 
@@ -1651,6 +1672,7 @@ def run_registry_server(
             activation=activation,
             capacity_refresh=capacity_refresh,
             model_preparation=model_preparation,
+            governance_projection=governance_readiness(ROOT),
         )
         startup_complete = True
         stop = threading.Event()

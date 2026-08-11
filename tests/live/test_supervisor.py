@@ -1021,6 +1021,43 @@ def test_model_preparation_endpoints_accept_only_public_identity(
         thread.join(timeout=5)
 
 
+def test_governance_readiness_endpoint_serves_only_the_frozen_projection(
+    tmp_path: Path,
+) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    projection = {
+        "protocol": "mycelium.governance_readiness.v1",
+        "release_ready": False,
+        "release_exclusions": ["runtime gates remain open"],
+    }
+
+    async def app(*_args):
+        raise AssertionError("governance_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        governance_projection=projection,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/governance-readiness")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == projection
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

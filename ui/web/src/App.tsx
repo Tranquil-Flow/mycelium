@@ -49,6 +49,7 @@ import {
 } from './features/lifecycle/lifecycleProjection';
 import { SettingsProvider } from './features/settings/SettingsContext';
 import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
+import { GovernanceReadinessSource } from './features/governance/GovernanceReadinessSource';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
@@ -300,6 +301,7 @@ export default function App({
       <ProductEvidenceSettings />
       {source.source_mode === 'live' ? <M22ReleaseSourcePanel view="settings" hideUnavailable /> : null}
       {source.source_mode === 'live' ? <M21HeterogeneousSourcePanel view="settings" hideUnavailable /> : null}
+      {source.source_mode === 'live' ? <GovernanceReadinessSource /> : null}
       <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} speculationClient={source.source_mode === 'live' ? liveM20SpeculationClient : null} />
       {source.source_mode === 'live' ? <ModelCatalogControlSource /> : null}
     </>;

@@ -54,12 +54,10 @@ def test_honest_tree_preserves_fixed_false_readiness_claims(tmp_path: Path) -> N
         {
             "app.py": "state = {'route_ready': False, 'release_ready': False}\n",
             "mycelium_qualification/qualifier.py": (
-                "def accepted_record():\n"
-                "    return {'route_ready': True}\n"
+                "def accepted_record():\n    return {'route_ready': True}\n"
             ),
             "mycelium_gateway/asgi.py": (
-                "ALLOWED_METHOD = 'GET'\n"
-                "REJECTION = 'POST requests remain rejected'\n"
+                "ALLOWED_METHOD = 'GET'\nREJECTION = 'POST requests remain rejected'\n"
             ),
             "ui/web/src/data/observatorySource.ts": (
                 "export const load = (url: string) => fetch(url);\n"
@@ -107,12 +105,18 @@ def test_route_and_release_true_literals_fail_outside_authority(tmp_path: Path) 
     assert result["ok"] is False
     findings = result["findings"]
     assert isinstance(findings, list)
-    assert [item for item in findings if item["code"] == "route_ready_true_outside_authority"] == [
+    assert [
+        item
+        for item in findings
+        if item["code"] == "route_ready_true_outside_authority"
+    ] == [
         {"code": "route_ready_true_outside_authority", "line": 1, "path": "worker.py"},
         {"code": "route_ready_true_outside_authority", "line": 2, "path": "worker.py"},
         {"code": "route_ready_true_outside_authority", "line": 3, "path": "worker.py"},
     ]
-    assert [item for item in findings if item["code"] == "release_ready_true_literal"] == [
+    assert [
+        item for item in findings if item["code"] == "release_ready_true_literal"
+    ] == [
         {
             "code": "release_ready_true_literal",
             "line": 1,
@@ -147,7 +151,9 @@ def test_observatory_backend_and_ui_write_surfaces_fail(tmp_path: Path) -> None:
     assert result["ok"] is False
     findings = result["findings"]
     assert isinstance(findings, list)
-    assert [item for item in findings if item["code"] == "observatory_backend_write_surface"] == [
+    assert [
+        item for item in findings if item["code"] == "observatory_backend_write_surface"
+    ] == [
         {
             "code": "observatory_backend_write_surface",
             "line": 1,
@@ -161,7 +167,9 @@ def test_observatory_backend_and_ui_write_surfaces_fail(tmp_path: Path) -> None:
             "subject": "delete",
         },
     ]
-    assert [item for item in findings if item["code"] == "observatory_ui_write_surface"] == [
+    assert [
+        item for item in findings if item["code"] == "observatory_ui_write_surface"
+    ] == [
         {
             "code": "observatory_ui_write_surface",
             "line": 1,
@@ -177,7 +185,9 @@ def test_observatory_backend_and_ui_write_surfaces_fail(tmp_path: Path) -> None:
     ]
 
 
-def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(tmp_path: Path) -> None:
+def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(
+    tmp_path: Path,
+) -> None:
     repo = _repo(
         tmp_path,
         {
@@ -186,6 +196,9 @@ def test_allowlisted_product_action_clients_do_not_weaken_observatory_boundary(t
             "ui/web/src/features/swarm/SwarmClient.ts": "fetch('/api/v1/swarm/join', { method: 'POST' });\n",
             "ui/web/src/features/membership/membershipClient.ts": "fetch('/api/v1/membership/join', { method: 'POST' });\n",
             "ui/web/src/features/deviceLab/deviceLabClient.ts": "fetch('/api/interactive/infer', { method: 'POST' });\n",
+            "ui/web/src/features/liveRoute/deploymentActivation.ts": "fetch('/__mycelium/deployment-activation/start', { method: 'POST' });\n",
+            "ui/web/src/features/models/modelCapacityRefresh.ts": "fetch('/__mycelium/model-capacity-refresh/start', { method: 'POST' });\n",
+            "ui/web/src/features/models/modelPreparation.ts": "fetch('/__mycelium/model-preparation/start', { method: 'POST' });\n",
             "ui/web/src/features/deviceLab/arbitraryClient.ts": "fetch('/api/interactive/infer', { method: 'POST' });\n",
             "ui/web/src/data/observatorySource.ts": "fetch('/api/v1/observatory', { method: 'POST' });\n",
         },

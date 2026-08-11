@@ -29,6 +29,7 @@ import { M21HeterogeneousSourcePanel } from './M21HeterogeneousSourcePanel';
 import { M22ReleaseSourcePanel } from './M22ReleaseSourcePanel';
 import { M23KvSourcePanel } from './M23KvSourcePanel';
 import { PreparedDeploymentsSourcePanel } from './PreparedDeploymentsSourcePanel';
+import { GovernanceReadinessSource } from '../governance/GovernanceReadinessSource';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -224,6 +225,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'readiness' ? (
         <>
+          <GovernanceReadinessSource />
           <M22ReleaseSourcePanel view="readiness" hideUnavailable />
           <M23KvSourcePanel view="readiness" hideUnavailable />
           <M21HeterogeneousSourcePanel view="readiness" hideUnavailable />

@@ -1,0 +1,70 @@
+{
+  "protocol": "mycelium.governance_ledger.v1",
+  "state_order": [
+    "absent",
+    "design_only",
+    "implemented_unintegrated",
+    "partial",
+    "qualified"
+  ],
+  "governing_plan": "docs/superpowers/plans/2026-08-11-mycelium-astra-completion-plan.md",
+  "architecture_ledger": "docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md",
+  "contract_manifest": {
+    "path": "contracts/contract-manifest.v1.json",
+    "protocol": "mycelium.contract_manifest.v1"
+  },
+  "capabilities": [
+    {"id": "4.1", "state": "qualified"},
+    {"id": "4.2", "state": "qualified"},
+    {"id": "4.3", "state": "qualified"},
+    {"id": "4.4", "state": "partial"},
+    {"id": "4.5", "state": "partial"},
+    {"id": "4.6", "state": "qualified"},
+    {"id": "4.7", "state": "partial"},
+    {"id": "4.8", "state": "implemented_unintegrated"},
+    {"id": "4.9", "state": "design_only"},
+    {"id": "4.10", "state": "partial"},
+    {"id": "4.11", "state": "implemented_unintegrated"},
+    {"id": "4.12", "state": "partial"},
+    {"id": "4.13", "state": "implemented_unintegrated"},
+    {"id": "4.14", "state": "partial"},
+    {"id": "4.15", "state": "partial"}
+  ],
+  "milestones": [
+    {"id": "M17", "state": "partial", "capability_claims": {"4.2": "qualified", "4.5": "partial", "4.15": "partial"}},
+    {"id": "M18", "state": "implemented_unintegrated", "capability_claims": {"4.8": "implemented_unintegrated"}},
+    {"id": "M19", "state": "implemented_unintegrated", "capability_claims": {"4.10": "partial", "4.11": "implemented_unintegrated", "4.13": "implemented_unintegrated"}},
+    {"id": "M20", "state": "design_only", "capability_claims": {"4.9": "design_only"}},
+    {"id": "M21", "state": "partial", "capability_claims": {"4.12": "partial", "4.14": "partial"}},
+    {"id": "M22", "state": "partial", "capability_claims": {"4.15": "partial"}},
+    {"id": "M23", "state": "partial", "capability_claims": {"4.10": "partial"}}
+  ],
+  "authorized_product_actions": [
+    {"client": "ui/web/src/features/inference/deploymentClient.ts", "methods": ["POST"], "endpoints": ["/__mycelium/deployments/select"], "protocols": ["mycelium.live_deployment_registry.v1"], "consent": "explicit_model_selection"},
+    {"client": "ui/web/src/features/inference/requestClient.ts", "methods": ["POST", "DELETE"], "endpoints": ["/api/v1/inference/requests", "/api/v1/inference/requests/{request_id}"], "protocols": ["mycelium.product_ui.bootstrap.v1", "mycelium.request_gateway.v2", "mycelium.request_event.v2"], "consent": "explicit_inference_or_cancel"},
+    {"client": "ui/web/src/features/deviceLab/deviceLabClient.ts", "methods": ["POST"], "endpoints": ["/api/interactive/invite", "/api/interactive/infer", "/api/interactive/cancel"], "protocols": ["mycelium.interactive_status.v1", "mycelium.interactive_runtime.v1", "mycelium.interactive_inference_record.v1"], "consent": "operator_capability_and_explicit_action"},
+    {"client": "ui/web/src/features/membership/membershipClient.ts", "methods": ["POST"], "endpoints": ["/api/v1/membership/invite", "/api/v1/membership/join", "/api/v1/membership/revoke"], "protocols": ["mycelium.product_membership.v1"], "consent": "explicit_membership_action"},
+    {"client": "ui/web/src/features/swarm/SwarmClient.ts", "methods": ["POST"], "endpoints": ["/api/v1/swarm/invites", "/api/v1/swarm/join", "/api/v1/swarm/leave"], "protocols": ["mycelium.product_ui.bootstrap.v1", "mycelium.product_ui.swarm.v1"], "consent": "explicit_swarm_action"},
+    {"client": "ui/web/src/features/liveRoute/deploymentActivation.ts", "methods": ["POST"], "endpoints": ["/__mycelium/deployment-activation/start", "/__mycelium/deployment-activation/unload"], "protocols": ["mycelium.deployment_activation.v1"], "consent": "explicit_activation_or_unload"},
+    {"client": "ui/web/src/features/models/modelCapacityRefresh.ts", "methods": ["POST"], "endpoints": ["/__mycelium/model-capacity-refresh/start"], "protocols": ["mycelium.model_capacity_refresh.v1", "mycelium.swarm_feasibility_evidence.v1"], "consent": "explicit_capacity_refresh"},
+    {"client": "ui/web/src/features/models/modelPreparation.ts", "methods": ["POST"], "endpoints": ["/__mycelium/model-preparation/start"], "protocols": ["mycelium.model_preparation.v1", "mycelium.model_representation_decision.v1", "mycelium.model_preparation_authorization.v1"], "consent": "exact_representation_owner_authorization"}
+  ],
+  "read_only_boundary_protocols": [
+    "mycelium.governance_readiness.v1",
+    "mycelium.governance_gate.v1",
+    "mycelium.governance_audit.v1",
+    "mycelium.claim_boundary_audit.v1",
+    "mycelium.contract_audit.v1"
+  ],
+  "release_exclusions": [
+    "sealed milestone evidence is historical until A1 separates it from live state",
+    "larger-model preparation and qualification remain representation-bound and open",
+    "traffic-aware scoped liveness and recovery are not integrated on the product path",
+    "multi-stage replicated throughput is not qualified on the product path",
+    "real batching and multi-position target verification are not implemented",
+    "speculative decoding is not promoted",
+    "off-tailnet join and forced-relay serving are not qualified",
+    "platform-neutral Android and foreground-only iOS activation remain open",
+    "release closure is not derived exclusively from executed artifacts"
+  ]
+}

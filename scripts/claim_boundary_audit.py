@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Audit fixed readiness claims and Observatory read-only source boundaries."""
+
 from __future__ import annotations
 
 import argparse
@@ -43,6 +44,9 @@ _ALLOWED_PRODUCT_ACTION_CLIENTS = frozenset(
         "ui/web/src/features/deviceLab/deviceLabClient.ts",
         "ui/web/src/features/membership/membershipClient.ts",
         "ui/web/src/features/swarm/SwarmClient.ts",
+        "ui/web/src/features/liveRoute/deploymentActivation.ts",
+        "ui/web/src/features/models/modelCapacityRefresh.ts",
+        "ui/web/src/features/models/modelPreparation.ts",
     }
 )
 _PREFIXED_TOKEN_PATTERN = re.compile(
@@ -54,13 +58,16 @@ _PREFIXED_TOKEN_PATTERN = re.compile(
 
 def canonical_json(value: Any) -> str:
     """Serialize deterministic JSON with exactly one trailing newline."""
-    return json.dumps(
-        value,
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ) + "\n"
+    return (
+        json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def _redact_output(value: str) -> str:
@@ -178,15 +185,14 @@ def _source_kind(relative_path: str) -> str | None:
     path = PurePosixPath(relative_path)
     if path.suffix == ".py":
         return "python"
-    if (
-        path.parts[:3] == ("ui", "web", "src")
-        and path.suffix.lower() in _UI_SUFFIXES
-    ):
+    if path.parts[:3] == ("ui", "web", "src") and path.suffix.lower() in _UI_SUFFIXES:
         return "observatory_ui"
     return None
 
 
-def _read_regular_file(repo_root: Path, relative_path: str) -> tuple[bytes | None, str | None]:
+def _read_regular_file(
+    repo_root: Path, relative_path: str
+) -> tuple[bytes | None, str | None]:
     current = repo_root
     parts = PurePosixPath(relative_path).parts
     metadata = repo_root.lstat()
@@ -198,7 +204,9 @@ def _read_regular_file(repo_root: Path, relative_path: str) -> tuple[bytes | Non
             return None, "tracked_file_missing"
         if stat.S_ISLNK(metadata.st_mode):
             return None, (
-                "tracked_symlink" if index == len(parts) - 1 else "tracked_symlink_component"
+                "tracked_symlink"
+                if index == len(parts) - 1
+                else "tracked_symlink_component"
             )
         if index < len(parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
             return None, "tracked_path_component_not_directory"
@@ -260,7 +268,9 @@ def _literal_claims(tree: ast.AST) -> list[tuple[str, int]]:
                     and isinstance(keyword.value, ast.Constant)
                     and keyword.value.value is True
                 ):
-                    claims.add((keyword.arg, keyword.value.lineno, keyword.value.col_offset))
+                    claims.add(
+                        (keyword.arg, keyword.value.lineno, keyword.value.col_offset)
+                    )
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
             value = node.value
             if not isinstance(value, ast.Constant) or value.value is not True:
@@ -275,7 +285,12 @@ def _literal_claims(tree: ast.AST) -> list[tuple[str, int]]:
                 claim = _claim_target(node.target)
                 if claim in {"route_ready", "release_ready"}:
                     claims.add((claim, node.lineno, node.col_offset))
-    return [(claim, line) for claim, line, _column in sorted(claims, key=lambda item: (item[1], item[2], item[0]))]
+    return [
+        (claim, line)
+        for claim, line, _column in sorted(
+            claims, key=lambda item: (item[1], item[2], item[0])
+        )
+    ]
 
 
 def _claim_findings(
@@ -292,7 +307,9 @@ def _claim_findings(
                 _finding("route_ready_true_outside_authority", relative_path, line=line)
             )
         else:
-            findings.append(_finding("release_ready_true_literal", relative_path, line=line))
+            findings.append(
+                _finding("release_ready_true_literal", relative_path, line=line)
+            )
     return findings, allowed
 
 
@@ -359,9 +376,9 @@ def audit_repository(repo_root: str | Path) -> dict[str, object]:
     if not root.is_dir():
         return _result([_finding("repository_root_not_directory", ".")], **empty)
     try:
-        git_root = Path(_git(root, "rev-parse", "--show-toplevel").decode().strip()).resolve(
-            strict=True
-        )
+        git_root = Path(
+            _git(root, "rev-parse", "--show-toplevel").decode().strip()
+        ).resolve(strict=True)
         if git_root != root:
             raise ValueError("path is not repository root")
         entries = _tracked_entries(root)

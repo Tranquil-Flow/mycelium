@@ -70,8 +70,8 @@
         },
         {
           "path": "mycelium_live/registry.py",
-          "sha256": "41259f566d44bc289aa4d9c67d4f513e03aa1489cb0dc0aea525a6a496d22989",
-          "size_bytes": 29709
+          "sha256": "bdf53b5b2bd0a5175484457fc049d57d379ded0b4532774addcab72bab588ec2",
+          "size_bytes": 32893
         }
       ],
       "protocol": "mycelium.candidate_promotion_report.v1"
@@ -145,26 +145,66 @@
       "owner_sources": [
         {
           "path": "mycelium_live/activation.py",
-          "sha256": "a4f423f26a373eef39ae00daab29ec10c149f8995da0ea8e2d3b41ee136515a9",
-          "size_bytes": 19982
+          "sha256": "dc1fe0dd27e5c497500f8bc91fdb0a73268ccb320098f7b126ad18368e40ff6e",
+          "size_bytes": 21539
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "df465b4df63f3c5625dcfdec30f2c6985e43df57581f60d923328f6065c7426e",
-          "size_bytes": 60209
+          "sha256": "ca187eaf9e5d2ed3f3f08eb41de3c3a6def20513b7baf8eb9aec395e96c81f99",
+          "size_bytes": 74618
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
-          "sha256": "f8d362a15a4dfb9295de421068b1506f8066eed3e37f3761137fbfa9a498ad38",
-          "size_bytes": 7439
+          "sha256": "6dc86b5e7faa31b1b4629b1235048e672144bd6428e8f17f292682f0777fc690",
+          "size_bytes": 7943
         },
         {
           "path": "ui/web/src/features/liveRoute/PreparedDeploymentsPanel.tsx",
-          "sha256": "c2d6b8c3d28445ed0573b350a0868ee3a21c99b661aa66ef00fa8436e6d22a58",
-          "size_bytes": 4876
+          "sha256": "395697ee4a5e61d70e4935de29945a57676dd7b467d2ab6aa42739cbe9a75dfd",
+          "size_bytes": 5112
         }
       ],
       "protocol": "mycelium.deployment_activation.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/deployment-residency-physical-v1.json",
+        "sha256": "d1f739f134f4221228d0d2a8231609809ff4942c89a4cafdb08fdc49c0086445",
+        "size_bytes": 1184
+      },
+      "owner_sources": [
+        {
+          "path": "docs/superpowers/specs/2026-08-11-mycelium-deployment-residency-control.md",
+          "sha256": "ec1f0d00231388770bff196b32685671b5ed3335d12bb39317358cb9a32004e1",
+          "size_bytes": 3299
+        },
+        {
+          "path": "mycelium_live/activation.py",
+          "sha256": "dc1fe0dd27e5c497500f8bc91fdb0a73268ccb320098f7b126ad18368e40ff6e",
+          "size_bytes": 21539
+        },
+        {
+          "path": "mycelium_live/registry.py",
+          "sha256": "bdf53b5b2bd0a5175484457fc049d57d379ded0b4532774addcab72bab588ec2",
+          "size_bytes": 32893
+        },
+        {
+          "path": "mycelium_live/supervisor.py",
+          "sha256": "ca187eaf9e5d2ed3f3f08eb41de3c3a6def20513b7baf8eb9aec395e96c81f99",
+          "size_bytes": 74618
+        },
+        {
+          "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
+          "sha256": "6dc86b5e7faa31b1b4629b1235048e672144bd6428e8f17f292682f0777fc690",
+          "size_bytes": 7943
+        },
+        {
+          "path": "ui/web/src/features/models/ModelCatalogControlPanel.tsx",
+          "sha256": "c58badcc600586f1cad3f5231fe1b521fca0583b3cfacea01ad7a570f72d722d",
+          "size_bytes": 9833
+        }
+      ],
+      "protocol": "mycelium.deployment_residency_physical_gate.v1"
     },
     {
       "fixture": {
@@ -265,6 +305,36 @@
         }
       ],
       "protocol": "mycelium.gossip.router_view.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/governance-readiness-v1.json",
+        "sha256": "8f8d99c07e4842abb5d4f0490d94a2522d5eb2e5a47db75ade5488529f8934a7",
+        "size_bytes": 813
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_governance.py",
+          "sha256": "26373620e51730d27470571964ee239e3851ddf53af90958926e05558adecaf7",
+          "size_bytes": 2567
+        },
+        {
+          "path": "mycelium_live/supervisor.py",
+          "sha256": "ca187eaf9e5d2ed3f3f08eb41de3c3a6def20513b7baf8eb9aec395e96c81f99",
+          "size_bytes": 74618
+        },
+        {
+          "path": "ui/web/src/features/governance/governanceReadiness.ts",
+          "sha256": "5f6459e0cb060186efe16bf4653073ea5365dedd99a35a873a3cd62369f5cae1",
+          "size_bytes": 3777
+        },
+        {
+          "path": "ui/web/src/features/governance/GovernanceReadinessSource.tsx",
+          "sha256": "1992b904f0c503c5876feb0391f54d1eaa1ca35989961d2b236135be6a331741",
+          "size_bytes": 2571
+        }
+      ],
+      "protocol": "mycelium.governance_readiness.v1"
     },
     {
       "fixture": {
@@ -410,8 +480,8 @@
         },
         {
           "path": "mycelium_live/registry.py",
-          "sha256": "41259f566d44bc289aa4d9c67d4f513e03aa1489cb0dc0aea525a6a496d22989",
-          "size_bytes": 29709
+          "sha256": "bdf53b5b2bd0a5175484457fc049d57d379ded0b4532774addcab72bab588ec2",
+          "size_bytes": 32893
         }
       ],
       "protocol": "mycelium.live_route_incident.v1"

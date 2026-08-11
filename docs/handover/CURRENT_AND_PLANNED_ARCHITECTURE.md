@@ -110,6 +110,14 @@ progress, is retryable after failure, and preserves the incumbent route. This cl
 the gateway-restart gap for prepared deployments, not the remaining automatic M17
 feasibility, assignment-local acquisition, or lifecycle-convergence gates.
 
+A qualified candidate-backed standby can now be explicitly unloaded from memory
+without deleting its prepared plan or changing the selected deployment. The registry
+refuses active or in-use targets, closes the route before removing it, persists the
+reduced serving set, and projects the candidate as ready to activate again. This
+provides the first finite-memory residency control for switching among a larger local
+catalog; boot-only deployments still need immutable candidate plans before they can
+be safely unloaded and later reactivated.
+
 The live Inference and Settings workspaces now present one model catalog control that
 joins immutable local identities, lifecycle state, feasibility evidence, and prepared
 activation candidates. Qualified models alone populate the inference selector;
@@ -209,18 +217,18 @@ promote the rest of a composite capability.
 | 4.1 Evidence-driven planning | `qualified` | One signed, source-bound M13 bundle coherently supplies membership, status, runtime/decode mode, memory tiers, and required directed edges to the selected live candidate; stale or mismatched evidence fails closed. |
 | 4.2 Capability-aware contiguous allocation | `qualified` | Deterministic contiguous DP selected the M13 two-Mac 15/9 split and the M14 measured-order three-host 1/1/22 split. Compute-only and fast-memory-only physical A/B inputs produced distinct allocations with `planner_v2` provenance. |
 | 4.3 Directed cyclic topology | `qualified` | A complete six-edge activation-plane matrix across three physical hosts drove exact cycle selection; the winning cycle differs from canonical order and is opened into forward edges plus explicit decode loopback. |
-| 4.4 Phase/workload objectives | `qualified` | M15 compares three phase objectives over two content-free workload profiles on one frozen evidence snapshot, exposes robust/Pareto selection, and binds sequential physical observations to exact request-shape predictions and frozen budgets. Concurrent/batched execution remains M16. |
-| 4.5 Assignment-local artifacts | `partially_qualified` | M13 materializes and proves only each host's assigned shard plus shared static assets, with assignment-bound load proofs. Cache eviction, corruption recovery, concurrent staging, and full runtime memory/thermal admission are not qualified. |
+| 4.4 Phase/workload objectives | `partial` | M15 compares three phase objectives over two content-free workload profiles on one frozen evidence snapshot, exposes robust/Pareto selection, and binds sequential physical observations to exact request-shape predictions and frozen budgets. Concurrency and batch shape remain modeled rather than executed. |
+| 4.5 Assignment-local artifacts | `partial` | M13 materializes and proves only each host's assigned shard plus shared static assets, with assignment-bound load proofs. Cache eviction, corruption recovery, concurrent staging, and full runtime memory/thermal admission are not qualified. |
 | 4.6 Progressive routing and immutable execution | `qualified` | M16 reserves every placement before dispatch, projects the progressive candidate, commits an immutable graph/topology-bound `PathManifest`, and releases all request resources on every terminal path. |
-| 4.7 Batching/scheduling/backpressure | `partially_qualified` | M16 physically qualifies bounded concurrent admission, interactive/batch QoS with aging, sequential dispatch, queue bounds, cancellation, and cleanup. Physical runtime batching, continuous batching, and pipeline overlap remain explicitly unclaimed. |
+| 4.7 Batching/scheduling/backpressure | `partial` | M16 physically qualifies bounded concurrent admission, interactive/batch QoS with aging, sequential dispatch, queue bounds, cancellation, and cleanup. Physical runtime batching, continuous batching, and pipeline overlap remain explicitly unclaimed. |
 | 4.8 Data-parallel stage replication | `implemented_unintegrated` | Planner/flow concepts exist; no live replica group or multi-track physical throughput proof exists. |
 | 4.9 Speculative decode | `design_only` | No promoted draft/target runtime path. |
-| 4.10 KV ownership/fault tolerance | `partially_qualified` | Stage-local KV ownership and cleanup are physically observed on homogeneous MLX routes. Any NumPy or Pixel placement downgrades the route to complete-context replay; standby/replay recovery is not implemented. |
+| 4.10 KV ownership/fault tolerance | `partial` | M23 physically qualifies stage-local KV ownership and cleanup on one three-host MLX/MLX/NumPy Qwen2 route. Live replay recovery and fenced successor recovery are not integrated; the M23 result does not claim KV migration or a general cross-backend cache format. |
 | 4.11 Deterministic scoped replanning | `implemented_unintegrated` | Replan types/logic exist; current failure rebuilds or switches a complete deployment. |
-| 4.12 Signed heterogeneous membership | `partially_qualified` | Durable signed membership now binds two MLX Macs and one `linux_numpy_iroh` host as fresh activation-eligible members. Device Lab/mobile and different-network heterogeneous activation remain separate M20 work. |
+| 4.12 Signed heterogeneous membership | `partial` | Durable signed membership now binds two MLX Macs and one `linux_numpy_iroh` host as fresh activation-eligible members. Platform-neutral Android/iOS and off-tailnet heterogeneous activation remain open. |
 | 4.13 Traffic-aware liveness | `implemented_unintegrated` | General liveness code exists, but the live route can remain blocked until node command timeout after peer loss. |
-| 4.14 Authenticated direct/relay transport | `partially_qualified` | Native authenticated Iroh publishes path class, relay metadata when present, cold/warm RTT, goodput, jitter/loss, reconnects, generations, freshness, and connection reuse. M14 physically observed six direct edges; it makes no relay-path claim. |
-| 4.15 Privacy/authority/qualification | `qualified` | One privacy-reduced product snapshot/event spine drives browser-safe Nodes, Readiness, and Incidents projections; qualifier-gated admission, durable authority generation, and refresh persistence are physically exercised in the two-Mac M12 boundary. |
+| 4.14 Authenticated direct/relay transport | `partial` | Native authenticated Iroh publishes path class and activation-connection observations. M14 physically observed six direct edges; forced relay, relay region/redaction, unknown rather than zero for missing samples, and off-tailnet control-plane operation remain open. |
+| 4.15 Privacy/authority/qualification | `partial` | Privacy-reduced projections, qualifier-gated admission, durable authority generation, and refresh persistence are real. Static boundary/contract audits and the separation of sealed history from live runtime state must close before this capability can be promoted. |
 
 ## Product UI truth boundary
 
@@ -265,13 +273,13 @@ references, not public release artifacts.
 | M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
-| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, representation-bound resident/load-peak feasibility, fail-closed selection, live capacity refresh, local-only assignment preparation, and prepared-deployment activation implemented | M17 model-operation endpoint/UI and catalog/parity suites; `mycelium.model_capacity_refresh.v1`; `mycelium.model_preparation.v1`; `mycelium.deployment_activation.v1`; live 0.5B/1.5B start plus no-restart 3B qualification | Fresh evidence rejects 8B before provisioning and admits local Qwen2.5-7B; successful 7B preparation/qualification and the remaining acquisition failure matrix stay open |
-| M18 | Qualified replica planning/runtime evidence and concurrency attribution completed | M18 replica plan/runtime endpoints and UI | Continuous batching and pipeline overlap remain unclaimed |
-| M19 | Traffic-aware liveness, scoped recovery evidence, and fenced recovery paths completed | M19 liveness/recovery endpoints and UI | Cross-backend live KV migration remains unclaimed |
-| M20 | Target-authoritative speculative planning/runtime evidence completed | M20 speculative plan/runtime endpoints and UI | Promotion remains workload- and target-parity-bound |
-| M21 | Heterogeneous membership and physical MLX/NumPy route evidence completed | M21 heterogeneous endpoint/UI and physical route records | Mobile activation and different-network Mac conformance remain deferred, not silently inferred |
-| M22 | Release closure, service packaging, UI audit, local 3B qualification, Qwen3 adapter proof, and reviewer bundle completed | `/Users/evinova-self/mycelium-physical-run/m22-release-20260811/m22-release.json` | Fresh representation-aware evidence again rejects Qwen3-8B but admits Qwen2.5-7B; 7B preparation and qualification remain open, and no public release has occurred |
-| M23 | Three-host MLX/MLX/NumPy stage-local KV physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain | `docs/handover/M23_PROGRESS_2026-08-11.md`; `contracts/compatibility-fixtures/m23-kv-gate-v1.json` | Tensor parallelism, continuous batching, KV migration, and mobile activation remain later scope |
+| M17 | `partial` | Multi-model inventory, dense Qwen2/Qwen3 adapters, representation-bound resident/load-peak feasibility, fail-closed selection, live capacity refresh, exact owner-authorized local preparation, and prepared-deployment activation exist; live 0.5B/1.5B and no-restart 3B qualification are the physical boundary | Successful representation-approved 7B preparation/qualification and the remaining acquisition failure matrix stay open |
+| M18 | `implemented_unintegrated` | Historical replica contracts, sealed planner/runtime documents, endpoints, UI, and a qualification-only whole-model throughput observation exist | Re-prove a replicated stage inside a multi-stage pipeline through concurrent browser requests on the normal product path; do not promote the historical single-stage whole-model result as stage replication |
+| M19 | `implemented_unintegrated` | Historical liveness/recovery contracts, sealed documents, endpoints, UI, and script-driven recovery evidence exist | Integrate traffic-aware detection, scoped failure, full-context replay, fenced KV successors, circuit breakers, restart reconciliation, and observed positive/negative browser-path recovery |
+| M20 | `design_only` | Target-authoritative speculative contracts and a disabled-decision UI exist; sealed measurements do not establish speculative execution | Add real multi-position target verification, same-session measurement, bounded draft fallback, and either measured material gain or an honestly measured disabled decision |
+| M21 | `partial` | Durable heterogeneous membership and physical MLX/NumPy execution are real; the current evidence and direct-path observations are historical | Replace fabricated/static network claims, prove off-tailnet join plus direct/relay serving, version generic peer capabilities, and separately qualify Android/iOS eligibility |
+| M22 | `partial` | A historical release/service/UI/reviewer bundle exists; it is not a current complete-Astra or public-release claim | Replace operator-authored gate booleans with executed-artifact provenance and rerun closure only after the open Astra gates pass |
+| M23 | `partial` | One three-host MLX/MLX/NumPy stage-local-KV route is physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain | Preserve that exact result while replay recovery, tensor parallelism, continuous batching, KV migration, and mobile activation remain open |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no
 Router admission. The factual, arithmetic, and exact-format cases are distributed
@@ -349,11 +357,15 @@ signed membership + capability + load + directed-link evidence
 | M22 | Complete planned UI, accessibility/performance/privacy gates, cold bootstrap, and sealed release closure |
 | M23 | Architecture-scoped heterogeneous stage-local KV, physical replay A/B, per-placement runtime evidence, and fail-closed mode negotiation |
 
-The next milestone must be specified before implementation. The leading M24 candidate is
-continuous batching with honest queue/batch attribution and a physical concurrency A/B. It
-must not be conflated with the already-completed M16 admission scheduler. Tensor parallelism,
-cross-backend KV migration, and mobile activation eligibility should remain independent
-milestones with their own parity, failure, resource, and UI gates.
+The governing remaining sequence is
+`docs/superpowers/plans/2026-08-11-mycelium-astra-completion-plan.md`. It reopens
+M18-M20 as product-path capability gates, separates sealed historical evidence from live
+runtime state, decouples replay recovery from replica capacity, moves real batched target
+verification before speculation, and gives Android/iOS, off-tailnet onboarding, direct/relay
+transport, installation, and UI closure explicit gates. Tensor/hybrid parallelism,
+full-model data parallelism, cross-backend KV migration, prefix caching, disaggregated
+prefill/decode, expert parallelism, and sequence parallelism remain separately reviewed
+future programs rather than additions to the Astra completion plan.
 
 ## Reviewer rules
 

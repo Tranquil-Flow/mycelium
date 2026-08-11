@@ -1,4 +1,5 @@
 """Authoritative executable contract registry used by generators and audit."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -287,7 +288,10 @@ CONTRACT_SPECS = (
     ContractSpec(
         "performance-budget-v2.json",
         "mycelium.performance_budget.v2",
-        ("mycelium_performance_budget.py", "mycelium_layer_planner/workload_intelligence.py"),
+        (
+            "mycelium_performance_budget.py",
+            "mycelium_layer_planner/workload_intelligence.py",
+        ),
     ),
     ContractSpec(
         "performance-budget-v3.json",
@@ -410,6 +414,28 @@ CONTRACT_SPECS = (
             "mycelium_live/supervisor.py",
             "ui/web/src/features/liveRoute/deploymentActivation.ts",
             "ui/web/src/features/liveRoute/PreparedDeploymentsPanel.tsx",
+        ),
+    ),
+    ContractSpec(
+        "deployment-residency-physical-v1.json",
+        "mycelium.deployment_residency_physical_gate.v1",
+        (
+            "docs/superpowers/specs/2026-08-11-mycelium-deployment-residency-control.md",
+            "mycelium_live/activation.py",
+            "mycelium_live/registry.py",
+            "mycelium_live/supervisor.py",
+            "ui/web/src/features/liveRoute/deploymentActivation.ts",
+            "ui/web/src/features/models/ModelCatalogControlPanel.tsx",
+        ),
+    ),
+    ContractSpec(
+        "governance-readiness-v1.json",
+        "mycelium.governance_readiness.v1",
+        (
+            "mycelium_governance.py",
+            "mycelium_live/supervisor.py",
+            "ui/web/src/features/governance/governanceReadiness.ts",
+            "ui/web/src/features/governance/GovernanceReadinessSource.tsx",
         ),
     ),
     ContractSpec(

@@ -5,10 +5,11 @@
 
 ## 1. Outcome and claim boundary
 
-M19 adds traffic-aware liveness, scoped replanning, and truthful request recovery to
-the qualified M18 replica topology. At least one physical request must continue by an
-explicitly qualified recovery mode and at least one must terminate explicitly when no
-compatible successor exists.
+M19 adds traffic-aware liveness, scoped replanning, and truthful request recovery to a
+qualified deployment topology. A successor may be any newly qualified compatible path;
+M18 replicas are useful successor candidates but are not a prerequisite for replay.
+At least one physical request must continue by an explicitly qualified recovery mode and
+at least one must terminate explicitly when no compatible successor exists.
 
 M19 does not infer recovery from replica availability. A replica is only a candidate
 until its model, revision, representation, graph, assignment, load proof, decode mode,

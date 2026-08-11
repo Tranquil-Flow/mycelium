@@ -11,7 +11,10 @@ from pathlib import Path
 import pytest
 
 from layer_assignment import validate_assignment_identity
-from mycelium_assignment_cache import validate_cache_status, validate_materialization_report
+from mycelium_assignment_cache import (
+    validate_cache_status,
+    validate_materialization_report,
+)
 from mycelium_candidate_promotion import validate_candidate_promotion_report
 from mycelium_gateway.semantic import (
     decode_observatory_event,
@@ -118,6 +121,10 @@ EXPECTED_PROTOCOLS = {
     "path-manifest-v1.json": "mycelium.path_manifest.v1",
     "live-route-status-v1.json": "mycelium.live_route_status.v1",
     "deployment-activation-v1.json": "mycelium.deployment_activation.v1",
+    "deployment-residency-physical-v1.json": (
+        "mycelium.deployment_residency_physical_gate.v1"
+    ),
+    "governance-readiness-v1.json": "mycelium.governance_readiness.v1",
     "router-wire-v1.json": "mycelium.router_wire.v1",
     "layer-replan-simulation-report-v1.json": "mycelium.layer_replan_simulation_report.v1",
     "product-ui-bootstrap-v1.json": "mycelium.product_ui.bootstrap.v1",
@@ -149,7 +156,10 @@ def load_fixture(name: str) -> dict:
 
 
 def test_generated_contract_fixtures_have_no_drift() -> None:
-    for script in ("scripts/generate_contract_fixtures.py", "scripts/generate_contract_manifest.py"):
+    for script in (
+        "scripts/generate_contract_fixtures.py",
+        "scripts/generate_contract_manifest.py",
+    ):
         completed = subprocess.run(
             [sys.executable, script, "--check"],
             cwd=ROOT,
@@ -173,8 +183,12 @@ def test_contract_audit_checks_manifest_hashes_and_protocol_ownership() -> None:
     assert payload == {"checked": len(EXPECTED_PROTOCOLS), "drift": [], "ok": True}
 
 
-def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(tmp_path: Path) -> None:
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(
+    tmp_path: Path,
+) -> None:
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
 
     canonical["contracts"][0]["fixture"]["size_bytes"] += 1
     hash_manifest = tmp_path / "hash-drift.json"
@@ -183,14 +197,20 @@ def test_contract_audit_fails_closed_on_hash_namespace_and_path_drift(tmp_path: 
     assert hash_result["ok"] is False
     assert any("size drift" in error for error in hash_result["drift"])
 
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
     canonical["contracts"][1]["protocol"] = canonical["contracts"][0]["protocol"]
-    canonical["contracts"][1]["owner_sources"][0]["path"] = "../mycelium-mobile-lab/pyproject.toml"
+    canonical["contracts"][1]["owner_sources"][0]["path"] = (
+        "../mycelium-mobile-lab/pyproject.toml"
+    )
     ownership_manifest = tmp_path / "ownership-drift.json"
     ownership_manifest.write_text(json.dumps(canonical), encoding="utf-8")
     ownership_result = audit(ownership_manifest)
     assert ownership_result["ok"] is False
-    assert any("duplicate protocol owner" in error for error in ownership_result["drift"])
+    assert any(
+        "duplicate protocol owner" in error for error in ownership_result["drift"]
+    )
     assert any("escapes canonical root" in error for error in ownership_result["drift"])
 
 
@@ -232,7 +252,9 @@ def test_contract_audit_rejects_manifest_listed_symlink_source(
     result = audit(manifest_path)
 
     assert result["ok"] is False
-    assert any("owner_sources" in error and "symlink" in error for error in result["drift"])
+    assert any(
+        "owner_sources" in error and "symlink" in error for error in result["drift"]
+    )
 
 
 def test_contract_audit_rejects_manifest_listed_symlink_fixture(
@@ -278,10 +300,14 @@ def test_contract_audit_rejects_manifest_listed_symlink_parent(
     result = audit(manifest_path)
 
     assert result["ok"] is False
-    assert any(expected_label in error and "symlink" in error for error in result["drift"])
+    assert any(
+        expected_label in error and "symlink" in error for error in result["drift"]
+    )
 
 
-def test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests(tmp_path: Path) -> None:
+def test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests(
+    tmp_path: Path,
+) -> None:
     manifest_path = ROOT / "contracts" / "contract-manifest.v1.json"
     canonical_text = manifest_path.read_text(encoding="utf-8")
     canonical = json.loads(canonical_text)
@@ -316,8 +342,12 @@ def test_contract_audit_rejects_incomplete_alias_and_duplicate_key_manifests(tmp
     assert any("duplicate JSON key" in error for error in duplicate["drift"])
 
 
-def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(tmp_path: Path) -> None:
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(
+    tmp_path: Path,
+) -> None:
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
     canonical["contracts"][0]["protocol"] = ["mycelium.invalid"]
     protocol_path = tmp_path / "array-protocol.json"
     protocol_path.write_text(json.dumps(canonical), encoding="utf-8")
@@ -325,10 +355,14 @@ def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(tmp_
     protocol_result = audit(protocol_path)
 
     assert protocol_result["ok"] is False
-    assert any("contract registry mismatch" in error for error in protocol_result["drift"])
+    assert any(
+        "contract registry mismatch" in error for error in protocol_result["drift"]
+    )
     assert any("invalid protocol" in error for error in protocol_result["drift"])
 
-    canonical = json.loads((ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8"))
+    canonical = json.loads(
+        (ROOT / "contracts" / "contract-manifest.v1.json").read_text(encoding="utf-8")
+    )
     canonical["contracts"][0]["fixture"]["path"] = {"not": "a path"}
     fixture_path = tmp_path / "object-fixture-path.json"
     fixture_path.write_text(json.dumps(canonical), encoding="utf-8")
@@ -336,7 +370,9 @@ def test_contract_audit_reports_unhashable_manifest_fields_without_crashing(tmp_
     fixture_result = audit(fixture_path)
 
     assert fixture_result["ok"] is False
-    assert any("contract registry mismatch" in error for error in fixture_result["drift"])
+    assert any(
+        "contract registry mismatch" in error for error in fixture_result["drift"]
+    )
     assert any("pinned path" in error for error in fixture_result["drift"])
 
 
@@ -499,7 +535,12 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
 
     assignments, reports = assignments_and_reports()
     audit_payload = load_fixture("provisioning-audit-v1.json")
-    assert provisioning_audit_errors(generated_manual_route(), assignments, reports, audit_payload) == []
+    assert (
+        provisioning_audit_errors(
+            generated_manual_route(), assignments, reports, audit_payload
+        )
+        == []
+    )
     tampered_audit = dict(audit_payload)
     tampered_audit["deployment_id"] = "87654321-4321-8765-4321-876543218765"
     assert any(
@@ -536,9 +577,10 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
         ],
         now_unix_ms=2_000,
     )
-    assert validated_signed_bundle.bundle.evidence_bundle_digest == evidence_bundle[
-        "evidence_bundle_digest"
-    ]
+    assert (
+        validated_signed_bundle.bundle.evidence_bundle_digest
+        == evidence_bundle["evidence_bundle_digest"]
+    )
     planner_snapshot = load_fixture("layer-planner-snapshot-v1.json")
     validate_planner_snapshot_binding(planner_snapshot, evidence_bundle)
     tranche = load_fixture("control-plane-tranche-v1.json")
@@ -552,7 +594,10 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
             for prefix in tranche_assignment["expected_tensor_prefixes"]
             for suffix in GPT2_DECODER_TENSOR_SUFFIXES
         )
-        assert tranche_assignment["component_tensor_keys"]["decoder"] == expected_decoder_keys
+        assert (
+            tranche_assignment["component_tensor_keys"]["decoder"]
+            == expected_decoder_keys
+        )
 
     load_proof = load_fixture("layer-load-proof-v1.json")
     assert load_proof["assignment_id"] == tranche["assignments"][0]["assignment_id"]
@@ -561,14 +606,20 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     )
 
     submission_document = load_fixture("request-gateway-v1.json")
-    assert InferenceSubmission.from_dict(submission_document).to_dict() == submission_document
+    assert (
+        InferenceSubmission.from_dict(submission_document).to_dict()
+        == submission_document
+    )
     submission_v2 = load_fixture("request-gateway-v2.json")
     assert InferenceSubmission.from_dict(submission_v2).to_dict() == submission_v2
     event_document = load_fixture("request-event-v1.json")
     assert StreamEvent.from_dict(event_document).to_dict() == event_document
 
     membership = load_fixture("membership-signed-message-v1.json")
-    assert verify_join_request(membership, now=1_100.0)["protocol"] == JOIN_REQUEST_PROTOCOL
+    assert (
+        verify_join_request(membership, now=1_100.0)["protocol"]
+        == JOIN_REQUEST_PROTOCOL
+    )
 
     graph_document = load_fixture("execution-graph-v1.json")
     graph = execution_graph_from_dict(graph_document)
@@ -617,7 +668,9 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
 
     transport = load_fixture("router-wire-v1.json")
     golden_root = ROOT / "contracts" / "router-wire-golden"
-    assert transport == json.loads((golden_root / "index.json").read_text(encoding="utf-8"))
+    assert transport == json.loads(
+        (golden_root / "index.json").read_text(encoding="utf-8")
+    )
     for frame in transport["frames"]:
         payload = (golden_root / frame["file"]).read_bytes()
         assert hashlib.sha256(payload).hexdigest() == frame["frame_sha256"]

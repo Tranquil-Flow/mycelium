@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Generate deterministic executable compatibility fixtures for Mycelium contracts."""
+
 # ruff: noqa: E402 -- imports follow repository-root bootstrap for direct CLI execution.
 from __future__ import annotations
 
@@ -29,7 +30,10 @@ from mycelium_assignment_cache import (
     validate_materialization_report,
 )
 from mycelium_candidate_promotion import evaluate_candidate_promotion
-from mycelium_gossip.evidence_bundle import build_evidence_bundle, evidence_bundle_to_dict
+from mycelium_gossip.evidence_bundle import (
+    build_evidence_bundle,
+    evidence_bundle_to_dict,
+)
 from mycelium_gossip.registry import VersionedRecordStore
 from mycelium_gossip.schema import RecordKind, build_record
 from mycelium_gossip.service import PeerHealthState, PeerState
@@ -47,7 +51,10 @@ from mycelium_layer_planner.gossip_adapter import (
 from mycelium_layer_planner.planner import plan_snapshot
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_layer_planner.workload import empirical_interactive_chat, sustained_batch
-from mycelium_layer_planner.workload_intelligence import attach_m15_observations, build_m15_plan_comparison
+from mycelium_layer_planner.workload_intelligence import (
+    attach_m15_observations,
+    build_m15_plan_comparison,
+)
 from mycelium_layer_planner.replan_simulator import simulate_bundle
 from mycelium_layer_planner.serialization import route_plan_to_dict
 from mycelium_membership import (
@@ -66,7 +73,11 @@ from mycelium_membership import (
     sign_membership_message,
     validate_membership_message,
 )
-from mycelium_performance_budget import validate_performance_budget, validate_performance_budget_v2, validate_performance_budget_v3
+from mycelium_performance_budget import (
+    validate_performance_budget,
+    validate_performance_budget_v2,
+    validate_performance_budget_v3,
+)
 from mycelium_product_spine import (
     ENTITY_KINDS,
     validate_product_event,
@@ -108,7 +119,10 @@ from mycelium_router.layer_builder import build_execution_graph
 from mycelium_router.serialization import execution_graph_to_dict, path_manifest_to_dict
 from mycelium_router.validation import validate_manifest
 from mycelium_ui_gateway.validation import validate_swarm_status
-from planner_assignment import compile_bound_layer_assignments, validate_control_plane_tranche
+from planner_assignment import (
+    compile_bound_layer_assignments,
+    validate_control_plane_tranche,
+)
 from route_contract import validate_manual_provisioning_route_v1
 from runtime_contracts import GPT2_DECODER_TENSOR_SUFFIXES
 from weight_provisioning import artifact_report_errors, audit_provisioning
@@ -124,7 +138,9 @@ FIXTURE_DIR = ROOT / "contracts" / "compatibility-fixtures"
 
 
 def canonical_bytes(document: dict[str, Any]) -> bytes:
-    return (json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    return (
+        json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
 
 
 def planner_snapshot() -> dict[str, Any]:
@@ -141,7 +157,13 @@ def planner_snapshot() -> dict[str, Any]:
         for suffix in ("a", "b")
     ]
     links = [
-        {"src": src["node_id"], "dst": dst["node_id"], "rtt_ms": 1.0, "jitter_ms": 0.1, "bandwidth_Bps": 100_000_000}
+        {
+            "src": src["node_id"],
+            "dst": dst["node_id"],
+            "rtt_ms": 1.0,
+            "jitter_ms": 0.1,
+            "bandwidth_Bps": 100_000_000,
+        }
         for src in nodes
         for dst in nodes
         if src is not dst
@@ -161,8 +183,17 @@ def planner_snapshot() -> dict[str, Any]:
         },
         "nodes": nodes,
         "links": links,
-        "workload": {"preset": "interactive_chat_v1", "concurrency_points": [1, 4], "user_scale": 2},
-        "policy": {"memory_reserve_fraction": 0, "replica_budget": 1, "ttft_slo_ms": 1_000_000, "tpot_slo_ms": 1_000_000},
+        "workload": {
+            "preset": "interactive_chat_v1",
+            "concurrency_points": [1, 4],
+            "user_scale": 2,
+        },
+        "policy": {
+            "memory_reserve_fraction": 0,
+            "replica_budget": 1,
+            "ttft_slo_ms": 1_000_000,
+            "tpot_slo_ms": 1_000_000,
+        },
     }
 
 
@@ -178,8 +209,14 @@ def manual_route() -> dict[str, Any]:
             "resolved_commit": manifest["resolved_commit"],
         },
         "route": [
-            {"node_id": "node-a", "range": {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2}},
-            {"node_id": "node-b", "range": {"start_layer": 2, "end_layer_exclusive": 4, "layer_count": 2}},
+            {
+                "node_id": "node-a",
+                "range": {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
+            },
+            {
+                "node_id": "node-b",
+                "range": {"start_layer": 2, "end_layer_exclusive": 4, "layer_count": 2},
+            },
         ],
         "node_order": ["node-a", "node-b"],
         "claim_boundary": "manual provisioning order only; not product Planner output",
@@ -247,7 +284,10 @@ def assignments_and_reports() -> tuple[list[dict[str, Any]], list[dict[str, Any]
         manifest=model_manifest(),
         deployment_id="12345678-1234-5678-1234-567812345678",
         deployment_epoch=1,
-        cache_roots={"node-a": "/var/lib/mycelium/node-a", "node-b": "/var/lib/mycelium/node-b"},
+        cache_roots={
+            "node-a": "/var/lib/mycelium/node-a",
+            "node-b": "/var/lib/mycelium/node-b",
+        },
         runtime_by_node={
             "node-a": {"backend": "mlx", "dtype": "float16", "quantization": "none"},
             "node-b": {"backend": "mlx", "dtype": "float16", "quantization": "none"},
@@ -289,7 +329,9 @@ def provisioning_audit() -> dict[str, Any]:
     audit = audit_provisioning(manual_route(), assignments, reports)
     audit["timestamp"] = "2026-07-17T00:00:00+00:00"
     if not audit["all_assignments_verified"]:
-        raise ValueError("invalid generated provisioning audit: " + "; ".join(audit["errors"]))
+        raise ValueError(
+            "invalid generated provisioning audit: " + "; ".join(audit["errors"])
+        )
     return audit
 
 
@@ -333,7 +375,11 @@ def gossip_documents() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
                 "platform": "darwin",
                 "architecture": "arm64",
                 "memory_domains": [
-                    {"memory_domain_id": "unified-0", "kind": "unified", "total_bytes": 48 * 1024**3}
+                    {
+                        "memory_domain_id": "unified-0",
+                        "kind": "unified",
+                        "total_bytes": 48 * 1024**3,
+                    }
                 ],
                 "endpoints": [endpoint],
                 "policy": {"available_for_swarm": True},
@@ -987,7 +1033,11 @@ def performance_budget_v2() -> dict[str, Any]:
             "tpot_ms_maximum": 2_000.0,
             "minimum_output_tokens_per_second": 0.5,
             "maximum_frames_per_request": 64,
-            "maximum_relative_model_error": {"ttft": 1.0, "tpot": 1.0, "throughput": 1.0},
+            "maximum_relative_model_error": {
+                "ttft": 1.0,
+                "tpot": 1.0,
+                "throughput": 1.0,
+            },
             "execution_scope": "sequential_observed",
             "peak_memory_budget_state": "approved_exclusion",
             "energy_thermal_budget_state": "approved_exclusion",
@@ -1002,17 +1052,45 @@ def performance_budget_v2() -> dict[str, Any]:
 
 def performance_budget_v3() -> dict[str, Any]:
     dimensions = [
-        {"dimension": name, "state": "met", "bound": 1000.0, "observed": 1.0, "unit": "milliseconds", "evidence_digest": "sha256:" + "a" * 64, "reason": "observed_within_bound"}
+        {
+            "dimension": name,
+            "state": "met",
+            "bound": 1000.0,
+            "observed": 1.0,
+            "unit": "milliseconds",
+            "evidence_digest": "sha256:" + "a" * 64,
+            "reason": "observed_within_bound",
+        }
         for name in (
-            "admission_latency_p95_ms", "queue_wait_p95_ms", "maximum_queue_depth",
-            "completed_requests", "interactive_latency_regression_ratio",
-            "batch_starvation_interval_ms", "cancellation_release_latency_ms",
+            "admission_latency_p95_ms",
+            "queue_wait_p95_ms",
+            "maximum_queue_depth",
+            "completed_requests",
+            "interactive_latency_regression_ratio",
+            "batch_starvation_interval_ms",
+            "cancellation_release_latency_ms",
             "runtime_batch_size",
         )
     ]
-    dimensions[-1].update({"state": "approved_exclusion", "bound": 1.0, "observed": 1.0, "unit": "requests", "reason": "sequential_dispatch_observed"})
+    dimensions[-1].update(
+        {
+            "state": "approved_exclusion",
+            "bound": 1.0,
+            "observed": 1.0,
+            "unit": "requests",
+            "reason": "sequential_dispatch_observed",
+        }
+    )
     return validate_performance_budget_v3(
-        {"protocol": "mycelium.performance_budget.v3", "budget_id": "m16-physical-v1", "profile_id": "mixed_interactive_batch_v1", "evidence_scope": "concurrent_physical_observed", "observed_request_count": 3, "dimensions": dimensions, "overall_state": "met_with_approved_exclusions"}
+        {
+            "protocol": "mycelium.performance_budget.v3",
+            "budget_id": "m16-physical-v1",
+            "profile_id": "mixed_interactive_batch_v1",
+            "evidence_scope": "concurrent_physical_observed",
+            "observed_request_count": 3,
+            "dimensions": dimensions,
+            "overall_state": "met_with_approved_exclusions",
+        }
     )
 
 
@@ -1219,7 +1297,11 @@ def m15_plan_comparison() -> dict[str, Any]:
         budget = performance_budget_v2()
         budget["budget_id"] = f"m15-{profile.name}-fixture"
         budget["profile_id"] = profile.name
-        budget["maximum_relative_model_error"] = {"ttft": 100.0, "tpot": 100.0, "throughput": 100.0}
+        budget["maximum_relative_model_error"] = {
+            "ttft": 100.0,
+            "tpot": 100.0,
+            "throughput": 100.0,
+        }
         budgets.append(budget)
         observations.append(
             {
@@ -1230,9 +1312,21 @@ def m15_plan_comparison() -> dict[str, Any]:
                 "runtime_backends": ["fixture"],
                 "topology_version": 1,
                 "placement": [{"node_id": "node-a", "start": 0, "end": 24}],
-                "counters_before": {"frames_sent": index * 20, "frames_received": index * 20, "applied_operation_count": index * 18},
-                "counters_after": {"frames_sent": (index + 1) * 20, "frames_received": (index + 1) * 20, "applied_operation_count": (index + 1) * 18},
-                "observed": {"ttft_ms": 1_000.0, "tpot_ms": 500.0, "output_goodput_tps": 2.0},
+                "counters_before": {
+                    "frames_sent": index * 20,
+                    "frames_received": index * 20,
+                    "applied_operation_count": index * 18,
+                },
+                "counters_after": {
+                    "frames_sent": (index + 1) * 20,
+                    "frames_received": (index + 1) * 20,
+                    "applied_operation_count": (index + 1) * 18,
+                },
+                "observed": {
+                    "ttft_ms": 1_000.0,
+                    "tpot_ms": 500.0,
+                    "output_goodput_tps": 2.0,
+                },
             }
         )
     return attach_m15_observations(projected, snapshot, budgets, observations)
@@ -1427,6 +1521,63 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def deployment_residency_physical_gate() -> dict[str, Any]:
+    """Return the sealed, historical candidate-residency physical observation."""
+
+    return {
+        "protocol": "mycelium.deployment_residency_physical_gate.v1",
+        "observed_at_unix_ms": 1_786_467_195_000,
+        "source_commit": "5b876403f15a8af75b7453f00a5762c0e5be0ae2",
+        "candidate": {
+            "deployment_id": "f91a3ad0-1e1a-41f2-be1b-1c102ff8546e",
+            "model_id": "Qwen/Qwen2.5-3B-Instruct",
+            "model_revision": "aa8e72537993ba99e69dfaafa59ed015b17504d1",
+            "plan_digest": "sha256:7ae2fe076394a56f2eb5ee0ddc916d17a51e65633b20b2caf060dd01a1228d83",
+            "topology_size": 3,
+            "state_before": "qualified",
+            "state_after": "prepared",
+            "prepared_plan_retained": True,
+        },
+        "residency": {
+            "local_stage_rss_kib_before": 6_319_824,
+            "local_stage_process_present_after": False,
+            "remote_stage_process_present_after": {
+                "node-1": False,
+                "node-2": False,
+            },
+            "model_files_deleted": False,
+        },
+        "selection": {
+            "selected_deployment_id_before": "81d479dc-2e56-56f9-b40b-fb157c78ac57",
+            "selected_deployment_id_after": "81d479dc-2e56-56f9-b40b-fb157c78ac57",
+            "selected_model_id_after": "Qwen/Qwen2.5-0.5B-Instruct",
+        },
+        "terminal_status_sha256": "sha256:03894e28ab395b5d0c6ac06a156633bcd10de25c6376a364b4c2bc3f8f1f3e42",
+        "route_ready": False,
+    }
+
+
+def governance_readiness() -> dict[str, Any]:
+    return {
+        "protocol": "mycelium.governance_readiness.v1",
+        "observed_at_unix_ms": 1,
+        "source_kind": "source_control",
+        "source_commit": "a" * 40,
+        "source_worktree_clean": True,
+        "ledger_protocol": "mycelium.governance_ledger.v1",
+        "ledger_digest": "sha256:" + "b" * 64,
+        "contract_manifest_protocol": "mycelium.contract_manifest.v1",
+        "contract_manifest_digest": "sha256:" + "c" * 64,
+        "governance_gate_protocol": "mycelium.governance_gate.v1",
+        "governance_gate_ok": True,
+        "authorized_product_action_count": 8,
+        "capability_count": 15,
+        "milestone_count": 7,
+        "release_exclusions": ["runtime and physical gates remain open"],
+        "release_ready": False,
+    }
+
+
 def product_bootstrap() -> dict[str, Any]:
     return {
         "protocol": "mycelium.product_ui.bootstrap.v1",
@@ -1490,12 +1641,48 @@ def observatory_snapshot() -> dict[str, Any]:
         },
     }
     claim_specs = (
-        ("deployment", "deployment-fixture", "deployment_bound", "gateway_projection", "mycelium_gateway"),
-        ("model", "model-fixture", "model_bound", "provisioning_audit", "mycelium_provisioning"),
-        ("route", "route-fixture", "route_challenge_succeeded", "route_challenge", "mycelium_router"),
-        ("assignment", "assignment-a", "assignment_ready", "provisioning_audit", "mycelium_provisioning"),
-        ("assignment", "assignment-b", "assignment_ready", "provisioning_audit", "mycelium_provisioning"),
-        ("request", "request-fixture", "request_lifecycle_observed", "router_runtime", "mycelium_router"),
+        (
+            "deployment",
+            "deployment-fixture",
+            "deployment_bound",
+            "gateway_projection",
+            "mycelium_gateway",
+        ),
+        (
+            "model",
+            "model-fixture",
+            "model_bound",
+            "provisioning_audit",
+            "mycelium_provisioning",
+        ),
+        (
+            "route",
+            "route-fixture",
+            "route_challenge_succeeded",
+            "route_challenge",
+            "mycelium_router",
+        ),
+        (
+            "assignment",
+            "assignment-a",
+            "assignment_ready",
+            "provisioning_audit",
+            "mycelium_provisioning",
+        ),
+        (
+            "assignment",
+            "assignment-b",
+            "assignment_ready",
+            "provisioning_audit",
+            "mycelium_provisioning",
+        ),
+        (
+            "request",
+            "request-fixture",
+            "request_lifecycle_observed",
+            "router_runtime",
+            "mycelium_router",
+        ),
     )
     return {
         "protocol": "mycelium.observatory.snapshot.v1",
@@ -1511,9 +1698,13 @@ def observatory_snapshot() -> dict[str, Any]:
                 "freshness": freshness,
                 "provenance": {"kind": provenance_kind, "producer": producer},
             }
-            for index, (kind, scope_id, statement, provenance_kind, producer) in enumerate(
-                claim_specs, start=1
-            )
+            for index, (
+                kind,
+                scope_id,
+                statement,
+                provenance_kind,
+                producer,
+            ) in enumerate(claim_specs, start=1)
         ],
         "conflicts": [],
         "route_challenge": {
@@ -1581,11 +1772,41 @@ def m16_runtime_status() -> dict[str, Any]:
             "deployment_epoch": 16,
             "topology_version": 7,
             "graph_digest": "sha256:" + "6" * 64,
-            "queue": {"depth": 0, "maximum_items": 1024, "queued_bytes": 0, "maximum_bytes": 268435456, "interactive_depth": 0, "batch_depth": 0, "active_request_id": None},
-            "placements": [{"placement_id": "placement-fixture", "node_id": "node-fixture", "memory_capacity_bytes": 1000000, "reserved_memory_bytes": 0, "free_memory_bytes": 1000000, "kv_capacity_bytes": 500000, "reserved_kv_bytes": 0, "free_kv_bytes": 500000, "workspace_capacity_bytes": 250000, "reserved_workspace_bytes": 0, "free_workspace_bytes": 250000, "active_reservations": 0, "maximum_reservations": 64}],
+            "queue": {
+                "depth": 0,
+                "maximum_items": 1024,
+                "queued_bytes": 0,
+                "maximum_bytes": 268435456,
+                "interactive_depth": 0,
+                "batch_depth": 0,
+                "active_request_id": None,
+            },
+            "placements": [
+                {
+                    "placement_id": "placement-fixture",
+                    "node_id": "node-fixture",
+                    "memory_capacity_bytes": 1000000,
+                    "reserved_memory_bytes": 0,
+                    "free_memory_bytes": 1000000,
+                    "kv_capacity_bytes": 500000,
+                    "reserved_kv_bytes": 0,
+                    "free_kv_bytes": 500000,
+                    "workspace_capacity_bytes": 250000,
+                    "reserved_workspace_bytes": 0,
+                    "free_workspace_bytes": 250000,
+                    "active_reservations": 0,
+                    "maximum_reservations": 64,
+                }
+            ],
             "requests": [],
             "incidents": [],
-            "batch_state": {"mode": "sequential_dispatch", "maximum_runtime_batch_size": 20, "observed_batches": [], "continuous_batching": False, "pipeline_overlap": False},
+            "batch_state": {
+                "mode": "sequential_dispatch",
+                "maximum_runtime_batch_size": 20,
+                "observed_batches": [],
+                "continuous_batching": False,
+                "pipeline_overlap": False,
+            },
             "claim_boundary": "bounded admission and sequential physical dispatch",
             "performance_budgets": [],
         }
@@ -1734,9 +1955,12 @@ def m23_kv_gate() -> dict[str, Any]:
             "performance qualification is limited to this measured route and workload."
         ),
     }
-    document["evidence_digest"] = "sha256:" + hashlib.sha256(
-        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    document["evidence_digest"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    )
     return validate_m23_kv_evidence(document)
 
 
@@ -1758,7 +1982,9 @@ def seed_operator_rotation() -> dict[str, Any]:
 def documents() -> dict[str, dict[str, Any]]:
     assignments, reports = assignments_and_reports()
     router, allocator, evidence_bundle = gossip_documents()
-    planner_evidence_snapshot, _, control_plane_tranche = control_plane_documents(evidence_bundle)
+    planner_evidence_snapshot, _, control_plane_tranche = control_plane_documents(
+        evidence_bundle
+    )
     load_proofs = layer_load_proofs(control_plane_tranche)
     graph = execution_graph_document(control_plane_tranche, load_proofs)
     semantic_snapshot = observatory_snapshot()
@@ -1771,7 +1997,9 @@ def documents() -> dict[str, dict[str, Any]]:
         "gossip-router-view-v1.json": router,
         "gossip-allocator-view-v1.json": allocator,
         "gossip-evidence-bundle-v1.json": evidence_bundle,
-        "signed-gossip-evidence-bundle-v1.json": signed_evidence_bundle(evidence_bundle),
+        "signed-gossip-evidence-bundle-v1.json": signed_evidence_bundle(
+            evidence_bundle
+        ),
         "layer-planner-snapshot-v1.json": planner_evidence_snapshot,
         "control-plane-tranche-v1.json": control_plane_tranche,
         "layer-load-proof-v1.json": load_proofs[0],
@@ -1783,9 +2011,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "request-event-v1.json": request_event(),
         "request-event-v2.json": request_event_v2(),
         "membership-signed-message-v1.json": membership_envelope(),
-        "membership-join-request-v1.json": membership_message(
-            JOIN_REQUEST_PROTOCOL
-        ),
+        "membership-join-request-v1.json": membership_message(JOIN_REQUEST_PROTOCOL),
         "membership-join-acceptance-v1.json": membership_message(
             JOIN_ACCEPTANCE_PROTOCOL
         ),
@@ -1802,9 +2028,7 @@ def documents() -> dict[str, dict[str, Any]]:
             LINK_PROBE_REPORT_PROTOCOL
         ),
         "membership-heartbeat-v1.json": membership_message(HEARTBEAT_PROTOCOL),
-        "membership-lease-renewal-v1.json": membership_message(
-            LEASE_RENEWAL_PROTOCOL
-        ),
+        "membership-lease-renewal-v1.json": membership_message(LEASE_RENEWAL_PROTOCOL),
         "membership-assignment-offer-v1.json": membership_message(
             ASSIGNMENT_OFFER_PROTOCOL
         ),
@@ -1842,8 +2066,12 @@ def documents() -> dict[str, dict[str, Any]]:
         "path-manifest-v1.json": path_manifest_document(graph),
         "live-route-status-v1.json": live_route_status(graph),
         "deployment-activation-v1.json": deployment_activation_status(),
+        "deployment-residency-physical-v1.json": deployment_residency_physical_gate(),
+        "governance-readiness-v1.json": governance_readiness(),
         "router-wire-v1.json": json.loads(
-            read_under_root(ROOT, ROOT / "contracts" / "router-wire-golden" / "index.json")
+            read_under_root(
+                ROOT, ROOT / "contracts" / "router-wire-golden" / "index.json"
+            )
         ),
         "layer-replan-simulation-report-v1.json": simulate_bundle(
             ROOT / "scenarios" / "product-v1-replanning.json"
@@ -1857,7 +2085,9 @@ def documents() -> dict[str, dict[str, Any]]:
         },
     }
     if set(generated) != EXPECTED_FIXTURE_NAMES:
-        raise ValueError("generated fixture set differs from authoritative contract registry")
+        raise ValueError(
+            "generated fixture set differs from authoritative contract registry"
+        )
     for name, document in generated.items():
         expected_protocol = SPECS_BY_FIXTURE[name].protocol
         if document.get("protocol") != expected_protocol:
@@ -1870,11 +2100,15 @@ def documents() -> dict[str, dict[str, Any]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true", help="fail if checked-in fixtures differ")
+    parser.add_argument(
+        "--check", action="store_true", help="fail if checked-in fixtures differ"
+    )
     args = parser.parse_args()
     expected = documents()
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
-    present = {path.name for path in FIXTURE_DIR.iterdir() if path.name.endswith(".json")}
+    present = {
+        path.name for path in FIXTURE_DIR.iterdir() if path.name.endswith(".json")
+    }
     unexpected = sorted(present - EXPECTED_FIXTURE_NAMES)
     if unexpected:
         print("unexpected fixture: " + ", ".join(unexpected), file=sys.stderr)
@@ -1896,7 +2130,9 @@ def main() -> int:
     if drift:
         print("fixture drift: " + ", ".join(drift), file=sys.stderr)
         return 1
-    print(f"contract fixtures {'verified' if args.check else 'generated'}: {len(expected)}")
+    print(
+        f"contract fixtures {'verified' if args.check else 'generated'}: {len(expected)}"
+    )
     return 0
 
 

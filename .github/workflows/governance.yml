@@ -1,0 +1,18 @@
+name: Governance gates
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  governance:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Verify executable claim governance
+        run: python scripts/governance_gate.py --repo-root . --json
+      - name: Run governance and contract negative suites
+        run: python -m pytest -q tests/governance tests/claims tests/contracts
