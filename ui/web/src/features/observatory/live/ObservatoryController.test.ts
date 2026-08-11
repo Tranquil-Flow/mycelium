@@ -97,7 +97,8 @@ function expectProductLabel(
 
 describe('ObservatoryController', () => {
   it('resolves production source mode fail closed and wires the event source to BFF paths', () => {
-    expect(resolveProductObservatorySourceMode(undefined)).toBe('fixture');
+    expect(resolveProductObservatorySourceMode(undefined)).toBe('live');
+    expect(resolveProductObservatorySourceMode('')).toBe('live');
     expect(resolveProductObservatorySourceMode('fixture')).toBe('fixture');
     expect(resolveProductObservatorySourceMode('live')).toBe('live');
     expect(() => resolveProductObservatorySourceMode('replay')).toThrow(/source mode/i);
@@ -411,8 +412,8 @@ describe('ObservatoryController', () => {
     expect(JSON.stringify(state)).not.toContain('private upstream detail');
   });
 
-  it('defaults to an explicit fixture projection and never relabels it live', async () => {
-    const controller = new ObservatoryController();
+  it('keeps an explicitly selected fixture projection offline and never relabels it live', async () => {
+    const controller = new ObservatoryController({ source_mode: 'fixture' });
     const state = await controller.start();
 
     expectProductLabel(state, 'fixture');

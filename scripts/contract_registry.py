@@ -439,6 +439,28 @@ CONTRACT_SPECS = (
         ),
     ),
     ContractSpec(
+        "evidence-projection-v1.json",
+        "mycelium.evidence_projection.v1",
+        (
+            "docs/superpowers/specs/2026-08-11-mycelium-a1-live-evidence-separation.md",
+            "mycelium_evidence.py",
+            "mycelium_live/supervisor.py",
+            "ui/web/src/features/evidence/evidenceProjection.ts",
+            "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
+        ),
+    ),
+    ContractSpec(
+        "evidence-history-v1.json",
+        "mycelium.evidence_history.v1",
+        (
+            "docs/superpowers/specs/2026-08-11-mycelium-a1-live-evidence-separation.md",
+            "mycelium_evidence.py",
+            "mycelium_live/supervisor.py",
+            "ui/web/src/features/evidence/evidenceProjection.ts",
+            "ui/web/src/features/evidence/EvidenceProvenanceSource.tsx",
+        ),
+    ),
+    ContractSpec(
         "router-wire-v1.json",
         "mycelium.router_wire.v1",
         ("mycelium_router/wire.py", "scripts/generate_router_wire_golden.py"),

@@ -75,16 +75,21 @@ traffic-aware liveness and scoped recovery.
 ## Current deployments and topology
 
 The operator currently has three independently prepared deployment identities. The
-live registry is dynamic: at the 2026-08-11 restart, 0.5B and 1.5B were qualified and
-the 3B route was discoverable as a prepared candidate. Explicit no-restart activation
-then qualified the 3B route while preserving 0.5B as the selected default. The product
-reconstructs this state from the backend and does not assume a fixed number of models:
+live registry is dynamic. During the 2026-08-11 A1 browser gate, the ordinary product
+URL discovered both initially qualified routes and the prepared 3B candidate without a
+fixed frontend configuration. The selected 1.5B route then emitted five real tokens and
+failed closed on `decode_completion_timeout`; the registry immediately marked it
+unavailable. The operator selected the still-qualified 0.5B route, which completed a
+fresh browser request. The 3B route remains a prepared candidate in this running server;
+an earlier no-restart qualification does not make it currently active or qualified.
+The product reconstructs all of this state from the backend and does not assume a fixed
+number of models:
 
 | Model | Quantization | Stage 0 | Stage 1 | Purpose |
 | --- | --- | --- | --- | --- |
 | `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX `[0,12)` | MLX `[12,24)` | baseline and failover |
-| `Qwen/Qwen2.5-1.5B-Instruct` | int8 weight-only | MLX `[0,14)` | MLX `[14,28)` | selected quality candidate |
-| `Qwen/Qwen2.5-3B-Instruct` | int8 weight-only | three-stage MLX/MLX/NumPy physical route | — | larger qualified candidate |
+| `Qwen/Qwen2.5-1.5B-Instruct` | int8 weight-only | MLX `[0,14)` | MLX `[14,28)` | unavailable after observed timeout; must requalify |
+| `Qwen/Qwen2.5-3B-Instruct` | int8 weight-only | three-stage MLX/MLX/NumPy physical route | — | prepared candidate; not active |
 
 M7 separately proved a three-host 0.5B topology: M4 Pro/MLX `[0,8)`, Evi
 MacBook Pro/MLX `[8,16)`, and Surface/NumPy `[16,24)`. That proof is not the same
@@ -228,15 +233,20 @@ promote the rest of a composite capability.
 | 4.12 Signed heterogeneous membership | `partial` | Durable signed membership now binds two MLX Macs and one `linux_numpy_iroh` host as fresh activation-eligible members. Platform-neutral Android/iOS and off-tailnet heterogeneous activation remain open. |
 | 4.13 Traffic-aware liveness | `implemented_unintegrated` | General liveness code exists, but the live route can remain blocked until node command timeout after peer loss. |
 | 4.14 Authenticated direct/relay transport | `partial` | Native authenticated Iroh publishes path class and activation-connection observations. M14 physically observed six direct edges; forced relay, relay region/redaction, unknown rather than zero for missing samples, and off-tailnet control-plane operation remain open. |
-| 4.15 Privacy/authority/qualification | `partial` | Privacy-reduced projections, qualifier-gated admission, durable authority generation, and refresh persistence are real. Static boundary/contract audits and the separation of sealed history from live runtime state must close before this capability can be promoted. |
+| 4.15 Privacy/authority/qualification | `partial` | Privacy-reduced projections, qualifier-gated admission, durable authority generation, and refresh persistence are real. A0 static boundary/contract governance is green. A1 separates a monotonic `live_runtime` envelope from immutable `sealed_historical` records, removes the numbered historical browser endpoints, and refuses historical evidence as current. The ordinary product URL was browser-verified live: one 0.5B request completed, runtime generation advanced from 4 to 5, physical frames advanced from 9/9 to 15/15, server-retained terminal history advanced from one to two, and refresh preserved both the terminal history and the original recorded-evidence timestamp. The composite remains `partial` because A15 release closure and the other listed privacy/authority gates remain open, not because the A1 browser gate is open. |
 
 ## Product UI truth boundary
 
 The shell has eight stable workspaces: Inference, Device Lab, Network, Nodes, Plans,
 Readiness, Incidents, and Settings. Inference uses the product/request gateway.
-The product snapshot/event spine is the shared privacy-reduced source for Nodes,
-Readiness, and Incidents, while bounded same-origin live route/deployment endpoints
-remain action/status adapters for Inference. M13 placement, M14 topology, and M15
+The product snapshot/event spine is the shared privacy-reduced live source. One
+contract-pinned evidence projection exposes current route execution separately from a
+read-only recorded-evidence register. Every live workspace shows the same human-readable
+source provenance; sealed records display their original observation time and authority
+and cannot satisfy live readiness. The former numbered M15-M23 browser endpoints and
+their repeated source-panel polling are removed. Bounded same-origin live
+route/deployment endpoints remain action/status adapters for Inference. M13 placement,
+M14 topology, and M15
 workload/calibration projections give Plans, Network, Nodes, and Readiness the same
 planner inputs, measured directed links, candidate cycles, selected order, allocation,
 connection reuse, evidence digests, workload assumptions, policy frontier, and
@@ -274,12 +284,12 @@ references, not public release artifacts.
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
 | M17 | `partial` | Multi-model inventory, dense Qwen2/Qwen3 adapters, representation-bound resident/load-peak feasibility, fail-closed selection, live capacity refresh, exact owner-authorized local preparation, and prepared-deployment activation exist; live 0.5B/1.5B and no-restart 3B qualification are the physical boundary | Successful representation-approved 7B preparation/qualification and the remaining acquisition failure matrix stay open |
-| M18 | `implemented_unintegrated` | Historical replica contracts, sealed planner/runtime documents, endpoints, UI, and a qualification-only whole-model throughput observation exist | Re-prove a replicated stage inside a multi-stage pipeline through concurrent browser requests on the normal product path; do not promote the historical single-stage whole-model result as stage replication |
-| M19 | `implemented_unintegrated` | Historical liveness/recovery contracts, sealed documents, endpoints, UI, and script-driven recovery evidence exist | Integrate traffic-aware detection, scoped failure, full-context replay, fenced KV successors, circuit breakers, restart reconciliation, and observed positive/negative browser-path recovery |
-| M20 | `design_only` | Target-authoritative speculative contracts and a disabled-decision UI exist; sealed measurements do not establish speculative execution | Add real multi-position target verification, same-session measurement, bounded draft fallback, and either measured material gain or an honestly measured disabled decision |
-| M21 | `partial` | Durable heterogeneous membership and physical MLX/NumPy execution are real; the current evidence and direct-path observations are historical | Replace fabricated/static network claims, prove off-tailnet join plus direct/relay serving, version generic peer capabilities, and separately qualify Android/iOS eligibility |
-| M22 | `partial` | A historical release/service/UI/reviewer bundle exists; it is not a current complete-Astra or public-release claim | Replace operator-authored gate booleans with executed-artifact provenance and rerun closure only after the open Astra gates pass |
-| M23 | `partial` | One three-host MLX/MLX/NumPy stage-local-KV route is physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain | Preserve that exact result while replay recovery, tensor parallelism, continuous batching, KV migration, and mobile activation remain open |
+| M18 | `implemented_unintegrated` | Historical replica contracts, planner documents, and a qualification-only whole-model throughput observation exist. They are no longer served through a polling endpoint as live runtime state. | Re-prove a replicated stage inside a multi-stage pipeline through concurrent browser requests on the normal product path; do not promote the historical single-stage whole-model result as stage replication |
+| M19 | `implemented_unintegrated` | Historical liveness/recovery contracts and script-driven positive replay evidence exist. They are no longer exposed as live sources. The qualification script now measures detection, delivery, and cleanup and marks the unexecuted negative gate explicitly instead of fabricating success. | Integrate traffic-aware detection, scoped failure, full-context replay, fenced KV successors, circuit breakers, restart reconciliation, and observed positive/negative browser-path recovery |
+| M20 | `design_only` | Target-authoritative speculative contracts and pure decoders remain; the stored disabled decision is not a live browser authority and no speculative capability endpoint is exposed. | Add real multi-position target verification, same-session measurement, bounded draft fallback, and either measured material gain or an honestly measured disabled decision |
+| M21 | `partial` | Durable heterogeneous membership and physical MLX/NumPy execution are real. Participation and OS class no longer fabricate per-member connectivity or external-network proof; current direct-path observations remain historical. | Derive member connectivity only from bound activation observations, prove off-tailnet join plus direct/relay serving, version generic peer capabilities, and separately qualify Android/iOS eligibility |
+| M22 | `partial` | A historical release/service/UI/reviewer bundle exists; it is not exposed as current evidence and is not a current complete-Astra or public-release claim. | Replace operator-authored gate booleans with executed-artifact provenance and rerun closure only after the open Astra gates pass |
+| M23 | `partial` | One three-host MLX/MLX/NumPy stage-local-KV route is physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain. The exact sealed record is available only under `Recorded evidence` with its original capture time. | Preserve that exact result while replay recovery, tensor parallelism, continuous batching, KV migration, and mobile activation remain open |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no
 Router admission. The factual, arithmetic, and exact-format cases are distributed

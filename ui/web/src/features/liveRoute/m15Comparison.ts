@@ -1,4 +1,4 @@
-export const M15_COMPARISON_PATH = '/__mycelium/m15-plan-comparison';
+export const M15_COMPARISON_PATH = '/__mycelium/planning/workload-comparison';
 export const M15_COMPARISON_PROTOCOL = 'mycelium.m15_plan_comparison.v1' as const;
 
 export interface M15ScenarioProfile {

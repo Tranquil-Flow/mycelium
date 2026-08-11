@@ -22,6 +22,6 @@ describe('M15 plan comparison contract', () => {
   it('uses the fixed same-origin endpoint', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify(fixture), { headers: { 'content-type': 'application/json' } }));
     await new HttpM15ComparisonClient(fetcher as typeof fetch).load();
-    expect(fetcher).toHaveBeenCalledWith('/__mycelium/m15-plan-comparison', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }));
+    expect(fetcher).toHaveBeenCalledWith('/__mycelium/planning/workload-comparison', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }));
   });
 });

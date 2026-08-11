@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlsplit
 import uuid
 
 from mycelium_demo.product_stack import build_loopback_product_stack
+from mycelium_evidence import EvidenceProjectionRegistry, sealed_evidence_projection
 from mycelium_governance import governance_readiness
 from mycelium_product_spine import ProductEvidenceApplication, ProductProjector
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
@@ -436,6 +437,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     capacity_refresh: ModelCapacityRefresh | None
     model_preparation: LocalModelPreparation | None
     governance_projection: Mapping[str, Any] | None
+    evidence_registry: EvidenceProjectionRegistry | None
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -740,6 +742,65 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "application/json; charset=utf-8",
             )
 
+        def _runtime_evidence(self) -> None:
+            registry = self.server.evidence_registry
+            if registry is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "runtime_evidence_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            try:
+                document = registry.runtime()
+            except (TypeError, ValueError, RuntimeError):
+                self._send_bytes(
+                    503,
+                    _json_bytes({"error": "runtime_evidence_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
+        def _historical_evidence(self, query: str) -> None:
+            registry = self.server.evidence_registry
+            if registry is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "historical_evidence_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            capability: str | None = None
+            if query:
+                parts = query.split("=")
+                if len(parts) != 2 or parts[0] != "capability" or not parts[1]:
+                    self._send_bytes(
+                        400,
+                        _json_bytes({"error": "evidence_filter_invalid"}),
+                        "application/json; charset=utf-8",
+                    )
+                    return
+                capability = unquote(parts[1])
+            try:
+                document = registry.history(capability=capability)
+            except ValueError:
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "evidence_filter_invalid"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
         def _start_model_preparation(self) -> None:
             preparation = self.server.model_preparation
             if preparation is None:
@@ -851,22 +912,6 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._send_bytes(
                     503,
                     _json_bytes({"error": str(exc)}),
-                    "application/json; charset=utf-8",
-                )
-                return
-            self._send_bytes(
-                200,
-                _json_bytes(document),
-                "application/json; charset=utf-8",
-            )
-
-        def _m18_projection(self, method_name: str, error_name: str) -> None:
-            source = getattr(self.server.route, method_name, None)
-            document = source() if callable(source) else None
-            if document is None:
-                self._send_bytes(
-                    404,
-                    _json_bytes({"error": error_name}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -1133,49 +1178,23 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             parsed = urlsplit(self.path)
             if parsed.path == "/__mycelium/live-status" and not parsed.query:
                 self._status()
-            elif parsed.path == "/__mycelium/m15-plan-comparison" and not parsed.query:
-                self._m15_plan_comparison()
-            elif parsed.path == "/__mycelium/m16-runtime-status" and not parsed.query:
-                self._m16_runtime_status()
-            elif parsed.path == "/__mycelium/m17-model-operation" and not parsed.query:
-                self._m17_model_operation()
-            elif parsed.path == "/__mycelium/m17-swarm-evidence" and not parsed.query:
-                self._m17_swarm_evidence()
-            elif parsed.path == "/__mycelium/m18-replica-plan" and not parsed.query:
-                self._m18_projection("m18_replica_plan", "m18_replica_plan_unavailable")
-            elif parsed.path == "/__mycelium/m18-replica-runtime" and not parsed.query:
-                self._m18_projection(
-                    "m18_replica_runtime", "m18_replica_runtime_unavailable"
-                )
-            elif parsed.path == "/__mycelium/m19-liveness" and not parsed.query:
-                self._m18_projection("m19_liveness", "m19_liveness_unavailable")
-            elif parsed.path == "/__mycelium/m19-recovery-plan" and not parsed.query:
-                self._m18_projection(
-                    "m19_recovery_plan", "m19_recovery_plan_unavailable"
-                )
-            elif parsed.path == "/__mycelium/m19-recovery-runtime" and not parsed.query:
-                self._m18_projection(
-                    "m19_recovery_runtime", "m19_recovery_runtime_unavailable"
-                )
-            elif parsed.path == "/__mycelium/m20-speculative-plan" and not parsed.query:
-                self._m18_projection(
-                    "m20_speculative_plan", "m20_speculative_plan_unavailable"
-                )
             elif (
-                parsed.path == "/__mycelium/m20-speculative-runtime"
+                parsed.path == "/__mycelium/planning/workload-comparison"
                 and not parsed.query
             ):
-                self._m18_projection(
-                    "m20_speculative_runtime", "m20_speculative_runtime_unavailable"
-                )
-            elif parsed.path == "/__mycelium/m21-heterogeneous" and not parsed.query:
-                self._m18_projection(
-                    "m21_heterogeneous", "m21_heterogeneous_unavailable"
-                )
-            elif parsed.path == "/__mycelium/m22-release" and not parsed.query:
-                self._m18_projection("m22_release", "m22_release_unavailable")
-            elif parsed.path == "/__mycelium/m23-kv" and not parsed.query:
-                self._m18_projection("m23_kv", "m23_kv_unavailable")
+                self._m15_plan_comparison()
+            elif (
+                parsed.path == "/__mycelium/runtime/admission-status"
+                and not parsed.query
+            ):
+                self._m16_runtime_status()
+            elif parsed.path == "/__mycelium/models/operation" and not parsed.query:
+                self._m17_model_operation()
+            elif (
+                parsed.path == "/__mycelium/swarm/resource-observations"
+                and not parsed.query
+            ):
+                self._m17_swarm_evidence()
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif (
@@ -1190,6 +1209,16 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._model_preparation_status()
             elif parsed.path == "/__mycelium/governance-readiness" and not parsed.query:
                 self._governance_readiness()
+            elif parsed.path == "/__mycelium/evidence/runtime" and not parsed.query:
+                self._runtime_evidence()
+            elif parsed.path == "/__mycelium/evidence/history":
+                self._historical_evidence(parsed.query)
+            elif parsed.path.startswith("/__mycelium/"):
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "product_endpoint_unknown"}),
+                    "application/json; charset=utf-8",
+                )
             elif parsed.path.startswith("/api/"):
                 self._asgi()
             else:
@@ -1245,6 +1274,7 @@ def create_server(
     capacity_refresh: ModelCapacityRefresh | None = None,
     model_preparation: LocalModelPreparation | None = None,
     governance_projection: Mapping[str, Any] | None = None,
+    evidence_registry: EvidenceProjectionRegistry | None = None,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -1259,6 +1289,7 @@ def create_server(
     server.capacity_refresh = capacity_refresh
     server.model_preparation = model_preparation
     server.governance_projection = governance_projection
+    server.evidence_registry = evidence_registry
     return server
 
 
@@ -1481,6 +1512,99 @@ def _m23_evidence(deployment_dir: Path) -> Mapping[str, Any] | None:
     )
 
 
+def _historical_evidence(
+    deployment_dir: Path, *, deployment_id: str
+) -> tuple[Mapping[str, Any], ...]:
+    """Load only records with intrinsic Unix observation time and measured provenance."""
+
+    records: list[Mapping[str, Any]] = []
+    replica_plan = _m18_replica_plan(deployment_dir)
+    if replica_plan is not None:
+        records.append(
+            sealed_evidence_projection(
+                record_id=f"replication-plan-{deployment_id}",
+                capability="replicated_serving",
+                authority="mycelium_m18_replication:build_replica_plan",
+                generation=int(replica_plan["evidence"]["generation"]),
+                observed_at_unix_ms=int(replica_plan["generated_at_unix_ms"]),
+                payload=replica_plan,
+            )
+        )
+    liveness, recovery_plan, _runtime = _m19_evidence(deployment_dir)
+    if liveness is not None:
+        records.append(
+            sealed_evidence_projection(
+                record_id=f"recovery-liveness-{deployment_id}",
+                capability="scoped_recovery",
+                authority="mycelium_m19_recovery:LivenessTracker",
+                generation=int(liveness["binding"]["membership_generation"]),
+                observed_at_unix_ms=int(liveness["generated_at_unix_ms"]),
+                payload=liveness,
+            )
+        )
+    if recovery_plan is not None:
+        records.append(
+            sealed_evidence_projection(
+                record_id=f"recovery-plan-{deployment_id}",
+                capability="scoped_recovery",
+                authority="mycelium_m19_recovery:build_recovery_plan",
+                generation=int(recovery_plan["binding"]["membership_generation"]),
+                observed_at_unix_ms=int(recovery_plan["generated_at_unix_ms"]),
+                payload=recovery_plan,
+            )
+        )
+    kv_evidence = _m23_evidence(deployment_dir)
+    if kv_evidence is not None:
+        records.append(
+            sealed_evidence_projection(
+                record_id=f"stage-local-kv-{deployment_id}",
+                capability="stage_local_kv",
+                authority="scripts.run_m23_kv_gate:sealed_physical_gate",
+                generation=0,
+                observed_at_unix_ms=int(kv_evidence["generated_at_unix_ms"]),
+                payload=kv_evidence,
+            )
+        )
+    return tuple(records)
+
+
+def _explicit_historical_evidence(
+    paths: Sequence[Path],
+) -> tuple[Mapping[str, Any], ...]:
+    """Load explicitly selected, intrinsically timestamped historical records."""
+
+    records: list[Mapping[str, Any]] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.stat().st_size > 4 * 1024 * 1024
+        ):
+            raise ValueError("historical_evidence_file_unsafe")
+        try:
+            raw = json.loads(path.read_text("utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+            raise ValueError("historical_evidence_file_invalid") from exc
+        if not isinstance(raw, Mapping):
+            raise ValueError("historical_evidence_file_invalid")
+        if raw.get("protocol") == "mycelium.m23_heterogeneous_kv_gate.v1":
+            document = validate_m23_kv_evidence(raw)
+            records.append(
+                sealed_evidence_projection(
+                    record_id=f"stage-local-kv-{document['evidence_digest'][7:23]}",
+                    capability="stage_local_kv",
+                    authority="scripts.run_m23_kv_gate:sealed_physical_gate",
+                    generation=0,
+                    observed_at_unix_ms=int(document["generated_at_unix_ms"]),
+                    payload=document,
+                )
+            )
+            continue
+        raise ValueError("historical_evidence_protocol_unsupported")
+    return tuple(records)
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -1533,16 +1657,6 @@ def _qualified_runtime(
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         codec = prompt_codec_from_deployment(selected_deployment_dir)
         route.set_stop_token_ids(getattr(codec, "stop_token_ids", frozenset()))
-        replica_runtime = _m18_replica_runtime(selected_deployment_dir)
-        m19_liveness, m19_plan, m19_runtime = _m19_evidence(selected_deployment_dir)
-        route.set_m19_recovery_evidence(
-            liveness=m19_liveness, plan=m19_plan, runtime=m19_runtime
-        )
-        m20_plan, m20_runtime = _m20_evidence(selected_deployment_dir)
-        route.set_m20_speculative_evidence(plan=m20_plan, runtime=m20_runtime)
-        route.set_m21_heterogeneous_evidence(_m21_evidence(selected_deployment_dir))
-        route.set_m22_release_evidence(_m22_evidence(selected_deployment_dir))
-        route.set_m23_kv_evidence(_m23_evidence(selected_deployment_dir))
         return QualifiedDeploymentRuntime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,
@@ -1562,10 +1676,9 @@ def _qualified_runtime(
                 explicit_path=model_operation_file,
             ),
             replica_plan=_m18_replica_plan(selected_deployment_dir),
-            replica_runtime_source=(
-                None
-                if replica_runtime is None
-                else lambda document=replica_runtime: document
+            historical_evidence=_historical_evidence(
+                selected_deployment_dir,
+                deployment_id=identity.deployment_id,
             ),
         )
     except BaseException:
@@ -1587,6 +1700,7 @@ def run_registry_server(
     model_cache_root: Path | None = None,
     model_preparation_template_plan: Path | None = None,
     model_preparation_root: Path | None = None,
+    historical_evidence_files: Sequence[Path] = (),
 ) -> int:
     """Open, qualify, and serve one or more immutable deployments."""
 
@@ -1663,6 +1777,13 @@ def run_registry_server(
             product_state_root=seed_state_root,
             seed_url=seed_url,
         )
+        evidence_registry = EvidenceProjectionRegistry(
+            runtime_source=registry.public_status,
+            historical_records=tuple(
+                record for runtime in runtimes for record in runtime.historical_evidence
+            )
+            + _explicit_historical_evidence(historical_evidence_files),
+        )
         server = create_server(
             app=stack.app,
             route=registry,
@@ -1673,6 +1794,7 @@ def run_registry_server(
             capacity_refresh=capacity_refresh,
             model_preparation=model_preparation,
             governance_projection=governance_readiness(ROOT),
+            evidence_registry=evidence_registry,
         )
         startup_complete = True
         stop = threading.Event()
@@ -1737,6 +1859,7 @@ def run_physical_server(
     seed_state_root: Path,
     seed_url: str | None = None,
     model_cache_root: Path | None = None,
+    historical_evidence_files: Sequence[Path] = (),
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
@@ -1765,21 +1888,6 @@ def run_physical_server(
                 explicit_path=model_operation_file,
             )
         )
-        route.set_m18_replica_plan(_m18_replica_plan(selected_deployment_dir))
-        replica_runtime = _m18_replica_runtime(selected_deployment_dir)
-        if replica_runtime is not None:
-            route.set_m18_replica_runtime_source(
-                lambda document=replica_runtime: document
-            )
-        m19_liveness, m19_plan, m19_runtime = _m19_evidence(selected_deployment_dir)
-        route.set_m19_recovery_evidence(
-            liveness=m19_liveness, plan=m19_plan, runtime=m19_runtime
-        )
-        m20_plan, m20_runtime = _m20_evidence(selected_deployment_dir)
-        route.set_m20_speculative_evidence(plan=m20_plan, runtime=m20_runtime)
-        route.set_m21_heterogeneous_evidence(_m21_evidence(selected_deployment_dir))
-        route.set_m22_release_evidence(_m22_evidence(selected_deployment_dir))
-        route.set_m23_kv_evidence(_m23_evidence(selected_deployment_dir))
         stack = build_live_stack(
             route=route,
             deployment_dir=selected_deployment_dir,
@@ -1806,6 +1914,14 @@ def run_physical_server(
             host=host,
             port=port,
             capacity_refresh=capacity_refresh,
+            evidence_registry=EvidenceProjectionRegistry(
+                runtime_source=route.public_status,
+                historical_records=_historical_evidence(
+                    selected_deployment_dir,
+                    deployment_id=identity.deployment_id,
+                )
+                + _explicit_historical_evidence(historical_evidence_files),
+            ),
         )
         startup_complete = True
 
@@ -1871,6 +1987,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--static-root", type=Path)
     parser.add_argument("--registry-state", type=Path)
+    parser.add_argument("--historical-evidence-file", type=Path, action="append")
     parser.add_argument("--seed-state-root", type=Path, required=True)
     parser.add_argument(
         "--candidate-plan-root",
@@ -1913,6 +2030,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed_state_root=args.seed_state_root,
             seed_url=args.seed_url,
             model_cache_root=args.model_cache_root,
+            historical_evidence_files=tuple(args.historical_evidence_file or ()),
         )
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
@@ -1929,6 +2047,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_cache_root=args.model_cache_root,
         model_preparation_template_plan=args.model_preparation_template_plan,
         model_preparation_root=args.model_preparation_root,
+        historical_evidence_files=tuple(args.historical_evidence_file or ()),
     )
 
 

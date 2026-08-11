@@ -1,6 +1,3 @@
-export const M20_PLAN_PATH = '/__mycelium/m20-speculative-plan';
-export const M20_RUNTIME_PATH = '/__mycelium/m20-speculative-runtime';
-
 export type M20ModelIdentity = Readonly<{ model_id: string; model_revision: string; tokenizer_digest: string; vocabulary_size: number; special_tokens_digest: string; position_semantics_digest: string; kv_schema_digest: string }>;
 export type M20Measurements = Readonly<{ sample_count: number; target_only_tpot_ms: number | null; draft_tpot_ms: number | null; verification_batch_ms: number | null; proposal_transfer_ms: number | null; observed_acceptance_fraction: number | null; predicted_gain_fraction: number | null; observed_gain_fraction: number | null }>;
 export type M20SpeculativePlan = Readonly<{ protocol: 'mycelium.m20_speculative_plan.v1'; binding: Readonly<Record<string, string | number>>; target: M20ModelIdentity; draft: M20ModelIdentity; workload_id: string; proposal_width: number; acceptance_distribution: readonly number[]; compatibility: Readonly<{ tokenizer: boolean; vocabulary: boolean; special_tokens: boolean; position_semantics: boolean; separate_kv_ownership: boolean; batched_target_verification: boolean }>; measurements: M20Measurements; decision: Readonly<{ state: 'disabled' | 'qualified_enabled'; reason: string; material_gain_threshold: number; target_fallback: true }>; privacy: string; plan_digest: string }>;
@@ -41,13 +38,3 @@ export function decodeM20SpeculativeRuntime(value: unknown): M20SpeculativeRunti
 }
 
 export interface M20SpeculationClient { load(signal?: AbortSignal): Promise<readonly [M20SpeculativePlan, M20SpeculativeRuntime]> }
-export class HttpM20SpeculationClient implements M20SpeculationClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
-  async load(signal?: AbortSignal): Promise<readonly [M20SpeculativePlan, M20SpeculativeRuntime]> {
-    const request = (path: string) => this.fetcher(path, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
-    const responses = await Promise.all([request(M20_PLAN_PATH), request(M20_RUNTIME_PATH)]);
-    if (responses.some((response) => !response.ok)) throw new Error(`m20_speculation_${responses.map((response) => response.status).join('_')}`);
-    const documents = await Promise.all(responses.map((response) => response.json()));
-    return Object.freeze([decodeM20SpeculativePlan(documents[0]), decodeM20SpeculativeRuntime(documents[1])] as const);
-  }
-}

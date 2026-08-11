@@ -1,5 +1,3 @@
-export const M22_RELEASE_PATH = '/__mycelium/m22-release';
-
 export type M22ReleaseEvidence = Readonly<{
   protocol: 'mycelium.m22_release_closure.v1';
   generated_at_unix_ms: number;
@@ -50,13 +48,4 @@ export function decodeM22Release(value: unknown): M22ReleaseEvidence {
     reviewer: Object.freeze({ bundle_version: text(reviewer.bundle_version,'reviewer bundle'), bundle_manifest_digest: sha(reviewer.bundle_manifest_digest,'reviewer bundle digest'), preflight_idempotent: bool(reviewer.preflight_idempotent,'preflight'), surrogate_verified: bool(reviewer.surrogate_verified,'surrogate'), external_network: bool(reviewer.external_network,'external network'), assigned_stage: bool(reviewer.assigned_stage,'assigned stage'), inference_completed: bool(reviewer.inference_completed,'inference completed'), negative_case_verified: bool(reviewer.negative_case_verified,'negative case') }),
     gate_state: root.gate_state as M22ReleaseEvidence['gate_state'], exclusions: texts(root.exclusions,'exclusions'), privacy: text(root.privacy,'privacy'), evidence_digest: text(root.evidence_digest,'evidence digest'),
   });
-}
-
-export interface M22ReleaseClient { load(signal?: AbortSignal): Promise<M22ReleaseEvidence> }
-export class HttpM22ReleaseClient implements M22ReleaseClient {
-  async load(signal?: AbortSignal): Promise<M22ReleaseEvidence> {
-    const response = await fetch(M22_RELEASE_PATH, { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error(`m22_release_${response.status}`);
-    return decodeM22Release(await response.json());
-  }
 }

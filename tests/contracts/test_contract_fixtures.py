@@ -125,6 +125,8 @@ EXPECTED_PROTOCOLS = {
         "mycelium.deployment_residency_physical_gate.v1"
     ),
     "governance-readiness-v1.json": "mycelium.governance_readiness.v1",
+    "evidence-projection-v1.json": "mycelium.evidence_projection.v1",
+    "evidence-history-v1.json": "mycelium.evidence_history.v1",
     "router-wire-v1.json": "mycelium.router_wire.v1",
     "layer-replan-simulation-report-v1.json": "mycelium.layer_replan_simulation_report.v1",
     "product-ui-bootstrap-v1.json": "mycelium.product_ui.bootstrap.v1",

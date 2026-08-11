@@ -1,4 +1,4 @@
-export const M17_MODEL_OPERATION_PATH = '/__mycelium/m17-model-operation';
+export const M17_MODEL_OPERATION_PATH = '/__mycelium/models/operation';
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const COMMIT = /^[0-9a-f]{40}$/;

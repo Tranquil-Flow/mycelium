@@ -128,7 +128,10 @@ function cloneProductEnvelope(value: unknown): ProductObservatoryEnvelope {
  * can never be selected by an ambient deployment value.
  */
 export function resolveProductObservatorySourceMode(value: unknown): 'fixture' | 'live' {
-  if (value === undefined || value === '') return 'fixture';
+  // A product build is a live client by default. Recorded fixture mode must be
+  // chosen explicitly so a missing build-time variable can never make a live
+  // gateway look like a fixed, non-interactive demonstration.
+  if (value === undefined || value === '') return 'live';
   if (value === 'fixture' || value === 'live') return value;
   throw new TypeError('Unknown product Observatory source mode');
 }

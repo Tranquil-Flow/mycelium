@@ -8,7 +8,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from .device_lab import DeviceLabError, prepare_device_lab
-from .doctor import DEFAULT_COMMANDS, canonical_json, local_tcp_port_available, run_preflight
+from .doctor import (
+    DEFAULT_COMMANDS,
+    canonical_json,
+    local_tcp_port_available,
+    run_preflight,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,7 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="action", required=True)
 
-    doctor = commands.add_parser("doctor", help="run local non-mutating prerequisite checks")
+    doctor = commands.add_parser(
+        "doctor", help="run local non-mutating prerequisite checks"
+    )
     doctor.add_argument("--repo-root", type=Path, default=ROOT)
     doctor.add_argument("--state-dir", type=Path, required=True)
     doctor.add_argument(
@@ -100,6 +107,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--model-operation-file", type=Path)
     serve.add_argument("--model-cache-root", type=Path)
     serve.add_argument("--registry-state", type=Path)
+    serve.add_argument("--historical-evidence-file", type=Path, action="append")
     serve.add_argument("--seed-state-root", type=Path)
     serve.add_argument("--candidate-plan-root", type=Path)
     serve.add_argument("--model-preparation-template-plan", type=Path)
@@ -117,6 +125,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
     ]
     for operator_plan in args.operator_plan or ():
         result.extend(("--operator-plan", str(operator_plan)))
+    for evidence_file in args.historical_evidence_file or ():
+        result.extend(("--historical-evidence-file", str(evidence_file)))
     optional_paths = (
         ("--deployment-dir", args.deployment_dir),
         ("--model-operation-file", args.model_operation_file),
@@ -153,6 +163,7 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.model_operation_file,
             args.model_cache_root,
             args.registry_state,
+            args.historical_evidence_file,
             args.candidate_plan_root,
             args.model_preparation_template_plan,
             args.model_preparation_root,
@@ -267,7 +278,9 @@ def main(
                 args.tls_key,
             )
         ):
-            parser.error("physical live mode is loopback-only and rejects interactive-runtime options")
+            parser.error(
+                "physical live mode is loopback-only and rejects interactive-runtime options"
+            )
         if live_server_main is None:
             from mycelium_live.supervisor import main as live_server_main
 

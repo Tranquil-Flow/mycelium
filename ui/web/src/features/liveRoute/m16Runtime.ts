@@ -1,4 +1,4 @@
-export const M16_RUNTIME_PATH = '/__mycelium/m16-runtime-status';
+export const M16_RUNTIME_PATH = '/__mycelium/runtime/admission-status';
 export const M16_RUNTIME_PROTOCOL = 'mycelium.m16_runtime_status.v1' as const;
 
 export interface M16QueueStatus {

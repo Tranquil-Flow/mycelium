@@ -24,9 +24,6 @@ import {
 import { loadProductSettings } from '../settings/SettingsContext';
 import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from '../liveRoute/m16Runtime';
 import { ModelCatalogControlSource } from '../models/ModelCatalogControlSource';
-import { M18ReplicationSourcePanel } from '../liveRoute/M18ReplicationSourcePanel';
-import { M19RecoverySourcePanel } from '../liveRoute/M19RecoverySourcePanel';
-import { M20SpeculationSourcePanel } from '../liveRoute/M20SpeculationSourcePanel';
 import { DEPLOYMENTS_CHANGED_EVENT } from '../liveRoute/deploymentActivation';
 
 const encoder = new TextEncoder();
@@ -525,9 +522,6 @@ export function InferenceWorkspace({
       </div>
 
       {client === undefined ? <ModelCatalogControlSource /> : null}
-      {client === undefined ? <M20SpeculationSourcePanel view="inference" hideUnavailable /> : null}
-      {client === undefined ? <M19RecoverySourcePanel view="inference" hideUnavailable /> : null}
-      {client === undefined ? <M18ReplicationSourcePanel view="inference" hideUnavailable /> : null}
 
       <section className={styles.outputPanel} aria-labelledby="output-title">
         <div className={styles.sectionHeading}>

@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import model_manifest as mm
+from mycelium_evidence import sealed_evidence_projection, validate_evidence_projection
 from layer_assignment import compile_layer_assignments
 from mycelium_capacity_profiles import (
     CapacityObservation,
@@ -1578,6 +1579,47 @@ def governance_readiness() -> dict[str, Any]:
     }
 
 
+def evidence_projection() -> dict[str, Any]:
+    return validate_evidence_projection(
+        {
+            "protocol": "mycelium.evidence_projection.v1",
+            "record_id": "runtime-contract-fixture",
+            "capability": "route_execution",
+            "source_kind": "live_runtime",
+            "authority": "mycelium_live.route:public_status",
+            "generation": 1,
+            "captured_at_unix_ms": 2,
+            "observed_at_unix_ms": 1,
+            "valid_until_unix_ms": 3_002,
+            "freshness": "current",
+            "payload_protocol": "mycelium.live_route_status.v1",
+            "payload": {
+                "protocol": "mycelium.live_route_status.v1",
+                "route_alive": True,
+            },
+        }
+    )
+
+
+def evidence_history() -> dict[str, Any]:
+    return {
+        "protocol": "mycelium.evidence_history.v1",
+        "records": [
+            sealed_evidence_projection(
+                record_id="recorded-replication-fixture",
+                capability="replicated_serving",
+                authority="mycelium_m18_replication:build_replica_plan",
+                generation=1,
+                observed_at_unix_ms=1,
+                payload={
+                    "protocol": "mycelium.replica_plan.v1",
+                    "route_ready": False,
+                },
+            )
+        ],
+    }
+
+
 def product_bootstrap() -> dict[str, Any]:
     return {
         "protocol": "mycelium.product_ui.bootstrap.v1",
@@ -2068,6 +2110,8 @@ def documents() -> dict[str, dict[str, Any]]:
         "deployment-activation-v1.json": deployment_activation_status(),
         "deployment-residency-physical-v1.json": deployment_residency_physical_gate(),
         "governance-readiness-v1.json": governance_readiness(),
+        "evidence-projection-v1.json": evidence_projection(),
+        "evidence-history-v1.json": evidence_history(),
         "router-wire-v1.json": json.loads(
             read_under_root(
                 ROOT, ROOT / "contracts" / "router-wire-golden" / "index.json"

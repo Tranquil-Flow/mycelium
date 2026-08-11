@@ -1,5 +1,3 @@
-export const M23_KV_PATH = '/__mycelium/m23-kv';
-
 export type M23KvEvidence = Readonly<{
   protocol: 'mycelium.m23_heterogeneous_kv_gate.v1';
   generated_at_unix_ms: number;
@@ -82,13 +80,4 @@ export function decodeM23KvEvidence(value: unknown): M23KvEvidence {
     claim_boundary: text(root.claim_boundary, 'claim boundary'),
     evidence_digest: sha(root.evidence_digest, 'evidence digest'),
   });
-}
-
-export interface M23KvClient { load(signal?: AbortSignal): Promise<M23KvEvidence> }
-export class HttpM23KvClient implements M23KvClient {
-  async load(signal?: AbortSignal): Promise<M23KvEvidence> {
-    const response = await fetch(M23_KV_PATH, { method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error(`m23_kv_${response.status}`);
-    return decodeM23KvEvidence(await response.json());
-  }
 }

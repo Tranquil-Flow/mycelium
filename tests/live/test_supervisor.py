@@ -13,6 +13,7 @@ from mycelium_live.route import FakeLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
     LiveObservatoryApplication,
     LiveSwarmCoordinator,
+    _explicit_historical_evidence,
     _m18_replica_plan,
     _placement_projection,
     _workload_comparison,
@@ -491,7 +492,7 @@ def test_m17_swarm_evidence_endpoint_is_read_only_and_fail_closed(
     thread.start()
     try:
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-        connection.request("GET", "/__mycelium/m17-swarm-evidence")
+        connection.request("GET", "/__mycelium/swarm/resource-observations")
         response = connection.getresponse()
         assert response.status == 200
         assert json.loads(response.read()) == expected
@@ -502,24 +503,77 @@ def test_m17_swarm_evidence_endpoint_is_read_only_and_fail_closed(
         thread.join(timeout=5)
 
 
-def test_m18_plan_and_runtime_endpoints_are_read_only(tmp_path: Path) -> None:
+def test_runtime_and_historical_evidence_endpoints_are_separate(tmp_path: Path) -> None:
     static_root = tmp_path / "dist"
     static_root.mkdir()
     (static_root / "index.html").write_text("ok", encoding="utf-8")
-    plan = {"protocol": "mycelium.replica_plan.v1", "route_ready": False}
-    runtime = {"protocol": "mycelium.replica_runtime.v1", "requests": []}
-    calls: list[str] = []
-    route = SimpleNamespace(
-        m18_replica_plan=lambda: calls.append("plan") or plan,
-        m18_replica_runtime=lambda: calls.append("runtime") or runtime,
+    from mycelium_evidence import EvidenceProjectionRegistry, sealed_evidence_projection
+
+    route_status = {
+        "protocol": "mycelium.live_route_status.v1",
+        "route_alive": True,
+        "counters": {"frames_sent": 4, "fatal": None},
+    }
+    history = sealed_evidence_projection(
+        record_id="replication-plan-a",
+        capability="replicated_serving",
+        authority="planner",
+        generation=1,
+        observed_at_unix_ms=1_000,
+        payload={"protocol": "mycelium.replica_plan.v1", "route_ready": False},
+    )
+    registry = EvidenceProjectionRegistry(
+        runtime_source=lambda: route_status,
+        historical_records=[history],
+        clock_unix_ms=lambda: 2_000,
+        incarnation="test",
     )
 
     async def app(*_args):
-        raise AssertionError("m18_projection_reached_asgi")
+        raise AssertionError("evidence_projection_reached_asgi")
 
     server = create_server(
         app=app,
-        route=route,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        evidence_registry=registry,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for path in (
+            "/__mycelium/evidence/runtime",
+            "/__mycelium/evidence/history?capability=replicated_serving",
+        ):
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", path)
+            response = connection.getresponse()
+            assert response.status == 200
+            document = json.loads(response.read())
+            if path.endswith("runtime"):
+                assert document["source_kind"] == "live_runtime"
+                assert document["freshness"] == "current"
+            else:
+                assert document["records"] == [history]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_milestone_numbered_evidence_endpoints_are_retired(tmp_path: Path) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+
+    async def app(*_args):
+        raise AssertionError("retired_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
         static_root=static_root,
         host="127.0.0.1",
         port=0,
@@ -527,189 +581,23 @@ def test_m18_plan_and_runtime_endpoints_are_read_only(tmp_path: Path) -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        for path, expected in (
-            ("/__mycelium/m18-replica-plan", plan),
-            ("/__mycelium/m18-replica-runtime", runtime),
+        for path in (
+            "/__mycelium/m18-replica-plan",
+            "/__mycelium/m19-liveness",
+            "/__mycelium/m20-speculative-plan",
+            "/__mycelium/m21-heterogeneous",
+            "/__mycelium/m22-release",
+            "/__mycelium/m23-kv",
+            "/__mycelium/m15-plan-comparison",
+            "/__mycelium/m16-runtime-status",
+            "/__mycelium/m17-model-operation",
+            "/__mycelium/m17-swarm-evidence",
         ):
             connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
             connection.request("GET", path)
             response = connection.getresponse()
-            assert response.status == 200
-            assert json.loads(response.read()) == expected
-        assert calls == ["plan", "runtime"]
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def test_m19_evidence_endpoints_are_read_only(tmp_path: Path) -> None:
-    static_root = tmp_path / "dist"
-    static_root.mkdir()
-    (static_root / "index.html").write_text("ok", encoding="utf-8")
-    evidence = {
-        "m19_liveness": {"protocol": "mycelium.m19_liveness.v1"},
-        "m19_recovery_plan": {"protocol": "mycelium.m19_recovery_plan.v1"},
-        "m19_recovery_runtime": {"protocol": "mycelium.m19_recovery_runtime.v1"},
-    }
-    calls: list[str] = []
-    route = SimpleNamespace(
-        **{
-            name: (lambda key=name: calls.append(key) or evidence[key])
-            for name in evidence
-        }
-    )
-
-    async def app(*_args):
-        raise AssertionError("m19_projection_reached_asgi")
-
-    server = create_server(
-        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        for path, name in (
-            ("/__mycelium/m19-liveness", "m19_liveness"),
-            ("/__mycelium/m19-recovery-plan", "m19_recovery_plan"),
-            ("/__mycelium/m19-recovery-runtime", "m19_recovery_runtime"),
-        ):
-            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-            connection.request("GET", path)
-            response = connection.getresponse()
-            assert response.status == 200
-            assert json.loads(response.read()) == evidence[name]
-        assert calls == list(evidence)
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def test_m20_evidence_endpoints_are_read_only(tmp_path: Path) -> None:
-    static_root = tmp_path / "dist"
-    static_root.mkdir()
-    (static_root / "index.html").write_text("ok", encoding="utf-8")
-    evidence = {
-        "m20_speculative_plan": {"protocol": "mycelium.m20_speculative_plan.v1"},
-        "m20_speculative_runtime": {"protocol": "mycelium.m20_speculative_runtime.v1"},
-    }
-    calls: list[str] = []
-    route = SimpleNamespace(
-        **{
-            name: (lambda key=name: calls.append(key) or evidence[key])
-            for name in evidence
-        }
-    )
-
-    async def app(*_args):
-        raise AssertionError("m20_projection_reached_asgi")
-
-    server = create_server(
-        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        for path, name in (
-            ("/__mycelium/m20-speculative-plan", "m20_speculative_plan"),
-            ("/__mycelium/m20-speculative-runtime", "m20_speculative_runtime"),
-        ):
-            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-            connection.request("GET", path)
-            response = connection.getresponse()
-            assert response.status == 200
-            assert json.loads(response.read()) == evidence[name]
-        assert calls == list(evidence)
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def test_m21_evidence_endpoint_is_read_only(tmp_path: Path) -> None:
-    static_root = tmp_path / "dist"
-    static_root.mkdir()
-    (static_root / "index.html").write_text("ok", encoding="utf-8")
-    evidence = {"protocol": "mycelium.m21_heterogeneous_swarm.v1"}
-    calls: list[str] = []
-    route = SimpleNamespace(
-        m21_heterogeneous=lambda: calls.append("m21_heterogeneous") or evidence
-    )
-
-    async def app(*_args):
-        raise AssertionError("m21_projection_reached_asgi")
-
-    server = create_server(
-        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-        connection.request("GET", "/__mycelium/m21-heterogeneous")
-        response = connection.getresponse()
-        assert response.status == 200
-        assert json.loads(response.read()) == evidence
-        assert calls == ["m21_heterogeneous"]
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def test_m22_release_endpoint_is_read_only(tmp_path: Path) -> None:
-    static_root = tmp_path / "dist"
-    static_root.mkdir()
-    (static_root / "index.html").write_text("ok", encoding="utf-8")
-    evidence = {"protocol": "mycelium.m22_release_closure.v1"}
-    calls: list[str] = []
-    route = SimpleNamespace(m22_release=lambda: calls.append("m22_release") or evidence)
-
-    async def app(*_args):
-        raise AssertionError("m22_projection_reached_asgi")
-
-    server = create_server(
-        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-        connection.request("GET", "/__mycelium/m22-release")
-        response = connection.getresponse()
-        assert response.status == 200
-        assert json.loads(response.read()) == evidence
-        assert calls == ["m22_release"]
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def test_m23_kv_endpoint_is_read_only(tmp_path: Path) -> None:
-    static_root = tmp_path / "dist"
-    static_root.mkdir()
-    (static_root / "index.html").write_text("ok", encoding="utf-8")
-    evidence = {"protocol": "mycelium.m23_heterogeneous_kv_gate.v1"}
-    calls: list[str] = []
-    route = SimpleNamespace(m23_kv=lambda: calls.append("m23_kv") or evidence)
-
-    async def app(*_args):
-        raise AssertionError("m23_projection_reached_asgi")
-
-    server = create_server(
-        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
-        connection.request("GET", "/__mycelium/m23-kv")
-        response = connection.getresponse()
-        assert response.status == 200
-        assert json.loads(response.read()) == evidence
-        assert calls == ["m23_kv"]
+            assert response.status == 404
+            assert json.loads(response.read()) == {"error": "product_endpoint_unknown"}
     finally:
         server.shutdown()
         server.server_close()
@@ -1056,6 +944,23 @@ def test_governance_readiness_endpoint_serves_only_the_frozen_projection(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_explicit_historical_evidence_keeps_intrinsic_capture_time() -> None:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "contracts"
+        / "compatibility-fixtures"
+        / "m23-kv-gate-v1.json"
+    )
+    records = _explicit_historical_evidence((path,))
+    assert len(records) == 1
+    assert records[0]["source_kind"] == "sealed_historical"
+    assert records[0]["freshness"] == "historical"
+    assert (
+        records[0]["observed_at_unix_ms"]
+        == records[0]["payload"]["generated_at_unix_ms"]
+    )
 
 
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:

@@ -29,12 +29,9 @@ import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
 import { ModelCatalogControlSource } from './features/models/ModelCatalogControlSource';
-import { M21HeterogeneousSourcePanel } from './features/liveRoute/M21HeterogeneousSourcePanel';
-import { M22ReleaseSourcePanel } from './features/liveRoute/M22ReleaseSourcePanel';
-import { M23KvSourcePanel } from './features/liveRoute/M23KvSourcePanel';
 import { PreparedDeploymentsSourcePanel } from './features/liveRoute/PreparedDeploymentsSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
-import { HttpM20SpeculationClient } from './features/liveRoute/m20Speculation';
+import { EvidenceProvenanceSource } from './features/evidence/EvidenceProvenanceSource';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
 import {
   ProductEvidenceSettings,
@@ -81,7 +78,6 @@ const emptyFeatureRegistry = createProductFeatureRegistry([]);
 const fixtureInferenceClient = new FixtureInferenceClient();
 const liveM15ComparisonClient = new HttpM15ComparisonClient();
 const liveDeploymentRegistryClient = new HttpDeploymentRegistryClient();
-const liveM20SpeculationClient = new HttpM20SpeculationClient();
 const recordedLifecycleProjections = Object.freeze(
   LIFECYCLE_STATE_ORDER.map((state) => projectLifecycle(preparingFixture({ state }))),
 );
@@ -291,18 +287,14 @@ export default function App({
   if (activeView === 'lab') {
     content = <>
       <ProductEvidenceSummary compact />
-      {source.source_mode === 'live' ? <M22ReleaseSourcePanel view="lab" hideUnavailable /> : null}
-      {source.source_mode === 'live' ? <M21HeterogeneousSourcePanel view="lab" hideUnavailable /> : null}
       <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />
     </>;
   } else if (activeView === 'settings') {
     content = <>
       <ProductEvidenceSummary compact />
       <ProductEvidenceSettings />
-      {source.source_mode === 'live' ? <M22ReleaseSourcePanel view="settings" hideUnavailable /> : null}
-      {source.source_mode === 'live' ? <M21HeterogeneousSourcePanel view="settings" hideUnavailable /> : null}
       {source.source_mode === 'live' ? <GovernanceReadinessSource /> : null}
-      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} speculationClient={source.source_mode === 'live' ? liveM20SpeculationClient : null} />
+      <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} />
       {source.source_mode === 'live' ? <ModelCatalogControlSource /> : null}
     </>;
   } else if (rendered.state === 'loading') {
@@ -313,8 +305,6 @@ export default function App({
     content = (
       <>
         <ProductEvidenceSummary compact />
-        {source.source_mode === 'live' ? <M22ReleaseSourcePanel view="inference" hideUnavailable /> : null}
-        {source.source_mode === 'live' ? <M23KvSourcePanel view="inference" hideUnavailable /> : null}
         {source.source_mode === 'live' ? <LiveKvStatusPanel view="inference" freshness={rendered.sourceState.freshness} /> : null}
         <InferenceWorkspace
           client={source.source_mode !== 'live' ? fixtureInferenceClient : undefined}
@@ -333,26 +323,28 @@ export default function App({
     content = productEvidence.configured
       ? (
           <>
-            <ProductEvidenceSummary compact />
             {activeView === 'nodes' ? (
-              <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M23KvSourcePanel view="nodes" hideUnavailable /><M21HeterogeneousSourcePanel view="nodes" hideUnavailable /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
+              <><ProductEvidenceWorkspace view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
-              <LiveRouteWorkspace
-                view={activeView}
-                qualification={
-                  isProductEventState(rendered.sourceState)
-                    ? rendered.sourceState.projection.snapshot.qualification
-                    : null
-                }
-                freshness={rendered.sourceState.freshness}
-              />
+              <>
+                <ProductEvidenceWorkspace view={activeView} />
+                <LiveRouteWorkspace
+                  view={activeView}
+                  qualification={
+                    isProductEventState(rendered.sourceState)
+                      ? rendered.sourceState.projection.snapshot.qualification
+                      : null
+                  }
+                  freshness={rendered.sourceState.freshness}
+                />
+              </>
             ) : (
               <ProductEvidenceWorkspace view={activeView} />
             )}
           </>
         )
       : activeView === 'nodes'
-        ? <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M23KvSourcePanel view="nodes" hideUnavailable /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /></>
+        ? <><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /></>
         : isProductEventState(rendered.sourceState)
           ? activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents'
             ? (
@@ -458,6 +450,7 @@ export default function App({
           registry={featureRegistry}
           productState={renderedProductState}
         >
+          {source.source_mode === 'live' ? <EvidenceProvenanceSource /> : null}
           {content}
         </ProductFeatureSlot>
       </AppShell>

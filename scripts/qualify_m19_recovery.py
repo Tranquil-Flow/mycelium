@@ -18,7 +18,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mycelium_live.route import PhysicalLiveRoute
-from mycelium_m19_recovery import RecoveryLedger, TrafficAwareLivenessDetector, build_recovery_plan
+from mycelium_m19_recovery import (
+    RecoveryLedger,
+    TrafficAwareLivenessDetector,
+    build_recovery_plan,
+)
 from mycelium_qualification.contracts import route_qualification_to_dict
 from mycelium_qualification.evidence import canonical_json_bytes, sha256_document
 from mycelium_qualification.live import issue_live_route_qualification
@@ -27,9 +31,11 @@ from mycelium_qualification.live import issue_live_route_qualification
 class _Sink:
     def __init__(self) -> None:
         self.tokens: list[int] = []
+        self.duplicate_or_skipped = False
 
     def emit(self, token_index: int, token_id: int) -> None:
         if token_index != len(self.tokens):
+            self.duplicate_or_skipped = True
             raise RuntimeError("m19_duplicate_or_skipped_delivery")
         self.tokens.append(token_id)
 
@@ -49,7 +55,9 @@ def _write(path: Path, value: dict[str, Any]) -> None:
 def build(args: argparse.Namespace) -> dict[str, Any]:
     replica_plan = _read(args.deployment_dir / "m18-replica-plan.json")
     operator = _read(args.operator_plan)
-    graph_digest = operator["controller"]["membership_snapshot"]["assignment_offers"][0]["message"]["graph_digest"]
+    graph_digest = operator["controller"]["membership_snapshot"]["assignment_offers"][
+        0
+    ]["message"]["graph_digest"]
     graph = _read(args.deployment_dir.parent / "control" / "execution-graph.json")
     primary_track, successor_track = replica_plan["tracks"][:2]
     deployment = replica_plan["deployment"]
@@ -63,12 +71,16 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "graph_digest": graph_digest,
         "membership_generation": max(
             item["message"]["generation"]
-            for item in operator["controller"]["membership_snapshot"]["assignment_offers"]
+            for item in operator["controller"]["membership_snapshot"][
+                "assignment_offers"
+            ]
         ),
     }
     primary_placement = primary_track["placement_ids"][0]
     successor_placement = successor_track["placement_ids"][0]
-    route = PhysicalLiveRoute.from_operator_plan(args.operator_plan, seed_state_root=args.seed_state_root)
+    route = PhysicalLiveRoute.from_operator_plan(
+        args.operator_plan, seed_state_root=args.seed_state_root
+    )
     nonce = str(time.time_ns())
     try:
         route.open()
@@ -80,7 +92,13 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
 
         reference_id = f"m19-reference-{nonce}"
         reference_sink = _Sink()
-        reference = route.infer(prompt, max_new_tokens=total, request_id=reference_id, sink=reference_sink, selected_placement_ids=(successor_placement,))
+        reference = route.infer(
+            prompt,
+            max_new_tokens=total,
+            request_id=reference_id,
+            sink=reference_sink,
+            selected_placement_ids=(successor_placement,),
+        )
         route.m17_swarm_evidence()
         successor_qualification = route_qualification_to_dict(
             issue_live_route_qualification(
@@ -95,7 +113,13 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
 
         primary_id = f"m19-primary-{nonce}"
         primary_sink = _Sink()
-        committed = route.infer(prompt, max_new_tokens=committed_count, request_id=primary_id, sink=primary_sink, selected_placement_ids=(primary_placement,))
+        committed = route.infer(
+            prompt,
+            max_new_tokens=committed_count,
+            request_id=primary_id,
+            sink=primary_sink,
+            selected_placement_ids=(primary_placement,),
+        )
         route.m17_swarm_evidence()
         primary_qualification_document = route_qualification_to_dict(
             issue_live_route_qualification(
@@ -106,6 +130,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         )
         primary_node = graph["stages"][0]["placements"][0]["node_id"]
         worker_pid = route.process_id(primary_node)
+        failure_started = time.monotonic()
         os.kill(worker_pid, signal.SIGTERM)
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -116,21 +141,43 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             time.sleep(0.05)
         else:
             os.kill(worker_pid, signal.SIGKILL)
+        detection_ms = (time.monotonic() - failure_started) * 1_000
 
         replay_id = f"m19-replay-{nonce}"
         replay_sink = _Sink()
-        replay = route.infer((*prompt, *committed.token_ids), max_new_tokens=total - committed_count, request_id=replay_id, sink=replay_sink, selected_placement_ids=(successor_placement,))
+        replay = route.infer(
+            (*prompt, *committed.token_ids),
+            max_new_tokens=total - committed_count,
+            request_id=replay_id,
+            sink=replay_sink,
+            selected_placement_ids=(successor_placement,),
+        )
         logical_output = (*committed.token_ids, *replay.token_ids)
-        parity = logical_output == reference.token_ids and tuple(replay_sink.tokens) == reference.token_ids[committed_count:]
+        parity = (
+            logical_output == reference.token_ids
+            and tuple(replay_sink.tokens) == reference.token_ids[committed_count:]
+        )
         route.release_request(replay_id)
         if not parity:
             raise RuntimeError("m19_full_context_replay_parity_failed")
+        public_status = route.public_status()
+        cleanup_complete = all(
+            peer["active_kv_state_count"] == 0 for peer in public_status["peers"]
+        )
+        duplicate_delivery = replay_sink.duplicate_or_skipped
 
         now = int(time.time() * 1_000)
         detector = TrafficAwareLivenessDetector(binding, generated_at_unix_ms=now)
         detector.observe(primary_node, observed_at_unix_ms=now)
-        detector.active_disconnect(primary_node, observed_at_unix_ms=now + 1, scope="placement", affected_track_ids=(primary_track["track_id"],))
-        detector.observe(graph["stages"][0]["placements"][1]["node_id"], observed_at_unix_ms=now)
+        detector.active_disconnect(
+            primary_node,
+            observed_at_unix_ms=now + 1,
+            scope="placement",
+            affected_track_ids=(primary_track["track_id"],),
+        )
+        detector.observe(
+            graph["stages"][0]["placements"][1]["node_id"], observed_at_unix_ms=now
+        )
 
         successor = {
             "track_id": successor_track["track_id"],
@@ -138,36 +185,103 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "qualification_digest": sha256_document(successor_qualification),
             "decode_mode": deployment["decode_mode"],
             "kv_compatibility": "compatible",
-            "kv_schema_digest": sha256_document({"stage_signature": graph["stages"][0]["placements"][1]["stage_signature"], "decode_mode": deployment["decode_mode"]}),
+            "kv_schema_digest": sha256_document(
+                {
+                    "stage_signature": graph["stages"][0]["placements"][1][
+                        "stage_signature"
+                    ],
+                    "decode_mode": deployment["decode_mode"],
+                }
+            ),
             "failure_domain": "physical-host-node-1",
         }
-        plan = build_recovery_plan(binding, incumbent_track_ids=(primary_track["track_id"], successor_track["track_id"]), failed_track_ids=(primary_track["track_id"],), successors=(successor,), equivalent_candidate_generations=1, candidate_first_seen_unix_ms=now + 1, generated_at_unix_ms=now + 1)
+        plan = build_recovery_plan(
+            binding,
+            incumbent_track_ids=(
+                primary_track["track_id"],
+                successor_track["track_id"],
+            ),
+            failed_track_ids=(primary_track["track_id"],),
+            successors=(successor,),
+            equivalent_candidate_generations=1,
+            candidate_first_seen_unix_ms=now + 1,
+            generated_at_unix_ms=now + 1,
+        )
         ledger = RecoveryLedger(binding, maximum_recovery_attempts=2)
         primary_qualification = {
             "qualification_id": primary_qualification_document["qualification_id"],
             "qualification_digest": sha256_document(primary_qualification_document),
         }
-        ledger.admit("m19-physical-replay", path_id="path-primary", track_id=primary_track["track_id"], qualification_id=primary_qualification["qualification_id"], qualification_digest=primary_qualification["qualification_digest"])
+        ledger.admit(
+            "m19-physical-replay",
+            path_id="path-primary",
+            track_id=primary_track["track_id"],
+            qualification_id=primary_qualification["qualification_id"],
+            qualification_digest=primary_qualification["qualification_digest"],
+        )
         committed_digest = sha256_document(list(committed.token_ids))
-        ledger.commit("m19-physical-replay", committed_token_count=committed_count, committed_token_digest=committed_digest)
-        ledger.recover("m19-physical-replay", successor=successor, expected_attempt=2, committed_token_count=committed_count, committed_token_digest=committed_digest, recovery_mode="full_context_replay", successor_path_id="path-successor", replay_performed=True)
-        ledger.complete("m19-physical-replay", committed_token_count=total, committed_token_digest=sha256_document(list(logical_output)))
-        ledger.admit("m19-no-successor", path_id="path-primary", track_id=primary_track["track_id"], qualification_id=primary_qualification["qualification_id"], qualification_digest=primary_qualification["qualification_digest"])
-        ledger.commit("m19-no-successor", committed_token_count=committed_count, committed_token_digest=committed_digest)
-        ledger.abort("m19-no-successor", reason="no_compatible_successor")
-
+        ledger.commit(
+            "m19-physical-replay",
+            committed_token_count=committed_count,
+            committed_token_digest=committed_digest,
+        )
+        ledger.recover(
+            "m19-physical-replay",
+            successor=successor,
+            expected_attempt=2,
+            committed_token_count=committed_count,
+            committed_token_digest=committed_digest,
+            recovery_mode="full_context_replay",
+            successor_path_id="path-successor",
+            replay_performed=True,
+        )
+        ledger.complete(
+            "m19-physical-replay",
+            committed_token_count=total,
+            committed_token_digest=sha256_document(list(logical_output)),
+        )
         liveness = detector.status()
         runtime = ledger.status()
+        gate_passed = (
+            parity
+            and not duplicate_delivery
+            and cleanup_complete
+            and detection_ms
+            <= detector.status()["budgets"]["active_failure_detection_ms"]
+        )
         gate = {
-            "protocol": "mycelium.m19_physical_recovery_gate.v1",
+            "protocol": "mycelium.m19_physical_recovery_gate.v2",
             "captured_at_unix_ms": now + 1,
             "deployment_id": binding["deployment_id"],
             "primary_node_id": primary_node,
             "successor_node_id": graph["stages"][0]["placements"][1]["node_id"],
-            "failure": {"mode": "physical_worker_sigterm_after_committed_prefix", "committed_token_count": committed_count, "detected_within_budget": True},
-            "recovery": {"mode": "full_context_replay", "attempt": 2, "kv_outcome": "not_transferred", "reference_output_digest": sha256_document(list(reference.token_ids)), "logical_output_digest": sha256_document(list(logical_output)), "suffix_delivery_digest": sha256_document(list(replay_sink.tokens)), "token_parity": parity, "duplicate_delivery": False, "cleanup_complete": True},
-            "negative": {"reason": "no_compatible_successor", "terminal_state": "aborted", "continuity_claimed": False, "cleanup_complete": True},
-            "route_ready": parity,
+            "failure": {
+                "mode": "physical_worker_sigterm_after_committed_prefix",
+                "committed_token_count": committed_count,
+                "detection_ms": detection_ms,
+                "detection_budget_ms": liveness["budgets"][
+                    "active_failure_detection_ms"
+                ],
+                "detected_within_budget": detection_ms
+                <= liveness["budgets"]["active_failure_detection_ms"],
+            },
+            "recovery": {
+                "mode": "full_context_replay",
+                "attempt": 2,
+                "kv_outcome": "not_transferred",
+                "reference_output_digest": sha256_document(list(reference.token_ids)),
+                "logical_output_digest": sha256_document(list(logical_output)),
+                "suffix_delivery_digest": sha256_document(list(replay_sink.tokens)),
+                "token_parity": parity,
+                "duplicate_delivery": duplicate_delivery,
+                "cleanup_complete": cleanup_complete,
+            },
+            "negative_gate": {
+                "state": "not_executed",
+                "reason": "no_physical_negative_observation",
+            },
+            "gate_passed": gate_passed,
+            "route_ready": False,
             "claim_boundary": "physical two-host full-context replay; no KV transfer or heterogeneous continuity claim",
         }
         _write(args.output_dir / "m19-physical-recovery-gate.json", gate)
@@ -186,7 +300,17 @@ def main() -> int:
     parser.add_argument("--seed-state-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     gate = build(parser.parse_args())
-    print(json.dumps({"route_ready": gate["route_ready"], "token_parity": gate["recovery"]["token_parity"], "negative": gate["negative"]["terminal_state"]}, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "gate_passed": gate["gate_passed"],
+                "route_ready": False,
+                "token_parity": gate["recovery"]["token_parity"],
+                "negative_gate": gate["negative_gate"]["state"],
+            },
+            sort_keys=True,
+        )
+    )
     return 0
 
 

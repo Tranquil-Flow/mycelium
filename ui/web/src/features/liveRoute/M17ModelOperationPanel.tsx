@@ -36,8 +36,8 @@ export function M17ModelOperationPanel({ operation, view }: { readonly operation
     return reports.has(`${entry.model_id}@${entry.revision}`) && model?.selectable !== true;
   });
   return (
-    <section className={styles.panel} aria-labelledby="m17-model-operation-title">
-      <h2 id="m17-model-operation-title">Local models and swarm fit</h2>
+    <section className={styles.panel} aria-labelledby="model-operation-title">
+      <h2 id="model-operation-title">Local models and swarm fit</h2>
       <p>
         Local catalog generation {operation.catalog_generation}. A model is selectable only after the swarm can fit it,
         its artifacts are provisioned, and its deployment passes qualification. Downloads require fresh operator approval.

@@ -1,5 +1,3 @@
-export const M21_HETEROGENEOUS_PATH = '/__mycelium/m21-heterogeneous';
-
 export type M21Member = Readonly<{
   member_id: string; peer_class: string; runtime_backend: string; trust_state: string;
   generation: number; incarnation: string; freshness: string; revocation_state: string;
@@ -54,13 +52,4 @@ export function decodeM21Heterogeneous(value: unknown): M21HeterogeneousEvidence
   const paths = source.paths.map((value, index): M21Path => { const item = record(value, pathFields, `m21 path ${index}`); const pathClass = text(item.path_class, 'path_class'); if (!['direct', 'relay', 'unknown'].includes(pathClass) || (item.relay_region !== null && typeof item.relay_region !== 'string')) throw new TypeError('m21 path is invalid'); return Object.freeze({ source_member_id: text(item.source_member_id, 'source_member_id'), destination_member_id: text(item.destination_member_id, 'destination_member_id'), path_class: pathClass as M21Path['path_class'], relay_region: item.relay_region as string | null, cold_rtt_ms: positive(item.cold_rtt_ms, 'cold_rtt_ms'), warm_rtt_ms: positive(item.warm_rtt_ms, 'warm_rtt_ms'), jitter_ms: positive(item.jitter_ms, 'jitter_ms'), loss_ratio: positive(item.loss_ratio, 'loss_ratio'), goodput_bytes_per_second: positive(item.goodput_bytes_per_second, 'goodput'), reconnect_count: integer(item.reconnect_count, 'reconnect_count'), connection_generation: integer(item.connection_generation, 'connection_generation'), selected_path_changes: integer(item.selected_path_changes, 'selected_path_changes'), sample_count: integer(item.sample_count, 'sample_count') }); });
   const route = record(source.route, routeFields, 'm21 route');
   return Object.freeze({ protocol: 'mycelium.m21_heterogeneous_swarm.v1', generated_at_unix_ms: integer(source.generated_at_unix_ms, 'generated_at_unix_ms'), binding: Object.freeze({ ...binding }) as M21HeterogeneousEvidence['binding'], policy: Object.freeze({ ...policy }) as M21HeterogeneousEvidence['policy'], members: Object.freeze(members), paths: Object.freeze(paths), route: Object.freeze({ physical: bool(route.physical, 'physical'), route_alive: bool(route.route_alive, 'route_alive'), heterogeneous: bool(route.heterogeneous, 'heterogeneous'), participant_count: integer(route.participant_count, 'participant_count'), runtime_class_count: integer(route.runtime_class_count, 'runtime_class_count'), frame_count_before: integer(route.frame_count_before, 'frame_count_before'), frame_count_after: integer(route.frame_count_after, 'frame_count_after'), latest_output_token_count: integer(route.latest_output_token_count, 'latest_output_token_count'), tailscale_product_dependency: bool(route.tailscale_product_dependency, 'tailscale_product_dependency'), activation_transport: text(route.activation_transport, 'activation_transport'), operator_staging_transport: text(route.operator_staging_transport, 'operator_staging_transport') }), gate_state: source.gate_state, exclusions: Object.freeze(source.exclusions.map((item) => text(item, 'exclusion'))), privacy: text(source.privacy, 'privacy'), evidence_digest: text(source.evidence_digest, 'evidence_digest') });
-}
-
-export interface M21HeterogeneousClient { load(signal?: AbortSignal): Promise<M21HeterogeneousEvidence> }
-export class HttpM21HeterogeneousClient implements M21HeterogeneousClient {
-  async load(signal?: AbortSignal): Promise<M21HeterogeneousEvidence> {
-    const response = await fetch(M21_HETEROGENEOUS_PATH, { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error(`m21_heterogeneous_${response.status}`);
-    return decodeM21Heterogeneous(await response.json());
-  }
 }

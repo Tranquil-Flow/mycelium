@@ -44,6 +44,7 @@ class QualifiedDeploymentRuntime:
     model_operation: Mapping[str, Any] | None = None
     replica_plan: Mapping[str, Any] | None = None
     replica_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
+    historical_evidence: tuple[Mapping[str, Any], ...] = ()
 
 
 class LiveDeploymentRegistry:

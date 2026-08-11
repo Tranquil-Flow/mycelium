@@ -1,0 +1,22 @@
+{
+  "protocol": "mycelium.evidence_history.v1",
+  "records": [
+    {
+      "authority": "mycelium_m18_replication:build_replica_plan",
+      "capability": "replicated_serving",
+      "captured_at_unix_ms": 1,
+      "freshness": "historical",
+      "generation": 1,
+      "observed_at_unix_ms": 1,
+      "payload": {
+        "protocol": "mycelium.replica_plan.v1",
+        "route_ready": false
+      },
+      "payload_protocol": "mycelium.replica_plan.v1",
+      "protocol": "mycelium.evidence_projection.v1",
+      "record_id": "recorded-replication-fixture",
+      "source_kind": "sealed_historical",
+      "valid_until_unix_ms": null
+    }
+  ]
+}

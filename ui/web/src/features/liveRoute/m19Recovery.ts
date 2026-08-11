@@ -1,7 +1,3 @@
-export const M19_LIVENESS_PATH = '/__mycelium/m19-liveness';
-export const M19_PLAN_PATH = '/__mycelium/m19-recovery-plan';
-export const M19_RUNTIME_PATH = '/__mycelium/m19-recovery-runtime';
-
 export type M19Subject = Readonly<{ subject_id: string; state: 'fresh' | 'suspect' | 'quarantined' | 'failed' | 'recovered'; last_fresh_unix_ms: number; last_observed_unix_ms: number; consecutive_misses: number; consecutive_fresh: number }>;
 export type M19Incident = Readonly<{ incident_id: string; subject_id: string; scope: 'request' | 'edge' | 'placement' | 'peer' | 'deployment'; detector_source: string; reason: string; first_observed_unix_ms: number; last_observed_unix_ms: number; old_generation: number; new_generation: number; affected_track_ids: readonly string[]; action: string; terminal_outcome: string }>;
 export type M19Liveness = Readonly<{ protocol: 'mycelium.m19_liveness.v1'; generated_at_unix_ms: number; binding: Readonly<Record<string, string | number>>; budgets: Readonly<Record<string, number>>; subjects: readonly M19Subject[]; incidents: readonly M19Incident[]; evidence_digest: string }>;
@@ -58,20 +54,4 @@ export function decodeM19RecoveryRuntime(value: unknown): M19RecoveryRuntime {
   const reconciliation: Record<string, 'resumed' | 'aborted' | 'already_terminal'> = {};
   for (const [requestId, outcome] of Object.entries(source.reconciliation)) { if (!['resumed', 'aborted', 'already_terminal'].includes(String(outcome))) throw new TypeError('reconciliation outcome is invalid'); reconciliation[requestId] = outcome as 'resumed' | 'aborted' | 'already_terminal'; }
   return Object.freeze({ protocol: 'mycelium.m19_recovery_runtime.v1', binding: closedRecord(source.binding, BINDING, 'binding'), maximum_recovery_attempts: integer(source.maximum_recovery_attempts, 'maximum_recovery_attempts'), requests: Object.freeze(requests), breaker: Object.freeze({ state: breaker.state, failure_observations_unix_ms: failureObservations, open_until_unix_ms: integer(breaker.open_until_unix_ms, 'open_until_unix_ms') }), reconciliation: Object.freeze(reconciliation), runtime_digest: text(source.runtime_digest, 'runtime_digest') });
-}
-
-export interface M19RecoveryClient { load(signal?: AbortSignal): Promise<readonly [M19Liveness, M19RecoveryPlan, M19RecoveryRuntime]> }
-export class HttpM19RecoveryClient implements M19RecoveryClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
-  async load(signal?: AbortSignal): Promise<readonly [M19Liveness, M19RecoveryPlan, M19RecoveryRuntime]> {
-    const request = (path: string) => this.fetcher(path, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
-    const responses = await Promise.all([request(M19_LIVENESS_PATH), request(M19_PLAN_PATH), request(M19_RUNTIME_PATH)]);
-    if (responses.some((response) => !response.ok)) throw new Error(`m19_recovery_${responses.map((response) => response.status).join('_')}`);
-    const documents = await Promise.all(responses.map((response) => response.json()));
-    return Object.freeze([
-      decodeM19Liveness(documents[0]),
-      decodeM19RecoveryPlan(documents[1]),
-      decodeM19RecoveryRuntime(documents[2]),
-    ] as const);
-  }
 }

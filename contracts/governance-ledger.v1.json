@@ -50,6 +50,8 @@
     {"client": "ui/web/src/features/models/modelPreparation.ts", "methods": ["POST"], "endpoints": ["/__mycelium/model-preparation/start"], "protocols": ["mycelium.model_preparation.v1", "mycelium.model_representation_decision.v1", "mycelium.model_preparation_authorization.v1"], "consent": "exact_representation_owner_authorization"}
   ],
   "read_only_boundary_protocols": [
+    "mycelium.evidence_projection.v1",
+    "mycelium.evidence_history.v1",
     "mycelium.governance_readiness.v1",
     "mycelium.governance_gate.v1",
     "mycelium.governance_audit.v1",
@@ -57,7 +59,6 @@
     "mycelium.contract_audit.v1"
   ],
   "release_exclusions": [
-    "sealed milestone evidence is historical until A1 separates it from live state",
     "larger-model preparation and qualification remain representation-bound and open",
     "traffic-aware scoped liveness and recovery are not integrated on the product path",
     "multi-stage replicated throughput is not qualified on the product path",

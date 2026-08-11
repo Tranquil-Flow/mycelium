@@ -55,7 +55,10 @@ def _endpoint_ids(seed_root: Path) -> dict[str, str]:
         ).fetchall()
     finally:
         connection.close()
-    if not rows or any(not isinstance(node, str) or not isinstance(endpoint, str) for node, endpoint in rows):
+    if not rows or any(
+        not isinstance(node, str) or not isinstance(endpoint, str)
+        for node, endpoint in rows
+    ):
         raise ValueError("m21_endpoint_inventory_invalid")
     return dict(rows)
 
@@ -89,7 +92,11 @@ def main() -> int:
     after_counters = after.get("counters", {})
     frames_before = int(before_counters.get("frames_sent", -1))
     frames_after = int(after_counters.get("frames_sent", -1))
-    if frames_before < 0 or frames_after <= frames_before or after_counters.get("fatal") is not None:
+    if (
+        frames_before < 0
+        or frames_after <= frames_before
+        or after_counters.get("fatal") is not None
+    ):
         raise ValueError("m21_live_frame_delta_required")
 
     route_nodes = {str(node["node_id"]): node for node in topology["nodes"]}
@@ -133,10 +140,14 @@ def main() -> int:
                 "revocation_state": str(member["revocation_state"]),
                 "activation_eligible": eligible,
                 "route_participant": participant,
-                "eligibility_reason": "eligible" if eligible else "activation_protocol_unavailable",
-                "connectivity": "direct" if participant else "unknown",
-                "external_network": route_node is not None and route_node.get("platform") == "linux",
-                "endpoint_identity_digest": endpoint_identity_digest(endpoints[node_id]),
+                "eligibility_reason": "eligible"
+                if eligible
+                else "activation_protocol_unavailable",
+                "connectivity": "unknown",
+                "external_network": False,
+                "endpoint_identity_digest": endpoint_identity_digest(
+                    endpoints[node_id]
+                ),
             }
         )
     pseudonyms = {
@@ -159,13 +170,17 @@ def main() -> int:
             "sample_count": item["sample_count"],
         }
         for item in matrix["observations"]
-        if item["local_node_id"] in route_nodes and item["remote_node_id"] in route_nodes
+        if item["local_node_id"] in route_nodes
+        and item["remote_node_id"] in route_nodes
     ]
     recent = after.get("recent_inferences", [])
     latest_output = int(recent[-1]["output_tokens"]) if recent else 0
     runtime_classes = {str(node["runtime_backend"]) for node in route_nodes.values()}
     graph = operator_plan["controller"]["run_plan"]["nodes"][0]["configure"]["graph"]
-    if graph["deployment_id"] != after["deployment_id"] or graph["model_id"] != after["model_id"]:
+    if (
+        graph["deployment_id"] != after["deployment_id"]
+        or graph["model_id"] != after["model_id"]
+    ):
         raise ValueError("m21_operator_route_binding_mismatch")
     evidence = build_heterogeneous_evidence(
         generated_at_unix_ms=int(time.time() * 1_000),
@@ -176,7 +191,9 @@ def main() -> int:
             "deployment_id": after["deployment_id"],
             "model_id": after["model_id"],
             "model_revision": graph["resolved_commit"],
-            "membership_generation": max(int(member["generation"]) for member in inventory["members"]),
+            "membership_generation": max(
+                int(member["generation"]) for member in inventory["members"]
+            ),
         },
         policy={
             "invitation_ownership": "owner_only",
@@ -211,7 +228,9 @@ def main() -> int:
         exclusions=("path_transition_not_observed_within_budget",),
     )
     args.deployment_dir.mkdir(parents=True, exist_ok=True)
-    (args.deployment_dir / "m21-heterogeneous.json").write_bytes(canonical_json_bytes(evidence))
+    (args.deployment_dir / "m21-heterogeneous.json").write_bytes(
+        canonical_json_bytes(evidence)
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report = {
         "protocol": "mycelium.m21_physical_gate.v1",

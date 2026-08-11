@@ -1,5 +1,3 @@
-export const M18_PLAN_PATH = '/__mycelium/m18-replica-plan';
-export const M18_RUNTIME_PATH = '/__mycelium/m18-replica-runtime';
 export const M18_PLAN_PROTOCOL = 'mycelium.replica_plan.v1' as const;
 export const M18_RUNTIME_PROTOCOL = 'mycelium.replica_runtime.v1' as const;
 
@@ -271,23 +269,4 @@ export function decodeM18ReplicaRuntime(value: unknown): M18ReplicaRuntime {
     throughput = Object.freeze({ evidence_digest: text(item.evidence_digest, 'evidence_digest'), mode: text(item.mode, 'mode'), baseline_request_count: integer(item.baseline_request_count, 'baseline_request_count'), baseline_throughput_rps: number(item.baseline_throughput_rps, 'baseline_throughput_rps'), replicated_request_count: integer(item.replicated_request_count, 'replicated_request_count'), replicated_throughput_rps: number(item.replicated_throughput_rps, 'replicated_throughput_rps'), gain_fraction: number(item.gain_fraction, 'gain_fraction'), minimum_required_fraction: number(item.minimum_required_fraction, 'minimum_required_fraction'), passed: item.passed });
   }
   return Object.freeze({ protocol: M18_RUNTIME_PROTOCOL, generated_at_monotonic_s: number(source.generated_at_monotonic_s, 'generated_at_monotonic_s'), deployment: deployment(source.deployment, 'deployment'), replica_plan_digest: text(source.replica_plan_digest, 'replica_plan_digest'), parallelism: 'data_parallel_request_routing', qualified_tracks: Object.freeze(qualifiedTracks), requests: Object.freeze(requests), incidents: Object.freeze(incidents), throughput, claim_boundary: text(source.claim_boundary, 'claim_boundary') });
-}
-
-export interface M18ReplicationClient {
-  loadPlan(signal?: AbortSignal): Promise<M18ReplicaPlan>;
-  loadRuntime(signal?: AbortSignal): Promise<M18ReplicaRuntime>;
-}
-
-export class HttpM18ReplicationClient implements M18ReplicationClient {
-  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
-  async loadPlan(signal?: AbortSignal): Promise<M18ReplicaPlan> {
-    const response = await this.fetcher(M18_PLAN_PATH, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error(`m18_replica_plan_${response.status}`);
-    return decodeM18ReplicaPlan(await response.json());
-  }
-  async loadRuntime(signal?: AbortSignal): Promise<M18ReplicaRuntime> {
-    const response = await this.fetcher(M18_RUNTIME_PATH, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error(`m18_replica_runtime_${response.status}`);
-    return decodeM18ReplicaRuntime(await response.json());
-  }
 }
