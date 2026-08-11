@@ -53,6 +53,7 @@ _SERVICES = frozenset(
         "foreground_route_restart_verified",
         "restart_verified",
         "coordinator_restart_verified",
+        "managed_restart_evidence_digest",
         "log_rotation",
         "graceful_drain",
     }
@@ -230,6 +231,7 @@ def _derived_gate(result: Mapping[str, Any]) -> str:
         and services["bounded_restart"] is True
         and services["restart_verified"] is True
         and services["coordinator_restart_verified"] is True
+        and isinstance(services["managed_restart_evidence_digest"], str)
         and services["log_rotation"] is True
         and services["graceful_drain"] is True
         and physical["simulated"] is False
@@ -317,6 +319,7 @@ def validate_release_evidence(document: Mapping[str, Any]) -> dict[str, Any]:
         ):
             if type(services[key]) is not bool:
                 raise ValueError("m22_release_evidence_invalid")
+        _sha(services["managed_restart_evidence_digest"])
         physical = _closed(result["physical"], _PHYSICAL)
         for key in (
             "participant_count",

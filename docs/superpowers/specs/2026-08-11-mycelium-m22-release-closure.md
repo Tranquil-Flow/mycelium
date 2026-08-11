@@ -39,6 +39,13 @@ checks, graceful termination/drain, and explicit upgrade/rollback commands. Serv
 generation is deterministic and idempotent; installing a node service never creates a
 second seed authority.
 
+The platform descriptors invoke one shared, shell-free service runner. Its
+owner-only state persists the start timestamps for the configured restart window, so
+launchd and systemd enforce the same fail-closed budget even if the platform manager
+itself relaunches the wrapper. A managed-restart claim is valid only when
+`mycelium.managed_service_restart.v1` binds child replacement, continuous manager
+ownership, restored health, coordinator renewals, and post-restart route frames.
+
 Native agents randomize renewal timing and retry transient coordinator/network failure
 with capped exponential backoff while the current lease remains valid. Authorization,
 revocation, generation mismatch, stale heartbeat, expired lease, and malformed signed

@@ -137,12 +137,23 @@ def validate_service_config(value: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(canonical_json_bytes(normalized))
 
 
-def _launchd(config: Mapping[str, Any]) -> bytes:
+def _runner_argv(config: Mapping[str, Any], config_path: Path) -> list[str]:
+    return [
+        str(config["argv"][0]),
+        "-B",
+        "-m",
+        "mycelium_service_runner",
+        "--config",
+        str(config_path),
+    ]
+
+
+def _launchd(config: Mapping[str, Any], config_path: Path) -> bytes:
     label = f"org.mycelium.{config['service_id']}"
     log_directory = str(config["log_directory"])
     document = {
         "Label": label,
-        "ProgramArguments": list(config["argv"]),
+        "ProgramArguments": _runner_argv(config, config_path),
         "WorkingDirectory": config["working_directory"],
         "EnvironmentVariables": dict(config["environment"]),
         "RunAtLoad": True,
@@ -160,12 +171,33 @@ def _systemd_escape(value: str) -> str:
     return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 
-def _systemd(config: Mapping[str, Any]) -> bytes:
+def _systemd_path(value: str) -> str:
+    """Encode one absolute path without relying on directive-specific quoting."""
+
+    safe = frozenset(
+        "abcdefghijklmnopqrstuvwxyz"
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "0123456789/_.:+@=-"
+    )
+    encoded: list[str] = []
+    for character in value:
+        if character in safe:
+            encoded.append(character)
+        elif character == "%":
+            encoded.append("%%")
+        else:
+            encoded.extend(f"\\x{byte:02x}" for byte in character.encode("utf-8"))
+    return "".join(encoded)
+
+
+def _systemd(config: Mapping[str, Any], config_path: Path) -> bytes:
     environment = "\n".join(
         f"Environment={_systemd_escape(f'{key}={value}')}"
         for key, value in config["environment"].items()
     )
-    command = " ".join(_systemd_escape(item) for item in config["argv"])
+    command = " ".join(
+        _systemd_escape(item) for item in _runner_argv(config, config_path)
+    )
     lines = [
         "[Unit]",
         f"Description=Mycelium {config['role']} ({config['service_id']})",
@@ -176,7 +208,7 @@ def _systemd(config: Mapping[str, Any]) -> bytes:
         "",
         "[Service]",
         "Type=simple",
-        f"WorkingDirectory={_systemd_escape(config['working_directory'])}",
+        f"WorkingDirectory={_systemd_path(config['working_directory'])}",
         environment,
         f"ExecStart={command}",
         "Restart=on-failure",
@@ -184,9 +216,9 @@ def _systemd(config: Mapping[str, Any]) -> bytes:
         "KillSignal=SIGTERM",
         f"TimeoutStopSec={config['stop_timeout_seconds']}",
         "NoNewPrivileges=true",
-        "PrivateTmp=true",
-        "ProtectSystem=strict",
-        f"ReadWritePaths={_systemd_escape(config['state_directory'])} {_systemd_escape(config['log_directory'])}",
+        "UMask=0077",
+        "RestrictSUIDSGID=true",
+        "LockPersonality=true",
         "StandardOutput=journal",
         "StandardError=journal",
         "",
@@ -197,11 +229,16 @@ def _systemd(config: Mapping[str, Any]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def build_service_package(value: Mapping[str, Any]) -> dict[str, Any]:
+def build_service_package(
+    value: Mapping[str, Any], *, package_root: Path
+) -> dict[str, Any]:
     config = validate_service_config(value)
+    if not package_root.is_absolute():
+        raise ServicePackageError("service_package_root_invalid")
+    config_path = package_root / "service-config.json"
     config_raw = canonical_json_bytes(config)
-    launchd_raw = _launchd(config)
-    systemd_raw = _systemd(config)
+    launchd_raw = _launchd(config, config_path)
+    systemd_raw = _systemd(config, config_path)
     return {
         "protocol": PROTOCOL,
         "package_version": config["package_version"],
@@ -213,6 +250,8 @@ def build_service_package(value: Mapping[str, Any]) -> dict[str, Any]:
         },
         "lifecycle": {
             "bounded_restart": True,
+            "persistent_restart_budget": True,
+            "restart_budget_owner": "mycelium_service_runner",
             "graceful_signal": "SIGTERM",
             "stop_timeout_seconds": config["stop_timeout_seconds"],
             "log_rotation": "platform_journal_or_10MiB_x5_operator_policy",
@@ -233,7 +272,9 @@ def build_service_package(value: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def write_service_package(value: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
-    package = build_service_package(value)
+    if not output_root.is_absolute():
+        raise ServicePackageError("service_package_root_invalid")
+    package = build_service_package(value, package_root=output_root)
     output_root.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(output_root, 0o700)
     payloads = package.pop("_payloads")

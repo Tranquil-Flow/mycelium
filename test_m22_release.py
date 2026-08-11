@@ -42,6 +42,7 @@ def values() -> dict[str, object]:
             "foreground_route_restart_verified": True,
             "restart_verified": True,
             "coordinator_restart_verified": True,
+            "managed_restart_evidence_digest": "sha256:" + "e" * 64,
             "log_rotation": True,
             "graceful_drain": True,
         },
