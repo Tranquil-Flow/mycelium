@@ -27,6 +27,8 @@ import { M17ModelOperationSourcePanel } from '../liveRoute/M17ModelOperationSour
 import { M18ReplicationSourcePanel } from '../liveRoute/M18ReplicationSourcePanel';
 import { M19RecoverySourcePanel } from '../liveRoute/M19RecoverySourcePanel';
 import { M20SpeculationSourcePanel } from '../liveRoute/M20SpeculationSourcePanel';
+import { PreparedDeploymentsSourcePanel } from '../liveRoute/PreparedDeploymentsSourcePanel';
+import { DEPLOYMENTS_CHANGED_EVENT } from '../liveRoute/deploymentActivation';
 
 const encoder = new TextEncoder();
 const activeModelDisplay = Object.freeze({
@@ -207,11 +209,23 @@ export function InferenceWorkspace({
 
   useEffect(() => {
     if (effectiveDeploymentClient === null) return;
-    const controller = new AbortController();
-    void effectiveDeploymentClient.status(controller.signal)
-      .then(setDeploymentRegistry)
-      .catch(() => setDeploymentRegistry(null));
-    return () => controller.abort();
+    let controller: AbortController | null = null;
+    const load = () => {
+      controller?.abort();
+      const request = new AbortController();
+      controller = request;
+      void effectiveDeploymentClient.status(request.signal)
+        .then(setDeploymentRegistry)
+        .catch(() => {
+          if (!request.signal.aborted) setDeploymentRegistry(null);
+        });
+    };
+    load();
+    window.addEventListener(DEPLOYMENTS_CHANGED_EVENT, load);
+    return () => {
+      window.removeEventListener(DEPLOYMENTS_CHANGED_EVENT, load);
+      controller?.abort();
+    };
   }, [effectiveDeploymentClient]);
 
   useEffect(() => {
@@ -512,6 +526,7 @@ export function InferenceWorkspace({
       </div>
 
       {client === undefined ? <M17ModelOperationSourcePanel view="inference" /> : null}
+      {client === undefined ? <PreparedDeploymentsSourcePanel view="inference" hideUnavailable /> : null}
       {client === undefined ? <M20SpeculationSourcePanel view="inference" hideUnavailable /> : null}
       {client === undefined ? <M19RecoverySourcePanel view="inference" hideUnavailable /> : null}
       {client === undefined ? <M18ReplicationSourcePanel view="inference" hideUnavailable /> : null}

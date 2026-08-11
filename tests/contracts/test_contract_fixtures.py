@@ -117,6 +117,7 @@ EXPECTED_PROTOCOLS = {
     "execution-graph-v1.json": "mycelium.execution_graph.v1",
     "path-manifest-v1.json": "mycelium.path_manifest.v1",
     "live-route-status-v1.json": "mycelium.live_route_status.v1",
+    "deployment-activation-v1.json": "mycelium.deployment_activation.v1",
     "router-wire-v1.json": "mycelium.router_wire.v1",
     "layer-replan-simulation-report-v1.json": "mycelium.layer_replan_simulation_report.v1",
     "product-ui-bootstrap-v1.json": "mycelium.product_ui.bootstrap.v1",

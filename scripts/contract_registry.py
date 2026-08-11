@@ -403,6 +403,16 @@ CONTRACT_SPECS = (
         ("mycelium_live/route.py", "ui/web/src/features/liveRoute/routeStatus.ts"),
     ),
     ContractSpec(
+        "deployment-activation-v1.json",
+        "mycelium.deployment_activation.v1",
+        (
+            "mycelium_live/activation.py",
+            "mycelium_live/supervisor.py",
+            "ui/web/src/features/liveRoute/deploymentActivation.ts",
+            "ui/web/src/features/liveRoute/PreparedDeploymentsPanel.tsx",
+        ),
+    ),
+    ContractSpec(
         "router-wire-v1.json",
         "mycelium.router_wire.v1",
         ("mycelium_router/wire.py", "scripts/generate_router_wire_golden.py"),

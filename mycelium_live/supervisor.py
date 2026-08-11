@@ -12,7 +12,7 @@ import secrets
 import signal
 import threading
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import unquote, urlsplit
 import uuid
 
@@ -45,6 +45,7 @@ from mycelium_m23_kv import validate_m23_kv_evidence
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
+from .activation import DeploymentActivationError, PreparedDeploymentActivation
 from .codec import prompt_codec_from_deployment
 from .health import RouteHealthSource
 from .registry import (
@@ -422,6 +423,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     app: Any
     route: LiveRoute
     static_root: Path
+    activation: PreparedDeploymentActivation | None
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -508,6 +510,78 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             self._send_bytes(
                 200,
                 _json_bytes(registry_status()),
+                "application/json; charset=utf-8",
+            )
+
+        def _deployment_activation_status(self) -> None:
+            activation = self.server.activation
+            if activation is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "deployment_activation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            try:
+                document = activation.status()
+            except DeploymentActivationError as exc:
+                self._send_bytes(
+                    503,
+                    _json_bytes({"error": exc.code}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(document),
+                "application/json; charset=utf-8",
+            )
+
+        def _start_deployment_activation(self) -> None:
+            activation = self.server.activation
+            if activation is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "deployment_activation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            body = self._read_body(limit=4_096)
+            if body is None:
+                return
+            try:
+                document = json.loads(body)
+                if (
+                    not isinstance(document, dict)
+                    or set(document) != {"candidate_id"}
+                    or not isinstance(document["candidate_id"], str)
+                ):
+                    raise ValueError
+                status = activation.activate(document["candidate_id"])
+            except DeploymentActivationError as exc:
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": exc.code}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_activation_request"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                202,
+                _json_bytes(status),
                 "application/json; charset=utf-8",
             )
 
@@ -825,6 +899,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._m18_projection("m23_kv", "m23_kv_unavailable")
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
+            elif parsed.path == "/__mycelium/deployment-activation" and not parsed.query:
+                self._deployment_activation_status()
             elif parsed.path.startswith("/api/"):
                 self._asgi()
             else:
@@ -834,6 +910,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             parsed = urlsplit(self.path)
             if parsed.path == "/__mycelium/deployments/select" and not parsed.query:
                 self._select_deployment()
+            elif parsed.path == "/__mycelium/deployment-activation/start" and not parsed.query:
+                self._start_deployment_activation()
             elif parsed.path == "/__mycelium/candidates/canary" and not parsed.query:
                 self._canary_candidate()
             elif parsed.path == "/__mycelium/candidates/promote" and not parsed.query:
@@ -850,7 +928,13 @@ def _handler() -> type[BaseHTTPRequestHandler]:
 
 
 def create_server(
-    *, app: Any, route: LiveRoute, static_root: Path, host: str, port: int
+    *,
+    app: Any,
+    route: LiveRoute,
+    static_root: Path,
+    host: str,
+    port: int,
+    activation: PreparedDeploymentActivation | None = None,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -861,6 +945,7 @@ def create_server(
     server.app = app
     server.route = route
     server.static_root = static_root
+    server.activation = activation
     return server
 
 
@@ -1073,14 +1158,21 @@ def _qualified_runtime(
     seed_state_root: Path,
     deployment_dir: Path | None = None,
     model_operation_file: Path | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> QualifiedDeploymentRuntime:
+    if progress is not None:
+        progress("validating_plan")
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
         seed_state_root=seed_state_root,
     )
     try:
+        if progress is not None:
+            progress("opening_route")
         identity = route.open()
         _validate_route_identity(identity, route.execution_graph)
+        if progress is not None:
+            progress("qualifying_route")
         qualification = _qualify_open_route(route)
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         codec = prompt_codec_from_deployment(selected_deployment_dir)
@@ -1135,14 +1227,16 @@ def run_registry_server(
     seed_state_root: Path,
     model_operation_file: Path | None = None,
     seed_url: str | None = None,
+    candidate_plan_root: Path | None = None,
 ) -> int:
-    """Open, qualify, and serve two or more immutable deployments."""
+    """Open, qualify, and serve one or more immutable deployments."""
 
-    if len(operator_plans) < 2:
-        raise ValueError("deployment_registry_requires_two_or_more")
+    if not operator_plans:
+        raise ValueError("deployment_registry_requires_one_or_more")
     runtimes: list[QualifiedDeploymentRuntime] = []
     server: LiveHTTPServer | None = None
     registry: LiveDeploymentRegistry | None = None
+    activation: PreparedDeploymentActivation | None = None
     startup_complete = False
     try:
         for plan in operator_plans:
@@ -1158,6 +1252,20 @@ def run_registry_server(
             state_path=registry_state,
             qualification_refresher=lambda runtime: _qualify_open_route(runtime.route),
         )
+        if candidate_plan_root is not None:
+            activation_state_root = Path(seed_state_root) / "deployment-activation"
+            activation_state_root.mkdir(mode=0o700, exist_ok=True)
+            activation = PreparedDeploymentActivation(
+                candidate_root=candidate_plan_root,
+                state_root=activation_state_root,
+                registry=registry,
+                runtime_loader=lambda plan, report: _qualified_runtime(
+                    plan,
+                    seed_state_root=seed_state_root,
+                    model_operation_file=model_operation_file,
+                    progress=report,
+                ),
+            )
         stack = build_registry_stack(
             registry=registry,
             bearer_token=secrets.token_urlsafe(32),
@@ -1170,6 +1278,7 @@ def run_registry_server(
             static_root=static_root or ROOT / "ui" / "web" / "dist",
             host=host,
             port=port,
+            activation=activation,
         )
         startup_complete = True
         stop = threading.Event()
@@ -1202,10 +1311,15 @@ def run_registry_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        if activation is not None:
+            activation.close()
         if server is not None:
             server.server_close()
-        for runtime in runtimes:
-            runtime.route.close()
+        if registry is not None:
+            registry.close()
+        else:
+            for runtime in runtimes:
+                runtime.route.close()
         if not startup_complete:
             for runtime in runtimes:
                 try:
@@ -1339,6 +1453,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--registry-state", type=Path)
     parser.add_argument("--seed-state-root", type=Path, required=True)
     parser.add_argument(
+        "--candidate-plan-root",
+        type=Path,
+        help="private directory of operator-prepared deployment plans",
+    )
+    parser.add_argument(
         "--seed-url",
         help="network URL advertised by the live durable seed; enables owner enrollment",
     )
@@ -1349,7 +1468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not 1 <= args.port <= 65_535:
         raise SystemExit("port must be from 1 through 65535")
-    if len(args.operator_plan) == 1:
+    if len(args.operator_plan) == 1 and args.candidate_plan_root is None:
         if args.registry_state is not None:
             raise SystemExit("--registry-state requires multiple --operator-plan values")
         return run_physical_server(
@@ -1373,6 +1492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed_state_root=args.seed_state_root,
         model_operation_file=args.model_operation_file,
         seed_url=args.seed_url,
+        candidate_plan_root=args.candidate_plan_root,
     )
 
 

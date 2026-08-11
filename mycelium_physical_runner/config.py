@@ -44,6 +44,7 @@ _CONTROLLER_FIELDS = frozenset(
         "source_root",
         "peers",
         "transfer_manifest",
+        "node_transfer_manifests",
         "membership_snapshot",
         "run_plan",
         "authority_documents",
@@ -239,7 +240,11 @@ def _controller(value: Any) -> Mapping[str, Any]:
     snapshot = dict(value)
     unknown = set(snapshot) - _CONTROLLER_FIELDS
     _require(not unknown, "plan_unknown_field", "controller." + ",".join(sorted(unknown)))
-    required = _CONTROLLER_FIELDS - {"authority_documents", "authority_profile"}
+    required = _CONTROLLER_FIELDS - {
+        "authority_documents",
+        "authority_profile",
+        "node_transfer_manifests",
+    }
     missing = required - set(snapshot)
     _require(not missing, "plan_missing_field", "controller." + ",".join(sorted(missing)))
     _require(snapshot.get("mode") == "physical", "plan_field_invalid", "controller.mode")
@@ -304,6 +309,16 @@ def _controller(value: Any) -> Mapping[str, Any]:
         _safe_remote_path(peer.get("staging_root"), "controller.peers.staging_root")
     for field in ("transfer_manifest", "membership_snapshot", "run_plan"):
         _require(isinstance(snapshot.get(field), Mapping), "plan_field_invalid", f"controller.{field}")
+    if "node_transfer_manifests" in snapshot:
+        node_manifests = snapshot["node_transfer_manifests"]
+        _require(
+            isinstance(node_manifests, Mapping)
+            and node_manifests.get("protocol")
+            == "mycelium.controller_node_transfer_manifests.v1"
+            and isinstance(node_manifests.get("manifests"), Mapping),
+            "plan_field_invalid",
+            "controller.node_transfer_manifests",
+        )
     entry_node_id = snapshot["run_plan"].get("entry_node_id")
     _require(
         isinstance(entry_node_id, str) and entry_node_id in peers_by_node,

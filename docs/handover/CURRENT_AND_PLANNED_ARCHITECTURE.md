@@ -1,8 +1,9 @@
 # Mycelium current and planned architecture
 
-**Status:** Canonical review entry point, 2026-08-10. This document supersedes the
-operational status in `ASTRA_CURRENT.md`; the older file remains historical
-provenance. M15 is the current implemented tranche; M16 is next.
+**Status:** Canonical review entry point, updated 2026-08-11. This document supersedes
+the operational status in `ASTRA_CURRENT.md`; the older file remains historical
+provenance. Milestone evidence through M23 exists; remaining unchecked gates in the
+governing plan are still authoritative.
 
 ## Read this first
 
@@ -73,12 +74,13 @@ traffic-aware liveness and scoped recovery.
 
 ## Current deployments and topology
 
-The active registry contains two independent, qualified two-stage deployments:
+The live registry currently contains three independent qualified deployments:
 
 | Model | Quantization | Stage 0 | Stage 1 | Purpose |
 | --- | --- | --- | --- | --- |
 | `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX `[0,12)` | MLX `[12,24)` | baseline and failover |
 | `Qwen/Qwen2.5-1.5B-Instruct` | int8 weight-only | MLX `[0,14)` | MLX `[14,28)` | selected quality candidate |
+| `Qwen/Qwen2.5-3B-Instruct` | int8 weight-only | three-stage MLX/MLX/NumPy physical route | — | larger qualified candidate |
 
 M7 separately proved a three-host 0.5B topology: M4 Pro/MLX `[0,8)`, Evi
 MacBook Pro/MLX `[8,16)`, and Surface/NumPy `[16,24)`. That proof is not the same
@@ -94,6 +96,15 @@ stage-local KV; the ordinary activation path does not transfer KV.
 The current product does **not** claim tensor parallelism, data-parallel replicas,
 pipeline microbatch overlap, continuous batching, speculative decode, request-time
 layer reallocation, continuous topology re-optimization, or in-flight KV migration.
+
+The supervisor can also watch one owner-controlled directory of already-prepared
+operator plans. Candidate discovery is read-only and path-private. Explicit browser
+activation snapshots the immutable plan, opens its physical route, runs the startup
+challenge, and adds it to the registry only after qualification; it never selects the
+new deployment or downloads artifacts. Activation is single-flight, reports bounded
+progress, is retryable after failure, and preserves the incumbent route. This closes
+the gateway-restart gap for prepared deployments, not the remaining automatic M17
+feasibility, assignment-local acquisition, or lifecycle-convergence gates.
 
 ## Current planning, trust, and network authority
 
@@ -213,7 +224,7 @@ references, not public release artifacts.
 | M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
-| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, assignment-local acquisition, and fail-closed model selection completed | M17 model-operation endpoint/UI and catalog/parity suites | Qwen3-8B is adapter-compatible and locally complete but capacity-infeasible on the current swarm |
+| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, fail-closed selection, and live prepared-deployment activation implemented | M17 model-operation endpoint/UI and catalog/parity suites; `mycelium.deployment_activation.v1`; live 0.5B/1.5B start plus no-restart 3B qualification and browser request | Automated feasibility-to-provisioning convergence and acquisition failure matrix remain open; Qwen3-8B is adapter-compatible and locally complete but capacity-infeasible on the current swarm |
 | M18 | Qualified replica planning/runtime evidence and concurrency attribution completed | M18 replica plan/runtime endpoints and UI | Continuous batching and pipeline overlap remain unclaimed |
 | M19 | Traffic-aware liveness, scoped recovery evidence, and fenced recovery paths completed | M19 liveness/recovery endpoints and UI | Cross-backend live KV migration remains unclaimed |
 | M20 | Target-authoritative speculative planning/runtime evidence completed | M20 speculative plan/runtime endpoints and UI | Promotion remains workload- and target-parity-bound |

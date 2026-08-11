@@ -288,6 +288,27 @@ def test_controller_authority_profile_is_bounded_and_exclusive(workspace: Path) 
     assert mixed_error.value.code == "plan_field_invalid"
 
 
+def test_controller_accepts_only_typed_node_transfer_manifests(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["node_transfer_manifests"] = {
+        "protocol": "mycelium.controller_node_transfer_manifests.v1",
+        "manifests": {"node-a": payload["controller"]["transfer_manifest"]},
+    }
+    config = parse_operator_plan(payload)
+    assert config.controller["node_transfer_manifests"]["manifests"] == {
+        "node-a": payload["controller"]["transfer_manifest"]
+    }
+
+    invalid = _plan(workspace)
+    invalid["controller"]["node_transfer_manifests"] = {
+        "protocol": "mycelium.controller_node_transfer_manifests.v2",
+        "manifests": {},
+    }
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(invalid)
+    assert caught.value.code == "plan_field_invalid"
+
+
 def test_unknown_and_missing_top_level_fields_fail_closed(workspace: Path) -> None:
     extra = _plan(workspace)
     extra["unexpected"] = 1

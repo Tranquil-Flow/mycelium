@@ -86,6 +86,10 @@ from mycelium_request_gateway.contracts import (
 )
 from mycelium_m16_runtime import validate_m16_runtime_status
 from mycelium_m23_kv import PROTOCOL as M23_KV_PROTOCOL, validate_m23_kv_evidence
+from mycelium_live.activation import (
+    ACTIVATION_PROTOCOL,
+    validate_activation_status,
+)
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
     complete_directed_observation_matrix,
@@ -1328,6 +1332,33 @@ def product_event() -> dict[str, Any]:
     )
 
 
+def deployment_activation_status() -> dict[str, Any]:
+    document = {
+        "protocol": ACTIVATION_PROTOCOL,
+        "generation": 3,
+        "busy_candidate_id": "12345678-1234-5678-1234-567812345678",
+        "invalid_candidate_count": 0,
+        "candidates": [
+            {
+                "candidate_id": "12345678-1234-5678-1234-567812345678",
+                "deployment_id": "12345678-1234-5678-1234-567812345678",
+                "model_id": "Qwen/Qwen2.5-3B-Instruct",
+                "model_revision": "a" * 40,
+                "quantization": "int8-weight-only",
+                "topology_size": 3,
+                "plan_digest": "sha256:" + "b" * 64,
+                "state": "activating",
+                "phase": "qualifying_route",
+                "completed_steps": 3,
+                "total_steps": 4,
+                "reason_code": None,
+            }
+        ],
+    }
+    validate_activation_status(document)
+    return document
+
+
 def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
     stages = [
         {
@@ -1810,6 +1841,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "execution-graph-v1.json": graph,
         "path-manifest-v1.json": path_manifest_document(graph),
         "live-route-status-v1.json": live_route_status(graph),
+        "deployment-activation-v1.json": deployment_activation_status(),
         "router-wire-v1.json": json.loads(
             read_under_root(ROOT, ROOT / "contracts" / "router-wire-golden" / "index.json")
         ),

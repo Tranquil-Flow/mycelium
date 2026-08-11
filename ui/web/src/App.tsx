@@ -31,6 +31,7 @@ import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOpera
 import { M21HeterogeneousSourcePanel } from './features/liveRoute/M21HeterogeneousSourcePanel';
 import { M22ReleaseSourcePanel } from './features/liveRoute/M22ReleaseSourcePanel';
 import { M23KvSourcePanel } from './features/liveRoute/M23KvSourcePanel';
+import { PreparedDeploymentsSourcePanel } from './features/liveRoute/PreparedDeploymentsSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
 import { HttpM20SpeculationClient } from './features/liveRoute/m20Speculation';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
@@ -330,7 +331,7 @@ export default function App({
           <>
             <ProductEvidenceSummary compact />
             {activeView === 'nodes' ? (
-              <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M23KvSourcePanel view="nodes" hideUnavailable /><M21HeterogeneousSourcePanel view="nodes" hideUnavailable /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><M17ModelOperationSourcePanel view="nodes" /></>
+              <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M23KvSourcePanel view="nodes" hideUnavailable /><M21HeterogeneousSourcePanel view="nodes" hideUnavailable /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
               <LiveRouteWorkspace
                 view={activeView}

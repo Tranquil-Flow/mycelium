@@ -224,6 +224,35 @@ def test_live_serve_forwards_multiple_qualified_deployment_plans(tmp_path: Path)
     ]
 
 
+def test_live_serve_forwards_prepared_candidate_directory(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    candidate_root = tmp_path / "candidates"
+
+    exit_code = cli.main(
+        [
+            "serve",
+            "--mode",
+            "live",
+            "--operator-plan",
+            str(tmp_path / "incumbent.json"),
+            "--seed-state-root",
+            str(tmp_path / "seed"),
+            "--candidate-plan-root",
+            str(candidate_root),
+        ],
+        live_server_main=lambda argv: calls.append(list(argv)) or 0,
+        environ={},
+    )
+
+    assert exit_code == 0
+    assert calls[0][-4:] == [
+        "--seed-state-root",
+        str(tmp_path / "seed"),
+        "--candidate-plan-root",
+        str(candidate_root),
+    ]
+
+
 def test_live_serve_requires_operator_plan() -> None:
     with pytest.raises(SystemExit) as exc:
         cli.main(["serve", "--mode", "live"], environ={})

@@ -62,6 +62,36 @@ def test_registry_lists_and_atomically_selects_qualified_deployments() -> None:
     ]
 
 
+def test_registry_starts_with_one_runtime_and_adds_qualified_standby() -> None:
+    incumbent = _runtime(0)
+    candidate = _runtime(1)
+    registry = LiveDeploymentRegistry([incumbent])
+
+    status = registry.add_qualified_runtime(candidate)
+
+    assert status["selected_deployment_id"] == "deployment-0"
+    assert [item["deployment_id"] for item in status["deployments"]] == [
+        "deployment-0",
+        "deployment-1",
+    ]
+    assert registry.current_deployment().deployment_id == "deployment-0"
+    registry.select("deployment-1")
+    assert registry.current_deployment().deployment_id == "deployment-1"
+
+
+def test_registry_rejects_duplicate_or_unqualified_runtime_insertion() -> None:
+    incumbent = _runtime(0)
+    registry = LiveDeploymentRegistry([incumbent])
+
+    with pytest.raises(DeploymentSelectionError, match="deployment_duplicate"):
+        registry.add_qualified_runtime(incumbent)
+
+    unavailable = _runtime(1)
+    unavailable.route.close()
+    with pytest.raises(DeploymentSelectionError, match="deployment_not_qualified"):
+        registry.add_qualified_runtime(unavailable)
+
+
 def test_candidate_canary_executes_without_changing_selection() -> None:
     runtimes = [_runtime(0), _runtime(1)]
     runtimes[1].graph.stages = (

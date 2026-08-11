@@ -720,6 +720,90 @@ def test_m23_kv_endpoint_is_read_only(tmp_path: Path) -> None:
         thread.join(timeout=5)
 
 
+def test_deployment_activation_endpoints_are_same_origin_and_closed_shape(
+    tmp_path: Path,
+) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    status = {
+        "protocol": "mycelium.deployment_activation.v1",
+        "generation": 1,
+        "busy_candidate_id": None,
+        "invalid_candidate_count": 0,
+        "candidates": [],
+    }
+    calls: list[str] = []
+    activation = SimpleNamespace(
+        status=lambda: calls.append("status") or status,
+        activate=lambda candidate_id: calls.append(candidate_id) or status,
+    )
+
+    async def app(*_args):
+        raise AssertionError("activation_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        activation=activation,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/deployment-activation")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/deployment-activation/start",
+            body=json.dumps({"candidate_id": "deployment-candidate"}),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 202
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/deployment-activation/start",
+            body=json.dumps({"candidate_id": "deployment-candidate", "path": "/tmp"}),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read()) == {"error": "invalid_activation_request"}
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/deployment-activation/start",
+            body=json.dumps({"candidate_id": "deployment-candidate"}),
+            headers={"content-type": "application/json", "origin": "https://evil.test"},
+        )
+        response = connection.getresponse()
+        assert response.status == 403
+        assert json.loads(response.read()) == {"error": "origin_mismatch"}
+        assert calls == ["status", "deployment-candidate"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

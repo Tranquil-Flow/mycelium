@@ -70,8 +70,8 @@
         },
         {
           "path": "mycelium_live/registry.py",
-          "sha256": "770fd9257846af49113f9f2e0c3cf521ecb0d69157ce34b7701b6412cc8dc52e",
-          "size_bytes": 28229
+          "sha256": "41259f566d44bc289aa4d9c67d4f513e03aa1489cb0dc0aea525a6a496d22989",
+          "size_bytes": 29709
         }
       ],
       "protocol": "mycelium.candidate_promotion_report.v1"
@@ -135,6 +135,36 @@
         }
       ],
       "protocol": "mycelium.control_plane_tranche.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/deployment-activation-v1.json",
+        "sha256": "c1c3e945373ca5d9c1ae3afce68fd29f86358182effd855bcefcde67fb602bdd",
+        "size_bytes": 748
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_live/activation.py",
+          "sha256": "a4f423f26a373eef39ae00daab29ec10c149f8995da0ea8e2d3b41ee136515a9",
+          "size_bytes": 19982
+        },
+        {
+          "path": "mycelium_live/supervisor.py",
+          "sha256": "df465b4df63f3c5625dcfdec30f2c6985e43df57581f60d923328f6065c7426e",
+          "size_bytes": 60209
+        },
+        {
+          "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
+          "sha256": "f8d362a15a4dfb9295de421068b1506f8066eed3e37f3761137fbfa9a498ad38",
+          "size_bytes": 7439
+        },
+        {
+          "path": "ui/web/src/features/liveRoute/PreparedDeploymentsPanel.tsx",
+          "sha256": "c2d6b8c3d28445ed0573b350a0868ee3a21c99b661aa66ef00fa8436e6d22a58",
+          "size_bytes": 4876
+        }
+      ],
+      "protocol": "mycelium.deployment_activation.v1"
     },
     {
       "fixture": {
@@ -380,8 +410,8 @@
         },
         {
           "path": "mycelium_live/registry.py",
-          "sha256": "770fd9257846af49113f9f2e0c3cf521ecb0d69157ce34b7701b6412cc8dc52e",
-          "size_bytes": 28229
+          "sha256": "41259f566d44bc289aa4d9c67d4f513e03aa1489cb0dc0aea525a6a496d22989",
+          "size_bytes": 29709
         }
       ],
       "protocol": "mycelium.live_route_incident.v1"

@@ -60,27 +60,14 @@ class LiveDeploymentRegistry:
         ) = None,
         clock_unix_ms: Callable[[], int] | None = None,
     ) -> None:
-        if len(runtimes) < 2:
-            raise ValueError("deployment_registry_requires_two_or_more")
+        if not runtimes:
+            raise ValueError("deployment_registry_requires_one_or_more")
         if len({runtime.deployment_id for runtime in runtimes}) != len(runtimes):
             raise ValueError("deployment_registry_duplicate")
         self._runtimes = {runtime.deployment_id: runtime for runtime in runtimes}
-        self._routers = {}
-        for runtime in runtimes:
-            coordinator = None
-            if isinstance(runtime.graph, ExecutionGraph):
-                coordinator = build_live_m16_runtime(
-                    runtime.graph,
-                    placement_projection=runtime.placement_projection,
-                    workload_comparison=runtime.workload_comparison,
-                )
-                if runtime.m16_performance_budget is not None:
-                    coordinator.attach_performance_budget(runtime.m16_performance_budget)
-            self._routers[runtime.deployment_id] = LiveRouterPort(
-                route=runtime.route,
-                execution_graph=runtime.graph,
-                runtime_coordinator=coordinator,
-            )
+        self._routers = {
+            runtime.deployment_id: self._router_for(runtime) for runtime in runtimes
+        }
         self._selected = runtimes[0].deployment_id
         self._requests: dict[str, str] = {}
         self._incidents: list[dict[str, Any]] = []
@@ -97,6 +84,52 @@ class LiveDeploymentRegistry:
         if restored is not None:
             self._selected = restored
         self._persist()
+
+    @staticmethod
+    def _router_for(runtime: QualifiedDeploymentRuntime) -> LiveRouterPort:
+        coordinator = None
+        if isinstance(runtime.graph, ExecutionGraph):
+            coordinator = build_live_m16_runtime(
+                runtime.graph,
+                placement_projection=runtime.placement_projection,
+                workload_comparison=runtime.workload_comparison,
+            )
+            if runtime.m16_performance_budget is not None:
+                coordinator.attach_performance_budget(runtime.m16_performance_budget)
+        return LiveRouterPort(
+            route=runtime.route,
+            execution_graph=runtime.graph,
+            runtime_coordinator=coordinator,
+        )
+
+    def add_qualified_runtime(
+        self,
+        runtime: QualifiedDeploymentRuntime,
+    ) -> Mapping[str, Any]:
+        """Insert one independently opened and qualified runtime without selecting it."""
+
+        if not isinstance(runtime, QualifiedDeploymentRuntime):
+            raise DeploymentSelectionError("deployment_runtime_invalid")
+        qualification = runtime.qualification
+        if (
+            not runtime.route.is_alive()
+            or getattr(qualification, "route_ready", None) is not True
+            or getattr(qualification, "deployment_id", None)
+            != runtime.deployment_id
+            or getattr(qualification, "model_id", None) != runtime.model_id
+            or getattr(runtime.graph, "deployment_id", None)
+            != runtime.deployment_id
+        ):
+            raise DeploymentSelectionError("deployment_not_qualified")
+        router = self._router_for(runtime)
+        with self._lock:
+            if runtime.deployment_id in self._runtimes:
+                raise DeploymentSelectionError("deployment_duplicate")
+            self._runtimes[runtime.deployment_id] = runtime
+            self._routers[runtime.deployment_id] = router
+            status = self.registry_status()
+            self._persist(status)
+            return status
 
     def _restored_selection(self) -> str | None:
         path = self._state_path
@@ -664,11 +697,15 @@ class LiveDeploymentRegistry:
             return self._current().route.is_alive()
 
     def close(self) -> None:
-        for runtime in self._runtimes.values():
+        with self._lock:
+            runtimes = tuple(self._runtimes.values())
+        for runtime in runtimes:
             runtime.route.close()
 
     def cleanup(self) -> None:
-        for runtime in self._runtimes.values():
+        with self._lock:
+            runtimes = tuple(self._runtimes.values())
+        for runtime in runtimes:
             runtime.route.cleanup()
 
 
