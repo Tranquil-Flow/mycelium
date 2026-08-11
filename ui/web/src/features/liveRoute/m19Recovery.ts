@@ -1,0 +1,77 @@
+export const M19_LIVENESS_PATH = '/__mycelium/m19-liveness';
+export const M19_PLAN_PATH = '/__mycelium/m19-recovery-plan';
+export const M19_RUNTIME_PATH = '/__mycelium/m19-recovery-runtime';
+
+export type M19Subject = Readonly<{ subject_id: string; state: 'fresh' | 'suspect' | 'quarantined' | 'failed' | 'recovered'; last_fresh_unix_ms: number; last_observed_unix_ms: number; consecutive_misses: number; consecutive_fresh: number }>;
+export type M19Incident = Readonly<{ incident_id: string; subject_id: string; scope: 'request' | 'edge' | 'placement' | 'peer' | 'deployment'; detector_source: string; reason: string; first_observed_unix_ms: number; last_observed_unix_ms: number; old_generation: number; new_generation: number; affected_track_ids: readonly string[]; action: string; terminal_outcome: string }>;
+export type M19Liveness = Readonly<{ protocol: 'mycelium.m19_liveness.v1'; generated_at_unix_ms: number; binding: Readonly<Record<string, string | number>>; budgets: Readonly<Record<string, number>>; subjects: readonly M19Subject[]; incidents: readonly M19Incident[]; evidence_digest: string }>;
+export type M19Successor = Readonly<{ track_id: string; qualification_id: string; qualification_digest: string; decode_mode: string; kv_compatibility: 'compatible' | 'incompatible' | 'unknown'; kv_schema_digest: string | null; failure_domain: string }>;
+export type M19RecoveryPlan = Readonly<{ protocol: 'mycelium.m19_recovery_plan.v1'; generated_at_unix_ms: number; binding: Readonly<Record<string, string | number>>; incumbent_track_ids: readonly string[]; failed_track_ids: readonly string[]; surviving_track_ids: readonly string[]; successors: readonly M19Successor[]; candidate_state: 'hysteresis_pending' | 'stable_candidate' | 'emergency_candidate'; equivalent_candidate_generations: number; candidate_first_seen_unix_ms: number; provisioning_allowed: boolean; claim_boundary: string; plan_digest: string }>;
+export type M19Request = Readonly<{ request_id: string; attempt: number; path_id: string; track_id: string; qualification_id: string; qualification_digest: string; committed_token_count: number; committed_token_digest: string | null; recovery_mode: 'none' | 'full_context_replay' | 'fenced_kv_successor'; successor_track_id: string | null; successor_path_id: string | null; kv_outcome: 'not_applicable' | 'not_transferred' | 'resumed_from_checkpoint'; replay_performed: boolean; terminal_state: 'completed' | 'aborted' | null; terminal_reason: string | null; cleanup_complete: boolean }>;
+export type M19RecoveryRuntime = Readonly<{ protocol: 'mycelium.m19_recovery_runtime.v1'; binding: Readonly<Record<string, string | number>>; maximum_recovery_attempts: number; requests: readonly M19Request[]; breaker: Readonly<{ state: 'closed' | 'open'; failure_observations_unix_ms: readonly number[]; open_until_unix_ms: number }>; reconciliation: Readonly<Record<string, 'resumed' | 'aborted' | 'already_terminal'>>; runtime_digest: string }>;
+
+function record(value: unknown, fields: readonly string[], path: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError(`${path} must be an object`);
+  const item = value as Record<string, unknown>;
+  if (Object.keys(item).sort().join('|') !== [...fields].sort().join('|')) throw new TypeError(`${path} has unknown or missing fields`);
+  return item;
+}
+function text(value: unknown, path: string): string { if (typeof value !== 'string' || value.length === 0) throw new TypeError(`${path} must be text`); return value; }
+function integer(value: unknown, path: string): number { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new TypeError(`${path} must be a non-negative integer`); return value; }
+function bool(value: unknown, path: string): boolean { if (typeof value !== 'boolean') throw new TypeError(`${path} must be boolean`); return value; }
+function list(value: unknown, path: string, maximum = 4096): unknown[] { if (!Array.isArray(value) || value.length > maximum) throw new TypeError(`${path} must be a bounded array`); return value; }
+function texts(value: unknown, path: string): readonly string[] { return Object.freeze(list(value, path).map((item, index) => text(item, `${path}[${index}]`))); }
+function optionalText(value: unknown, path: string): string | null { return value === null ? null : text(value, path); }
+function closedRecord(value: unknown, fields: readonly string[], path: string): Readonly<Record<string, string | number>> {
+  const item = record(value, fields, path); const output: Record<string, string | number> = {};
+  for (const field of fields) output[field] = typeof item[field] === 'number' ? integer(item[field], `${path}.${field}`) : text(item[field], `${path}.${field}`);
+  return Object.freeze(output);
+}
+const BINDING = ['deployment_id', 'deployment_epoch', 'topology_version', 'model_id', 'model_revision', 'representation_digest', 'graph_digest', 'membership_generation'] as const;
+const BUDGETS = ['active_failure_detection_ms', 'idle_keepalive_ms', 'suspect_misses', 'quarantine_misses', 'quarantine_stale_ms', 'recovery_fresh_observations'] as const;
+
+export function decodeM19Liveness(value: unknown): M19Liveness {
+  const source = record(value, ['protocol', 'generated_at_unix_ms', 'binding', 'budgets', 'subjects', 'incidents', 'evidence_digest'], 'm19_liveness');
+  if (source.protocol !== 'mycelium.m19_liveness.v1') throw new TypeError('m19_liveness protocol is invalid');
+  const states = new Set(['fresh', 'suspect', 'quarantined', 'failed', 'recovered']);
+  const subjects = list(source.subjects, 'subjects').map((value, index): M19Subject => { const item = record(value, ['subject_id', 'state', 'last_fresh_unix_ms', 'last_observed_unix_ms', 'consecutive_misses', 'consecutive_fresh'], `subjects[${index}]`); if (!states.has(String(item.state))) throw new TypeError('subject state is invalid'); return Object.freeze({ subject_id: text(item.subject_id, 'subject_id'), state: item.state as M19Subject['state'], last_fresh_unix_ms: integer(item.last_fresh_unix_ms, 'last_fresh_unix_ms'), last_observed_unix_ms: integer(item.last_observed_unix_ms, 'last_observed_unix_ms'), consecutive_misses: integer(item.consecutive_misses, 'consecutive_misses'), consecutive_fresh: integer(item.consecutive_fresh, 'consecutive_fresh') }); });
+  const scopes = new Set(['request', 'edge', 'placement', 'peer', 'deployment']);
+  const incidents = list(source.incidents, 'incidents', 256).map((value, index): M19Incident => { const item = record(value, ['incident_id', 'subject_id', 'scope', 'detector_source', 'reason', 'first_observed_unix_ms', 'last_observed_unix_ms', 'old_generation', 'new_generation', 'affected_track_ids', 'action', 'terminal_outcome'], `incidents[${index}]`); if (!scopes.has(String(item.scope))) throw new TypeError('incident scope is invalid'); return Object.freeze({ incident_id: text(item.incident_id, 'incident_id'), subject_id: text(item.subject_id, 'subject_id'), scope: item.scope as M19Incident['scope'], detector_source: text(item.detector_source, 'detector_source'), reason: text(item.reason, 'reason'), first_observed_unix_ms: integer(item.first_observed_unix_ms, 'first_observed_unix_ms'), last_observed_unix_ms: integer(item.last_observed_unix_ms, 'last_observed_unix_ms'), old_generation: integer(item.old_generation, 'old_generation'), new_generation: integer(item.new_generation, 'new_generation'), affected_track_ids: texts(item.affected_track_ids, 'affected_track_ids'), action: text(item.action, 'action'), terminal_outcome: text(item.terminal_outcome, 'terminal_outcome') }); });
+  return Object.freeze({ protocol: 'mycelium.m19_liveness.v1', generated_at_unix_ms: integer(source.generated_at_unix_ms, 'generated_at_unix_ms'), binding: closedRecord(source.binding, BINDING, 'binding'), budgets: closedRecord(source.budgets, BUDGETS, 'budgets') as Readonly<Record<string, number>>, subjects: Object.freeze(subjects), incidents: Object.freeze(incidents), evidence_digest: text(source.evidence_digest, 'evidence_digest') });
+}
+
+export function decodeM19RecoveryPlan(value: unknown): M19RecoveryPlan {
+  const source = record(value, ['protocol', 'generated_at_unix_ms', 'binding', 'incumbent_track_ids', 'failed_track_ids', 'surviving_track_ids', 'successors', 'candidate_state', 'equivalent_candidate_generations', 'candidate_first_seen_unix_ms', 'provisioning_allowed', 'claim_boundary', 'plan_digest'], 'm19_plan');
+  if (source.protocol !== 'mycelium.m19_recovery_plan.v1' || !['hysteresis_pending', 'stable_candidate', 'emergency_candidate'].includes(String(source.candidate_state))) throw new TypeError('m19_plan authority is invalid');
+  const successors = list(source.successors, 'successors').map((value, index): M19Successor => { const item = record(value, ['track_id', 'qualification_id', 'qualification_digest', 'decode_mode', 'kv_compatibility', 'kv_schema_digest', 'failure_domain'], `successors[${index}]`); if (!['compatible', 'incompatible', 'unknown'].includes(String(item.kv_compatibility))) throw new TypeError('kv compatibility is invalid'); return Object.freeze({ track_id: text(item.track_id, 'track_id'), qualification_id: text(item.qualification_id, 'qualification_id'), qualification_digest: text(item.qualification_digest, 'qualification_digest'), decode_mode: text(item.decode_mode, 'decode_mode'), kv_compatibility: item.kv_compatibility as M19Successor['kv_compatibility'], kv_schema_digest: optionalText(item.kv_schema_digest, 'kv_schema_digest'), failure_domain: text(item.failure_domain, 'failure_domain') }); });
+  return Object.freeze({ protocol: 'mycelium.m19_recovery_plan.v1', generated_at_unix_ms: integer(source.generated_at_unix_ms, 'generated_at_unix_ms'), binding: closedRecord(source.binding, BINDING, 'binding'), incumbent_track_ids: texts(source.incumbent_track_ids, 'incumbent_track_ids'), failed_track_ids: texts(source.failed_track_ids, 'failed_track_ids'), surviving_track_ids: texts(source.surviving_track_ids, 'surviving_track_ids'), successors: Object.freeze(successors), candidate_state: source.candidate_state as M19RecoveryPlan['candidate_state'], equivalent_candidate_generations: integer(source.equivalent_candidate_generations, 'equivalent_candidate_generations'), candidate_first_seen_unix_ms: integer(source.candidate_first_seen_unix_ms, 'candidate_first_seen_unix_ms'), provisioning_allowed: bool(source.provisioning_allowed, 'provisioning_allowed'), claim_boundary: text(source.claim_boundary, 'claim_boundary'), plan_digest: text(source.plan_digest, 'plan_digest') });
+}
+
+export function decodeM19RecoveryRuntime(value: unknown): M19RecoveryRuntime {
+  const source = record(value, ['protocol', 'binding', 'maximum_recovery_attempts', 'requests', 'breaker', 'reconciliation', 'runtime_digest'], 'm19_runtime');
+  if (source.protocol !== 'mycelium.m19_recovery_runtime.v1') throw new TypeError('m19_runtime protocol is invalid');
+  const requests = list(source.requests, 'requests').map((value, index): M19Request => { const item = record(value, ['request_id', 'attempt', 'path_id', 'track_id', 'qualification_id', 'qualification_digest', 'committed_token_count', 'committed_token_digest', 'recovery_mode', 'successor_track_id', 'successor_path_id', 'kv_outcome', 'replay_performed', 'terminal_state', 'terminal_reason', 'cleanup_complete'], `requests[${index}]`); if (!['none', 'full_context_replay', 'fenced_kv_successor'].includes(String(item.recovery_mode)) || !['not_applicable', 'not_transferred', 'resumed_from_checkpoint'].includes(String(item.kv_outcome)) || ![null, 'completed', 'aborted'].includes(item.terminal_state as null | string)) throw new TypeError('request recovery state is invalid'); return Object.freeze({ request_id: text(item.request_id, 'request_id'), attempt: integer(item.attempt, 'attempt'), path_id: text(item.path_id, 'path_id'), track_id: text(item.track_id, 'track_id'), qualification_id: text(item.qualification_id, 'qualification_id'), qualification_digest: text(item.qualification_digest, 'qualification_digest'), committed_token_count: integer(item.committed_token_count, 'committed_token_count'), committed_token_digest: optionalText(item.committed_token_digest, 'committed_token_digest'), recovery_mode: item.recovery_mode as M19Request['recovery_mode'], successor_track_id: optionalText(item.successor_track_id, 'successor_track_id'), successor_path_id: optionalText(item.successor_path_id, 'successor_path_id'), kv_outcome: item.kv_outcome as M19Request['kv_outcome'], replay_performed: bool(item.replay_performed, 'replay_performed'), terminal_state: item.terminal_state as M19Request['terminal_state'], terminal_reason: optionalText(item.terminal_reason, 'terminal_reason'), cleanup_complete: bool(item.cleanup_complete, 'cleanup_complete') }); });
+  const breaker = record(source.breaker, ['state', 'failure_observations_unix_ms', 'open_until_unix_ms'], 'breaker');
+  if (breaker.state !== 'closed' && breaker.state !== 'open') throw new TypeError('breaker state is invalid');
+  const failureObservations = Object.freeze(list(breaker.failure_observations_unix_ms, 'failure_observations_unix_ms', 3).map((item) => integer(item, 'failure_observation_unix_ms')));
+  if (typeof source.reconciliation !== 'object' || source.reconciliation === null || Array.isArray(source.reconciliation)) throw new TypeError('reconciliation must be an object');
+  const reconciliation: Record<string, 'resumed' | 'aborted' | 'already_terminal'> = {};
+  for (const [requestId, outcome] of Object.entries(source.reconciliation)) { if (!['resumed', 'aborted', 'already_terminal'].includes(String(outcome))) throw new TypeError('reconciliation outcome is invalid'); reconciliation[requestId] = outcome as 'resumed' | 'aborted' | 'already_terminal'; }
+  return Object.freeze({ protocol: 'mycelium.m19_recovery_runtime.v1', binding: closedRecord(source.binding, BINDING, 'binding'), maximum_recovery_attempts: integer(source.maximum_recovery_attempts, 'maximum_recovery_attempts'), requests: Object.freeze(requests), breaker: Object.freeze({ state: breaker.state, failure_observations_unix_ms: failureObservations, open_until_unix_ms: integer(breaker.open_until_unix_ms, 'open_until_unix_ms') }), reconciliation: Object.freeze(reconciliation), runtime_digest: text(source.runtime_digest, 'runtime_digest') });
+}
+
+export interface M19RecoveryClient { load(signal?: AbortSignal): Promise<readonly [M19Liveness, M19RecoveryPlan, M19RecoveryRuntime]> }
+export class HttpM19RecoveryClient implements M19RecoveryClient {
+  constructor(private readonly fetcher: typeof fetch = globalThis.fetch.bind(globalThis)) {}
+  async load(signal?: AbortSignal): Promise<readonly [M19Liveness, M19RecoveryPlan, M19RecoveryRuntime]> {
+    const request = (path: string) => this.fetcher(path, { method: 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' }, signal });
+    const responses = await Promise.all([request(M19_LIVENESS_PATH), request(M19_PLAN_PATH), request(M19_RUNTIME_PATH)]);
+    if (responses.some((response) => !response.ok)) throw new Error(`m19_recovery_${responses.map((response) => response.status).join('_')}`);
+    const documents = await Promise.all(responses.map((response) => response.json()));
+    return Object.freeze([
+      decodeM19Liveness(documents[0]),
+      decodeM19RecoveryPlan(documents[1]),
+      decodeM19RecoveryRuntime(documents[2]),
+    ] as const);
+  }
+}

@@ -375,8 +375,8 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "ac685b3625fa053523c657b54c48d6604bee31c2bfca79718873887c63f2b18e",
-          "size_bytes": 92389
+          "sha256": "c3a99cb4bc3b144d170ed27693e1b9ac4d0ab28197132ee1c443fa3add52c3e7",
+          "size_bytes": 94797
         },
         {
           "path": "mycelium_live/registry.py",
@@ -395,8 +395,8 @@
       "owner_sources": [
         {
           "path": "mycelium_live/route.py",
-          "sha256": "ac685b3625fa053523c657b54c48d6604bee31c2bfca79718873887c63f2b18e",
-          "size_bytes": 92389
+          "sha256": "c3a99cb4bc3b144d170ed27693e1b9ac4d0ab28197132ee1c443fa3add52c3e7",
+          "size_bytes": 94797
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
@@ -950,8 +950,8 @@
         },
         {
           "path": "mycelium_live/route.py",
-          "sha256": "ac685b3625fa053523c657b54c48d6604bee31c2bfca79718873887c63f2b18e",
-          "size_bytes": 92389
+          "sha256": "c3a99cb4bc3b144d170ed27693e1b9ac4d0ab28197132ee1c443fa3add52c3e7",
+          "size_bytes": 94797
         }
       ],
       "protocol": "mycelium.product_ui.swarm.v1"

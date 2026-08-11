@@ -30,6 +30,11 @@ from mycelium_request_gateway.contracts import safe_qualification_projection
 from mycelium_m16_runtime import build_live_m16_runtime
 from mycelium_performance_budget import validate_performance_budget_v3
 from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
+from mycelium_m19_recovery import (
+    validate_liveness,
+    validate_recovery_plan,
+    validate_recovery_runtime,
+)
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
@@ -739,6 +744,12 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._m18_projection("m18_replica_plan", "m18_replica_plan_unavailable")
             elif parsed.path == "/__mycelium/m18-replica-runtime" and not parsed.query:
                 self._m18_projection("m18_replica_runtime", "m18_replica_runtime_unavailable")
+            elif parsed.path == "/__mycelium/m19-liveness" and not parsed.query:
+                self._m18_projection("m19_liveness", "m19_liveness_unavailable")
+            elif parsed.path == "/__mycelium/m19-recovery-plan" and not parsed.query:
+                self._m18_projection("m19_recovery_plan", "m19_recovery_plan_unavailable")
+            elif parsed.path == "/__mycelium/m19-recovery-runtime" and not parsed.query:
+                self._m18_projection("m19_recovery_runtime", "m19_recovery_runtime_unavailable")
             elif parsed.path == "/__mycelium/deployments" and not parsed.query:
                 self._deployment_registry()
             elif parsed.path.startswith("/api/"):
@@ -884,6 +895,28 @@ def _m18_replica_runtime(deployment_dir: Path) -> Mapping[str, Any] | None:
         raise ValueError("m18_replica_runtime_invalid") from exc
 
 
+def _m19_projection(
+    deployment_dir: Path, filename: str, validator: Any, error_name: str
+) -> Mapping[str, Any] | None:
+    path = Path(deployment_dir) / filename
+    if not path.exists():
+        return None
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+        raise ValueError(f"{error_name}_unsafe")
+    try:
+        return validator(json.loads(path.read_text("utf-8")))
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as exc:
+        raise ValueError(f"{error_name}_invalid") from exc
+
+
+def _m19_evidence(deployment_dir: Path) -> tuple[Mapping[str, Any] | None, ...]:
+    return (
+        _m19_projection(deployment_dir, "m19-liveness.json", validate_liveness, "m19_liveness"),
+        _m19_projection(deployment_dir, "m19-recovery-plan.json", validate_recovery_plan, "m19_recovery_plan"),
+        _m19_projection(deployment_dir, "m19-recovery-runtime.json", validate_recovery_runtime, "m19_recovery_runtime"),
+    )
+
+
 def _qualify_open_route(route: Any) -> Any:
     """Renew authority by rerunning the exact physical startup challenge."""
 
@@ -929,6 +962,10 @@ def _qualified_runtime(
         codec = prompt_codec_from_deployment(selected_deployment_dir)
         route.set_stop_token_ids(getattr(codec, "stop_token_ids", frozenset()))
         replica_runtime = _m18_replica_runtime(selected_deployment_dir)
+        m19_liveness, m19_plan, m19_runtime = _m19_evidence(selected_deployment_dir)
+        route.set_m19_recovery_evidence(
+            liveness=m19_liveness, plan=m19_plan, runtime=m19_runtime
+        )
         return QualifiedDeploymentRuntime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,
@@ -1073,6 +1110,10 @@ def run_physical_server(
             route.set_m18_replica_runtime_source(
                 lambda document=replica_runtime: document
             )
+        m19_liveness, m19_plan, m19_runtime = _m19_evidence(selected_deployment_dir)
+        route.set_m19_recovery_evidence(
+            liveness=m19_liveness, plan=m19_plan, runtime=m19_runtime
+        )
         stack = build_live_stack(
             route=route,
             deployment_dir=selected_deployment_dir,

@@ -491,6 +491,49 @@ def test_m18_plan_and_runtime_endpoints_are_read_only(tmp_path: Path) -> None:
         thread.join(timeout=5)
 
 
+def test_m19_evidence_endpoints_are_read_only(tmp_path: Path) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    evidence = {
+        "m19_liveness": {"protocol": "mycelium.m19_liveness.v1"},
+        "m19_recovery_plan": {"protocol": "mycelium.m19_recovery_plan.v1"},
+        "m19_recovery_runtime": {"protocol": "mycelium.m19_recovery_runtime.v1"},
+    }
+    calls: list[str] = []
+    route = SimpleNamespace(
+        **{
+            name: (lambda key=name: calls.append(key) or evidence[key])
+            for name in evidence
+        }
+    )
+
+    async def app(*_args):
+        raise AssertionError("m19_projection_reached_asgi")
+
+    server = create_server(
+        app=app, route=route, static_root=static_root, host="127.0.0.1", port=0
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for path, name in (
+            ("/__mycelium/m19-liveness", "m19_liveness"),
+            ("/__mycelium/m19-recovery-plan", "m19_recovery_plan"),
+            ("/__mycelium/m19-recovery-runtime", "m19_recovery_runtime"),
+        ):
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            connection.request("GET", path)
+            response = connection.getresponse()
+            assert response.status == 200
+            assert json.loads(response.read()) == evidence[name]
+        assert calls == list(evidence)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

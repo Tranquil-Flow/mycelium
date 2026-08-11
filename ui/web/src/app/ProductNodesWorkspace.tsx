@@ -16,6 +16,7 @@ import { M14TopologyPanel } from '../features/liveRoute/M14TopologyPanel';
 import { M16RuntimePanel } from '../features/liveRoute/M16RuntimePanel';
 import { HttpM16RuntimeClient, type M16RuntimeStatus } from '../features/liveRoute/m16Runtime';
 import { M18ReplicationSourcePanel } from '../features/liveRoute/M18ReplicationSourcePanel';
+import { M19RecoverySourcePanel } from '../features/liveRoute/M19RecoverySourcePanel';
 
 const fixtureStatus = makeProductSwarmFixture();
 
@@ -86,6 +87,7 @@ export function ProductNodesWorkspace({ sourceMode, snapshot, provisioning }: Pr
         </section>
       ) : null}
       {topology === null ? null : <M14TopologyPanel topology={topology} view="nodes" />}
+      {!fixture ? <M19RecoverySourcePanel view="nodes" hideUnavailable /> : null}
       {!fixture ? <M18ReplicationSourcePanel view="nodes" hideUnavailable /> : null}
       {placement === null ? null : <M13PlacementPanel placement={placement} view="nodes" />}
       {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="nodes" />}

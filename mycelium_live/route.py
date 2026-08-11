@@ -813,6 +813,45 @@ class PhysicalLiveRoute:
         document = None if source is None else source()
         return None if document is None else validate_replica_runtime(document)
 
+    def set_m19_recovery_evidence(
+        self,
+        *,
+        liveness: Mapping[str, Any] | None,
+        plan: Mapping[str, Any] | None,
+        runtime: Mapping[str, Any] | None,
+    ) -> None:
+        """Attach privacy-reduced M19 evidence; none of it grants route authority."""
+
+        from mycelium_m19_recovery import (
+            validate_liveness,
+            validate_recovery_plan,
+            validate_recovery_runtime,
+        )
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._m19_liveness = None if liveness is None else validate_liveness(liveness)
+            self._m19_recovery_plan = None if plan is None else validate_recovery_plan(plan)
+            self._m19_recovery_runtime = (
+                None if runtime is None else validate_recovery_runtime(runtime)
+            )
+
+    def m19_liveness(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m19_liveness", None)
+            return None if document is None else json.loads(json.dumps(document))
+
+    def m19_recovery_plan(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m19_recovery_plan", None)
+            return None if document is None else json.loads(json.dumps(document))
+
+    def m19_recovery_runtime(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m19_recovery_runtime", None)
+            return None if document is None else json.loads(json.dumps(document))
+
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
         """Capture one fresh set of independently signed node resource observations."""
 
@@ -1056,8 +1095,13 @@ class PhysicalLiveRoute:
         return tokens
 
     def _snapshot_all(self) -> None:
+        self._snapshot_nodes(frozenset(self._sessions))
+
+    def _snapshot_nodes(self, node_ids: frozenset[str]) -> None:
         snapshots: dict[str, dict[str, Any]] = {}
-        for node_id in sorted(self._sessions):
+        if not node_ids or not node_ids <= set(self._sessions):
+            raise ValueError("snapshot_nodes_invalid")
+        for node_id in sorted(node_ids):
             response = self._sessions[node_id].send(
                 command_id=self._command_id(node_id, "snapshot"),
                 command="snapshot",
@@ -1068,7 +1112,7 @@ class PhysicalLiveRoute:
             fatal = observation["details"].get("transport_fatal_error")
             if fatal is not None:
                 self._fatal = str(fatal.get("code", "transport_fatal"))
-        self._last_snapshots = snapshots
+        self._last_snapshots.update(snapshots)
 
     def _cancellation_cleanup_complete(
         self, participating_node_ids: frozenset[str] | None = None
@@ -1118,7 +1162,11 @@ class PhysicalLiveRoute:
         selected_placement_ids: Sequence[str] | None = None,
     ) -> InferenceResult:
         with self._lock:
-            if not self.is_alive():
+            if (
+                getattr(self, "_closed", False)
+                or not getattr(self, "_open", True)
+                or self._fatal is not None
+            ):
                 raise RuntimeError("route_not_open")
             if (
                 not isinstance(max_new_tokens, int)
@@ -1130,12 +1178,14 @@ class PhysicalLiveRoute:
                 raise ValueError("invalid_inference_request")
             graph = getattr(self, "_graph", None)
             if graph is None:
+                explicit_selection = False
                 if selected_placement_ids is not None:
                     raise ValueError("invalid_selected_placement_ids")
                 entry_node_id = self._plan["entry_node_id"]
                 excluded_placement_ids: list[str] = []
                 participating_node_ids = frozenset(self._sessions)
             else:
+                explicit_selection = selected_placement_ids is not None
                 selected = (
                     tuple(selected_placement_ids)
                     if selected_placement_ids is not None
@@ -1167,6 +1217,11 @@ class PhysicalLiveRoute:
                     for placement in stage.placements
                     if placement.placement_id not in selected
                 ]
+            if any(
+                getattr(self._sessions[node_id], "returncode", None) is not None
+                for node_id in participating_node_ids
+            ):
+                raise RuntimeError("selected_route_not_open")
             before_peers = self._peer_counters()
             started_at = time.monotonic()
             prefill_completed_at: float | None = None
@@ -1267,6 +1322,8 @@ class PhysicalLiveRoute:
                 output = output[:max_new_tokens]
                 if cancelled_for_stop or cancelled_for_request:
                     self._wait_for_cancellation_cleanup(participating_node_ids)
+                elif explicit_selection:
+                    self._snapshot_nodes(participating_node_ids)
                 else:
                     self._snapshot_all()
                 if self._fatal is not None:
