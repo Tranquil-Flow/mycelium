@@ -992,6 +992,7 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
         return session
 
     run_plan = _physical_run_plan(peers)
+    run_plan["decode_mode"] = "stage_local_kv"
     controller = QualificationController(
         mode="physical",
         peers=peers,
@@ -1045,6 +1046,8 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
         assert remote_argv[key_flag + 1] == (
             f"/var/lib/mycelium/identities/{peer.node_id}.key"
         )
+        mode_flag = remote_argv.index("--decode-mode")
+        assert remote_argv[mode_flag + 1] == "stage_local_kv"
     assert sessions[peers[0].node_id].commands == [
         "hello",
         "configure",

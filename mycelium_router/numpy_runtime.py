@@ -1,14 +1,10 @@
 """Assignment- and graph-bound NumPy implementation of the Router RuntimePort.
 
-The port executes one already loaded GPT-2 stage at a time using only NumPy
-(no MLX, no CUDA, no MKL claims).  It is fail-closed: every binding (graph,
-load proof, placement, batch key, payload) is revalidated against loader-held
-evidence before any execution.  ``complete_context_replay`` is the sole
-supported decode mode; every call receives the full token sequence (entry
-stage) or the full hidden-state sequence (intermediate stage) and produces
-deterministic activation bytes or a deterministic token id.  No state is
-carried between calls and the optional ``kv_snapshot`` only exposes aggregate
-lifecycle counters.
+The port executes one authenticated stage at a time using only NumPy (no MLX,
+CUDA, or MKL claims). It supports complete-context replay for every qualified
+architecture and stage-local KV for dense Qwen2/Qwen3. Every binding (graph,
+load proof, placement, batch key, payload, cache position, and lease) is
+revalidated against loader-held evidence before execution.
 """
 
 from __future__ import annotations
@@ -16,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import re
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping
@@ -46,6 +43,10 @@ from mycelium_router.stage_signatures import stage_signature_for_backend
 from mycelium_router.validation import ContractError, validate_execution_graph
 from numpy_runtime import (
    NumpyRuntimeError as _StageNumpyRuntimeError,
+   _qwen2_block_with_kv,
+   _qwen2_embedding,
+   _qwen2_linear,
+   _rms_norm,
    execute_loaded_stage as _numpy_execute_loaded_stage,
 )
 from runtime_contracts import validate_normalized_numpy_runtime
@@ -149,6 +150,22 @@ class _ReplayResult:
    result: RuntimeResult
 
 
+@dataclass
+class _KVState:
+   request_id: str
+   path_id: str
+   path_attempt: int
+   placement_id: str
+   assignment_id: str
+   manifest_digest: str
+   deployment_epoch: int
+   lease_expires_at: float
+   next_position: int
+   next_sequence: int
+   cached_context_tokens: int
+   layers: dict[int, tuple[np.ndarray, np.ndarray]]
+
+
 def _numpy_identity_fields() -> tuple[str, ...]:
    return ("backend", "backend_version", "device", "dtype", "quantization", "architecture")
 
@@ -177,10 +194,8 @@ def _is_finite_array(value: Any) -> bool:
 class NumpyRuntimePort:
    """Serial, item-isolated, fail-closed NumPy RuntimePort.
 
-   ``decode_mode`` is fixed to ``complete_context_replay``: every call carries
-   the complete context as either a token-id sequence (entry stage) or a
-   hidden-state envelope (intermediate/final stage).  No KV state is retained
-   between calls.
+   Dense Qwen2/Qwen3 placements may use ``stage_local_kv``. Other qualified
+   architectures remain ``complete_context_replay`` only.
    """
 
    decode_mode = "complete_context_replay"
@@ -193,6 +208,7 @@ class NumpyRuntimePort:
       loaded_stages: Mapping[str, LoadedStage],
       *,
       clock: Callable[[], float] | None = None,
+      decode_mode: str = "complete_context_replay",
    ):
       if not isinstance(node_id, str) or not node_id or node_id != node_id.strip():
          _reject("invalid_runtime_node_id")
@@ -207,6 +223,8 @@ class NumpyRuntimePort:
          _reject("missing_model_id")
       if not isinstance(loaded_stages, Mapping):
          _reject("invalid_loaded_stage_mapping")
+      if decode_mode not in {"stage_local_kv", "complete_context_replay"}:
+         _reject("invalid_runtime_decode_mode")
       if not loaded_stages:
          _reject("missing_local_loaded_stages")
       if not all(isinstance(key, str) and key for key in loaded_stages):
@@ -253,16 +271,33 @@ class NumpyRuntimePort:
             _reject("loaded_stage_runtime_mismatch", placement_id)
          bound[placement_id] = (stage, placement, loaded, runtime)
 
+      if (
+         decode_mode == "stage_local_kv"
+         and canonical_runtime["architecture"] not in {"qwen2", "qwen3"}
+      ):
+         _reject("stage_local_kv_unsupported_architecture")
+
       self.node_id = node_id
       self.graph = graph
+      self.decode_mode = decode_mode
+      self._architecture = canonical_runtime["architecture"]
       self._bound = MappingProxyType(bound)
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
       self._clock = clock or (importlib.import_module("time").monotonic)
       self._cancelled_paths: OrderedDict[str, None] = OrderedDict()
+      self._kv_states: dict[str, _KVState] = {}
+      self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
       self._release_counts: Counter[str] = Counter()
+      self._peak_kv_bytes = 0
+      self._last_release_reason: str | None = None
       self._applied_operation_count = 0
+      self._prefill_operation_count = 0
+      self._prefill_input_token_count = 0
+      self._decode_operation_count = 0
+      self._decode_input_token_count = 0
+      self._activation_output_bytes = 0
       self._closed = False
       self._state_lock = RLock()
 
@@ -453,13 +488,14 @@ class NumpyRuntimePort:
             self._replays.pop(key, None)
 
    def cancel(self, path_id: str) -> None:
-      """Idempotently reject future work for ``path_id``; release replay cache."""
+      """Idempotently reject future work and release path-local KV state."""
 
       if not isinstance(path_id, str):
          return
       with self._state_lock:
          self._remember_path_marker(self._cancelled_paths, path_id, None)
-         self._purge_path_replays(path_id)
+         if not self._release_state(path_id, "cancelled"):
+            self._purge_path_replays(path_id)
 
    @staticmethod
    def _failure(reason: str) -> RuntimeResult:
@@ -517,29 +553,116 @@ class NumpyRuntimePort:
       while len(self._replays) > _MAX_RETAINED_OPERATIONS:
          self._replays.popitem(last=False)
 
+   def _release_state(self, path_id: str, reason: str) -> bool:
+      state = self._kv_states.pop(path_id, None)
+      if state is None:
+         return False
+      if path_id not in self._released_paths:
+         self._remember_path_marker(self._released_paths, path_id, reason)
+      self._release_counts[reason] += 1
+      self._last_release_reason = reason
+      state.layers.clear()
+      self._purge_path_replays(path_id)
+      return True
+
+   def expire_leases(self, *, now: float | None = None) -> tuple[str, ...]:
+      """Release every active path whose reservation lease has expired."""
+
+      current = self._clock() if now is None else now
+      if (
+         not isinstance(current, (int, float))
+         or isinstance(current, bool)
+         or not math.isfinite(float(current))
+      ):
+         raise NumpyRuntimeError("invalid_lease_expiry_time")
+      expired: list[str] = []
+      with self._state_lock:
+         for path_id, state in tuple(self._kv_states.items()):
+            if float(current) >= state.lease_expires_at:
+               if self._release_state(path_id, "lease_expired"):
+                  expired.append(path_id)
+      return tuple(sorted(expired))
+
    def close(self, *, reason: str = "worker_shutdown") -> None:
-      """Release all per-path replay cache before worker/process teardown."""
+      """Release all stage state before worker/process teardown."""
 
       if not isinstance(reason, str) or not reason:
          raise NumpyRuntimeError("invalid_runtime_close_reason")
       with self._state_lock:
          if self._closed:
             return
+         released_any = bool(self._kv_states)
+         for path_id in tuple(self._kv_states):
+            self._release_state(path_id, reason)
          self._replays.clear()
          self._closed = True
-         self._release_counts[reason] += 1
+         if not released_any:
+            self._release_counts[reason] += 1
+            self._last_release_reason = reason
+
+   @staticmethod
+   def _kv_bytes(state: _KVState) -> int:
+      return sum(
+         int(array.nbytes)
+         for pair in state.layers.values()
+         for array in pair
+      )
+
+   def _update_kv_watermark(self) -> None:
+      active_bytes = sum(self._kv_bytes(state) for state in self._kv_states.values())
+      self._peak_kv_bytes = max(self._peak_kv_bytes, active_bytes)
 
    def kv_snapshot(self) -> dict[str, Any]:
       """Return identity/lifecycle evidence without KV tensor values."""
 
+      self.expire_leases()
       with self._state_lock:
+         states = {
+            path_id: {
+               "request_id": state.request_id,
+               "path_attempt": state.path_attempt,
+               "placement_id": state.placement_id,
+               "assignment_id": state.assignment_id,
+               "manifest_digest": state.manifest_digest,
+               "deployment_epoch": state.deployment_epoch,
+               "lease_expires_at": state.lease_expires_at,
+               "next_position": state.next_position,
+               "next_sequence": state.next_sequence,
+               "cached_context_tokens": state.cached_context_tokens,
+               "layer_count": len(state.layers),
+               "kv_bytes": self._kv_bytes(state),
+            }
+            for path_id, state in sorted(self._kv_states.items())
+         }
          return {
-            "mode": "complete_context_replay",
+            "mode": self.decode_mode,
             "backend": "numpy",
+            "architecture": self._architecture,
             "closed": self._closed,
-            "active_state_count": 0,
+            "active_state_count": len(states),
+            "active_kv_bytes": sum(state["kv_bytes"] for state in states.values()),
+            "peak_kv_bytes": self._peak_kv_bytes,
+            "current_position": max(
+               (state["next_position"] for state in states.values()), default=None
+            ),
+            "release_state": (
+               "closed"
+               if self._closed
+               else "active"
+               if states
+               else "released"
+               if self._last_release_reason is not None
+               else "idle"
+            ),
+            "last_release_reason": self._last_release_reason,
+            "states": states,
             "retained_result_count": len(self._replays),
             "applied_operation_count": self._applied_operation_count,
+            "prefill_operation_count": self._prefill_operation_count,
+            "prefill_input_token_count": self._prefill_input_token_count,
+            "decode_operation_count": self._decode_operation_count,
+            "decode_input_token_count": self._decode_input_token_count,
+            "activation_output_bytes": self._activation_output_bytes,
             "cancelled_path_count": len(self._cancelled_paths),
             "release_counts": dict(sorted(self._release_counts.items())),
          }
@@ -555,6 +678,7 @@ class NumpyRuntimePort:
          if item.path_id in self._cancelled_paths:
             return self._failure("path_cancelled")
          try:
+            self.expire_leases()
             return self._execute_bound(item)
          except PayloadError as exc:
             return self._failure(exc.code)
@@ -578,7 +702,11 @@ class NumpyRuntimePort:
          if not token_ids:
             _reject("empty_token_sequence")
          config = runtime["model_config"]
-         if len(token_ids) > config["n_positions"]:
+         if (
+            len(token_ids) > config["n_positions"]
+            if self.decode_mode == "complete_context_replay"
+            else item.position + len(token_ids) > config["n_positions"]
+         ):
             _reject("position_bounds_exceeded")
          if any(token_id >= config["vocab_size"] for token_id in token_ids):
             _reject("token_bounds_exceeded")
@@ -603,7 +731,11 @@ class NumpyRuntimePort:
       if envelope.shape[0] != 1 or envelope.shape[2] != self.graph.hidden_size:
          _reject("activation_shape_mismatch")
       sequence = envelope.shape[1]
-      if sequence > runtime["model_config"]["n_positions"]:
+      if (
+         sequence > runtime["model_config"]["n_positions"]
+         if self.decode_mode == "complete_context_replay"
+         else item.position + sequence > runtime["model_config"]["n_positions"]
+      ):
          _reject("position_bounds_exceeded")
       self._validate_sequence_span(item.batch_key, item.phase, sequence)
       hidden = np.frombuffer(envelope.data, dtype=_NUMPY_DTYPES[envelope.dtype])
@@ -639,35 +771,84 @@ class NumpyRuntimePort:
          ),
       )
 
-   def _execute_bound(self, item: HopWorkItem) -> RuntimeResult:
-      if item.phase == "PREFILL_CHUNK":
-         _reject("prefill_chunk_requires_kv_continuity")
-      if item.phase not in {"PREFILL", "RECOVERY_PREFILL", "DECODE"}:
-         _reject("unsupported_runtime_phase")
-      if not isinstance(item.payload, bytes):
-         _reject("runtime_payload_must_be_bytes")
-      if not isinstance(item.idempotency_key, str) or not item.idempotency_key:
-         _reject("invalid_idempotency_key")
-      if (
-         not isinstance(item.position, int)
-         or isinstance(item.position, bool)
-         or item.position < 0
+   def _execute_stage_with_kv(
+      self,
+      *,
+      stage: Stage,
+      loaded: LoadedStage,
+      runtime: Mapping[str, Any],
+      token_ids: np.ndarray | None,
+      hidden_states: np.ndarray | None,
+      position: int,
+      past_layers: Mapping[int, tuple[np.ndarray, np.ndarray]],
+   ) -> tuple[np.ndarray, dict[int, tuple[np.ndarray, np.ndarray]]]:
+      if runtime["architecture"] not in {"qwen2", "qwen3"}:
+         _reject("stage_local_kv_unsupported_architecture")
+      config = runtime["model_config"]
+      tensors = loaded.tensors
+      if "input_embedding" in stage.component_roles:
+         if token_ids is None or hidden_states is not None:
+            _reject("entry_stage_requires_token_ids")
+         hidden = _qwen2_embedding(tensors["model.embed_tokens.weight"], token_ids)
+      else:
+         if hidden_states is None or token_ids is not None:
+            _reject("non_entry_stage_requires_hidden_states")
+         hidden = hidden_states
+
+      next_layers: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+      for layer in range(
+         stage.layer_range.start_layer,
+         stage.layer_range.end_layer_exclusive,
       ):
-         _reject("invalid_kv_position")
+         hidden, layer_kv = _qwen2_block_with_kv(
+            hidden,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            position,
+            past_layers.get(layer),
+            runtime["architecture"],
+         )
+         next_layers[layer] = tuple(
+            np.ascontiguousarray(array) for array in layer_kv
+         )
+      if "final_norm" in stage.component_roles:
+         hidden = _rms_norm(
+            hidden,
+            tensors["model.norm.weight"],
+            float(config["rms_norm_epsilon"]),
+         )
+      if "lm_head" in stage.component_roles:
+         aliases = loaded.resolved_aliases
+         if not isinstance(aliases, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+         alias = aliases.get("lm_head", {})
+         if not isinstance(alias, Mapping):
+            _reject("invalid_loaded_stage_aliases")
+         head_keys = alias.get("tensor_keys", ["lm_head.weight"])
+         if (
+            not isinstance(head_keys, (list, tuple))
+            or len(head_keys) != 1
+            or not isinstance(head_keys[0], str)
+         ):
+            _reject("invalid_loaded_stage_aliases")
+         hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
+      output = np.ascontiguousarray(hidden, dtype=np.dtype(runtime["dtype"]))
+      if not np.isfinite(output).all():
+         _reject("nonfinite_stage_output")
+      return output, next_layers
 
-      binding = self._bound.get(item.placement_id)
-      if binding is None:
-         _reject("unbound_runtime_placement")
-      stage, placement, loaded, runtime = binding
-      self._validate_batch_key(item, placement)
-      fingerprint = self._operation_fingerprint(item)
-      replay = self._replays.get((item.path_id, item.idempotency_key))
-      if replay is not None:
-         if replay.fingerprint != fingerprint:
-            _reject("replay_fingerprint_mismatch")
-         return replay.result
-
-      token_ids, hidden_states, sequence = self._decode_input(item, stage, runtime)
+   def _execute_complete_context(
+      self,
+      item: HopWorkItem,
+      stage: Stage,
+      loaded: LoadedStage,
+      runtime: Mapping[str, Any],
+      token_ids: np.ndarray | None,
+      hidden_states: np.ndarray | None,
+      sequence: int,
+      fingerprint: str,
+   ) -> RuntimeResult:
       if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
          if item.phase == "PREFILL" and item.token_index != -1:
             _reject("prefill_sequence_mismatch")
@@ -693,16 +874,174 @@ class NumpyRuntimePort:
       except _StageNumpyRuntimeError as exc:
          raise NumpyRouterRuntimeError(str(exc)) from exc
       except RuntimeExecutionError as exc:
-         raise NumpyRouterRuntimeError(str(exc) or "runtime_execution_rejected") from exc
-
+         raise NumpyRouterRuntimeError(
+            str(exc) or "runtime_execution_rejected"
+         ) from exc
       if not isinstance(output, np.ndarray):
          _reject("invalid_stage_output_type")
       if not np.isfinite(output).all():
          _reject("nonfinite_stage_output")
       result = self._runtime_result(stage, runtime, output)
+      self._applied_operation_count += 1
+      self._activation_output_bytes += len(result.payload or b"")
+      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         self._prefill_operation_count += 1
+         self._prefill_input_token_count += sequence
+      else:
+         self._decode_operation_count += 1
+         self._decode_input_token_count += sequence
+      self._remember_result(item, fingerprint, result)
+      return result
+
+   def _execute_bound(self, item: HopWorkItem) -> RuntimeResult:
+      if item.phase == "PREFILL_CHUNK":
+         _reject("prefill_chunk_requires_kv_continuity")
+      if item.phase not in {"PREFILL", "RECOVERY_PREFILL", "DECODE"}:
+         _reject("unsupported_runtime_phase")
+      if not isinstance(item.payload, bytes):
+         _reject("runtime_payload_must_be_bytes")
+      if not isinstance(item.idempotency_key, str) or not item.idempotency_key:
+         _reject("invalid_idempotency_key")
+      if (
+         not isinstance(item.position, int)
+         or isinstance(item.position, bool)
+         or item.position < 0
+      ):
+         _reject("invalid_kv_position")
+      if self.decode_mode == "stage_local_kv":
+         if not isinstance(item.terminal, bool):
+            _reject("invalid_terminal_marker")
+         if (
+            not isinstance(item.lease_expires_at, (int, float))
+            or isinstance(item.lease_expires_at, bool)
+            or not math.isfinite(float(item.lease_expires_at))
+         ):
+            _reject("invalid_kv_lease")
+
+      binding = self._bound.get(item.placement_id)
+      if binding is None:
+         _reject("unbound_runtime_placement")
+      stage, placement, loaded, runtime = binding
+      self._validate_batch_key(item, placement)
+      fingerprint = self._operation_fingerprint(item)
+      replay = self._replays.get((item.path_id, item.idempotency_key))
+      if replay is not None:
+         if replay.fingerprint != fingerprint:
+            _reject(
+               "kv_sequence_replay_conflict"
+               if self.decode_mode == "stage_local_kv"
+               else "replay_fingerprint_mismatch"
+            )
+         return replay.result
+
+      token_ids, hidden_states, sequence = self._decode_input(item, stage, runtime)
+      if self.decode_mode == "complete_context_replay":
+         return self._execute_complete_context(
+            item,
+            stage,
+            loaded,
+            runtime,
+            token_ids,
+            hidden_states,
+            sequence,
+            fingerprint,
+         )
+
+      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         if item.phase == "PREFILL" and item.token_index != -1:
+            _reject("kv_prefill_sequence_mismatch")
+         if item.phase == "RECOVERY_PREFILL" and item.token_index < 0:
+            _reject("kv_recovery_sequence_mismatch")
+         if item.position != 0:
+            _reject("kv_position_mismatch")
+         if item.path_id in self._kv_states:
+            _reject("kv_state_already_exists")
+         released_reason = self._released_paths.get(item.path_id)
+         if released_reason == "lease_expired":
+            _reject("kv_lease_expired")
+         if released_reason is not None:
+            _reject("kv_state_released")
+         if float(self._clock()) >= float(item.lease_expires_at):
+            self._remember_path_marker(
+               self._released_paths, item.path_id, "lease_expired"
+            )
+            _reject("kv_lease_expired")
+         output, layers = self._execute_stage_with_kv(
+            stage=stage,
+            loaded=loaded,
+            runtime=runtime,
+            token_ids=token_ids,
+            hidden_states=hidden_states,
+            position=item.position,
+            past_layers={},
+         )
+         result = self._runtime_result(stage, runtime, output)
+         self._kv_states[item.path_id] = _KVState(
+            request_id=item.request_id,
+            path_id=item.path_id,
+            path_attempt=item.path_attempt,
+            placement_id=item.placement_id,
+            assignment_id=placement.assignment_id,
+            manifest_digest=self.graph.manifest_digest,
+            deployment_epoch=self.graph.deployment_epoch,
+            lease_expires_at=float(item.lease_expires_at),
+            next_position=sequence,
+            next_sequence=1 if item.phase == "PREFILL" else item.token_index + 1,
+            cached_context_tokens=sequence,
+            layers=layers,
+         )
+         self._update_kv_watermark()
+      else:
+         state = self._kv_states.get(item.path_id)
+         if state is None:
+            released_reason = self._released_paths.get(item.path_id)
+            if released_reason == "lease_expired":
+               _reject("kv_lease_expired")
+            if released_reason is not None:
+               _reject("kv_state_released")
+            _reject("kv_state_missing")
+         if item.request_id != state.request_id:
+            _reject("kv_request_id_mismatch")
+         if item.path_attempt != state.path_attempt:
+            _reject("kv_path_attempt_mismatch")
+         if item.placement_id != state.placement_id:
+            _reject("kv_placement_id_mismatch")
+         if item.position != state.next_position:
+            _reject("kv_position_mismatch")
+         if item.token_index != state.next_sequence:
+            _reject("kv_sequence_mismatch")
+         if float(item.lease_expires_at) != state.lease_expires_at:
+            _reject("kv_lease_mismatch")
+         if float(self._clock()) >= state.lease_expires_at:
+            self._release_state(item.path_id, "lease_expired")
+            _reject("kv_lease_expired")
+         output, layers = self._execute_stage_with_kv(
+            stage=stage,
+            loaded=loaded,
+            runtime=runtime,
+            token_ids=token_ids,
+            hidden_states=hidden_states,
+            position=item.position,
+            past_layers=state.layers,
+         )
+         result = self._runtime_result(stage, runtime, output)
+         state.layers = layers
+         state.next_position += sequence
+         state.next_sequence += 1
+         state.cached_context_tokens += sequence
+         self._update_kv_watermark()
 
       self._applied_operation_count += 1
+      self._activation_output_bytes += len(result.payload or b"")
+      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         self._prefill_operation_count += 1
+         self._prefill_input_token_count += sequence
+      else:
+         self._decode_operation_count += 1
+         self._decode_input_token_count += sequence
       self._remember_result(item, fingerprint, result)
+      if item.terminal:
+         self._release_state(item.path_id, "normal_completion")
       return result
 
    def _validate_batch_key(self, item: HopWorkItem, placement: Any) -> None:
@@ -735,8 +1074,8 @@ class NumpyRuntimePort:
       ):
          _reject("invalid_batch_key_token_span")
 
-   @staticmethod
    def _validate_sequence_span(
+      self,
       key: RuntimeBatchKey | None,
       phase: str,
       sequence: int,
@@ -747,6 +1086,12 @@ class NumpyRuntimePort:
          _reject("batch_key_token_span_mismatch")
       if phase == "DECODE" and key.token_span != 1:
          _reject("batch_key_token_span_mismatch")
+      if (
+         phase == "DECODE"
+         and self.decode_mode == "stage_local_kv"
+         and sequence != 1
+      ):
+         _reject("decode_requires_single_token")
 
    def execute_batch(self, batch: RuntimeBatch) -> tuple[RuntimeResult, ...]:
       """Execute serially in input order; one item cannot poison its siblings."""

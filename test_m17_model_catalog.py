@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 import struct
 import hashlib
@@ -147,6 +148,10 @@ def _swarm_evidence(
             supported_dtypes=("bfloat16",),
             supported_quantizations=("bfloat16",),
             supported_decode_modes=("complete_context_replay", "stage_local_kv"),
+            decode_modes_by_architecture={
+                "qwen2": ("complete_context_replay", "stage_local_kv"),
+                "qwen3": ("complete_context_replay", "stage_local_kv"),
+            },
             runtime_build_digest="sha256:" + f"{index + 201:064x}",
             available_memory_bytes=node.total_memory_bytes,
             rss_bytes=128,
@@ -440,6 +445,30 @@ def test_missing_required_directed_loopback_rejects_complete_track(tmp_path: Pat
 
     assert report["state"] == "infeasible"
     assert "missing_directed_edge:node-b->node-a" in report["reasons"]
+
+
+def test_decode_mode_is_checked_for_the_candidate_architecture(tmp_path: Path) -> None:
+    _model_snapshot(tmp_path)
+    (entry,) = scan_huggingface_cache(tmp_path)
+    nodes = (_node("node-a", 20_000),)
+    evidence = _swarm_evidence(nodes)
+    constrained = replace(
+        evidence,
+        nodes=(
+            replace(
+                evidence.nodes[0],
+                decode_modes_by_architecture={
+                    "qwen2": ("complete_context_replay",),
+                    "qwen3": ("complete_context_replay", "stage_local_kv"),
+                },
+            ),
+        ),
+    )
+
+    report = _evaluate(entry, nodes, evidence=constrained)
+
+    assert report["state"] == "infeasible"
+    assert "decode_mode_unsupported:node-a:stage_local_kv" in report["reasons"]
 
 
 def test_capability_drift_invalidates_a_previously_feasible_report(tmp_path: Path) -> None:

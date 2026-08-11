@@ -237,6 +237,7 @@ def _work_item(
    token_index=None,
    position=None,
    terminal=False,
+   lease_expires_at=None,
    idempotency_key=None,
 ):
    key = batch_key or _batch_key(case, stage_index, phase, token_span)
@@ -264,6 +265,7 @@ def _work_item(
       batch_key=key,
       position=position,
       terminal=terminal,
+      lease_expires_at=lease_expires_at,
    )
 
 
@@ -376,6 +378,31 @@ def test_decode_mode_and_backend_are_pinned(runtime_case):
    for port in runtime_case.ports:
       assert port.decode_mode == "complete_context_replay"
       assert port.backend == "numpy"
+
+
+def test_stage_local_kv_rejects_unqualified_architecture(runtime_case):
+   placement = runtime_case.graph.stages[0].placements[0]
+   with pytest.raises(
+      NumpyRouterRuntimeError,
+      match="^stage_local_kv_unsupported_architecture$",
+   ):
+      NumpyRuntimePort(
+         placement.node_id,
+         runtime_case.graph,
+         {placement.placement_id: runtime_case.loaded[0]},
+         decode_mode="stage_local_kv",
+      )
+
+
+def test_constructor_rejects_unknown_decode_mode(runtime_case):
+   placement = runtime_case.graph.stages[0].placements[0]
+   with pytest.raises(NumpyRouterRuntimeError, match="^invalid_runtime_decode_mode$"):
+      NumpyRuntimePort(
+         placement.node_id,
+         runtime_case.graph,
+         {placement.placement_id: runtime_case.loaded[0]},
+         decode_mode="backend_specific_guess",
+      )
 
 
 def test_complete_context_replay_prefill_matches_reference(runtime_case):

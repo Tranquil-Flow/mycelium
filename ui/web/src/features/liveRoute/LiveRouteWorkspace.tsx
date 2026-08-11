@@ -27,6 +27,7 @@ import { M19RecoverySourcePanel } from './M19RecoverySourcePanel';
 import { M20SpeculationSourcePanel } from './M20SpeculationSourcePanel';
 import { M21HeterogeneousSourcePanel } from './M21HeterogeneousSourcePanel';
 import { M22ReleaseSourcePanel } from './M22ReleaseSourcePanel';
+import { M23KvSourcePanel } from './M23KvSourcePanel';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -40,6 +41,12 @@ export interface LiveRouteWorkspaceProps {
 
 function metric(value: number | null, suffix = ' ms'): string {
   return value === null ? 'Unknown' : `${value.toFixed(1)}${suffix}`;
+}
+
+function bytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 export function LiveRouteWorkspace({ view, qualification, freshness, client, workloadClient, runtimeClient, modelOperationClient }: LiveRouteWorkspaceProps) {
@@ -69,9 +76,24 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
   };
 
   useEffect(() => {
-    void refresh();
-    // The status source is fixed for this mounted workspace.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let mounted = true;
+    const load = async () => {
+      try {
+        const value = await source.load();
+        if (!mounted) return;
+        setStatus(value);
+        setError(null);
+      } catch (reason) {
+        if (!mounted) return;
+        setError(reason instanceof Error ? reason.message : 'route_status_unavailable');
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 1_000);
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
   }, [source]);
 
   useEffect(() => {
@@ -183,6 +205,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'plans' ? <M22ReleaseSourcePanel view="plans" hideUnavailable /> : null}
+      {view === 'plans' ? <M23KvSourcePanel view="plans" hideUnavailable /> : null}
       {view === 'plans' ? (
         <><M21HeterogeneousSourcePanel view="plans" hideUnavailable /><M20SpeculationSourcePanel view="plans" hideUnavailable /><M19RecoverySourcePanel view="plans" hideUnavailable /><M18ReplicationSourcePanel view="plans" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
@@ -201,6 +224,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       {view === 'readiness' ? (
         <>
           <M22ReleaseSourcePanel view="readiness" hideUnavailable />
+          <M23KvSourcePanel view="readiness" hideUnavailable />
           <M21HeterogeneousSourcePanel view="readiness" hideUnavailable />
           <M20SpeculationSourcePanel view="readiness" hideUnavailable />
           <M19RecoverySourcePanel view="readiness" hideUnavailable />
@@ -225,6 +249,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'incidents' ? <M22ReleaseSourcePanel view="incidents" hideUnavailable /> : null}
+      {view === 'incidents' ? <M23KvSourcePanel view="incidents" hideUnavailable /> : null}
       {view === 'incidents' ? (
         <><M19RecoverySourcePanel view="incidents" hideUnavailable /><M18ReplicationSourcePanel view="incidents" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="incidents" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
           <h2 id="live-incidents-title">Physical route incident log</h2>
@@ -264,7 +289,7 @@ function PeerTable({ status }: { readonly status: LiveRouteStatus }) {
       <h2 id="live-peer-title">Per-host execution evidence</h2>
       <div className={styles.tableWrap}>
         <table>
-          <thead><tr><th>Peer</th><th>Backend / layers</th><th>Total sent</th><th>Total received</th><th>Operations</th><th>Latest Δ sent / received / ops</th><th>KV</th></tr></thead>
+          <thead><tr><th>Peer</th><th>Backend / layers</th><th>Total sent</th><th>Total received</th><th>Operations</th><th>Latest Δ sent / received / ops</th><th>Incremental KV</th></tr></thead>
           <tbody>
             {status.peers.map((peer) => {
               const delta = latest?.peer_counter_deltas.find((item) => item.node_id === peer.node_id);
@@ -277,7 +302,13 @@ function PeerTable({ status }: { readonly status: LiveRouteStatus }) {
                   <td>{peer.frames_received}</td>
                   <td>{peer.applied_operation_count}</td>
                   <td>{delta ? `${delta.frames_sent} / ${delta.frames_received} / ${delta.applied_operation_count}` : 'Unknown'}</td>
-                  <td>{peer.decode_mode ?? 'Unknown'} · {peer.active_kv_state_count} active</td>
+                  <td>
+                    {peer.decode_mode ?? 'Unknown'} · {peer.active_kv_state_count} active · {bytes(peer.active_kv_bytes)}
+                    <small>
+                      {peer.architecture ?? 'unknown architecture'} · position {peer.current_position ?? 'released'} · peak {bytes(peer.peak_kv_bytes)} · {peer.release_state}{peer.last_release_reason === null ? '' : ` (${peer.last_release_reason})`}
+                      {' · '}decode work {peer.decode_input_token_count} input tokens / {peer.decode_operation_count} operations · {bytes(peer.activation_output_bytes)} activations
+                    </small>
+                  </td>
                 </tr>
               );
             })}

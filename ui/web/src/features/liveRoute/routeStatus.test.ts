@@ -22,6 +22,13 @@ describe('live route status contract', () => {
     expect(decoded.simulated).toBe(false);
     expect(decoded.decode_mode).toBe('stage_local_kv');
     expect(decoded.peers.every((peer) => peer.active_kv_state_count === 0)).toBe(true);
+    expect(decoded.peers[0]).toMatchObject({
+      architecture: 'qwen2',
+      supported_decode_modes: ['complete_context_replay', 'stage_local_kv'],
+      peak_kv_bytes: 4096,
+      release_state: 'released',
+      last_release_reason: 'normal_completion',
+    });
   });
 
   it('decodes one bounded planner-v2 projection without making it route authority', () => {

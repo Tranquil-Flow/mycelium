@@ -280,6 +280,24 @@ def _runtime_build_digest(backend: str) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _route_decode_mode(graph: ExecutionGraph, architecture: str | None) -> str:
+    """Choose one decode mode supported by every active route placement."""
+
+    route_backends = {
+        placement.runtime_backend
+        for stage in graph.stages
+        for placement in stage.placements
+        if placement.lifecycle_state == "ACTIVE"
+    }
+    if not route_backends or route_backends - {"mlx", "numpy", "pixel-stdlib"}:
+        raise NodeCommandError("unsupported_runtime_backend")
+    if "pixel-stdlib" in route_backends:
+        return "complete_context_replay"
+    if "numpy" in route_backends and architecture not in {"qwen2", "qwen3"}:
+        return "complete_context_replay"
+    return "stage_local_kv"
+
+
 def execution_graph_from_document(document: Any) -> ExecutionGraph:
     root_fields = {
         "deployment_id",
@@ -677,6 +695,7 @@ class PhysicalNodeService:
         sidecar_local_only: bool,
         command_timeout: float,
         endpoint_secret_file: Path | None = None,
+        requested_decode_mode: str | None = None,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -687,6 +706,10 @@ class PhysicalNodeService:
                 isinstance(value, str) and bool(value) and value == value.strip(), code
             )
         _require(command_timeout > 0, "invalid_command_timeout")
+        _require(
+            requested_decode_mode in {None, "complete_context_replay", "stage_local_kv"},
+            "invalid_requested_decode_mode",
+        )
         self.run_id = run_id
         self.deployment_id = deployment_id
         self.node_id = node_id
@@ -698,6 +721,7 @@ class PhysicalNodeService:
         self.endpoint_secret_file = _validated_endpoint_secret_file(
             endpoint_secret_file
         )
+        self.requested_decode_mode = requested_decode_mode
         self.host_id, _boot_id = derive_local_run_scoped_identity(run_id)
         self.process_id = os.getpid()
         self.state = "NEW"
@@ -868,10 +892,21 @@ class PhysicalNodeService:
         }
         supported_dtypes.add(runtime_identity["dtype"])
         supported_quantizations.add(runtime_identity["quantization"])
-        supported_decode_modes = (
-            ["complete_context_replay", "stage_local_kv"]
-            if backend == "mlx"
-            else ["complete_context_replay"]
+        decode_modes_by_architecture = {
+            architecture: (
+                ["complete_context_replay", "stage_local_kv"]
+                if backend == "mlx"
+                or (backend == "numpy" and architecture in {"qwen2", "qwen3"})
+                else ["complete_context_replay"]
+            )
+            for architecture in supported_architectures
+        }
+        supported_decode_modes = sorted(
+            {
+                mode
+                for modes in decode_modes_by_architecture.values()
+                for mode in modes
+            }
         )
         object_root = self.artifact_root / ".mycelium" / "objects" / "sha256"
         cached_content_digests = (
@@ -898,6 +933,7 @@ class PhysicalNodeService:
             "supported_dtypes": sorted(supported_dtypes),
             "supported_quantizations": sorted(supported_quantizations),
             "supported_decode_modes": supported_decode_modes,
+            "decode_modes_by_architecture": decode_modes_by_architecture,
             "runtime_build_digest": _runtime_build_digest(backend),
             "available_memory_bytes": _host_available_memory_bytes(),
             "rss_bytes": _process_rss_bytes(),
@@ -1036,19 +1072,24 @@ class PhysicalNodeService:
         backend = placement.runtime_backend
         clock = self._clock.now
         loaded_stages = {placement.placement_id: loaded}
-        route_backends = {
-            candidate.runtime_backend
-            for stage in graph.stages
-            for candidate in stage.placements
-            if candidate.lifecycle_state == "ACTIVE"
-        }
-        if not route_backends or route_backends - {"mlx", "numpy", "pixel-stdlib"}:
-            raise NodeCommandError("unsupported_runtime_backend")
-        route_decode_mode = (
-            "complete_context_replay"
-            if route_backends & {"numpy", "pixel-stdlib"}
-            else "stage_local_kv"
+        runtime_proof = getattr(loaded, "proof", None)
+        runtime_document = (
+            runtime_proof.get("runtime")
+            if isinstance(runtime_proof, Mapping)
+            else None
         )
+        architecture = (
+            runtime_document.get("architecture")
+            if isinstance(runtime_document, Mapping)
+            else None
+        )
+        supported_route_mode = _route_decode_mode(graph, architecture)
+        if (
+            self.requested_decode_mode == "stage_local_kv"
+            and supported_route_mode != "stage_local_kv"
+        ):
+            raise NodeCommandError("requested_decode_mode_unsupported")
+        route_decode_mode = self.requested_decode_mode or supported_route_mode
         if backend == "pixel-stdlib":
             from mycelium_mobile.pixel_runtime import (
                 PixelRuntimeError,
@@ -1080,6 +1121,7 @@ class PhysicalNodeService:
                 graph,
                 loaded_stages,
                 clock=clock,
+                decode_mode=route_decode_mode,
             )
         if backend == "mlx":
             from mycelium_router.mlx_runtime import MLXRuntimePort
@@ -1607,6 +1649,23 @@ class PhysicalNodeService:
             time.sleep(0.01)
             status = self.router.request_status(request_id)
         _require(status != "PREFILL", "prefill_completion_timeout")
+        if getattr(self.runtime, "decode_mode", None) == "stage_local_kv":
+            while (
+                status == "DECODING"
+                and not sink.token_ids
+                and time.monotonic() < deadline
+            ):
+                if (
+                    self.transport is not None
+                    and self.transport.fatal_error is not None
+                ):
+                    raise NodeCommandError(self.transport.fatal_error.code)
+                time.sleep(0.01)
+                status = self.router.request_status(request_id)
+            _require(
+                bool(sink.token_ids) or status == "COMPLETED",
+                "prefill_token_timeout",
+            )
         record = self.router.get_request(request_id)
         manifest = record.manifest
         return self._signed_result(
@@ -1844,6 +1903,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sidecar-local-only", action="store_true")
     parser.add_argument("--endpoint-secret-file", type=Path)
     parser.add_argument("--command-timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--decode-mode",
+        choices=("complete_context_replay", "stage_local_kv"),
+    )
     return parser.parse_args()
 
 
@@ -1860,6 +1923,7 @@ def main() -> int:
             sidecar_local_only=args.sidecar_local_only,
             command_timeout=args.command_timeout,
             endpoint_secret_file=args.endpoint_secret_file,
+            requested_decode_mode=args.decode_mode,
         )
     except (NodeCommandError, OSError) as exc:
         print(f"physical-node startup rejected: {type(exc).__name__}", file=sys.stderr)

@@ -29,7 +29,19 @@ export interface LiveRoutePeer {
   readonly frames_received: number;
   readonly applied_operation_count: number;
   readonly decode_mode: string | null;
+  readonly architecture: string | null;
+  readonly supported_decode_modes: readonly string[];
   readonly active_kv_state_count: number;
+  readonly active_kv_bytes: number;
+  readonly peak_kv_bytes: number;
+  readonly prefill_operation_count: number;
+  readonly prefill_input_token_count: number;
+  readonly decode_operation_count: number;
+  readonly decode_input_token_count: number;
+  readonly activation_output_bytes: number;
+  readonly current_position: number | null;
+  readonly release_state: 'idle' | 'active' | 'released' | 'closed' | 'unknown';
+  readonly last_release_reason: string | null;
   readonly retained_result_count: number;
   readonly release_counts: Readonly<Record<string, number>>;
 }
@@ -289,7 +301,19 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       'frames_received',
       'applied_operation_count',
       'decode_mode',
+      'architecture',
+      'supported_decode_modes',
       'active_kv_state_count',
+      'active_kv_bytes',
+      'peak_kv_bytes',
+      'prefill_operation_count',
+      'prefill_input_token_count',
+      'decode_operation_count',
+      'decode_input_token_count',
+      'activation_output_bytes',
+      'current_position',
+      'release_state',
+      'last_release_reason',
       'retained_result_count',
       'release_counts',
     ],
@@ -299,6 +323,13 @@ function peer(value: unknown, path: string): LiveRoutePeer {
   if (mode !== null && (typeof mode !== 'string' || mode.length > 64)) {
     throw new TypeError(`${path}.decode_mode is invalid`);
   }
+  const architecture = item.architecture;
+  if (architecture !== null && typeof architecture !== 'string') throw new TypeError(`${path}.architecture is invalid`);
+  const currentPosition = item.current_position;
+  if (currentPosition !== null) integer(currentPosition, `${path}.current_position`);
+  if (!['idle', 'active', 'released', 'closed', 'unknown'].includes(String(item.release_state))) throw new TypeError(`${path}.release_state is invalid`);
+  const lastReleaseReason = item.last_release_reason;
+  if (lastReleaseReason !== null && typeof lastReleaseReason !== 'string') throw new TypeError(`${path}.last_release_reason is invalid`);
   if (typeof item.release_counts !== 'object' || item.release_counts === null || Array.isArray(item.release_counts)) {
     throw new TypeError(`${path}.release_counts must be an object`);
   }
@@ -328,7 +359,19 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       ),
     ),
     decode_mode: mode,
+    architecture: architecture === null ? null : identifier(architecture, `${path}.architecture`),
+    supported_decode_modes: Object.freeze(array(item.supported_decode_modes, `${path}.supported_decode_modes`).map((value, index) => identifier(value, `${path}.supported_decode_modes[${index}]`))),
     active_kv_state_count: integer(item.active_kv_state_count, `${path}.active_kv_state_count`),
+    active_kv_bytes: integer(item.active_kv_bytes, `${path}.active_kv_bytes`),
+    peak_kv_bytes: integer(item.peak_kv_bytes, `${path}.peak_kv_bytes`),
+    prefill_operation_count: integer(item.prefill_operation_count, `${path}.prefill_operation_count`),
+    prefill_input_token_count: integer(item.prefill_input_token_count, `${path}.prefill_input_token_count`),
+    decode_operation_count: integer(item.decode_operation_count, `${path}.decode_operation_count`),
+    decode_input_token_count: integer(item.decode_input_token_count, `${path}.decode_input_token_count`),
+    activation_output_bytes: integer(item.activation_output_bytes, `${path}.activation_output_bytes`),
+    current_position: currentPosition as number | null,
+    release_state: item.release_state as LiveRoutePeer['release_state'],
+    last_release_reason: lastReleaseReason === null ? null : identifier(lastReleaseReason, `${path}.last_release_reason`),
     retained_result_count: integer(item.retained_result_count, `${path}.retained_result_count`),
     release_counts: Object.freeze(releases),
   });

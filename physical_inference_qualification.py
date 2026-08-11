@@ -1086,7 +1086,7 @@ class QualificationController:
             "decode_count",
             "expected_token_ids",
         }
-        optional_fields = {"qualification_operation", "recovery_fault"}
+        optional_fields = {"qualification_operation", "recovery_fault", "decode_mode"}
         if plan is None or not expected_fields.issubset(plan) or set(plan) - expected_fields - optional_fields:
             _reject("controller_run_plan_invalid")
         if plan.get("protocol") != _RUN_PLAN_PROTOCOL:
@@ -1094,6 +1094,9 @@ class QualificationController:
         qualification_operation = plan.get("qualification_operation", "run")
         if qualification_operation not in {"run", "cancel"}:
             _reject("controller_run_plan_invalid")
+        decode_mode = plan.get("decode_mode")
+        if decode_mode not in {None, "complete_context_replay", "stage_local_kv"}:
+            _reject("run_plan_decode_mode_invalid")
         run_id = _segment(plan.get("run_id"), "run_id_invalid")
         deployment_id = _segment(
             plan.get("deployment_id"), "deployment_id_invalid"
@@ -1280,6 +1283,7 @@ class QualificationController:
             "expected_token_ids": list(expected_token_ids),
             "qualification_operation": qualification_operation,
             "recovery_fault": recovery_fault,
+            "decode_mode": decode_mode,
         }
 
     def _hello_identity(
@@ -1471,6 +1475,8 @@ class QualificationController:
                     "--command-timeout",
                     str(int(NODE_COMMAND_TIMEOUT_SECONDS)),
                 )
+                if plan["decode_mode"] is not None:
+                    node_command += ("--decode-mode", plan["decode_mode"])
                 session = self._session_factory(
                     argv=_peer_process_argv(peer, node_command),
                     node_id=node_id,
@@ -1721,6 +1727,8 @@ class QualificationController:
                         "--command-timeout",
                         str(int(NODE_COMMAND_TIMEOUT_SECONDS)),
                     )
+                    if plan["decode_mode"] is not None:
+                        node_command += ("--decode-mode", plan["decode_mode"])
                     try:
                         replacement = self._session_factory(
                             argv=_peer_process_argv(peer, node_command),

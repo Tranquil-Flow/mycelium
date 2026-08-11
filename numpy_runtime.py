@@ -235,6 +235,122 @@ def _qwen2_rope(
     )
 
 
+def _qwen2_rope_at_position(
+    query: np.ndarray,
+    key: np.ndarray,
+    *,
+    position: int,
+    theta: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply Qwen rotary embeddings at an absolute cache position."""
+
+    sequence = int(query.shape[2])
+    head_dim = int(query.shape[3])
+    inv_freq = 1.0 / (
+        theta ** (np.arange(0, head_dim, 2, dtype=np.float32) / head_dim)
+    )
+    positions = np.arange(position, position + sequence, dtype=np.float32)
+    frequencies = positions[:, None] * inv_freq[None, :]
+    embedding = np.concatenate((frequencies, frequencies), axis=-1)
+    cosine = np.cos(embedding)[None, None, :, :]
+    sine = np.sin(embedding)[None, None, :, :]
+
+    def rotate_half(value: np.ndarray) -> np.ndarray:
+        first, second = np.split(value, 2, axis=-1)
+        return np.concatenate((-second, first), axis=-1)
+
+    return (
+        query * cosine + rotate_half(query) * sine,
+        key * cosine + rotate_half(key) * sine,
+    )
+
+
+def _qwen2_block_with_kv(
+    hidden: np.ndarray,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+    position: int,
+    past: tuple[np.ndarray, np.ndarray] | None,
+    architecture: str = "qwen2",
+) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray]]:
+    """Execute one dense Qwen decoder block while retaining local K/V state."""
+
+    n_head = int(config["n_head"])
+    n_kv_head = int(config["n_kv_head"])
+    head_dim = int(config["head_dim"])
+    epsilon = float(config["rms_norm_epsilon"])
+    residual = hidden
+    normalized = _rms_norm(
+        hidden, tensors[prefix + "input_layernorm.weight"], epsilon
+    )
+    query = _qwen2_linear(normalized, tensors[prefix + "self_attn.q_proj.weight"])
+    key = _qwen2_linear(normalized, tensors[prefix + "self_attn.k_proj.weight"])
+    value = _qwen2_linear(normalized, tensors[prefix + "self_attn.v_proj.weight"])
+    if architecture == "qwen2":
+        query = query + tensors[prefix + "self_attn.q_proj.bias"]
+        key = key + tensors[prefix + "self_attn.k_proj.bias"]
+        value = value + tensors[prefix + "self_attn.v_proj.bias"]
+    batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
+    query = query.reshape(batch, sequence, n_head, head_dim).transpose(0, 2, 1, 3)
+    key = key.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+    value = value.reshape(batch, sequence, n_kv_head, head_dim).transpose(0, 2, 1, 3)
+    if architecture == "qwen3":
+        query = _rms_norm(
+            query,
+            tensors[prefix + "self_attn.q_norm.weight"],
+            epsilon,
+        )
+        key = _rms_norm(
+            key,
+            tensors[prefix + "self_attn.k_norm.weight"],
+            epsilon,
+        )
+    query, key = _qwen2_rope_at_position(
+        query,
+        key,
+        position=position,
+        theta=float(config["rope_theta"]),
+    )
+    if past is None:
+        all_key = key
+        all_value = value
+    else:
+        all_key = np.concatenate((past[0], key), axis=2)
+        all_value = np.concatenate((past[1], value), axis=2)
+    repeats = n_head // n_kv_head
+    attention_key = np.repeat(all_key, repeats, axis=1)
+    attention_value = np.repeat(all_value, repeats, axis=1)
+    scores = (
+        np.matmul(query, attention_key.transpose(0, 1, 3, 2))
+        / math.sqrt(head_dim)
+    )
+    query_positions = np.arange(position, position + sequence)
+    key_positions = np.arange(int(all_key.shape[2]))
+    causal = query_positions[:, None] >= key_positions[None, :]
+    probabilities = _softmax(
+        np.where(causal[None, None, :, :], scores, -np.inf), axis=-1
+    )
+    attended = np.matmul(probabilities, attention_value)
+    attended = attended.transpose(0, 2, 1, 3).reshape(batch, sequence, -1)
+    hidden = residual + _qwen2_linear(
+        attended, tensors[prefix + "self_attn.o_proj.weight"]
+    )
+
+    residual = hidden
+    normalized = _rms_norm(
+        hidden, tensors[prefix + "post_attention_layernorm.weight"], epsilon
+    )
+    gate = _silu(
+        _qwen2_linear(normalized, tensors[prefix + "mlp.gate_proj.weight"])
+    )
+    up = _qwen2_linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
+    hidden = residual + _qwen2_linear(
+        gate * up, tensors[prefix + "mlp.down_proj.weight"]
+    )
+    return hidden, (all_key, all_value)
+
+
 def _qwen2_block(
     hidden: np.ndarray,
     tensors: Mapping[str, np.ndarray],

@@ -485,6 +485,7 @@ class MLXRuntimePort:
       self.node_id = node_id
       self.graph = graph
       self.decode_mode = decode_mode
+      self._architecture = canonical_runtime["architecture"]
       self._bound = MappingProxyType(bound)
       if clock is not None and not callable(clock):
          _reject("invalid_runtime_clock")
@@ -494,7 +495,14 @@ class MLXRuntimePort:
       self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
       self._release_counts: Counter[str] = Counter()
+      self._peak_kv_bytes = 0
+      self._last_release_reason: str | None = None
       self._applied_operation_count = 0
+      self._prefill_operation_count = 0
+      self._prefill_input_token_count = 0
+      self._decode_operation_count = 0
+      self._decode_input_token_count = 0
+      self._activation_output_bytes = 0
       self._closed = False
       self._state_lock = RLock()
 
@@ -743,6 +751,7 @@ class MLXRuntimePort:
       if path_id not in self._released_paths:
          self._remember_path_marker(self._released_paths, path_id, reason)
       self._release_counts[reason] += 1
+      self._last_release_reason = reason
       state.layers.clear()
       self._purge_path_replays(path_id)
       return True
@@ -786,6 +795,10 @@ class MLXRuntimePort:
          for array in pair
       )
 
+   def _update_kv_watermark(self) -> None:
+      active_bytes = sum(self._kv_bytes(state) for state in self._kv_states.values())
+      self._peak_kv_bytes = max(self._peak_kv_bytes, active_bytes)
+
    def kv_snapshot(self) -> dict[str, Any]:
       """Return identity/lifecycle evidence without exposing KV tensor values."""
 
@@ -810,11 +823,33 @@ class MLXRuntimePort:
          }
          return {
             "mode": self.decode_mode,
+            "backend": "mlx",
+            "architecture": self._architecture,
             "closed": self._closed,
             "active_state_count": len(states),
+            "active_kv_bytes": sum(state["kv_bytes"] for state in states.values()),
+            "peak_kv_bytes": self._peak_kv_bytes,
+            "current_position": max(
+               (state["next_position"] for state in states.values()), default=None
+            ),
+            "release_state": (
+               "closed"
+               if self._closed
+               else "active"
+               if states
+               else "released"
+               if self._last_release_reason is not None
+               else "idle"
+            ),
+            "last_release_reason": self._last_release_reason,
             "states": states,
             "retained_result_count": len(self._replays),
             "applied_operation_count": self._applied_operation_count,
+            "prefill_operation_count": self._prefill_operation_count,
+            "prefill_input_token_count": self._prefill_input_token_count,
+            "decode_operation_count": self._decode_operation_count,
+            "decode_input_token_count": self._decode_input_token_count,
+            "activation_output_bytes": self._activation_output_bytes,
             "release_counts": dict(sorted(self._release_counts.items())),
          }
 
@@ -1083,6 +1118,13 @@ class MLXRuntimePort:
          _reject("nonfinite_stage_output")
       result = self._runtime_result(stage, runtime, output)
       self._applied_operation_count += 1
+      self._activation_output_bytes += len(result.payload or b"")
+      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         self._prefill_operation_count += 1
+         self._prefill_input_token_count += sequence
+      else:
+         self._decode_operation_count += 1
+         self._decode_input_token_count += sequence
       self._remember_result(item, fingerprint, result)
       return result
 
@@ -1176,6 +1218,7 @@ class MLXRuntimePort:
             layers=layers,
          )
          self._kv_states[item.path_id] = state
+         self._update_kv_watermark()
       else:
          state = self._kv_states.get(item.path_id)
          if state is None:
@@ -1214,8 +1257,16 @@ class MLXRuntimePort:
          state.next_position += sequence
          state.next_sequence += 1
          state.cached_context_tokens += sequence
+         self._update_kv_watermark()
 
       self._applied_operation_count += 1
+      self._activation_output_bytes += len(result.payload or b"")
+      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+         self._prefill_operation_count += 1
+         self._prefill_input_token_count += sequence
+      else:
+         self._decode_operation_count += 1
+         self._decode_input_token_count += sequence
       self._remember_result(item, fingerprint, result)
       if item.terminal:
          self._release_state(item.path_id, "normal_completion")

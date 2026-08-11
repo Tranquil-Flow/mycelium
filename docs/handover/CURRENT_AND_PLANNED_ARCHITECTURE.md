@@ -213,6 +213,13 @@ references, not public release artifacts.
 | M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
+| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, assignment-local acquisition, and fail-closed model selection completed | M17 model-operation endpoint/UI and catalog/parity suites | Qwen3-8B is adapter-compatible and locally complete but capacity-infeasible on the current swarm |
+| M18 | Qualified replica planning/runtime evidence and concurrency attribution completed | M18 replica plan/runtime endpoints and UI | Continuous batching and pipeline overlap remain unclaimed |
+| M19 | Traffic-aware liveness, scoped recovery evidence, and fenced recovery paths completed | M19 liveness/recovery endpoints and UI | Cross-backend live KV migration remains unclaimed |
+| M20 | Target-authoritative speculative planning/runtime evidence completed | M20 speculative plan/runtime endpoints and UI | Promotion remains workload- and target-parity-bound |
+| M21 | Heterogeneous membership and physical MLX/NumPy route evidence completed | M21 heterogeneous endpoint/UI and physical route records | Mobile activation and different-network Mac conformance remain deferred, not silently inferred |
+| M22 | Release closure, service packaging, UI audit, local 3B qualification, Qwen3 adapter proof, and reviewer bundle completed | `/Users/evinova-self/mycelium-physical-run/m22-release-20260811/m22-release.json` | Qwen3-8B placement remains capacity-blocked; no public release has occurred |
+| M23 | Three-host MLX/MLX/NumPy stage-local KV physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain | `docs/handover/M23_PROGRESS_2026-08-11.md`; `contracts/compatibility-fixtures/m23-kv-gate-v1.json` | Tensor parallelism, continuous batching, KV migration, and mobile activation remain later scope |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no
 Router admission. The factual, arithmetic, and exact-format cases are distributed
@@ -249,7 +256,7 @@ model outputs. Never describe all four as model-quality generations.
   release manifest. Task 0 of the post-M11 plan is therefore the immediate gate before
   M12 implementation.
 
-## Planned architecture, M12-M21
+## Planned architecture, M12-M23 and next boundaries
 
 ```text
 signed membership + capability + load + directed-link evidence
@@ -288,6 +295,13 @@ signed membership + capability + load + directed-link evidence
 | M20 | Optional speculative decode promoted only with target parity and measured end-to-end gain |
 | M21 | Heterogeneous invited participation and authenticated direct/relay operation without Tailscale dependency |
 | M22 | Complete planned UI, accessibility/performance/privacy gates, cold bootstrap, and sealed release closure |
+| M23 | Architecture-scoped heterogeneous stage-local KV, physical replay A/B, per-placement runtime evidence, and fail-closed mode negotiation |
+
+The next milestone must be specified before implementation. The leading M24 candidate is
+continuous batching with honest queue/batch attribution and a physical concurrency A/B. It
+must not be conflated with the already-completed M16 admission scheduler. Tensor parallelism,
+cross-backend KV migration, and mobile activation eligibility should remain independent
+milestones with their own parity, failure, resource, and UI gates.
 
 ## Reviewer rules
 

@@ -25,10 +25,12 @@ import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
+import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
 import { M21HeterogeneousSourcePanel } from './features/liveRoute/M21HeterogeneousSourcePanel';
 import { M22ReleaseSourcePanel } from './features/liveRoute/M22ReleaseSourcePanel';
+import { M23KvSourcePanel } from './features/liveRoute/M23KvSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
 import { HttpM20SpeculationClient } from './features/liveRoute/m20Speculation';
 import { useProductEvidence } from './features/productEvidence/ProductEvidenceContext';
@@ -307,6 +309,8 @@ export default function App({
       <>
         <ProductEvidenceSummary compact />
         {source.source_mode === 'live' ? <M22ReleaseSourcePanel view="inference" hideUnavailable /> : null}
+        {source.source_mode === 'live' ? <M23KvSourcePanel view="inference" hideUnavailable /> : null}
+        {source.source_mode === 'live' ? <LiveKvStatusPanel view="inference" freshness={rendered.sourceState.freshness} /> : null}
         <InferenceWorkspace
           client={source.source_mode !== 'live' ? fixtureInferenceClient : undefined}
           externalBlockReason={
@@ -326,7 +330,7 @@ export default function App({
           <>
             <ProductEvidenceSummary compact />
             {activeView === 'nodes' ? (
-              <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M21HeterogeneousSourcePanel view="nodes" hideUnavailable /><ProductNodesWorkspace sourceMode="live" /><M17ModelOperationSourcePanel view="nodes" /></>
+              <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M23KvSourcePanel view="nodes" hideUnavailable /><M21HeterogeneousSourcePanel view="nodes" hideUnavailable /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
               <LiveRouteWorkspace
                 view={activeView}
@@ -343,7 +347,7 @@ export default function App({
           </>
         )
       : activeView === 'nodes'
-        ? <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><ProductNodesWorkspace sourceMode="live" /></>
+        ? <><M22ReleaseSourcePanel view="nodes" hideUnavailable /><M23KvSourcePanel view="nodes" hideUnavailable /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /></>
         : isProductEventState(rendered.sourceState)
           ? activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents'
             ? (

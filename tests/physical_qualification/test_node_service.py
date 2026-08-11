@@ -676,6 +676,82 @@ def test_infer_decode_accepts_eos_completion_without_visible_token(
     }
 
 
+def test_stage_local_infer_start_waits_for_prefill_token_event(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-stage-local-prefill",
+        deployment_id="deployment-stage-local-prefill",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+
+    class Router:
+        status_calls = 0
+        sink: Any = None
+
+        def start_distributed_prefill(self, request, sink, **_kwargs: Any) -> str:
+            self.sink = sink
+            return request.request_id
+
+        def request_status(self, request_id: str) -> str:
+            assert request_id == "request-stage-local-prefill"
+            self.status_calls += 1
+            if self.status_calls == 2:
+                self.sink.emit(0, 42)
+            return "DECODING"
+
+        def get_request(self, request_id: str):
+            assert request_id == "request-stage-local-prefill"
+            hop = type("Hop", (), {"placement_id": "placement-0"})()
+            manifest = type(
+                "Manifest",
+                (),
+                {"path_id": "path-0", "path_attempt": 0, "ordered_hops": (hop,)},
+            )()
+            return type("Record", (), {"manifest": manifest})()
+
+    service.state = "RUNNING"
+    service.runtime = type("Runtime", (), {"decode_mode": "stage_local_kv"})()
+    service.router = Router()  # type: ignore[assignment]
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+    payload = {
+        "request": {
+            "request_id": "request-stage-local-prefill",
+            "prompt_token_ids": [1, 2, 3],
+            "max_new_tokens": 4,
+            "expected_new_tokens": 4,
+            "qos_class": "interactive",
+            "admitted_at": 0.0,
+            "target_ttft_ms": 1_000.0,
+            "target_tpot_ms": 1_000.0,
+            "target_tokens_per_second": 1.0,
+            "sampling_seed": 17,
+            "generation_config_digest": "sha256:" + "a" * 64,
+        }
+    }
+
+    started = service._infer_start(payload)
+
+    assert started["details"]["output"] == {
+        "token_indexes": [0],
+        "token_ids": [42],
+    }
+    assert service.router.status_calls == 2
+
+
 def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:
     socket_root = tmp_path / "socket"
     socket_root.mkdir()
@@ -1638,7 +1714,11 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
             time.sleep(0.02)
         assert first_after_cancel["runtime"]["active_state_count"] == 0
         assert second_after_cancel["runtime"]["active_state_count"] == 0
-        for snapshot in (first_after_cancel, second_after_cancel):
+        for node_id, snapshot in zip(
+            ("node-a", "node-b"),
+            (first_after_cancel, second_after_cancel),
+            strict=True,
+        ):
             resources = snapshot["host_resources"]
             assert resources["protocol"] == "mycelium.host_resource_snapshot.v1"
             assert resources["valid_until_unix_ms"] > resources["observed_at_unix_ms"]
@@ -1647,6 +1727,17 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
             assert resources["disk_free_bytes"] > 0
             assert resources["runtime_build_digest"].startswith("sha256:")
             assert resources["resource_digest"].startswith("sha256:")
+            backend = (
+                runtime_backends_by_node[node_id]
+                if runtime_backends_by_node is not None
+                else runtime_backend
+            )
+            expected_gpt2_modes = ["complete_context_replay"]
+            if backend == "mlx":
+                expected_gpt2_modes.append("stage_local_kv")
+            assert resources["decode_modes_by_architecture"]["gpt2"] == (
+                expected_gpt2_modes
+            )
             assert resources["route_ready"] is False
         assert first_after_cancel["transport_pending_delivery_count"] == 0
         assert second_after_cancel["transport_pending_delivery_count"] == 0

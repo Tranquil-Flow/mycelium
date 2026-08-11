@@ -14,7 +14,14 @@ from mycelium_router.mlx_runtime import (
     _qwen2_linear as _cached_qwen2_linear,
     _rms_norm,
 )
-from numpy_runtime import NumpyQwen3Runtime
+from numpy_runtime import (
+    NumpyQwen3Runtime,
+    _qwen2_block as _numpy_qwen3_block,
+    _qwen2_block_with_kv as _numpy_qwen3_block_with_kv,
+    _qwen2_embedding as _numpy_qwen3_embedding,
+    _qwen2_linear as _numpy_qwen3_linear,
+    _rms_norm as _numpy_rms_norm,
+)
 from runtime_contracts import normalize_qwen3_model_config
 from runtime_loader import _qwen2_block, _qwen2_linear
 from runtime_loader import _quantize_qwen2_mlx_tensors
@@ -338,3 +345,70 @@ def test_qwen3_stage_local_kv_matches_complete_context() -> None:
     assert int(mx.argmax(cached[0, -1]).item()) == int(
         mx.argmax(reference[0, -1]).item()
     )
+
+
+def test_qwen3_numpy_stage_local_kv_matches_complete_context() -> None:
+    config = _runtime("numpy")["model_config"]
+    tensors = _tensors()
+    prompt = (1, 7, 11, 5)
+    next_token = 9
+
+    reference = _numpy_qwen3_embedding(
+        tensors["model.embed_tokens.weight"],
+        np.array((prompt + (next_token,),), dtype=np.int64),
+    )
+    for layer in range(2):
+        reference = _numpy_qwen3_block(
+            reference,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            "qwen3",
+        )
+    reference = _numpy_rms_norm(
+        reference,
+        tensors["model.norm.weight"],
+        float(config["rms_norm_epsilon"]),
+    )
+    reference = _numpy_qwen3_linear(
+        reference[:, -1:, :], tensors["model.embed_tokens.weight"]
+    )
+
+    cached = _numpy_qwen3_embedding(
+        tensors["model.embed_tokens.weight"],
+        np.array((prompt,), dtype=np.int64),
+    )
+    cache: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    for layer in range(2):
+        cached, cache[layer] = _numpy_qwen3_block_with_kv(
+            cached,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            0,
+            None,
+            "qwen3",
+        )
+    cached = _numpy_qwen3_embedding(
+        tensors["model.embed_tokens.weight"],
+        np.array(((next_token,),), dtype=np.int64),
+    )
+    for layer in range(2):
+        cached, _ = _numpy_qwen3_block_with_kv(
+            cached,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            len(prompt),
+            cache[layer],
+            "qwen3",
+        )
+    cached = _numpy_rms_norm(
+        cached,
+        tensors["model.norm.weight"],
+        float(config["rms_norm_epsilon"]),
+    )
+    cached = _numpy_qwen3_linear(cached, tensors["model.embed_tokens.weight"])
+
+    np.testing.assert_allclose(cached, reference, rtol=2e-5, atol=2e-6)
+    assert int(np.argmax(cached[0, -1])) == int(np.argmax(reference[0, -1]))

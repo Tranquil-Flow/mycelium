@@ -84,6 +84,13 @@ def _verified_node(
         supported_dtypes=tuple(resources["supported_dtypes"]),
         supported_quantizations=tuple(resources["supported_quantizations"]),
         supported_decode_modes=tuple(resources["supported_decode_modes"]),
+        decode_modes_by_architecture={
+            str(architecture): tuple(modes)
+            for architecture, modes in _mapping(
+                resources.get("decode_modes_by_architecture", {}),
+                "architecture decode modes",
+            ).items()
+        },
         runtime_build_digest=str(resources["runtime_build_digest"]),
         available_memory_bytes=int(resources["available_memory_bytes"]),
         rss_bytes=int(resources["rss_bytes"]),

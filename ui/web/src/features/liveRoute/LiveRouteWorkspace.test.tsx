@@ -23,6 +23,9 @@ describe('LiveRouteWorkspace', () => {
     expect(screen.getByText('layers [0, 12) · mlx')).toBeInTheDocument();
     expect(screen.getByText('layers [12, 24) · mlx')).toBeInTheDocument();
     expect(screen.getByText('10 / 9 / 6')).toBeInTheDocument();
+    expect(screen.getByText(/stage_local_kv · 0 active · 0 B/)).toBeInTheDocument();
+    expect(screen.getByText(/qwen2 · position released · peak 4.0 KiB · released \(normal_completion\)/)).toBeInTheDocument();
+    expect(screen.getByText(/decode work 8 input tokens \/ 8 operations/)).toBeInTheDocument();
   });
 
   it('labels observed timing as physical measurement', async () => {

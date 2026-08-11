@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -334,6 +334,9 @@ class NodeFeasibilityEvidence:
     cached_content_digests: tuple[str, ...] = ()
     thermal_state: str | None = None
     power_state: str | None = None
+    decode_modes_by_architecture: Mapping[str, tuple[str, ...]] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         if not self.node_id or self.node_id != self.node_id.strip():
@@ -377,6 +380,20 @@ class NodeFeasibilityEvidence:
             value = getattr(self, name)
             if value is not None and (not value or value != value.strip()):
                 raise ValueError(f"node feasibility evidence {name} is invalid")
+        if not isinstance(self.decode_modes_by_architecture, Mapping):
+            raise ValueError("node feasibility architecture decode modes are invalid")
+        for architecture, modes in self.decode_modes_by_architecture.items():
+            if (
+                not isinstance(architecture, str)
+                or not architecture
+                or architecture != architecture.strip()
+                or not isinstance(modes, tuple)
+                or not modes
+                or len(modes) != len(set(modes))
+                or any(not mode or mode != mode.strip() for mode in modes)
+                or any(mode not in self.supported_decode_modes for mode in modes)
+            ):
+                raise ValueError("node feasibility architecture decode modes are invalid")
 
     def projection(self) -> dict[str, object]:
         return {
@@ -398,6 +415,12 @@ class NodeFeasibilityEvidence:
             "cached_content_digests": list(self.cached_content_digests),
             "thermal_state": self.thermal_state,
             "power_state": self.power_state,
+            "decode_modes_by_architecture": {
+                architecture: list(modes)
+                for architecture, modes in sorted(
+                    self.decode_modes_by_architecture.items()
+                )
+            },
         }
 
 
@@ -553,6 +576,12 @@ def swarm_feasibility_evidence_from_document(
                     "supported_quantizations": tuple(value["supported_quantizations"]),
                     "supported_decode_modes": tuple(value["supported_decode_modes"]),
                     "cached_content_digests": tuple(value["cached_content_digests"]),
+                    "decode_modes_by_architecture": {
+                        architecture: tuple(modes)
+                        for architecture, modes in value[
+                            "decode_modes_by_architecture"
+                        ].items()
+                    },
                 }
             )
         )
@@ -1185,7 +1214,13 @@ def _preflight_feasibility(
             reasons.append(
                 f"quantization_unsupported:{node.node_id}:{entry.quantization}"
             )
-        if required_decode_mode not in resource.supported_decode_modes:
+        architecture_modes = resource.decode_modes_by_architecture.get(
+            entry.adapter_id,
+            resource.supported_decode_modes
+            if not resource.decode_modes_by_architecture
+            else (),
+        )
+        if required_decode_mode not in architecture_modes:
             reasons.append(
                 f"decode_mode_unsupported:{node.node_id}:{required_decode_mode}"
             )

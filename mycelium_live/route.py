@@ -923,6 +923,23 @@ class PhysicalLiveRoute:
             document = getattr(self, "_m22_release", None)
             return None if document is None else json.loads(json.dumps(document))
 
+    def set_m23_kv_evidence(self, document: Mapping[str, Any] | None) -> None:
+        """Attach the sealed privacy-reduced M23 heterogeneous KV gate."""
+
+        from mycelium_m23_kv import validate_m23_kv_evidence
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._m23_kv = (
+                None if document is None else validate_m23_kv_evidence(document)
+            )
+
+    def m23_kv(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m23_kv", None)
+            return None if document is None else json.loads(json.dumps(document))
+
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
         """Capture one fresh set of independently signed node resource observations."""
 
@@ -1007,6 +1024,9 @@ class PhysicalLiveRoute:
             "--command-timeout",
             str(int(NODE_COMMAND_TIMEOUT_SECONDS)),
         )
+        decode_mode = self._plan.get("decode_mode")
+        if decode_mode is not None:
+            command += ("--decode-mode", decode_mode)
         return _peer_process_argv(peer, command)
 
     def _verify_observation(
@@ -1977,18 +1997,67 @@ class PhysicalLiveRoute:
                 observation = self._last_snapshots.get(node_id, {})
                 details = observation.get("details", {})
                 runtime = details.get("runtime", {})
+                resources = details.get("host_resources", {})
                 mode = runtime.get("mode")
                 if isinstance(mode, str):
                     decode_modes.add(mode)
                 release_counts = runtime.get("release_counts", {})
+                architecture = runtime.get("architecture")
+                architecture_modes = (
+                    resources.get("decode_modes_by_architecture", {})
+                    if isinstance(resources, Mapping)
+                    else {}
+                )
+                supported_modes = (
+                    architecture_modes.get(architecture, [])
+                    if isinstance(architecture_modes, Mapping)
+                    and isinstance(architecture, str)
+                    else []
+                )
                 peers.append(
                     {
                         "node_id": node_id,
                         "placements": placements_by_node.get(node_id, []),
                         **peer_counters[node_id],
                         "decode_mode": mode if isinstance(mode, str) else None,
+                        "architecture": (
+                            architecture if isinstance(architecture, str) else None
+                        ),
+                        "supported_decode_modes": (
+                            [str(value) for value in supported_modes]
+                            if isinstance(supported_modes, (list, tuple))
+                            else []
+                        ),
                         "active_kv_state_count": int(
                             runtime.get("active_state_count", 0)
+                        ),
+                        "active_kv_bytes": int(runtime.get("active_kv_bytes", 0)),
+                        "peak_kv_bytes": int(runtime.get("peak_kv_bytes", 0)),
+                        "prefill_operation_count": int(
+                            runtime.get("prefill_operation_count", 0)
+                        ),
+                        "prefill_input_token_count": int(
+                            runtime.get("prefill_input_token_count", 0)
+                        ),
+                        "decode_operation_count": int(
+                            runtime.get("decode_operation_count", 0)
+                        ),
+                        "decode_input_token_count": int(
+                            runtime.get("decode_input_token_count", 0)
+                        ),
+                        "activation_output_bytes": int(
+                            runtime.get("activation_output_bytes", 0)
+                        ),
+                        "current_position": (
+                            int(runtime["current_position"])
+                            if type(runtime.get("current_position")) is int
+                            else None
+                        ),
+                        "release_state": str(runtime.get("release_state", "unknown")),
+                        "last_release_reason": (
+                            str(runtime["last_release_reason"])
+                            if isinstance(runtime.get("last_release_reason"), str)
+                            else None
                         ),
                         "retained_result_count": int(
                             runtime.get("retained_result_count", 0)

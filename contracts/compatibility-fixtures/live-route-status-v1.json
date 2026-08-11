@@ -11,12 +11,22 @@
   "model_id": "org/model",
   "peers": [
     {
+      "activation_output_bytes": 8192,
+      "active_kv_bytes": 0,
       "active_kv_state_count": 0,
       "applied_operation_count": 0,
+      "architecture": "qwen2",
+      "current_position": null,
+      "decode_input_token_count": 8,
       "decode_mode": "stage_local_kv",
+      "decode_operation_count": 8,
       "frames_received": 0,
       "frames_sent": 0,
       "node_id": "node-a",
+      "last_release_reason": "normal_completion",
+      "peak_kv_bytes": 4096,
+      "prefill_input_token_count": 9,
+      "prefill_operation_count": 1,
       "placements": [
         {
           "component_roles": [
@@ -31,16 +41,28 @@
           "start_layer": 0
         }
       ],
-      "release_counts": {},
+      "release_counts": {"normal_completion": 1},
+      "release_state": "released",
+      "supported_decode_modes": ["complete_context_replay", "stage_local_kv"],
       "retained_result_count": 0
     },
     {
+      "activation_output_bytes": 8192,
+      "active_kv_bytes": 0,
       "active_kv_state_count": 0,
       "applied_operation_count": 0,
+      "architecture": "qwen2",
+      "current_position": null,
+      "decode_input_token_count": 8,
       "decode_mode": "stage_local_kv",
+      "decode_operation_count": 8,
       "frames_received": 0,
       "frames_sent": 0,
       "node_id": "node-b",
+      "last_release_reason": "normal_completion",
+      "peak_kv_bytes": 4096,
+      "prefill_input_token_count": 9,
+      "prefill_operation_count": 1,
       "placements": [
         {
           "component_roles": [
@@ -56,7 +78,9 @@
           "start_layer": 2
         }
       ],
-      "release_counts": {},
+      "release_counts": {"normal_completion": 1},
+      "release_state": "released",
+      "supported_decode_modes": ["complete_context_replay", "stage_local_kv"],
       "retained_result_count": 0
     }
   ],

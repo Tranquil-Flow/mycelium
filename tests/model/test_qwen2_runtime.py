@@ -12,7 +12,15 @@ from mycelium_router.mlx_runtime import (
     _qwen2_linear as _cached_qwen2_linear,
     _rms_norm as _cached_rms_norm,
 )
-from numpy_runtime import NumpyQwen2Runtime
+from numpy_runtime import (
+    NumpyQwen2Runtime,
+    _qwen2_block as _numpy_qwen2_block,
+    _qwen2_block_with_kv as _numpy_qwen2_block_with_kv,
+    _qwen2_embedding as _numpy_qwen2_embedding,
+    _qwen2_linear as _numpy_qwen2_linear,
+    _rms_norm as _numpy_rms_norm,
+    quantize_qwen2_numpy_tensors,
+)
 from runtime_loader import (
     _digest_probe_output,
     _qwen2_block,
@@ -248,3 +256,78 @@ def test_qwen2_stage_local_kv_decode_matches_complete_context(
     assert int(mx.argmax(cached[0, -1]).item()) == int(
         mx.argmax(reference[0, -1]).item()
     )
+
+
+@pytest.mark.parametrize("quantization", ["none", "int8-weight-only"])
+def test_qwen2_numpy_stage_local_kv_matches_complete_context(
+    quantization: str,
+) -> None:
+    config = _runtime("numpy", quantization)["model_config"]
+    tensors = _tensors()
+    if quantization == "int8-weight-only":
+        tensors = quantize_qwen2_numpy_tensors(tensors)
+    prompt = (1, 7, 11, 5)
+    next_token = 9
+
+    reference = _numpy_qwen2_embedding(
+        tensors["model.embed_tokens.weight"],
+        np.array((prompt + (next_token,),), dtype=np.int64),
+    )
+    for layer in range(2):
+        reference = _numpy_qwen2_block(
+            reference,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+        )
+    reference = _numpy_rms_norm(
+        reference,
+        tensors["model.norm.weight"],
+        float(config["rms_norm_epsilon"]),
+    )
+    reference = _numpy_qwen2_linear(
+        reference[:, -1:, :], tensors["model.embed_tokens.weight"]
+    )
+
+    cached = _numpy_qwen2_embedding(
+        tensors["model.embed_tokens.weight"],
+        np.array((prompt,), dtype=np.int64),
+    )
+    layer_cache = {}
+    for layer in range(2):
+        cached, layer_cache[layer] = _numpy_qwen2_block_with_kv(
+            cached,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            0,
+            None,
+        )
+    cached = _numpy_qwen2_embedding(
+        tensors["model.embed_tokens.weight"],
+        np.array(((next_token,),), dtype=np.int64),
+    )
+    for layer in range(2):
+        cached, _ = _numpy_qwen2_block_with_kv(
+            cached,
+            tensors,
+            f"model.layers.{layer}.",
+            config,
+            len(prompt),
+            layer_cache[layer],
+        )
+    cached = _numpy_rms_norm(
+        cached,
+        tensors["model.norm.weight"],
+        float(config["rms_norm_epsilon"]),
+    )
+    cached = _numpy_qwen2_linear(cached, tensors["model.embed_tokens.weight"])
+
+    tolerance = 3e-3 if quantization == "int8-weight-only" else 2e-6
+    np.testing.assert_allclose(
+        cached,
+        reference,
+        rtol=5e-3 if quantization == "int8-weight-only" else 2e-5,
+        atol=tolerance,
+    )
+    assert int(np.argmax(cached[0, -1])) == int(np.argmax(reference[0, -1]))

@@ -61,7 +61,13 @@ export function liveRouteStatusFixture(): LiveRouteStatus {
       {
         node_id: 'node-0', placements: [], frames_sent: 20, frames_received: 19,
         applied_operation_count: 12, decode_mode: 'stage_local_kv',
+        architecture: 'qwen2', supported_decode_modes: ['complete_context_replay', 'stage_local_kv'],
         active_kv_state_count: 0, retained_result_count: 2,
+        active_kv_bytes: 0, peak_kv_bytes: 4096, current_position: null,
+        prefill_operation_count: 1, prefill_input_token_count: 9,
+        decode_operation_count: 8, decode_input_token_count: 8,
+        activation_output_bytes: 8192,
+        release_state: 'released', last_release_reason: 'normal_completion',
         release_counts: { request_complete: 1 },
       },
     ],
