@@ -189,11 +189,48 @@ replay, and fixture sources.
 ### A2 — Assignment lifecycle and representation authority
 
 **Outcome:** model preparation uses the exact representation approved and priced by the
-planner.
+planner, and assigned artifacts can be acquired efficiently from the authorized swarm
+without giving a peer unassigned model content.
+
+Before production work, write and approve a closed
+`mycelium.swarm_artifact_acquisition.v1` specification. Petals is an architectural
+reference for decentralized block availability and capacity-aware serving, not evidence
+that its model-weight acquisition is itself a BitTorrent protocol. Mycelium's extension
+is an explicit content-addressed, multi-source acquisition protocol owned by the
+Provisioner. Availability evidence never grants placement, changes an assignment, or
+makes an artifact executable.
+
+Implement A2 in this order:
+
+1. **Authority and immutable artifact manifests.** Freeze the owner-approved model,
+   revision, serving representation, assignment, tensor/component scope, and feasibility
+   generation. Build assignment-local stage packs with fixed-size content chunks, a
+   canonical Merkle/digest manifest, exact byte bounds, and signatures or equivalent
+   authenticated owner provenance. Peers are never authorized for model layers or
+   shared components outside their current assignment allow-list.
+2. **Privacy-reduced availability discovery.** Authorized peers advertise immutable
+   content/chunk digests, verified byte availability, freshness, serving limits, and
+   transfer health. They do not advertise local paths, credentials, raw addresses, or
+   model bytes. The Planner may consider availability and redundancy as cost evidence;
+   only the Planner chooses placement, and only the Provisioner issues acquisition
+   grants.
+3. **Swarm-assisted acquisition.** Fetch missing chunks concurrently from multiple
+   authorized peers when at least two useful sources exist, with the operator-owned
+   source/cache as fallback. Support resumable range/chunk transfer, bounded retry,
+   source rotation, duplicate suppression, disk reservation, concurrent staging locks,
+   corruption quarantine, and bandwidth/concurrency budgets. Prioritize the chunks on
+   the route-readiness critical path; use rare-chunk preference only as a secondary
+   redundancy policy. Below a measured size/source/link threshold, select a simpler
+   single-source transfer to avoid coordination and hashing overhead.
+4. **Verification and atomic promotion.** Verify each chunk before reuse, then verify
+   the complete stage-pack digest, artifact size, model revision, representation digest,
+   tensor ownership/scope, assignment digest, and feasibility generation. Only a fully
+   verified pack is atomically promoted and eligible for load proof. Interrupted or
+   corrupt partial state is never runtime-visible.
 
 - Add resumable assignment-local transfers, corruption quarantine, bounded retry,
   concurrent staging locks, disk reservation, eviction policy, atomic promotion, and
-  zero-duplicate warm reuse.
+  zero-duplicate warm reuse across both origin and peer sources.
 - Require an owner authorization choosing an existing immutable representation or an
   explicitly named derived representation.
 - Reject preparation when authorization, feasibility, builder output, assignment,
@@ -202,16 +239,35 @@ planner.
   workload changes.
 - Keep newly enrolled peers outside preparation until current capability and directed-
   link evidence includes them.
+- Keep artifact acquisition subordinate to serving traffic: use separate bounded queues,
+  bandwidth reservations, cancellation, and thermal/power policies so staging cannot
+  congest activation links or starve an admitted inference request.
+- Rebalance availability toward under-replicated or bottleneck stage packs only through
+  explicit planner/provisioner intent. Cached content is evidence and a performance
+  opportunity, never permission to auto-place a peer or silently replicate a model.
 
-**Physical positive:** one cold preparation followed by a warm preparation transfers
-zero duplicate bytes and loads the exact authorized representation.
+**Physical positive:** add one freshly assigned peer whose stage pack is obtained from
+at least two existing authorized peers, with exact per-source/chunk byte accounting,
+digest verification, no unassigned-layer transfer, and no duplicate origin fetch. Then
+repeat the same preparation from a warm cache and transfer zero duplicate bytes while
+loading the exact authorized representation. A serving-traffic A/B must show acquisition
+budgets preserve the frozen activation latency/goodput envelope.
 
 **Negative gate:** corrupt reuse, insufficient disk, representation drift, authorization
-drift, stale feasibility, interrupted transfer, and concurrent staging fail safely.
+drift, stale feasibility, interrupted transfer, source disappearance, unauthorized or
+unassigned chunk requests, replayed grants, manifest substitution, and concurrent staging
+fail safely. An interrupted multi-source transfer resumes from another authorized peer;
+if no source remains, it falls back to the approved origin or stays explicitly
+unprepared. It never widens the assignment or downloads an unapproved representation.
 
-**UI:** Models/Settings show representation and lifecycle; Nodes shows per-placement
-artifact state; Plans shows allocation and representation binding; Readiness shows exact
-blockers; Incidents records acquisition failures without private paths.
+**UI:** Models/Settings show representation, lifecycle, acquisition policy, and owner
+authority; Nodes shows each placement's assigned layers, cached/missing/verified bytes,
+source count, transfer rate, ETA, and artifact state; Plans shows allocation,
+representation binding, artifact sources, redundancy, and origin fallback; Readiness
+shows manifest, authorization, transfer, verification, and load blockers; Incidents
+records source loss, resume, corruption, quarantine, fallback, and terminal acquisition
+failure without private paths. Refresh/reconnect reconstructs progress and terminal
+history from the Provisioner's live authority rather than browser-local state.
 
 ### A3 — Qualify useful local models
 
@@ -585,10 +641,13 @@ The Astra architecture is complete only when:
    level;
 7. Qwen2.5-7B and any serving Qwen3-8B representation are selected only after exact
    representation-bound physical qualification;
-8. speculative decoding is either physically beneficial under its frozen gate or visibly
+8. assignment-local stage packs can be acquired from multiple authorized swarm peers,
+   resume after source loss, reject corrupt or unauthorized chunks, and warm-reuse exact
+   verified content without duplicate transfer or interference with admitted traffic;
+9. speculative decoding is either physically beneficial under its frozen gate or visibly
    disabled with measured reasons;
-9. all eight workspaces consume genuine live authorities and label sealed history;
-10. the release decision is derived from executed artifacts rather than assertions.
+10. all eight workspaces consume genuine live authorities and label sealed history;
+11. the release decision is derived from executed artifacts rather than assertions.
 
 ## 9. Separately reviewed future program
 
