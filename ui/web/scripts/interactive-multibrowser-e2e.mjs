@@ -158,9 +158,7 @@ async function main() {
       '--worker-static-root', path.join(ROOT, 'mycelium_interactive', 'static'),
     ]
     : [
-      '-m', 'mycelium_demo',
-      'serve',
-      '--mode', 'live',
+      '-m', 'mycelium_interactive.server',
       '--host', '127.0.0.1',
       '--port', String(serverPort),
       '--state-root', stateRoot,
@@ -345,7 +343,7 @@ async function main() {
       protocol: 'mycelium.interactive_multibrowser_e2e.v1',
       exact_launch_entrypoint: deviceLabHost
         ? 'python3.14 -m mycelium_demo device-lab --advertise-host <LAN_IP>'
-        : 'python3.14 -m mycelium_demo serve --mode live',
+        : 'python3.14 -m mycelium_interactive.server --host 127.0.0.1',
       network_origin: deviceLabHost ? 'lan_address_https' : 'loopback_http',
       node_https_api_verified: deviceLabHost !== null,
       browser_certificate_errors_ignored: deviceLabHost !== null,

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import mlx.core as mx
 import numpy as np
+import pytest
 
 from model_manifest import compile_model_manifest, verify_manifest_digest
+from model_adapters import adapter_for_config, adapter_for_runtime
 from mycelium_router.mlx_runtime import (
     _qwen2_block_with_kv,
     _qwen2_embedding,
@@ -99,6 +101,47 @@ def test_qwen3_normalizes_real_dense_config_contract() -> None:
     assert normalized["n_embd"] == 4096
     assert normalized["n_kv_head"] == 8
     assert normalized["head_dim"] == 128
+
+
+def test_qwen3_8b_has_a_first_class_runtime_adapter() -> None:
+    adapter = adapter_for_config(
+        {
+            "model_type": "qwen3",
+            "architectures": ["Qwen3ForCausalLM"],
+            "num_hidden_layers": 36,
+        }
+    )
+    adapter.validate_architectures(
+        {
+            "model_type": "qwen3",
+            "architectures": ["Qwen3ForCausalLM"],
+            "num_hidden_layers": 36,
+        }
+    )
+
+    assert adapter is adapter_for_runtime("qwen3")
+    assert adapter.layer_count({"num_hidden_layers": 36}) == 36
+    assert adapter.supported_architectures == ("Qwen3ForCausalLM",)
+    assert adapter.runtime_backends == ("mlx", "numpy")
+
+
+def test_qwen3_adapter_rejects_a_non_causal_or_moe_architecture() -> None:
+    adapter = adapter_for_config(
+        {
+            "model_type": "qwen3",
+            "architectures": ["Qwen3MoeForCausalLM"],
+            "num_hidden_layers": 36,
+        }
+    )
+
+    with pytest.raises(ValueError, match="unsupported qwen3 architecture"):
+        adapter.validate_architectures(
+            {
+                "model_type": "qwen3",
+                "architectures": ["Qwen3MoeForCausalLM"],
+                "num_hidden_layers": 36,
+            }
+        )
 
 
 def test_qwen3_manifest_owns_exact_bias_free_decoder_tensors() -> None:

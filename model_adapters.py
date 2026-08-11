@@ -180,14 +180,32 @@ ADAPTERS = {
          "BertForMultipleChoice",
       ),
    ),
+   "qwen2": ModelAdapter(
+      architecture="qwen2",
+      layer_count_fields=("num_hidden_layers", "n_layer"),
+      block_prefix_template="model.layers.{layer}.",
+      components=_MODEL_LAYERS_COMPONENTS,
+      tied_lm_head_source=("model.embed_tokens.",),
+      supported_architectures=("Qwen2ForCausalLM",),
+      decoder_tensor_suffixes=QWEN2_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy"),
+   ),
+   "qwen3": ModelAdapter(
+      architecture="qwen3",
+      layer_count_fields=("num_hidden_layers", "n_layer"),
+      block_prefix_template="model.layers.{layer}.",
+      components=_MODEL_LAYERS_COMPONENTS,
+      tied_lm_head_source=("model.embed_tokens.",),
+      supported_architectures=("Qwen3ForCausalLM",),
+      decoder_tensor_suffixes=QWEN3_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy"),
+   ),
 }
 
 for _model_type in (
    "llama",
    "mistral",
    "mixtral",
-   "qwen2",
-   "qwen3",
    "gemma",
    "gemma2",
    "gemma3_text",
@@ -198,14 +216,8 @@ for _model_type in (
       block_prefix_template="model.layers.{layer}.",
       components=_MODEL_LAYERS_COMPONENTS,
       tied_lm_head_source=("model.embed_tokens.",),
-      decoder_tensor_suffixes=(
-         QWEN2_DECODER_TENSOR_SUFFIXES
-         if _model_type == "qwen2"
-         else QWEN3_DECODER_TENSOR_SUFFIXES
-         if _model_type == "qwen3"
-         else ()
-      ),
-      runtime_backends=("mlx", "numpy") if _model_type in {"qwen2", "qwen3"} else (),
+      decoder_tensor_suffixes=(),
+      runtime_backends=(),
    )
 
 

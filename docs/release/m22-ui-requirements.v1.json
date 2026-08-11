@@ -1,0 +1,26 @@
+{
+  "protocol": "mycelium.m22_ui_audit.v1",
+  "source": "Astra successor spec section 5 plus M22.1 synthesis of the 2026-07-15 Observatory and 2026-07-19 Product UI plans",
+  "requirements": [
+    {"id":"network-layouts","status":"verified","evidence":["ui/web/src/views/NetworkView.tsx","ui/web/src/graph/graph.test.ts"],"boundary":"Fixture layouts remain illustrative; live M14/M21 panels label observed topology."},
+    {"id":"network-filters-inspector-formulas","status":"verified","evidence":["ui/web/src/views/NetworkView.tsx","ui/web/src/views/PlansView.tsx","ui/web/src/features/liveRoute/M15WorkloadPanel.tsx"],"boundary":"Unknown formula inputs render as unavailable."},
+    {"id":"network-stable-replay","status":"verified","evidence":["ui/web/src/data/observatoryEventSource.test.ts","ui/web/src/features/readiness/evidenceHistory.test.ts"],"boundary":"Replay evidence is never live qualification."},
+    {"id":"network-large-fleet-clustering-bundling","status":"verified","evidence":["ui/web/src/graph/graph.test.ts","ui/web/src/graph/performanceFixtures.ts"],"boundary":"24/100-node graphs are renderer-only synthetic fixtures."},
+    {"id":"accessible-tables-keyboard-flow","status":"verified","evidence":["ui/web/src/features/readiness/EvidenceView.test.tsx","ui/web/e2e/product-shell.smoke.spec.ts"],"boundary":"Native controls and scoped tables retain semantic labels."},
+    {"id":"reduced-motion-high-contrast","status":"verified","evidence":["ui/web/src/styles.css","ui/web/src/features/membership/Membership.module.css"],"boundary":"OS preferences and explicit reduced-motion state disable animation."},
+    {"id":"pseudonymized-export","status":"verified","evidence":["ui/web/src/features/readiness/pseudonymizedExport.test.ts","ui/web/src/features/readiness/EvidenceView.test.tsx"],"boundary":"Raw node IDs and private locators are omitted."},
+    {"id":"plans-comparison-frontier","status":"verified","evidence":["ui/web/src/views/PlansView.tsx","ui/web/src/features/liveRoute/M15WorkloadPanel.test.tsx"],"boundary":"Modeled and observed alternatives are visually distinct."},
+    {"id":"plans-pruning","status":"verified","evidence":["ui/web/src/features/plans/planModel.test.ts","ui/web/src/features/liveRoute/M13PlacementPanel.test.tsx"],"boundary":"Absent pruning traces render as not supplied; the UI does not invent removed nodes."},
+    {"id":"plans-replication-speculation","status":"verified","evidence":["ui/web/src/features/liveRoute/M18ReplicationPanel.test.tsx","ui/web/src/features/liveRoute/M20SpeculationPanel.test.tsx"],"boundary":"Unpromoted speculation remains disabled with measured reason."},
+    {"id":"nodes-inventory-detail-onboarding","status":"verified","evidence":["ui/web/src/features/nodes/NodesWorkspace.test.tsx","ui/web/src/features/membership/membershipWorkspaces.test.tsx"],"boundary":"Membership and activation eligibility remain separate."},
+    {"id":"readiness-matrix-history-diff","status":"verified","evidence":["ui/web/src/features/readiness/EvidenceView.test.tsx","ui/web/src/features/readiness/evidenceHistory.test.ts"],"boundary":"Only supplied comparable captures participate in diffs."},
+    {"id":"incidents-replay","status":"verified","evidence":["ui/web/src/features/readiness/IncidentsView.test.tsx","ui/web/src/features/readiness/incidentReplay.test.ts"],"boundary":"Synthetic scenarios and live failures are labelled separately."},
+    {"id":"inference-lifecycle-history-attribution","status":"verified","evidence":["ui/web/src/features/inference/InferenceWorkspace.test.tsx","ui/web/src/features/inference/sessionStore.test.ts"],"boundary":"Each terminal request retains exact model/deployment attribution."},
+    {"id":"device-lab","status":"verified","evidence":["ui/web/src/features/deviceLab/DeviceLabWorkspace.test.tsx","ui/web/src/features/deviceLab/deviceLabCapability.test.ts"],"boundary":"Browser/mobile fixture work cannot imply distributed model inference."},
+    {"id":"settings","status":"verified","evidence":["ui/web/src/features/settings/SettingsWorkspace.test.tsx","ui/web/src/features/inference/deploymentClient.ts"],"boundary":"Only qualified future-request defaults are selectable."},
+    {"id":"responsive-320-to-large-desktop","status":"verified","evidence":["ui/web/src/styles.css","ui/web/e2e/product-shell.smoke.spec.ts"],"boundary":"No horizontal document overflow; data tables scroll within labelled regions."},
+    {"id":"navigation-refresh-back-forward-reconnect","status":"verified","evidence":["ui/web/src/App.test.tsx","ui/web/src/features/inference/sessionStore.test.ts","ui/web/src/data/observatoryEventSource.test.ts"],"boundary":"Source identity changes never reuse a prior accepted bundle."},
+    {"id":"fixture-replay-live-separation","status":"verified","evidence":["ui/web/src/test/renderProductFeature.test.tsx","ui/web/src/components/AppShell.tsx"],"boundary":"Fixture and replay can never satisfy live readiness."},
+    {"id":"all-eight-workspaces","status":"verified","evidence":["ui/web/src/app/navigation.test.ts","ui/web/e2e/product-shell.smoke.spec.ts"],"boundary":"Release Closure is shared evidence, not a ninth workspace."}
+  ]
+}

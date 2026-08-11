@@ -1,9 +1,10 @@
-# Mycelium live MVP operator runbook (M14)
+# Mycelium live MVP operator runbook (M22)
 
-This runbook operates the bounded M7–M14 product: one or more sealed physical
+This runbook operates the bounded M7–M22 product: one or more sealed physical
 pipeline deployments, capability-aware contiguous allocation, measured directed
-cycle selection, qualified model selection, truthful failure handling, and the
-isolated Device Lab browser-worker path.
+cycle selection, qualified multi-model selection, continuous membership renewal,
+durable service packaging, truthful failure handling, and the isolated Device Lab
+browser-worker path.
 
 ## Claim boundary
 
@@ -95,6 +96,14 @@ The builder emits:
 
 Inspect the build report before staging. Layer ranges must be non-empty, contiguous,
 non-overlapping, and cover the entire decoder exactly once.
+
+For large checkpoints, `--stage-sharded` deterministically splits any stage file
+that would exceed the controller's 2 GiB per-artifact verification boundary. A
+multi-part stage still has one layer owner; each part is independently digest-bound
+and the checkpoint index maps every tensor to exactly one part. Never raise the
+controller limit to force a large single file through. The current local catalog
+includes the dense Qwen3-8B adapter, but admission must remain blocked whenever its
+measured memory or disk requirements do not fit the current swarm.
 
 ## 3. Stage without launching
 
@@ -260,14 +269,40 @@ and cleanup evidence outside the source tree in a private run directory. Seal on
 the exact approved files and record the resulting canonical manifest digest. Evidence
 containing prompts or outputs must never enter Observatory or a public release bundle.
 
-## 9. Shutdown
+## 9. Durable services and reviewer package
+
+Generate the three service packages from owner-reviewed absolute-path configs:
+
+```sh
+/opt/homebrew/bin/python3.14 scripts/package_m22_service.py \
+  --config release/service-configs/seed.json --output /private/service/seed
+/opt/homebrew/bin/python3.14 scripts/package_m22_service.py \
+  --config release/service-configs/node.json --output /private/service/node
+/opt/homebrew/bin/python3.14 scripts/package_m22_service.py \
+  --config release/service-configs/supervisor.json --output /private/service/supervisor
+```
+
+Install only the descriptor matching the host platform after replacing the sample
+paths with that host's pinned release root and private state directories. Service
+configuration and descriptors remain owner-only. Verify bounded restart, SIGTERM
+drain, coordinator restart/rejoin, health, and log rotation on the installed hosts;
+package generation alone is not runtime proof.
+
+Build the deterministic reviewer bundle with
+`scripts/build_astra_reviewer_bundle.py`. On a clean Mac, unpack it into an owner-only
+directory and run `scripts/astra_reviewer_preflight.py` twice with the same unique
+invitation. The second result must be an idempotent status read, not a second join.
+Membership is not stage participation; placement, artifact load, and a physical
+qualification must still pass before the reviewer host appears in an inference route.
+
+## 10. Shutdown
 
 Send `SIGINT` or `SIGTERM` to each supervisor and Device Lab server. Confirm all
 native and browser worker sessions exit, all active KV state is zero, and every
 digest-bound staging root is removed from its owning host. Do not delete a broad
 directory, an unverified path, or a root belonging to another run.
 
-## 10. Adding trusted users and devices
+## 11. Adding trusted users and devices
 
 Do not use the loopback product UI to transmit native join credentials. For multiple
 known testers or devices, follow `docs/swarm-multi-device-onboarding.md` and the

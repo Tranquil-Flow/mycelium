@@ -70,6 +70,7 @@ from stage_pack import (
 from weight_provisioning import artifact_report_errors, provision_assignment
 
 
+_MAX_STAGED_MODEL_FILE_BYTES = 1_900_000_000
 MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 MODEL_COMMIT = "7ae557604adf67be50417f59c2c2f167def9a775"
 LOAD_GENERATION = 17
@@ -840,6 +841,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 sharded_root,
                 shard_count=len(node_ids),
                 layer_ranges=planned_ranges,
+                max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
             )
             prepared = prepare(sharded_root)
     else:

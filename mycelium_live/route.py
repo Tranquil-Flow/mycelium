@@ -906,6 +906,23 @@ class PhysicalLiveRoute:
             document = getattr(self, "_m21_heterogeneous", None)
             return None if document is None else json.loads(json.dumps(document))
 
+    def set_m22_release_evidence(self, document: Mapping[str, Any] | None) -> None:
+        """Attach the privacy-reduced M22 release-closure projection."""
+
+        from mycelium_m22_release import validate_release_evidence
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            self._m22_release = (
+                None if document is None else validate_release_evidence(document)
+            )
+
+    def m22_release(self) -> Mapping[str, Any] | None:
+        with self._lock:
+            document = getattr(self, "_m22_release", None)
+            return None if document is None else json.loads(json.dumps(document))
+
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
         """Capture one fresh set of independently signed node resource observations."""
 

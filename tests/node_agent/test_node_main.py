@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 from contextlib import nullcontext
 import gc
+import hashlib
 import importlib
 import io
 from email.message import Message
@@ -166,7 +167,7 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
         coordinator,
         host="127.0.0.1",
         port=0,
-    ) as seed_server:
+    ) as _seed_server:
         bundle = coordinator.mint_invite(nonce="node-main-invite", ttl_seconds=120)
         _write_bundle(invite_file, bundle)
         command = _node_command(
@@ -194,20 +195,32 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
             assert bundle["token"] not in process_listing
             assert bundle["token"] not in json.dumps(status, sort_keys=True)
             assert status == {
+                "connectivity_state": "online",
                 "event": "node_started",
+                "last_signed_observation_unix_ms": status[
+                    "last_signed_observation_unix_ms"
+                ],
                 "membership_generation": 1,
-                "node_endpoint_id": status["node_endpoint_id"],
+                "node_endpoint_identity_digest": status[
+                    "node_endpoint_identity_digest"
+                ],
                 "node_id": "node-main-a",
                 "node_process_pid": status["node_process_pid"],
+                "placement_impact": "qualification_still_required",
                 "protocol": "mycelium.node_main_status.v1",
+                "reconnect_action": "none",
+                "renewal_deadline_unix_ms": status[
+                    "renewal_deadline_unix_ms"
+                ],
                 "route_ready": False,
-                "seed_url": seed_server.base_url,
             }
             assert isinstance(status["node_process_pid"], int)
             assert status["node_process_pid"] > 0
             assert status["node_process_pid"] != process.pid
             member = coordinator.member("node-main-a")
-            assert member["endpoint_id"] == status["node_endpoint_id"]
+            assert status["node_endpoint_identity_digest"] == "sha256:" + hashlib.sha256(
+                member["endpoint_id"].encode("utf-8")
+            ).hexdigest()
             assert member["generation"] == 1
             assert member["last_heartbeat_sequence"] == 1
             assert member["lifecycle_state"] == "RUNNING"
@@ -703,6 +716,8 @@ for line in sys.stdin:
 
     class FakeSession:
         generation = 1
+        lease_expires_at = time.time() + 120
+        node_id = "node-cleanup"
 
         def __init__(self, **_kwargs: Any) -> None:
             pass

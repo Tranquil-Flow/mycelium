@@ -26,6 +26,7 @@ import { M18ReplicationSourcePanel } from './M18ReplicationSourcePanel';
 import { M19RecoverySourcePanel } from './M19RecoverySourcePanel';
 import { M20SpeculationSourcePanel } from './M20SpeculationSourcePanel';
 import { M21HeterogeneousSourcePanel } from './M21HeterogeneousSourcePanel';
+import { M22ReleaseSourcePanel } from './M22ReleaseSourcePanel';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -158,6 +159,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'network' ? (
         <>
+          <M22ReleaseSourcePanel view="network" hideUnavailable />
           <M21HeterogeneousSourcePanel view="network" hideUnavailable />
           <M19RecoverySourcePanel view="network" hideUnavailable />
           <M18ReplicationSourcePanel view="network" hideUnavailable />
@@ -180,6 +182,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
         </>
       ) : null}
 
+      {view === 'plans' ? <M22ReleaseSourcePanel view="plans" hideUnavailable /> : null}
       {view === 'plans' ? (
         <><M21HeterogeneousSourcePanel view="plans" hideUnavailable /><M20SpeculationSourcePanel view="plans" hideUnavailable /><M19RecoverySourcePanel view="plans" hideUnavailable /><M18ReplicationSourcePanel view="plans" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>M15 policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
@@ -197,6 +200,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'readiness' ? (
         <>
+          <M22ReleaseSourcePanel view="readiness" hideUnavailable />
           <M21HeterogeneousSourcePanel view="readiness" hideUnavailable />
           <M20SpeculationSourcePanel view="readiness" hideUnavailable />
           <M19RecoverySourcePanel view="readiness" hideUnavailable />
@@ -220,6 +224,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
         </>
       ) : null}
 
+      {view === 'incidents' ? <M22ReleaseSourcePanel view="incidents" hideUnavailable /> : null}
       {view === 'incidents' ? (
         <><M19RecoverySourcePanel view="incidents" hideUnavailable /><M18ReplicationSourcePanel view="incidents" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="incidents" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
           <h2 id="live-incidents-title">Physical route incident log</h2>

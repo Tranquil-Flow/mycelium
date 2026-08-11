@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import hashlib
 import json
-import math
 import os
 from pathlib import Path
+import random
 import signal
 import stat
 import sys
@@ -38,6 +39,7 @@ from .durable_membership import (
     save_membership_state,
 )
 from .membership import NodeMembershipSession
+from .reconnect import RenewalRetryPolicy, transient_renewal_failure
 from .process import (
     _ExecutableIdentity,
     PhysicalNodeProcess,
@@ -302,6 +304,9 @@ def _parser() -> argparse.ArgumentParser:
         default="NEW",
     )
     parser.add_argument("--heartbeat-interval", type=float, default=30.0)
+    parser.add_argument("--renewal-jitter-fraction", type=float, default=0.15)
+    parser.add_argument("--reconnect-base-seconds", type=float, default=0.5)
+    parser.add_argument("--reconnect-max-seconds", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -403,8 +408,13 @@ def _preflight(
 ]:
     state_root: PrivateDirectoryLease | None = None
     try:
-        if not math.isfinite(args.heartbeat_interval) or args.heartbeat_interval <= 0:
-            raise ValueError("heartbeat interval is invalid")
+        RenewalRetryPolicy(
+            heartbeat_interval_seconds=args.heartbeat_interval,
+            jitter_fraction=args.renewal_jitter_fraction,
+            reconnect_base_seconds=args.reconnect_base_seconds,
+            reconnect_max_seconds=args.reconnect_max_seconds,
+            lease_risk_window_seconds=max(args.heartbeat_interval, 1.0),
+        )
         state_root = private_directory_lease(
             args.data_dir,
             create=not args.dry_run,
@@ -535,6 +545,101 @@ def _join_rejected(exc: SeedHTTPError) -> bool:
         and exc.status == authoritative_status
         and exc.status == _error_status(exc.code)
     )
+
+
+def _endpoint_identity_digest(endpoint_id: str) -> str:
+    return "sha256:" + hashlib.sha256(endpoint_id.encode("utf-8")).hexdigest()
+
+
+def _renew_lease(
+    *,
+    client: SeedHTTPClient,
+    session: NodeMembershipSession,
+    lifecycle_state: str,
+    stopping: threading.Event,
+    policy: RenewalRetryPolicy,
+) -> bool:
+    """Renew one exact signed heartbeat with bounded idempotent retry."""
+
+    heartbeat = session.heartbeat(
+        lifecycle_state=lifecycle_state,
+        active_requests=0,
+        force=True,
+    )
+    if heartbeat is None:  # pragma: no cover - force=True makes this unreachable.
+        raise RuntimeError("membership_heartbeat_missing")
+    message = heartbeat.get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("message_id"), str):
+        raise RuntimeError("membership_heartbeat_invalid")
+    attempt = 0
+    disconnected = False
+    while not stopping.is_set():
+        try:
+            renewal = client.send_member_message(
+                heartbeat,
+                now=time.time() + 1.0,
+            )
+            session.accept_lease_renewal(
+                renewal,
+                heartbeat_message_id=message["message_id"],
+            )
+        except BaseException as exc:
+            lease_expires_at = session.lease_expires_at
+            if lease_expires_at is None:
+                raise RuntimeError("membership_lease_missing") from exc
+            now = time.time()
+            state = policy.state(
+                now=now,
+                lease_expires_at=lease_expires_at,
+                disconnected=True,
+            )
+            _emit_status(
+                {
+                    "protocol": _STATUS_PROTOCOL,
+                    "event": "membership_connectivity_changed",
+                    "node_id": session.node_id,
+                    "membership_generation": session.generation,
+                    "connectivity_state": state.value,
+                    "last_signed_observation_unix_ms": int(now * 1_000),
+                    "renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
+                    "reconnect_action": "bounded_exponential_retry",
+                    "placement_impact": "route_eligibility_requires_fresh_qualification",
+                    "route_ready": False,
+                }
+            )
+            if not transient_renewal_failure(exc) or state.value == "expired":
+                raise
+            delay = policy.reconnect_delay(
+                attempt=attempt,
+                random_value=random.random(),
+                now=now,
+                lease_expires_at=lease_expires_at,
+            )
+            if delay <= 0 or stopping.wait(delay):
+                return False
+            disconnected = True
+            attempt += 1
+            continue
+        if disconnected:
+            lease_expires_at = session.lease_expires_at
+            assert lease_expires_at is not None
+            now = time.time()
+            _emit_status(
+                {
+                    "protocol": _STATUS_PROTOCOL,
+                    "event": "membership_connectivity_changed",
+                    "node_id": session.node_id,
+                    "membership_generation": session.generation,
+                    "connectivity_state": "online",
+                    "last_signed_observation_unix_ms": int(now * 1_000),
+                    "renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
+                    "reconnect_action": "reconnected",
+                    "placement_impact": "qualification_still_required",
+                    "route_ready": False,
+                }
+            )
+        return True
+    return False
 
 
 def _run_bound(
@@ -753,32 +858,44 @@ def _run_bound(
                 EXIT_RUNTIME_FAILURE,
             ) from exc
 
-        heartbeat = session.heartbeat(
+        renewal_policy = RenewalRetryPolicy(
+            heartbeat_interval_seconds=args.heartbeat_interval,
+            jitter_fraction=args.renewal_jitter_fraction,
+            reconnect_base_seconds=args.reconnect_base_seconds,
+            reconnect_max_seconds=args.reconnect_max_seconds,
+            lease_risk_window_seconds=max(args.heartbeat_interval, 1.0),
+        )
+        if not _renew_lease(
+            client=client,
+            session=session,
             lifecycle_state=args.lifecycle_state,
-            active_requests=0,
-        )
-        renewal = client.send_member_message(
-            heartbeat,
-            now=time.time() + 1.0,
-        )
-        session.accept_lease_renewal(
-            renewal,
-            heartbeat_message_id=heartbeat["message"]["message_id"],
-        )
+            stopping=stopping,
+            policy=renewal_policy,
+        ):
+            return EXIT_SUCCESS
+        lease_expires_at = session.lease_expires_at
+        assert lease_expires_at is not None
+        observed_at = time.time()
         status: dict[str, object] = {
-                "protocol": _STATUS_PROTOCOL,
-                "event": "node_started",
-                "node_id": args.node_id,
-                "node_endpoint_id": signer.endpoint_id,
-                "membership_generation": session.generation,
-                "seed_url": verified["payload"]["seed_url"],
-                "node_process_pid": process.pid,
-                "route_ready": False,
-            }
+            "protocol": _STATUS_PROTOCOL,
+            "event": "node_started",
+            "node_id": args.node_id,
+            "node_endpoint_identity_digest": _endpoint_identity_digest(
+                signer.endpoint_id
+            ),
+            "membership_generation": session.generation,
+            "connectivity_state": "online",
+            "last_signed_observation_unix_ms": int(observed_at * 1_000),
+            "renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
+            "reconnect_action": "none",
+            "placement_impact": "qualification_still_required",
+            "node_process_pid": process.pid,
+            "route_ready": False,
+        }
         if persisted is not None:
             status["membership_resumed"] = True
         _emit_status(status)
-        while not stopping.wait(args.heartbeat_interval):
+        while not stopping.wait(renewal_policy.heartbeat_delay(random.random())):
             rotation = client.rotation(now=time.time())
             if (
                 rotation is not None
@@ -800,18 +917,14 @@ def _run_bound(
                         now=time.time() + 1.0,
                     )
                     acknowledged_authority_generation = authority_generation
-            heartbeat = session.heartbeat(
+            if not _renew_lease(
+                client=client,
+                session=session,
                 lifecycle_state=args.lifecycle_state,
-                active_requests=0,
-            )
-            renewal = client.send_member_message(
-                heartbeat,
-                now=time.time() + 1.0,
-            )
-            session.accept_lease_renewal(
-                renewal,
-                heartbeat_message_id=heartbeat["message"]["message_id"],
-            )
+                stopping=stopping,
+                policy=renewal_policy,
+            ):
+                break
     except _EntrypointFailure as exc:
         failure = exc
     except Exception:

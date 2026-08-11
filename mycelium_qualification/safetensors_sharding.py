@@ -12,6 +12,7 @@ from typing import Any, BinaryIO, Sequence
 
 _INDEX_FILE = "model.safetensors.index.json"
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
+_MIN_OUTPUT_FILE_BYTES = 64
 _LAYER_KEY = re.compile(r"^model\.layers\.(\d+)\.")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _BLOB = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -176,6 +177,67 @@ def _write_shard(
     return destination.stat().st_size
 
 
+def _projected_shard_size(
+    tensors: Sequence[tuple[str, Path, int, dict[str, Any]]],
+) -> int:
+    header: dict[str, dict[str, Any]] = {}
+    cursor = 0
+    for name, _source, _data_start, record in tensors:
+        start, end = record["data_offsets"]
+        size = end - start
+        header[name] = {
+            "dtype": record["dtype"],
+            "shape": record["shape"],
+            "data_offsets": [cursor, cursor + size],
+        }
+        cursor += size
+    encoded = json.dumps(
+        header,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    encoded_length = len(encoded) + ((8 - len(encoded) % 8) % 8)
+    return 8 + encoded_length + cursor
+
+
+def _partition_tensors(
+    tensors: Sequence[tuple[str, Path, int, dict[str, Any]]],
+    *,
+    max_file_bytes: int | None,
+) -> tuple[tuple[tuple[str, Path, int, dict[str, Any]], ...], ...]:
+    if max_file_bytes is None:
+        return (tuple(tensors),)
+    if (
+        not isinstance(max_file_bytes, int)
+        or isinstance(max_file_bytes, bool)
+        or max_file_bytes < _MIN_OUTPUT_FILE_BYTES
+    ):
+        _reject("stage_shard_file_limit_invalid")
+    parts: list[list[tuple[str, Path, int, dict[str, Any]]]] = []
+    current: list[tuple[str, Path, int, dict[str, Any]]] = []
+    for tensor in tensors:
+        candidate = [*current, tensor]
+        if _projected_shard_size(candidate) <= max_file_bytes:
+            current = candidate
+            continue
+        if not current or _projected_shard_size((tensor,)) > max_file_bytes:
+            _reject("stage_shard_tensor_exceeds_file_limit")
+        parts.append(current)
+        current = [tensor]
+    if current:
+        parts.append(current)
+    return tuple(tuple(part) for part in parts)
+
+
+def _part_filename(filename: str, *, index: int, count: int) -> str:
+    if count == 1:
+        return filename
+    stem = filename.removesuffix(".safetensors")
+    return f"{stem}-part-{index + 1:03d}-of-{count:03d}.safetensors"
+
+
 def _validated_ranges(
     num_layers: int,
     shard_count: int,
@@ -241,6 +303,7 @@ def shard_qwen2_checkpoint(
     *,
     shard_count: int,
     layer_ranges: Sequence[range] | None = None,
+    max_file_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Copy a pinned dense Qwen2/Qwen3 checkpoint into static and layer shards."""
 
@@ -294,7 +357,6 @@ def shard_qwen2_checkpoint(
         groups[
             f"model-stage-{index_value + 1:03d}-of-{shard_count:03d}.safetensors"
         ] = []
-    output_map: dict[str, str] = {}
     for name in sorted(records):
         matched = _LAYER_KEY.match(name)
         if matched is None:
@@ -309,9 +371,22 @@ def shard_qwen2_checkpoint(
             )
         source_path, data_start, record = records[name]
         groups[filename].append((name, source_path, data_start, record))
-        output_map[name] = filename
     if any(not tensors for tensors in groups.values()):
         _reject("stage_shard_empty")
+
+    output_groups: dict[str, tuple[tuple[str, Path, int, dict[str, Any]], ...]] = {}
+    output_map: dict[str, str] = {}
+    for filename, tensors in groups.items():
+        parts = _partition_tensors(tensors, max_file_bytes=max_file_bytes)
+        for index_value, part in enumerate(parts):
+            part_filename = _part_filename(
+                filename,
+                index=index_value,
+                count=len(parts),
+            )
+            output_groups[part_filename] = part
+            for name, _source_path, _data_start, _record in part:
+                output_map[name] = part_filename
 
     destination_root.mkdir(parents=True, mode=0o700)
     try:
@@ -322,8 +397,12 @@ def shard_qwen2_checkpoint(
                 os.chmod(destination_root / asset, 0o600)
         file_sizes = {
             filename: _write_shard(destination_root / filename, tensors)
-            for filename, tensors in groups.items()
+            for filename, tensors in output_groups.items()
         }
+        if max_file_bytes is not None and any(
+            size > max_file_bytes for size in file_sizes.values()
+        ):
+            _reject("stage_shard_file_limit_exceeded")
         raw_tensor_bytes = sum(
             record[2]["data_offsets"][1] - record[2]["data_offsets"][0]
             for record in records.values()

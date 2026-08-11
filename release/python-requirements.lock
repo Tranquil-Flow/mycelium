@@ -1,0 +1,8 @@
+cryptography==46.0.5
+huggingface_hub==1.8.0
+mlx==0.31.1; sys_platform == "darwin"
+numpy==2.5.1
+pytest==9.0.2
+tokenizers==0.22.2
+typing_extensions==4.15.0
+zstandard==0.25.0

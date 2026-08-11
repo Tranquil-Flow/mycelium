@@ -146,6 +146,49 @@ def test_shards_exact_planner_ranges_and_rejects_non_covering_ranges(
         )
 
 
+def test_splits_one_stage_into_bounded_deterministic_sub_artifacts(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    values = _write_checkpoint(source)
+    destination = tmp_path / "bounded"
+
+    report = shard_qwen2_checkpoint(
+        source,
+        destination,
+        shard_count=2,
+        max_file_bytes=128,
+    )
+
+    index = json.loads((destination / "model.safetensors.index.json").read_text())
+    layer_zero = index["weight_map"]["model.layers.0.weight"]
+    layer_one = index["weight_map"]["model.layers.1.weight"]
+    assert layer_zero != layer_one
+    assert layer_zero.startswith("model-stage-001-of-002-part-")
+    assert layer_one.startswith("model-stage-001-of-002-part-")
+    assert all(item["size_bytes"] <= 128 for item in report["files"])
+    recovered = {}
+    for filename in sorted(set(index["weight_map"].values())):
+        recovered.update(_tensor_bytes(destination / filename))
+    assert recovered == values
+
+
+def test_rejects_tensor_larger_than_bounded_artifact(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    _write_checkpoint(source)
+
+    with pytest.raises(
+        SafetensorsShardingError,
+        match="^stage_shard_tensor_exceeds_file_limit$",
+    ):
+        shard_qwen2_checkpoint(
+            source,
+            tmp_path / "bounded",
+            shard_count=2,
+            max_file_bytes=64,
+        )
+
+
 def test_rejects_non_qwen_and_existing_destination(tmp_path: Path) -> None:
     source = tmp_path / "source"
     _write_checkpoint(source)

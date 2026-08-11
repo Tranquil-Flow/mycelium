@@ -207,6 +207,11 @@ class NodeMembershipSession:
         with self._lock:
             return self._seed_key_digest
 
+    @property
+    def lease_expires_at(self) -> float | None:
+        with self._lock:
+            return self._lease_expires_at
+
     def _now(self) -> float:
         return _finite_now(self._clock())
 
