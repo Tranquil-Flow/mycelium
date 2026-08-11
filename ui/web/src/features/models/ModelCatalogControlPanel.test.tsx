@@ -22,7 +22,7 @@ const activation: DeploymentActivationStatus = { protocol: 'mycelium.deployment_
 describe('ModelCatalogControlPanel', () => {
   it('shows the actionable catalog first, retains all local identities, and activates only the bound candidate', () => {
     const activate = vi.fn(); const refresh = vi.fn();
-    render(<ModelCatalogControlPanel operation={operation} activation={activation} nowUnixMs={1_000} error={null} onActivate={activate} onRefresh={refresh} />);
+    render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={null} nowUnixMs={1_000} error={null} onActivate={activate} onRefresh={refresh} onRecheckCapacity={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'Model catalog' })).toBeInTheDocument();
     expect(screen.getAllByText('Ready to activate')).toHaveLength(2);
     expect(screen.getByText(/No action here downloads a model/)).toBeInTheDocument();
@@ -37,7 +37,14 @@ describe('ModelCatalogControlPanel', () => {
   });
 
   it('disables activation while another model is qualifying', () => {
-    render(<ModelCatalogControlPanel operation={operation} activation={{ ...activation, busy_candidate_id: 'someone-else' }} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} />);
+    render(<ModelCatalogControlPanel operation={operation} activation={{ ...activation, busy_candidate_id: 'someone-else' }} capacityRefresh={null} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Activate and qualify' })).toBeDisabled();
+  });
+
+  it('runs an explicit local-only capacity recheck and explains progress', () => {
+    const recheck = vi.fn();
+    render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={{ protocol: 'mycelium.model_capacity_refresh.v1', generation: 2, state: 'refreshing', phase: 'evaluating_models', started_at_unix_ms: 1_000, completed_at_unix_ms: null, operation_digest: null, catalog_generation: null, evaluated_model_count: 0, reason_code: null, download_authorized: false, provisioning_started: false }} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={recheck} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/does not download or provision/);
+    expect(screen.getByRole('button', { name: 'Rechecking capacity…' })).toBeDisabled();
   });
 });

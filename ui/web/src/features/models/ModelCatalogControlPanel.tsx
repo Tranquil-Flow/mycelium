@@ -1,5 +1,6 @@
 import type { DeploymentActivationStatus } from '../liveRoute/deploymentActivation';
 import type { M17ModelOperation } from '../liveRoute/m17ModelOperation';
+import type { ModelCapacityRefreshStatus } from './modelCapacityRefresh';
 import { projectModelCatalogControls, type ModelCatalogRow } from './modelCatalogControl';
 import styles from '../liveRoute/LiveRouteWorkspace.module.css';
 
@@ -33,6 +34,8 @@ export function ModelCatalogControlPanel({
   error,
   onActivate,
   onRefresh,
+  capacityRefresh,
+  onRecheckCapacity,
 }: {
   readonly operation: M17ModelOperation;
   readonly activation: DeploymentActivationStatus;
@@ -40,18 +43,24 @@ export function ModelCatalogControlPanel({
   readonly error: string | null;
   readonly onActivate: (candidateId: string) => void;
   readonly onRefresh: () => void;
+  readonly capacityRefresh: ModelCapacityRefreshStatus | null;
+  readonly onRecheckCapacity: () => void;
 }) {
   const rows = projectModelCatalogControls(operation, activation, nowUnixMs);
   const prominent = rows.filter((row) => row.prominent);
   const other = rows.filter((row) => !row.prominent);
-  const busy = activation.busy_candidate_id !== null;
+  const capacityBusy = capacityRefresh?.state === 'refreshing';
+  const busy = activation.busy_candidate_id !== null || capacityBusy;
   return <section className={styles.panel} aria-labelledby="model-catalog-control-title">
-    <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>Swarm model control</p><h2 id="model-catalog-control-title">Model catalog</h2></div><button type="button" onClick={onRefresh}>Refresh deployment status</button></div>
+    <div className={styles.panelTitlebar}><div><p className={styles.eyebrow}>Swarm model control</p><h2 id="model-catalog-control-title">Model catalog</h2></div><div><button type="button" onClick={onRefresh}>Refresh deployment status</button>{capacityRefresh === null ? null : <button type="button" disabled={capacityBusy} onClick={onRecheckCapacity}>{capacityBusy ? 'Rechecking capacity…' : 'Recheck swarm capacity'}</button>}</div></div>
     <p>
       This catalog is discovered from local model files. Models become selectable only after capacity planning,
       artifact verification, physical route loading, and distributed qualification all succeed. No action here downloads a model.
     </p>
     <p>Need more capacity? <a href="#nodes">Add or inspect swarm devices</a>. A new member contributes only after fresh capability evidence, planning, and route qualification.</p>
+    {capacityRefresh?.state === 'refreshing' ? <p role="status">Capturing signed device resources and rerunning the layer-allocation planner. This does not download or provision model files.</p> : null}
+    {capacityRefresh?.state === 'succeeded' ? <p role="status">Capacity checked across the current planned route: {capacityRefresh.evaluated_model_count} compatible local model {capacityRefresh.evaluated_model_count === 1 ? 'identity' : 'identities'} evaluated.</p> : null}
+    {capacityRefresh?.state === 'failed' ? <p role="alert">Capacity recheck failed: {(capacityRefresh.reason_code ?? 'capacity refresh failed').replaceAll('_', ' ')}.</p> : null}
     <dl className={styles.measurements}>
       <div><dt>Local identities</dt><dd>{rows.length}</dd></div>
       <div><dt>Qualified choices</dt><dd>{rows.filter((row) => row.availability === 'qualified' || row.availability === 'active').length}</dd></div>

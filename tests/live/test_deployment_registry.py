@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,6 +78,44 @@ def test_registry_starts_with_one_runtime_and_adds_qualified_standby() -> None:
     assert registry.current_deployment().deployment_id == "deployment-0"
     registry.select("deployment-1")
     assert registry.current_deployment().deployment_id == "deployment-1"
+
+
+def test_registry_capacity_evidence_uses_richest_live_planned_route() -> None:
+    small = replace(
+        _runtime(0),
+        placement_projection={"nodes": [{"node_id": "node-a"}]},
+        topology_projection={"decision": {"opened_order": ["node-a"]}},
+    )
+    rich = replace(
+        _runtime(1),
+        placement_projection={
+            "nodes": [{"node_id": "node-a"}, {"node_id": "node-b"}]
+        },
+        topology_projection={"decision": {"opened_order": ["node-a", "node-b"]}},
+    )
+    small.route.m17_swarm_evidence = lambda: {"deployment_id": "small"}  # type: ignore[attr-defined,method-assign]
+    rich.route.m17_swarm_evidence = lambda: {"deployment_id": "rich"}  # type: ignore[attr-defined,method-assign]
+    registry = LiveDeploymentRegistry([small, rich])
+
+    evidence = registry.m17_swarm_evidence()
+
+    assert evidence["deployment_id"] == "rich"
+    assert evidence["placement"] == rich.placement_projection
+    assert evidence["topology"] == rich.topology_projection
+
+
+def test_registry_publishes_refreshed_operation_to_all_runtimes() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0), _runtime(1)])
+    operation = {"protocol": "mycelium.model_operation.v1", "generation": 7}
+
+    registry.set_m17_model_operation(operation)
+    operation["generation"] = 8
+
+    assert {
+        runtime.model_operation["generation"]
+        for runtime in registry._runtimes.values()  # noqa: SLF001
+        if runtime.model_operation is not None
+    } == {7}
 
 
 def test_registry_rejects_duplicate_or_unqualified_runtime_insertion() -> None:

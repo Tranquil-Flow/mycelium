@@ -117,6 +117,17 @@ prepared models expose explicit activation; compatible or capacity-blocked local
 models remain visible with bounded reasons. Stale capacity results are never treated
 as current, and catalog refresh never downloads model data.
 
+An explicit local-only capacity refresh now captures fresh signed resources from the
+richest currently qualified planned route and reruns the capability-aware contiguous
+allocation planner before atomically replacing the model-operation generation. It is
+single-flight and visibly separate from provisioning, activation, qualification, and
+selection. Standby enrolled members still require a future capability/link probe and
+new route plan before they contribute capacity; enrollment alone is never counted.
+The 2026-08-11 three-host validation inventoried 39 local identities and found fresh
+feasible allocations for the five compatible local Qwen identities, including
+Qwen2.5-7B and Qwen3-8B. This supersedes the expired capacity rejection only; neither
+larger model is prepared, loaded, qualified, or selectable yet.
+
 ## Current planning, trust, and network authority
 
 M13 made one signed, source-bound Gossip evidence bundle authoritative for placement.
@@ -235,12 +246,12 @@ references, not public release artifacts.
 | M14 | Complete measured directed activation matrix selected a non-canonical three-host cycle and physical loopback | `docs/handover/M14_PROGRESS_2026-08-10.md` | Continuous topology optimization remains later scope |
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
-| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, fail-closed selection, and live prepared-deployment activation implemented | M17 model-operation endpoint/UI and catalog/parity suites; `mycelium.deployment_activation.v1`; live 0.5B/1.5B start plus no-restart 3B qualification and browser request | Automated feasibility-to-provisioning convergence and acquisition failure matrix remain open; Qwen3-8B is adapter-compatible and locally complete but capacity-infeasible on the current swarm |
+| M17 | Multi-model inventory, dense Qwen2/Qwen3 adapters, exact-weight feasibility, fail-closed selection, live capacity refresh, and prepared-deployment activation implemented | M17 model-operation endpoint/UI and catalog/parity suites; `mycelium.model_capacity_refresh.v1`; `mycelium.deployment_activation.v1`; live 0.5B/1.5B start plus no-restart 3B qualification | Feasibility-to-preparation/provisioning convergence and acquisition failure matrix remain open; fresh three-host evidence now finds Qwen3-8B feasible, but it is not prepared, loaded, qualified, or selectable |
 | M18 | Qualified replica planning/runtime evidence and concurrency attribution completed | M18 replica plan/runtime endpoints and UI | Continuous batching and pipeline overlap remain unclaimed |
 | M19 | Traffic-aware liveness, scoped recovery evidence, and fenced recovery paths completed | M19 liveness/recovery endpoints and UI | Cross-backend live KV migration remains unclaimed |
 | M20 | Target-authoritative speculative planning/runtime evidence completed | M20 speculative plan/runtime endpoints and UI | Promotion remains workload- and target-parity-bound |
 | M21 | Heterogeneous membership and physical MLX/NumPy route evidence completed | M21 heterogeneous endpoint/UI and physical route records | Mobile activation and different-network Mac conformance remain deferred, not silently inferred |
-| M22 | Release closure, service packaging, UI audit, local 3B qualification, Qwen3 adapter proof, and reviewer bundle completed | `/Users/evinova-self/mycelium-physical-run/m22-release-20260811/m22-release.json` | Qwen3-8B placement remains capacity-blocked; no public release has occurred |
+| M22 | Release closure, service packaging, UI audit, local 3B qualification, Qwen3 adapter proof, and reviewer bundle completed | `/Users/evinova-self/mycelium-physical-run/m22-release-20260811/m22-release.json` | The historical M22 Qwen3-8B capacity rejection is superseded by fresh feasibility evidence; preparation and qualification remain open, and no public release has occurred |
 | M23 | Three-host MLX/MLX/NumPy stage-local KV physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain | `docs/handover/M23_PROGRESS_2026-08-11.md`; `contracts/compatibility-fixtures/m23-kv-gate-v1.json` | Tensor parallelism, continuous batching, KV migration, and mobile activation remain later scope |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no

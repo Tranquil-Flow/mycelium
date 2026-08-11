@@ -48,6 +48,11 @@ from physical_inference_qualification import ControllerError
 from .activation import DeploymentActivationError, PreparedDeploymentActivation
 from .codec import prompt_codec_from_deployment
 from .health import RouteHealthSource
+from .model_capacity import (
+    ModelCapacityRefresh,
+    ModelCapacityRefreshError,
+    recompute_model_operation,
+)
 from .registry import (
     DeploymentSelectionError,
     LiveDeploymentRegistry,
@@ -424,6 +429,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     route: LiveRoute
     static_root: Path
     activation: PreparedDeploymentActivation | None
+    capacity_refresh: ModelCapacityRefresh | None
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -576,6 +582,65 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._send_bytes(
                     400,
                     _json_bytes({"error": "invalid_activation_request"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                202,
+                _json_bytes(status),
+                "application/json; charset=utf-8",
+            )
+
+        def _model_capacity_refresh_status(self) -> None:
+            refresh = self.server.capacity_refresh
+            if refresh is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "model_capacity_refresh_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(refresh.status()),
+                "application/json; charset=utf-8",
+            )
+
+        def _start_model_capacity_refresh(self) -> None:
+            refresh = self.server.capacity_refresh
+            if refresh is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "model_capacity_refresh_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            body = self._read_body(limit=256)
+            if body is None:
+                return
+            try:
+                document = json.loads(body)
+                if not isinstance(document, dict) or document:
+                    raise ValueError
+                status = refresh.start()
+            except ModelCapacityRefreshError as exc:
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": exc.code}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_capacity_refresh_request"}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -901,6 +966,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._deployment_registry()
             elif parsed.path == "/__mycelium/deployment-activation" and not parsed.query:
                 self._deployment_activation_status()
+            elif parsed.path == "/__mycelium/model-capacity-refresh" and not parsed.query:
+                self._model_capacity_refresh_status()
             elif parsed.path.startswith("/api/"):
                 self._asgi()
             else:
@@ -912,6 +979,8 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._select_deployment()
             elif parsed.path == "/__mycelium/deployment-activation/start" and not parsed.query:
                 self._start_deployment_activation()
+            elif parsed.path == "/__mycelium/model-capacity-refresh/start" and not parsed.query:
+                self._start_model_capacity_refresh()
             elif parsed.path == "/__mycelium/candidates/canary" and not parsed.query:
                 self._canary_candidate()
             elif parsed.path == "/__mycelium/candidates/promote" and not parsed.query:
@@ -935,6 +1004,7 @@ def create_server(
     host: str,
     port: int,
     activation: PreparedDeploymentActivation | None = None,
+    capacity_refresh: ModelCapacityRefresh | None = None,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -946,6 +1016,7 @@ def create_server(
     server.route = route
     server.static_root = static_root
     server.activation = activation
+    server.capacity_refresh = capacity_refresh
     return server
 
 
@@ -1228,6 +1299,7 @@ def run_registry_server(
     model_operation_file: Path | None = None,
     seed_url: str | None = None,
     candidate_plan_root: Path | None = None,
+    model_cache_root: Path | None = None,
 ) -> int:
     """Open, qualify, and serve one or more immutable deployments."""
 
@@ -1237,6 +1309,7 @@ def run_registry_server(
     server: LiveHTTPServer | None = None
     registry: LiveDeploymentRegistry | None = None
     activation: PreparedDeploymentActivation | None = None
+    capacity_refresh: ModelCapacityRefresh | None = None
     startup_complete = False
     try:
         for plan in operator_plans:
@@ -1266,6 +1339,16 @@ def run_registry_server(
                     progress=report,
                 ),
             )
+        if model_cache_root is not None:
+            capacity_refresh = ModelCapacityRefresh(
+                evaluator=lambda progress: recompute_model_operation(
+                    cache_root=model_cache_root,
+                    live_observations=registry.m17_swarm_evidence(),
+                    evaluated_at_unix_ms=int(time.time() * 1_000),
+                    progress=progress,
+                ),
+                operation_sink=registry.set_m17_model_operation,
+            )
         stack = build_registry_stack(
             registry=registry,
             bearer_token=secrets.token_urlsafe(32),
@@ -1279,6 +1362,7 @@ def run_registry_server(
             host=host,
             port=port,
             activation=activation,
+            capacity_refresh=capacity_refresh,
         )
         startup_complete = True
         stop = threading.Event()
@@ -1311,6 +1395,8 @@ def run_registry_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        if capacity_refresh is not None:
+            capacity_refresh.close()
         if activation is not None:
             activation.close()
         if server is not None:
@@ -1338,6 +1424,7 @@ def run_physical_server(
     static_root: Path | None = None,
     seed_state_root: Path,
     seed_url: str | None = None,
+    model_cache_root: Path | None = None,
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
@@ -1346,6 +1433,7 @@ def run_physical_server(
     stack: LiveStack | None = None
     server: LiveHTTPServer | None = None
     startup_complete = False
+    capacity_refresh: ModelCapacityRefresh | None = None
     try:
         identity = route.open()
         _validate_route_identity(identity, route.execution_graph)
@@ -1389,12 +1477,23 @@ def run_physical_server(
             seed_url=seed_url,
         )
         stack.health.publish(qualification)
+        if model_cache_root is not None:
+            capacity_refresh = ModelCapacityRefresh(
+                evaluator=lambda progress: recompute_model_operation(
+                    cache_root=model_cache_root,
+                    live_observations=route.m17_swarm_evidence(),
+                    evaluated_at_unix_ms=int(time.time() * 1_000),
+                    progress=progress,
+                ),
+                operation_sink=route.set_m17_model_operation,
+            )
         server = create_server(
             app=stack.app,
             route=route,
             static_root=static_root or ROOT / "ui" / "web" / "dist",
             host=host,
             port=port,
+            capacity_refresh=capacity_refresh,
         )
         startup_complete = True
 
@@ -1428,6 +1527,8 @@ def run_physical_server(
                 signal.signal(signum, handler)
         return 0
     finally:
+        if capacity_refresh is not None:
+            capacity_refresh.close()
         if stack is not None:
             stack.health.drop()
         if server is not None:
@@ -1449,6 +1550,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--deployment-dir", type=Path)
     parser.add_argument("--model-operation-file", type=Path)
+    parser.add_argument(
+        "--model-cache-root",
+        type=Path,
+        help="read-only local Hugging Face cache used by explicit capacity rechecks",
+    )
     parser.add_argument("--static-root", type=Path)
     parser.add_argument("--registry-state", type=Path)
     parser.add_argument("--seed-state-root", type=Path, required=True)
@@ -1480,6 +1586,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             static_root=args.static_root,
             seed_state_root=args.seed_state_root,
             seed_url=args.seed_url,
+            model_cache_root=args.model_cache_root,
         )
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
@@ -1493,6 +1600,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_operation_file=args.model_operation_file,
         seed_url=args.seed_url,
         candidate_plan_root=args.candidate_plan_root,
+        model_cache_root=args.model_cache_root,
     )
 
 

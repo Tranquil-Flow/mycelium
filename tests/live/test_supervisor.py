@@ -804,6 +804,79 @@ def test_deployment_activation_endpoints_are_same_origin_and_closed_shape(
         thread.join(timeout=5)
 
 
+def test_model_capacity_refresh_endpoints_are_same_origin_and_closed_shape(
+    tmp_path: Path,
+) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    status = {
+        "protocol": "mycelium.model_capacity_refresh.v1",
+        "generation": 1,
+        "state": "idle",
+    }
+    calls: list[str] = []
+    refresh = SimpleNamespace(
+        status=lambda: calls.append("status") or status,
+        start=lambda: calls.append("start") or status,
+    )
+
+    async def app(*_args):
+        raise AssertionError("capacity_refresh_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        capacity_refresh=refresh,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/model-capacity-refresh")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/model-capacity-refresh/start",
+            body="{}",
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 202
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/__mycelium/model-capacity-refresh/start",
+            body=json.dumps({"cache_root": "/private/path"}),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 400
+        assert json.loads(response.read()) == {
+            "error": "invalid_capacity_refresh_request"
+        }
+        assert calls == ["status", "start"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_optional_m13_projection_loader_fails_closed(tmp_path: Path) -> None:
     assert _placement_projection(tmp_path) is None
     fixture = (

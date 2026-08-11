@@ -534,11 +534,42 @@ class LiveDeploymentRegistry:
                 self.registry_status(),
             )
 
+    def set_m17_model_operation(self, document: Mapping[str, Any]) -> None:
+        """Atomically publish one refreshed catalog generation to every runtime."""
+
+        detached = copy.deepcopy(dict(document))
+        if detached.get("protocol") != "mycelium.model_operation.v1":
+            raise ValueError("m17_model_operation_invalid")
+        with self._lock:
+            self._runtimes = {
+                deployment_id: replace(runtime, model_operation=copy.deepcopy(detached))
+                for deployment_id, runtime in self._runtimes.items()
+            }
+
     def m17_swarm_evidence(self) -> Mapping[str, Any]:
-        """Capture current signed resources without changing deployment selection."""
+        """Capture the richest current signed route without changing selection."""
 
         with self._lock:
-            return self._current().route.m17_swarm_evidence()
+            candidates = [
+                runtime
+                for runtime in self._runtimes.values()
+                if runtime.route.is_alive()
+                and runtime.placement_projection is not None
+                and runtime.topology_projection is not None
+            ]
+            if not candidates:
+                raise RuntimeError("m17_swarm_evidence_unavailable")
+            runtime = max(
+                candidates,
+                key=lambda item: (
+                    len(item.placement_projection.get("nodes", [])),
+                    item.deployment_id,
+                ),
+            )
+            document = dict(runtime.route.m17_swarm_evidence())
+            document["placement"] = copy.deepcopy(runtime.placement_projection)
+            document["topology"] = copy.deepcopy(runtime.topology_projection)
+            return document
 
     def m18_replica_plan(self) -> Mapping[str, Any] | None:
         """Return selected deployment's bounded Planner-owned replica intent."""
