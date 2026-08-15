@@ -93,6 +93,7 @@ _TOPOLOGY_FIELDS = (
     "sidecar_binary",
     "endpoint_secret_file",
     "endpoint_id",
+    "membership_generation",
     "runtime_backend",
 )
 _ROUTE_LABEL_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
@@ -131,6 +132,14 @@ def _route_label(args: argparse.Namespace) -> str:
     if not isinstance(label, str) or not _ROUTE_LABEL_PATTERN.fullmatch(label):
         raise RuntimeError("route_label_invalid")
     return label
+
+
+def _placement_provenance(
+    *, m13_document: object, preparation_authorization: object
+) -> str:
+    if m13_document is not None or preparation_authorization is not None:
+        return "planner_v2"
+    return "target_local_physical_preload"
 
 
 def _model_identity(args: argparse.Namespace) -> tuple[str, str, str]:
@@ -587,6 +596,27 @@ def _endpoint_ids(template: dict[str, Any]) -> dict[str, str]:
     return result
 
 
+def _membership_generations(template: dict[str, Any]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    offers = template["controller"]["membership_snapshot"]["assignment_offers"]
+    for offer in offers:
+        message = offer["message"]
+        records = [
+            (message["recipient_node_id"], message["generation"]),
+            *[
+                (record["node_id"], record["membership_generation"])
+                for record in message["peer_endpoint_records"]
+            ],
+        ]
+        for node_id, generation in records:
+            if type(generation) is not int or generation <= 0:
+                raise RuntimeError("topology_membership_generation_invalid")
+            prior = result.setdefault(node_id, generation)
+            if prior != generation:
+                raise RuntimeError("topology_membership_generation_inconsistent")
+    return result
+
+
 def _topology_nodes(
     template: dict[str, Any], topology_path: Path | None
 ) -> list[dict[str, Any]]:
@@ -604,6 +634,7 @@ def _topology_nodes(
             for node in template["controller"]["run_plan"]["nodes"]
         }
         endpoint_ids = _endpoint_ids(template)
+        membership_generations = _membership_generations(template)
         nodes = []
         for index, peer in enumerate(template["controller"]["peers"]):
             node_id = peer["node_id"]
@@ -615,6 +646,7 @@ def _topology_nodes(
                     "sidecar_binary": runtime["sidecar_binary"],
                     "endpoint_secret_file": runtime["endpoint_secret_file"],
                     "endpoint_id": endpoint_ids[node_id],
+                    "membership_generation": membership_generations[node_id],
                     "runtime_backend": "mlx" if index == 0 else "numpy",
                 }
             )
@@ -652,6 +684,9 @@ def _topology_nodes(
         raise RuntimeError("topology_endpoint_id_invalid")
     if len(set(endpoint_ids)) != len(endpoint_ids):
         raise RuntimeError("topology_endpoint_id_duplicate")
+    generations = [node["membership_generation"] for node in nodes]
+    if any(type(generation) is not int or generation <= 0 for generation in generations):
+        raise RuntimeError("topology_membership_generation_invalid")
     backends = [node["runtime_backend"] for node in nodes]
     if any(backend not in {"mlx", "numpy"} for backend in backends):
         raise RuntimeError("topology_runtime_backend_unsupported")
@@ -771,6 +806,7 @@ def _membership_snapshot(
     packs: list[dict[str, Any]],
     graph_document: dict[str, Any],
     endpoint_ids: dict[str, str],
+    membership_generations: dict[str, int],
     now: float,
     route_label: str = "m7",
     placement_provenance: str = "target_local_physical_preload",
@@ -787,11 +823,11 @@ def _membership_snapshot(
                 "node_id": other["node_id"],
                 "endpoint_id": endpoint_ids[other["node_id"]],
                 "deployment_epoch": assignment["deployment_epoch"],
-                "membership_generation": other_index + 1,
+                "membership_generation": membership_generations[other["node_id"]],
                 "valid_from": now,
                 "valid_until": now + 3_600.0,
             }
-            for other_index, other in enumerate(assignments)
+            for other in assignments
             if other["node_id"] != assignment["node_id"]
         ]
         peer_records.sort(key=lambda record: record["node_id"])
@@ -803,7 +839,7 @@ def _membership_snapshot(
             "sender_endpoint_id": signer.endpoint_id,
             "recipient_node_id": assignment["node_id"],
             "incarnation": f"{route_label}-qwen-incarnation",
-            "generation": 1,
+            "generation": membership_generations[assignment["node_id"]],
             "issued_at": now,
             "expires_at": now + 3_600.0,
             "deployment_id": assignment["deployment_id"],
@@ -1074,7 +1110,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 args.model_root,
                 sharded_root,
                 shard_count=len(node_ids),
-                layer_ranges=planned_ranges,
+                layer_ranges=prepare_ranges,
                 max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
             )
             prepared = prepare(sharded_root)
@@ -1516,14 +1552,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         packs=packs,
         graph_document=graph_document,
         endpoint_ids={node["node_id"]: node["endpoint_id"] for node in topology},
+        membership_generations={
+            node["node_id"]: node["membership_generation"] for node in topology
+        },
         now=now,
         route_label=route_label,
-        placement_provenance=(
-            "planner_v2"
-            if m13_document is not None
-            else "capability_aware_contiguous_exact_weight_dp"
-            if preparation_authorization is not None
-            else "target_local_physical_preload"
+        placement_provenance=_placement_provenance(
+            m13_document=m13_document,
+            preparation_authorization=preparation_authorization,
         ),
     )
     request = {
@@ -1640,12 +1676,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             for node_id, manifest in node_transfer_manifests["manifests"].items()
         },
         "stage_sharding": stage_sharding,
-        "placement_provenance": (
-            "planner_v2"
-            if m13_document is not None
-            else "capability_aware_contiguous_exact_weight_dp"
-            if preparation_authorization is not None
-            else "target_local_physical_preload"
+        "placement_provenance": _placement_provenance(
+            m13_document=m13_document,
+            preparation_authorization=preparation_authorization,
         ),
         "planner_snapshot_digest": (
             m13_document["route_plan"]["snapshot_digest"]

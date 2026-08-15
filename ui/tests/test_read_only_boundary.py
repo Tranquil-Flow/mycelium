@@ -48,6 +48,8 @@ def test_mutating_http_calls_are_confined_to_typed_product_action_clients() -> N
         (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "deploymentActivation.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelCapacityRefresh.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelPreparation.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),
     }
     forbidden = re.compile(
@@ -67,6 +69,7 @@ def test_browser_network_is_confined_to_read_only_source_and_typed_action_client
     allowed_transports = {
         (UI_ROOT / "web" / "src" / "data" / "observatorySource.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "deviceLab" / "deviceLabClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "governance" / "governanceReadiness.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "deploymentClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "inference" / "requestClient.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m17ModelOperation.ts").resolve(),
@@ -75,6 +78,9 @@ def test_browser_network_is_confined_to_read_only_source_and_typed_action_client
         (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "m23Kv.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "liveRoute" / "deploymentActivation.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "membership" / "membershipClient.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "artifactAcquisition.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelCapacityRefresh.ts").resolve(),
+        (UI_ROOT / "web" / "src" / "features" / "models" / "modelPreparation.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "observatory" / "live" / "productGatewaySession.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "productEvidence" / "source.ts").resolve(),
         (UI_ROOT / "web" / "src" / "features" / "swarm" / "SwarmClient.ts").resolve(),

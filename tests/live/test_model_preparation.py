@@ -131,6 +131,47 @@ def test_preparation_freezes_fresh_authority_and_publishes_only_after_success() 
     ] == [(0, 30), (30, 36)]
 
 
+def test_preparation_preserves_approved_immutable_representation_authority() -> None:
+    operation = _operation()
+    original_owner_decision_digest = "sha256:" + "e" * 64
+    operation["feasibility_reports"][0]["representation_authority"] = {
+        "kind": "approved_existing_immutable_representation",
+        "owner_decision_digest": original_owner_decision_digest,
+        "prior_feasibility_digest": "sha256:" + "f" * 64,
+    }
+    captured = []
+    service = LocalModelPreparation(
+        operation_source=lambda: operation,
+        preparer=lambda authorization, _progress: (
+            captured.append(authorization)
+            or PreparationResult("candidate-1", 2, 140, 140)
+        ),
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    service.start(_decision())
+    service.close()
+
+    assert captured[0]["owner_decision_digest"] == original_owner_decision_digest
+    assert captured[0]["feasibility_digest"] == "sha256:" + "c" * 64
+
+
+def test_preparation_rejects_malformed_inherited_representation_authority() -> None:
+    operation = _operation()
+    operation["feasibility_reports"][0]["representation_authority"] = {
+        "kind": "approved_existing_immutable_representation",
+        "owner_decision_digest": "not-a-digest",
+    }
+    service = LocalModelPreparation(
+        operation_source=lambda: operation,
+        preparer=lambda *_args: None,  # type: ignore[arg-type,return-value]
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    with pytest.raises(ModelPreparationError, match="model_operation_invalid"):
+        service.start(_decision())
+
+
 @pytest.mark.parametrize(
     ("operation", "reason"),
     [

@@ -116,6 +116,30 @@ def test_registry_capacity_evidence_uses_richest_live_planned_route() -> None:
     assert evidence["topology"] == rich.topology_projection
 
 
+def test_registry_capacity_evidence_allows_placement_derived_route_order() -> None:
+    runtime = replace(
+        _runtime(0),
+        placement_projection={
+            "nodes": [
+                {"node_id": "node-a", "start_layer": 0, "end_layer_exclusive": 8},
+                {"node_id": "node-b", "start_layer": 8, "end_layer_exclusive": 16},
+            ]
+        },
+        topology_projection=None,
+    )
+    runtime.route.m17_swarm_evidence = lambda: {  # type: ignore[attr-defined,method-assign]
+        "deployment_id": "placement-only",
+        "topology": None,
+    }
+    registry = LiveDeploymentRegistry([runtime])
+
+    evidence = registry.m17_swarm_evidence()
+
+    assert evidence["deployment_id"] == "placement-only"
+    assert evidence["placement"] == runtime.placement_projection
+    assert evidence["topology"] is None
+
+
 def test_registry_publishes_refreshed_operation_to_all_runtimes() -> None:
     registry = LiveDeploymentRegistry([_runtime(0), _runtime(1)])
     operation = {"protocol": "mycelium.model_operation.v1", "generation": 7}

@@ -98,6 +98,33 @@ describe('ProductInferenceClient', () => {
     }
   });
 
+  it('renews the product session after a backend restart invalidates the cached bootstrap', async () => {
+    const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
+    const fetch: InferenceFetch = vi.fn(async (input, init) => {
+      calls.push([input, init]);
+      if (calls.length === 1 || calls.length === 3) return jsonResponse(bootstrap());
+      if (calls.length === 2) {
+        return jsonResponse(
+          { protocol: 'mycelium.product_ui.error.v1', code: 'session_invalid', retryable: true },
+          401,
+        );
+      }
+      return jsonResponse(qualification());
+    });
+    const client = new ProductInferenceClient({ fetch });
+
+    await expect(client.loadQualification()).resolves.toEqual(
+      decodeProductQualification(qualification()),
+    );
+
+    expect(calls.map(([input]) => input)).toEqual([
+      '/api/v1/bootstrap',
+      '/api/v1/qualification/current',
+      '/api/v1/bootstrap',
+      '/api/v1/qualification/current',
+    ]);
+  });
+
   it('submits the exact captured qualification with CSRF and no prompt-bearing URL', async () => {
     const calls: Array<[RequestInfo | URL, RequestInit | undefined]> = [];
     const fetch: InferenceFetch = vi.fn(async (input, init) => {

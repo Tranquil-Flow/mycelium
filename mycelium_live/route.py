@@ -506,6 +506,7 @@ def _refresh_membership_snapshot(
             raise ValueError("membership_member_invalid")
         member_by_node[node_id] = member
     recipients = []
+    activation_endpoint_by_node: dict[str, str] = {}
     for envelope in offers:
         message = envelope.get("message") if isinstance(envelope, Mapping) else None
         recipient = (
@@ -514,6 +515,24 @@ def _refresh_membership_snapshot(
         if not isinstance(recipient, str) or not recipient or recipient in recipients:
             raise ValueError("membership_snapshot_invalid")
         recipients.append(recipient)
+        records = message.get("peer_endpoint_records")
+        if not isinstance(records, list):
+            raise ValueError("membership_snapshot_invalid")
+        for record in records:
+            if not isinstance(record, Mapping):
+                raise ValueError("membership_snapshot_invalid")
+            node_id = record.get("node_id")
+            endpoint_id = record.get("endpoint_id")
+            if (
+                not isinstance(node_id, str)
+                or not node_id
+                or not isinstance(endpoint_id, str)
+                or not endpoint_id
+            ):
+                raise ValueError("membership_activation_endpoint_invalid")
+            prior = activation_endpoint_by_node.setdefault(node_id, endpoint_id)
+            if prior != endpoint_id:
+                raise ValueError("membership_activation_endpoint_conflict")
     route_members: dict[str, Mapping[str, Any]] = {}
     for recipient in recipients:
         member = member_by_node.get(recipient)
@@ -542,6 +561,8 @@ def _refresh_membership_snapshot(
         if not capable:
             raise ValueError("membership_member_activation_ineligible")
         route_members[recipient] = member
+    if len(route_members) > 1 and set(activation_endpoint_by_node) != set(route_members):
+        raise ValueError("membership_activation_endpoint_missing")
     valid_until = min(
         now + 3_600.0,
         *(float(member["lease_expires_at"]) for member in route_members.values()),
@@ -565,7 +586,10 @@ def _refresh_membership_snapshot(
         message["peer_endpoint_records"] = [
             {
                 "node_id": node_id,
-                "endpoint_id": other["endpoint_id"],
+                # Membership endpoint identity authenticates the current member and
+                # generation. It is not the planner-authorized activation-plane Iroh
+                # identity. Configure separately proves possession of that key.
+                "endpoint_id": activation_endpoint_by_node[node_id],
                 "deployment_epoch": message["deployment_epoch"],
                 "membership_generation": other["generation"],
                 "valid_from": now,
@@ -1001,7 +1025,7 @@ class PhysicalLiveRoute:
 
         with self._lock:
             if self._closed or not self._open or not self.is_alive():
-                raise RuntimeError("m17_swarm_evidence_unavailable")
+                raise RuntimeError("swarm_evidence_unavailable")
             before = len(self._signed_observations)
             self._snapshot_all()
             captured = self._signed_observations[before:]
@@ -1015,7 +1039,7 @@ class PhysicalLiveRoute:
                 ):
                     by_node[str(observation["node_id"])] = signed
             if set(by_node) != set(self._sessions):
-                raise RuntimeError("m17_swarm_evidence_incomplete")
+                raise RuntimeError("swarm_evidence_incomplete")
             return {
                 "protocol": "mycelium.live_swarm_resource_observations.v1",
                 "captured_at_unix_ms": int(time.time() * 1_000),

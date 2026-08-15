@@ -389,6 +389,141 @@ def test_int8_serving_feasibility_accounts_for_transient_conversion_peak(
     )
 
 
+def test_existing_immutable_representation_preserves_approved_stage_artifacts(
+    tmp_path: Path,
+) -> None:
+    _model_snapshot(tmp_path, weight_bytes=4_096, matrix_tensors=True)
+    (entry,) = scan_huggingface_cache(tmp_path)
+    nodes = (_node("node-a", 20_000), _node("node-b", 20_000))
+    representation_digest = "sha256:" + "9" * 64
+    authorization = {
+        "protocol": "mycelium.model_preparation_authorization.v1",
+        "model_id": entry.model_id,
+        "revision": entry.revision,
+        "source_quantization": entry.quantization,
+        "serving_dtype": "float32",
+        "serving_quantization": "int8-weight-only",
+        "representation_digest": representation_digest,
+        "conversion_authorized": True,
+        "owner_decision_digest": "sha256:" + "8" * 64,
+        "feasibility_digest": "sha256:" + "7" * 64,
+        "stages": [
+            {
+                "stage_index": 0,
+                "node_id": "node-a",
+                "start_layer": 0,
+                "end_layer_exclusive": 1,
+                "backend": "numpy",
+                "decode_mode": "stage_local_kv",
+                "assignment_files": ["model-stage-001-of-002.safetensors"],
+                "assignment_artifact_bytes": 111,
+            },
+            {
+                "stage_index": 1,
+                "node_id": "node-b",
+                "start_layer": 1,
+                "end_layer_exclusive": 4,
+                "backend": "numpy",
+                "decode_mode": "stage_local_kv",
+                "assignment_files": [
+                    "model-stage-002-of-002.safetensors",
+                    "model-static-output.safetensors",
+                ],
+                "assignment_artifact_bytes": 222,
+            },
+        ],
+    }
+
+    report = evaluate_model_feasibility(
+        entry,
+        ordered_nodes=nodes,
+        workload=_workload(),
+        policy=PlanningPolicy(memory_reserve_fraction=0),
+        evidence=_swarm_evidence(nodes),
+        evaluated_at_unix_ms=1_000,
+        required_decode_mode="stage_local_kv",
+        serving_quantization="int8-weight-only",
+        representation_authorization=authorization,
+    )
+
+    assert report["state"] == "feasible"
+    assert report["representation_digest"] == representation_digest
+    assert report["planner"] == "capability_aware_contiguous_exact_weight_dp"
+    assert report["evaluation_mode"] == (
+        "approved_assignment_current_capability_validation"
+    )
+    assert report["representation_authority"]["kind"] == (
+        "approved_existing_immutable_representation"
+    )
+    assert [
+        (stage["start_layer"], stage["end_layer_exclusive"])
+        for stage in report["stages"]
+    ] == [(0, 1), (1, 4)]
+    assert [stage["assignment_files"] for stage in report["stages"]] == [
+        ["model-stage-001-of-002.safetensors"],
+        [
+            "model-stage-002-of-002.safetensors",
+            "model-static-output.safetensors",
+        ],
+    ]
+    assert [stage["assignment_artifact_bytes"] for stage in report["stages"]] == [
+        111,
+        222,
+    ]
+    assert report["missing_artifact_bytes"] == 333
+
+
+def test_existing_representation_rejects_host_order_drift(tmp_path: Path) -> None:
+    _model_snapshot(tmp_path, weight_bytes=4_096, matrix_tensors=True)
+    (entry,) = scan_huggingface_cache(tmp_path)
+    nodes = (_node("node-a", 20_000), _node("node-b", 20_000))
+    authorization = {
+        "protocol": "mycelium.model_preparation_authorization.v1",
+        "model_id": entry.model_id,
+        "revision": entry.revision,
+        "source_quantization": entry.quantization,
+        "serving_dtype": "float32",
+        "serving_quantization": "int8-weight-only",
+        "representation_digest": "sha256:" + "9" * 64,
+        "conversion_authorized": True,
+        "stages": [
+            {
+                "stage_index": 0,
+                "node_id": "node-b",
+                "start_layer": 0,
+                "end_layer_exclusive": 2,
+                "backend": "numpy",
+                "decode_mode": "stage_local_kv",
+                "assignment_files": ["stage-0.safetensors"],
+                "assignment_artifact_bytes": 100,
+            },
+            {
+                "stage_index": 1,
+                "node_id": "node-a",
+                "start_layer": 2,
+                "end_layer_exclusive": 4,
+                "backend": "numpy",
+                "decode_mode": "stage_local_kv",
+                "assignment_files": ["stage-1.safetensors"],
+                "assignment_artifact_bytes": 100,
+            },
+        ],
+    }
+
+    with pytest.raises(ValueError, match="approved_serving_representation_invalid"):
+        evaluate_model_feasibility(
+            entry,
+            ordered_nodes=nodes,
+            workload=_workload(),
+            policy=PlanningPolicy(memory_reserve_fraction=0),
+            evidence=_swarm_evidence(nodes),
+            evaluated_at_unix_ms=1_000,
+            required_decode_mode="stage_local_kv",
+            serving_quantization="int8-weight-only",
+            representation_authorization=authorization,
+        )
+
+
 def test_incompatible_model_is_rejected_without_running_planner(tmp_path: Path) -> None:
     _model_snapshot(tmp_path, model_type="llama")
     (entry,) = scan_huggingface_cache(tmp_path)

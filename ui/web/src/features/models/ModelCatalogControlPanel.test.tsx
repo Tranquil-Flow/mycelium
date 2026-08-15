@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { DeploymentActivationStatus } from '../liveRoute/deploymentActivation';
 import type { M17ModelOperation } from '../liveRoute/m17ModelOperation';
@@ -20,10 +20,11 @@ const operation: M17ModelOperation = {
 const activation: DeploymentActivationStatus = { protocol: 'mycelium.deployment_activation.v1', generation: 2, busy_candidate_id: null, invalid_candidate_count: 0, candidates: [{ candidate_id: 'candidate-ready', deployment_id: 'candidate-ready', model_id: 'Qwen/Ready', model_revision: revision, quantization: 'int8-weight-only', topology_size: 3, plan_digest: digest, state: 'prepared', phase: null, completed_steps: 0, total_steps: 4, reason_code: null }] };
 
 describe('ModelCatalogControlPanel', () => {
-  it('shows the actionable catalog first, retains all local identities, and activates only the bound candidate', () => {
+  it('shows and filters every discovered identity, and activates only the bound candidate', () => {
     const activate = vi.fn(); const refresh = vi.fn();
     render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={null} nowUnixMs={1_000} error={null} onActivate={activate} onRefresh={refresh} onRecheckCapacity={vi.fn()} />);
-    expect(screen.getByRole('heading', { name: 'Model catalog' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Available models' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '2 of 2 discovered model identities' })).toBeInTheDocument();
     expect(screen.getAllByText('Ready to activate')).toHaveLength(2);
     expect(screen.getByText(/No action here downloads a model/)).toBeInTheDocument();
     expect(screen.getByText(/bfloat16 → int8-weight-only/)).toBeInTheDocument();
@@ -32,14 +33,23 @@ describe('ModelCatalogControlPanel', () => {
     expect(screen.getByRole('link', { name: 'Add or inspect swarm devices' })).toHaveAttribute('href', '#nodes');
     fireEvent.click(screen.getByRole('button', { name: 'Refresh deployment status' }));
     expect(refresh).toHaveBeenCalledTimes(1);
-    const details = screen.getByText(/Show 1 other local model identity/).closest('details');
-    expect(details).not.toBeNull();
-    expect(within(details!).getByText('Qwen/Other')).toBeInTheDocument();
+    expect(screen.getByText('Qwen/Other')).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Find a model' }), { target: { value: 'Other' } });
+    expect(screen.queryByText('Qwen/Ready')).not.toBeInTheDocument();
+    expect(screen.getByRole('table', { name: '1 of 2 discovered model identities' })).toBeInTheDocument();
   });
 
   it('disables activation while another model is qualifying', () => {
     render(<ModelCatalogControlPanel operation={operation} activation={{ ...activation, busy_candidate_id: 'someone-else' }} capacityRefresh={null} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Activate and qualify' })).toBeDisabled();
+  });
+
+  it('keeps the catalogue visible when deployment mutation controls are unavailable', () => {
+    render(<ModelCatalogControlPanel operation={operation} activation={{ ...activation, candidates: [] }} capacityRefresh={null} actionsAvailable={false} nowUnixMs={1_000} error="deployment_activation_unavailable" onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
+    expect(screen.getByRole('table', { name: '2 of 2 discovered model identities' })).toBeInTheDocument();
+    expect(screen.getByText('Qwen/Ready')).toBeInTheDocument();
+    expect(screen.getByText(/Preparation and activation controls are unavailable/)).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/Existing qualified inference remains usable/);
   });
 
   it('can release a qualified prepared route without changing the selected model', () => {
@@ -56,6 +66,13 @@ describe('ModelCatalogControlPanel', () => {
     render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={{ protocol: 'mycelium.model_capacity_refresh.v1', generation: 2, state: 'refreshing', phase: 'evaluating_models', started_at_unix_ms: 1_000, completed_at_unix_ms: null, operation_digest: null, catalog_generation: null, evaluated_model_count: 0, reason_code: null, download_authorized: false, provisioning_started: false }} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={recheck} />);
     expect(screen.getByRole('status')).toHaveTextContent(/does not download or provision/);
     expect(screen.getByRole('button', { name: 'Rechecking capacity…' })).toBeDisabled();
+  });
+
+  it('renders failed capacity evidence without internal milestone labels', () => {
+    render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={{ protocol: 'mycelium.model_capacity_refresh.v1', generation: 3, state: 'failed', phase: null, started_at_unix_ms: 1_000, completed_at_unix_ms: 1_100, operation_digest: null, catalog_generation: null, evaluated_model_count: 0, reason_code: 'm17_swarm_evidence_unavailable', download_authorized: false, provisioning_started: false }} nowUnixMs={1_100} error={null} onActivate={vi.fn()} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Capacity recheck failed: swarm evidence unavailable.');
+    expect(alert).not.toHaveTextContent(/m\d+/i);
   });
 
   it('requires an exact affirmative representation decision before conversion and preparation', () => {

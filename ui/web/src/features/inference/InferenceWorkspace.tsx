@@ -24,9 +24,11 @@ import {
 import { loadProductSettings } from '../settings/SettingsContext';
 import { HttpM16RuntimeClient, type M16RuntimeClient, type M16RuntimeStatus } from '../liveRoute/m16Runtime';
 import { ModelCatalogControlSource } from '../models/ModelCatalogControlSource';
+import { ArtifactAcquisitionSource } from '../models/ArtifactAcquisitionSource';
 import { DEPLOYMENTS_CHANGED_EVENT } from '../liveRoute/deploymentActivation';
 
 const encoder = new TextEncoder();
+const DEPLOYMENT_RECONCILE_INTERVAL_MS = 5_000;
 const activeModelDisplay = Object.freeze({
   name: import.meta.env.VITE_ACTIVE_MODEL_DISPLAY_NAME?.trim() ?? '',
   deployment_id: import.meta.env.VITE_ACTIVE_MODEL_DEPLOYMENT_ID?.trim() ?? '',
@@ -185,7 +187,15 @@ export function InferenceWorkspace({
   const canResume = session.accepted_request !== null &&
     (session.phase === 'interrupted' || session.phase === 'cancelling');
   const qualification = session.qualification;
-  const activeModelName = modelDisplayName(qualification);
+  const selectedDeployment = deploymentRegistry?.deployments.find(
+    (item) => item.deployment_id === deploymentRegistry.selected_deployment_id,
+  ) ?? null;
+  const qualifiedDeployments = deploymentRegistry?.deployments.filter(
+    (item) => item.health === 'qualified',
+  ) ?? [];
+  const activeModelName = qualification === null
+    ? selectedDeployment?.model_id ?? 'Unknown'
+    : modelDisplayName(qualification);
   const stageCount = Math.max(
     1,
     qualification?.binding.stage_load_proof_digests.length ?? 1,
@@ -194,6 +204,7 @@ export function InferenceWorkspace({
   const activeRuntimeRequest = runtime?.requests.find(
     (request) => request.request_id === session.accepted_request?.request_id,
   ) ?? null;
+  const reloadQualification = session.reload_qualification;
 
   useLayoutEffect(() => {
     effectiveSessionStore?.save({
@@ -216,13 +227,28 @@ export function InferenceWorkspace({
           if (!request.signal.aborted) setDeploymentRegistry(null);
         });
     };
+    const reconcile = () => {
+      load();
+      void reloadQualification();
+    };
+    const reconcileWhenVisible = () => {
+      if (document.visibilityState === 'visible') reconcile();
+    };
     load();
-    window.addEventListener(DEPLOYMENTS_CHANGED_EVENT, load);
+    window.addEventListener(DEPLOYMENTS_CHANGED_EVENT, reconcile);
+    window.addEventListener('focus', reconcile);
+    window.addEventListener('hashchange', reconcile);
+    document.addEventListener('visibilitychange', reconcileWhenVisible);
+    const timer = window.setInterval(reconcile, DEPLOYMENT_RECONCILE_INTERVAL_MS);
     return () => {
-      window.removeEventListener(DEPLOYMENTS_CHANGED_EVENT, load);
+      window.removeEventListener(DEPLOYMENTS_CHANGED_EVENT, reconcile);
+      window.removeEventListener('focus', reconcile);
+      window.removeEventListener('hashchange', reconcile);
+      document.removeEventListener('visibilitychange', reconcileWhenVisible);
+      window.clearInterval(timer);
       controller?.abort();
     };
-  }, [effectiveDeploymentClient]);
+  }, [effectiveDeploymentClient, reloadQualification]);
 
   useEffect(() => {
     if (effectiveWorkloadClient === null) return;
@@ -384,7 +410,7 @@ export function InferenceWorkspace({
                   deploymentSwitching ||
                   deploymentRegistry === null ||
                   !deploymentRegistry.switching_allowed ||
-                  deploymentRegistry.deployments.filter((item) => item.health === 'qualified').length < 2
+                  qualifiedDeployments.length < 2
                 }
                 onChange={(event) => void selectDeployment(event.currentTarget.value)}
                 aria-label="Model"
@@ -404,10 +430,16 @@ export function InferenceWorkspace({
               </select>
               <small className={styles.fieldHelp}>
                 {deploymentRegistry === null
-                  ? `Using ${activeModelName}. This server has not published a selectable model registry.`
-                  : deploymentRegistry.deployments.filter((item) => item.health === 'qualified').length < 2
-                    ? `Using ${activeModelName}. It is the only model currently qualified for this swarm; other local models appear below with their exact availability reason.`
-                    : 'Choose any currently qualified model. Switching is atomic and disabled while a request is active.'}
+                  ? qualification === null
+                    ? 'No current qualifier binding or selectable model registry is available.'
+                    : `Using ${activeModelName}. This server has not published a selectable model registry.`
+                  : qualifiedDeployments.length === 0
+                    ? selectedDeployment === null
+                      ? 'No model is currently qualified for new inference. Recheck swarm capacity or restore route evidence.'
+                      : `${selectedDeployment.model_id} is the last selected deployment, but no model is currently qualified for new inference. Recheck swarm capacity or restore route evidence; unavailable models remain visible below with their exact reason.`
+                    : qualifiedDeployments.length === 1
+                      ? `Using ${qualifiedDeployments[0].model_id}. It is the only model currently qualified for this swarm; other local models appear below with their exact availability reason.`
+                      : 'Choose any currently qualified model. Switching is atomic and disabled while a request is active.'}
               </small>
               {deploymentError === null ? null : <small className={styles.error} role="alert">Model not changed: {deploymentError}</small>}
             </label>
@@ -469,7 +501,7 @@ export function InferenceWorkspace({
               <p className={styles.eyebrow}>Qualifier authority</p>
               <h2 id="qualification-title">Current binding</h2>
             </div>
-            <button type="button" onClick={() => void session.reload_qualification()}>
+            <button type="button" onClick={() => window.dispatchEvent(new Event(DEPLOYMENTS_CHANGED_EVENT))}>
               Refresh
             </button>
           </div>
@@ -522,6 +554,7 @@ export function InferenceWorkspace({
       </div>
 
       {client === undefined ? <ModelCatalogControlSource /> : null}
+      {client === undefined ? <ArtifactAcquisitionSource view="inference" /> : null}
 
       <section className={styles.outputPanel} aria-labelledby="output-title">
         <div className={styles.sectionHeading}>

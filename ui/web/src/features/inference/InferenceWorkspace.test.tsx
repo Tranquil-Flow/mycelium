@@ -20,6 +20,7 @@ import m15Fixture from '../../../../../contracts/compatibility-fixtures/m15-plan
 import { decodeM15PlanComparison } from '../liveRoute/m15Comparison';
 import { decodeM16RuntimeStatus } from '../liveRoute/m16Runtime';
 import { m16RuntimeFixture } from '../liveRoute/m16Runtime.test';
+import { DEPLOYMENTS_CHANGED_EVENT } from '../liveRoute/deploymentActivation';
 
 const NOW = 1_800_000_000_000;
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -58,7 +59,7 @@ class WorkspaceClient implements InferenceClient {
   readonly submitted: InferenceSubmission[] = [];
   streams: InferenceEvent[][] = [];
 
-  constructor(readonly current: ProductQualification) {}
+  constructor(public current: ProductQualification) {}
 
   async loadQualification() {
     return this.current;
@@ -103,6 +104,12 @@ class WaitingWorkspaceClient extends WorkspaceClient {
       if (signal?.aborted === true) resolve();
       else signal?.addEventListener('abort', () => resolve(), { once: true });
     });
+  }
+}
+
+class UnavailableQualificationClient extends WorkspaceClient {
+  override async loadQualification(): Promise<ProductQualification> {
+    throw new Error('qualification_unavailable');
   }
 }
 
@@ -153,6 +160,82 @@ describe('InferenceWorkspace', () => {
 
     await waitFor(() => expect(select).toHaveBeenCalledWith('deployment-b'));
     expect(screen.getByText(/Switching is atomic and disabled while a request is active/)).toBeVisible();
+  });
+
+  it('labels a stale selected deployment without claiming it is qualified', async () => {
+    const registry: DeploymentRegistryStatus = {
+      protocol: 'mycelium.live_deployment_registry.v1',
+      selected_deployment_id: 'deployment-a',
+      switching_allowed: true,
+      deployments: [
+        {
+          deployment_id: 'deployment-a', model_id: 'Qwen/Qwen2.5-0.5B-Instruct',
+          model_revision: 'a'.repeat(40), quantization: 'int8-weight-only',
+          topology_size: 2, health: 'unavailable', qualified_at_unix_ms: NOW,
+          qualification_id: 'qualification-a',
+        },
+      ],
+    };
+    render(
+      <InferenceWorkspace
+        client={new UnavailableQualificationClient(qualification(true))}
+        deploymentClient={{ status: async () => registry, select: async () => registry }}
+        now={() => NOW + 2}
+      />,
+    );
+
+    expect(await screen.findByText(/is the last selected deployment, but no model is currently qualified/)).toBeVisible();
+    expect(screen.queryByText(/It is the only model currently qualified/)).not.toBeInTheDocument();
+    expect(screen.getByText('Qwen/Qwen2.5-0.5B-Instruct', { selector: 'strong' })).toBeVisible();
+  });
+
+  it('reconciles an externally selected deployment with the current qualification', async () => {
+    const firstQualification = qualification(true);
+    const secondQualification: ProductQualification = {
+      ...firstQualification,
+      issued_at_unix_ms: NOW + 1,
+      binding: {
+        ...firstQualification.binding,
+        qualification_id: 'qualification-b',
+        deployment_id: 'deployment-b',
+        model_id: 'model-b',
+      },
+    };
+    const client = new WorkspaceClient(firstQualification);
+    let selected = 'deployment-a';
+    const registry = (): DeploymentRegistryStatus => ({
+      protocol: 'mycelium.live_deployment_registry.v1',
+      selected_deployment_id: selected,
+      switching_allowed: true,
+      deployments: [
+        {
+          deployment_id: 'deployment-a', model_id: 'model-a', model_revision: 'a'.repeat(40),
+          quantization: 'int8-weight-only', topology_size: 2, health: 'qualified',
+          qualified_at_unix_ms: NOW, qualification_id: 'qualification-a',
+        },
+        {
+          deployment_id: 'deployment-b', model_id: 'model-b', model_revision: 'b'.repeat(40),
+          quantization: 'int8-weight-only', topology_size: 3, health: 'qualified',
+          qualified_at_unix_ms: NOW + 1, qualification_id: 'qualification-b',
+        },
+      ],
+    });
+    render(
+      <InferenceWorkspace
+        client={client}
+        deploymentClient={{ status: async () => registry(), select: async () => registry() }}
+        now={() => NOW + 2}
+      />,
+    );
+
+    expect(await screen.findByLabelText('Model')).toHaveValue('deployment-a');
+    client.current = secondQualification;
+    selected = 'deployment-b';
+    window.dispatchEvent(new Event(DEPLOYMENTS_CHANGED_EVENT));
+
+    await waitFor(() => expect(screen.getByLabelText('Model')).toHaveValue('deployment-b'));
+    expect(await screen.findByRole('button', { name: 'Accept current binding' })).toBeVisible();
+    expect(screen.getByText('deployment-b')).toBeVisible();
   });
 
   it('disables submission for route_ready=false and renders the exact reason', async () => {

@@ -99,6 +99,43 @@ M18, M19, and M20 remain open capability gates. M21 is partial. M22 release evid
 historical until the final executed-artifact closure in A15. M23's heterogeneous stage-
 local KV result remains valid within its exact physical and representation boundary.
 
+### Current execution checkpoint — 2026-08-15
+
+A2 is complete and A3 is the next active gate. The live
+Qwen2.5-0.5B representation is freshly qualified
+for the Lenovo-independent M4 Pro -> Surface route. Planner-v2 independently selected
+the contiguous `node-0 [0,23) -> node-2 [23,24)` allocation from fresh signed resource
+and activation-plane evidence. Capacity refresh exposes the exact immutable
+`int8-weight-only` replacement operation and its assignment-local artifact bytes without
+silently authorizing a conversion; signed member inventory discovery expands the
+catalogue without granting selection authority. A generic mobile HTTPS artifact-source
+member is current and may source assigned chunks, but remains permanently ineligible
+for model-layer placement.
+
+The A2 artifact protocol is physically proven for cold two-source acquisition, warm
+zero-byte reuse, serving-traffic pacing, source loss/rotation, corrupt-cache quarantine,
+interrupted-process recovery, persistent signed-grant replay rejection, disk admission,
+manifest substitution, concurrent staging, cancellation, no-source failure, membership
+drift, representation/authorization drift, stale feasibility, and unassigned requests.
+Every authorized source holds every exact chunk, while transfer grants remain scoped to
+the recipient's current assignment. No model download, conversion, quantization, or
+representation substitution was used.
+
+The owner authorized only the exact `int8-weight-only` representation of existing local
+revision `7ae557604adf67be50417f59c2c2f167def9a775`; no download or model
+substitution was authorized or performed. The ordinary product path then recorded a
+302,097,376-byte two-source cold Surface acquisition with zero origin and exact warm
+reuse with zero transfer. Executed artifact
+`a2-product-gate-20260815-after-warm.json` passed every check and binds those records to
+a fresh physical inference returning `Paris`, stable route identity, and positive
+counters on both stages. The prepared candidate is visible to activation authority with
+zero invalid candidates. All eight UI workspaces passed live browser checks, including
+refresh, navigation, Back/Forward, fail-closed outage, automatic session renewal on
+reconnect, and an independent second session. Lenovo restoration remains explicitly
+outside the close gate. The final full Python/frontend/governance/contract/security
+regression is green and the single atomic A2 commit is present. A3 work must remain in
+its own milestone commit.
+
 ## 5. Dependency graph
 
 ```text
@@ -214,6 +251,11 @@ Implement A2 in this order:
    model bytes. The Planner may consider availability and redundancy as cost evidence;
    only the Planner chooses placement, and only the Provisioner issues acquisition
    grants.
+   Model and artifact discovery must be member-driven rather than coordinator-cache-
+   fixed: a newly enrolled current member may add immutable identities and signed chunk
+   availability to the private coordinator inventory. The UI consumes the reconciled
+   aggregate, displays discovery scope and blockers, and never hard-codes a model or
+   device count. Discovery alone never makes a model selectable.
 3. **Swarm-assisted acquisition.** Fetch missing chunks concurrently from multiple
    authorized peers when at least two useful sources exist, with the operator-owned
    source/cache as fallback. Support resumable range/chunk transfer, bounded retry,
@@ -541,7 +583,9 @@ Incidents thermal/network events; Settings contribution and revocation controls.
 ### A13 — Cross-platform installation and invitation UX
 
 **Outcome:** normal users join safely without filesystem, seed URL, EndpointID, sidecar,
-or CLI knowledge.
+or CLI knowledge. The product remains an open-ended private swarm rather than a fixed
+demo inventory: authorized users can invite additional members, observe their evidence
+and eligibility, and use newly qualified capacity without changing frontend code.
 
 - Provide signed packages/apps for supported platforms and durable managed services where
   the OS permits them.
@@ -552,6 +596,9 @@ or CLI knowledge.
 - Automate bootstrap reachability, identity creation, capability probe, lease renewal,
   reconnect, update, and revocation while retaining advanced diagnostics.
 - Joining never modifies active Router state or deployment selection.
+- Drive the entire join -> measure -> qualify -> acquire assigned artifacts -> load ->
+  serve lifecycle from live authorities surfaced in the frontend. Do not encode a fixed
+  member, model, stage, platform, or topology list in either the UI or coordinator.
 - Suggested distribution targets: signed macOS package, Linux package/service, Windows
   installer/service, signed Android app, TestFlight/native iOS/iPadOS app, and a clearly
   limited browser member.
@@ -647,7 +694,11 @@ The Astra architecture is complete only when:
 9. speculative decoding is either physically beneficial under its frozen gate or visibly
    disabled with measured reasons;
 10. all eight workspaces consume genuine live authorities and label sealed history;
-11. the release decision is derived from executed artifacts rather than assertions.
+11. the release decision is derived from executed artifacts rather than assertions;
+12. a reviewer can add another supported device and select another locally discovered,
+    physically qualified model through the frontend without editing a fixture, plan,
+    source file, or hard-coded inventory; unsafe or oversized choices remain visible
+    with their real blocker and cannot be forced into service.
 
 ## 9. Separately reviewed future program
 

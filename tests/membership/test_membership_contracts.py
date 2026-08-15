@@ -451,6 +451,21 @@ def test_linux_numpy_iroh_runtime_is_activation_eligible() -> None:
     )
 
 
+def test_artifact_source_https_is_exact_and_never_activation_eligible() -> None:
+    message = _message(JOIN_REQUEST_PROTOCOL)
+    message["peer_class"] = "artifact_source_https"
+    message["runtime_capability"] = {
+        "runtime_backend": "artifact-source",
+        "transport": "https",
+        "activation_protocol": None,
+    }
+
+    validate_membership_message(message)
+    assert not peer_runtime_is_activation_eligible(
+        message["peer_class"], message["runtime_capability"]
+    )
+
+
 def test_heartbeat_liveness_source_requires_bound_receipt_shape() -> None:
     heartbeat = _message(HEARTBEAT_PROTOCOL)
     validate_membership_message(heartbeat)

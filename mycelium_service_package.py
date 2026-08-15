@@ -17,7 +17,7 @@ from mycelium_qualification.evidence import canonical_json_bytes
 
 
 PROTOCOL = "mycelium.service_package.v1"
-ROLES = frozenset({"seed", "node", "supervisor"})
+ROLES = frozenset({"artifact_source", "seed", "node", "supervisor"})
 _ID = re.compile(r"^[a-z][a-z0-9.-]{0,126}[a-z0-9]$")
 _ENV = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SECRET_ENV = re.compile(r"(?:TOKEN|SECRET|PASSWORD|PRIVATE|CREDENTIAL|API_KEY)")

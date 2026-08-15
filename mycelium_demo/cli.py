@@ -112,6 +112,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--candidate-plan-root", type=Path)
     serve.add_argument("--model-preparation-template-plan", type=Path)
     serve.add_argument("--model-preparation-root", type=Path)
+    serve.add_argument("--member-artifact-transport-plan", type=Path)
+    serve.add_argument("--member-model-inventory-file", type=Path, action="append")
+    serve.add_argument("--member-model-inventory-authorities-file", type=Path)
+    serve.add_argument("--representation-authorization-file", type=Path)
     serve.add_argument("--seed-url")
     return parser
 
@@ -127,6 +131,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         result.extend(("--operator-plan", str(operator_plan)))
     for evidence_file in args.historical_evidence_file or ():
         result.extend(("--historical-evidence-file", str(evidence_file)))
+    for inventory_file in args.member_model_inventory_file or ():
+        result.extend(("--member-model-inventory-file", str(inventory_file)))
     optional_paths = (
         ("--deployment-dir", args.deployment_dir),
         ("--model-operation-file", args.model_operation_file),
@@ -137,6 +143,15 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         ("--candidate-plan-root", args.candidate_plan_root),
         ("--model-preparation-template-plan", args.model_preparation_template_plan),
         ("--model-preparation-root", args.model_preparation_root),
+        ("--member-artifact-transport-plan", args.member_artifact_transport_plan),
+        (
+            "--member-model-inventory-authorities-file",
+            args.member_model_inventory_authorities_file,
+        ),
+        (
+            "--representation-authorization-file",
+            args.representation_authorization_file,
+        ),
     )
     for flag, value in optional_paths:
         if value is not None:
@@ -167,6 +182,10 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.candidate_plan_root,
             args.model_preparation_template_plan,
             args.model_preparation_root,
+            args.member_artifact_transport_plan,
+            args.member_model_inventory_file,
+            args.member_model_inventory_authorities_file,
+            args.representation_authorization_file,
             args.seed_url,
         )
     )

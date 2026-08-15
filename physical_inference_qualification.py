@@ -51,6 +51,10 @@ _RESULT_PROTOCOL = "mycelium.physical_controller_result.v1"
 _SNAPSHOT_PROTOCOL = "mycelium.controller_membership_snapshot.v1"
 _TRANSFER_PROTOCOL = "mycelium.controller_transfer_manifest.v1"
 _NODE_TRANSFERS_PROTOCOL = "mycelium.controller_node_transfer_manifests.v1"
+_PREPOSITIONED_PROTOCOL = "mycelium.controller_prepositioned_artifacts.v1"
+_PREPOSITIONED_MEMBER_PROTOCOL = (
+    "mycelium.controller_prepositioned_member_artifacts.v1"
+)
 _SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SSH_TARGET_RE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$"
@@ -78,9 +82,9 @@ _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
 _NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 _NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
 _RUN_PLAN_PROTOCOL = "mycelium.controller_run_plan.v1"
-_REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,sys,tarfile
+_REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,stat,sys,tarfile
 from pathlib import Path,PurePosixPath
-root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);created=False
+root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);preposition_digest=sys.argv[5] if len(sys.argv)>5 else None;preposition_size=int(sys.argv[6]) if len(sys.argv)>6 else 0;created=False
 try:
     if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or root.exists():raise ValueError("root")
     current=Path(root.anchor)
@@ -96,7 +100,6 @@ try:
             content=sys.stdin.buffer.read(min(1_048_576,expected_size-received))
             if not content:raise ValueError("size")
             incoming.write(content);digest.update(content);received+=len(content)
-        if sys.stdin.buffer.read(1):raise ValueError("size")
     archive_path.chmod(0o600);actual="sha256:"+digest.hexdigest()
     if actual!=expected_digest:raise ValueError("digest")
     with tarfile.open(archive_path,mode="r:") as archive:
@@ -117,10 +120,60 @@ try:
                 if source.read(1):raise ValueError("content")
             destination.chmod(0o600)
     archive_path.unlink()
-    marker={"archive_digest":actual,"node_id":node_id};marker_path=root/".mycelium-stage.json"
+    actual_preposition=None
+    if preposition_digest is not None:
+        encoded=sys.stdin.buffer.read(preposition_size)
+        if len(encoded)!=preposition_size:raise ValueError("preposition_size")
+        actual_preposition="sha256:"+hashlib.sha256(encoded).hexdigest()
+        if actual_preposition!=preposition_digest:raise ValueError("preposition_digest")
+        document=json.loads(encoded)
+        if set(document)!={"files","protocol"} or document["protocol"]!="mycelium.controller_prepositioned_member_artifacts.v1" or not isinstance(document["files"],list):raise ValueError("preposition_document")
+        destinations=[]
+        for record in document["files"]:
+            if not isinstance(record,dict) or set(record)!={"content_digest","destination_path","size_bytes","source_path"}:raise ValueError("preposition_record")
+            destination_value=record["destination_path"];source_value=record["source_path"];size=record["size_bytes"];content_digest=record["content_digest"]
+            relative=PurePosixPath(destination_value)
+            source_path=Path(source_value)
+            if relative.is_absolute() or str(relative)!=destination_value or any(part in ("",".","..") for part in relative.parts):raise ValueError("preposition_destination")
+            if not source_path.is_absolute() or str(source_path)!=source_value or any(part in ("",".","..") for part in source_path.parts):raise ValueError("preposition_source")
+            if not isinstance(size,int) or isinstance(size,bool) or size<0 or not isinstance(content_digest,str) or len(content_digest)!=71 or not content_digest.startswith("sha256:"):raise ValueError("preposition_binding")
+            destinations.append(destination_value)
+            current=Path(source_path.anchor)
+            for part in source_path.parts[1:]:
+                current=current/part
+                metadata=current.lstat()
+                if stat.S_ISLNK(metadata.st_mode):raise ValueError("preposition_symlink")
+            flags=os.O_RDONLY
+            if hasattr(os,"O_NOFOLLOW"):flags|=os.O_NOFOLLOW
+            fd=os.open(source_path,flags)
+            destination=root.joinpath(*relative.parts)
+            try:
+                metadata=os.fstat(fd)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid!=os.geteuid() or metadata.st_size!=size or destination.exists():raise ValueError("preposition_source")
+                destination.parent.mkdir(parents=True,mode=0o700,exist_ok=True)
+                output_flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
+                if hasattr(os,"O_NOFOLLOW"):output_flags|=os.O_NOFOLLOW
+                output_fd=os.open(destination,output_flags,0o600)
+                copied=0;content_hash=hashlib.sha256()
+                try:
+                    while copied<size:
+                        content=os.read(fd,min(1_048_576,size-copied))
+                        if not content:raise ValueError("preposition_size")
+                        os.write(output_fd,content);content_hash.update(content);copied+=len(content)
+                    if os.read(fd,1):raise ValueError("preposition_size")
+                    os.fsync(output_fd)
+                finally:os.close(output_fd)
+                if "sha256:"+content_hash.hexdigest()!=content_digest:raise ValueError("preposition_content")
+            finally:os.close(fd)
+        if destinations!=sorted(destinations) or len(destinations)!=len(set(destinations)):raise ValueError("preposition_order")
+    if sys.stdin.buffer.read(1):raise ValueError("size")
+    marker={"archive_digest":actual,"node_id":node_id}
+    if actual_preposition is not None:marker["preposition_digest"]=actual_preposition
+    marker_path=root/".mycelium-stage.json"
     with marker_path.open("x",encoding="utf-8") as output:output.write(json.dumps(marker,sort_keys=True,separators=(",",":"))+"\n")
     marker_path.chmod(0o600)
     ack={"archive_digest":actual,"archive_size_bytes":received,"node_id":node_id,"protocol":"mycelium.controller_remote_stage_ack.v1","staging_root":str(root)}
+    if actual_preposition is not None:ack.update({"preposition_digest":actual_preposition,"preposition_size_bytes":preposition_size})
     sys.stdout.write(json.dumps(ack,sort_keys=True,separators=(",",":"))+"\n");sys.stdout.flush()
 except BaseException:
     if created:shutil.rmtree(root,ignore_errors=True)
@@ -128,7 +181,7 @@ except BaseException:
 '''
 _REMOTE_CLEANUP_SCRIPT = r'''import json,shutil,stat,sys
 from pathlib import Path
-root=Path(sys.argv[1]);node_id=sys.argv[2];archive_digest=sys.argv[3]
+root=Path(sys.argv[1]);node_id=sys.argv[2];archive_digest=sys.argv[3];preposition_digest=None if len(sys.argv)<5 or sys.argv[4]=="-" else sys.argv[4]
 try:
     if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or not any(part.startswith("mycelium") for part in root.parts):raise ValueError("root")
     removed=False
@@ -137,8 +190,9 @@ try:
         if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):raise ValueError("root")
         marker_path=root/".mycelium-stage.json";marker_metadata=marker_path.lstat()
         if not stat.S_ISREG(marker_metadata.st_mode) or marker_metadata.st_nlink!=1 or marker_metadata.st_size>1024:raise ValueError("marker")
-        marker=json.loads(marker_path.read_text(encoding="utf-8"))
-        if marker!={"archive_digest":archive_digest,"node_id":node_id}:raise ValueError("marker")
+        marker=json.loads(marker_path.read_text(encoding="utf-8"));expected={"archive_digest":archive_digest,"node_id":node_id}
+        if preposition_digest is not None:expected["preposition_digest"]=preposition_digest
+        if marker!=expected:raise ValueError("marker")
         shutil.rmtree(root);removed=True
     ack={"node_id":node_id,"protocol":"mycelium.controller_remote_cleanup_ack.v1","removed":removed,"staging_root":str(root)}
     sys.stdout.write(json.dumps(ack,sort_keys=True,separators=(",",":"))+"\n");sys.stdout.flush()
@@ -852,6 +906,7 @@ class QualificationController:
         membership_snapshot: Mapping[str, Any],
         now: float,
         node_transfer_manifests: Mapping[str, Any] | None = None,
+        prepositioned_artifacts: Mapping[str, Any] | None = None,
         runner: CommandRunner | None = None,
         run_plan: Mapping[str, Any] | None = None,
         session_factory: Callable[..., Any] | None = None,
@@ -904,6 +959,11 @@ class QualificationController:
             if node_transfer_manifests is None
             else dict(node_transfer_manifests)
         )
+        self._prepositioned_artifacts = (
+            None
+            if prepositioned_artifacts is None
+            else dict(prepositioned_artifacts)
+        )
         self._membership_snapshot = dict(membership_snapshot)
         self._run_plan = None if run_plan is None else dict(run_plan)
         self._now = float(now)
@@ -932,7 +992,10 @@ class QualificationController:
             _verify_transfer_file(self.source_root, record) for record in records
         )
         node_manifests = self._node_transfer_manifests
+        prepositioned = self._validate_prepositioned_artifacts(verified)
         if node_manifests is None:
+            if any(prepositioned.values()):
+                _reject("prepositioned_artifacts_require_node_manifests")
             return verified
         if (
             set(node_manifests) != {"protocol", "manifests"}
@@ -967,10 +1030,98 @@ class QualificationController:
                     _reject("node_transfer_manifest_not_base_subset")
             if "physical_inference_node.py" not in node_paths:
                 _reject("node_transfer_manifest_node_script_missing")
+            prepositioned_paths = {
+                record["destination_path"] for record in prepositioned[node_id]
+            }
+            if set(node_paths) & prepositioned_paths:
+                _reject("prepositioned_artifact_also_transferred")
             covered_paths.update(node_paths)
+            covered_paths.update(prepositioned_paths)
         if covered_paths != set(base_records):
             _reject("node_transfer_manifests_incomplete")
         return verified
+
+    def _validate_prepositioned_artifacts(
+        self,
+        verified: tuple[dict[str, Any], ...],
+    ) -> dict[str, list[dict[str, Any]]]:
+        expected_nodes = {peer.node_id for peer in self.peers}
+        if self._prepositioned_artifacts is None:
+            return {node_id: [] for node_id in expected_nodes}
+        document = self._prepositioned_artifacts
+        if (
+            set(document) != {"protocol", "members"}
+            or document.get("protocol") != _PREPOSITIONED_PROTOCOL
+            or not isinstance(document.get("members"), Mapping)
+            or set(document["members"]) != expected_nodes
+        ):
+            _reject("prepositioned_artifacts_invalid")
+        base_records = {record["path"]: record for record in verified}
+        result: dict[str, list[dict[str, Any]]] = {}
+        for node_id in sorted(expected_nodes):
+            records = document["members"][node_id]
+            if (
+                not isinstance(records, list)
+                or len(records) > 256
+                or not all(isinstance(record, Mapping) for record in records)
+            ):
+                _reject("prepositioned_artifacts_invalid")
+            destinations = [record.get("destination_path") for record in records]
+            if destinations != sorted(destinations) or len(destinations) != len(
+                set(destinations)
+            ):
+                _reject("prepositioned_artifacts_order_invalid")
+            normalized: list[dict[str, Any]] = []
+            for record in records:
+                if set(record) != {
+                    "destination_path",
+                    "source_path",
+                    "size_bytes",
+                    "content_digest",
+                }:
+                    _reject("prepositioned_artifact_invalid")
+                destination = str(
+                    _safe_transfer_path(record.get("destination_path"))
+                )
+                source_value = record.get("source_path")
+                source_path = (
+                    PurePosixPath(source_value)
+                    if isinstance(source_value, str)
+                    else None
+                )
+                if (
+                    source_path is None
+                    or not source_path.is_absolute()
+                    or str(source_path) != source_value
+                    or len(source_value) > 2048
+                    or any(part in {"", ".", ".."} for part in source_path.parts)
+                ):
+                    _reject("prepositioned_artifact_source_invalid")
+                size = record.get("size_bytes")
+                digest = record.get("content_digest")
+                base = base_records.get(destination)
+                if (
+                    not isinstance(size, int)
+                    or isinstance(size, bool)
+                    or size < 0
+                    or size > _MAX_TRANSFER_BYTES
+                    or not isinstance(digest, str)
+                    or _DIGEST_RE.fullmatch(digest) is None
+                    or base is None
+                    or size != base["size_bytes"]
+                    or digest != base["content_digest"]
+                ):
+                    _reject("prepositioned_artifact_binding_invalid")
+                normalized.append(
+                    {
+                        "destination_path": destination,
+                        "source_path": source_value,
+                        "size_bytes": size,
+                        "content_digest": digest,
+                    }
+                )
+            result[node_id] = normalized
+        return result
 
     def _transfer_manifest_for_node(self, node_id: str) -> Mapping[str, Any]:
         if self._node_transfer_manifests is None:
@@ -989,6 +1140,24 @@ class QualificationController:
             self._transfer_manifest_for_node(peer.node_id),
         )
         return archive, "sha256:" + hashlib.sha256(archive).hexdigest()
+
+    def _preposition_identity_for_peer(
+        self,
+        peer: PeerIdentity,
+    ) -> tuple[bytes, str] | None:
+        if self._prepositioned_artifacts is None:
+            return None
+        members = self._prepositioned_artifacts.get("members")
+        if not isinstance(members, Mapping) or not isinstance(
+            members.get(peer.node_id), list
+        ):
+            _reject("prepositioned_artifacts_invalid")
+        document = {
+            "protocol": _PREPOSITIONED_MEMBER_PROTOCOL,
+            "files": members[peer.node_id],
+        }
+        encoded = _canonical_bytes(document)
+        return encoded, "sha256:" + hashlib.sha256(encoded).hexdigest()
 
     def _validate_membership(self) -> dict[str, dict[str, Any]]:
         snapshot = self._membership_snapshot
@@ -1431,6 +1600,14 @@ class QualificationController:
         peers_by_node = {peer.node_id: peer for peer in self.peers}
         archive_digests = {
             node_id: self._archive_identity_for_peer(peer)[1]
+            for node_id, peer in peers_by_node.items()
+        }
+        preposition_digests = {
+            node_id: (
+                None
+                if (identity := self._preposition_identity_for_peer(peer)) is None
+                else identity[1]
+            )
             for node_id, peer in peers_by_node.items()
         }
         plans_by_node = {record["node_id"]: record for record in plan["nodes"]}
@@ -1942,6 +2119,7 @@ class QualificationController:
                     self._cleanup_peer(
                         peer,
                         archive_digest=archive_digests[peer.node_id],
+                        preposition_digest=preposition_digests[peer.node_id],
                     )
                 )
             except ControllerError:
@@ -2092,6 +2270,8 @@ class QualificationController:
         peer: PeerIdentity,
         archive_digest: str,
         archive_size: int,
+        preposition_digest: str | None = None,
+        preposition_size: int = 0,
     ) -> dict[str, Any]:
         if capture.returncode != 0:
             _reject("remote_stage_failed")
@@ -2111,6 +2291,13 @@ class QualificationController:
             "archive_digest": archive_digest,
             "archive_size_bytes": archive_size,
         }
+        if preposition_digest is not None:
+            expected.update(
+                {
+                    "preposition_digest": preposition_digest,
+                    "preposition_size_bytes": preposition_size,
+                }
+            )
         if ack != expected or capture.stdout != _canonical_bytes(expected):
             _reject("remote_stage_ack_mismatch")
         return expected
@@ -2120,6 +2307,7 @@ class QualificationController:
         peer: PeerIdentity,
         *,
         archive_digest: str,
+        preposition_digest: str | None = None,
     ) -> dict[str, Any]:
         argv = _peer_process_argv(
             peer,
@@ -2130,6 +2318,7 @@ class QualificationController:
                 peer.staging_root,
                 peer.node_id,
                 archive_digest,
+                preposition_digest or "-",
             ),
         )
         capture = self._runner.run(
@@ -2163,8 +2352,15 @@ class QualificationController:
         for peer in self.peers:
             try:
                 _archive, archive_digest = self._archive_identity_for_peer(peer)
+                preposition = self._preposition_identity_for_peer(peer)
                 actions.append(
-                    self._cleanup_peer(peer, archive_digest=archive_digest)
+                    self._cleanup_peer(
+                        peer,
+                        archive_digest=archive_digest,
+                        preposition_digest=(
+                            None if preposition is None else preposition[1]
+                        ),
+                    )
                 )
             except ControllerError:
                 failed = True
@@ -2192,33 +2388,45 @@ class QualificationController:
     ) -> dict[str, Any]:
         del transfers
         actions: list[dict[str, Any]] = []
-        attempted: list[tuple[PeerIdentity, str]] = []
+        attempted: list[tuple[PeerIdentity, str, str | None]] = []
         try:
             for peer in self.peers:
                 archive, archive_digest = self._archive_identity_for_peer(peer)
-                attempted.append((peer, archive_digest))
+                preposition = self._preposition_identity_for_peer(peer)
+                preposition_bytes = b"" if preposition is None else preposition[0]
+                preposition_digest = None if preposition is None else preposition[1]
+                attempted.append((peer, archive_digest, preposition_digest))
+                stage_arguments = [
+                    "python3",
+                    "-c",
+                    _REMOTE_STAGE_SCRIPT,
+                    peer.staging_root,
+                    peer.node_id,
+                    archive_digest,
+                    str(len(archive)),
+                ]
+                if preposition_digest is not None:
+                    stage_arguments.extend(
+                        [preposition_digest, str(len(preposition_bytes))]
+                    )
                 argv = _peer_process_argv(
                     peer,
-                    (
-                        "python3",
-                        "-c",
-                        _REMOTE_STAGE_SCRIPT,
-                        peer.staging_root,
-                        peer.node_id,
-                        archive_digest,
-                        str(len(archive)),
-                    ),
+                    tuple(stage_arguments),
                 )
                 capture = self._runner.run(
                     argv,
-                    timeout_seconds=_stage_timeout_seconds(len(archive)),
-                    stdin_bytes=archive,
+                    timeout_seconds=_stage_timeout_seconds(
+                        len(archive) + len(preposition_bytes)
+                    ),
+                    stdin_bytes=archive + preposition_bytes,
                 )
                 ack = self._parse_stage_ack(
                     capture,
                     peer=peer,
                     archive_digest=archive_digest,
                     archive_size=len(archive),
+                    preposition_digest=preposition_digest,
+                    preposition_size=len(preposition_bytes),
                 )
                 actions.append(
                     {
@@ -2227,15 +2435,21 @@ class QualificationController:
                         "status": "staged",
                         "archive_digest": archive_digest,
                         "archive_size_bytes": len(archive),
+                        "preposition_digest": preposition_digest,
+                        "preposition_size_bytes": len(preposition_bytes),
                         "staging_root": peer.staging_root,
                         "acknowledgement": ack,
                     }
                 )
         except ControllerError as stage_error:
             cleanup_failed = False
-            for peer, archive_digest in attempted:
+            for peer, archive_digest, preposition_digest in attempted:
                 try:
-                    self._cleanup_peer(peer, archive_digest=archive_digest)
+                    self._cleanup_peer(
+                        peer,
+                        archive_digest=archive_digest,
+                        preposition_digest=preposition_digest,
+                    )
                 except ControllerError:
                     cleanup_failed = True
             if cleanup_failed:
@@ -2363,6 +2577,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-root")
     parser.add_argument("--transfer-manifest")
     parser.add_argument("--node-transfer-manifests")
+    parser.add_argument("--prepositioned-artifacts")
     parser.add_argument("--membership-snapshot")
     parser.add_argument("--run-plan")
     parser.add_argument("--now", type=float)
@@ -2412,6 +2627,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 None
                 if args.node_transfer_manifests is None
                 else _read_document(Path(args.node_transfer_manifests))
+            ),
+            prepositioned_artifacts=(
+                None
+                if args.prepositioned_artifacts is None
+                else _read_document(Path(args.prepositioned_artifacts))
             ),
             membership_snapshot=_read_document(Path(args.membership_snapshot)),
             now=args.now,

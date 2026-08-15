@@ -1031,11 +1031,27 @@ def catalog_document(
     entries: Iterable[LocalModelEntry],
     *,
     generation: int,
+    discovered_entries: Iterable[Mapping[str, object]] = (),
+    discovery: Mapping[str, object] | None = None,
+    entry_discovery: Mapping[tuple[str, str], Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     if type(generation) is not int or generation <= 0:
         raise ValueError("catalog generation must be a positive exact integer")
+    discovery_by_identity = entry_discovery or {}
+    projections = []
+    for entry in entries:
+        projection = entry.projection()
+        identity = (entry.model_id, entry.revision)
+        metadata = discovery_by_identity.get(identity)
+        if metadata is not None:
+            projection.update(json.loads(json.dumps(dict(metadata), allow_nan=False)))
+        projections.append(projection)
+    projections.extend(
+        json.loads(json.dumps(dict(entry), allow_nan=False))
+        for entry in discovered_entries
+    )
     projections = sorted(
-        (entry.projection() for entry in entries),
+        projections,
         key=lambda entry: (str(entry["model_id"]), str(entry["revision"])),
     )
     if len(projections) > _MAX_ENTRIES:
@@ -1046,6 +1062,14 @@ def catalog_document(
         "source": "local_read_only_inventory",
         "download_policy": "operator_approval_required",
         "entries": projections,
+        "discovery": json.loads(json.dumps(dict(discovery), allow_nan=False))
+        if discovery is not None
+        else {
+            "scope": "coordinator_only",
+            "accepted_member_count": 0,
+            "rejected_member_count": 0,
+            "blockers": [],
+        },
         "route_ready": False,
         "qualification_evaluated": False,
     }
@@ -1092,6 +1116,7 @@ def _exact_allocation(
     evidence: SwarmFeasibilityEvidence,
     required_decode_mode: str,
     serving_quantization: str | None,
+    representation_authorization: Mapping[str, object] | None,
 ) -> tuple[
     bool,
     list[dict[str, object]],
@@ -1110,6 +1135,75 @@ def _exact_allocation(
     for size in entry.layer_weight_bytes:
         prefix.append(prefix[-1] + size)
     rejected: list[dict[str, object]] = []
+    authorized_stages: tuple[Mapping[str, object], ...] | None = None
+    authorized_representation_digest: str | None = None
+    if representation_authorization is not None:
+        if (
+            representation_authorization.get("protocol")
+            != "mycelium.model_preparation_authorization.v1"
+            or representation_authorization.get("model_id") != entry.model_id
+            or representation_authorization.get("revision") != entry.revision
+            or representation_authorization.get("source_quantization")
+            != entry.quantization
+            or representation_authorization.get("serving_quantization")
+            != serving_quantization
+            or not isinstance(representation_authorization.get("serving_dtype"), str)
+            or not representation_authorization.get("serving_dtype")
+            or not isinstance(
+                representation_authorization.get("representation_digest"), str
+            )
+            or _DIGEST_PATTERN.fullmatch(
+                str(representation_authorization["representation_digest"])
+            )
+            is None
+            or (
+                entry.quantization != serving_quantization
+                and representation_authorization.get("conversion_authorized") is not True
+            )
+        ):
+            raise ValueError("approved_serving_representation_invalid")
+        raw_stages = representation_authorization.get("stages")
+        if not isinstance(raw_stages, list) or len(raw_stages) != len(nodes):
+            raise ValueError("approved_serving_representation_invalid")
+        cursor = 0
+        validated_stages: list[Mapping[str, object]] = []
+        for index, (raw_stage, node) in enumerate(zip(raw_stages, nodes, strict=True)):
+            if not isinstance(raw_stage, Mapping):
+                raise ValueError("approved_serving_representation_invalid")
+            start = raw_stage.get("start_layer")
+            end = raw_stage.get("end_layer_exclusive")
+            files = raw_stage.get("assignment_files")
+            artifact_bytes = raw_stage.get("assignment_artifact_bytes")
+            if (
+                raw_stage.get("stage_index") != index
+                or raw_stage.get("node_id") != node.node_id
+                or type(start) is not int
+                or type(end) is not int
+                or start != cursor
+                or end <= start
+                or not isinstance(raw_stage.get("backend"), str)
+                or raw_stage.get("decode_mode") != required_decode_mode
+                or not isinstance(files, list)
+                or not files
+                or not all(
+                    isinstance(item, str)
+                    and item
+                    and item == Path(item).name
+                    for item in files
+                )
+                or len(files) != len(set(files))
+                or type(artifact_bytes) is not int
+                or artifact_bytes <= 0
+            ):
+                raise ValueError("approved_serving_representation_invalid")
+            validated_stages.append(raw_stage)
+            cursor = end
+        if cursor != model.num_layers:
+            raise ValueError("approved_serving_representation_invalid")
+        authorized_stages = tuple(validated_stages)
+        authorized_representation_digest = str(
+            representation_authorization["representation_digest"]
+        )
 
     def assignment_files(
         start: int,
@@ -1231,6 +1325,18 @@ def _exact_allocation(
                 load_peak_weight_bytes += entry.int8_load_final_static_bytes
             representation = entry.projection()["serving_representations"][0]
             representation_digest = str(representation["representation_digest"])
+        authorized_stage = (
+            None if authorized_stages is None else authorized_stages[stage_index]
+        )
+        if authorized_stage is not None:
+            if (
+                authorized_stage["start_layer"] != start
+                or authorized_stage["end_layer_exclusive"] != end
+                or authorized_stage["backend"] != resource.backend
+            ):
+                reject(stage_index, start, end, "approved_representation_stage_mismatch")
+                return None
+            representation_digest = authorized_representation_digest
         kv_bytes = (
             model.kv_bytes_per_layer_token
             * layer_count
@@ -1264,18 +1370,31 @@ def _exact_allocation(
                 else "insufficient_memory",
             )
             return None
-        try:
-            files = assignment_files(start, end, stage_index)
-        except (OSError, ValueError, json.JSONDecodeError):
-            reject(stage_index, start, end, "assignment_file_coverage_unavailable")
-            return None
-        cached_digests = set(resource.cached_content_digests)
-        cached_artifact_bytes = sum(
-            int(record["size_bytes"])
-            for record in files
-            if record.get("content_digest") in cached_digests
-        )
-        assignment_artifact_bytes = sum(int(record["size_bytes"]) for record in files)
+        if authorized_stage is None:
+            try:
+                files = assignment_files(start, end, stage_index)
+            except (OSError, ValueError, json.JSONDecodeError):
+                reject(stage_index, start, end, "assignment_file_coverage_unavailable")
+                return None
+            cached_digests = set(resource.cached_content_digests)
+            cached_artifact_bytes = sum(
+                int(record["size_bytes"])
+                for record in files
+                if record.get("content_digest") in cached_digests
+            )
+            assignment_artifact_bytes = sum(
+                int(record["size_bytes"]) for record in files
+            )
+            assignment_file_names = [str(record["name"]) for record in files]
+        else:
+            # The immutable authorization owns exact assignment-local byte bounds.
+            # Chunk manifests later prove cache reuse; until joined, conservatively
+            # count the entire approved stage as missing.
+            cached_artifact_bytes = 0
+            assignment_artifact_bytes = int(
+                authorized_stage["assignment_artifact_bytes"]
+            )
+            assignment_file_names = list(authorized_stage["assignment_files"])
         missing_artifact_bytes = assignment_artifact_bytes - cached_artifact_bytes
         staging_overhead_bytes = missing_artifact_bytes
         required_disk_bytes = missing_artifact_bytes + staging_overhead_bytes
@@ -1364,7 +1483,7 @@ def _exact_allocation(
             "assignment_artifact_bytes": assignment_artifact_bytes,
             "cached_artifact_bytes": cached_artifact_bytes,
             "missing_artifact_bytes": missing_artifact_bytes,
-            "assignment_files": [str(record["name"]) for record in files],
+            "assignment_files": assignment_file_names,
             "backend": resource.backend,
             "runtime_build_digest": resource.runtime_build_digest,
             "dtype": "float32"
@@ -1382,6 +1501,25 @@ def _exact_allocation(
             ),
             "modeled_service_work_ms": service_work,
         }
+
+    if authorized_stages is not None:
+        stages: list[dict[str, object]] = []
+        objective = 0.0
+        for stage_index, stage in enumerate(authorized_stages):
+            cost = candidate_cost(
+                stage_index,
+                int(stage["start_layer"]),
+                int(stage["end_layer_exclusive"]),
+            )
+            if cost is None:
+                diagnostics = {"approved_representation_currently_infeasible"}
+                diagnostics.update(
+                    f"{item['reason']}:{item['node_id']}" for item in rejected
+                )
+                return False, [], None, tuple(sorted(diagnostics)), rejected
+            objective = max(objective, cost[0])
+            stages.append(cost[1])
+        return True, stages, objective, (), rejected
 
     dp: dict[tuple[int, int], tuple[float, tuple[int, ...]]] = {(0, 0): (0.0, ())}
     for stage_count in range(1, len(nodes) + 1):
@@ -1520,6 +1658,7 @@ def evaluate_model_feasibility(
     evaluated_at_unix_ms: int,
     required_decode_mode: str,
     serving_quantization: str | None = None,
+    representation_authorization: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Evaluate one immutable model against one fresh signed swarm generation."""
 
@@ -1566,6 +1705,7 @@ def evaluate_model_feasibility(
                 evidence,
                 required_decode_mode,
                 serving_quantization,
+                representation_authorization,
             )
             reasons.extend(diagnostics)
     cached_artifact_bytes = sum(int(stage["cached_artifact_bytes"]) for stage in stages)
@@ -1609,14 +1749,39 @@ def evaluate_model_feasibility(
         "artifact_digest": entry.artifact_digest,
         "source_quantization": entry.quantization,
         "serving_quantization": serving_quantization or entry.quantization,
-        "serving_dtype": "float32"
-        if serving_quantization == "int8-weight-only"
-        else entry.quantization,
+        "serving_dtype": (
+            representation_authorization["serving_dtype"]
+            if representation_authorization is not None
+            else (
+                "float32"
+                if serving_quantization == "int8-weight-only"
+                else entry.quantization
+            )
+        ),
         "representation_digest": (
-            entry.projection()["serving_representations"][0]["representation_digest"]
-            if serving_quantization == "int8-weight-only"
-            and entry.int8_layer_weight_bytes
-            else entry.artifact_digest
+            representation_authorization["representation_digest"]
+            if representation_authorization is not None
+            else (
+                entry.projection()["serving_representations"][0][
+                    "representation_digest"
+                ]
+                if serving_quantization == "int8-weight-only"
+                and entry.int8_layer_weight_bytes
+                else entry.artifact_digest
+            )
+        ),
+        "representation_authority": (
+            {
+                "kind": "approved_existing_immutable_representation",
+                "owner_decision_digest": representation_authorization.get(
+                    "owner_decision_digest"
+                ),
+                "prior_feasibility_digest": representation_authorization.get(
+                    "feasibility_digest"
+                ),
+            }
+            if representation_authorization is not None
+            else {"kind": "locally_derived_candidate"}
         ),
         "evidence_digest": evidence.evidence_digest,
         "evidence_generation": evidence.generation,
@@ -1633,6 +1798,11 @@ def evaluate_model_feasibility(
             "required_decode_mode": required_decode_mode,
         },
         "planner": "capability_aware_contiguous_exact_weight_dp",
+        "evaluation_mode": (
+            "approved_assignment_current_capability_validation"
+            if representation_authorization is not None
+            else "fresh_contiguous_allocation"
+        ),
         "state": "feasible" if feasible else "infeasible",
         "stages": stages,
         "bottleneck_service_work_ms": bottleneck,

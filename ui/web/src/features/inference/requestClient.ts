@@ -243,30 +243,37 @@ export class ProductInferenceClient implements InferenceClient {
   }
 
   async loadQualification(signal?: AbortSignal): Promise<ProductQualification> {
-    const bootstrap = await this.loadBootstrap(signal);
-    const path = exactSameOriginPath(
-      bootstrap.api.qualification_current,
-      PRODUCT_API_PATHS.qualification_current,
-    );
-    const response = await fetchSafe(
-      this.fetchImplementation,
-      path,
-      {
-        method: 'GET',
-        credentials: 'same-origin',
-        cache: 'no-store',
-        redirect: 'error',
-        headers: { Accept: 'application/json' },
-      },
-      signal,
-    );
-    if (!response.ok) return throwResponseError(response);
-    try {
-      return decodeProductQualification(await responseJson(response));
-    } catch (error) {
-      if (error instanceof InferenceClientError) throw error;
-      throw clientError('invalid_qualification_contract', false, response.status);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const bootstrap = await this.loadBootstrap(signal);
+      const path = exactSameOriginPath(
+        bootstrap.api.qualification_current,
+        PRODUCT_API_PATHS.qualification_current,
+      );
+      const response = await fetchSafe(
+        this.fetchImplementation,
+        path,
+        {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          redirect: 'error',
+          headers: { Accept: 'application/json' },
+        },
+        signal,
+      );
+      if (response.status === 401 && attempt === 0) {
+        this.bootstrap = null;
+        continue;
+      }
+      if (!response.ok) return throwResponseError(response);
+      try {
+        return decodeProductQualification(await responseJson(response));
+      } catch (error) {
+        if (error instanceof InferenceClientError) throw error;
+        throw clientError('invalid_qualification_contract', false, response.status);
+      }
     }
+    throw clientError('request_failed', true, 401);
   }
 
   private async mutationHeaders(signal?: AbortSignal): Promise<Record<string, string>> {

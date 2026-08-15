@@ -53,7 +53,8 @@ function identity(modelId: string, revision: string): string {
 }
 
 function humanReason(value: string): string {
-  const [code, suffix] = value.split(':', 2);
+  const [rawCode, suffix] = value.split(':', 2);
+  const code = rawCode.replace(/^m\d+_/, '');
   const subject = suffix?.trim();
   const reasons: Readonly<Record<string, string>> = Object.freeze({
     insufficient_disk: `Not enough disk space${subject ? ` on ${subject}` : ''}`,
@@ -68,8 +69,10 @@ function humanReason(value: string): string {
     no_feasible_contiguous_exact_weight_allocation: 'No safe contiguous layer allocation fits this swarm',
     startup_challenge_failed: 'Distributed startup challenge failed',
     route_unavailable: 'Prepared route is no longer reachable',
+    owner_metadata_reconciliation_required: 'Waiting for owner metadata reconciliation',
+    member_inventory_identity_conflict: 'Member inventories disagree on immutable model identity',
   });
-  return reasons[code] ?? value.replaceAll('_', ' ');
+  return reasons[code] ?? `${code}${subject ? `: ${subject}` : ''}`.replaceAll('_', ' ');
 }
 
 function phaseLabel(value: DeploymentActivationPhase | null): string {
@@ -115,6 +118,16 @@ export function projectModelCatalogControls(
 
     if (model.state === 'active' || candidate?.state === 'active') {
       availability = 'active'; statusLabel = 'Active'; detail = 'Serving new inference requests now.';
+      const freshReplacement = candidate === null
+        && report?.state === 'feasible'
+        && report.provisioning_authorized
+        && report.evidence_valid_until_unix_ms >= nowUnixMs;
+      if (freshReplacement && (!isPreparation || preparation?.state === 'idle')) {
+        action = 'prepare';
+        detail = 'Serving new inference requests now. A replacement deployment can be prepared without interrupting this route.';
+      } else if (freshReplacement && isPreparation && preparation?.state === 'failed') {
+        action = 'retry_prepare';
+      }
     } else if (model.state === 'qualified' || candidate?.state === 'qualified') {
       availability = 'qualified'; statusLabel = 'Qualified'; detail = 'Ready to select from the Model menu.';
     } else if (candidate?.state === 'activating') {

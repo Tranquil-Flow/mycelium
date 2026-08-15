@@ -1,6 +1,6 @@
 # Mycelium current and planned architecture
 
-**Status:** Canonical review entry point, updated 2026-08-11. This document supersedes
+**Status:** Canonical review entry point, updated 2026-08-15. This document supersedes
 the operational status in `ASTRA_CURRENT.md`; the older file remains historical
 provenance. Milestone evidence through M23 exists; remaining unchecked gates in the
 governing plan are still authoritative.
@@ -32,6 +32,20 @@ machine; verify the recorded digests or request an explicit evidence bundle rath
 assuming absence. The complete physical/MLX gate must run on a compatible macOS host.
 The authoritative remaining release conditions are the numbered conditions in the
 external-review status document.
+
+Current gate checkpoint: A2 code, physical recipient gates, ordinary-product cold/warm
+ledger gate, browser persistence/reconnect gate, final integrated regression, and the
+atomic milestone commit are green. A2 is complete; A3 is the next active gate.
+The current live route is the Lenovo-independent M4 Pro/MLX `node-0 [0,23)` to
+Surface/NumPy `node-2 [23,24)` Qwen2.5-0.5B deployment. Two-source cold transfer,
+zero-transfer warm reuse, serving-concurrent pacing, source disappearance, corruption,
+disk, substitution, replay, writer conflict, cancellation, no-source, and interrupted-
+restart recovery have physical evidence. The final ordinary product acquisition uses
+the durable M4 source plus the platform-neutral mobile HTTPS source; the latter is not a
+compute stage. Lenovo's expired historical lease is not a close-gate dependency and it
+must rejoin normally before any future plan can use it. The owner authorized only the
+exact local-revision `int8-weight-only` representation; no download or substitution was
+authorized or performed.
 
 ## As-built request path
 
@@ -74,22 +88,41 @@ traffic-aware liveness and scoped recovery.
 
 ## Current deployments and topology
 
-The operator currently has three independently prepared deployment identities. The
-live registry is dynamic. During the 2026-08-11 A1 browser gate, the ordinary product
-URL discovered both initially qualified routes and the prepared 3B candidate without a
-fixed frontend configuration. The selected 1.5B route then emitted five real tokens and
-failed closed on `decode_completion_timeout`; the registry immediately marked it
-unavailable. The operator selected the still-qualified 0.5B route, which completed a
-fresh browser request. The 3B route remains a prepared candidate in this running server;
-an earlier no-restart qualification does not make it currently active or qualified.
-The product reconstructs all of this state from the backend and does not assume a fixed
-number of models:
+The operator has three independently prepared deployment identities. The live registry
+and model selector are dynamic. During the 2026-08-11 A1 browser gate,
+the ordinary product URL discovered both initially qualified routes and the prepared
+3B candidate without a fixed frontend configuration. The selected 1.5B route then
+emitted five real tokens and failed closed on `decode_completion_timeout`; the registry
+immediately marked it unavailable. During the 2026-08-11 A2 implementation pass, the
+same browser activated and physically qualified the prepared three-host 3B candidate.
+The selector then exposed both the qualified 0.5B and 3B deployments, and a browser
+request explicitly selecting 3B completed with `Paris`. Its prompt, response, model,
+deployment, terminal state, and token count survived refresh. The product reconstructs
+all of this state from the backend and does not assume a fixed number of models.
+
+Those successful runs are historical observations, not current health. On 2026-08-12
+the live registry retained the 0.5B and 3B identities but marked both unavailable after
+their required physical members stopped contributing; 0.5B remained the last selected
+identity and the selector truthfully exposed zero qualified choices. The 1.5B identity
+remains unavailable after its earlier decode timeout. No row below is permission to
+admit new inference without a fresh qualifier binding:
+
+On 2026-08-15 the 0.5B deployment was freshly rebound and qualified as the physical
+two-host route M4 Pro `node-0 [0,23)` to Surface `node-2 [23,24)`. The ordinary browser
+product path completed new distributed requests with current evidence and retained
+their prompt, output, and terminal history after refresh and in an independent session.
+A fresh capacity refresh independently selected the same contiguous allocation for a
+new `int8-weight-only` replacement candidate. That report is planning evidence with
+`locally_derived_candidate` representation authority: it is not owner-approved,
+prepared, qualified, or selectable until the explicit conversion decision and all A2
+gates complete. The catalogue remains dynamic; only qualified deployments enter the
+selector.
 
 | Model | Quantization | Stage 0 | Stage 1 | Purpose |
 | --- | --- | --- | --- | --- |
-| `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX `[0,12)` | MLX `[12,24)` | baseline and failover |
+| `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX `[0,23)` | NumPy `[23,24)` | current Lenovo-independent qualified route; replacement acquisition awaits owner approval |
 | `Qwen/Qwen2.5-1.5B-Instruct` | int8 weight-only | MLX `[0,14)` | MLX `[14,28)` | unavailable after observed timeout; must requalify |
-| `Qwen/Qwen2.5-3B-Instruct` | int8 weight-only | three-stage MLX/MLX/NumPy physical route | — | prepared candidate; not active |
+| `Qwen/Qwen2.5-3B-Instruct` | int8 weight-only | three-stage MLX/MLX/NumPy physical route | — | browser-inference verified historically; currently unavailable |
 
 M7 separately proved a three-host 0.5B topology: M4 Pro/MLX `[0,8)`, Evi
 MacBook Pro/MLX `[8,16)`, and Surface/NumPy `[16,24)`. That proof is not the same
@@ -97,14 +130,28 @@ deployment as either currently registered two-host route. Do not blend their hos
 performance, or qualification claims.
 
 The serving path is contiguous pipeline/model parallelism. Embeddings belong to the
-entry stage; final normalization and LM head belong to the final stage. Every stage
-pack contains only the stage's authorized tensors plus shared tokenizer/config
-assets. Normal decode uses request-, deployment-, generation-, and layer-bound
-stage-local KV; the ordinary activation path does not transfer KV.
+entry stage; final normalization and LM head belong to the final stage. Runtime loading
+is logically restricted to assignment-owned tensors. The pre-A2 sharder, however,
+placed embedding and final-normalization tensors in one shared static safetensors file,
+so existing candidates can physically over-transfer a boundary tensor even though the
+loader does not use it. The A2 builder now emits separate embedding and output static
+containers and rejects any acquisition file whose tensor set exceeds its assignment;
+that correction has software coverage but is not yet the artifact lineage of the
+previously active 3B candidate. Normal decode uses request-, deployment-, generation-,
+and layer-bound stage-local KV; the ordinary activation path does not transfer KV.
 
 The current product does **not** claim tensor parallelism, data-parallel replicas,
 pipeline microbatch overlap, continuous batching, speculative decode, request-time
 layer reallocation, continuous topology re-optimization, or in-flight KV migration.
+
+The generic native enrollment path includes `node-lenovo`, classified as
+`linux_numpy_iroh`. Fresh capability and complete directed-link evidence assigned exactly
+layer 21 to it in the A2 three-host route. That assignment was acquired, promoted,
+loaded, and exercised by real inference; it was not inferred from enrollment or cache
+presence. The member later lost its live seed lease and was unreachable on 2026-08-15,
+so the same route now correctly refuses startup until membership becomes fresh again.
+This preserves the boundary that prior qualification and cached bytes do not override
+current membership authority.
 
 The supervisor can also watch one owner-controlled directory of already-prepared
 operator plans. Candidate discovery is read-only and path-private. Explicit browser
@@ -159,6 +206,49 @@ row-wise-int8 representation digest, float32 runtime dtype, exact resident bytes
 modeled conversion peak into feasibility and preparation authorization. Fresh
 three-host evidence therefore rejects 8B before provisioning and selects the
 already-local Qwen2.5-7B as the next physical target.
+
+The A2 acquisition implementation now defines closed assignment-, representation-,
+feasibility-, graph-, member-, file-, chunk-, and Merkle-bound contracts; resumable
+content-addressed acquisition with bounded concurrency, source rotation, quarantine,
+disk reservation, warm reuse, and atomic file-tree promotion; durable current and
+terminal ledgers; and live projections across Inference, Nodes, Plans, Readiness,
+Incidents, and Settings. New local preparation is wired through that Provisioner using
+the explicitly authorized operator origin. Remote preparation replicates only the
+recipient's assignment-local verified chunks to every authorized source, registers the
+exact digest-named manifest in each private inbox, waits for freshly signed matching
+availability, runs the no-origin acquisition on the assigned recipient, and hands
+promoted bytes into controller staging without coordinator relay. Signed peer grants
+are consumed once in a persistent recipient registry. Remote success and failure use
+canonical closed envelopes, and failed final attempts preserve quarantine and recovery
+accounting.
+
+The physical Lenovo and Surface recipient runs prove cold two-source acquisition, warm reuse,
+source-loss continuation, serving-safe source-side pacing, cache/source corruption,
+disk reservation, manifest and membership drift, grant replay, one-writer locking,
+cancellation, no-source failure, and interrupted-process resume. The ordinary product
+path now also records the M4/mobile-to-Surface cold acquisition of 302,097,376 bytes from
+two sources with zero origin, followed by exact warm reuse of all 302,097,376 bytes with
+zero transfer. Executed gate evidence
+`sha256:f1bcdd2e5b3366a942a15ac614576934ce50e185f6934b7ba25f4152a9e0504d`
+binds those ledger records to a fresh physical inference returning `Paris`, a stable
+two-stage route identity, and positive frame/operation deltas on both stages. The live
+activation authority discovers the separately staged candidate as prepared with zero
+invalid candidates. All eight browser workspaces passed current-source checks; refresh,
+navigation, Back/Forward, backend outage/reconnect, and a clean second session preserved
+the intended tab-private history boundary. The final regression passed 3,942 Python
+tests (13 skipped), 485 frontend tests, TypeScript/build/contracts, repository-wide
+Ruff, and all governance, claim-boundary, contract, and release-security audits. A2 is
+closed by its atomic milestone commit.
+
+The member-side transport is now platform-neutral and deployable. It serves verified
+content-addressed chunks over certificate-validated HTTPS only after checking a fresh
+Provisioner-signed grant, recipient signature, source availability, member generations,
+range scope, and a durable replay fence. Each response has a signed byte-range receipt,
+and the Provisioner enforces aggregate and per-source byte-rate schedules. Signed
+availability bundles provide the dynamic discovery input. Source agents atomically
+reconcile private exact-manifest control documents without restart and renew their
+authority before expiry; invalid inbox state preserves the last valid serving snapshot.
+This control path grants no placement authority and transfers no model bytes.
 
 ## Current planning, trust, and network authority
 

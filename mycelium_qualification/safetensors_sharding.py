@@ -1,4 +1,5 @@
 """Stream a Safetensors checkpoint into deterministic stage-aligned files."""
+
 from __future__ import annotations
 
 import json
@@ -351,7 +352,8 @@ def shard_qwen2_checkpoint(
         _reject("checkpoint_index_tensor_mismatch")
 
     groups: dict[str, list[tuple[str, Path, int, dict[str, Any]]]] = {
-        "model-static.safetensors": []
+        "model-static-embedding.safetensors": [],
+        "model-static-output.safetensors": [],
     }
     for index_value in range(shard_count):
         groups[
@@ -360,7 +362,12 @@ def shard_qwen2_checkpoint(
     for name in sorted(records):
         matched = _LAYER_KEY.match(name)
         if matched is None:
-            filename = "model-static.safetensors"
+            if name.startswith("model.embed_tokens."):
+                filename = "model-static-embedding.safetensors"
+            elif name.startswith("model.norm.") or name.startswith("lm_head."):
+                filename = "model-static-output.safetensors"
+            else:
+                _reject("checkpoint_static_tensor_unsupported")
         else:
             layer = int(matched.group(1))
             shard_index = layer_to_shard.get(layer)

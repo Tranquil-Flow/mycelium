@@ -91,6 +91,29 @@ describe('projectModelCatalogControls', () => {
     expect(row.detail).toMatch(/expired/);
   });
 
+  it('can prepare a fresh replacement while the incumbent identity keeps serving', () => {
+    const model = entry('active-replacement');
+    const [row] = projectModelCatalogControls(
+      operation([model], [feasibility('active-replacement', 'feasible')], [lifecycle('active-replacement', 'active')]),
+      activation([]),
+      1_000,
+    );
+    expect(row.availability).toBe('active');
+    expect(row.action).toBe('prepare');
+    expect(row.detail).toMatch(/without interrupting/);
+  });
+
+  it('does not prepare over an equivalent active candidate', () => {
+    const model = entry('already-active');
+    const [row] = projectModelCatalogControls(
+      operation([model], [feasibility('already-active', 'feasible')], [lifecycle('already-active', 'active')]),
+      activation([candidate('already-active', 'active')]),
+      1_000,
+    );
+    expect(row.availability).toBe('active');
+    expect(row.action).toBeNull();
+  });
+
   it('treats an expired rejection as recheckable after swarm membership changes', () => {
     const model = entry('previously-too-large');
     const [row] = projectModelCatalogControls(operation([model], [feasibility('previously-too-large', 'infeasible', 999)], [lifecycle('previously-too-large')]), activation([]), 1_000);

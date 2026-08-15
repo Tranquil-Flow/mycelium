@@ -49,6 +49,7 @@ from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
 from .activation import DeploymentActivationError, PreparedDeploymentActivation
+from .artifact_provisioner import ArtifactAcquisitionStore
 from .codec import prompt_codec_from_deployment
 from .health import RouteHealthSource
 from .model_capacity import (
@@ -57,6 +58,7 @@ from .model_capacity import (
     recompute_model_operation,
 )
 from .local_preparer import LocalCandidatePreparer
+from .member_transport import MemberArtifactTransport
 from .preparation import LocalModelPreparation, ModelPreparationError
 from .registry import (
     DeploymentSelectionError,
@@ -438,6 +440,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     model_preparation: LocalModelPreparation | None
     governance_projection: Mapping[str, Any] | None
     evidence_registry: EvidenceProjectionRegistry | None
+    artifact_acquisition_store: ArtifactAcquisitionStore | None
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -727,6 +730,21 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "application/json; charset=utf-8",
             )
 
+        def _artifact_acquisition_ledger(self) -> None:
+            store = self.server.artifact_acquisition_store
+            if store is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "artifact_acquisition_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes(store.ledger()),
+                "application/json; charset=utf-8",
+            )
+
         def _governance_readiness(self) -> None:
             projection = self.server.governance_projection
             if projection is None:
@@ -887,7 +905,7 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             if document is None:
                 self._send_bytes(
                     404,
-                    _json_bytes({"error": "m17_model_operation_unavailable"}),
+                    _json_bytes({"error": "model_operation_unavailable"}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -902,7 +920,7 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             if not callable(source):
                 self._send_bytes(
                     404,
-                    _json_bytes({"error": "m17_swarm_evidence_unavailable"}),
+                    _json_bytes({"error": "swarm_evidence_unavailable"}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -1207,6 +1225,10 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._model_capacity_refresh_status()
             elif parsed.path == "/__mycelium/model-preparation" and not parsed.query:
                 self._model_preparation_status()
+            elif (
+                parsed.path == "/__mycelium/artifacts/acquisitions" and not parsed.query
+            ):
+                self._artifact_acquisition_ledger()
             elif parsed.path == "/__mycelium/governance-readiness" and not parsed.query:
                 self._governance_readiness()
             elif parsed.path == "/__mycelium/evidence/runtime" and not parsed.query:
@@ -1275,6 +1297,7 @@ def create_server(
     model_preparation: LocalModelPreparation | None = None,
     governance_projection: Mapping[str, Any] | None = None,
     evidence_registry: EvidenceProjectionRegistry | None = None,
+    artifact_acquisition_store: ArtifactAcquisitionStore | None = None,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -1290,6 +1313,7 @@ def create_server(
     server.model_preparation = model_preparation
     server.governance_projection = governance_projection
     server.evidence_registry = evidence_registry
+    server.artifact_acquisition_store = artifact_acquisition_store
     return server
 
 
@@ -1374,19 +1398,42 @@ def _m17_model_operation(
     )
     if not path.exists():
         if explicit_path is not None:
-            raise ValueError("m17_model_operation_missing")
+            raise ValueError("model_operation_missing")
         return None
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
-        raise ValueError("m17_model_operation_unsafe")
+        raise ValueError("model_operation_unsafe")
     try:
         document = json.loads(path.read_text("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
-        raise ValueError("m17_model_operation_invalid") from exc
+        raise ValueError("model_operation_invalid") from exc
     if (
         not isinstance(document, dict)
         or document.get("protocol") != "mycelium.model_operation.v1"
     ):
-        raise ValueError("m17_model_operation_invalid")
+        raise ValueError("model_operation_invalid")
+    return document
+
+
+def _representation_authorization(path: Path | None) -> Mapping[str, Any] | None:
+    if path is None:
+        return None
+    candidate = Path(path)
+    if (
+        candidate.is_symlink()
+        or not candidate.is_file()
+        or candidate.stat().st_size > 1024 * 1024
+    ):
+        raise ValueError("representation_authorization_unsafe")
+    try:
+        document = json.loads(candidate.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError("representation_authorization_invalid") from exc
+    if (
+        not isinstance(document, dict)
+        or document.get("protocol")
+        != "mycelium.model_preparation_authorization.v1"
+    ):
+        raise ValueError("representation_authorization_invalid")
     return document
 
 
@@ -1700,6 +1747,10 @@ def run_registry_server(
     model_cache_root: Path | None = None,
     model_preparation_template_plan: Path | None = None,
     model_preparation_root: Path | None = None,
+    member_artifact_transport_plan: Path | None = None,
+    member_model_inventory_files: Sequence[Path] = (),
+    member_model_inventory_authorities_file: Path | None = None,
+    representation_authorization_file: Path | None = None,
     historical_evidence_files: Sequence[Path] = (),
 ) -> int:
     """Open, qualify, and serve one or more immutable deployments."""
@@ -1712,8 +1763,12 @@ def run_registry_server(
     activation: PreparedDeploymentActivation | None = None
     capacity_refresh: ModelCapacityRefresh | None = None
     model_preparation: LocalModelPreparation | None = None
+    artifact_acquisition_store: ArtifactAcquisitionStore | None = None
     startup_complete = False
     try:
+        representation_authorization = _representation_authorization(
+            representation_authorization_file
+        )
         for plan in operator_plans:
             runtimes.append(
                 _qualified_runtime(
@@ -1726,6 +1781,9 @@ def run_registry_server(
             runtimes,
             state_path=registry_state,
             qualification_refresher=lambda runtime: _qualify_open_route(runtime.route),
+        )
+        artifact_acquisition_store = ArtifactAcquisitionStore(
+            Path(seed_state_root) / "artifact-acquisitions"
         )
         if candidate_plan_root is not None:
             activation_state_root = Path(seed_state_root) / "deployment-activation"
@@ -1747,6 +1805,11 @@ def run_registry_server(
                     cache_root=model_cache_root,
                     live_observations=registry.m17_swarm_evidence(),
                     evaluated_at_unix_ms=int(time.time() * 1_000),
+                    member_inventory_files=member_model_inventory_files,
+                    member_inventory_authorities_file=(
+                        member_model_inventory_authorities_file
+                    ),
+                    representation_authorization=representation_authorization,
                     progress=progress,
                 ),
                 operation_sink=registry.set_m17_model_operation,
@@ -1763,6 +1826,12 @@ def run_registry_server(
                 template_plan=model_preparation_template_plan,
                 workspace_root=preparation_root,
                 candidate_root=candidate_plan_root,
+                artifact_store=artifact_acquisition_store,
+                member_stage_pack_acquirer=(
+                    None
+                    if member_artifact_transport_plan is None
+                    else MemberArtifactTransport(member_artifact_transport_plan)
+                ),
             )
             model_preparation = LocalModelPreparation(
                 operation_source=registry.m17_model_operation,
@@ -1795,6 +1864,7 @@ def run_registry_server(
             model_preparation=model_preparation,
             governance_projection=governance_readiness(ROOT),
             evidence_registry=evidence_registry,
+            artifact_acquisition_store=artifact_acquisition_store,
         )
         startup_complete = True
         stop = threading.Event()
@@ -1859,6 +1929,9 @@ def run_physical_server(
     seed_state_root: Path,
     seed_url: str | None = None,
     model_cache_root: Path | None = None,
+    member_model_inventory_files: Sequence[Path] = (),
+    member_model_inventory_authorities_file: Path | None = None,
+    representation_authorization_file: Path | None = None,
     historical_evidence_files: Sequence[Path] = (),
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
@@ -1869,8 +1942,16 @@ def run_physical_server(
     server: LiveHTTPServer | None = None
     startup_complete = False
     capacity_refresh: ModelCapacityRefresh | None = None
+    artifact_acquisition_store: ArtifactAcquisitionStore | None = None
     try:
-        identity = route.open()
+        representation_authorization = _representation_authorization(
+            representation_authorization_file
+        )
+        try:
+            identity = route.open()
+        except ControllerError as exc:
+            safe_code = exc.remote_code or exc.code
+            raise RuntimeError(f"startup_route_open_rejected:{safe_code}") from exc
         _validate_route_identity(identity, route.execution_graph)
 
         qualification = _qualify_open_route(route)
@@ -1897,12 +1978,20 @@ def run_physical_server(
             seed_url=seed_url,
         )
         stack.health.publish(qualification)
+        artifact_acquisition_store = ArtifactAcquisitionStore(
+            Path(seed_state_root) / "artifact-acquisitions"
+        )
         if model_cache_root is not None:
             capacity_refresh = ModelCapacityRefresh(
                 evaluator=lambda progress: recompute_model_operation(
                     cache_root=model_cache_root,
                     live_observations=route.m17_swarm_evidence(),
                     evaluated_at_unix_ms=int(time.time() * 1_000),
+                    member_inventory_files=member_model_inventory_files,
+                    member_inventory_authorities_file=(
+                        member_model_inventory_authorities_file
+                    ),
+                    representation_authorization=representation_authorization,
                     progress=progress,
                 ),
                 operation_sink=route.set_m17_model_operation,
@@ -1914,6 +2003,7 @@ def run_physical_server(
             host=host,
             port=port,
             capacity_refresh=capacity_refresh,
+            artifact_acquisition_store=artifact_acquisition_store,
             evidence_registry=EvidenceProjectionRegistry(
                 runtime_source=route.public_status,
                 historical_records=_historical_evidence(
@@ -2005,6 +2095,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="owner-only workspace retaining built local model candidates",
     )
     parser.add_argument(
+        "--member-artifact-transport-plan",
+        type=Path,
+        help="owner-private signed-source and recipient execution bindings",
+    )
+    parser.add_argument(
+        "--member-model-inventory-file",
+        type=Path,
+        action="append",
+        help="current signed member inventory; repeat for multiple members",
+    )
+    parser.add_argument(
+        "--member-model-inventory-authorities-file",
+        type=Path,
+        help="owner-private current member generation and key bindings",
+    )
+    parser.add_argument(
+        "--representation-authorization-file",
+        type=Path,
+        help="owner-approved immutable serving representation to revalidate",
+    )
+    parser.add_argument(
         "--seed-url",
         help="network URL advertised by the live durable seed; enables owner enrollment",
     )
@@ -2030,6 +2141,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed_state_root=args.seed_state_root,
             seed_url=args.seed_url,
             model_cache_root=args.model_cache_root,
+            member_model_inventory_files=tuple(
+                args.member_model_inventory_file or ()
+            ),
+            member_model_inventory_authorities_file=(
+                args.member_model_inventory_authorities_file
+            ),
+            representation_authorization_file=(
+                args.representation_authorization_file
+            ),
             historical_evidence_files=tuple(args.historical_evidence_file or ()),
         )
     if args.deployment_dir is not None:
@@ -2047,6 +2167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_cache_root=args.model_cache_root,
         model_preparation_template_plan=args.model_preparation_template_plan,
         model_preparation_root=args.model_preparation_root,
+        member_artifact_transport_plan=args.member_artifact_transport_plan,
+        member_model_inventory_files=tuple(args.member_model_inventory_file or ()),
+        member_model_inventory_authorities_file=(
+            args.member_model_inventory_authorities_file
+        ),
+        representation_authorization_file=args.representation_authorization_file,
         historical_evidence_files=tuple(args.historical_evidence_file or ()),
     )
 

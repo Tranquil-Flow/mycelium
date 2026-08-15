@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mycelium_live.artifact_provisioner import ArtifactAcquisitionStore
 from mycelium_live.route import FakeLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
     LiveObservatoryApplication,
@@ -48,6 +49,44 @@ def test_build_live_stack_returns_app_and_health_source(
         "node-b",
     ]
     assert all(node["membership_state"] == "assigned" for node in swarm["native_nodes"])
+
+
+def test_artifact_acquisition_endpoint_projects_durable_provisioner_ledger(
+    tmp_path: Path,
+) -> None:
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok")
+    store = ArtifactAcquisitionStore(tmp_path / "artifact-state")
+
+    async def app(*_args):
+        raise AssertionError("artifact_acquisition_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        artifact_acquisition_store=store,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request("GET", "/__mycelium/artifacts/acquisitions")
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {
+            "protocol": "mycelium.swarm_artifact_acquisition_ledger.v1",
+            "generation": 0,
+            "current": None,
+            "history": [],
+        }
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 def test_health_publishes_after_challenge(deployment_dir, qualified_route) -> None:
@@ -281,6 +320,46 @@ def test_physical_server_surfaces_safe_startup_remote_code(monkeypatch) -> None:
             seed_state_root=Path("/private/test-seed"),
         )
 
+    assert route.closed is True
+    assert route.cleaned is True
+
+
+def test_physical_server_surfaces_safe_open_remote_code(monkeypatch) -> None:
+    class RejectingRoute:
+        execution_graph = _graph(("node-a", "node-b", "node-c"))
+
+        def __init__(self) -> None:
+            self.closed = False
+            self.cleaned = False
+
+        def open(self):
+            raise ControllerError(
+                "node_command_rejected",
+                remote_code="invalid_stage_pack_file",
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+
+    route = RejectingRoute()
+    monkeypatch.setattr(
+        "mycelium_live.supervisor.PhysicalLiveRoute.from_operator_plan",
+        lambda _plan, **_kwargs: route,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="startup_route_open_rejected:invalid_stage_pack_file",
+    ):
+        run_physical_server(
+            operator_plan=SimpleNamespace(),
+            host="127.0.0.1",
+            port=8788,
+            seed_state_root=Path("/private/test-seed"),
+        )
     assert route.closed is True
     assert route.cleaned is True
 

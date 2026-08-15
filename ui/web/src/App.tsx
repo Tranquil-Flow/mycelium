@@ -29,6 +29,7 @@ import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
 import { ModelCatalogControlSource } from './features/models/ModelCatalogControlSource';
+import { ArtifactAcquisitionSource } from './features/models/ArtifactAcquisitionSource';
 import { PreparedDeploymentsSourcePanel } from './features/liveRoute/PreparedDeploymentsSourcePanel';
 import { HttpM15ComparisonClient } from './features/liveRoute/m15Comparison';
 import { EvidenceProvenanceSource } from './features/evidence/EvidenceProvenanceSource';
@@ -296,6 +297,7 @@ export default function App({
       {source.source_mode === 'live' ? <GovernanceReadinessSource /> : null}
       <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} />
       {source.source_mode === 'live' ? <ModelCatalogControlSource /> : null}
+      {source.source_mode === 'live' ? <ArtifactAcquisitionSource view="settings" /> : null}
     </>;
   } else if (rendered.state === 'loading') {
     content = <BundleLoading sourceMode={source.source_mode} />;
@@ -324,7 +326,7 @@ export default function App({
       ? (
           <>
             {activeView === 'nodes' ? (
-              <><ProductEvidenceWorkspace view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
+              <><ProductEvidenceWorkspace view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
               <>
                 <ProductEvidenceWorkspace view={activeView} />
@@ -337,6 +339,7 @@ export default function App({
                   }
                   freshness={rendered.sourceState.freshness}
                 />
+                {activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? <ArtifactAcquisitionSource view={activeView} /> : null}
               </>
             ) : (
               <ProductEvidenceWorkspace view={activeView} />
@@ -344,15 +347,15 @@ export default function App({
           </>
         )
       : activeView === 'nodes'
-        ? <><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /></>
+        ? <><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /></>
         : isProductEventState(rendered.sourceState)
           ? activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents'
             ? (
-                <LiveRouteWorkspace
-                  view={activeView}
-                  qualification={rendered.sourceState.projection.snapshot.qualification}
-                  freshness={rendered.sourceState.freshness}
-                />
+              <><LiveRouteWorkspace
+                view={activeView}
+                qualification={rendered.sourceState.projection.snapshot.qualification}
+                freshness={rendered.sourceState.freshness}
+              />{activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? <ArtifactAcquisitionSource view={activeView} /> : null}</>
               )
             : <ProductGatewayProjectionView state={rendered.sourceState} />
           : <SemanticProjectionView state={rendered.sourceState} />;

@@ -39,6 +39,7 @@ _DIRECTORY_OPEN_FLAGS = (
     | getattr(os, "O_DIRECTORY", 0)
     | getattr(os, "O_NOFOLLOW", 0)
 )
+_PRIVATE_PATH_ANCHOR_ENV = "MYCELIUM_PRIVATE_PATH_ANCHOR"
 _FILE_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
@@ -217,6 +218,33 @@ def _descriptor_is_writable(metadata: os.stat_result) -> bool:
     if metadata.st_gid in os.getgroups():
         return mode & 0o030 == 0o030
     return mode & 0o003 == 0o003
+
+
+def _walk_start(path: Path) -> tuple[int, tuple[str, ...]]:
+    """Open the trusted walk anchor and return path components below it."""
+
+    configured = os.environ.get(_PRIVATE_PATH_ANCHOR_ENV)
+    if configured is None:
+        return os.open("/", _DIRECTORY_OPEN_FLAGS), tuple(path.parts[1:])
+    anchor = Path(configured)
+    if (
+        not anchor.is_absolute()
+        or anchor == Path("/")
+        or anchor != _absolute_path(anchor)
+        or not path.is_relative_to(anchor)
+    ):
+        raise ValueError("private path anchor is invalid")
+    try:
+        descriptor = os.open(anchor, _DIRECTORY_OPEN_FLAGS)
+        metadata = os.fstat(descriptor)
+        _validate_walk_component(metadata)
+    except OSError as exc:
+        raise ValueError("private path anchor is unavailable") from exc
+    except Exception:
+        if "descriptor" in locals():
+            os.close(descriptor)
+        raise
+    return descriptor, tuple(path.relative_to(anchor).parts)
 
 
 class PrivateDirectoryLease:
@@ -432,8 +460,7 @@ def private_directory_lease(
     path = _absolute_path(value)
     if path == Path("/"):
         raise ValueError("data directory is invalid")
-    components = path.parts[1:]
-    descriptor = os.open("/", _DIRECTORY_OPEN_FLAGS)
+    descriptor, components = _walk_start(path)
     try:
         _validate_walk_component(os.fstat(descriptor))
         for index, component in enumerate(components):
@@ -600,9 +627,9 @@ def private_directory_parent_fd(
 
     if not path.is_absolute() or not getattr(os, "O_NOFOLLOW", 0):
         raise ValueError("path is invalid")
-    descriptor: int | None = os.open("/", _DIRECTORY_OPEN_FLAGS)
+    descriptor, relative_parts = _walk_start(path)
     try:
-        for component in path.parts[1:-1]:
+        for component in relative_parts[:-1]:
             child: int | None = None
             try:
                 if descriptor is None:

@@ -243,6 +243,135 @@ def test_node_module_joins_seed_supervises_child_and_cleans_up(
     assert _pid_exists(child_pid) is False
 
 
+def test_membership_control_only_renews_without_launching_stage_runtime(
+    tmp_path: Path,
+) -> None:
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-membership-control",
+        seed_node_id="seed-node",
+        seed_url=None,
+        signer=generate_ed25519_signer(endpoint_id="seed-control-endpoint"),
+        invite_registry=SqliteInviteRegistry(tmp_path / "seed" / "state.sqlite3"),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    data_dir = tmp_path / "node"
+    invite_file = tmp_path / "node-invite.json"
+
+    with SeedHTTPServer(coordinator, host="127.0.0.1", port=0):
+        _write_bundle(
+            invite_file,
+            coordinator.mint_invite(nonce="membership-control-invite", ttl_seconds=120),
+        )
+        command = [
+            sys.executable,
+            "-m",
+            "mycelium_node",
+            "--data-dir",
+            str(data_dir),
+            "--join-bundle-file",
+            str(invite_file),
+            "--node-id",
+            "node-control-a",
+            "--peer-class",
+            "mac_mlx_iroh",
+            "--advertise",
+            "https://node-control-a.test/control",
+            "--membership-control-only",
+            "--heartbeat-interval",
+            "0.1",
+        ]
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            status = _read_status(process)
+            assert status == {
+                "connectivity_state": "online",
+                "event": "node_started",
+                "last_signed_observation_unix_ms": status[
+                    "last_signed_observation_unix_ms"
+                ],
+                "membership_generation": 1,
+                "node_endpoint_identity_digest": status[
+                    "node_endpoint_identity_digest"
+                ],
+                "node_id": "node-control-a",
+                "placement_impact": "qualification_still_required",
+                "protocol": "mycelium.node_main_status.v1",
+                "reconnect_action": "none",
+                "renewal_deadline_unix_ms": status[
+                    "renewal_deadline_unix_ms"
+                ],
+                "route_ready": False,
+                "runtime_ownership": "product_route",
+            }
+            time.sleep(0.25)
+            member = coordinator.member("node-control-a")
+            assert member["generation"] == 1
+            assert member["last_heartbeat_sequence"] >= 2
+            assert member["peer_class"] == "mac_mlx_iroh"
+            assert member["runtime_capability"] == {
+                "runtime_backend": "mlx",
+                "transport": "iroh",
+                "activation_protocol": "mycelium.router_wire.v1",
+            }
+        finally:
+            process.terminate()
+            stdout, stderr = process.communicate(timeout=10)
+
+    assert process.returncode == 0
+    assert "node_runtime_failed" not in stdout + stderr
+
+
+def test_membership_control_only_rejects_sidecar(
+    tmp_path: Path,
+    node_main_sidecar_binary: Path,  # noqa: F811
+) -> None:
+    data_dir = tmp_path / "node-private"
+    data_dir.mkdir(mode=0o700)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-control-reject",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:9",
+        signer=generate_ed25519_signer(endpoint_id="seed-control-reject"),
+        invite_registry=SqliteInviteRegistry(tmp_path / "seed" / "state.sqlite3"),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    invite_file = tmp_path / "node-invite.json"
+    _write_bundle(
+        invite_file,
+        coordinator.mint_invite(nonce="control-reject-invite", ttl_seconds=120),
+    )
+    command = _node_command(
+        data_dir=data_dir,
+        node_id="node-control-reject",
+        sidecar=node_main_sidecar_binary,
+        bundle_file=invite_file,
+        dry_run=True,
+    )
+    command.append("--membership-control-only")
+
+    completed = subprocess.run(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "node_preflight_failed\n"
+
+
 def test_node_and_seed_restart_resume_without_invite(
     tmp_path: Path,
     node_main_sidecar_binary: Path,  # noqa: F811
@@ -426,6 +555,54 @@ def test_node_dry_run_performs_no_network_or_process_io(
         "route_ready": False,
     }
     assert captured.out.encode() == canonical_json_bytes(expected) + b"\n"
+    assert captured.err == ""
+
+
+def test_source_only_dry_run_requires_no_sidecar(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    node_main = importlib.import_module("mycelium_node.__main__")
+    data_dir = tmp_path / "source-private"
+    data_dir.mkdir(mode=0o700)
+    coordinator = SeedCoordinator(
+        swarm_id="swarm-source-dry",
+        seed_node_id="seed-node",
+        seed_url="http://127.0.0.1:9",
+        signer=generate_ed25519_signer(endpoint_id="seed-source-dry"),
+        invite_registry=SqliteInviteRegistry(tmp_path / "seed-source" / "state.sqlite3"),
+        incarnation="seed-main-test",
+        id_source=_ids(),
+    )
+    bundle_file = tmp_path / "source-bundle.json"
+    _write_bundle(
+        bundle_file,
+        coordinator.mint_invite(nonce="source-main-dry", ttl_seconds=120),
+    )
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("source-only dry-run crossed a process boundary")
+
+    monkeypatch.setattr(node_main, "_sidecar_path", forbidden)
+    monkeypatch.setattr(node_main, "validate_physical_node_launch_shape", forbidden)
+    command = [
+        "--data-dir",
+        str(data_dir),
+        "--join-bundle-file",
+        str(bundle_file),
+        "--node-id",
+        "source-only-dry",
+        "--peer-class",
+        "artifact_source_https",
+        "--advertise",
+        "https://100.126.233.4:9443/control",
+        "--dry-run",
+    ]
+
+    assert node_main.run(command) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["route_ready"] is False
     assert captured.err == ""
 
 
@@ -963,6 +1140,34 @@ def test_join_rejection_requires_complete_canonical_status_code_matrix() -> None
                 )
                 is False
             )
+
+
+def test_private_path_anchor_avoids_root_walk_and_rejects_escape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_module = importlib.import_module("mycelium_node.process")
+    anchor = tmp_path / "application-private"
+    anchor.mkdir(mode=0o700)
+    target = anchor / "mycelium" / "state"
+    monkeypatch.setenv("MYCELIUM_PRIVATE_PATH_ANCHOR", str(anchor))
+    real_open = os.open
+
+    def root_forbidden(path: Any, *args: Any, **kwargs: Any) -> int:
+        if path == "/":
+            raise AssertionError("anchored walk opened filesystem root")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", root_forbidden)
+    lease = process_module.private_directory_lease(target)
+    try:
+        assert lease.path == target
+        lease.revalidate()
+    finally:
+        lease.close()
+
+    with pytest.raises(ValueError, match="private path anchor is invalid"):
+        process_module.private_directory_lease(tmp_path / "outside")
 
 
 @pytest.mark.parametrize(

@@ -86,6 +86,14 @@ def test_written_package_is_owner_only_and_manifest_matches(tmp_path: Path) -> N
     assert "_payloads" not in manifest
 
 
+def test_service_config_accepts_generic_artifact_source_role() -> None:
+    value = config()
+    value["role"] = "artifact_source"
+    value["service_id"] = "artifact-source-node-0"
+
+    assert validate_service_config(value)["role"] == "artifact_source"
+
+
 @pytest.mark.parametrize(
     "field,value,code",
     [

@@ -31,7 +31,7 @@ export function M17ModelOperationSourcePanel({
         setError(null);
       }).catch((reason) => {
         if (!mounted || controller.signal.aborted) return;
-        setError(reason instanceof Error ? reason.message : 'm17_model_operation_unavailable');
+        setError(reason instanceof Error ? reason.message : 'model_operation_unavailable');
       }).finally(() => {
         if (active === controller) active = null;
       });

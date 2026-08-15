@@ -19,6 +19,17 @@ export interface M17CatalogEntry {
   readonly present_file_count: number;
   readonly reasons: readonly string[];
   readonly artifact_digest: string;
+  readonly discovery_scope?: readonly ('coordinator' | 'member_inventory')[];
+  readonly discovered_member_count?: number;
+  readonly metadata_reconciled?: boolean;
+  readonly discovery_blockers?: readonly string[];
+}
+
+export interface M17CatalogDiscovery {
+  readonly scope: 'coordinator_only' | 'coordinator_and_members' | 'unavailable';
+  readonly accepted_member_count: number;
+  readonly rejected_member_count: number;
+  readonly blockers: readonly string[];
 }
 
 export interface M17FeasibilityStage {
@@ -133,6 +144,7 @@ export interface M17ModelOperation {
   readonly catalog_generation: number;
   readonly catalog_digest: string;
   readonly entries: readonly M17CatalogEntry[];
+  readonly discovery?: M17CatalogDiscovery;
   readonly feasibility_reports: readonly M17FeasibilityReport[];
   readonly selection_authority: 'qualified_deployment_registry';
   readonly download_policy: 'operator_approval_required';
@@ -190,6 +202,12 @@ function entry(value: unknown, path: string): M17CatalogEntry {
   if (!SHA256.test(digest)) throw new TypeError(`${path}.artifact_digest is invalid`);
   const layerCount = item.num_layers === null ? null : integer(item.num_layers, `${path}.num_layers`);
   if (typeof item.exact_tensor_accounting !== 'boolean') throw new TypeError(`${path}.exact_tensor_accounting is invalid`);
+  const discoveryScope = item.discovery_scope === undefined ? ['coordinator'] : strings(item.discovery_scope, `${path}.discovery_scope`);
+  if (discoveryScope.some((scope) => scope !== 'coordinator' && scope !== 'member_inventory') || new Set(discoveryScope).size !== discoveryScope.length) {
+    throw new TypeError(`${path}.discovery_scope is invalid`);
+  }
+  const metadataReconciled = item.metadata_reconciled === undefined ? true : item.metadata_reconciled;
+  if (typeof metadataReconciled !== 'boolean') throw new TypeError(`${path}.metadata_reconciled is invalid`);
   return Object.freeze({
     model_id: text(item.model_id, `${path}.model_id`),
     revision,
@@ -205,6 +223,10 @@ function entry(value: unknown, path: string): M17CatalogEntry {
     present_file_count: integer(item.present_file_count, `${path}.present_file_count`),
     reasons: strings(item.reasons, `${path}.reasons`),
     artifact_digest: digest,
+    discovery_scope: Object.freeze(discoveryScope as ('coordinator' | 'member_inventory')[]),
+    discovered_member_count: item.discovered_member_count === undefined ? 0 : integer(item.discovered_member_count, `${path}.discovered_member_count`),
+    metadata_reconciled: metadataReconciled,
+    discovery_blockers: item.discovery_blockers === undefined ? Object.freeze([]) : strings(item.discovery_blockers, `${path}.discovery_blockers`),
   });
 }
 
@@ -388,11 +410,32 @@ export function decodeM17ModelOperation(value: unknown): M17ModelOperation {
   if (decodedLifecycle.catalog_digest !== catalogDigest) {
     throw new TypeError('model operation lifecycle catalog binding is invalid');
   }
+  let discovery: M17CatalogDiscovery;
+  if (catalog.discovery === undefined) {
+    discovery = Object.freeze({
+      scope: 'unavailable',
+      accepted_member_count: 0,
+      rejected_member_count: 0,
+      blockers: Object.freeze(['member_inventory_scope_unavailable']),
+    });
+  } else {
+    const rawDiscovery = object(catalog.discovery, 'model_operation.catalog.discovery');
+    if (rawDiscovery.scope !== 'coordinator_only' && rawDiscovery.scope !== 'coordinator_and_members') {
+      throw new TypeError('model operation catalog discovery scope is invalid');
+    }
+    discovery = Object.freeze({
+      scope: rawDiscovery.scope,
+      accepted_member_count: integer(rawDiscovery.accepted_member_count, 'model_operation.catalog.discovery.accepted_member_count'),
+      rejected_member_count: integer(rawDiscovery.rejected_member_count, 'model_operation.catalog.discovery.rejected_member_count'),
+      blockers: strings(rawDiscovery.blockers, 'model_operation.catalog.discovery.blockers'),
+    });
+  }
   return Object.freeze({
     protocol: 'mycelium.model_operation.v1',
     catalog_generation: integer(item.catalog_generation, 'model_operation.catalog_generation'),
     catalog_digest: catalogDigest,
     entries: Object.freeze(catalog.entries.map((value, index) => entry(value, `model_operation.catalog.entries[${index}]`))),
+    discovery,
     feasibility_reports: Object.freeze(item.feasibility_reports.map((value, index) => feasibility(value, `model_operation.feasibility_reports[${index}]`))),
     selection_authority: 'qualified_deployment_registry',
     download_policy: 'operator_approval_required',
@@ -412,7 +455,7 @@ export class HttpM17ModelOperationClient implements M17ModelOperationClient {
       method: 'GET', signal, cache: 'no-store', credentials: 'same-origin', redirect: 'error',
       headers: { accept: 'application/json' },
     });
-    if (!response.ok) throw new Error(`m17_model_operation_${response.status}`);
+    if (!response.ok) throw new Error(`model_operation_${response.status}`);
     return decodeM17ModelOperation(await response.json());
   }
 }

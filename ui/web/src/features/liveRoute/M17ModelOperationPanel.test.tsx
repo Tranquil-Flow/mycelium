@@ -71,6 +71,9 @@ describe('M17 model operation UI convergence', () => {
 
   it('shows assignment-local ranges and capacity without private cache paths on Nodes', () => {
     render(<M17ModelOperationPanel operation={operation} view="nodes" />);
+    expect(screen.getByRole('heading', { name: /model catalogue and proposed swarm fit/i })).toBeInTheDocument();
+    expect(screen.getByText(/planner intent · not active runtime/i)).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: /proposed placement and capacity estimates/i })).toBeInTheDocument();
     expect(screen.getByText('[0, 36)')).toBeInTheDocument();
     expect(screen.getByText(/node-0/)).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\/Users\/|\.cache\/huggingface/);

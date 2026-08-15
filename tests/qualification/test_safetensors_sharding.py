@@ -61,7 +61,10 @@ def _tensor_bytes(path: Path) -> dict[str, bytes]:
     header, data_start = _header(path)
     payload = path.read_bytes()
     return {
-        name: payload[data_start + record["data_offsets"][0] : data_start + record["data_offsets"][1]]
+        name: payload[
+            data_start + record["data_offsets"][0] : data_start
+            + record["data_offsets"][1]
+        ]
         for name, record in header.items()
     }
 
@@ -80,8 +83,10 @@ def test_shards_qwen_checkpoint_by_contiguous_layer_range(tmp_path: Path) -> Non
     ]
     index = json.loads((destination / "model.safetensors.index.json").read_text())
     weight_map = index["weight_map"]
-    assert weight_map["model.embed_tokens.weight"] == "model-static.safetensors"
-    assert weight_map["model.norm.weight"] == "model-static.safetensors"
+    assert weight_map["model.embed_tokens.weight"] == (
+        "model-static-embedding.safetensors"
+    )
+    assert weight_map["model.norm.weight"] == "model-static-output.safetensors"
     assert weight_map["model.layers.0.weight"] == "model-stage-001-of-002.safetensors"
     assert weight_map["model.layers.3.weight"] == "model-stage-002-of-002.safetensors"
     recovered = {}
@@ -126,12 +131,8 @@ def test_shards_exact_planner_ranges_and_rejects_non_covering_ranges(
         {"start_layer": 3, "end_layer_exclusive": 4, "layer_count": 1},
     ]
     index = json.loads((destination / "model.safetensors.index.json").read_text())
-    assert index["weight_map"]["model.layers.2.weight"].startswith(
-        "model-stage-001"
-    )
-    assert index["weight_map"]["model.layers.3.weight"].startswith(
-        "model-stage-002"
-    )
+    assert index["weight_map"]["model.layers.2.weight"].startswith("model-stage-001")
+    assert index["weight_map"]["model.layers.3.weight"].startswith("model-stage-002")
     recovered = {}
     for filename in sorted(set(index["weight_map"].values())):
         recovered.update(_tensor_bytes(destination / filename))

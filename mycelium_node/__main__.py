@@ -76,8 +76,14 @@ _PEER_CAPABILITIES = {
         "transport": "none",
         "activation_protocol": None,
     },
+    "artifact_source_https": {
+        "runtime_backend": "artifact-source",
+        "transport": "https",
+        "activation_protocol": None,
+    },
 }
 _DEFAULT_CAPABILITY = _PEER_CAPABILITIES["mac_mlx_iroh"]
+_SOURCE_ONLY_PEER_CLASSES = frozenset({"artifact_source_https"})
 _MAX_JOIN_BUNDLE_BYTES = 1024 * 1024
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY
@@ -294,7 +300,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--membership-endpoint-id")
     parser.add_argument("--advertise", action="append", required=True)
-    parser.add_argument("--sidecar-path")
+    parser.add_argument(
+        "--sidecar-path",
+        help="required for inference peers and forbidden for source-only peers",
+    )
+    parser.add_argument(
+        "--membership-control-only",
+        action="store_true",
+        help=(
+            "renew the inference peer membership lease while the product route owns "
+            "the physical stage runtime"
+        ),
+    )
     parser.add_argument("--run-id", default="node-main-run")
     parser.add_argument("--deployment-id", default="node-main-unassigned")
     parser.add_argument("--incarnation", default="node-main")
@@ -402,8 +419,8 @@ def _preflight(
     dict[str, Any],
     dict[str, Any],
     SeedHTTPClient,
-    Path,
-    tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity],
+    Path | None,
+    tuple[_ExecutableIdentity, _ExecutableIdentity, _ExecutableIdentity] | None,
     dict[str, Any] | None,
 ]:
     state_root: PrivateDirectoryLease | None = None
@@ -455,23 +472,35 @@ def _preflight(
                 seed_key_digest=persisted["seed_key_digest"],
                 seed_key_records=list(persisted["seed_key_records"]),
             )
-        sidecar = _sidecar_path(args.sidecar_path)
+        source_only = args.peer_class in _SOURCE_ONLY_PEER_CLASSES
+        membership_control_only = args.membership_control_only
+        if source_only and membership_control_only:
+            raise ValueError("source-only peer has no product-route runtime ownership")
+        if source_only or membership_control_only:
+            if args.sidecar_path is not None:
+                raise ValueError("control-only peer cannot accept a sidecar")
+            sidecar = None
+        else:
+            sidecar = _sidecar_path(args.sidecar_path)
         advertised_endpoints = [
             _validate_advertised_endpoint(value) for value in args.advertise
         ]
-        service_script = (
-            Path(__file__).resolve().parents[1] / "physical_inference_node.py"
-        )
-        interpreter = _service_interpreter()
-        identities = validate_physical_node_launch_shape(
-            python_executable=interpreter,
-            service_script=service_script,
-            run_id=args.run_id,
-            deployment_id=args.deployment_id,
-            node_id=args.node_id,
-            sidecar_binary=sidecar,
-            sidecar_local_only=False,
-        )
+        identities = None
+        if not source_only and not membership_control_only:
+            service_script = (
+                Path(__file__).resolve().parents[1] / "physical_inference_node.py"
+            )
+            interpreter = _service_interpreter()
+            assert sidecar is not None
+            identities = validate_physical_node_launch_shape(
+                python_executable=interpreter,
+                service_script=service_script,
+                run_id=args.run_id,
+                deployment_id=args.deployment_id,
+                node_id=args.node_id,
+                sidecar_binary=sidecar,
+                sidecar_local_only=False,
+            )
         validation_signer = generate_ed25519_signer(
             endpoint_id=args.membership_endpoint_id or "node-preflight-endpoint"
         )
@@ -648,14 +677,17 @@ def _run_bound(
     bundle: dict[str, Any],
     verified: dict[str, Any],
     client: SeedHTTPClient,
-    sidecar: Path,
+    sidecar: Path | None,
     identities: tuple[
         _ExecutableIdentity,
         _ExecutableIdentity,
         _ExecutableIdentity,
-    ],
+    ] | None,
     persisted: dict[str, Any] | None = None,
 ) -> int:
+    membership_control_only = bool(
+        getattr(args, "membership_control_only", False)
+    )
     try:
         rotation_method = getattr(client, "rotation", None)
         if callable(rotation_method):
@@ -696,26 +728,32 @@ def _run_bound(
             peer_class=args.peer_class,
             runtime_capability=_PEER_CAPABILITIES[args.peer_class],
         )
-        artifact_root = state_root.private_subdirectory("artifacts")
-        state_root.revalidate()
-        artifact_root.revalidate()
-        temporary_root = _temporary_root()
-        with state_root.working_directory():
-            command = build_physical_node_command(
-                python_executable=_service_interpreter(),
-                service_script=Path(__file__).resolve().parents[1]
-                / "physical_inference_node.py",
-                run_id=args.run_id,
-                deployment_id=args.deployment_id,
-                node_id=args.node_id,
-                artifact_root=Path("artifacts"),
-                socket_root=temporary_root.path,
-                sidecar_binary=sidecar,
-                sidecar_local_only=False,
-                descriptor_relative_artifact_root=True,
-            )
-        state_root.revalidate()
-        artifact_root.revalidate()
+        command = None
+        if (
+            args.peer_class not in _SOURCE_ONLY_PEER_CLASSES
+            and not membership_control_only
+        ):
+            assert sidecar is not None and identities is not None
+            artifact_root = state_root.private_subdirectory("artifacts")
+            state_root.revalidate()
+            artifact_root.revalidate()
+            temporary_root = _temporary_root()
+            with state_root.working_directory():
+                command = build_physical_node_command(
+                    python_executable=_service_interpreter(),
+                    service_script=Path(__file__).resolve().parents[1]
+                    / "physical_inference_node.py",
+                    run_id=args.run_id,
+                    deployment_id=args.deployment_id,
+                    node_id=args.node_id,
+                    artifact_root=Path("artifacts"),
+                    socket_root=temporary_root.path,
+                    sidecar_binary=sidecar,
+                    sidecar_local_only=False,
+                    descriptor_relative_artifact_root=True,
+                )
+            state_root.revalidate()
+            artifact_root.revalidate()
     except Exception as exc:
         failure = _EntrypointFailure(
             "node_preflight_failed",
@@ -750,17 +788,19 @@ def _run_bound(
             previous[signum] = signal.signal(signum, request_stop)
         # The child resolves its descriptor-relative artifact directory during
         # startup, so pin its inherited cwd to the retained state-root fd.
-        with state_root.working_directory():
-            process = PhysicalNodeProcess(
-                command=command,
-                node_id=args.node_id,
-                run_id=args.run_id,
-                deployment_id=args.deployment_id,
-                expected_executables=identities,
-            )
-        hello = process.command("hello")
-        if not isinstance(hello, dict) or hello.get("route_ready") is not False:
-            raise RuntimeError("node child claim is invalid")
+        if command is not None:
+            assert identities is not None
+            with state_root.working_directory():
+                process = PhysicalNodeProcess(
+                    command=command,
+                    node_id=args.node_id,
+                    run_id=args.run_id,
+                    deployment_id=args.deployment_id,
+                    expected_executables=identities,
+                )
+            hello = process.command("hello")
+            if not isinstance(hello, dict) or hello.get("route_ready") is not False:
+                raise RuntimeError("node child claim is invalid")
 
         try:
             rotation = client.rotation(now=time.time())
@@ -889,9 +929,14 @@ def _run_bound(
             "renewal_deadline_unix_ms": int(lease_expires_at * 1_000),
             "reconnect_action": "none",
             "placement_impact": "qualification_still_required",
-            "node_process_pid": process.pid,
             "route_ready": False,
         }
+        if process is not None:
+            status["node_process_pid"] = process.pid
+        elif membership_control_only:
+            status["runtime_ownership"] = "product_route"
+        else:
+            status["source_only"] = True
         if persisted is not None:
             status["membership_resumed"] = True
         _emit_status(status)
@@ -939,16 +984,16 @@ def _run_bound(
                 process.close()
             except Exception:
                 cleanup_phases.append("process")
-        try:
-            assert temporary_root is not None
-            _remove_temporary_root(temporary_root)
-        except Exception:
-            cleanup_phases.append("temporary_root")
-        try:
-            assert artifact_root is not None
-            artifact_root.close()
-        except Exception:
-            cleanup_phases.append("artifact_root")
+        if temporary_root is not None:
+            try:
+                _remove_temporary_root(temporary_root)
+            except Exception:
+                cleanup_phases.append("temporary_root")
+        if artifact_root is not None:
+            try:
+                artifact_root.close()
+            except Exception:
+                cleanup_phases.append("artifact_root")
         for signum in reversed(tuple(previous)):
             try:
                 signal.signal(signum, previous[signum])

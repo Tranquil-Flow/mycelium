@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import stat
 import sys
 import time
+from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -24,6 +27,47 @@ from mycelium_seed.plan_binding import (  # noqa: E402
     bind_operator_plan_document,
 )
 from mycelium_seed.state import SqliteSeedState  # noqa: E402
+from scripts.build_qwen_live_route import refresh_peer_identities  # noqa: E402
+
+
+_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+IdentityRefresher = Callable[[list[dict[str, Any]], str], list[dict[str, Any]]]
+
+
+def _rotate_run_session(
+    plan: dict[str, Any],
+    *,
+    run_id: str,
+    identity_refresher: IdentityRefresher = refresh_peer_identities,
+) -> dict[str, Any]:
+    if _RUN_ID.fullmatch(run_id) is None:
+        raise PlanBindingError("operator_plan_run_id_invalid")
+    controller = plan.get("controller")
+    run_plan = controller.get("run_plan") if isinstance(controller, dict) else None
+    peers = controller.get("peers") if isinstance(controller, dict) else None
+    if (
+        not isinstance(run_plan, dict)
+        or not isinstance(peers, list)
+        or not peers
+        or not all(isinstance(peer, dict) for peer in peers)
+        or not isinstance(plan.get("run_id"), str)
+        or run_plan.get("run_id") != plan.get("run_id")
+    ):
+        raise PlanBindingError("operator_plan_run_session_invalid")
+    rotated = copy.deepcopy(plan)
+    rotated["run_id"] = run_id
+    rotated["controller"]["run_plan"]["run_id"] = run_id
+    refreshed = identity_refresher(copy.deepcopy(peers), run_id)
+    if (
+        not isinstance(refreshed, list)
+        or len(refreshed) != len(peers)
+        or any(not isinstance(peer, dict) for peer in refreshed)
+        or [peer.get("node_id") for peer in refreshed]
+        != [peer.get("node_id") for peer in peers]
+    ):
+        raise PlanBindingError("operator_plan_run_identity_invalid")
+    rotated["controller"]["peers"] = refreshed
+    return rotated
 
 
 def _load_seed(root: Path):
@@ -64,6 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--operator-plan", type=Path, required=True)
     parser.add_argument("--seed-state-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--rotate-run-id",
+        help=(
+            "fresh physical session identity; preserves model, representation, "
+            "deployment, graph, and assignments"
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         signer, swarm_id, seed_node_id, members = _load_seed(args.seed_state_root)
@@ -76,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
             members=members,
             now=time.time(),
         )
+        if args.rotate_run_id is not None:
+            bound = _rotate_run_session(bound, run_id=args.rotate_run_id)
         body = canonical_json_bytes(bound) + b"\n"
         output = args.output.expanduser().resolve()
         output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

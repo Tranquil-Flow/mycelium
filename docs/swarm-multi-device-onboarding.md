@@ -98,7 +98,14 @@ transfer mechanism can pipe it without persisting or logging it.
 
 Do not share a device state directory, clone a device private key, or start two users
 under one node ID. If a target cannot run the reviewed native sidecar/runtime, enroll
-it through Device Lab as a visibly activation-ineligible probe instead.
+it through Device Lab as a visibly activation-ineligible probe instead. A device that
+can run the signed HTTPS artifact agent may instead join with
+`--peer-class artifact_source_https`; this source-only class does not accept a sidecar,
+never becomes activation-eligible, and cannot receive a model-layer assignment.
+Sandboxed runtimes that cannot open `/` may set `MYCELIUM_PRIVATE_PATH_ANCHOR` to one
+absolute, owner-controlled application root. Every Mycelium state path must remain
+beneath that anchor and retains the ordinary descriptor-relative ownership, mode,
+no-follow, and revalidation checks.
 
 ## 4. Qualification gate before inference
 

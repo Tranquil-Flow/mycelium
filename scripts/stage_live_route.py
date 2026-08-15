@@ -120,6 +120,15 @@ def main(argv: list[str] | None = None) -> int:
         command.extend(
             ["--node-transfer-manifests", str(node_transfer_manifests_path)]
         )
+    prepositioned_artifacts = controller.get("prepositioned_artifacts")
+    if prepositioned_artifacts is not None:
+        prepositioned_artifacts_path = work_dir / "prepositioned-artifacts.json"
+        prepositioned_artifacts_path.write_bytes(
+            _canonical_bytes(prepositioned_artifacts)
+        )
+        command.extend(
+            ["--prepositioned-artifacts", str(prepositioned_artifacts_path)]
+        )
 
     print(f"$ {' '.join(command)}", file=sys.stderr, flush=True)
     completed = subprocess.run(command, check=False)

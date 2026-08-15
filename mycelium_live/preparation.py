@@ -224,8 +224,23 @@ def _authorization(
     conversion_required = source_quantization != serving_quantization
     if conversion_required and decision["conversion_authorized"] is not True:
         raise ModelPreparationError("model_representation_conversion_not_authorized")
-    owner_decision = _detached(decision)
-    owner_decision_digest = _digest(owner_decision)
+    representation_authority = report.get("representation_authority")
+    inherited_owner_decision_digest = (
+        representation_authority.get("owner_decision_digest")
+        if isinstance(representation_authority, Mapping)
+        and representation_authority.get("kind")
+        == "approved_existing_immutable_representation"
+        else None
+    )
+    if inherited_owner_decision_digest is not None:
+        if (
+            not isinstance(inherited_owner_decision_digest, str)
+            or _DIGEST.fullmatch(inherited_owner_decision_digest) is None
+        ):
+            raise ModelPreparationError("model_operation_invalid")
+        owner_decision_digest = inherited_owner_decision_digest
+    else:
+        owner_decision_digest = _digest(_detached(decision))
     preparation_binding_digest = _digest(
         {
             "feasibility_digest": feasibility_digest,

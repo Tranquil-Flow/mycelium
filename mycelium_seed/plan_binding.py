@@ -45,12 +45,31 @@ def bind_operator_plan_document(
         if isinstance(member, Mapping) and isinstance(member.get("node_id"), str)
     }
     recipients: list[str] = []
+    activation_endpoint_by_node: dict[str, str] = {}
     for envelope in offers:
         message = envelope.get("message") if isinstance(envelope, Mapping) else None
         recipient = message.get("recipient_node_id") if isinstance(message, Mapping) else None
         if not isinstance(recipient, str) or recipient in recipients:
             raise PlanBindingError("operator_plan_binding_invalid")
         recipients.append(recipient)
+        records = message.get("peer_endpoint_records")
+        if not isinstance(records, list):
+            raise PlanBindingError("operator_plan_binding_invalid")
+        for record in records:
+            if not isinstance(record, Mapping):
+                raise PlanBindingError("operator_plan_binding_invalid")
+            node_id = record.get("node_id")
+            endpoint_id = record.get("endpoint_id")
+            if (
+                not isinstance(node_id, str)
+                or not node_id
+                or not isinstance(endpoint_id, str)
+                or not endpoint_id
+            ):
+                raise PlanBindingError("operator_plan_activation_endpoint_invalid")
+            prior = activation_endpoint_by_node.setdefault(node_id, endpoint_id)
+            if prior != endpoint_id:
+                raise PlanBindingError("operator_plan_activation_endpoint_conflict")
     selected: dict[str, dict[str, Any]] = {}
     for recipient in recipients:
         member = current.get(recipient)
@@ -66,6 +85,8 @@ def bind_operator_plan_document(
         ):
             raise PlanBindingError("operator_plan_member_ineligible")
         selected[recipient] = member
+    if len(selected) > 1 and set(activation_endpoint_by_node) != set(selected):
+        raise PlanBindingError("operator_plan_activation_endpoint_missing")
     valid_until = min(now + 3_600.0, *(float(item["lease_expires_at"]) for item in selected.values()))
     refreshed = []
     for index, envelope in enumerate(offers):
@@ -84,7 +105,10 @@ def bind_operator_plan_document(
             peer_endpoint_records=[
                 {
                     "node_id": node_id,
-                    "endpoint_id": peer["endpoint_id"],
+                    # Seed control-plane identity proves current membership. The
+                    # separately authorized Iroh activation identity must survive
+                    # a membership-generation renewal.
+                    "endpoint_id": activation_endpoint_by_node[node_id],
                     "deployment_epoch": message["deployment_epoch"],
                     "membership_generation": peer["generation"],
                     "valid_from": now,

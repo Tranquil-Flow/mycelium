@@ -309,6 +309,42 @@ def test_controller_accepts_only_typed_node_transfer_manifests(workspace: Path) 
     assert caught.value.code == "plan_field_invalid"
 
 
+def test_controller_accepts_closed_prepositioned_artifact_bindings(
+    workspace: Path,
+) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["prepositioned_artifacts"] = {
+        "protocol": "mycelium.controller_prepositioned_artifacts.v1",
+        "members": {
+            node_id: [
+                {
+                    "destination_path": "deployment/stage.safetensors",
+                    "source_path": f"/srv/{node_id}/stage.safetensors",
+                    "size_bytes": 17,
+                    "content_digest": "sha256:" + "a" * 64,
+                }
+            ]
+            for node_id in ("node-a", "node-b")
+        },
+    }
+
+    parsed = parse_operator_plan(payload)
+
+    assert set(parsed.controller["prepositioned_artifacts"]["members"]) == {
+        "node-a",
+        "node-b",
+    }
+
+    invalid = _plan(workspace)
+    invalid["controller"]["prepositioned_artifacts"] = {
+        "protocol": "mycelium.controller_prepositioned_artifacts.v1",
+        "members": {"node-a": []},
+    }
+    with pytest.raises(RunnerError) as caught:
+        parse_operator_plan(invalid)
+    assert caught.value.code == "plan_field_invalid"
+
+
 def test_unknown_and_missing_top_level_fields_fail_closed(workspace: Path) -> None:
     extra = _plan(workspace)
     extra["unexpected"] = 1

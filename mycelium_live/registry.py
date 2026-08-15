@@ -587,7 +587,7 @@ class LiveDeploymentRegistry:
 
         detached = copy.deepcopy(dict(document))
         if detached.get("protocol") != "mycelium.model_operation.v1":
-            raise ValueError("m17_model_operation_invalid")
+            raise ValueError("model_operation_invalid")
         with self._lock:
             self._runtimes = {
                 deployment_id: replace(runtime, model_operation=copy.deepcopy(detached))
@@ -604,10 +604,9 @@ class LiveDeploymentRegistry:
                 if runtime.route.is_alive()
                 and runtime.deployment_id not in self._draining
                 and runtime.placement_projection is not None
-                and runtime.topology_projection is not None
             ]
             if not candidates:
-                raise RuntimeError("m17_swarm_evidence_unavailable")
+                raise RuntimeError("swarm_evidence_unavailable")
             runtime = max(
                 candidates,
                 key=lambda item: (

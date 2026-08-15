@@ -59,7 +59,30 @@ def _template() -> dict:
             "run_plan": {"nodes": runtime_nodes},
             "membership_snapshot": {
                 "assignment_offers": [
-                    {"message": {"peer_endpoint_records": endpoint_records}}
+                    {
+                        "message": {
+                            "recipient_node_id": "node-0",
+                            "generation": 1,
+                            "peer_endpoint_records": [
+                                {
+                                    **endpoint_records[1],
+                                    "membership_generation": 2,
+                                }
+                            ],
+                        }
+                    },
+                    {
+                        "message": {
+                            "recipient_node_id": "node-1",
+                            "generation": 2,
+                            "peer_endpoint_records": [
+                                {
+                                    **endpoint_records[0],
+                                    "membership_generation": 1,
+                                }
+                            ],
+                        }
+                    },
                 ]
             },
         }
@@ -77,6 +100,7 @@ def _topology_node(index: int, *, backend: str) -> dict:
         "sidecar_binary": f"/opt/mycelium/node-{index}/sidecar",
         "endpoint_secret_file": f"/opt/mycelium/identities/node-{index}.key",
         "endpoint_id": f"endpoint-{index}",
+        "membership_generation": index + 1,
         "runtime_backend": backend,
     }
 
@@ -492,6 +516,7 @@ def test_membership_snapshot_uses_custom_route_label() -> None:
         packs=packs,
         graph_document={"protocol": "graph.v1", "stages": []},
         endpoint_ids={"node-0": "endpoint-0"},
+        membership_generations={"node-0": 7},
         now=1_000.0,
         route_label="m8-cached",
     )
@@ -515,6 +540,7 @@ def test_membership_snapshot_preserves_planner_v2_provenance() -> None:
         packs=[{"stage_pack_digest": "sha256:" + "1" * 64}],
         graph_document={"protocol": "graph.v1", "stages": []},
         endpoint_ids={"node-0": "endpoint-0"},
+        membership_generations={"node-0": 7},
         now=1_000.0,
         route_label="m13",
         placement_provenance="planner_v2",
@@ -523,6 +549,30 @@ def test_membership_snapshot_preserves_planner_v2_provenance() -> None:
     assert (
         snapshot["assignment_offers"][0]["message"]["placement_provenance"]
         == "planner_v2"
+    )
+
+
+def test_model_feasibility_preparation_uses_planner_v2_authority_class() -> None:
+    assert (
+        builder._placement_provenance(
+            m13_document=None,
+            preparation_authorization={"planner": "capability_aware_exact_dp"},
+        )
+        == "planner_v2"
+    )
+    assert (
+        builder._placement_provenance(
+            m13_document={"protocol": "mycelium.m13_physical_candidate.v1"},
+            preparation_authorization=None,
+        )
+        == "planner_v2"
+    )
+    assert (
+        builder._placement_provenance(
+            m13_document=None,
+            preparation_authorization=None,
+        )
+        == "target_local_physical_preload"
     )
 
 
@@ -545,6 +595,7 @@ def test_membership_snapshot_sorts_peer_records_independently_of_route_order() -
         endpoint_ids={
             node_id: f"endpoint-{node_id}" for node_id in ("node-0", "node-1", "node-2")
         },
+        membership_generations={"node-0": 11, "node-1": 13, "node-2": 17},
         now=1_000.0,
         route_label="m14",
         placement_provenance="planner_v2",
@@ -557,6 +608,11 @@ def test_membership_snapshot_sorts_peer_records_independently_of_route_order() -
     assert [
         record["node_id"] for record in by_recipient["node-0"]["peer_endpoint_records"]
     ] == ["node-1", "node-2"]
+    assert by_recipient["node-0"]["generation"] == 11
+    assert [
+        record["membership_generation"]
+        for record in by_recipient["node-0"]["peer_endpoint_records"]
+    ] == [13, 17]
 
 
 def test_m13_control_plane_extracts_exact_track_ranges(tmp_path: Path) -> None:
@@ -627,6 +683,7 @@ def test_live_route_reissues_membership_against_current_clock(tmp_path: Path) ->
         packs=[{"stage_pack_digest": "sha256:" + "1" * 64}],
         graph_document={"protocol": "graph.v1", "stages": []},
         endpoint_ids={"node-0": "endpoint-0"},
+        membership_generations={"node-0": 7},
         now=1_000.0,
         route_label="m11-live",
     )
@@ -684,7 +741,7 @@ def test_live_route_reissues_membership_against_current_clock(tmp_path: Path) ->
     assert restarted_signer.endpoint_id == signer.endpoint_id
 
 
-def test_live_route_replaces_stale_plan_peer_records_from_membership_authority(
+def test_live_route_renews_membership_without_replacing_activation_endpoints(
     tmp_path: Path,
 ) -> None:
     snapshot = builder._membership_snapshot(
@@ -702,6 +759,7 @@ def test_live_route_replaces_stale_plan_peer_records_from_membership_authority(
         ],
         graph_document={"protocol": "graph.v1", "stages": []},
         endpoint_ids={"node-0": "stale-0", "node-1": "stale-1"},
+        membership_generations={"node-0": 11, "node-1": 13},
         now=1_000.0,
         route_label="m12-live",
     )
@@ -745,14 +803,78 @@ def test_live_route_replaces_stale_plan_peer_records_from_membership_authority(
     assert by_recipient["node-0"]["peer_endpoint_records"] == [
         {
             "node_id": "node-1",
-            "endpoint_id": "current-1",
+            "endpoint_id": "stale-1",
             "deployment_epoch": 1,
             "membership_generation": 13,
             "valid_from": 2_000.0,
             "valid_until": 2_600.0,
         }
     ]
-    assert "stale-1" not in json.dumps(refreshed)
+    assert "current-1" not in json.dumps(refreshed)
+    assert (
+        by_recipient["node-1"]["peer_endpoint_records"][0]["endpoint_id"] == "stale-0"
+    )
+
+
+def test_live_route_rejects_conflicting_planned_activation_endpoints(
+    tmp_path: Path,
+) -> None:
+    snapshot = builder._membership_snapshot(
+        assignments=[
+            {
+                "node_id": f"node-{index}",
+                "deployment_id": "deployment-0",
+                "deployment_epoch": 1,
+                "assignment_id": f"assignment-{index}",
+            }
+            for index in range(2)
+        ],
+        packs=[
+            {"stage_pack_digest": "sha256:" + str(index + 1) * 64} for index in range(2)
+        ],
+        graph_document={"protocol": "graph.v1", "stages": []},
+        endpoint_ids={"node-0": "activation-0", "node-1": "activation-1"},
+        membership_generations={"node-0": 11, "node-1": 13},
+        now=1_000.0,
+        route_label="activation-conflict",
+    )
+    snapshot["assignment_offers"][0]["message"]["peer_endpoint_records"][0][
+        "endpoint_id"
+    ] = "conflicting-activation-1"
+    snapshot["assignment_offers"][1]["message"]["peer_endpoint_records"].append(
+        {
+            **snapshot["assignment_offers"][0]["message"]["peer_endpoint_records"][0],
+            "endpoint_id": "activation-1",
+        }
+    )
+    signer = load_or_create_node_signer(tmp_path / "seed" / "identity.key")
+    capability = {
+        "runtime_backend": "mlx",
+        "transport": "iroh",
+        "activation_protocol": "mycelium.router_wire.v1",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="^membership_activation_endpoint_conflict$",
+    ):
+        _refresh_membership_snapshot(
+            snapshot,
+            now=2_000.0,
+            signer=signer,
+            seed_node_id="seed-node",
+            members=tuple(
+                {
+                    "node_id": f"node-{index}",
+                    "endpoint_id": f"membership-{index}",
+                    "generation": index + 1,
+                    "lease_expires_at": 2_600.0,
+                    "peer_class": "mac_mlx_iroh",
+                    "runtime_capability": capability,
+                }
+                for index in range(2)
+            ),
+        )
 
 
 def test_live_route_rejects_plan_placement_without_current_member(
@@ -770,6 +892,7 @@ def test_live_route_rejects_plan_placement_without_current_member(
         packs=[{"stage_pack_digest": "sha256:" + "1" * 64}],
         graph_document={"protocol": "graph.v1", "stages": []},
         endpoint_ids={"node-0": "stale-0"},
+        membership_generations={"node-0": 7},
         now=1_000.0,
         route_label="m12-live",
     )

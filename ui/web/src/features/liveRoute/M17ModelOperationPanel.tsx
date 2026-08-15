@@ -37,10 +37,13 @@ export function M17ModelOperationPanel({ operation, view }: { readonly operation
   });
   return (
     <section className={styles.panel} aria-labelledby="model-operation-title">
-      <h2 id="model-operation-title">Local models and swarm fit</h2>
+      <p className={styles.eyebrow}>Planner intent · not active runtime</p>
+      <h2 id="model-operation-title">Model catalogue and proposed swarm fit</h2>
       <p>
-        Local catalog generation {operation.catalog_generation}. A model is selectable only after the swarm can fit it,
-        its artifacts are provisioned, and its deployment passes qualification. Downloads require fresh operator approval.
+        Local catalogue generation {operation.catalog_generation}. Capacity and stage rows below are proposed planner
+        estimates from their named evidence generation, not the currently executing route shown above. A model becomes
+        selectable only after its exact artifacts are provisioned, loaded, and physically qualified. Downloads require
+        fresh operator approval.
       </p>
       {view === 'readiness' ? (
         <><dl className={styles.measurements}>
@@ -57,6 +60,7 @@ export function M17ModelOperationPanel({ operation, view }: { readonly operation
         </dl><LifecycleTable operation={operation} /></>
       ) : view === 'nodes' ? (
         <div className={styles.tableWrap}><table>
+          <caption>Proposed placement and capacity estimates; not the active route</caption>
           <thead><tr><th>Candidate / stage</th><th>Assigned range</th><th>Runtime</th><th>Memory envelope</th><th>Artifact / disk</th><th>Capacity envelope</th></tr></thead>
           <tbody>{operation.feasibility_reports.flatMap((report) => report.stages.map((stage) => <tr key={`${report.model_id}@${report.revision}:${stage.node_id}`}>
             <th scope="row">{report.model_id}<small> · {stage.node_id}</small></th>

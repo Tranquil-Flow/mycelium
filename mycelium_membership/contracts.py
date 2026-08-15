@@ -67,6 +67,11 @@ _PEER_RUNTIME_CAPABILITIES = {
         "transport": "none",
         "activation_protocol": None,
     },
+    "artifact_source_https": {
+        "runtime_backend": "artifact-source",
+        "transport": "https",
+        "activation_protocol": None,
+    },
 }
 PEER_CLASSES = frozenset(_PEER_RUNTIME_CAPABILITIES)
 

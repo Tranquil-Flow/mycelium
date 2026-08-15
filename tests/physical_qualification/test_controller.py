@@ -799,6 +799,156 @@ def test_physical_prepare_uses_node_specific_subset_archives(tmp_path: Path) -> 
     assert [action["archive_digest"] for action in result["actions"]] == digests
 
 
+def test_physical_prepare_binds_member_prepositioned_artifacts(tmp_path: Path) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    records = {record["path"]: record for record in transfers["files"]}
+    node_manifests = {
+        "protocol": "mycelium.controller_node_transfer_manifests.v1",
+        "manifests": {
+            peers[0].node_id: {
+                "protocol": "mycelium.controller_transfer_manifest.v1",
+                "files": [records["physical_inference_node.py"]],
+            },
+            peers[1].node_id: transfers,
+        },
+    }
+    promoted = tmp_path / "member-state" / "promoted" / "runtime_contracts.py"
+    promoted.parent.mkdir(parents=True)
+    promoted.write_bytes((source_root / "runtime_contracts.py").read_bytes())
+    prepositioned = {
+        "protocol": "mycelium.controller_prepositioned_artifacts.v1",
+        "members": {
+            peers[0].node_id: [
+                {
+                    "destination_path": "runtime_contracts.py",
+                    "source_path": str(promoted),
+                    "size_bytes": records["runtime_contracts.py"]["size_bytes"],
+                    "content_digest": records["runtime_contracts.py"][
+                        "content_digest"
+                    ],
+                }
+            ],
+            peers[1].node_id: [],
+        },
+    }
+    archives = [
+        build_transfer_archive(source_root, node_manifests["manifests"][peer.node_id])
+        for peer in peers
+    ]
+    member_documents = [
+        controller_module._canonical_bytes(
+            {
+                "protocol": "mycelium.controller_prepositioned_member_artifacts.v1",
+                "files": prepositioned["members"][peer.node_id],
+            }
+        )
+        for peer in peers
+    ]
+    archive_digests = [
+        "sha256:" + hashlib.sha256(archive).hexdigest() for archive in archives
+    ]
+    preposition_digests = [
+        "sha256:" + hashlib.sha256(document).hexdigest()
+        for document in member_documents
+    ]
+    runner = StagingRunner(
+        [
+            CommandCapture(
+                argv=(),
+                returncode=0,
+                stdout=(
+                    json.dumps(
+                        {
+                            "protocol": "mycelium.controller_remote_stage_ack.v1",
+                            "node_id": peer.node_id,
+                            "staging_root": peer.staging_root,
+                            "archive_digest": archive_digest,
+                            "archive_size_bytes": len(archive),
+                            "preposition_digest": preposition_digest,
+                            "preposition_size_bytes": len(member_document),
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                ).encode(),
+                stderr=b"",
+            )
+            for peer, archive, member_document, archive_digest, preposition_digest in zip(
+                peers,
+                archives,
+                member_documents,
+                archive_digests,
+                preposition_digests,
+                strict=True,
+            )
+        ]
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        node_transfer_manifests=node_manifests,
+        prepositioned_artifacts=prepositioned,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+    )
+
+    result = controller.execute("prepare")
+
+    assert [call[2] for call in runner.calls] == [
+        archive + member_document
+        for archive, member_document in zip(archives, member_documents, strict=True)
+    ]
+    assert [action["preposition_digest"] for action in result["actions"]] == (
+        preposition_digests
+    )
+
+
+def test_prepositioned_artifact_cannot_duplicate_coordinator_transfer(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    record = transfers["files"][1]
+    prepositioned = {
+        "protocol": "mycelium.controller_prepositioned_artifacts.v1",
+        "members": {
+            peers[0].node_id: [
+                {
+                    "destination_path": record["path"],
+                    "source_path": str(source_root / record["path"]),
+                    "size_bytes": record["size_bytes"],
+                    "content_digest": record["content_digest"],
+                }
+            ],
+            peers[1].node_id: [],
+        },
+    }
+    controller = QualificationController(
+        mode="dry-run",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        node_transfer_manifests={
+            "protocol": "mycelium.controller_node_transfer_manifests.v1",
+            "manifests": {peer.node_id: transfers for peer in peers},
+        },
+        prepositioned_artifacts=prepositioned,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+    )
+
+    with pytest.raises(
+        ControllerError,
+        match="prepositioned_artifact_also_transferred",
+    ):
+        controller.execute("prepare")
+
+
 def test_node_transfer_manifests_must_cover_the_base_manifest(tmp_path: Path) -> None:
     peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)
@@ -2068,6 +2218,86 @@ def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
     )
     assert second_cleanup.returncode == 0
     assert json.loads(second_cleanup.stdout)["removed"] is False
+
+
+def test_remote_stage_program_verifies_member_promoted_artifact(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path / "source")
+    records = {record["path"]: record for record in transfers["files"]}
+    archive_manifest = {
+        "protocol": "mycelium.controller_transfer_manifest.v1",
+        "files": [records["physical_inference_node.py"]],
+    }
+    archive = build_transfer_archive(source_root, archive_manifest)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    promoted = tmp_path / "member" / "promoted" / "runtime_contracts.py"
+    promoted.parent.mkdir(parents=True)
+    promoted.write_bytes((source_root / "runtime_contracts.py").read_bytes())
+    preposition_document = controller_module._canonical_bytes(
+        {
+            "protocol": "mycelium.controller_prepositioned_member_artifacts.v1",
+            "files": [
+                {
+                    "destination_path": "runtime_contracts.py",
+                    "source_path": str(promoted),
+                    "size_bytes": records["runtime_contracts.py"]["size_bytes"],
+                    "content_digest": records["runtime_contracts.py"][
+                        "content_digest"
+                    ],
+                }
+            ],
+        }
+    )
+    preposition_digest = "sha256:" + hashlib.sha256(
+        preposition_document
+    ).hexdigest()
+    staging_root = tmp_path / "remote" / "mycelium-run" / "node-1"
+
+    capture = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_STAGE_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+            str(len(archive)),
+            preposition_digest,
+            str(len(preposition_document)),
+        ),
+        timeout_seconds=10.0,
+        stdin_bytes=archive + preposition_document,
+    )
+
+    assert capture.returncode == 0
+    assert capture.stderr == b""
+    assert json.loads(capture.stdout) == {
+        "protocol": "mycelium.controller_remote_stage_ack.v1",
+        "node_id": "node-1",
+        "staging_root": str(staging_root),
+        "archive_digest": archive_digest,
+        "archive_size_bytes": len(archive),
+        "preposition_digest": preposition_digest,
+        "preposition_size_bytes": len(preposition_document),
+    }
+    assert (staging_root / "runtime_contracts.py").read_bytes() == (
+        source_root / "runtime_contracts.py"
+    ).read_bytes()
+    cleanup = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_CLEANUP_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+            preposition_digest,
+        ),
+        timeout_seconds=10.0,
+    )
+    assert cleanup.returncode == 0
+    assert json.loads(cleanup.stdout)["removed"] is True
 
 
 def test_remote_stage_program_streams_archive_and_members_with_bounded_memory() -> None:

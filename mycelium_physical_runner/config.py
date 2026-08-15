@@ -45,6 +45,7 @@ _CONTROLLER_FIELDS = frozenset(
         "peers",
         "transfer_manifest",
         "node_transfer_manifests",
+        "prepositioned_artifacts",
         "membership_snapshot",
         "run_plan",
         "authority_documents",
@@ -244,6 +245,7 @@ def _controller(value: Any) -> Mapping[str, Any]:
         "authority_documents",
         "authority_profile",
         "node_transfer_manifests",
+        "prepositioned_artifacts",
     }
     missing = required - set(snapshot)
     _require(not missing, "plan_missing_field", "controller." + ",".join(sorted(missing)))
@@ -319,6 +321,68 @@ def _controller(value: Any) -> Mapping[str, Any]:
             "plan_field_invalid",
             "controller.node_transfer_manifests",
         )
+    if "prepositioned_artifacts" in snapshot:
+        prepositioned = snapshot["prepositioned_artifacts"]
+        _require(
+            isinstance(prepositioned, Mapping)
+            and set(prepositioned) == {"protocol", "members"}
+            and prepositioned.get("protocol")
+            == "mycelium.controller_prepositioned_artifacts.v1"
+            and isinstance(prepositioned.get("members"), Mapping)
+            and set(prepositioned["members"]) == set(peers_by_node),
+            "plan_field_invalid",
+            "controller.prepositioned_artifacts",
+        )
+        for node_id in sorted(peers_by_node):
+            records = prepositioned["members"][node_id]
+            _require(
+                isinstance(records, list) and bool(records),
+                "plan_field_invalid",
+                "controller.prepositioned_artifacts.members",
+            )
+            destinations: list[str] = []
+            for record in records:
+                _require(
+                    isinstance(record, Mapping)
+                    and set(record)
+                    == {
+                        "destination_path",
+                        "source_path",
+                        "size_bytes",
+                        "content_digest",
+                    },
+                    "plan_field_invalid",
+                    "controller.prepositioned_artifacts.members",
+                )
+                destination = record.get("destination_path")
+                destination_path = PurePosixPath(str(destination))
+                _require(
+                    isinstance(destination, str)
+                    and bool(destination)
+                    and not destination_path.is_absolute()
+                    and destination_path.as_posix() == destination
+                    and all(part not in {"", ".", ".."} for part in destination_path.parts),
+                    "plan_path_unsafe",
+                    "controller.prepositioned_artifacts.destination_path",
+                )
+                _safe_remote_path(
+                    record.get("source_path"),
+                    "controller.prepositioned_artifacts.source_path",
+                )
+                _require(
+                    type(record.get("size_bytes")) is int
+                    and record["size_bytes"] > 0
+                    and isinstance(record.get("content_digest"), str)
+                    and _SHA256_RE.fullmatch(record["content_digest"]) is not None,
+                    "plan_field_invalid",
+                    "controller.prepositioned_artifacts.members",
+                )
+                destinations.append(destination)
+            _require(
+                destinations == sorted(set(destinations)),
+                "plan_field_invalid",
+                "controller.prepositioned_artifacts.members",
+            )
     entry_node_id = snapshot["run_plan"].get("entry_node_id")
     _require(
         isinstance(entry_node_id, str) and entry_node_id in peers_by_node,

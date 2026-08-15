@@ -8,6 +8,7 @@ import pytest
 from mycelium_live.model_capacity import (
     ModelCapacityRefresh,
     ModelCapacityRefreshError,
+    _capacity_topology,
     recompute_model_operation,
 )
 
@@ -70,6 +71,43 @@ def test_capacity_refresh_failure_is_bounded_and_preserves_no_partial_operation(
     assert published == []
 
 
+def test_capacity_topology_derives_contiguous_m13_stage_order() -> None:
+    topology = _capacity_topology(
+        {
+            "nodes": [
+                {"node_id": "node-2", "start_layer": 23, "end_layer_exclusive": 24},
+                {"node_id": "node-0", "start_layer": 0, "end_layer_exclusive": 23},
+            ]
+        },
+        None,
+    )
+
+    assert topology == {
+        "protocol": "mycelium.capacity_route_order.v1",
+        "source": "validated_m13_placement_stage_order",
+        "decision": {"opened_order": ["node-0", "node-2"]},
+        "route_ready": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        [
+            {"node_id": "node-0", "start_layer": 0, "end_layer_exclusive": 12},
+            {"node_id": "node-2", "start_layer": 13, "end_layer_exclusive": 24},
+        ],
+        [
+            {"node_id": "node-0", "start_layer": 0, "end_layer_exclusive": 12},
+            {"node_id": "node-0", "start_layer": 12, "end_layer_exclusive": 24},
+        ],
+    ],
+)
+def test_capacity_topology_rejects_ambiguous_stage_order(nodes) -> None:
+    with pytest.raises(ValueError, match="capacity_topology_order_invalid"):
+        _capacity_topology({"nodes": nodes}, None)
+
+
 def test_recompute_joins_fresh_evidence_local_catalog_and_existing_planner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -81,8 +119,12 @@ def test_recompute_joins_fresh_evidence_local_catalog_and_existing_planner(
     reports = []
     phases = []
     live = {
-        "placement": {"nodes": []},
-        "topology": {"decision": {"opened_order": []}},
+        "placement": {
+            "nodes": [
+                {"node_id": "node-0", "start_layer": 0, "end_layer_exclusive": 1}
+            ]
+        },
+        "topology": {"decision": {"opened_order": ["node-0"]}},
     }
 
     monkeypatch.setattr("mycelium_live.model_capacity.assemble", lambda value: {"assembled": value})

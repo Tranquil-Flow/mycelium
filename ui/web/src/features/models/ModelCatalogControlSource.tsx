@@ -14,6 +14,14 @@ import { ModelCatalogControlPanel } from './ModelCatalogControlPanel';
 import { HttpModelCapacityRefreshClient, type ModelCapacityRefreshClient, type ModelCapacityRefreshStatus } from './modelCapacityRefresh';
 import { HttpModelPreparationClient, type ModelPreparationClient, type ModelPreparationStatus, type ModelRepresentationDecision } from './modelPreparation';
 
+const unavailableActivation: DeploymentActivationStatus = Object.freeze({
+  protocol: 'mycelium.deployment_activation.v1',
+  generation: 0,
+  busy_candidate_id: null,
+  invalid_candidate_count: 0,
+  candidates: Object.freeze([]),
+});
+
 export function ModelCatalogControlSource({
   operationClient,
   activationClient,
@@ -39,6 +47,7 @@ export function ModelCatalogControlSource({
   const [activation, setActivation] = useState<DeploymentActivationStatus | null>(null);
   const [capacityRefresh, setCapacityRefresh] = useState<ModelCapacityRefreshStatus | null>(null);
   const [preparation, setPreparation] = useState<ModelPreparationStatus | null>(null);
+  const [actionsAvailable, setActionsAvailable] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const previousQualified = useRef<ReadonlySet<string>>(new Set());
@@ -51,8 +60,20 @@ export function ModelCatalogControlSource({
       if (active !== null) return;
       const controller = new AbortController();
       active = controller;
-      void Promise.all([operations.load(controller.signal), activations.status(controller.signal), capacity.status(controller.signal).catch(() => null), preparationApi.status(controller.signal).catch(() => null)]).then(([nextOperation, nextActivation, nextCapacity, nextPreparation]) => {
+      void Promise.all([
+        operations.load(controller.signal),
+        activations.status(controller.signal).then(
+          (status) => ({ status, error: null }),
+          (reason: unknown) => ({
+            status: unavailableActivation,
+            error: reason instanceof Error ? reason.message : 'deployment_activation_unavailable',
+          }),
+        ),
+        capacity.status(controller.signal).catch(() => null),
+        preparationApi.status(controller.signal).catch(() => null),
+      ]).then(([nextOperation, activationResult, nextCapacity, nextPreparation]) => {
         if (!mounted) return;
+        const nextActivation = activationResult.status;
         const qualified = new Set(nextActivation.candidates
           .filter((candidate) => candidate.state === 'qualified' || candidate.state === 'active')
           .map((candidate) => candidate.deployment_id));
@@ -60,7 +81,8 @@ export function ModelCatalogControlSource({
           window.dispatchEvent(new Event(DEPLOYMENTS_CHANGED_EVENT));
         }
         previousQualified.current = qualified;
-        setOperation(nextOperation); setActivation(nextActivation); setError(null);
+        setOperation(nextOperation); setActivation(nextActivation); setError(activationResult.error);
+        setActionsAvailable(activationResult.error === null);
         setCapacityRefresh(nextCapacity);
         setPreparation(nextPreparation);
       }).catch((reason) => {
@@ -109,6 +131,6 @@ export function ModelCatalogControlSource({
     }
   };
 
-  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(decision) => void prepare(decision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
+  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} actionsAvailable={actionsAvailable} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(decision) => void prepare(decision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
   return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading model catalog and deployment status…' : `Model controls are unavailable (${error}). Existing qualified inference remains usable.`}</section>;
 }
