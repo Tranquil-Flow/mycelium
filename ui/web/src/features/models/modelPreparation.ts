@@ -1,11 +1,12 @@
 export const MODEL_PREPARATION_PATH = '/__mycelium/model-preparation';
 export const MODEL_PREPARATION_START_PATH = '/__mycelium/model-preparation/start';
+export const MODEL_REACQUISITION_START_PATH = '/__mycelium/model-preparation/reacquire';
 
 export type ModelPreparationPhase = 'validating_capacity' | 'compiling_assignments' | 'verifying_local_artifacts' | 'staging_peers' | 'publishing_candidate';
 export type ModelPreparationState = 'idle' | 'preparing' | 'succeeded' | 'failed';
 
 export interface ModelRepresentationDecision {
-  readonly protocol: 'mycelium.model_representation_decision.v1';
+  readonly protocol: 'mycelium.model_representation_decision.v2';
   readonly model_id: string;
   readonly revision: string;
   readonly source_quantization: string;
@@ -13,10 +14,14 @@ export interface ModelRepresentationDecision {
   readonly serving_quantization: string;
   readonly representation_digest: string;
   readonly conversion_authorized: boolean;
+  readonly source_artifact_digest: string;
+  readonly quantizer: string;
+  readonly download_authorized: false;
 }
 
 export interface ModelPreparationStatus {
   readonly protocol: 'mycelium.model_preparation.v1';
+  readonly operation: 'prepare' | 'warm_reacquire';
   readonly generation: number;
   readonly state: ModelPreparationState;
   readonly phase: ModelPreparationPhase | null;
@@ -28,6 +33,10 @@ export interface ModelPreparationStatus {
   readonly topology_size: number | null;
   readonly transfer_bytes: number;
   readonly verified_bytes: number;
+  readonly cache_receipt_count: number;
+  readonly cached_verified_bytes: number;
+  readonly transferred_verified_bytes: number;
+  readonly origin_bytes: number;
   readonly reason_code: string | null;
   readonly started_at_unix_ms: number | null;
   readonly completed_at_unix_ms: number | null;
@@ -38,6 +47,7 @@ export interface ModelPreparationStatus {
 export interface ModelPreparationClient {
   status(signal?: AbortSignal): Promise<ModelPreparationStatus>;
   start(decision: ModelRepresentationDecision): Promise<ModelPreparationStatus>;
+  reacquire(candidateId: string, decision: ModelRepresentationDecision): Promise<ModelPreparationStatus>;
 }
 
 async function decode(response: Response): Promise<ModelPreparationStatus> {
@@ -55,6 +65,13 @@ export class HttpModelPreparationClient implements ModelPreparationClient {
     return decode(await fetch(MODEL_PREPARATION_START_PATH, {
       method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ decision }),
+    }));
+  }
+
+  async reacquire(candidateId: string, decision: ModelRepresentationDecision): Promise<ModelPreparationStatus> {
+    return decode(await fetch(MODEL_REACQUISITION_START_PATH, {
+      method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ candidate_id: candidateId, decision }),
     }));
   }
 }

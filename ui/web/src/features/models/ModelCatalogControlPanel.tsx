@@ -3,7 +3,7 @@ import type { DeploymentActivationStatus } from '../liveRoute/deploymentActivati
 import type { M17ModelOperation } from '../liveRoute/m17ModelOperation';
 import type { ModelCapacityRefreshStatus } from './modelCapacityRefresh';
 import type { ModelPreparationStatus, ModelRepresentationDecision } from './modelPreparation';
-import { projectModelCatalogControls, type ModelCatalogRow } from './modelCatalogControl';
+import { humanReason, projectModelCatalogControls, type ModelCatalogRow } from './modelCatalogControl';
 import styles from '../liveRoute/LiveRouteWorkspace.module.css';
 
 function bytes(value: number): string {
@@ -15,19 +15,25 @@ function publicReason(value: string): string {
   return value.replace(/^m\d+_/, '').replaceAll('_', ' ');
 }
 
-function Row({ row, busy, actionsAvailable, onActivate, onUnload, onPrepare }: { readonly row: ModelCatalogRow; readonly busy: boolean; readonly actionsAvailable: boolean; readonly onActivate: (candidateId: string) => void; readonly onUnload: (candidateId: string) => void; readonly onPrepare: (decision: ModelRepresentationDecision) => void }) {
+function Row({ row, busy, actionsAvailable, onActivate, onUnload, onPrepare, onReacquire }: { readonly row: ModelCatalogRow; readonly busy: boolean; readonly actionsAvailable: boolean; readonly onActivate: (candidateId: string) => void; readonly onUnload: (candidateId: string) => void; readonly onPrepare: (decision: ModelRepresentationDecision) => void; readonly onReacquire: (candidateId: string, decision: ModelRepresentationDecision) => void }) {
   const report = row.feasibility;
   const candidate = row.candidate;
   const [reviewing, setReviewing] = useState(false);
   const [conversionAuthorized, setConversionAuthorized] = useState(false);
+  const servingRepresentation = row.entry.serving_representations?.find((item) =>
+    item.quantization === report?.serving_quantization
+    && item.runtime_dtype === report?.serving_dtype
+    && item.representation_digest === report?.representation_digest
+  ) ?? null;
   const representationBound = report?.source_quantization !== undefined
     && report.serving_dtype !== undefined
     && report.serving_quantization !== undefined
-    && report.representation_digest !== undefined;
+    && report.representation_digest !== undefined
+    && servingRepresentation !== null;
   const conversionRequired = representationBound && report.source_quantization !== report.serving_quantization;
   const discoveredMemberCount = row.entry.discovered_member_count ?? 0;
   const decision = representationBound ? {
-    protocol: 'mycelium.model_representation_decision.v1' as const,
+    protocol: 'mycelium.model_representation_decision.v2' as const,
     model_id: row.entry.model_id,
     revision: row.entry.revision,
     source_quantization: report.source_quantization!,
@@ -35,6 +41,9 @@ function Row({ row, busy, actionsAvailable, onActivate, onUnload, onPrepare }: {
     serving_quantization: report.serving_quantization!,
     representation_digest: report.representation_digest!,
     conversion_authorized: conversionRequired ? conversionAuthorized : false,
+    source_artifact_digest: row.entry.artifact_digest,
+    quantizer: servingRepresentation!.quantizer,
+    download_authorized: false as const,
   } : null;
   return <tr>
     <th scope="row">{row.entry.model_id}<small> · {row.entry.revision.slice(0, 8)}</small></th>
@@ -49,12 +58,20 @@ function Row({ row, busy, actionsAvailable, onActivate, onUnload, onPrepare }: {
       {discoveredMemberCount === 0 ? null : <small> · seen on {discoveredMemberCount} current {discoveredMemberCount === 1 ? 'member' : 'members'}</small>}
       {row.entry.metadata_reconciled !== false ? null : <small> · metadata not reconciled</small>}
     </td>
-    <td>{!actionsAvailable && row.action !== null ? 'Preparation and activation controls are unavailable in this single-route session.' : (row.action === 'activate' || row.action === 'retry') && candidate !== null ? <button type="button" disabled={busy} onClick={() => onActivate(candidate.candidate_id)}>
-      {row.action === 'retry' ? 'Retry qualification' : 'Activate and qualify'}
-    </button> : row.action === 'prepare' || row.action === 'retry_prepare' ? !representationBound ? 'Representation binding unavailable' : <div>
+    <td>{!actionsAvailable && row.action !== null ? 'Preparation and activation controls are unavailable in this single-route session.' : (row.action === 'activate' || row.action === 'retry') && candidate !== null ? <div>
+      <button type="button" disabled={busy} onClick={() => onActivate(candidate.candidate_id)}>{row.action === 'retry' ? 'Retry qualification' : 'Activate and qualify'}</button>
+      {!representationBound ? null : <><button type="button" disabled={busy} onClick={() => setReviewing((value) => !value)}>{reviewing ? 'Close cache verification' : 'Verify cached copies'}</button>
+        {!reviewing ? null : <div role="group" aria-label={`Cache verification for ${row.entry.model_id}`}>
+          <p><small>Rechecks the exact prepared representation on every assigned device. It will fail instead of transferring missing bytes, downloading, activating, or changing the selected model.</small></p>
+          {conversionRequired ? <label><input type="checkbox" checked={conversionAuthorized} onChange={(event) => setConversionAuthorized(event.target.checked)} /> I confirm this exact derived representation remains owner-approved.</label> : null}
+          <button type="button" disabled={busy || (conversionRequired && !conversionAuthorized)} onClick={() => decision === null ? undefined : onReacquire(candidate.candidate_id, decision)}>Recheck exact device caches</button>
+        </div>}
+      </>}
+    </div> : row.action === 'prepare' || row.action === 'retry_prepare' ? !representationBound ? 'Representation binding unavailable' : <div>
       <button type="button" disabled={busy} onClick={() => setReviewing((value) => !value)}>{reviewing ? 'Close representation review' : 'Review representation'}</button>
       {!reviewing ? null : <div role="group" aria-label={`Representation authorization for ${row.entry.model_id}`}>
-        <p><strong>Exact representation</strong><small> · revision {row.entry.revision.slice(0, 8)} · {report!.source_quantization} → {report!.serving_quantization} ({report!.serving_dtype}) · {report!.representation_digest!.slice(0, 15)}…</small></p>
+        <p><strong>Exact representation</strong><small> · revision {row.entry.revision.slice(0, 8)} · {report!.source_quantization} → {report!.serving_quantization} ({report!.serving_dtype}) · {servingRepresentation!.quantizer} · {report!.representation_digest!.slice(0, 15)}…</small></p>
+        <p><small>Source {row.entry.artifact_digest.slice(0, 15)}… · download remains disabled</small></p>
         {conversionRequired ? <label><input type="checkbox" checked={conversionAuthorized} onChange={(event) => setConversionAuthorized(event.target.checked)} /> I authorize creating this exact derived representation.</label> : <p>No representation conversion is required.</p>}
         <button type="button" disabled={busy || (conversionRequired && !conversionAuthorized)} onClick={() => decision === null ? undefined : onPrepare(decision)}>{conversionRequired ? 'Authorize representation and prepare' : 'Confirm representation and prepare'}</button>
       </div>}
@@ -74,6 +91,7 @@ export function ModelCatalogControlPanel({
   onRecheckCapacity,
   preparation,
   onPrepare = () => undefined,
+  onReacquire = () => undefined,
   actionsAvailable = true,
 }: {
   readonly operation: M17ModelOperation;
@@ -87,6 +105,7 @@ export function ModelCatalogControlPanel({
   readonly onRecheckCapacity: () => void;
   readonly preparation?: ModelPreparationStatus | null;
   readonly onPrepare?: (decision: ModelRepresentationDecision) => void;
+  readonly onReacquire?: (candidateId: string, decision: ModelRepresentationDecision) => void;
   readonly actionsAvailable?: boolean;
 }) {
   const [query, setQuery] = useState('');
@@ -117,8 +136,9 @@ export function ModelCatalogControlPanel({
     {capacityRefresh?.state === 'refreshing' ? <p role="status">Capturing signed device resources and rerunning the layer-allocation planner. This does not download or provision model files.</p> : null}
     {capacityRefresh?.state === 'succeeded' ? <p role="status">Capacity checked across the current planned route: {capacityRefresh.evaluated_model_count} compatible local model {capacityRefresh.evaluated_model_count === 1 ? 'identity' : 'identities'} evaluated.</p> : null}
     {capacityRefresh?.state === 'failed' ? <p role="alert">Capacity recheck failed: {publicReason(capacityRefresh.reason_code ?? 'capacity refresh failed')}.</p> : null}
-    {preparation?.state === 'preparing' ? <p role="status">Preparing {preparation.model_id} across {preparation.topology_size ?? 'the planned'} stages. Only assignment-owned local files are transferred; no download or activation is authorized.</p> : null}
-    {preparation?.state === 'failed' ? <p role="alert">Model preparation failed: {publicReason(preparation.reason_code ?? 'model preparation failed')}. The active model was not changed.</p> : null}
+    {preparation?.state === 'preparing' ? <p role="status">{preparation.operation === 'warm_reacquire' ? 'Rechecking the exact prepared model against verified device caches' : `Preparing ${preparation.model_id} across ${preparation.topology_size ?? 'the planned'} stages`}. Only assignment-owned local files are considered; no download or activation is authorized.</p> : null}
+    {preparation?.state === 'succeeded' && preparation.operation === 'warm_reacquire' ? <p role="status">Verified {preparation.cache_receipt_count} current cache {preparation.cache_receipt_count === 1 ? 'receipt' : 'receipts'} covering {bytes(preparation.cached_verified_bytes)} with {preparation.transferred_verified_bytes === 0 ? 'zero bytes' : bytes(preparation.transferred_verified_bytes)} transferred and {preparation.origin_bytes === 0 ? 'zero bytes' : bytes(preparation.origin_bytes)} from origin.</p> : null}
+    {preparation?.state === 'failed' ? <p role="alert">Model preparation failed: {humanReason(preparation.reason_code ?? 'model preparation failed')}. The active model was not changed.</p> : null}
     <p>Discovery scope: {discovery.scope === 'coordinator_and_members' ? `coordinator plus ${discovery.accepted_member_count} current signed ${discovery.accepted_member_count === 1 ? 'member' : 'members'}` : discovery.scope === 'coordinator_only' ? 'coordinator cache only' : 'not recorded by this catalogue generation'}.</p>
     {discovery.rejected_member_count === 0 ? null : <p>Member discovery rejected {discovery.rejected_member_count} {discovery.rejected_member_count === 1 ? 'inventory' : 'inventories'}.</p>}
     {discovery.blockers.length === 0 ? null : <p>Reconciliation blockers: {discovery.blockers.map(publicReason).join(', ')}.</p>}
@@ -140,7 +160,7 @@ export function ModelCatalogControlPanel({
     <div className={styles.tableWrap}><table>
       <caption>{filtered.length} of {rows.length} discovered model identities</caption>
       <thead><tr><th>Model</th><th>Known representation</th><th>Availability</th><th>Swarm fit</th><th>Discovery</th><th>Action</th></tr></thead>
-      <tbody>{filtered.map((row) => <Row key={row.identity} row={row} busy={busy} actionsAvailable={actionsAvailable} onActivate={onActivate} onUnload={onUnload} onPrepare={onPrepare} />)}</tbody>
+      <tbody>{filtered.map((row) => <Row key={row.identity} row={row} busy={busy} actionsAvailable={actionsAvailable} onActivate={onActivate} onUnload={onUnload} onPrepare={onPrepare} onReacquire={onReacquire} />)}</tbody>
     </table></div>
     {filtered.length === 0 ? <p>No discovered model matches these filters.</p> : null}
     {activation.invalid_candidate_count === 0 ? null : <p role="alert">{activation.invalid_candidate_count} unsafe or invalid prepared route {activation.invalid_candidate_count === 1 ? 'was' : 'were'} rejected.</p>}

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import stat
 from typing import Any, Mapping
 import uuid
 
@@ -147,21 +148,53 @@ def build_stage_pack_source(
     chunk_size_bytes: int,
     issued_at_unix_ms: int,
     expires_at_unix_ms: int | None = None,
+    materialize_objects: bool = True,
+    resume_existing: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Create verified chunk objects plus one exact closed acquisition manifest."""
 
     if (
         type(chunk_size_bytes) is not int
         or not 65_536 <= chunk_size_bytes <= 64 * 1024 * 1024
+        or type(materialize_objects) is not bool
+        or type(resume_existing) is not bool
     ):
         raise StagePackBuildError("stage_pack_chunk_size_invalid")
     bundle = Path(transfer_bundle).resolve(strict=True)
     root = Path(output_root)
-    if not root.is_absolute() or root.exists():
+    if root.exists():
+        try:
+            metadata = root.lstat()
+        except OSError as exc:
+            raise StagePackBuildError("stage_pack_source_root_invalid") from exc
+        if (
+            not resume_existing
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise StagePackBuildError("stage_pack_source_root_invalid")
+    elif not root.is_absolute():
         raise StagePackBuildError("stage_pack_source_root_invalid")
-    root.mkdir(parents=True, mode=0o700)
+    else:
+        root.mkdir(parents=True, mode=0o700)
     objects = root / "objects"
-    objects.mkdir(mode=0o700)
+    if objects.exists():
+        try:
+            metadata = objects.lstat()
+        except OSError as exc:
+            raise StagePackBuildError("stage_pack_source_root_invalid") from exc
+        if (
+            not resume_existing
+            or not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise StagePackBuildError("stage_pack_source_root_invalid")
+    else:
+        objects.mkdir(mode=0o700)
     assignment_id = pack.get("assignment_id")
     node_id = pack.get("node_id")
     if (
@@ -223,7 +256,8 @@ def build_stage_pack_source(
                     if len(chunk_payload) == chunk_size_bytes:
                         payload = bytes(chunk_payload)
                         chunk_digest = "sha256:" + hashlib.sha256(payload).hexdigest()
-                        _write_object(objects, chunk_digest, payload)
+                        if materialize_objects:
+                            _write_object(objects, chunk_digest, payload)
                         chunk_digests.append(chunk_digest)
                         chunk_sizes.append(len(payload))
                         chunk_payload.clear()
@@ -231,7 +265,8 @@ def build_stage_pack_source(
     if chunk_payload:
         payload = bytes(chunk_payload)
         chunk_digest = "sha256:" + hashlib.sha256(payload).hexdigest()
-        _write_object(objects, chunk_digest, payload)
+        if materialize_objects:
+            _write_object(objects, chunk_digest, payload)
         chunk_digests.append(chunk_digest)
         chunk_sizes.append(len(payload))
     proofs = merkle_proofs(chunk_digests)

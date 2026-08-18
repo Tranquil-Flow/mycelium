@@ -40,14 +40,20 @@ class NetworkProbeTests(unittest.TestCase):
 
         def accept():
             for _ in range(3):
-                conn, _ = server.accept()
+                try:
+                    conn, _ = server.accept()
+                except OSError:
+                    break
                 conn.close()
 
         t = threading.Thread(target=accept, daemon=True)
         t.start()
 
         result = np.tcp_ping("127.0.0.1", port, timeout=1.0, attempts=3, settle=0.0)
+        t.join(timeout=1.0)
         server.close()
+        t.join(timeout=1.0)
+        self.assertFalse(t.is_alive())
         self.assertIsNotNone(result["avg_ms"])
         self.assertEqual(result["count"], 3)
         self.assertGreaterEqual(result["avg_ms"], 0.0)

@@ -7,6 +7,7 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).parents[2] / "mycelium_reference_oracle"
 ALLOWED_IMPORTS = {
     "__future__",
+    "argparse",
     "collections.abc",
     "dataclasses",
     "gpt2",
@@ -15,11 +16,16 @@ ALLOWED_IMPORTS = {
     "json",
     "math",
     "mlx.core",
+    "numpy",
+    "os",
     "pathlib",
     "re",
     "report",
+    "tempfile",
     "types",
     "typing",
+    "torch",
+    "transformers",
 }
 
 
@@ -35,7 +41,13 @@ def imported_modules(tree: ast.AST) -> set[str]:
 
 def test_oracle_source_uses_only_explicitly_allowed_independent_imports() -> None:
     source_files = sorted(PACKAGE_ROOT.glob("*.py"))
-    assert {path.name for path in source_files} == {"gpt2.py", "init.py", "report.py"}
+    assert {path.name for path in source_files} == {
+        "gpt2.py",
+        "init.py",
+        "qwen_parity.py",
+        "qwen_transformers.py",
+        "report.py",
+    }
 
     for path in source_files:
         source = path.read_text(encoding="utf-8")

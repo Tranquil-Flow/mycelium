@@ -417,6 +417,16 @@ CONTRACT_SPECS = (
         ),
     ),
     ContractSpec(
+        "model-preparation-authorization-v2.json",
+        "mycelium.model_preparation_authorization.v2",
+        (
+            "mycelium_live/preparation.py",
+            "mycelium_live/local_preparer.py",
+            "scripts/build_qwen_live_route.py",
+            "ui/web/src/features/models/modelPreparation.ts",
+        ),
+    ),
+    ContractSpec(
         "deployment-residency-physical-v1.json",
         "mycelium.deployment_residency_physical_gate.v1",
         (

@@ -106,12 +106,20 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--deployment-dir", type=Path)
     serve.add_argument("--model-operation-file", type=Path)
     serve.add_argument("--model-cache-root", type=Path)
+    serve.add_argument("--model-capacity-live-observations-file", type=Path)
     serve.add_argument("--registry-state", type=Path)
     serve.add_argument("--historical-evidence-file", type=Path, action="append")
     serve.add_argument("--seed-state-root", type=Path)
     serve.add_argument("--candidate-plan-root", type=Path)
+    serve.add_argument("--artifact-acquisition-root", type=Path)
     serve.add_argument("--model-preparation-template-plan", type=Path)
+    serve.add_argument("--model-preparation-execution-topology-plan", type=Path)
     serve.add_argument("--model-preparation-root", type=Path)
+    serve.add_argument("--model-preparation-temporary-root", type=Path)
+    serve.add_argument(
+        "--model-preparation-artifact-bytes-per-second",
+        type=int,
+    )
     serve.add_argument("--member-artifact-transport-plan", type=Path)
     serve.add_argument("--member-model-inventory-file", type=Path, action="append")
     serve.add_argument("--member-model-inventory-authorities-file", type=Path)
@@ -137,12 +145,25 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         ("--deployment-dir", args.deployment_dir),
         ("--model-operation-file", args.model_operation_file),
         ("--model-cache-root", args.model_cache_root),
+        (
+            "--model-capacity-live-observations-file",
+            args.model_capacity_live_observations_file,
+        ),
         ("--static-root", args.static_root),
         ("--registry-state", args.registry_state),
         ("--seed-state-root", args.seed_state_root),
         ("--candidate-plan-root", args.candidate_plan_root),
+        ("--artifact-acquisition-root", args.artifact_acquisition_root),
         ("--model-preparation-template-plan", args.model_preparation_template_plan),
+        (
+            "--model-preparation-execution-topology-plan",
+            args.model_preparation_execution_topology_plan,
+        ),
         ("--model-preparation-root", args.model_preparation_root),
+        (
+            "--model-preparation-temporary-root",
+            args.model_preparation_temporary_root,
+        ),
         ("--member-artifact-transport-plan", args.member_artifact_transport_plan),
         (
             "--member-model-inventory-authorities-file",
@@ -156,6 +177,13 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
     for flag, value in optional_paths:
         if value is not None:
             result.extend((flag, str(value)))
+    if args.model_preparation_artifact_bytes_per_second is not None:
+        result.extend(
+            (
+                "--model-preparation-artifact-bytes-per-second",
+                str(args.model_preparation_artifact_bytes_per_second),
+            )
+        )
     if args.seed_url is not None:
         result.extend(("--seed-url", args.seed_url))
     return result
@@ -177,11 +205,16 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.deployment_dir,
             args.model_operation_file,
             args.model_cache_root,
+            args.model_capacity_live_observations_file,
             args.registry_state,
             args.historical_evidence_file,
             args.candidate_plan_root,
+            args.artifact_acquisition_root,
             args.model_preparation_template_plan,
+            args.model_preparation_execution_topology_plan,
             args.model_preparation_root,
+            args.model_preparation_temporary_root,
+            args.model_preparation_artifact_bytes_per_second,
             args.member_artifact_transport_plan,
             args.member_model_inventory_file,
             args.member_model_inventory_authorities_file,

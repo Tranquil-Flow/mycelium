@@ -74,6 +74,7 @@ export function ProductEvidenceProvider({
     const unsubscribe = source.subscribe((state) => {
       if (!active) return;
       setLatest(state);
+      setErrorCode(null);
       setHistory((current) => {
         const previous = current.at(-1);
         const next = previous?.cursor === state.cursor
@@ -86,6 +87,7 @@ export function ProductEvidenceProvider({
     void source.loadInitial().then((state) => {
       if (!active) return;
       setLatest(source.getState() ?? state);
+      setErrorCode(null);
       setHistory((current) => {
         const accepted = source.getState() ?? state;
         const previous = current.at(-1);
@@ -97,7 +99,13 @@ export function ProductEvidenceProvider({
       setLoading(false);
     }).catch(() => {
       if (!active) return;
-      setErrorCode('product_evidence_unavailable');
+      const recovered = source.getState();
+      if (recovered !== null) {
+        setLatest(recovered);
+        setErrorCode(null);
+      } else {
+        setErrorCode('product_evidence_unavailable');
+      }
       setLoading(false);
     });
     return () => {

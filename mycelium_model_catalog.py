@@ -17,6 +17,7 @@ from mycelium_layer_planner.contracts import (
     PlanningPolicy,
     WorkloadScenario,
 )
+from weight_quantization import rowwise_int8_streaming_transient_bytes
 
 
 MODEL_CATALOG_PROTOCOL = "mycelium.model_catalog.v1"
@@ -260,7 +261,17 @@ def _int8_runtime_accounting(
     required_weight_files: Sequence[str],
     weight_map: dict[str, str],
     config: dict[str, Any],
-) -> tuple[tuple[int, ...], int, int, tuple[int, ...], int, int]:
+) -> tuple[
+    tuple[int, ...],
+    int,
+    int,
+    tuple[int, ...],
+    int,
+    int,
+    tuple[int, ...],
+    int,
+    int,
+]:
     """Return exact resident and transient-load bytes for rowwise int8 serving."""
 
     try:
@@ -268,7 +279,7 @@ def _int8_runtime_accounting(
         adapter.validate_architectures(config)
         num_layers = adapter.layer_count(config)
     except ValueError:
-        return (), 0, 0, (), 0, 0
+        return (), 0, 0, (), 0, 0, (), 0, 0
     headers = {
         filename: _safetensors_header(snapshot / filename)
         for filename in required_weight_files
@@ -278,13 +289,16 @@ def _int8_runtime_accounting(
         filename, header = next(iter(headers.items()))
         weight_map = {name: filename for name in header}
     if not weight_map or len(headers) != len(required_weight_files):
-        return (), 0, 0, (), 0, 0
+        return (), 0, 0, (), 0, 0, (), 0, 0
     resident_layers = [0] * num_layers
     load_layers = [0] * num_layers
+    streaming_transient_layers = [0] * num_layers
     resident_components = {name: 0 for name in adapter.components if name != "decoder"}
     load_components = dict(resident_components)
+    streaming_transient_components = dict(resident_components)
     resident_other = 0
     load_other = 0
+    streaming_transient_other = 0
     for tensor_name, filename in weight_map.items():
         record = headers[filename][tensor_name]
         shape = record.get("shape")
@@ -293,7 +307,7 @@ def _int8_runtime_accounting(
             or not shape
             or not all(type(item) is int and item > 0 for item in shape)
         ):
-            return (), 0, 0, (), 0, 0
+            return (), 0, 0, (), 0, 0, (), 0, 0
         elements = 1
         for extent in shape:
             elements *= extent
@@ -304,6 +318,10 @@ def _int8_runtime_accounting(
             else unquantized_bytes
         )
         load_bytes = unquantized_bytes + resident_bytes
+        streaming_transient_bytes = rowwise_int8_streaming_transient_bytes(
+            tuple(shape),
+            quantized_matrix=(len(shape) == 2 and tensor_name.endswith(".weight")),
+        )
         matched = False
         for layer in range(num_layers):
             prefixes = tuple(
@@ -316,6 +334,10 @@ def _int8_runtime_accounting(
             if tensor_name.startswith(prefixes):
                 resident_layers[layer] += resident_bytes
                 load_layers[layer] += load_bytes
+                streaming_transient_layers[layer] = max(
+                    streaming_transient_layers[layer],
+                    streaming_transient_bytes,
+                )
                 matched = True
                 break
         if matched:
@@ -329,15 +351,23 @@ def _int8_runtime_accounting(
             ):
                 resident_components[component] += resident_bytes
                 load_components[component] += load_bytes
+                streaming_transient_components[component] = max(
+                    streaming_transient_components[component],
+                    streaming_transient_bytes,
+                )
                 matched = True
                 break
         if not matched:
             resident_other += resident_bytes
             load_other += load_bytes
+            streaming_transient_other = max(
+                streaming_transient_other,
+                streaming_transient_bytes,
+            )
     if any(size <= 0 for size in resident_layers) or any(
         size <= 0 for size in load_layers
     ):
-        return (), 0, 0, (), 0, 0
+        return (), 0, 0, (), 0, 0, (), 0, 0
     resident_entry = resident_components.get("input_embedding", 0)
     load_entry = load_components.get("input_embedding", 0)
     resident_final = (
@@ -352,9 +382,26 @@ def _int8_runtime_accounting(
         sum(size for name, size in load_components.items() if name != "input_embedding")
         + load_other
     )
+    streaming_transient_entry = streaming_transient_components.get("input_embedding", 0)
+    streaming_transient_final = max(
+        (
+            size
+            for name, size in streaming_transient_components.items()
+            if name != "input_embedding"
+        ),
+        default=0,
+    )
+    streaming_transient_final = max(
+        streaming_transient_final,
+        streaming_transient_other,
+    )
     if config.get("tie_word_embeddings") is True:
         resident_final += resident_entry
         load_final += load_entry
+        streaming_transient_final = max(
+            streaming_transient_final,
+            streaming_transient_entry,
+        )
     return (
         tuple(resident_layers),
         resident_entry,
@@ -362,6 +409,9 @@ def _int8_runtime_accounting(
         tuple(load_layers),
         load_entry,
         load_final,
+        tuple(streaming_transient_layers),
+        streaming_transient_entry,
+        streaming_transient_final,
     )
 
 
@@ -395,6 +445,9 @@ class LocalModelEntry:
     int8_load_layer_bytes: tuple[int, ...]
     int8_load_entry_static_bytes: int
     int8_load_final_static_bytes: int
+    int8_streaming_transient_layer_bytes: tuple[int, ...]
+    int8_streaming_transient_entry_static_bytes: int
+    int8_streaming_transient_final_static_bytes: int
     required_files: tuple[str, ...]
     present_files: tuple[str, ...]
     file_records: tuple[dict[str, object], ...]
@@ -926,6 +979,9 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         int8_load_layer_bytes,
         int8_load_entry_static_bytes,
         int8_load_final_static_bytes,
+        int8_streaming_transient_layer_bytes,
+        int8_streaming_transient_entry_static_bytes,
+        int8_streaming_transient_final_static_bytes,
     ) = _int8_runtime_accounting(
         snapshot=snapshot,
         required_weight_files=required_weight_files,
@@ -1001,6 +1057,13 @@ def _snapshot_entry(model_root: Path, revision: str) -> LocalModelEntry:
         int8_load_layer_bytes=int8_load_layer_bytes,
         int8_load_entry_static_bytes=int8_load_entry_static_bytes,
         int8_load_final_static_bytes=int8_load_final_static_bytes,
+        int8_streaming_transient_layer_bytes=(int8_streaming_transient_layer_bytes),
+        int8_streaming_transient_entry_static_bytes=(
+            int8_streaming_transient_entry_static_bytes
+        ),
+        int8_streaming_transient_final_static_bytes=(
+            int8_streaming_transient_final_static_bytes
+        ),
         required_files=tuple(sorted(set(required_files))),
         present_files=tuple(sorted(present_files)),
         file_records=tuple(file_records),
@@ -1138,9 +1201,13 @@ def _exact_allocation(
     authorized_stages: tuple[Mapping[str, object], ...] | None = None
     authorized_representation_digest: str | None = None
     if representation_authorization is not None:
+        authorization_protocol = representation_authorization.get("protocol")
         if (
-            representation_authorization.get("protocol")
-            != "mycelium.model_preparation_authorization.v1"
+            authorization_protocol
+            not in {
+                "mycelium.model_preparation_authorization.v1",
+                "mycelium.model_preparation_authorization.v2",
+            }
             or representation_authorization.get("model_id") != entry.model_id
             or representation_authorization.get("revision") != entry.revision
             or representation_authorization.get("source_quantization")
@@ -1158,10 +1225,38 @@ def _exact_allocation(
             is None
             or (
                 entry.quantization != serving_quantization
-                and representation_authorization.get("conversion_authorized") is not True
+                and representation_authorization.get("conversion_authorized")
+                is not True
             )
         ):
             raise ValueError("approved_serving_representation_invalid")
+        if authorization_protocol == "mycelium.model_preparation_authorization.v2":
+            serving_representations = entry.projection().get("serving_representations")
+            matching_representations = (
+                [
+                    value
+                    for value in serving_representations
+                    if isinstance(value, Mapping)
+                    and value.get("quantization") == serving_quantization
+                    and value.get("runtime_dtype")
+                    == representation_authorization.get("serving_dtype")
+                    and value.get("representation_digest")
+                    == representation_authorization.get("representation_digest")
+                    and value.get("quantizer")
+                    == representation_authorization.get("quantizer")
+                ]
+                if isinstance(serving_representations, list)
+                else []
+            )
+            if (
+                representation_authorization.get("source_artifact_digest")
+                != entry.artifact_digest
+                or not isinstance(representation_authorization.get("quantizer"), str)
+                or not representation_authorization.get("quantizer")
+                or representation_authorization.get("download_authorized") is not False
+                or len(matching_representations) != 1
+            ):
+                raise ValueError("approved_serving_representation_invalid")
         raw_stages = representation_authorization.get("stages")
         if not isinstance(raw_stages, list) or len(raw_stages) != len(nodes):
             raise ValueError("approved_serving_representation_invalid")
@@ -1186,9 +1281,7 @@ def _exact_allocation(
                 or not isinstance(files, list)
                 or not files
                 or not all(
-                    isinstance(item, str)
-                    and item
-                    and item == Path(item).name
+                    isinstance(item, str) and item and item == Path(item).name
                     for item in files
                 )
                 or len(files) != len(set(files))
@@ -1311,18 +1404,30 @@ def _exact_allocation(
             if (
                 len(entry.int8_layer_weight_bytes) != entry.num_layers
                 or len(entry.int8_load_layer_bytes) != entry.num_layers
+                or len(entry.int8_streaming_transient_layer_bytes) != entry.num_layers
             ):
                 reject(stage_index, start, end, "serving_representation_unavailable")
                 return None
             resident_layer_bytes = sum(entry.int8_layer_weight_bytes[start:end])
-            load_peak_weight_bytes = sum(entry.int8_load_layer_bytes[start:end])
             resident_static_bytes = 0
+            streaming_transient_candidates = list(
+                entry.int8_streaming_transient_layer_bytes[start:end]
+            )
             if stage_index == 0:
                 resident_static_bytes += entry.int8_entry_static_bytes
-                load_peak_weight_bytes += entry.int8_load_entry_static_bytes
+                streaming_transient_candidates.append(
+                    entry.int8_streaming_transient_entry_static_bytes
+                )
             if stage_index == len(nodes) - 1:
                 resident_static_bytes += entry.int8_final_static_bytes
-                load_peak_weight_bytes += entry.int8_load_final_static_bytes
+                streaming_transient_candidates.append(
+                    entry.int8_streaming_transient_final_static_bytes
+                )
+            load_peak_weight_bytes = (
+                resident_layer_bytes
+                + resident_static_bytes
+                + max(streaming_transient_candidates, default=0)
+            )
             representation = entry.projection()["serving_representations"][0]
             representation_digest = str(representation["representation_digest"])
         authorized_stage = (
@@ -1334,7 +1439,9 @@ def _exact_allocation(
                 or authorized_stage["end_layer_exclusive"] != end
                 or authorized_stage["backend"] != resource.backend
             ):
-                reject(stage_index, start, end, "approved_representation_stage_mismatch")
+                reject(
+                    stage_index, start, end, "approved_representation_stage_mismatch"
+                )
                 return None
             representation_digest = authorized_representation_digest
         kv_bytes = (
@@ -1779,6 +1886,10 @@ def evaluate_model_feasibility(
                 "prior_feasibility_digest": representation_authorization.get(
                     "feasibility_digest"
                 ),
+                "source_artifact_digest": representation_authorization.get(
+                    "source_artifact_digest"
+                ),
+                "quantizer": representation_authorization.get("quantizer"),
             }
             if representation_authorization is not None
             else {"kind": "locally_derived_candidate"}

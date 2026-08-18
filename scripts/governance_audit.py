@@ -38,6 +38,48 @@ _ACTION_FIELDS = {"client", "methods", "endpoints", "protocols", "consent"}
 _MILESTONE_ROW = re.compile(
     r"^\| (M(?:17|18|19|20|21|22|23)) \| `([^`]+)` \|", re.MULTILINE
 )
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_CONST_PATH = re.compile(
+    r"\b(?:export\s+)?const\s+([A-Z][A-Z0-9_]*)\s*=\s*(['\"])(/[^'\"]+)\2"
+)
+_DIRECT_MUTATION = re.compile(
+    r"(?:\bfetch|\.request|\brequest)\s*\(\s*"
+    r"(?P<target>[A-Z][A-Z0-9_]*|(?P<quote>['\"])(?P<endpoint>/[^'\"]+)(?P=quote))\s*,"
+    r"(?P<arguments>(?:(?!\)\s*;).){0,700}?)\bmethod\s*:\s*(['\"])"
+    r"(?P<method>POST|PUT|PATCH|DELETE)['\"]",
+    re.DOTALL,
+)
+_DIRECT_POST = re.compile(r"\.post\s*\(\s*(['\"])(/[^'\"]+)\1")
+_PATH_MEMBER_MUTATION = re.compile(
+    r"this\.request\s*\(\s*this\.paths\.([a-zA-Z0-9_]+)\s*,"
+    r".{0,500}?\bmethod\s*:\s*(['\"])(POST|PUT|PATCH|DELETE)\2",
+    re.DOTALL,
+)
+_PATH_MEMBER_DEFAULT = re.compile(
+    r"([a-zA-Z0-9_]+)\s*:\s*sameOriginPath\([^)]*?\?\?\s*"
+    r"(['\"])(/[^'\"]+)\2\s*\)"
+)
+_BOOTSTRAP_MUTATION = re.compile(
+    r"#mutate\s*\(\s*bootstrap\.api\.([a-zA-Z0-9_]+)"
+)
+_PRODUCT_API_PATH = re.compile(
+    r"^\s*([a-zA-Z0-9_]+)\s*:\s*(['\"])(/[^'\"]+)\2\s*,?\s*$",
+    re.MULTILINE,
+)
+_EXACT_BOOTSTRAP_MUTATION = re.compile(
+    r"exactSameOriginPath\(\s*bootstrap\.api\.([a-zA-Z0-9_]+)\s*,"
+    r"\s*PRODUCT_API_PATHS\.[a-zA-Z0-9_]+\s*,?\s*\).*?"
+    r"\bmethod\s*:\s*(['\"])(GET|POST|PUT|PATCH|DELETE)\2",
+    re.DOTALL,
+)
+_DYNAMIC_CANCEL = re.compile(
+    r"accepted\.cancel_path\s*,\s*\{.{0,300}?"
+    r"\bmethod\s*:\s*(['\"])DELETE\1",
+    re.DOTALL,
+)
+_CANCEL_TEMPLATE = re.compile(
+    r"const\s+expectedCancelPath\s*=\s*`(/[^`]+)`"
+)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -76,6 +118,60 @@ def _load(root: Path, relative: object) -> Mapping[str, Any]:
     if not isinstance(document, dict):
         raise ValueError("document_not_object")
     return document
+
+
+def _product_api_paths(root: Path) -> dict[str, str]:
+    source = _read(root, "ui/web/src/app/contracts.ts").decode("utf-8")
+    return {key: endpoint for key, _, endpoint in _PRODUCT_API_PATH.findall(source)}
+
+
+def _implemented_action_endpoints(root: Path, client: str) -> set[str]:
+    """Extract the mutating same-origin endpoints exercised by one governed client."""
+
+    source = _read(root, client).decode("utf-8")
+    constants = {name: endpoint for name, _, endpoint in _CONST_PATH.findall(source)}
+    endpoints = set(_DIRECT_POST.findall(source))
+    implemented = {endpoint for _, endpoint in endpoints}
+
+    for match in _DIRECT_MUTATION.finditer(source):
+        target = match.group("target")
+        if target.startswith(("'", '"')):
+            implemented.add(match.group("endpoint"))
+        elif target in constants:
+            implemented.add(constants[target])
+
+    member_defaults = {
+        key: endpoint for key, _, endpoint in _PATH_MEMBER_DEFAULT.findall(source)
+    }
+    for key, _, _ in _PATH_MEMBER_MUTATION.findall(source):
+        if key not in member_defaults:
+            raise ValueError("implemented_endpoint_unresolved")
+        implemented.add(member_defaults[key])
+
+    api_keys = set(_BOOTSTRAP_MUTATION.findall(source))
+    api_keys.update(
+        key
+        for key, _, method in _EXACT_BOOTSTRAP_MUTATION.findall(source)
+        if method in _MUTATING_METHODS
+    )
+    if api_keys:
+        product_paths = _product_api_paths(root)
+        for key in api_keys:
+            if key not in product_paths:
+                raise ValueError("implemented_endpoint_unresolved")
+            implemented.add(product_paths[key])
+
+    if _DYNAMIC_CANCEL.search(source) is not None:
+        contracts = _read(root, "ui/web/src/app/contracts.ts").decode("utf-8")
+        match = _CANCEL_TEMPLATE.search(contracts)
+        if match is None:
+            raise ValueError("implemented_endpoint_unresolved")
+        template = re.sub(r"\$\{[^}]+\}", "{request_id}", match.group(1))
+        implemented.add(template)
+
+    if not implemented:
+        raise ValueError("implemented_endpoint_set_empty")
+    return implemented
 
 
 def audit(repo_root: str | Path) -> dict[str, Any]:
@@ -223,6 +319,14 @@ def audit(repo_root: str | Path) -> dict[str, Any]:
             or not consent
         ):
             findings.append("product_action_authority_invalid")
+            continue
+        try:
+            implemented_endpoints = _implemented_action_endpoints(root, client)
+        except (OSError, UnicodeError, ValueError):
+            findings.append(f"product_action_implementation_invalid:{client}")
+            continue
+        if set(endpoints) != implemented_endpoints:
+            findings.append(f"product_action_endpoint_set_mismatch:{client}")
             continue
         action_clients.add(client)
         pinned_protocols.update(protocols)

@@ -165,12 +165,19 @@ def complete_directed_observation_matrix(
     node_ids: Sequence[str],
     endpoint_ids_by_node: Mapping[str, str],
     now_unix_ms: int,
+    minimum_node_count: int = 3,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """Require one independently measured activation edge for every ordered pair."""
 
     nodes = tuple(node_ids)
-    if len(nodes) < 3 or len(nodes) != len(set(nodes)):
-        raise ValueError("M14 requires at least three distinct physical nodes")
+    if type(minimum_node_count) is not int or minimum_node_count < 2:
+        raise ValueError("topology minimum node count must be at least two")
+    if len(nodes) < minimum_node_count or len(nodes) != len(set(nodes)):
+        if minimum_node_count == 3:
+            raise ValueError("M14 requires at least three distinct physical nodes")
+        raise ValueError(
+            f"topology requires at least {minimum_node_count} distinct physical nodes"
+        )
     if set(endpoint_ids_by_node) != set(nodes):
         raise ValueError("M14 endpoint inventory does not cover nodes")
     matrix: dict[tuple[str, str], dict[str, Any]] = {}

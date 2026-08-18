@@ -12,10 +12,12 @@ from dataclasses import asdict
 import gc
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -102,7 +104,30 @@ _RUNTIME_PACKAGE_CLOSURE = (
     "mycelium_gossip",
     "mycelium_layer_planner",
 )
-_PREPARATION_AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v1"
+_PREPARATION_AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v2"
+_LEGACY_PREPARATION_AUTHORIZATION_PROTOCOL = (
+    "mycelium.model_preparation_authorization.v1"
+)
+
+
+def _private_temporary_root(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise RuntimeError("model_preparation_temporary_root_unsafe")
+    try:
+        metadata = candidate.lstat()
+    except OSError as exc:
+        raise RuntimeError("model_preparation_temporary_root_unsafe") from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise RuntimeError("model_preparation_temporary_root_unsafe")
+    return candidate.resolve(strict=True)
 
 
 def _m18_runtime_kv_bytes(
@@ -195,18 +220,47 @@ def _preparation_authorization(
         "stages",
         "download_authorized",
     }
+    protocol = document.get("protocol") if isinstance(document, dict) else None
+    if protocol == _PREPARATION_AUTHORIZATION_PROTOCOL:
+        expected.update(
+            {"authorized_at_unix_ms", "source_artifact_digest", "quantizer"}
+        )
     stages = document.get("stages") if isinstance(document, dict) else None
     if (
         not isinstance(document, dict)
         or set(document) != expected
-        or document.get("protocol") != _PREPARATION_AUTHORIZATION_PROTOCOL
+        or protocol
+        not in {
+            _PREPARATION_AUTHORIZATION_PROTOCOL,
+            _LEGACY_PREPARATION_AUTHORIZATION_PROTOCOL,
+        }
         or document.get("model_id") != model_id
         or document.get("revision") != resolved_commit
         or document.get("download_authorized") is not False
         or not isinstance(document.get("catalog_generation"), int)
         or not isinstance(document.get("evidence_generation"), int)
         or not isinstance(document.get("evidence_valid_until_unix_ms"), int)
-        or document["evidence_valid_until_unix_ms"] < int(time.time() * 1_000)
+        or (
+            protocol == _PREPARATION_AUTHORIZATION_PROTOCOL
+            and (
+                not isinstance(document.get("authorized_at_unix_ms"), int)
+                or document["authorized_at_unix_ms"] <= 0
+                or document["authorized_at_unix_ms"] > int(time.time() * 1_000)
+                or document["authorized_at_unix_ms"]
+                > document["evidence_valid_until_unix_ms"]
+                or re.fullmatch(
+                    r"sha256:[0-9a-f]{64}",
+                    str(document.get("source_artifact_digest", "")),
+                )
+                is None
+                or not isinstance(document.get("quantizer"), str)
+                or not document["quantizer"]
+            )
+        )
+        or (
+            protocol == _LEGACY_PREPARATION_AUTHORIZATION_PROTOCOL
+            and document["evidence_valid_until_unix_ms"] < int(time.time() * 1_000)
+        )
         or re.fullmatch(
             r"sha256:[0-9a-f]{64}", str(document.get("operation_digest", ""))
         )
@@ -240,17 +294,20 @@ def _preparation_authorization(
         or len(stages) != len(topology)
     ):
         raise RuntimeError("model_preparation_authorization_invalid")
+    binding = {
+        "feasibility_digest": document["feasibility_digest"],
+        "owner_decision_digest": document["owner_decision_digest"],
+        "representation_digest": document["representation_digest"],
+    }
+    if protocol == _PREPARATION_AUTHORIZATION_PROTOCOL:
+        binding.update(
+            {
+                "source_artifact_digest": document["source_artifact_digest"],
+                "quantizer": document["quantizer"],
+            }
+        )
     expected_binding_digest = (
-        "sha256:"
-        + hashlib.sha256(
-            canonical_json(
-                {
-                    "feasibility_digest": document["feasibility_digest"],
-                    "owner_decision_digest": document["owner_decision_digest"],
-                    "representation_digest": document["representation_digest"],
-                }
-            ).encode("utf-8")
-        ).hexdigest()
+        "sha256:" + hashlib.sha256(canonical_json(binding).encode("utf-8")).hexdigest()
     )
     if document["preparation_binding_digest"] != expected_binding_digest:
         raise RuntimeError("model_preparation_authorization_invalid")
@@ -466,6 +523,77 @@ def _write_document(path: Path, document: Any) -> None:
     path.write_bytes(_bytes(document))
 
 
+def _write_durable_document(path: Path, document: Any) -> None:
+    """Atomically checkpoint an expensive local result before remote work."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(_bytes(document))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _local_challenge_checkpoint(
+    *,
+    model_id: str,
+    resolved_commit: str,
+    prepared: Any,
+    assignments: list[dict[str, Any]],
+    proofs: list[dict[str, Any]],
+    challenge_prompt: tuple[int, ...],
+    challenge_output: tuple[int, ...],
+    challenge_output_text: str,
+    runtime_backends: Mapping[str, str],
+    preparation_authorization: Mapping[str, Any] | None,
+    stage_sharding: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Bind the completed local decode to its exact model and assignment inputs."""
+
+    return {
+        "protocol": "mycelium.local_candidate_challenge.v1",
+        "state": "passed",
+        "model_id": model_id,
+        "resolved_commit": resolved_commit,
+        "deployment_id": assignments[0]["deployment_id"],
+        "source_artifact_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization.get("source_artifact_digest")
+        ),
+        "representation_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization.get("representation_digest")
+        ),
+        "preparation_binding_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization.get("preparation_binding_digest")
+        ),
+        "model_manifest_digest": "sha256:"
+        + prepared.manifest["manifest_digest"]["value"],
+        "assignments": [
+            {
+                "node_id": assignment["node_id"],
+                "assignment_digest": _digest(_bytes(assignment)),
+                "load_proof_digest": layer_load_proof_digest(proof),
+            }
+            for assignment, proof in zip(assignments, proofs, strict=True)
+        ],
+        "runtime_backends": dict(runtime_backends),
+        "challenge_prompt_token_ids": list(challenge_prompt),
+        "challenge_output_token_ids": list(challenge_output),
+        "challenge_output_text": challenge_output_text,
+        "stage_sharding": stage_sharding,
+    }
+
+
 def _target_report(
     base_report: dict[str, Any], assignment: dict[str, Any]
 ) -> dict[str, Any]:
@@ -542,12 +670,11 @@ def _transfer_manifest(bundle: Path) -> dict[str, Any]:
         candidate for candidate in bundle.rglob("*") if candidate.is_file()
     ):
         relative = str(path.relative_to(bundle))
-        payload = path.read_bytes()
         records.append(
             {
                 "path": relative,
-                "size_bytes": len(payload),
-                "content_digest": _digest(payload),
+                "size_bytes": path.stat().st_size,
+                "content_digest": _file_digest(path),
             }
         )
     return {
@@ -685,7 +812,9 @@ def _topology_nodes(
     if len(set(endpoint_ids)) != len(endpoint_ids):
         raise RuntimeError("topology_endpoint_id_duplicate")
     generations = [node["membership_generation"] for node in nodes]
-    if any(type(generation) is not int or generation <= 0 for generation in generations):
+    if any(
+        type(generation) is not int or generation <= 0 for generation in generations
+    ):
         raise RuntimeError("topology_membership_generation_invalid")
     backends = [node["runtime_backend"] for node in nodes]
     if any(backend not in {"mlx", "numpy"} for backend in backends):
@@ -789,6 +918,42 @@ def refresh_peer_identities(
         peer["host_id"] = host_id
         peer["boot_id"] = boot_id
     return refreshed
+
+
+def preflight_remote_peers(topology: list[dict[str, Any]]) -> None:
+    """Reject an unavailable required SSH peer before expensive local preparation."""
+
+    for peer in topology:
+        if peer["process_transport"] == "local":
+            continue
+        command = ["ssh"]
+        identity = peer.get("ssh_identity_file")
+        if identity:
+            command.extend(("-i", identity))
+        command.extend(
+            (
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=5",
+                peer["ssh_target"],
+                "true",
+            )
+        )
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10.0,
+            )
+        except (
+            OSError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as exc:
+            raise RuntimeError("peer_preflight_unavailable") from exc
 
 
 def _physical_graph_document(graph: Any) -> dict[str, Any]:
@@ -927,6 +1092,8 @@ def _streaming_challenge(
     assignments: list[dict[str, Any]],
     reports: list[dict[str, Any]],
     runtime_backends: list[str],
+    *,
+    generated_token_count: int = 2,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Challenge a large candidate with at most one stage's weights resident."""
 
@@ -934,52 +1101,59 @@ def _streaming_challenge(
         not assignments
         or len(assignments) != len(reports)
         or len(assignments) != len(runtime_backends)
+        or not isinstance(generated_token_count, int)
+        or isinstance(generated_token_count, bool)
+        or not 2 <= generated_token_count <= 127
     ):
         raise RuntimeError("challenge_runtime_count_mismatch")
     prompt = codec.encode("Reply with exactly the word ready.")
     context = prompt
-    stage_output: Any = None
-    for index, (assignment, report, backend) in enumerate(
-        zip(assignments, reports, runtime_backends, strict=True)
-    ):
-        loaded = load_assignment_stage(
-            assignment,
-            report,
-            load_generation=LOAD_GENERATION,
-        )
-        try:
-            if backend == "mlx":
-                stage_output = (
-                    execute_loaded_stage(
-                        loaded,
-                        token_ids=mx.array((context,), dtype=mx.int32),
+    generated: list[int] = []
+    for _ in range(generated_token_count):
+        stage_output: Any = None
+        for index, (assignment, report, backend) in enumerate(
+            zip(assignments, reports, runtime_backends, strict=True)
+        ):
+            loaded = load_assignment_stage(
+                assignment,
+                report,
+                load_generation=LOAD_GENERATION,
+            )
+            try:
+                if backend == "mlx":
+                    stage_output = (
+                        execute_loaded_stage(
+                            loaded,
+                            token_ids=mx.array((context,), dtype=mx.int32),
+                        )
+                        if index == 0
+                        else execute_loaded_stage(
+                            loaded,
+                            hidden_states=mx.array(stage_output, dtype=mx.float32),
+                        )
                     )
-                    if index == 0
-                    else execute_loaded_stage(
-                        loaded,
-                        hidden_states=mx.array(stage_output, dtype=mx.float32),
+                    mx.eval(stage_output)
+                elif backend == "numpy":
+                    stage_output = (
+                        execute_loaded_numpy_stage(
+                            loaded,
+                            token_ids=np.asarray((context,), dtype=np.int64),
+                        )
+                        if index == 0
+                        else execute_loaded_numpy_stage(
+                            loaded,
+                            hidden_states=np.asarray(stage_output),
+                        )
                     )
-                )
-                mx.eval(stage_output)
-            elif backend == "numpy":
-                stage_output = (
-                    execute_loaded_numpy_stage(
-                        loaded,
-                        token_ids=np.asarray((context,), dtype=np.int64),
-                    )
-                    if index == 0
-                    else execute_loaded_numpy_stage(
-                        loaded,
-                        hidden_states=np.asarray(stage_output),
-                    )
-                )
-            else:
-                raise RuntimeError("challenge_runtime_backend_unsupported")
-        finally:
-            del loaded
-            _release_runtime_memory()
-    token_id = quantized_greedy_token_id(stage_output[0, -1, :].tolist())
-    return prompt, (token_id,)
+                else:
+                    raise RuntimeError("challenge_runtime_backend_unsupported")
+            finally:
+                del loaded
+                _release_runtime_memory()
+        token_id = quantized_greedy_token_id(stage_output[0, -1, :].tolist())
+        generated.append(token_id)
+        context = (*context, token_id)
+    return prompt, tuple(generated)
 
 
 def build(args: argparse.Namespace) -> dict[str, Any]:
@@ -990,10 +1164,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     output_root = args.output_root.resolve()
     if output_root.exists():
         raise RuntimeError("output_root_already_exists")
+    topology = _topology_nodes(template, args.topology)
+    preflight_remote_peers(topology)
     bundle = output_root / "transfer-bundle"
     deployment_root = bundle / "deployment"
     deployment_root.mkdir(parents=True)
-    topology = _topology_nodes(template, args.topology)
     node_ids = tuple(node["node_id"] for node in topology)
     runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
     preparation_authorization, preparation_ranges = _preparation_authorization(
@@ -1103,8 +1278,52 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     stage_sharding = None
-    if getattr(args, "stage_sharded", False):
-        with tempfile.TemporaryDirectory(prefix="mycelium-stage-shards-") as temporary:
+    reusable_stage_root = getattr(args, "reuse_stage_sharded_root", None)
+    if getattr(args, "stage_sharded", False) and reusable_stage_root is not None:
+        raise RuntimeError("stage_sharding_source_conflict")
+    if reusable_stage_root is not None:
+        candidate = Path(reusable_stage_root)
+        try:
+            reusable_root = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise RuntimeError("stage_sharding_reuse_invalid") from exc
+        if candidate.is_symlink() or not reusable_root.is_dir():
+            raise RuntimeError("stage_sharding_reuse_invalid")
+        # A prior immutable representation may have been file-sharded at a
+        # different layer boundary. Feeding those files directly to a new
+        # assignment can make one physical file contain tensors owned by two
+        # peers. Repartition the already-created representation to the exact
+        # current ranges before assignment compilation; this does not read the
+        # source checkpoint or perform another quantization.
+        with tempfile.TemporaryDirectory(
+            prefix="mycelium-reused-stage-shards-",
+            dir=_private_temporary_root(getattr(args, "temporary_root", None)),
+        ) as temporary:
+            sharded_root = Path(temporary) / "model"
+            repartition = shard_qwen2_checkpoint(
+                reusable_root,
+                sharded_root,
+                shard_count=len(node_ids),
+                layer_ranges=prepare_ranges,
+                max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
+            )
+            prepared = prepare(sharded_root)
+        stage_sharding = {
+            "protocol": "mycelium.stage_sharding_reuse.v2",
+            "manifest_digest": "sha256:"
+            + prepared.manifest["manifest_digest"]["value"],
+            "model_id": prepared.manifest["model_id"],
+            "resolved_commit": prepared.manifest["resolved_commit"],
+            "layer_ranges": repartition["layer_ranges"],
+            "source_representation_reused": True,
+            "source_requantized": False,
+            "verified_by_builder": True,
+        }
+    elif getattr(args, "stage_sharded", False):
+        with tempfile.TemporaryDirectory(
+            prefix="mycelium-stage-shards-",
+            dir=_private_temporary_root(getattr(args, "temporary_root", None)),
+        ) as temporary:
             sharded_root = Path(temporary) / "model"
             stage_sharding = shard_qwen2_checkpoint(
                 args.model_root,
@@ -1433,6 +1652,26 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 )
             )
 
+    challenge_output_text = "".join(
+        codec.decode_token(token_id) for token_id in challenge_output
+    )
+    _write_durable_document(
+        output_root / "local-challenge-checkpoint.json",
+        _local_challenge_checkpoint(
+            model_id=model_id,
+            resolved_commit=resolved_commit,
+            prepared=prepared,
+            assignments=assignments,
+            proofs=proofs,
+            challenge_prompt=challenge_prompt,
+            challenge_output=challenge_output,
+            challenge_output_text=challenge_output_text,
+            runtime_backends=runtime_backends,
+            preparation_authorization=preparation_authorization,
+            stage_sharding=stage_sharding,
+        ),
+    )
+
     control = bundle / "control"
     if preparation_authorization is not None:
         _write_document(
@@ -1648,6 +1887,26 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "model_id": model_id,
         "resolved_commit": resolved_commit,
         "quantization": runtime_quantization,
+        "source_artifact_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization.get("source_artifact_digest")
+        ),
+        "source_quantization": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization["source_quantization"]
+        ),
+        "serving_dtype": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization["serving_dtype"]
+        ),
+        "quantizer": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization.get("quantizer")
+        ),
         "representation_digest": (
             None
             if preparation_authorization is None
@@ -1658,15 +1917,18 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             if preparation_authorization is None
             else preparation_authorization["owner_decision_digest"]
         ),
+        "preparation_binding_digest": (
+            None
+            if preparation_authorization is None
+            else preparation_authorization["preparation_binding_digest"]
+        ),
         "layer_ranges": [assignment["range"] for assignment in assignments],
         "runtime_backends": [
             assignment["runtime"]["backend"] for assignment in assignments
         ],
         "challenge_prompt_token_count": len(challenge_prompt),
         "challenge_output_token_ids": list(challenge_output),
-        "challenge_output_text": "".join(
-            codec.decode_token(token_id) for token_id in challenge_output
-        ),
+        "challenge_output_text": challenge_output_text,
         "transfer_file_count": len(transfer_manifest["files"]),
         "transfer_bytes": sum(
             record["size_bytes"] for record in transfer_manifest["files"]
@@ -1756,7 +2018,20 @@ def main() -> int:
         action="store_true",
         help="rewrite Qwen weights into one static and one layer-only file per host",
     )
+    parser.add_argument(
+        "--reuse-stage-sharded-root",
+        type=Path,
+        help=(
+            "reuse a fully verified prior stage-sharded deployment as the local "
+            "source; the builder revalidates every file and emits a new candidate"
+        ),
+    )
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument(
+        "--temporary-root",
+        type=Path,
+        help="owner-private directory for large ephemeral stage-sharding files",
+    )
     parser.add_argument(
         "--route-label",
         default="m7",

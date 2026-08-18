@@ -60,6 +60,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
   const [runtime, setRuntime] = useState<M16RuntimeStatus | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [modelOperation, setModelOperation] = useState<M17ModelOperation | null>(null);
+  const [modelOperationError, setModelOperationError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -132,13 +133,26 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
   }, [runtimeSource]);
 
   useEffect(() => {
-    if (view !== 'plans' && view !== 'readiness' && view !== 'incidents') return;
+    if (view !== 'network' && view !== 'plans' && view !== 'readiness' && view !== 'incidents') return;
     const controller = new AbortController();
     void modelOperationSource.load(controller.signal)
-      .then(setModelOperation)
-      .catch(() => setModelOperation(null));
+      .then((value) => {
+        setModelOperation(value);
+        setModelOperationError(null);
+      })
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setModelOperation(null);
+        setModelOperationError(reason instanceof Error ? reason.message : 'model_operation_unavailable');
+      });
     return () => controller.abort();
   }, [modelOperationSource, view]);
+
+  const modelOperationProjection = modelOperation === null
+    ? modelOperationError === null
+      ? <p role="status">Loading model availability evidence…</p>
+      : <p role="alert">Model availability evidence unavailable: {modelOperationError}</p>
+    : <M17ModelOperationPanel operation={modelOperation} view={view} />;
 
   if (status === null) {
     return (
@@ -177,6 +191,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
 
       {view === 'network' ? (
         <>
+          {modelOperationProjection}
           {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="network" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="network" />}
           {status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="network" />}
@@ -197,7 +212,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'plans' ? (
-        <><PreparedDeploymentsSourcePanel view="plans" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="plans" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>Workload-policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
+        <><PreparedDeploymentsSourcePanel view="plans" hideUnavailable />{modelOperationProjection}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="plans" />}{workloadComparison === null ? (workloadUnavailable ? <section className={styles.panel}><h2>Workload-aware comparison unavailable</h2><p>Workload-policy evidence is not attached to this deployment. Existing physical measurements remain valid.</p></section> : null) : <M15WorkloadPanel comparison={workloadComparison} />}{status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="plans" />}{status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="plans" />}<section className={styles.panel} aria-labelledby="live-plan-title">
           <h2 id="live-plan-title">Qualified deployment measurement</h2>
           <p>This is observed physical execution, not a modeled alternative.</p>
           <dl className={styles.measurements}>
@@ -215,7 +230,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
         <>
           <GovernanceReadinessSource />
           <PreparedDeploymentsSourcePanel view="readiness" hideUnavailable />
-          {modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="readiness" />}
+          {modelOperationProjection}
           {runtime === null ? null : <M16RuntimePanel runtime={runtime} view="readiness" />}
           {status.topology === null ? null : <M14TopologyPanel topology={status.topology} view="readiness" />}
           {status.placement === null ? null : <M13PlacementPanel placement={status.placement} view="readiness" />}
@@ -235,7 +250,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
       ) : null}
 
       {view === 'incidents' ? (
-        <><PreparedDeploymentsSourcePanel view="incidents" hideUnavailable />{modelOperation === null ? null : <M17ModelOperationPanel operation={modelOperation} view="incidents" />}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
+        <><PreparedDeploymentsSourcePanel view="incidents" hideUnavailable />{modelOperationProjection}{runtime === null ? null : <M16RuntimePanel runtime={runtime} view="incidents" />}<section className={styles.panel} aria-labelledby="live-incidents-title">
           <h2 id="live-incidents-title">Physical route incident log</h2>
           {status.counters.fatal === null && status.incidents.length === 0 ? (
             <p>No active physical route incident. All projected peers remain on the qualified topology.</p>

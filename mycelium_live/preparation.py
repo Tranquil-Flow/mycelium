@@ -13,8 +13,10 @@ from typing import Any, Callable, Mapping
 
 
 PREPARATION_PROTOCOL = "mycelium.model_preparation.v1"
-AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v1"
+AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v2"
+LEGACY_AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v1"
 REPRESENTATION_DECISION_PROTOCOL = "mycelium.model_representation_decision.v1"
+REPRESENTATION_DECISION_PROTOCOL_V2 = "mycelium.model_representation_decision.v2"
 _PHASES = {
     "validating_capacity",
     "compiling_assignments",
@@ -26,6 +28,7 @@ _STATES = {"idle", "preparing", "succeeded", "failed"}
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _REVISION = re.compile(r"[0-9a-f]{40}\Z")
 _SAFE_REASON = re.compile(r"[a-z][a-z0-9_]{0,127}\Z")
+_CANDIDATE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}\Z")
 _DECISION_FIELDS = {
     "protocol",
     "model_id",
@@ -35,6 +38,12 @@ _DECISION_FIELDS = {
     "serving_quantization",
     "representation_digest",
     "conversion_authorized",
+}
+_DECISION_V2_FIELDS = {
+    *_DECISION_FIELDS,
+    "source_artifact_digest",
+    "quantizer",
+    "download_authorized",
 }
 
 
@@ -52,10 +61,19 @@ class PreparationResult:
     topology_size: int
     transfer_bytes: int
     verified_bytes: int
+    operation: str = "prepare"
+    cache_receipt_count: int = 0
+    cached_verified_bytes: int = 0
+    transferred_verified_bytes: int = 0
+    origin_bytes: int = 0
 
 
 Preparer = Callable[
     [Mapping[str, Any], Callable[[str, int | None, int | None], None]],
+    PreparationResult,
+]
+Reacquirer = Callable[
+    [Mapping[str, Any], str, Callable[[str, int | None, int | None], None]],
     PreparationResult,
 ]
 
@@ -88,13 +106,20 @@ def _authorization(
     decision: Mapping[str, Any],
     now_unix_ms: int,
 ) -> dict[str, Any]:
-    if set(decision) != _DECISION_FIELDS:
+    protocol = decision.get("protocol")
+    expected_fields = (
+        _DECISION_FIELDS
+        if protocol == REPRESENTATION_DECISION_PROTOCOL
+        else _DECISION_V2_FIELDS
+        if protocol == REPRESENTATION_DECISION_PROTOCOL_V2
+        else None
+    )
+    if expected_fields is None or set(decision) != expected_fields:
         raise ModelPreparationError("model_representation_decision_invalid")
     model_id = decision.get("model_id")
     revision = decision.get("revision")
     if (
-        decision.get("protocol") != REPRESENTATION_DECISION_PROTOCOL
-        or not isinstance(model_id, str)
+        not isinstance(model_id, str)
         or not model_id
         or len(model_id) > 256
         or not isinstance(revision, str)
@@ -108,6 +133,14 @@ def _authorization(
         or not isinstance(decision.get("representation_digest"), str)
         or _DIGEST.fullmatch(decision["representation_digest"]) is None
         or type(decision.get("conversion_authorized")) is not bool
+    ):
+        raise ModelPreparationError("model_representation_decision_invalid")
+    if protocol == REPRESENTATION_DECISION_PROTOCOL_V2 and (
+        not isinstance(decision.get("source_artifact_digest"), str)
+        or _DIGEST.fullmatch(decision["source_artifact_digest"]) is None
+        or not isinstance(decision.get("quantizer"), str)
+        or not decision["quantizer"]
+        or decision.get("download_authorized") is not False
     ):
         raise ModelPreparationError("model_representation_decision_invalid")
     if operation.get("protocol") != "mycelium.model_operation.v1":
@@ -132,6 +165,28 @@ def _authorization(
         raise ModelPreparationError("model_identity_unknown")
     if matching_entries[0].get("state") != "compatible":
         raise ModelPreparationError("model_not_compatible")
+    if protocol == REPRESENTATION_DECISION_PROTOCOL_V2:
+        entry = matching_entries[0]
+        representations = entry.get("serving_representations")
+        matching_representations = (
+            [
+                item
+                for item in representations
+                if isinstance(item, Mapping)
+                and item.get("quantization") == decision["serving_quantization"]
+                and item.get("runtime_dtype") == decision["serving_dtype"]
+                and item.get("representation_digest")
+                == decision["representation_digest"]
+                and item.get("quantizer") == decision["quantizer"]
+            ]
+            if isinstance(representations, list)
+            else []
+        )
+        if (
+            entry.get("artifact_digest") != decision["source_artifact_digest"]
+            or len(matching_representations) != 1
+        ):
+            raise ModelPreparationError("model_representation_decision_mismatch")
     matching_reports = [
         item
         for item in reports
@@ -221,6 +276,11 @@ def _authorization(
     )
     if any(decision[field] != report[field] for field in representation_fields):
         raise ModelPreparationError("model_representation_decision_mismatch")
+    if (
+        protocol == REPRESENTATION_DECISION_PROTOCOL_V2
+        and report.get("artifact_digest") != decision["source_artifact_digest"]
+    ):
+        raise ModelPreparationError("model_representation_decision_mismatch")
     conversion_required = source_quantization != serving_quantization
     if conversion_required and decision["conversion_authorized"] is not True:
         raise ModelPreparationError("model_representation_conversion_not_authorized")
@@ -241,14 +301,20 @@ def _authorization(
         owner_decision_digest = inherited_owner_decision_digest
     else:
         owner_decision_digest = _digest(_detached(decision))
-    preparation_binding_digest = _digest(
-        {
-            "feasibility_digest": feasibility_digest,
-            "owner_decision_digest": owner_decision_digest,
-            "representation_digest": representation_digest,
-        }
-    )
-    return {
+    binding: dict[str, Any] = {
+        "feasibility_digest": feasibility_digest,
+        "owner_decision_digest": owner_decision_digest,
+        "representation_digest": representation_digest,
+    }
+    if protocol == REPRESENTATION_DECISION_PROTOCOL_V2:
+        binding.update(
+            {
+                "source_artifact_digest": decision["source_artifact_digest"],
+                "quantizer": decision["quantizer"],
+            }
+        )
+    preparation_binding_digest = _digest(binding)
+    authorization = {
         "protocol": AUTHORIZATION_PROTOCOL,
         "model_id": model_id,
         "revision": revision,
@@ -263,10 +329,19 @@ def _authorization(
         "owner_decision_digest": owner_decision_digest,
         "preparation_binding_digest": preparation_binding_digest,
         "evidence_generation": evidence_generation,
+        "authorized_at_unix_ms": now_unix_ms,
         "evidence_valid_until_unix_ms": valid_until,
         "stages": frozen_stages,
         "download_authorized": False,
     }
+    if protocol == REPRESENTATION_DECISION_PROTOCOL_V2:
+        authorization.update(
+            {
+                "source_artifact_digest": decision["source_artifact_digest"],
+                "quantizer": decision["quantizer"],
+            }
+        )
+    return authorization
 
 
 class LocalModelPreparation:
@@ -277,11 +352,13 @@ class LocalModelPreparation:
         *,
         operation_source: Callable[[], Mapping[str, Any] | None],
         preparer: Preparer,
+        reacquirer: Reacquirer | None = None,
         on_candidate_published: Callable[[], object] | None = None,
         clock_unix_ms: Callable[[], int] | None = None,
     ) -> None:
         self._operation_source = operation_source
         self._preparer = preparer
+        self._reacquirer = reacquirer
         self._published = on_candidate_published
         self._clock = clock_unix_ms or (lambda: int(time.time() * 1_000))
         self._lock = threading.RLock()
@@ -298,11 +375,18 @@ class LocalModelPreparation:
         self._started_at: int | None = None
         self._completed_at: int | None = None
         self._authorization: Mapping[str, Any] | None = None
+        self._operation_kind = "prepare"
+        self._requested_candidate_id: str | None = None
+        self._cache_receipt_count = 0
+        self._cached_verified_bytes = 0
+        self._transferred_verified_bytes = 0
+        self._origin_bytes = 0
         self._worker: threading.Thread | None = None
 
     def _status_locked(self) -> dict[str, Any]:
         return {
             "protocol": PREPARATION_PROTOCOL,
+            "operation": self._operation_kind,
             "generation": self._generation,
             "state": self._state,
             "phase": self._phase,
@@ -322,6 +406,10 @@ class LocalModelPreparation:
             "topology_size": self._topology_size,
             "transfer_bytes": self._transfer_bytes,
             "verified_bytes": self._verified_bytes,
+            "cache_receipt_count": self._cache_receipt_count,
+            "cached_verified_bytes": self._cached_verified_bytes,
+            "transferred_verified_bytes": self._transferred_verified_bytes,
+            "origin_bytes": self._origin_bytes,
             "reason_code": self._reason_code,
             "started_at_unix_ms": self._started_at,
             "completed_at_unix_ms": self._completed_at,
@@ -346,14 +434,33 @@ class LocalModelPreparation:
                 self._verified_bytes = max(0, int(verified_bytes))
             self._generation += 1
 
-    def start(self, decision: Mapping[str, Any]) -> Mapping[str, Any]:
+    def _start(
+        self,
+        decision: Mapping[str, Any],
+        *,
+        operation_kind: str,
+        candidate_id: str | None,
+    ) -> Mapping[str, Any]:
         if not isinstance(decision, Mapping):
             raise ModelPreparationError("model_representation_decision_invalid")
+        if operation_kind not in {"prepare", "warm_reacquire"}:
+            raise ModelPreparationError("model_preparation_operation_invalid")
+        if operation_kind == "warm_reacquire" and (
+            self._reacquirer is None
+            or not isinstance(candidate_id, str)
+            or _CANDIDATE_ID.fullmatch(candidate_id) is None
+        ):
+            raise ModelPreparationError("model_candidate_identity_invalid")
         model_id = decision.get("model_id")
         revision = decision.get("revision")
         with self._lock:
             if self._state == "preparing":
-                if self._model_id == model_id and self._revision == revision:
+                if (
+                    self._model_id == model_id
+                    and self._revision == revision
+                    and self._operation_kind == operation_kind
+                    and self._requested_candidate_id == candidate_id
+                ):
                     return _detached(self._status_locked())
                 raise ModelPreparationError("model_preparation_busy")
         operation = self._operation_source()
@@ -366,6 +473,8 @@ class LocalModelPreparation:
         )
         with self._lock:
             self._state = "preparing"
+            self._operation_kind = operation_kind
+            self._requested_candidate_id = candidate_id
             self._phase = "validating_capacity"
             self._model_id = model_id
             self._revision = revision
@@ -376,6 +485,10 @@ class LocalModelPreparation:
                 for stage in authorization["stages"]
             )
             self._verified_bytes = 0
+            self._cache_receipt_count = 0
+            self._cached_verified_bytes = 0
+            self._transferred_verified_bytes = 0
+            self._origin_bytes = 0
             self._reason_code = None
             self._started_at = self._clock()
             self._completed_at = None
@@ -388,10 +501,37 @@ class LocalModelPreparation:
             worker.start()
             return _detached(self._status_locked())
 
+    def start(self, decision: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self._start(
+            decision,
+            operation_kind="prepare",
+            candidate_id=None,
+        )
+
+    def reacquire(
+        self,
+        decision: Mapping[str, Any],
+        candidate_id: str,
+    ) -> Mapping[str, Any]:
+        return self._start(
+            decision,
+            operation_kind="warm_reacquire",
+            candidate_id=candidate_id,
+        )
+
     def _run(self) -> None:
         try:
             assert self._authorization is not None
-            result = self._preparer(self._authorization, self._progress)
+            if self._operation_kind == "warm_reacquire":
+                assert self._reacquirer is not None
+                assert self._requested_candidate_id is not None
+                result = self._reacquirer(
+                    self._authorization,
+                    self._requested_candidate_id,
+                    self._progress,
+                )
+            else:
+                result = self._preparer(self._authorization, self._progress)
             if not isinstance(result, PreparationResult):
                 raise ModelPreparationError("model_preparation_result_invalid")
             if self._published is not None:
@@ -403,6 +543,12 @@ class LocalModelPreparation:
                 self._topology_size = result.topology_size
                 self._transfer_bytes = result.transfer_bytes
                 self._verified_bytes = result.verified_bytes
+                self._cache_receipt_count = result.cache_receipt_count
+                self._cached_verified_bytes = result.cached_verified_bytes
+                self._transferred_verified_bytes = (
+                    result.transferred_verified_bytes
+                )
+                self._origin_bytes = result.origin_bytes
                 self._reason_code = None
                 self._completed_at = self._clock()
                 self._generation += 1
@@ -425,9 +571,12 @@ class LocalModelPreparation:
 
 __all__ = [
     "AUTHORIZATION_PROTOCOL",
+    "LEGACY_AUTHORIZATION_PROTOCOL",
     "LocalModelPreparation",
     "ModelPreparationError",
     "PREPARATION_PROTOCOL",
     "REPRESENTATION_DECISION_PROTOCOL",
+    "REPRESENTATION_DECISION_PROTOCOL_V2",
     "PreparationResult",
+    "Reacquirer",
 ]

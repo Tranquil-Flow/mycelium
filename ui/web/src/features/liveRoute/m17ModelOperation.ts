@@ -19,10 +19,21 @@ export interface M17CatalogEntry {
   readonly present_file_count: number;
   readonly reasons: readonly string[];
   readonly artifact_digest: string;
+  readonly serving_representations?: readonly M17ServingRepresentation[];
   readonly discovery_scope?: readonly ('coordinator' | 'member_inventory')[];
   readonly discovered_member_count?: number;
   readonly metadata_reconciled?: boolean;
   readonly discovery_blockers?: readonly string[];
+}
+
+export interface M17ServingRepresentation {
+  readonly quantization: string;
+  readonly runtime_dtype: string;
+  readonly quantizer: string;
+  readonly representation_digest: string;
+  readonly resident_weight_bytes: number;
+  readonly load_peak_weight_bytes: number;
+  readonly preparation_required: boolean;
 }
 
 export interface M17CatalogDiscovery {
@@ -79,6 +90,14 @@ export interface M17ResourceBottleneck {
   readonly reason: string | null;
 }
 
+export interface M17RepresentationAuthority {
+  readonly kind: 'locally_derived_candidate' | 'approved_existing_immutable_representation';
+  readonly owner_decision_digest: string | null;
+  readonly prior_feasibility_digest: string | null;
+  readonly source_artifact_digest: string | null;
+  readonly quantizer: string | null;
+}
+
 export interface M17FeasibilityReport {
   readonly model_id: string;
   readonly revision: string;
@@ -103,6 +122,7 @@ export interface M17FeasibilityReport {
   readonly serving_quantization?: string;
   readonly serving_dtype?: string;
   readonly representation_digest?: string;
+  readonly representation_authority: M17RepresentationAuthority;
 }
 
 export type M17LifecycleState =
@@ -208,6 +228,22 @@ function entry(value: unknown, path: string): M17CatalogEntry {
   }
   const metadataReconciled = item.metadata_reconciled === undefined ? true : item.metadata_reconciled;
   if (typeof metadataReconciled !== 'boolean') throw new TypeError(`${path}.metadata_reconciled is invalid`);
+  const representations = item.serving_representations === undefined ? [] : item.serving_representations;
+  if (!Array.isArray(representations) || representations.length > 16) throw new TypeError(`${path}.serving_representations is invalid`);
+  const servingRepresentations = representations.map((value, index) => {
+    const representation = object(value, `${path}.serving_representations[${index}]`);
+    const representationDigest = text(representation.representation_digest, `${path}.serving_representations[${index}].representation_digest`);
+    if (!SHA256.test(representationDigest) || typeof representation.preparation_required !== 'boolean') throw new TypeError(`${path}.serving_representations[${index}] is invalid`);
+    return Object.freeze({
+      quantization: text(representation.quantization, `${path}.serving_representations[${index}].quantization`),
+      runtime_dtype: text(representation.runtime_dtype, `${path}.serving_representations[${index}].runtime_dtype`),
+      quantizer: text(representation.quantizer, `${path}.serving_representations[${index}].quantizer`),
+      representation_digest: representationDigest,
+      resident_weight_bytes: integer(representation.resident_weight_bytes, `${path}.serving_representations[${index}].resident_weight_bytes`),
+      load_peak_weight_bytes: integer(representation.load_peak_weight_bytes, `${path}.serving_representations[${index}].load_peak_weight_bytes`),
+      preparation_required: representation.preparation_required,
+    });
+  });
   return Object.freeze({
     model_id: text(item.model_id, `${path}.model_id`),
     revision,
@@ -223,6 +259,7 @@ function entry(value: unknown, path: string): M17CatalogEntry {
     present_file_count: integer(item.present_file_count, `${path}.present_file_count`),
     reasons: strings(item.reasons, `${path}.reasons`),
     artifact_digest: digest,
+    serving_representations: Object.freeze(servingRepresentations),
     discovery_scope: Object.freeze(discoveryScope as ('coordinator' | 'member_inventory')[]),
     discovered_member_count: item.discovered_member_count === undefined ? 0 : integer(item.discovered_member_count, `${path}.discovered_member_count`),
     metadata_reconciled: metadataReconciled,
@@ -281,6 +318,29 @@ function feasibility(value: unknown, path: string): M17FeasibilityReport {
       ? null : integer(bottleneckValue.headroom_bytes, `${path}.resource_bottleneck.headroom_bytes`),
     reason: nullableText(bottleneckValue.reason ?? null, `${path}.resource_bottleneck.reason`),
   });
+  const authorityValue = object(item.representation_authority, `${path}.representation_authority`);
+  if (authorityValue.kind !== 'locally_derived_candidate' && authorityValue.kind !== 'approved_existing_immutable_representation') {
+    throw new TypeError(`${path}.representation_authority.kind is invalid`);
+  }
+  const authorityDigest = (field: 'owner_decision_digest' | 'prior_feasibility_digest' | 'source_artifact_digest'): string | null => {
+    const value = authorityValue[field];
+    if (value === undefined || value === null) return null;
+    const digest = text(value, `${path}.representation_authority.${field}`);
+    if (!SHA256.test(digest)) throw new TypeError(`${path}.representation_authority.${field} is invalid`);
+    return digest;
+  };
+  const representationAuthority = Object.freeze({
+    kind: authorityValue.kind,
+    owner_decision_digest: authorityDigest('owner_decision_digest'),
+    prior_feasibility_digest: authorityDigest('prior_feasibility_digest'),
+    source_artifact_digest: authorityDigest('source_artifact_digest'),
+    quantizer: authorityValue.quantizer === undefined || authorityValue.quantizer === null
+      ? null : text(authorityValue.quantizer, `${path}.representation_authority.quantizer`),
+  });
+  if (representationAuthority.kind === 'approved_existing_immutable_representation'
+    && (representationAuthority.owner_decision_digest === null || representationAuthority.prior_feasibility_digest === null)) {
+    throw new TypeError(`${path}.representation_authority binding is incomplete`);
+  }
   if (!Array.isArray(item.required_directed_edges) || item.required_directed_edges.length > MAX_ENTRIES) {
     throw new TypeError(`${path}.required_directed_edges is invalid`);
   }
@@ -323,6 +383,7 @@ function feasibility(value: unknown, path: string): M17FeasibilityReport {
     serving_quantization: item.serving_quantization === undefined ? undefined : text(item.serving_quantization, `${path}.serving_quantization`),
     serving_dtype: item.serving_dtype === undefined ? undefined : text(item.serving_dtype, `${path}.serving_dtype`),
     representation_digest: representationDigest,
+    representation_authority: representationAuthority,
   });
 }
 

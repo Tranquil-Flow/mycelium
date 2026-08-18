@@ -75,6 +75,9 @@ _RECIPIENT_FIELDS = frozenset(
     }
 )
 _GRANT_TTL_MS = 15 * 60 * 1_000
+_AVAILABILITY_RECONCILE_MIN_SECONDS = 30.0
+_AVAILABILITY_RECONCILE_MAX_SECONDS = 30.0 * 60.0
+_AVAILABILITY_RECONCILE_BYTES_PER_SECOND = 4 * 1024 * 1024
 _PUBLIC_REASON = re.compile(r"[a-z][a-z0-9_]{0,127}\Z")
 _SSH_TARGET = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\Z")
 _REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,sys,tarfile
@@ -330,6 +333,19 @@ def _document(path: Path, code: str, *, private: bool = False) -> dict[str, Any]
     if not isinstance(value, dict) or encoded != _canonical(value):
         raise ModelPreparationError(code)
     return value
+
+
+def _availability_reconcile_timeout_seconds(total_size_bytes: int) -> float:
+    """Bound source reconciliation by the assignment bytes it must reverify."""
+
+    return min(
+        _AVAILABILITY_RECONCILE_MAX_SECONDS,
+        max(
+            _AVAILABILITY_RECONCILE_MIN_SECONDS,
+            _AVAILABILITY_RECONCILE_MIN_SECONDS
+            + total_size_bytes / _AVAILABILITY_RECONCILE_BYTES_PER_SECOND,
+        ),
+    )
 
 
 class MemberArtifactTransport:
@@ -621,6 +637,16 @@ class MemberArtifactTransport:
                     raise ModelPreparationError(
                         "member_artifact_manifest_registration_failed"
                     ) from exc
+                if self._current_availability_covers_manifest(
+                    source=source,
+                    manifest_bytes=manifest_bytes,
+                    manifest_digest=manifest_digest,
+                ):
+                    # The source has already signed a fresh, complete projection
+                    # for these exact chunks.  Touching the inbox entry would make
+                    # the agent hash every multi-gigabyte object again even though
+                    # the later reconciliation step verifies this same signature.
+                    return
                 try:
                     os.utime(destination, None, follow_symlinks=False)
                 except OSError as exc:
@@ -687,6 +713,48 @@ class MemberArtifactTransport:
             raise ModelPreparationError(
                 "member_artifact_manifest_registration_failed"
             )
+
+    def _current_availability_covers_manifest(
+        self,
+        *,
+        source: Mapping[str, Any],
+        manifest_bytes: bytes,
+        manifest_digest: str,
+    ) -> bool:
+        """Return true only for fresh signed availability of every exact chunk."""
+
+        try:
+            manifest = json.loads(manifest_bytes)
+            encoded = self._read_source_bundle(source=source)
+            checked = validate_availability_bundle(
+                json.loads(encoded),
+                verifier=build_ed25519_verifier([source["verification_key"]]),
+                now_unix_ms=self._clock(),
+                expected_source_member_id=source["member_id"],
+                expected_membership_generation=source["membership_generation"],
+            )
+            expected = sorted(
+                chunk["content_digest"] for chunk in manifest["chunks"]
+            )
+            expected_bytes = sum(chunk["size_bytes"] for chunk in manifest["chunks"])
+            matching = [
+                item
+                for item in checked["advertisements"]
+                if item["manifest_digest"] == manifest_digest
+                and item["available_chunk_digests"] == expected
+                and item["verified_bytes"] == expected_bytes
+            ]
+            return len(matching) == 1
+        except (
+            KeyError,
+            ModelPreparationError,
+            OSError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+            SwarmArtifactContractError,
+        ):
+            return False
 
     def _install_source_object(
         self,
@@ -842,7 +910,9 @@ class MemberArtifactTransport:
             )
         pending = {source["member_id"] for source in self._plan["sources"]}
         bundles: dict[str, bytes] = {}
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + _availability_reconcile_timeout_seconds(
+            manifest["total_size_bytes"]
+        )
         while pending and time.monotonic() < deadline:
             for source in self._plan["sources"]:
                 source_id = source["member_id"]
@@ -894,6 +964,7 @@ class MemberArtifactTransport:
         policy: Mapping[str, Any],
         stage_source: Path,
         peer: Mapping[str, Any],
+        warm_only: bool = False,
     ) -> MemberStagePackPromotion:
         try:
             frozen_manifest = validate_stage_pack_manifest(
@@ -905,18 +976,37 @@ class MemberArtifactTransport:
         recipient = self._plan["recipients"].get(member_id)
         if not isinstance(recipient, Mapping):
             raise ModelPreparationError("member_artifact_recipient_unconfigured")
+        if type(warm_only) is not bool:
+            raise ModelPreparationError("member_artifact_warm_mode_invalid")
+        active_sources = [] if warm_only else self._plan["sources"]
+        source_ids = sorted(source["member_id"] for source in active_sources)
+        if warm_only:
+            source_bundles: dict[str, bytes] = {}
+        else:
+            encoded_manifest = _canonical(frozen_manifest)
+            source_ready = all(
+                self._current_availability_covers_manifest(
+                    source=source,
+                    manifest_bytes=encoded_manifest,
+                    manifest_digest=frozen_manifest["manifest_digest"],
+                )
+                for source in active_sources
+            )
+            if not source_ready:
+                self._seed_source_objects(
+                    manifest=frozen_manifest,
+                    stage_source=stage_source,
+                )
+            source_bundles = self._reconcile_source_bundles(
+                manifest=frozen_manifest,
+            )
+        # Source materialization and signed-availability reconciliation can take
+        # minutes for a multi-gigabyte stage.  Issue the short-lived grant only
+        # after that work so the recipient receives its full transfer window.
         now = self._clock()
         expires = min(frozen_manifest["expires_at_unix_ms"], now + _GRANT_TTL_MS)
         if expires <= now:
             raise ModelPreparationError("member_artifact_authority_stale")
-        source_ids = sorted(source["member_id"] for source in self._plan["sources"])
-        self._seed_source_objects(
-            manifest=frozen_manifest,
-            stage_source=stage_source,
-        )
-        source_bundles = self._reconcile_source_bundles(
-            manifest=frozen_manifest,
-        )
         try:
             grant = sign_grant(
                 {
@@ -963,7 +1053,7 @@ class MemberArtifactTransport:
             ).read_bytes(),
         }
         sources = []
-        for index, source in enumerate(self._plan["sources"]):
+        for index, source in enumerate(active_sources):
             name = f"availability-{index:04d}.json"
             files[name] = source_bundles[source["member_id"]]
             sources.append(

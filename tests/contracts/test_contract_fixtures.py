@@ -121,6 +121,9 @@ EXPECTED_PROTOCOLS = {
     "path-manifest-v1.json": "mycelium.path_manifest.v1",
     "live-route-status-v1.json": "mycelium.live_route_status.v1",
     "deployment-activation-v1.json": "mycelium.deployment_activation.v1",
+    "model-preparation-authorization-v2.json": (
+        "mycelium.model_preparation_authorization.v2"
+    ),
     "deployment-residency-physical-v1.json": (
         "mycelium.deployment_residency_physical_gate.v1"
     ),
@@ -170,6 +173,19 @@ def test_generated_contract_fixtures_have_no_drift() -> None:
             check=False,
         )
         assert completed.returncode == 0, completed.stderr or completed.stdout
+
+
+def test_model_preparation_browser_contract_is_manifest_pinned() -> None:
+    manifest = json.loads(encoded_manifest())
+    contract = next(
+        item
+        for item in manifest["contracts"]
+        if item["protocol"] == "mycelium.model_preparation_authorization.v2"
+    )
+
+    assert "ui/web/src/features/models/modelPreparation.ts" in {
+        source["path"] for source in contract["owner_sources"]
+    }
 
 
 def test_contract_audit_checks_manifest_hashes_and_protocol_ownership() -> None:

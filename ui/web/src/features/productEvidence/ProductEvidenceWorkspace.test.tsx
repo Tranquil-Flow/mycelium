@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import fixture from '../../../../../contracts/compatibility-fixtures/product-snapshot-v1.json';
 import { ProductEvidenceProvider } from './ProductEvidenceContext';
@@ -26,6 +26,32 @@ const source = {
 };
 
 describe('unified product workspaces', () => {
+  it('clears a transient initial-load error after the live source recovers', async () => {
+    let listener: ((value: ProductEvidenceState) => void) | null = null;
+    let current: ProductEvidenceState | null = null;
+    const recoveringSource = {
+      getState: () => current,
+      loadInitial: async () => {
+        throw new Error('transient startup race');
+      },
+      subscribe: (next: (value: ProductEvidenceState) => void) => {
+        listener = next;
+        return () => undefined;
+      },
+    };
+
+    render(<ProductEvidenceProvider source={recoveringSource}><ProductEvidenceWorkspace view="nodes" /></ProductEvidenceProvider>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unified product evidence unavailable');
+
+    await act(async () => {
+      current = state;
+      listener?.(state);
+    });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(await screen.findByText('Durable membership and capability')).toBeInTheDocument();
+  });
+
   it('renders a mobile member without claiming activation eligibility', async () => {
     render(<ProductEvidenceProvider source={source}><ProductEvidenceWorkspace view="nodes" /></ProductEvidenceProvider>);
     expect(await screen.findByText('android_termux_iroh')).toBeInTheDocument();

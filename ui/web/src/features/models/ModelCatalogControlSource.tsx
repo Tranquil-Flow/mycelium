@@ -131,6 +131,14 @@ export function ModelCatalogControlSource({
     }
   };
 
-  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} actionsAvailable={actionsAvailable} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(decision) => void prepare(decision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
+  const reacquire = async (candidateId: string, decision: ModelRepresentationDecision): Promise<void> => {
+    try {
+      setPreparation(await preparationApi.reacquire(candidateId, decision)); setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'model_reacquisition_failed');
+    }
+  };
+
+  if (operation !== null && activation !== null) return <ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={capacityRefresh} preparation={preparation} actionsAvailable={actionsAvailable} nowUnixMs={now()} error={error} onActivate={(candidateId) => void activate(candidateId)} onUnload={(candidateId) => void unload(candidateId)} onPrepare={(decision) => void prepare(decision)} onReacquire={(candidateId, decision) => void reacquire(candidateId, decision)} onRefresh={refresh} onRecheckCapacity={() => void recheckCapacity()} />;
   return <section role={error === null ? 'status' : 'alert'}>{error === null ? 'Loading model catalog and deployment status…' : `Model controls are unavailable (${error}). Existing qualified inference remains usable.`}</section>;
 }

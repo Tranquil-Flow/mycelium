@@ -13,7 +13,11 @@ from mycelium_live.activation import (
     PreparedDeploymentActivation,
     validate_activation_status,
 )
-from mycelium_live.registry import LiveDeploymentRegistry, QualifiedDeploymentRuntime
+from mycelium_live.registry import (
+    LiveDeploymentRegistry,
+    QualifiedDeploymentRuntime,
+    UnavailableDeployment,
+)
 from mycelium_live.route import FakeLiveRoute
 from mycelium_router.serialization import execution_graph_from_dict
 from tests.physical_runner.conftest import operator_plan_payload, write_operator_plan
@@ -175,6 +179,85 @@ def test_qualified_candidate_can_be_unloaded_and_reactivated(tmp_path: Path) -> 
     )
     activation.activate(candidate_id)
     assert _wait_terminal(activation)["candidates"][0]["state"] == "qualified"
+
+
+def test_selected_but_unavailable_candidate_is_not_reported_active(
+    tmp_path: Path,
+) -> None:
+    candidate_root = tmp_path / "candidates"
+    state_root = tmp_path / "state"
+    candidate_root.mkdir(mode=0o700)
+    state_root.mkdir(mode=0o700)
+    graph_document = _graph_document()
+    graph = execution_graph_from_dict(graph_document)
+    _plan(candidate_root, tmp_path / "workspace", graph_document, "candidate.json")
+    registry = LiveDeploymentRegistry(
+        [],
+        unavailable_deployments=(
+            UnavailableDeployment(
+                deployment_id=graph.deployment_id,
+                model_id=graph.model_id,
+                model_revision=graph.resolved_commit,
+                quantization="int8-weight-only",
+                topology_size=len(graph.stages),
+                reason_code="membership_member_lease_expired",
+                observed_at_unix_ms=1_800_000_000_000,
+            ),
+        ),
+    )
+    activation = PreparedDeploymentActivation(
+        candidate_root=candidate_root,
+        state_root=state_root,
+        registry=registry,
+        runtime_loader=lambda *_args: pytest.fail("status must not load a route"),
+    )
+
+    [candidate] = activation.status()["candidates"]
+
+    assert registry.registry_status()["selected_deployment_id"] == graph.deployment_id
+    assert candidate["state"] == "unavailable"
+    assert candidate["reason_code"] == "route_unavailable"
+
+
+def test_unavailable_candidate_can_be_requalified(tmp_path: Path) -> None:
+    candidate_root = tmp_path / "candidates"
+    state_root = tmp_path / "state"
+    candidate_root.mkdir(mode=0o700)
+    state_root.mkdir(mode=0o700)
+    graph_document = _graph_document()
+    graph = execution_graph_from_dict(graph_document)
+    _plan(candidate_root, tmp_path / "workspace", graph_document, "candidate.json")
+    registry = LiveDeploymentRegistry(
+        [],
+        unavailable_deployments=(
+            UnavailableDeployment(
+                deployment_id=graph.deployment_id,
+                model_id=graph.model_id,
+                model_revision=graph.resolved_commit,
+                quantization="int8-weight-only",
+                topology_size=len(graph.stages),
+                reason_code="membership_member_lease_expired",
+                observed_at_unix_ms=1_800_000_000_000,
+            ),
+        ),
+    )
+    activation = PreparedDeploymentActivation(
+        candidate_root=candidate_root,
+        state_root=state_root,
+        registry=registry,
+        runtime_loader=lambda _plan, progress: (
+            progress("opening_route"),
+            progress("qualifying_route"),
+            _runtime(graph),
+        )[-1],
+    )
+    candidate_id = activation.status()["candidates"][0]["candidate_id"]
+
+    activation.activate(candidate_id)
+    [candidate] = _wait_terminal(activation)["candidates"]
+
+    assert candidate["state"] == "active"
+    assert registry.registry_status()["selected_deployment_id"] == candidate_id
 
 
 def test_activation_failure_is_retryable_and_keeps_incumbent(tmp_path: Path) -> None:

@@ -223,7 +223,9 @@ class ArtifactAcquisitionStore:
         self._consumed_grants_path = self.root / "state" / "consumed-grants.json"
         self._lock_path = self.root / "state" / "acquisition.lock"
         self._generation_path = self.root / "state" / "generation"
+        self._public_ledger: dict[str, Any] | None = None
         self._recover_interrupted()
+        self._public_ledger = self.ledger()
 
     def object_path(self, digest: str) -> Path:
         return self.root / "objects" / digest.removeprefix("sha256:")
@@ -368,6 +370,22 @@ class ArtifactAcquisitionStore:
         validated = validate_acquisition_status(status)
         with self._state_lock:
             _atomic_json(self._current_path, validated)
+            history = (
+                self._read_history()
+                if self._public_ledger is None
+                else self._public_ledger["history"]
+            )
+            self._public_ledger = validate_acquisition_ledger(
+                {
+                    "protocol": LEDGER_PROTOCOL,
+                    "generation": max(
+                        [validated["generation"]]
+                        + [item["generation"] for item in history]
+                    ),
+                    "current": validated,
+                    "history": history,
+                }
+            )
 
     def _read_history(self) -> list[dict[str, Any]]:
         if not self._history_path.exists():
@@ -387,9 +405,18 @@ class ArtifactAcquisitionStore:
         with self._state_lock:
             history = self._read_history()
             history.append(validated)
-            _atomic_json(self._history_path, history[-self.history_limit :])
+            history = history[-self.history_limit :]
+            _atomic_json(self._history_path, history)
             self._current_path.unlink(missing_ok=True)
             _fsync_directory(self._current_path.parent)
+            self._public_ledger = validate_acquisition_ledger(
+                {
+                    "protocol": LEDGER_PROTOCOL,
+                    "generation": max(item["generation"] for item in history),
+                    "current": None,
+                    "history": history,
+                }
+            )
 
     def import_member_terminal(self, status: Mapping[str, Any]) -> dict[str, Any]:
         """Append a validated remote terminal result to the product ledger."""
@@ -412,6 +439,8 @@ class ArtifactAcquisitionStore:
             self.release_writer(descriptor)
 
     def ledger(self) -> dict[str, Any]:
+        """Reread and validate the authoritative durable ledger."""
+
         with self._state_lock:
             current = None
             if self._current_path.exists():
@@ -435,6 +464,14 @@ class ArtifactAcquisitionStore:
                     "history": history,
                 }
             )
+
+    def public_ledger(self) -> dict[str, Any]:
+        """Return the last validated progress snapshot without blocking on storage."""
+
+        with self._state_lock:
+            if self._public_ledger is None:
+                self._public_ledger = self.ledger()
+            return _detached(self._public_ledger)
 
     def _recover_interrupted(self) -> None:
         if not self._current_path.exists():

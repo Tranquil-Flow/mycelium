@@ -197,7 +197,6 @@ def _job(path: Path) -> dict[str, Any]:
         or type(provisioner_generation) is not int
         or provisioner_generation < 1
         or not isinstance(sources, list)
-        or not sources
         or len(sources) > 1_024
         or type(predicted) not in {int, float}
         or not 0 <= float(predicted) <= 1

@@ -815,6 +815,7 @@ def validate_grant(
         value.get("authorized_source_member_ids"),
         "artifact_grant_invalid",
         validator=_identifier,
+        allow_empty=True,
     )
     maximum_bytes = _integer(
         value.get("maximum_total_bytes"), "artifact_grant_invalid", minimum=1

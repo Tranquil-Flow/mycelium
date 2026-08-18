@@ -109,6 +109,8 @@ def _verified_node(
         path = _mapping(value, "transport path observation")
         if path.get("protocol") != "mycelium.transport_path_observation.v1":
             raise ValueError("transport path observation protocol is invalid")
+        if path.get("local_node_id") != node_id:
+            raise ValueError("transport path observation is not owned by its signer")
         if (
             int(path["measured_at_unix_ms"]) <= 0
             or int(path["fresh_until_unix_ms"]) <= int(path["measured_at_unix_ms"])
@@ -145,10 +147,16 @@ def assemble(source: Mapping[str, Any]) -> dict[str, object]:
         raise ValueError("live swarm observations require signed snapshots")
     verified = [_verified_node(record) for record in snapshots]
     nodes = tuple(sorted((item[0] for item in verified), key=lambda item: item.node_id))
+    node_ids = {node.node_id for node in nodes}
     verification_keys = sorted(item[1] for item in verified)
     edges = tuple(
         sorted(
-            (edge for item in verified for edge in item[2]),
+            (
+                edge
+                for item in verified
+                for edge in item[2]
+                if edge.src in node_ids and edge.dst in node_ids
+            ),
             key=lambda item: (item.src, item.dst),
         )
     )

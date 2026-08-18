@@ -196,6 +196,7 @@ export class LiveObservatoryEventSource {
   private highestSeenGeneration = -1;
   private blockedGeneration: number | null = null;
   private freshnessTimer: ScheduleHandle | null = null;
+  private resyncPromise: Promise<void> | null = null;
 
   constructor(options: LiveObservatoryEventSourceOptions = {}) {
     this.snapshotUrl = sameOriginUrl(
@@ -267,6 +268,7 @@ export class LiveObservatoryEventSource {
     stream.onopen = () => {
       this.streamOpen = true;
       this.refreshTransportState();
+      if (this.blockedGeneration !== null) void this.resynchronizeFromSnapshot();
     };
     stream.onerror = () => {
       this.streamOpen = false;
@@ -295,6 +297,47 @@ export class LiveObservatoryEventSource {
     this.stream.close();
     this.stream = null;
     this.streamOpen = false;
+  }
+
+  private resynchronizeFromSnapshot(): Promise<void> {
+    if (this.resyncPromise !== null) return this.resyncPromise;
+    const priorHighestGeneration = this.highestSeenGeneration;
+    const priorObservedAt = this.state?.projection.snapshot.observed_at_unix_ms ?? -1;
+    this.resyncPromise = this.fetcher(this.snapshotUrl, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'same-origin',
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('restart snapshot unavailable');
+      const payload = await readBoundedJson(response, this.maxEventBytes);
+      const generation = parseObservatoryAdapterEventHeader(payload).generation;
+      const event = decodeObservatoryAdapterEvent(payload);
+
+      // A higher stream generation may have recovered while the GET was in flight.
+      if (
+        this.blockedGeneration === null ||
+        this.highestSeenGeneration > priorHighestGeneration
+      ) return;
+      if (event.bundle.snapshot.observed_at_unix_ms <= priorObservedAt) {
+        throw new Error('restart snapshot is not newer');
+      }
+
+      // A same-origin, freshly decoded snapshot with a strictly newer observation is
+      // the explicit epoch boundary. Ordinary SSE events still require monotonic
+      // generations and exact event IDs within that epoch.
+      this.highestSeenGeneration = generation - 1;
+      this.blockedGeneration = null;
+      this.acceptEvent(event);
+    }).catch(() => {
+      this.markDisconnected(
+        'Observatory restart snapshot unavailable',
+        this.highestSeenGeneration,
+      );
+    }).finally(() => {
+      this.resyncPromise = null;
+    });
+    return this.resyncPromise;
   }
 
   private readonly onSnapshotEvent = (message: MessageEvent<string>): void => {

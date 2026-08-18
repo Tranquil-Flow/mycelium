@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
 import struct
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import mlx.core as mx
+import numpy as np
 import pytest
 
 import runtime_loader
@@ -22,6 +24,7 @@ from runtime_loader import (
     load_assignment_stage,
 )
 from weight_provisioning import sha256_file
+from weight_quantization import Int8RowwiseWeight
 
 
 DEPLOYMENT_ID = "12345678-1234-5678-9234-abcdefabcdef"
@@ -41,6 +44,53 @@ LAYER_SUFFIXES = (
     "mlp.c_proj.weight",
     "mlp.c_proj.bias",
 )
+
+
+def test_rowwise_int8_loader_reads_only_one_bounded_row_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Reader(io.BytesIO):
+        maximum_read = 0
+
+        def read(self, size: int = -1) -> bytes:
+            self.maximum_read = max(self.maximum_read, size)
+            return super().read(size)
+
+    monkeypatch.setattr(
+        runtime_loader,
+        "ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES",
+        64,
+    )
+    source = np.arange(64, dtype=np.float32).reshape(8, 8) / 10.0
+    payload = source.astype("<f4").tobytes()
+    reader = Reader(payload)
+    loaded = runtime_loader._load_numpy_safetensors(
+        reader,
+        {
+            "model.layers.0.self_attn.q_proj.weight": {
+                "dtype": "F32",
+                "shape": [8, 8],
+                "data_offsets": [0, len(payload)],
+            }
+        },
+        0,
+        {"model.layers.0.self_attn.q_proj.weight"},
+        np.dtype("float32"),
+        quantize_qwen=True,
+    )
+
+    result = loaded["model.layers.0.self_attn.q_proj.weight"]
+    assert isinstance(result, Int8RowwiseWeight)
+    expected = runtime_loader.quantize_qwen2_numpy_tensor(
+        "model.layers.0.self_attn.q_proj.weight",
+        source,
+    )
+    assert isinstance(expected, Int8RowwiseWeight)
+    np.testing.assert_array_equal(result.values, expected.values)
+    np.testing.assert_array_equal(result.scales, expected.scales)
+    assert reader.maximum_read == 64
+    assert result.values.flags.writeable is False
+    assert result.scales.flags.writeable is False
 
 
 class _LoaderDeepcopyBomb:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -105,6 +106,80 @@ def _topology_node(index: int, *, backend: str) -> dict:
     }
 
 
+def test_remote_peer_preflight_runs_before_candidate_materialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(builder.subprocess, "run", run)
+
+    builder.preflight_remote_peers(
+        [_topology_node(0, backend="mlx"), _topology_node(1, backend="mlx")]
+    )
+
+    assert calls == [
+        [
+            "ssh",
+            "-i",
+            "/keys/remote-1",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=5",
+            "operator@remote-1",
+            "true",
+        ]
+    ]
+
+
+def test_remote_peer_preflight_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired("ssh", 10.0)
+
+    monkeypatch.setattr(builder.subprocess, "run", unavailable)
+
+    with pytest.raises(RuntimeError, match="peer_preflight_unavailable"):
+        builder.preflight_remote_peers([_topology_node(1, backend="mlx")])
+
+
+def test_build_preflights_peer_before_creating_candidate_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _write_topology(
+        tmp_path / "topology.json",
+        [_topology_node(0, backend="mlx"), _topology_node(1, backend="mlx")],
+    )
+    output_root = tmp_path / "candidate"
+
+    def unavailable(_topology: list[dict]) -> None:
+        raise RuntimeError("peer_preflight_unavailable")
+
+    monkeypatch.setattr(builder, "preflight_remote_peers", unavailable)
+
+    with pytest.raises(RuntimeError, match="^peer_preflight_unavailable$"):
+        builder.build(
+            SimpleNamespace(
+                template_plan=template,
+                output_root=output_root,
+                topology=topology,
+                model_id="Qwen/Qwen2.5-7B-Instruct",
+                resolved_commit="a" * 40,
+                route_label="modelprep-test",
+            )
+        )
+
+    assert not output_root.exists()
+
+
 def _write_topology(
     path: Path,
     nodes: list[dict],
@@ -188,21 +263,24 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
         _topology_node(1, backend="numpy"),
     ]
     document = {
-        "protocol": "mycelium.model_preparation_authorization.v1",
+        "protocol": "mycelium.model_preparation_authorization.v2",
         "model_id": model_id,
         "revision": revision,
         "catalog_generation": 3,
         "operation_digest": "sha256:" + "a" * 64,
         "feasibility_digest": "sha256:" + "c" * 64,
         "representation_digest": "sha256:" + "d" * 64,
+        "source_artifact_digest": "sha256:" + "f" * 64,
         "source_quantization": "bfloat16",
         "serving_dtype": "float32",
         "serving_quantization": "int8-weight-only",
+        "quantizer": "mycelium.rowwise_symmetric_int8.v1",
         "conversion_authorized": True,
         "owner_decision_digest": "sha256:" + "e" * 64,
         "preparation_binding_digest": "pending",
         "evidence_generation": 2,
-        "evidence_valid_until_unix_ms": 9_999_999_999_999,
+        "authorized_at_unix_ms": 1,
+        "evidence_valid_until_unix_ms": 2,
         "stages": [
             {
                 "stage_index": 0,
@@ -232,7 +310,9 @@ def test_model_preparation_authorization_owns_exact_stage_plan(tmp_path: Path) -
             {
                 "feasibility_digest": document["feasibility_digest"],
                 "owner_decision_digest": document["owner_decision_digest"],
+                "quantizer": document["quantizer"],
                 "representation_digest": document["representation_digest"],
+                "source_artifact_digest": document["source_artifact_digest"],
             }
         )
     )
@@ -417,8 +497,84 @@ def test_large_candidate_challenge_loads_only_one_stage_at_a_time(monkeypatch) -
     )
 
     assert prompt == (11, 12)
-    assert output == (2,)
+    assert output == (2, 2)
     assert maximum == 1
+
+
+@pytest.mark.parametrize("generated_token_count", [0, 1, 128, True])
+def test_large_candidate_challenge_requires_real_decode(
+    generated_token_count: int,
+) -> None:
+    with pytest.raises(RuntimeError, match="challenge_runtime_count_mismatch"):
+        builder._streaming_challenge(
+            SimpleNamespace(encode=lambda _prompt: (11, 12)),
+            [{"node_id": "node-0"}],
+            [{}],
+            ["mlx"],
+            generated_token_count=generated_token_count,
+        )
+
+
+def test_local_challenge_checkpoint_binds_exact_candidate_inputs() -> None:
+    assignment = {
+        "node_id": "node-0",
+        "deployment_id": "deployment-0",
+        "assignment_id": "assignment-0",
+    }
+    proof = {"proof": "value"}
+    authorization = {
+        "source_artifact_digest": "sha256:" + "1" * 64,
+        "representation_digest": "sha256:" + "2" * 64,
+        "preparation_binding_digest": "sha256:" + "3" * 64,
+    }
+
+    checkpoint = builder._local_challenge_checkpoint(
+        model_id="Qwen/Qwen2.5-7B-Instruct",
+        resolved_commit="a" * 40,
+        prepared=SimpleNamespace(manifest={"manifest_digest": {"value": "4" * 64}}),
+        assignments=[assignment],
+        proofs=[proof],
+        challenge_prompt=(11, 12),
+        challenge_output=(13, 14),
+        challenge_output_text="answer",
+        runtime_backends={"node-0": "mlx"},
+        preparation_authorization=authorization,
+        stage_sharding={"protocol": "mycelium.stage_sharding_reuse.v1"},
+    )
+
+    assert checkpoint == {
+        "protocol": "mycelium.local_candidate_challenge.v1",
+        "state": "passed",
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        "resolved_commit": "a" * 40,
+        "deployment_id": "deployment-0",
+        "source_artifact_digest": authorization["source_artifact_digest"],
+        "representation_digest": authorization["representation_digest"],
+        "preparation_binding_digest": authorization["preparation_binding_digest"],
+        "model_manifest_digest": "sha256:" + "4" * 64,
+        "assignments": [
+            {
+                "node_id": "node-0",
+                "assignment_digest": builder._digest(builder._bytes(assignment)),
+                "load_proof_digest": builder.layer_load_proof_digest(proof),
+            }
+        ],
+        "runtime_backends": {"node-0": "mlx"},
+        "challenge_prompt_token_ids": [11, 12],
+        "challenge_output_token_ids": [13, 14],
+        "challenge_output_text": "answer",
+        "stage_sharding": {"protocol": "mycelium.stage_sharding_reuse.v1"},
+    }
+
+
+def test_local_challenge_checkpoint_write_is_atomic_and_private(tmp_path: Path) -> None:
+    destination = tmp_path / "candidate" / "local-challenge-checkpoint.json"
+
+    builder._write_durable_document(destination, {"state": "passed"})
+
+    assert json.loads(destination.read_text("utf-8")) == {"state": "passed"}
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert list(destination.parent.glob(".*.tmp")) == []
 
 
 def test_remote_identity_program_matches_controller_derivation_locally() -> None:
@@ -931,3 +1087,50 @@ def test_model_identity_rejects_unpinned_source(
         builder._model_identity(
             SimpleNamespace(model_id=model_id, resolved_commit=resolved_commit)
         )
+
+
+def test_private_temporary_root_accepts_owner_private_absolute_directory(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "large-stage-work"
+    root.mkdir(mode=0o700)
+
+    assert builder._private_temporary_root(root) == root.resolve(strict=True)
+
+
+def test_private_temporary_root_rejects_group_writable_directory(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "unsafe-stage-work"
+    root.mkdir(mode=0o720)
+    root.chmod(0o720)
+
+    with pytest.raises(
+        RuntimeError,
+        match="^model_preparation_temporary_root_unsafe$",
+    ):
+        builder._private_temporary_root(root)
+
+
+def test_transfer_manifest_hashes_large_files_without_reading_whole_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    artifact = bundle / "stage.safetensors"
+    artifact.write_bytes(b"bounded-stream")
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda _path: pytest.fail("transfer manifest used whole-file read"),
+    )
+
+    manifest = builder._transfer_manifest(bundle)
+
+    assert manifest["files"] == [
+        {
+            "path": "stage.safetensors",
+            "size_bytes": 14,
+            "content_digest": builder._digest(b"bounded-stream"),
+        }
+    ]

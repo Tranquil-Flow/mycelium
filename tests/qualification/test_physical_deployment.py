@@ -575,6 +575,34 @@ def test_prepare_physical_deployment_accepts_local_sharded_gpt2_source(
         assert sha256_file(copied) == sha256_file(source_root / shard_name)
 
 
+def test_local_model_materialization_is_independent_of_source_mutation(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "source"
+    _write_dialogpt_style_monolithic_source(source_root, n_layer=2)
+    deployment = prepare_physical_deployment(
+        tmp_path / "deployment",
+        model_source=LocalModelSource(
+            root=source_root,
+            model_id="local/copy-on-write-model",
+            requested_revision="snapshot",
+            resolved_commit="2" * 40,
+        ),
+    )
+    materialized = deployment.root / "model.safetensors"
+    expected = sha256_file(materialized)
+
+    with (source_root / "model.safetensors").open("r+b") as source:
+        source.seek(-1, 2)
+        final_byte = source.read(1)
+        source.seek(-1, 2)
+        source.write(bytes((final_byte[0] ^ 0xFF,)))
+
+    assert sha256_file(source_root / "model.safetensors") != expected
+    assert sha256_file(materialized) == expected
+    assert materialized.stat().st_ino != (source_root / "model.safetensors").stat().st_ino
+
+
 def test_local_model_source_validation_rejects_unpinned_identity(
     tmp_path: Path,
 ) -> None:

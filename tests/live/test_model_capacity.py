@@ -9,6 +9,7 @@ from mycelium_live.model_capacity import (
     ModelCapacityRefresh,
     ModelCapacityRefreshError,
     _capacity_topology,
+    live_observations_document,
     recompute_model_operation,
 )
 
@@ -69,6 +70,21 @@ def test_capacity_refresh_failure_is_bounded_and_preserves_no_partial_operation(
     assert refresh.status()["state"] == "failed"
     assert refresh.status()["reason_code"] == "capacity_evidence_stale"
     assert published == []
+
+
+def test_live_capacity_observations_file_is_private_and_closed(tmp_path: Path) -> None:
+    source = tmp_path / "live-observations.json"
+    source.write_text(
+        '{"placement":{},"protocol":"mycelium.live_swarm_resource_observations.v1",'
+        '"signed_snapshots":[{}],"topology":{}}',
+        encoding="utf-8",
+    )
+    source.chmod(0o600)
+
+    assert live_observations_document(source)["signed_snapshots"] == [{}]
+    source.chmod(0o644)
+    with pytest.raises(ValueError, match="member_model_inventory_file_invalid"):
+        live_observations_document(source)
 
 
 def test_capacity_topology_derives_contiguous_m13_stage_order() -> None:

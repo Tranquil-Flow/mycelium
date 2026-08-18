@@ -33,6 +33,7 @@ _PHASES = frozenset(
 )
 _SAFE_REASON = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _MEMBER_AUTHORITIES_PROTOCOL = "mycelium.member_model_inventory_authorities.v1"
+_LIVE_OBSERVATIONS_PROTOCOL = "mycelium.live_swarm_resource_observations.v1"
 
 
 class ModelCapacityRefreshError(RuntimeError):
@@ -72,6 +73,21 @@ def _inventory_document(path: Path, *, private: bool) -> dict[str, Any]:
         raise ValueError("member_model_inventory_file_invalid") from exc
     if not isinstance(value, dict):
         raise ValueError("member_model_inventory_file_invalid")
+    return value
+
+
+def live_observations_document(path: Path) -> dict[str, Any]:
+    """Read one owner-private, dynamically captured signed swarm generation."""
+
+    value = _inventory_document(Path(path), private=True)
+    if (
+        value.get("protocol") != _LIVE_OBSERVATIONS_PROTOCOL
+        or not isinstance(value.get("placement"), Mapping)
+        or not isinstance(value.get("topology"), Mapping)
+        or not isinstance(value.get("signed_snapshots"), list)
+        or not value["signed_snapshots"]
+    ):
+        raise ValueError("model_capacity_live_observations_invalid")
     return value
 
 

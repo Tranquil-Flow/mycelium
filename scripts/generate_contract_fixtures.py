@@ -102,6 +102,7 @@ from mycelium_live.activation import (
     ACTIVATION_PROTOCOL,
     validate_activation_status,
 )
+from mycelium_live.preparation import AUTHORIZATION_PROTOCOL
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
     complete_directed_observation_matrix,
@@ -1454,6 +1455,85 @@ def deployment_activation_status() -> dict[str, Any]:
     return document
 
 
+def model_preparation_authorization_v2() -> dict[str, Any]:
+    feasibility_digest = "sha256:" + "c" * 64
+    owner_decision_digest = "sha256:" + "e" * 64
+    representation_digest = "sha256:" + "d" * 64
+    source_artifact_digest = "sha256:" + "f" * 64
+    quantizer = "mycelium.rowwise_symmetric_int8.v1"
+    binding = {
+        "feasibility_digest": feasibility_digest,
+        "owner_decision_digest": owner_decision_digest,
+        "quantizer": quantizer,
+        "representation_digest": representation_digest,
+        "source_artifact_digest": source_artifact_digest,
+    }
+    binding_digest = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                binding,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    return {
+        "authorized_at_unix_ms": 1_786_810_382_513,
+        "catalog_generation": 1_786_809_260_215,
+        "conversion_authorized": True,
+        "download_authorized": False,
+        "evidence_generation": 1_786_809_260_215,
+        "evidence_valid_until_unix_ms": 1_786_811_488_160,
+        "feasibility_digest": feasibility_digest,
+        "model_id": "Qwen/Qwen2.5-7B-Instruct",
+        "operation_digest": "sha256:" + "a" * 64,
+        "owner_decision_digest": owner_decision_digest,
+        "preparation_binding_digest": binding_digest,
+        "protocol": AUTHORIZATION_PROTOCOL,
+        "quantizer": quantizer,
+        "representation_digest": representation_digest,
+        "revision": "b" * 40,
+        "serving_dtype": "float32",
+        "serving_quantization": "int8-weight-only",
+        "source_artifact_digest": source_artifact_digest,
+        "source_quantization": "bfloat16",
+        "stages": [
+            {
+                "assignment_artifact_bytes": 11_674_894_879,
+                "assignment_files": [
+                    "config.json",
+                    "model-00001-of-00004.safetensors",
+                    "model-00002-of-00004.safetensors",
+                    "model-00003-of-00004.safetensors",
+                ],
+                "backend": "mlx",
+                "decode_mode": "complete_context_replay",
+                "end_layer_exclusive": 22,
+                "node_id": "node-0",
+                "stage_index": 0,
+                "start_layer": 0,
+            },
+            {
+                "assignment_artifact_bytes": 7_421_104_759,
+                "assignment_files": [
+                    "config.json",
+                    "model-00003-of-00004.safetensors",
+                    "model-00004-of-00004.safetensors",
+                ],
+                "backend": "mlx",
+                "decode_mode": "complete_context_replay",
+                "end_layer_exclusive": 28,
+                "node_id": "reviewer-mac-2",
+                "stage_index": 1,
+                "start_layer": 22,
+            },
+        ],
+    }
+
+
 def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
     stages = [
         {
@@ -2108,6 +2188,9 @@ def documents() -> dict[str, dict[str, Any]]:
         "path-manifest-v1.json": path_manifest_document(graph),
         "live-route-status-v1.json": live_route_status(graph),
         "deployment-activation-v1.json": deployment_activation_status(),
+        "model-preparation-authorization-v2.json": (
+            model_preparation_authorization_v2()
+        ),
         "deployment-residency-physical-v1.json": deployment_residency_physical_gate(),
         "governance-readiness-v1.json": governance_readiness(),
         "evidence-projection-v1.json": evidence_projection(),

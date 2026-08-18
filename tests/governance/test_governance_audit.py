@@ -18,6 +18,7 @@ def _isolated(tmp_path: Path) -> tuple[Path, dict]:
         ledger["governing_plan"],
         ledger["architecture_ledger"],
         ledger["contract_manifest"]["path"],
+        "ui/web/src/app/contracts.ts",
         *(item["client"] for item in ledger["authorized_product_actions"]),
     }
     for relative in paths:
@@ -46,6 +47,65 @@ def test_governance_ledger_matches_architecture_and_never_claims_release() -> No
         "release_ready": False,
     }
     assert str(result["ledger_digest"]).startswith("sha256:")
+
+
+def test_model_preparation_authority_covers_cold_and_warm_product_actions() -> None:
+    ledger = json.loads((ROOT / LEDGER_PATH).read_text("utf-8"))
+    action = next(
+        item
+        for item in ledger["authorized_product_actions"]
+        if item["client"] == "ui/web/src/features/models/modelPreparation.ts"
+    )
+
+    assert action["methods"] == ["POST"]
+    assert action["endpoints"] == [
+        "/__mycelium/model-preparation/start",
+        "/__mycelium/model-preparation/reacquire",
+    ]
+
+
+def test_governance_rejects_implemented_endpoint_missing_from_ledger(
+    tmp_path: Path,
+) -> None:
+    root, ledger = _isolated(tmp_path)
+    invalid = copy.deepcopy(ledger)
+    action = next(
+        item
+        for item in invalid["authorized_product_actions"]
+        if item["client"] == "ui/web/src/features/models/modelPreparation.ts"
+    )
+    action["endpoints"].remove("/__mycelium/model-preparation/reacquire")
+    _write(root, invalid)
+
+    result = audit(root)
+
+    assert result["ok"] is False
+    assert (
+        "product_action_endpoint_set_mismatch:"
+        "ui/web/src/features/models/modelPreparation.ts"
+    ) in result["findings"]
+
+
+def test_governance_rejects_governed_endpoint_missing_from_client(
+    tmp_path: Path,
+) -> None:
+    root, ledger = _isolated(tmp_path)
+    invalid = copy.deepcopy(ledger)
+    action = next(
+        item
+        for item in invalid["authorized_product_actions"]
+        if item["client"] == "ui/web/src/features/models/modelPreparation.ts"
+    )
+    action["endpoints"].append("/__mycelium/model-preparation/absent")
+    _write(root, invalid)
+
+    result = audit(root)
+
+    assert result["ok"] is False
+    assert (
+        "product_action_endpoint_set_mismatch:"
+        "ui/web/src/features/models/modelPreparation.ts"
+    ) in result["findings"]
 
 
 def test_governance_rejects_unsupported_milestone_promotion(tmp_path: Path) -> None:

@@ -685,7 +685,10 @@ def test_physical_prepare_timeout_scales_with_archive_size_and_stays_bounded() -
     assert controller_module._stage_timeout_seconds(30 * 1024 * 1024) == 120.0
     assert controller_module._stage_timeout_seconds(90 * 1024 * 1024) == 240.0
     assert 735.0 < controller_module._stage_timeout_seconds(354_068_480) < 736.0
-    assert controller_module._stage_timeout_seconds(10**12) == 900.0
+    assert 20_800.0 < controller_module._stage_timeout_seconds(
+        10_878_450_728 + 13_178_880
+    ) < 20_900.0
+    assert controller_module._stage_timeout_seconds(10**12) == 21_600.0
 
 
 def test_physical_prepare_streams_verified_archive_and_requires_bound_acknowledgements(
@@ -902,6 +905,19 @@ def test_physical_prepare_binds_member_prepositioned_artifacts(tmp_path: Path) -
     assert [call[2] for call in runner.calls] == [
         archive + member_document
         for archive, member_document in zip(archives, member_documents, strict=True)
+    ]
+    assert [call[1] for call in runner.calls] == [
+        controller_module._stage_timeout_seconds(
+            len(archive)
+            + len(member_document)
+            + sum(
+                record["size_bytes"]
+                for record in prepositioned["members"][peer.node_id]
+            )
+        )
+        for peer, archive, member_document in zip(
+            peers, archives, member_documents, strict=True
+        )
     ]
     assert [action["preposition_digest"] for action in result["actions"]] == (
         preposition_digests
@@ -2089,6 +2105,33 @@ def test_physical_run_rejects_endpoint_secret_outside_identity_root(
     assert runner.calls == []
 
 
+def test_physical_run_accepts_private_singular_identity_directory(
+    tmp_path: Path,
+) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+    run_plan = _physical_run_plan(
+        peers,
+        identity_root="/srv/mycelium-member/state/identity",
+    )
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=run_plan,
+        session_factory=FakeNodeSession,
+    )
+
+    result = controller.execute("run")
+
+    assert result["route_ready"] is False
+
+
 @pytest.mark.parametrize(
     "python_executable",
     ["python3", "/opt/mycelium/../python3", "/opt/mycelium/python3\n"],
@@ -2196,6 +2239,7 @@ def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
         assert staged.read_bytes() == (source_root / record["path"]).read_bytes()
         assert staged.stat().st_mode & 0o777 == 0o600
     assert not (staging_root / ".incoming.tar").exists()
+    assert not (staging_root / ".mycelium-stage-in-progress.json").exists()
 
     cleanup_argv = (
         sys.executable,
@@ -2218,6 +2262,167 @@ def test_remote_stage_program_verifies_extracts_and_acknowledges_archive(
     )
     assert second_cleanup.returncode == 0
     assert json.loads(second_cleanup.stdout)["removed"] is False
+
+
+def test_remote_cleanup_authenticates_and_removes_interrupted_stage(
+    tmp_path: Path,
+) -> None:
+    staging_root = tmp_path / "remote" / "mycelium-run" / "node-1"
+    staging_root.mkdir(parents=True)
+    archive_digest = "sha256:" + "a" * 64
+    marker = {
+        "archive_digest": archive_digest,
+        "node_id": "node-1",
+    }
+    journal = staging_root / ".mycelium-stage-in-progress.json"
+    journal.write_text(
+        json.dumps(marker, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    journal.chmod(0o600)
+    (staging_root / "partial.bin").write_bytes(b"partial")
+
+    cleanup = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_CLEANUP_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+        ),
+        timeout_seconds=10.0,
+    )
+
+    assert cleanup.returncode == 0
+    assert cleanup.stderr == b""
+    assert json.loads(cleanup.stdout)["removed"] is True
+    assert not staging_root.exists()
+
+
+def test_remote_stage_replaces_authenticated_completed_candidate_stage(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path / "source")
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    staging_root = tmp_path / "remote" / "mycelium-candidate" / "node-1"
+    staging_root.mkdir(parents=True)
+    old_marker = staging_root / ".mycelium-stage.json"
+    old_marker.write_text(
+        json.dumps(
+            {
+                "archive_digest": "sha256:" + "a" * 64,
+                "node_id": "node-1",
+                "preposition_digest": "sha256:" + "b" * 64,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    old_marker.chmod(0o600)
+    (staging_root / "old-runtime.py").write_text("old", encoding="utf-8")
+
+    capture = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_STAGE_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+            str(len(archive)),
+        ),
+        timeout_seconds=10.0,
+        stdin_bytes=archive,
+    )
+
+    assert capture.returncode == 0
+    assert capture.stderr == b""
+    assert json.loads(capture.stdout)["archive_digest"] == archive_digest
+    assert not (staging_root / "old-runtime.py").exists()
+    assert json.loads((staging_root / ".mycelium-stage.json").read_text()) == {
+        "archive_digest": archive_digest,
+        "node_id": "node-1",
+    }
+
+
+def test_remote_stage_rejects_completed_stage_for_another_node(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path / "source")
+    archive = build_transfer_archive(source_root, transfers)
+    archive_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    staging_root = tmp_path / "remote" / "mycelium-candidate" / "node-1"
+    staging_root.mkdir(parents=True)
+    marker = staging_root / ".mycelium-stage.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "archive_digest": "sha256:" + "a" * 64,
+                "node_id": "node-2",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+
+    capture = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_STAGE_SCRIPT,
+            str(staging_root),
+            "node-1",
+            archive_digest,
+            str(len(archive)),
+        ),
+        timeout_seconds=10.0,
+        stdin_bytes=archive,
+    )
+
+    assert capture.returncode == 2
+    assert capture.stderr == b"remote_stage_rejected\n"
+    assert staging_root.exists()
+    assert marker.exists()
+
+
+def test_remote_cleanup_rejects_unbound_interrupted_stage(tmp_path: Path) -> None:
+    staging_root = tmp_path / "remote" / "mycelium-run" / "node-1"
+    staging_root.mkdir(parents=True)
+    journal = staging_root / ".mycelium-stage-in-progress.json"
+    journal.write_text(
+        json.dumps(
+            {"archive_digest": "sha256:" + "b" * 64, "node_id": "node-1"},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    journal.chmod(0o600)
+
+    cleanup = SubprocessRunner().run(
+        (
+            sys.executable,
+            "-c",
+            _REMOTE_CLEANUP_SCRIPT,
+            str(staging_root),
+            "node-1",
+            "sha256:" + "a" * 64,
+        ),
+        timeout_seconds=10.0,
+    )
+
+    assert cleanup.returncode == 2
+    assert cleanup.stdout == b""
+    assert cleanup.stderr == b"remote_cleanup_rejected\n"
+    assert staging_root.exists()
 
 
 def test_remote_stage_program_verifies_member_promoted_artifact(
@@ -2423,5 +2628,5 @@ def test_subprocess_runner_allows_bounded_large_archive_timeout() -> None:
     with pytest.raises(ControllerError, match="runner_arguments_invalid"):
         runner.run(
             (sys.executable, "-c", "pass"),
-            timeout_seconds=900.1,
+            timeout_seconds=21_600.1,
         )

@@ -12,6 +12,7 @@ from mycelium_live.registry import (
     DeploymentSelectionError,
     LiveDeploymentRegistry,
     QualifiedDeploymentRuntime,
+    UnavailableDeployment,
 )
 from mycelium_live.route import FakeLiveRoute
 
@@ -46,6 +47,70 @@ def _runtime(index: int) -> QualifiedDeploymentRuntime:
             deployment_id=f"deployment-{index}",
             model_id=f"Qwen/model-{index}",
         ),
+    )
+
+
+def _unavailable(index: int) -> UnavailableDeployment:
+    return UnavailableDeployment(
+        deployment_id=f"deployment-{index}",
+        model_id=f"Qwen/model-{index}",
+        model_revision=f"{index}" * 40,
+        quantization="int8-weight-only",
+        topology_size=2,
+        reason_code="node_command_rejected",
+        observed_at_unix_ms=2_000 + index,
+    )
+
+
+def test_registry_serves_fail_closed_control_plane_without_live_route() -> None:
+    registry = LiveDeploymentRegistry(
+        [],
+        unavailable_deployments=(_unavailable(0),),
+    )
+
+    assert registry.current() is None
+    assert registry.is_alive() is False
+    assert registry.registry_status() == {
+        "protocol": "mycelium.live_deployment_registry.v1",
+        "selected_deployment_id": "deployment-0",
+        "switching_allowed": True,
+        "deployments": [
+            {
+                "deployment_id": "deployment-0",
+                "model_id": "Qwen/model-0",
+                "model_revision": "0" * 40,
+                "quantization": "int8-weight-only",
+                "topology_size": 2,
+                "health": "unavailable",
+                "qualified_at_unix_ms": 0,
+                "qualification_id": "unavailable",
+            }
+        ],
+    }
+    public = registry.public_status()
+    assert public["route_alive"] is False
+    assert public["simulated"] is False
+    assert public["counters"]["fatal"] == "node_command_rejected"
+    assert public["incidents"][-1]["state"] == "configured_deployment_unavailable"
+    assert registry.membership_status(qualification=None)["native_nodes"] == []
+    with pytest.raises(RuntimeError, match="deployment_unavailable"):
+        registry.current_deployment()
+
+
+def test_first_qualified_runtime_restores_service_from_degraded_registry() -> None:
+    registry = LiveDeploymentRegistry(
+        [],
+        unavailable_deployments=(_unavailable(0),),
+        clock_unix_ms=lambda: 9_000,
+    )
+
+    status = registry.add_qualified_runtime(_runtime(1))
+
+    assert status["selected_deployment_id"] == "deployment-1"
+    assert registry.current_deployment().deployment_id == "deployment-1"
+    assert registry.current() is not None
+    assert registry.public_status()["incidents"][-1]["state"] == (
+        "qualified_service_restored"
     )
 
 

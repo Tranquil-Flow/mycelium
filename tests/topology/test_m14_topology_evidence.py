@@ -129,6 +129,47 @@ def test_measured_exact_cycle_is_selected_and_opened_at_entry() -> None:
     assert len(decision["candidates"]) == 2
 
 
+def test_generic_matrix_can_admit_two_current_physical_nodes() -> None:
+    nodes = ("node-a", "node-b")
+    endpoints = {node: ENDPOINTS[node] for node in nodes}
+    values = [
+        observation("node-a", "node-b", 4),
+        observation("node-b", "node-a", 7),
+    ]
+
+    matrix = complete_directed_observation_matrix(
+        values,
+        node_ids=nodes,
+        endpoint_ids_by_node=endpoints,
+        now_unix_ms=2_000,
+        minimum_node_count=2,
+    )
+    decision = select_measured_topology(
+        matrix,
+        node_ids=nodes,
+        entry_node_id="node-b",
+    )
+
+    assert set(matrix) == {("node-a", "node-b"), ("node-b", "node-a")}
+    assert decision["opened_order"] == ["node-b", "node-a"]
+    assert decision["loopback"] == {"src": "node-a", "dst": "node-b"}
+
+
+def test_m14_default_still_requires_three_nodes() -> None:
+    nodes = ("node-a", "node-b")
+    endpoints = {node: ENDPOINTS[node] for node in nodes}
+    with pytest.raises(ValueError, match="M14 requires at least three"):
+        complete_directed_observation_matrix(
+            [
+                observation("node-a", "node-b", 4),
+                observation("node-b", "node-a", 7),
+            ],
+            node_ids=nodes,
+            endpoint_ids_by_node=endpoints,
+            now_unix_ms=2_000,
+        )
+
+
 def test_projection_carries_complete_matrix_without_endpoint_addresses() -> None:
     values = matrix_values()
     matrix = complete_directed_observation_matrix(

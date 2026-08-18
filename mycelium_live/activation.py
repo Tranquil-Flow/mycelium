@@ -352,13 +352,17 @@ class PreparedDeploymentActivation:
         for candidate_id, candidate in sorted(candidates.items()):
             deployment = registered.get(candidate.deployment_id)
             attempt = self._attempts.get(candidate_id)
-            if deployment is not None:
+            if attempt is not None and attempt.state == "activating":
+                state = attempt.state
+                phase = attempt.phase
+                reason = attempt.reason_code
+            elif deployment is not None:
                 state = (
-                    "active"
+                    "unavailable"
+                    if deployment.get("health") != "qualified"
+                    else "active"
                     if candidate.deployment_id == selected
                     else "qualified"
-                    if deployment.get("health") == "qualified"
-                    else "unavailable"
                 )
                 phase = None
                 reason = None if state != "unavailable" else "route_unavailable"
@@ -442,7 +446,8 @@ class PreparedDeploymentActivation:
             candidate = self._candidates.get(candidate_id)
             if candidate is None:
                 raise DeploymentActivationError("candidate_unknown")
-            if candidate.deployment_id in self._registered():
+            deployment = self._registered().get(candidate.deployment_id)
+            if deployment is not None and deployment.get("health") == "qualified":
                 return self._status_locked()
             if self._busy_candidate_id is not None:
                 if self._busy_candidate_id == candidate_id:

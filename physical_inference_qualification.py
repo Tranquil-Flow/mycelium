@@ -70,9 +70,9 @@ _FORBIDDEN_NAME_RE = re.compile(
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
-_MAX_RUNNER_TIMEOUT_SECONDS = 900.0
-NODE_COMMAND_TIMEOUT_SECONDS = 270.0
-NODE_SESSION_TIMEOUT_SECONDS = 300.0
+_MAX_RUNNER_TIMEOUT_SECONDS = 6 * 60 * 60.0
+NODE_COMMAND_TIMEOUT_SECONDS = 900.0
+NODE_SESSION_TIMEOUT_SECONDS = 930.0
 _MIN_STAGE_TIMEOUT_SECONDS = 120.0
 _MAX_STAGE_TIMEOUT_SECONDS = _MAX_RUNNER_TIMEOUT_SECONDS
 _STAGE_TIMEOUT_OVERHEAD_SECONDS = 60.0
@@ -86,12 +86,28 @@ _REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,stat,sys,tarfile
 from pathlib import Path,PurePosixPath
 root=Path(sys.argv[1]);node_id=sys.argv[2];expected_digest=sys.argv[3];expected_size=int(sys.argv[4]);preposition_digest=sys.argv[5] if len(sys.argv)>5 else None;preposition_size=int(sys.argv[6]) if len(sys.argv)>6 else 0;created=False
 try:
-    if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or root.exists():raise ValueError("root")
+    if not root.is_absolute() or str(root)!=sys.argv[1] or len(root.parts)<4 or not any(part.startswith("mycelium") for part in root.parts):raise ValueError("root")
     current=Path(root.anchor)
     for part in root.parts[1:-1]:
         current=current/part
         if current.exists() and current.is_symlink():raise ValueError("symlink")
+    if root.exists():
+        metadata=root.lstat();marker_path=root/".mycelium-stage.json"
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode) or metadata.st_uid!=os.geteuid():raise ValueError("root")
+        marker_metadata=marker_path.lstat()
+        if not stat.S_ISREG(marker_metadata.st_mode) or marker_metadata.st_nlink!=1 or marker_metadata.st_uid!=os.geteuid() or marker_metadata.st_size>1024:raise ValueError("marker")
+        marker=json.loads(marker_path.read_text(encoding="utf-8"));keys=set(marker)
+        if keys not in ({"archive_digest","node_id"},{"archive_digest","node_id","preposition_digest"}) or marker["node_id"]!=node_id:raise ValueError("marker")
+        if not isinstance(marker["archive_digest"],str) or len(marker["archive_digest"])!=71 or not marker["archive_digest"].startswith("sha256:"):raise ValueError("marker")
+        if "preposition_digest" in marker and (not isinstance(marker["preposition_digest"],str) or len(marker["preposition_digest"])!=71 or not marker["preposition_digest"].startswith("sha256:")):raise ValueError("marker")
+        shutil.rmtree(root)
     root.mkdir(parents=True,mode=0o700,exist_ok=False);created=True
+    journal={"archive_digest":expected_digest,"node_id":node_id}
+    if preposition_digest is not None:journal["preposition_digest"]=preposition_digest
+    journal_path=root/".mycelium-stage-in-progress.json"
+    with journal_path.open("x",encoding="utf-8") as output:
+        output.write(json.dumps(journal,sort_keys=True,separators=(",",":"))+"\n");output.flush();os.fsync(output.fileno())
+    journal_path.chmod(0o600)
     archive_path=root/".incoming.tar";digest=hashlib.sha256();received=0
     flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL
     if hasattr(os,"O_NOFOLLOW"):flags|=os.O_NOFOLLOW
@@ -170,8 +186,13 @@ try:
     marker={"archive_digest":actual,"node_id":node_id}
     if actual_preposition is not None:marker["preposition_digest"]=actual_preposition
     marker_path=root/".mycelium-stage.json"
-    with marker_path.open("x",encoding="utf-8") as output:output.write(json.dumps(marker,sort_keys=True,separators=(",",":"))+"\n")
+    with marker_path.open("x",encoding="utf-8") as output:
+        output.write(json.dumps(marker,sort_keys=True,separators=(",",":"))+"\n");output.flush();os.fsync(output.fileno())
     marker_path.chmod(0o600)
+    journal_path.unlink()
+    directory=os.open(root,os.O_RDONLY)
+    try:os.fsync(directory)
+    finally:os.close(directory)
     ack={"archive_digest":actual,"archive_size_bytes":received,"node_id":node_id,"protocol":"mycelium.controller_remote_stage_ack.v1","staging_root":str(root)}
     if actual_preposition is not None:ack.update({"preposition_digest":actual_preposition,"preposition_size_bytes":preposition_size})
     sys.stdout.write(json.dumps(ack,sort_keys=True,separators=(",",":"))+"\n");sys.stdout.flush()
@@ -188,7 +209,10 @@ try:
     if root.exists():
         metadata=root.lstat()
         if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):raise ValueError("root")
-        marker_path=root/".mycelium-stage.json";marker_metadata=marker_path.lstat()
+        marker_path=root/".mycelium-stage.json"
+        try:marker_metadata=marker_path.lstat()
+        except FileNotFoundError:
+            marker_path=root/".mycelium-stage-in-progress.json";marker_metadata=marker_path.lstat()
         if not stat.S_ISREG(marker_metadata.st_mode) or marker_metadata.st_nlink!=1 or marker_metadata.st_size>1024:raise ValueError("marker")
         marker=json.loads(marker_path.read_text(encoding="utf-8"));expected={"archive_digest":archive_digest,"node_id":node_id}
         if preposition_digest is not None:expected["preposition_digest"]=preposition_digest
@@ -529,7 +553,7 @@ class NodeProcessSession:
             or not isinstance(timeout_seconds, (int, float))
             or isinstance(timeout_seconds, bool)
             or not math.isfinite(float(timeout_seconds))
-            or not 0.0 < float(timeout_seconds) <= 300.0
+            or not 0.0 < float(timeout_seconds) <= _MAX_RUNNER_TIMEOUT_SECONDS
         ):
             _reject("node_process_arguments_invalid")
         _segment(node_id, "peer_node_id_invalid")
@@ -1144,7 +1168,7 @@ class QualificationController:
     def _preposition_identity_for_peer(
         self,
         peer: PeerIdentity,
-    ) -> tuple[bytes, str] | None:
+    ) -> tuple[bytes, str, int] | None:
         if self._prepositioned_artifacts is None:
             return None
         members = self._prepositioned_artifacts.get("members")
@@ -1157,7 +1181,14 @@ class QualificationController:
             "files": members[peer.node_id],
         }
         encoded = _canonical_bytes(document)
-        return encoded, "sha256:" + hashlib.sha256(encoded).hexdigest()
+        artifact_bytes = sum(
+            int(record["size_bytes"]) for record in members[peer.node_id]
+        )
+        return (
+            encoded,
+            "sha256:" + hashlib.sha256(encoded).hexdigest(),
+            artifact_bytes,
+        )
 
     def _validate_membership(self) -> dict[str, dict[str, Any]]:
         snapshot = self._membership_snapshot
@@ -1346,14 +1377,17 @@ class QualificationController:
             if not isinstance(endpoint_secret_file, str) or len(endpoint_secret_file) > 1024:
                 _reject("run_plan_endpoint_secret_file_invalid")
             endpoint_secret_path = PurePosixPath(endpoint_secret_file)
-            path_pairs = set(zip(endpoint_secret_path.parts, endpoint_secret_path.parts[1:]))
             if (
                 not endpoint_secret_path.is_absolute()
                 or str(endpoint_secret_path) != endpoint_secret_file
                 or len(endpoint_secret_path.parts) < 5
                 or any(part in {"", ".", ".."} for part in endpoint_secret_path.parts)
                 or any(character in endpoint_secret_file for character in "\n\r\t")
-                or ("mycelium", "identities") not in path_pairs
+                or endpoint_secret_path.parent.name not in {"identity", "identities"}
+                or not any(
+                    part.startswith("mycelium")
+                    for part in endpoint_secret_path.parts[:-2]
+                )
             ):
                 _reject("run_plan_endpoint_secret_file_invalid")
             configure = record.get("configure")
@@ -2395,6 +2429,9 @@ class QualificationController:
                 preposition = self._preposition_identity_for_peer(peer)
                 preposition_bytes = b"" if preposition is None else preposition[0]
                 preposition_digest = None if preposition is None else preposition[1]
+                preposition_artifact_bytes = (
+                    0 if preposition is None else preposition[2]
+                )
                 attempted.append((peer, archive_digest, preposition_digest))
                 stage_arguments = [
                     "python3",
@@ -2416,7 +2453,9 @@ class QualificationController:
                 capture = self._runner.run(
                     argv,
                     timeout_seconds=_stage_timeout_seconds(
-                        len(archive) + len(preposition_bytes)
+                        len(archive)
+                        + len(preposition_bytes)
+                        + preposition_artifact_bytes
                     ),
                     stdin_bytes=archive + preposition_bytes,
                 )

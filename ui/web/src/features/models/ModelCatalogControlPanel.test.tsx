@@ -6,11 +6,11 @@ import { ModelCatalogControlPanel } from './ModelCatalogControlPanel';
 
 const revision = 'a'.repeat(40);
 const digest = `sha256:${'b'.repeat(64)}`;
-const entry = (model_id: string, state: 'compatible' | 'discovered' = 'compatible') => ({ model_id, revision, state, architecture: 'Qwen2ForCausalLM', adapter_id: state === 'compatible' ? 'qwen2_dense' : null, checkpoint_format: 'safetensors', quantization: 'bfloat16', num_layers: 24, weight_bytes: 1_073_741_824, exact_tensor_accounting: true, required_file_count: 4, present_file_count: 4, reasons: state === 'discovered' ? ['runtime_adapter_unavailable:qwen2'] : [], artifact_digest: digest } as const);
+const entry = (model_id: string, state: 'compatible' | 'discovered' = 'compatible') => ({ model_id, revision, state, architecture: 'Qwen2ForCausalLM', adapter_id: state === 'compatible' ? 'qwen2_dense' : null, checkpoint_format: 'safetensors', quantization: 'bfloat16', num_layers: 24, weight_bytes: 1_073_741_824, exact_tensor_accounting: true, required_file_count: 4, present_file_count: 4, reasons: state === 'discovered' ? ['runtime_adapter_unavailable:qwen2'] : [], artifact_digest: digest, serving_representations: [{ quantization: 'int8-weight-only', runtime_dtype: 'float32', quantizer: 'mycelium.rowwise_symmetric_int8.v1', representation_digest: digest, resident_weight_bytes: 536_870_912, load_peak_weight_bytes: 2_684_354_560, preparation_required: true }] } as const);
 const operation: M17ModelOperation = {
   protocol: 'mycelium.model_operation.v1', catalog_generation: 7, catalog_digest: digest,
   entries: [entry('Qwen/Ready'), entry('Qwen/Other', 'discovered')],
-  feasibility_reports: [{ model_id: 'Qwen/Ready', revision, state: 'feasible', planner: 'capability_aware_contiguous_exact_weight_dp', stages: [], reasons: [], evidence_generation: 1, evidence_valid_until_unix_ms: 2_000, evaluated_at_unix_ms: 500, provisioning_authorized: true, maximum_qualified_context_tokens: 4096, maximum_qualified_concurrency: 1, cached_artifact_bytes: 1_073_741_824, missing_artifact_bytes: 0, modeled_transfer_ms: 0, modeled_execution_ms: null, resource_bottleneck: { kind: 'execution', node_id: null, headroom_bytes: null, reason: null }, required_directed_edges: [], feasibility_digest: digest, source_quantization: 'bfloat16', serving_quantization: 'int8-weight-only', serving_dtype: 'float32', representation_digest: digest }],
+  feasibility_reports: [{ model_id: 'Qwen/Ready', revision, state: 'feasible', planner: 'capability_aware_contiguous_exact_weight_dp', stages: [], reasons: [], evidence_generation: 1, evidence_valid_until_unix_ms: 2_000, evaluated_at_unix_ms: 500, provisioning_authorized: true, maximum_qualified_context_tokens: 4096, maximum_qualified_concurrency: 1, cached_artifact_bytes: 1_073_741_824, missing_artifact_bytes: 0, modeled_transfer_ms: 0, modeled_execution_ms: null, resource_bottleneck: { kind: 'execution', node_id: null, headroom_bytes: null, reason: null }, required_directed_edges: [], feasibility_digest: digest, source_quantization: 'bfloat16', serving_quantization: 'int8-weight-only', serving_dtype: 'float32', representation_digest: digest, representation_authority: { kind: 'locally_derived_candidate', owner_decision_digest: null, prior_feasibility_digest: null, source_artifact_digest: null, quantizer: null } }],
   selection_authority: 'qualified_deployment_registry', download_policy: 'operator_approval_required',
   lifecycle: { protocol: 'mycelium.model_lifecycle.v1', catalog_digest: digest, models: [
     { model_id: 'Qwen/Ready', revision, artifact_digest: digest, state: 'feasible', authority: 'capability_aware_planner', reason: 'swarm_capacity_feasible', evidence_ref: digest, deployment_ids: [], active_deployment_id: null, selectable: false },
@@ -85,7 +85,7 @@ describe('ModelCatalogControlPanel', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /I authorize creating this exact derived representation/ }));
     fireEvent.click(authorize);
     expect(prepare).toHaveBeenCalledWith({
-      protocol: 'mycelium.model_representation_decision.v1',
+      protocol: 'mycelium.model_representation_decision.v2',
       model_id: 'Qwen/Ready',
       revision,
       source_quantization: 'bfloat16',
@@ -93,7 +93,26 @@ describe('ModelCatalogControlPanel', () => {
       serving_quantization: 'int8-weight-only',
       representation_digest: digest,
       conversion_authorized: true,
+      source_artifact_digest: digest,
+      quantizer: 'mycelium.rowwise_symmetric_int8.v1',
+      download_authorized: false,
     });
+    expect(screen.getByText(/download remains disabled/i)).toBeInTheDocument();
     expect(screen.getByText(/no action here downloads a model/i)).toBeInTheDocument();
+  });
+
+  it('rechecks an exact prepared candidate without authorizing transfer or activation', () => {
+    const reacquire = vi.fn();
+    render(<ModelCatalogControlPanel operation={operation} activation={activation} capacityRefresh={null} preparation={null} nowUnixMs={1_000} error={null} onActivate={vi.fn()} onReacquire={reacquire} onRefresh={vi.fn()} onRecheckCapacity={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Verify cached copies' }));
+    expect(screen.getByText(/fail instead of transferring missing bytes/)).toBeInTheDocument();
+    const verify = screen.getByRole('button', { name: 'Recheck exact device caches' });
+    expect(verify).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /remains owner-approved/ }));
+    fireEvent.click(verify);
+    expect(reacquire).toHaveBeenCalledWith('candidate-ready', expect.objectContaining({
+      model_id: 'Qwen/Ready', revision, representation_digest: digest,
+      conversion_authorized: true, download_authorized: false,
+    }));
   });
 });

@@ -98,27 +98,32 @@ def _softmax(value: np.ndarray, axis: int) -> np.ndarray:
     return (exponent / np.sum(exponent, axis=axis, keepdims=True)).astype(dtype)
 
 
+def quantize_qwen2_numpy_tensor(key: str, raw: Any) -> Any:
+    """Quantize one Qwen matrix without retaining its float source."""
+
+    value = np.asarray(raw)
+    if not key.endswith(".weight") or value.ndim != 2:
+        return raw
+    compute = value.astype(np.float32)
+    scales = np.max(np.abs(compute), axis=1) / 127.0
+    scales = np.where(scales == 0.0, 1.0, scales).astype(np.float32)
+    scaled = compute / scales[:, None]
+    rounded = np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)
+    quantized = np.clip(rounded, -127, 127).astype(np.int8)
+    quantized.flags.writeable = False
+    scales.flags.writeable = False
+    return Int8RowwiseWeight(quantized, scales)
+
+
 def quantize_qwen2_numpy_tensors(
     tensors: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Replace Qwen2 matrix weights with deterministic symmetric int8 rows."""
 
-    result: dict[str, Any] = {}
-    for key, raw in tensors.items():
-        value = np.asarray(raw)
-        if key.endswith(".weight") and value.ndim == 2:
-            compute = value.astype(np.float32)
-            scales = np.max(np.abs(compute), axis=1) / 127.0
-            scales = np.where(scales == 0.0, 1.0, scales).astype(np.float32)
-            scaled = compute / scales[:, None]
-            rounded = np.sign(scaled) * np.floor(np.abs(scaled) + 0.5)
-            quantized = np.clip(rounded, -127, 127).astype(np.int8)
-            quantized.flags.writeable = False
-            scales.flags.writeable = False
-            result[key] = Int8RowwiseWeight(quantized, scales)
-        else:
-            result[key] = raw
-    return result
+    return {
+        key: quantize_qwen2_numpy_tensor(key, raw)
+        for key, raw in tensors.items()
+    }
 
 
 def _qwen2_linear(hidden: np.ndarray, weight: Any) -> np.ndarray:

@@ -66,7 +66,7 @@ export interface LiveRouteIncident {
   readonly incident_id: string;
   readonly deployment_id: string;
   readonly request_id: string | null;
-  readonly state: 'route_failed_closed' | 'qualified_failover_selected' | 'qualified_deployment_selected' | 'qualified_candidate_promoted' | 'qualified_candidate_rolled_back';
+  readonly state: 'route_failed_closed' | 'configured_deployment_unavailable' | 'qualified_service_restored' | 'qualified_failover_selected' | 'qualified_deployment_selected' | 'qualified_candidate_promoted' | 'qualified_candidate_rolled_back';
   readonly reason: string;
   readonly observed_at_unix_ms: number;
 }
@@ -418,7 +418,7 @@ function incident(value: unknown, path: string): LiveRouteIncident {
     throw new TypeError(`${path}.protocol is unsupported`);
   }
   if (
-    !['route_failed_closed', 'qualified_failover_selected', 'qualified_deployment_selected', 'qualified_candidate_promoted', 'qualified_candidate_rolled_back'].includes(String(item.state))
+    !['route_failed_closed', 'configured_deployment_unavailable', 'qualified_service_restored', 'qualified_failover_selected', 'qualified_deployment_selected', 'qualified_candidate_promoted', 'qualified_candidate_rolled_back'].includes(String(item.state))
   ) {
     throw new TypeError(`${path}.state is invalid`);
   }

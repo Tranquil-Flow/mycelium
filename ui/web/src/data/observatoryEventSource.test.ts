@@ -55,6 +55,7 @@ class FakeEventStream implements LiveEventStream {
 
 function harness(options: {
   initial?: unknown;
+  initialSequence?: readonly unknown[];
   initialBytes?: readonly Uint8Array[];
   contentLength?: string;
   now?: () => number;
@@ -64,8 +65,11 @@ function harness(options: {
   const calls: Array<{ url: string; init: LiveFetchInit }> = [];
   const fetcher: ObservatoryEventFetch = async (url, init) => {
     calls.push({ url, init });
+    const sequenceValue = options.initialSequence?.[
+      Math.min(calls.length - 1, options.initialSequence.length - 1)
+    ];
     const defaultBody = new TextEncoder().encode(
-      JSON.stringify(structuredClone(options.initial ?? validObservatoryAdapterEvent())),
+      JSON.stringify(structuredClone(sequenceValue ?? options.initial ?? validObservatoryAdapterEvent())),
     );
     const chunks = options.initialBytes ?? [defaultBody];
     return {
@@ -221,6 +225,37 @@ describe('live read-only Observatory event source', () => {
     stream.emit(validObservatoryAdapterEvent(2, 4), '2');
     expect(source.getState()!.status).toBe('connected');
     expect(source.getState()!.generation).toBe(2);
+  });
+
+  it('reconstructs a restarted backend only from a strictly newer same-origin snapshot', async () => {
+    const beforeRestart = validObservatoryAdapterEvent(9, 12);
+    beforeRestart.bundle.snapshot.observed_at_unix_ms = 1_000;
+    const staleRestart = validObservatoryAdapterEvent(1, 1);
+    staleRestart.bundle.snapshot.observed_at_unix_ms = 999;
+    const afterRestart = validObservatoryAdapterEvent(1, 1);
+    afterRestart.bundle.snapshot.observed_at_unix_ms = 2_000;
+    const { source, stream, calls } = harness({
+      initialSequence: [beforeRestart, staleRestart, afterRestart],
+      now: () => 2_000,
+    });
+    await source.loadInitial();
+    source.subscribe(() => undefined);
+    stream.open();
+    stream.fail();
+    stream.open();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(source.getState()!.status).toBe('disconnected');
+    expect(source.getState()!.reason).toMatch(/restart snapshot unavailable/i);
+    expect(calls).toHaveLength(2);
+
+    stream.open();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(source.getState()!.status).toBe('connected');
+    expect(source.getState()!.generation).toBe(1);
+    expect(source.getState()!.source_cursor).toBe(1);
+    expect(calls).toHaveLength(3);
   });
 
   it('promotes only current accepted physical evidence and revokes readiness on disconnect', async () => {

@@ -52,7 +52,7 @@ function identity(modelId: string, revision: string): string {
   return `${modelId}@${revision}`;
 }
 
-function humanReason(value: string): string {
+export function humanReason(value: string): string {
   const [rawCode, suffix] = value.split(':', 2);
   const code = rawCode.replace(/^m\d+_/, '');
   const subject = suffix?.trim();
@@ -69,6 +69,8 @@ function humanReason(value: string): string {
     no_feasible_contiguous_exact_weight_allocation: 'No safe contiguous layer allocation fits this swarm',
     startup_challenge_failed: 'Distributed startup challenge failed',
     route_unavailable: 'Prepared route is no longer reachable',
+    model_preparation_workspace_unavailable: 'Preparation storage was disconnected or changed; reconnect it, restart Mycelium, and retry',
+    model_preparation_diagnostic_write_failed: 'Preparation storage could not retain its private diagnostic record',
     owner_metadata_reconciliation_required: 'Waiting for owner metadata reconciliation',
     member_inventory_identity_conflict: 'Member inventories disagree on immutable model identity',
   });
@@ -115,8 +117,10 @@ export function projectModelCatalogControls(
     let statusLabel: string;
     let detail: string;
     let action: ModelCatalogRow['action'] = null;
+    const selectedCandidateUnavailable = candidate?.state === 'unavailable'
+      && model.active_deployment_id === candidate.deployment_id;
 
-    if (model.state === 'active' || candidate?.state === 'active') {
+    if ((model.state === 'active' || candidate?.state === 'active') && !selectedCandidateUnavailable) {
       availability = 'active'; statusLabel = 'Active'; detail = 'Serving new inference requests now.';
       const freshReplacement = candidate === null
         && report?.state === 'feasible'
@@ -134,12 +138,12 @@ export function projectModelCatalogControls(
       availability = 'activating'; statusLabel = 'Qualifying'; detail = phaseLabel(candidate.phase);
     } else if (candidate?.state === 'prepared') {
       availability = 'ready_to_activate'; statusLabel = 'Ready to activate'; detail = `Prepared across ${candidate.topology_size} physical ${candidate.topology_size === 1 ? 'stage' : 'stages'}; activation will not download anything.`; action = 'activate';
-    } else if (candidate?.state === 'failed') {
-      availability = 'activation_failed'; statusLabel = 'Activation failed'; detail = humanReason(candidate.reason_code ?? 'activation_failed'); action = 'retry';
+    } else if (candidate?.state === 'failed' || candidate?.state === 'unavailable') {
+      availability = 'activation_failed'; statusLabel = candidate.state === 'unavailable' ? 'Route unavailable' : 'Activation failed'; detail = humanReason(candidate.reason_code ?? (candidate.state === 'unavailable' ? 'route_unavailable' : 'activation_failed')); action = 'retry';
     } else if (isPreparation && preparation?.state === 'preparing') {
       availability = 'preparing'; statusLabel = 'Preparing on swarm'; detail = preparation.phase === 'validating_capacity' ? 'Freezing the current capacity decision.'
         : preparation.phase === 'compiling_assignments' ? 'Splitting the model into assignment-owned stages.'
-          : preparation.phase === 'verifying_local_artifacts' ? 'Verifying local model files and tensor ownership.'
+          : preparation.phase === 'verifying_local_artifacts' ? 'Verifying assigned artifacts and acquiring any missing peer stage data.'
             : preparation.phase === 'staging_peers' ? 'Transferring and verifying only each peer’s assigned model files.'
               : 'Publishing the immutable candidate plan.';
     } else if (isPreparation && preparation?.state === 'failed') {
@@ -151,7 +155,14 @@ export function projectModelCatalogControls(
         ? 'The last capacity result has expired; no provisioning or transfer is authorized.'
         : 'The last capacity rejection has expired; recheck after devices or their resources change.';
     } else if (report?.state === 'feasible') {
-      availability = 'fits_swarm'; statusLabel = 'Fits this swarm'; detail = 'A safe contiguous layer allocation exists and can be prepared from local files without a download.'; action = 'prepare';
+      availability = 'fits_swarm'; action = 'prepare';
+      if (report.representation_authority.kind === 'locally_derived_candidate') {
+        statusLabel = 'Owner approval required';
+        detail = 'Capacity fits, but this exact derived representation is not approved. Review and explicitly authorize it before preparation; downloads remain disabled.';
+      } else {
+        statusLabel = 'Fits this swarm';
+        detail = 'A safe contiguous layer allocation exists for the approved immutable representation and can be prepared from local files without a download.';
+      }
     } else if (report?.state === 'infeasible') {
       availability = 'does_not_fit'; statusLabel = 'Does not fit'; detail = humanReason(report.reasons[0] ?? 'No feasible allocation');
     } else if (entry.state === 'compatible') {

@@ -293,6 +293,15 @@ def _availability_snapshot(
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     availabilities: dict[str, dict[str, Any]] = {}
     for manifest in manifests.values():
+        valid_until = min(
+            manifest["expires_at_unix_ms"],
+            now + config["advertisement_ttl_seconds"] * 1_000,
+        )
+        if valid_until <= now:
+            # Expired inbox records are inert historical control material. Reject
+            # their authority before touching large model objects so retries do not
+            # turn obsolete manifests into recurring storage work.
+            continue
         available = []
         verified_bytes = 0
         for chunk in manifest["chunks"]:
@@ -310,15 +319,6 @@ def _availability_snapshot(
             if verified:
                 available.append(chunk["content_digest"])
                 verified_bytes += chunk["size_bytes"]
-        valid_until = min(
-            manifest["expires_at_unix_ms"],
-            now + config["advertisement_ttl_seconds"] * 1_000,
-        )
-        if valid_until <= now:
-            # Expired inbox records are inert historical control material.  They
-            # must disappear from serving authority without taking the durable
-            # source agent down or hiding other current manifests.
-            continue
         identity = {
             "source_member_id": source,
             "membership_generation": generation,

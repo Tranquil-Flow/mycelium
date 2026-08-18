@@ -6,7 +6,7 @@ import type {
   M17LifecycleModel,
   M17ModelOperation,
 } from '../liveRoute/m17ModelOperation';
-import { projectModelCatalogControls } from './modelCatalogControl';
+import { humanReason, projectModelCatalogControls } from './modelCatalogControl';
 
 const revision = 'a'.repeat(40);
 const digest = `sha256:${'b'.repeat(64)}`;
@@ -41,6 +41,7 @@ function feasibility(modelId: string, state: M17FeasibilityReport['state'], vali
     missing_artifact_bytes: 0, modeled_transfer_ms: 0, modeled_execution_ms: null,
     resource_bottleneck: { kind: state === 'feasible' ? 'execution' : 'memory', node_id: state === 'feasible' ? null : 'node-c', headroom_bytes: null, reason: null },
     required_directed_edges: [], feasibility_digest: digest,
+    representation_authority: { kind: 'locally_derived_candidate' as const, owner_decision_digest: null, prior_feasibility_digest: null, source_artifact_digest: null, quantizer: null },
   });
 }
 
@@ -66,6 +67,12 @@ function activation(candidates: readonly PreparedDeploymentCandidate[]): Deploym
 }
 
 describe('projectModelCatalogControls', () => {
+  it('explains removable preparation storage failures in product language', () => {
+    expect(humanReason('model_preparation_workspace_unavailable')).toBe(
+      'Preparation storage was disconnected or changed; reconnect it, restart Mycelium, and retry',
+    );
+  });
+
   it('joins immutable catalog identity to real activation and selection states', () => {
     const entries = [entry('active'), entry('prepared'), entry('feasible'), entry('large'), entry('unsupported', 'discovered')];
     const rows = projectModelCatalogControls(
@@ -81,6 +88,32 @@ describe('projectModelCatalogControls', () => {
       ['unsupported', 'unsupported', null],
     ]);
     expect(rows[3].detail).toBe('Not enough safe memory on node-c');
+    expect(rows[2].status_label).toBe('Owner approval required');
+    expect(rows[2].detail).toMatch(/not approved.*explicitly authorize.*downloads remain disabled/i);
+  });
+
+  it('distinguishes approved immutable capacity from proposed conversion capacity', () => {
+    const model = entry('approved');
+    const report = feasibility('approved', 'feasible');
+    const approved = {
+      ...report,
+      representation_authority: {
+        kind: 'approved_existing_immutable_representation' as const,
+        owner_decision_digest: digest,
+        prior_feasibility_digest: digest,
+        source_artifact_digest: digest,
+        quantizer: 'mycelium.rowwise_symmetric_int8.v1',
+      },
+    };
+
+    const [row] = projectModelCatalogControls(
+      operation([model], [approved], [lifecycle('approved')]),
+      activation([]),
+      1_000,
+    );
+
+    expect(row.status_label).toBe('Fits this swarm');
+    expect(row.detail).toMatch(/approved immutable representation/i);
   });
 
   it('fails closed when a formerly feasible capacity decision expires', () => {
@@ -126,5 +159,23 @@ describe('projectModelCatalogControls', () => {
     const [row] = projectModelCatalogControls(operation([model], [], [lifecycle('duplicate')]), activation([candidate('duplicate', 'failed'), candidate('duplicate', 'qualified')]), 1_000);
     expect(row.availability).toBe('qualified');
     expect(row.candidate?.state).toBe('qualified');
+  });
+
+  it('offers requalification instead of calling an unavailable selected route active', () => {
+    const model = entry('unavailable-route');
+    const active = {
+      ...lifecycle('unavailable-route', 'active'),
+      deployment_ids: ['deployment-unavailable-route'],
+      active_deployment_id: 'deployment-unavailable-route',
+    };
+    const [row] = projectModelCatalogControls(
+      operation([model], [feasibility('unavailable-route', 'feasible')], [active]),
+      activation([candidate('unavailable-route', 'unavailable')]),
+      1_000,
+    );
+    expect(row.availability).toBe('activation_failed');
+    expect(row.status_label).toBe('Route unavailable');
+    expect(row.detail).toBe('Prepared route is no longer reachable');
+    expect(row.action).toBe('retry');
   });
 });

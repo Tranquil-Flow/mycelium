@@ -147,6 +147,44 @@ def test_shards_exact_planner_ranges_and_rejects_non_covering_ranges(
         )
 
 
+def test_repartitions_an_existing_representation_to_new_exact_ranges(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    values = _write_checkpoint(source)
+    first = tmp_path / "first"
+    shard_qwen2_checkpoint(
+        source,
+        first,
+        shard_count=2,
+        layer_ranges=(range(0, 3), range(3, 4)),
+    )
+
+    second = tmp_path / "second"
+    report = shard_qwen2_checkpoint(
+        first,
+        second,
+        shard_count=2,
+        layer_ranges=(range(0, 2), range(2, 4)),
+    )
+
+    assert report["layer_ranges"] == [
+        {"start_layer": 0, "end_layer_exclusive": 2, "layer_count": 2},
+        {"start_layer": 2, "end_layer_exclusive": 4, "layer_count": 2},
+    ]
+    index = json.loads((second / "model.safetensors.index.json").read_text())
+    assert index["weight_map"]["model.layers.1.weight"].startswith(
+        "model-stage-001"
+    )
+    assert index["weight_map"]["model.layers.2.weight"].startswith(
+        "model-stage-002"
+    )
+    recovered = {}
+    for filename in sorted(set(index["weight_map"].values())):
+        recovered.update(_tensor_bytes(second / filename))
+    assert recovered == values
+
+
 def test_splits_one_stage_into_bounded_deterministic_sub_artifacts(
     tmp_path: Path,
 ) -> None:

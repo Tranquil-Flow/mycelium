@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -362,7 +363,7 @@ def test_int8_serving_feasibility_accounts_for_transient_conversion_peak(
     assert serving_report["serving_dtype"] == "float32"
     assert serving_report["representation_digest"] != entry.artifact_digest
 
-    roomy = (_node("node-a", 20_000), _node("node-b", 20_000))
+    roomy = (_node("node-a", 60_000), _node("node-b", 60_000))
     admitted = evaluate_model_feasibility(
         entry,
         ordered_nodes=roomy,
@@ -387,6 +388,17 @@ def test_int8_serving_feasibility_accounts_for_transient_conversion_peak(
         )
         for stage in admitted["stages"]
     )
+    assert all(
+        stage["load_peak_weight_bytes"]
+        == stage["resident_layer_weight_bytes"]
+        + stage["resident_static_weight_bytes"]
+        + max(
+            entry.int8_streaming_transient_layer_bytes[
+                stage["start_layer"] : stage["end_layer_exclusive"]
+            ]
+        )
+        for stage in admitted["stages"]
+    )
 
 
 def test_existing_immutable_representation_preserves_approved_stage_artifacts(
@@ -394,7 +406,7 @@ def test_existing_immutable_representation_preserves_approved_stage_artifacts(
 ) -> None:
     _model_snapshot(tmp_path, weight_bytes=4_096, matrix_tensors=True)
     (entry,) = scan_huggingface_cache(tmp_path)
-    nodes = (_node("node-a", 20_000), _node("node-b", 20_000))
+    nodes = (_node("node-a", 60_000), _node("node-b", 60_000))
     representation_digest = "sha256:" + "9" * 64
     authorization = {
         "protocol": "mycelium.model_preparation_authorization.v1",
@@ -471,6 +483,93 @@ def test_existing_immutable_representation_preserves_approved_stage_artifacts(
         222,
     ]
     assert report["missing_artifact_bytes"] == 333
+
+
+def test_v2_existing_representation_binds_source_quantizer_and_no_download(
+    tmp_path: Path,
+) -> None:
+    _model_snapshot(tmp_path, weight_bytes=4_096, matrix_tensors=True)
+    (entry,) = scan_huggingface_cache(tmp_path)
+    nodes = (_node("node-a", 60_000), _node("node-b", 60_000))
+    representation = entry.projection()["serving_representations"][0]
+    authorization = {
+        "protocol": "mycelium.model_preparation_authorization.v2",
+        "model_id": entry.model_id,
+        "revision": entry.revision,
+        "source_artifact_digest": entry.artifact_digest,
+        "source_quantization": entry.quantization,
+        "serving_dtype": representation["runtime_dtype"],
+        "serving_quantization": representation["quantization"],
+        "quantizer": representation["quantizer"],
+        "representation_digest": representation["representation_digest"],
+        "conversion_authorized": True,
+        "download_authorized": False,
+        "owner_decision_digest": "sha256:" + "8" * 64,
+        "feasibility_digest": "sha256:" + "7" * 64,
+        "stages": [
+            {
+                "stage_index": 0,
+                "node_id": "node-a",
+                "start_layer": 0,
+                "end_layer_exclusive": 1,
+                "backend": "numpy",
+                "decode_mode": "stage_local_kv",
+                "assignment_files": ["model-stage-001-of-002.safetensors"],
+                "assignment_artifact_bytes": 111,
+            },
+            {
+                "stage_index": 1,
+                "node_id": "node-b",
+                "start_layer": 1,
+                "end_layer_exclusive": 4,
+                "backend": "numpy",
+                "decode_mode": "stage_local_kv",
+                "assignment_files": ["model-stage-002-of-002.safetensors"],
+                "assignment_artifact_bytes": 222,
+            },
+        ],
+    }
+
+    report = evaluate_model_feasibility(
+        entry,
+        ordered_nodes=nodes,
+        workload=_workload(),
+        policy=PlanningPolicy(memory_reserve_fraction=0),
+        evidence=_swarm_evidence(nodes),
+        evaluated_at_unix_ms=1_000,
+        required_decode_mode="stage_local_kv",
+        serving_quantization="int8-weight-only",
+        representation_authorization=authorization,
+    )
+
+    assert report["state"] == "feasible"
+    assert report["representation_authority"] == {
+        "kind": "approved_existing_immutable_representation",
+        "owner_decision_digest": authorization["owner_decision_digest"],
+        "prior_feasibility_digest": authorization["feasibility_digest"],
+        "source_artifact_digest": entry.artifact_digest,
+        "quantizer": representation["quantizer"],
+    }
+
+    for field, value in (
+        ("source_artifact_digest", "sha256:" + "0" * 64),
+        ("quantizer", "other.quantizer"),
+        ("download_authorized", True),
+    ):
+        drift = deepcopy(authorization)
+        drift[field] = value
+        with pytest.raises(ValueError, match="approved_serving_representation_invalid"):
+            evaluate_model_feasibility(
+                entry,
+                ordered_nodes=nodes,
+                workload=_workload(),
+                policy=PlanningPolicy(memory_reserve_fraction=0),
+                evidence=_swarm_evidence(nodes),
+                evaluated_at_unix_ms=1_000,
+                required_decode_mode="stage_local_kv",
+                serving_quantization="int8-weight-only",
+                representation_authorization=drift,
+            )
 
 
 def test_existing_representation_rejects_host_order_drift(tmp_path: Path) -> None:

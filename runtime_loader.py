@@ -35,7 +35,7 @@ from numpy_runtime import (
     NumpyStageBackend,
     execute_loaded_stage as _execute_loaded_numpy_stage,
     tensor_digest as _numpy_tensor_digest,
-    quantize_qwen2_numpy_tensors,
+    quantize_qwen2_numpy_tensor,
 )
 from runtime_contracts import (
     SUPPORTED_NUMPY_DTYPES,
@@ -45,7 +45,10 @@ from runtime_contracts import (
     validate_normalized_numpy_runtime,
 )
 from weight_provisioning import artifact_report_errors
-from weight_quantization import Int8RowwiseWeight
+from weight_quantization import (
+    Int8RowwiseWeight,
+    ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES,
+)
 
 
 LAYER_LOAD_PROOF_PROTOCOL = "mycelium.layer_load_proof.v1"
@@ -807,16 +810,73 @@ def _validate_safetensors_header(
         handle.seek(0)
 
 
+def _decode_float_payload(payload: bytes, source_dtype: str) -> np.ndarray:
+    if source_dtype == "BF16":
+        words = np.frombuffer(payload, dtype="<u2")
+        return (words.astype(np.uint32) << 16).view(np.float32)
+    dtype = "<f2" if source_dtype == "F16" else "<f4"
+    return np.frombuffer(payload, dtype=dtype)
+
+
+def _load_rowwise_int8_weight(
+    handle: BinaryIO,
+    *,
+    data_offset: int,
+    start: int,
+    end: int,
+    source_dtype: str,
+    shape: tuple[int, ...],
+    key: str,
+) -> Int8RowwiseWeight:
+    if len(shape) != 2 or not key.endswith(".weight"):
+        raise _fail(f"invalid row-wise int8 tensor shape: {key}")
+    rows, columns = shape
+    source_item_bytes = _SAFE_DTYPE_BYTES[source_dtype]
+    row_source_bytes = columns * source_item_bytes
+    if rows * row_source_bytes != end - start:
+        raise _fail(f"Safetensors byte length does not match tensor {key}")
+    rows_per_chunk = max(
+        1,
+        ROWWISE_INT8_CONVERSION_CHUNK_FLOAT_BYTES // max(columns * 4, 1),
+    )
+    values = np.empty(shape, dtype=np.int8)
+    scales = np.empty((rows,), dtype=np.float32)
+    for row_start in range(0, rows, rows_per_chunk):
+        row_end = min(rows, row_start + rows_per_chunk)
+        byte_count = (row_end - row_start) * row_source_bytes
+        handle.seek(data_offset + start + row_start * row_source_bytes)
+        payload = handle.read(byte_count)
+        if len(payload) != byte_count:
+            raise _fail(f"truncated Safetensors data for tensor {key}")
+        source = _decode_float_payload(payload, source_dtype)
+        chunk = np.array(
+            source.reshape((row_end - row_start, columns)),
+            dtype=np.float32,
+            order="C",
+            copy=True,
+        )
+        converted = quantize_qwen2_numpy_tensor(key, chunk)
+        if not isinstance(converted, Int8RowwiseWeight):
+            raise _fail(f"row-wise int8 conversion failed for tensor {key}")
+        values[row_start:row_end] = converted.values
+        scales[row_start:row_end] = converted.scales
+    values.flags.writeable = False
+    scales.flags.writeable = False
+    return Int8RowwiseWeight(values, scales)
+
+
 def _load_numpy_safetensors(
     handle: BinaryIO,
     header: Mapping[str, Mapping[str, Any]],
     data_offset: int,
     selected: set[str],
     runtime_dtype: np.dtype[Any],
-) -> dict[str, np.ndarray]:
+    *,
+    quantize_qwen: bool = False,
+) -> dict[str, Any]:
     """Materialize only selected floating tensors without importing MLX."""
 
-    loaded: dict[str, np.ndarray] = {}
+    loaded: dict[str, Any] = {}
     for key in sorted(selected):
         entry = header[key]
         source_dtype = entry["dtype"]
@@ -826,17 +886,23 @@ def _load_numpy_safetensors(
                 f"{source_dtype}"
             )
         start, end = entry["data_offsets"]
+        shape = tuple(int(dimension) for dimension in entry["shape"])
+        if quantize_qwen and key.endswith(".weight") and len(shape) == 2:
+            loaded[key] = _load_rowwise_int8_weight(
+                handle,
+                data_offset=data_offset,
+                start=start,
+                end=end,
+                source_dtype=source_dtype,
+                shape=shape,
+                key=key,
+            )
+            continue
         handle.seek(data_offset + start)
         payload = handle.read(end - start)
         if len(payload) != end - start:
             raise _fail(f"truncated Safetensors data for tensor {key}")
-        if source_dtype == "BF16":
-            words = np.frombuffer(payload, dtype="<u2")
-            source = (words.astype(np.uint32) << 16).view(np.float32)
-        else:
-            dtype = "<f2" if source_dtype == "F16" else "<f4"
-            source = np.frombuffer(payload, dtype=dtype)
-        shape = tuple(int(dimension) for dimension in entry["shape"])
+        source = _decode_float_payload(payload, source_dtype)
         value = np.array(
             source.reshape(shape),
             dtype=runtime_dtype,
@@ -855,6 +921,8 @@ def _load_exact_tensors(
     expected_keys: list[str],
     runtime_dtype: Any,
     runtime_backend: str,
+    *,
+    quantize_qwen: bool = False,
 ) -> dict[str, Any]:
     """Load exactly the assignment-owned tensors from verified safetensors shards."""
 
@@ -884,7 +952,29 @@ def _load_exact_tensors(
             seen_inodes.add(inode)
             header, data_offset = _validate_safetensors_header(handle, path)
             selected = expected_set.intersection(header)
-            if runtime_backend == _MLX_RUNTIME_BACKEND:
+            if runtime_backend == _MLX_RUNTIME_BACKEND and quantize_qwen:
+                numpy_tensors = _load_numpy_safetensors(
+                    handle,
+                    header,
+                    data_offset,
+                    selected,
+                    np.dtype("float32"),
+                    quantize_qwen=True,
+                )
+                selected_tensors = {}
+                for key in sorted(selected):
+                    value = numpy_tensors[key]
+                    if isinstance(value, Int8RowwiseWeight):
+                        converted = Int8RowwiseWeight(
+                            mx.array(value.values),
+                            mx.array(value.scales),
+                        )
+                        mx.eval(converted.values, converted.scales)
+                    else:
+                        converted = mx.array(value).astype(runtime_dtype)
+                        mx.eval(converted)
+                    selected_tensors[key] = converted
+            elif runtime_backend == _MLX_RUNTIME_BACKEND:
                 try:
                     source_tensors = mx.load(handle, format="safetensors")
                 except Exception as exc:
@@ -897,10 +987,20 @@ def _load_exact_tensors(
                     raise _fail(
                         f"MLX tensor names do not match verified header: {path}"
                     )
-                selected_tensors = {
-                    key: source_tensors[key].astype(runtime_dtype)
-                    for key in selected
-                }
+                selected_tensors: dict[str, Any] = {}
+                for key in sorted(selected):
+                    source = source_tensors[key]
+                    if str(source.dtype) not in _SUPPORTED_SOURCE_DTYPES:
+                        raise _fail(
+                            "unverified or quantized source dtype for tensor "
+                            f"{key}: {source.dtype}"
+                        )
+                    converted = source.astype(runtime_dtype)
+                    if isinstance(converted, Int8RowwiseWeight):
+                        mx.eval(converted.values, converted.scales)
+                    else:
+                        mx.eval(converted)
+                    selected_tensors[key] = converted
             else:
                 selected_tensors = _load_numpy_safetensors(
                     handle,
@@ -908,24 +1008,14 @@ def _load_exact_tensors(
                     data_offset,
                     selected,
                     runtime_dtype,
+                    quantize_qwen=quantize_qwen,
                 )
             for key in selected:
                 if key in loaded:
                     raise _fail(
                         f"duplicate assigned tensor across verified files: {key}"
                     )
-                if runtime_backend == _MLX_RUNTIME_BACKEND:
-                    source = source_tensors[key]
-                    if str(source.dtype) not in _SUPPORTED_SOURCE_DTYPES:
-                        raise _fail(
-                            "unverified or quantized source dtype for tensor "
-                            f"{key}: {source.dtype}"
-                        )
                 loaded[key] = selected_tensors[key]
-            if runtime_backend == _MLX_RUNTIME_BACKEND:
-                # MLX loads lazily. Evaluate only assignment-owned tensors while
-                # the verified descriptor remains open.
-                mx.eval({key: loaded[key] for key in selected})
             if _artifact_fingerprint(os.fstat(handle.fileno())) != fingerprint:
                 raise _fail(f"verified artifact changed during load: {path}")
         finally:
@@ -1173,21 +1263,24 @@ def _qwen2_rope(query: Any, key: Any, theta: float, mx: Any) -> tuple[Any, Any]:
     )
 
 
+def _quantize_qwen2_mlx_tensor(key: str, value: Any, mx: Any) -> Any:
+    if not key.endswith(".weight") or len(value.shape) != 2:
+        return value
+    compute = value.astype(mx.float32)
+    scales = mx.max(mx.abs(compute), axis=1) / 127.0
+    scales = mx.where(scales == 0.0, mx.ones_like(scales), scales)
+    scaled = compute / scales[:, None]
+    rounded = mx.sign(scaled) * mx.floor(mx.abs(scaled) + 0.5)
+    quantized = mx.clip(rounded, -127, 127).astype(mx.int8)
+    mx.eval(quantized, scales)
+    return Int8RowwiseWeight(quantized, scales)
+
+
 def _quantize_qwen2_mlx_tensors(tensors: Mapping[str, Any], mx: Any) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in tensors.items():
-        if key.endswith(".weight") and len(value.shape) == 2:
-            compute = value.astype(mx.float32)
-            scales = mx.max(mx.abs(compute), axis=1) / 127.0
-            scales = mx.where(scales == 0.0, mx.ones_like(scales), scales)
-            scaled = compute / scales[:, None]
-            rounded = mx.sign(scaled) * mx.floor(mx.abs(scaled) + 0.5)
-            quantized = mx.clip(rounded, -127, 127).astype(mx.int8)
-            mx.eval(quantized, scales)
-            result[key] = Int8RowwiseWeight(quantized, scales)
-        else:
-            result[key] = value
-    return result
+    return {
+        key: _quantize_qwen2_mlx_tensor(key, value, mx)
+        for key, value in tensors.items()
+    }
 
 
 def _qwen2_linear(hidden: Any, weight: Any, mx: Any) -> Any:
@@ -1828,6 +1921,10 @@ def load_assignment_stage(
             assignment,
             artifact_report,
         )
+        quantize_during_load = (
+            runtime["architecture"] in {"qwen2", "qwen3"}
+            and runtime["quantization"] == "int8-weight-only"
+        )
         tensors = _load_exact_tensors(
             assignment,
             artifact_report,
@@ -1835,16 +1932,8 @@ def load_assignment_stage(
             expected_keys,
             runtime_dtype,
             runtime["backend"],
+            quantize_qwen=quantize_during_load,
         )
-        if (
-            runtime["architecture"] in {"qwen2", "qwen3"}
-            and runtime["quantization"] == "int8-weight-only"
-        ):
-            tensors = (
-                _quantize_qwen2_mlx_tensors(tensors, _mlx_module())
-                if runtime["backend"] == _MLX_RUNTIME_BACKEND
-                else quantize_qwen2_numpy_tensors(tensors)
-            )
         components = list(assignment["components"])
         if runtime["architecture"] in {"qwen2", "qwen3"}:
             _validate_qwen2_shapes(

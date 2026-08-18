@@ -698,6 +698,31 @@ def test_provisioner_acquires_one_pack_from_two_authenticated_https_members(
             thread.join(timeout=5)
 
 
+def test_expired_source_manifest_is_rejected_before_object_hashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest(b"expired-stage-pack")
+    objects = tmp_path / "objects"
+    objects.mkdir()
+
+    def unexpected_digest(_path: Path) -> str:
+        pytest.fail("expired manifest attempted to hash an object")
+
+    monkeypatch.setattr("mycelium_live.artifact_agent._digest", unexpected_digest)
+    availabilities, bundle = _availability_snapshot(
+        manifests={manifest["manifest_digest"]: manifest},
+        object_root=objects,
+        source="member-generic",
+        generation=4,
+        signer=generate_ed25519_signer(endpoint_id="expired-source"),
+        config={"advertisement_ttl_seconds": 300},
+        now=2_001,
+    )
+
+    assert availabilities == {}
+    assert bundle["advertisements"] == []
+
+
 def test_generic_source_agent_loads_private_config_and_publishes_signed_availability(
     tmp_path: Path,
 ) -> None:
@@ -1005,6 +1030,42 @@ def test_assigned_member_acquires_and_promotes_without_coordinator_origin(
             / "layers.safetensors"
         )
         assert promoted.read_bytes() == payload
+
+        # Exact warm reacquisition is cache-only: the signed grant authorizes no
+        # source and the member must prove the already verified content without
+        # opening a transport or falling back to an origin.
+        cache_grant = private / "cache-grant.json"
+        cache_grant.write_text(
+            json.dumps(
+                _grant(
+                    manifest,
+                    provisioner,
+                    sources=(),
+                    grant_id="grant-cache-only-1",
+                )
+            )
+        )
+        cache_grant.chmod(0o600)
+        cache_job = {
+            **job,
+            "grant_file": str(cache_grant),
+            "sources": [],
+            "status_output_file": str(private / "cache-result.json"),
+        }
+        job_file.write_text(json.dumps(cache_job))
+        job_file.chmod(0o600)
+
+        cache_result = acquire_member_stage_pack(
+            job_file, clock_unix_ms=request_clock
+        )
+
+        assert cache_result["state"] == "ready"
+        assert cache_result["cached_verified_bytes"] == len(payload)
+        assert cache_result["transferred_verified_bytes"] == 0
+        assert cache_result["origin_bytes"] == 0
+        assert cache_result["missing_bytes"] == 0
+        assert cache_result["quarantined_bytes"] == 0
+        assert cache_result["sources"] == []
 
         stale = {**job, "recipient_membership_generation": 10}
         job_file.write_text(json.dumps(stale))

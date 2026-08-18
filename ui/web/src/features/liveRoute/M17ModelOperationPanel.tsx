@@ -10,12 +10,20 @@ function milliseconds(value: number | null): string {
   return value >= 1_000 ? `${(value / 1_000).toFixed(1)} s` : `${value.toFixed(1)} ms`;
 }
 
+function throughput(value: number): string {
+  if (value < 1024) return `${value.toFixed(0)} B/s`;
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB/s`;
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MiB/s`;
+  return `${(value / 1024 ** 3).toFixed(1)} GiB/s`;
+}
+
 function reason(value: string): string {
   const separator = value.indexOf(':');
   const code = separator === -1 ? value : value.slice(0, separator);
   const node = separator === -1 ? undefined : value.slice(separator + 1).trim();
   if (code === 'insufficient_disk') return `Not enough disk space${node ? ` on ${node}` : ''}`;
   if (code === 'insufficient_memory') return `Not enough safe memory${node ? ` on ${node}` : ''}`;
+  if (code === 'insufficient_load_memory') return `Not enough memory to load this representation${node ? ` on ${node}` : ''}`;
   if (code === 'missing_weight_artifact') return 'Model weights are incomplete in the local cache';
   if (code === 'swarm_capacity_feasible') return 'Fits the measured swarm but has not been provisioned and qualified';
   if (code === 'catalog_compatible') return 'Runtime-compatible, but not yet provisioned and qualified';
@@ -25,7 +33,7 @@ function reason(value: string): string {
   return value.replaceAll('_', ' ');
 }
 
-export type M17ModelOperationPanelView = 'plans' | 'readiness' | 'nodes' | 'incidents' | 'inference';
+export type M17ModelOperationPanelView = 'plans' | 'readiness' | 'nodes' | 'incidents' | 'inference' | 'network' | 'lab';
 
 export function M17ModelOperationPanel({ operation, view }: { readonly operation: M17ModelOperation; readonly view: M17ModelOperationPanelView }) {
   const nowUnixMs = Date.now();
@@ -56,7 +64,7 @@ export function M17ModelOperationPanel({ operation, view }: { readonly operation
           <div><dt>Active</dt><dd>{operation.lifecycle.models.filter((model) => model.state === 'active').length}</dd></div>
           <div><dt>Qualified standby</dt><dd>{operation.lifecycle.models.filter((model) => model.state === 'qualified').length}</dd></div>
           <div><dt>Fresh feasibility</dt><dd>{operation.feasibility_reports.filter((report) => report.evidence_valid_until_unix_ms >= nowUnixMs).length}</dd></div>
-          <div><dt>Provisioning authorized now</dt><dd>{operation.feasibility_reports.filter((report) => report.provisioning_authorized && report.evidence_valid_until_unix_ms >= nowUnixMs).length}</dd></div>
+          <div><dt>Capacity permits preparation</dt><dd>{operation.feasibility_reports.filter((report) => report.provisioning_authorized && report.evidence_valid_until_unix_ms >= nowUnixMs).length}</dd></div>
         </dl><LifecycleTable operation={operation} /></>
       ) : view === 'nodes' ? (
         <div className={styles.tableWrap}><table>
@@ -71,6 +79,45 @@ export function M17ModelOperationPanel({ operation, view }: { readonly operation
             <td>{stage.maximum_context_tokens.toLocaleString()} context<small> · concurrency {stage.maximum_concurrency} · transfer {milliseconds(stage.modeled_transfer_ms)} · service {milliseconds(stage.modeled_service_work_ms)}</small></td>
           </tr>))}</tbody>
         </table></div>
+      ) : view === 'network' ? (
+        <>
+          <p>These are model-planning edges measured in each direction. Reverse reachability and cost are never inferred.</p>
+          {operation.feasibility_reports.some((report) => report.required_directed_edges.length > 0) ? (
+            <div className={styles.tableWrap}><table>
+              <caption>Directed activation links required by evaluated model routes</caption>
+              <thead><tr><th>Model</th><th>Direction</th><th>Warm RTT</th><th>Jitter</th><th>Observed goodput</th><th>Evidence</th></tr></thead>
+              <tbody>{operation.feasibility_reports.flatMap((report) => report.required_directed_edges.map((edge) => <tr key={`${report.model_id}@${report.revision}:${edge.src}->${edge.dst}`}>
+                <th scope="row">{report.model_id}<small> · {report.revision.slice(0, 8)}</small></th>
+                <td>{edge.src} → {edge.dst}</td>
+                <td>{edge.rtt_ms.toFixed(1)} ms</td>
+                <td>{edge.jitter_ms.toFixed(1)} ms</td>
+                <td>{throughput(edge.goodput_Bps)}</td>
+                <td>{edge.valid_until_unix_ms >= nowUnixMs ? 'Current' : 'Expired'}<small> · {edge.observation_digest.slice(0, 18)}…</small></td>
+              </tr>))}</tbody>
+            </table></div>
+          ) : <p>No model-specific directed route is currently feasible. The catalogue remains visible without implying connectivity.</p>}
+        </>
+      ) : view === 'lab' ? (
+        <>
+          <h3>Physical layer-host eligibility</h3>
+          <p>
+            Browser sessions in Device Lab are bounded local workers, not automatically eligible physical model-layer hosts.
+            A device can enter a model route only after signed resource evidence, compatible runtime and representation support,
+            safe memory and disk headroom, and current directed activation-link measurements all pass.
+          </p>
+          <div className={styles.tableWrap}><table>
+            <caption>Current larger-model host requirements and planner result</caption>
+            <thead><tr><th>Model</th><th>Planner result</th><th>Physical stages</th><th>Current requirement or blocker</th></tr></thead>
+            <tbody>{operation.feasibility_reports.map((report) => <tr key={`${report.model_id}@${report.revision}`}>
+              <th scope="row">{report.model_id}<small> · {report.revision.slice(0, 8)}</small></th>
+              <td>{report.state === 'feasible' ? 'Fits measured devices' : 'Does not fit measured devices'}</td>
+              <td>{report.stages.length}</td>
+              <td>{report.state !== 'feasible' ? reason(report.reasons[0] ?? 'No feasible allocation') : report.representation_authority.kind === 'approved_existing_immutable_representation'
+                ? 'Exact representation approved; assignment acquisition, load, and qualification still required'
+                : 'Owner approval for the exact representation is required before assignment acquisition'}</td>
+            </tr>)}</tbody>
+          </table></div>
+        </>
       ) : view === 'incidents' || view === 'inference' ? (
         <div className={styles.tableWrap}><table>
           <thead><tr><th>Other evaluated model</th><th>Availability</th><th>Capacity evidence</th><th>Reason</th></tr></thead>
@@ -79,26 +126,33 @@ export function M17ModelOperationPanel({ operation, view }: { readonly operation
             const report = reports.get(`${entry.model_id}@${entry.revision}`);
             return <tr key={`${entry.model_id}@${entry.revision}`}>
               <th scope="row">{entry.model_id}<small> · {entry.revision.slice(0, 8)}</small></th>
-              <td>{report?.state === 'feasible' ? 'Fits, not deployed' : 'Unavailable'}</td>
+              <td>{report?.state === 'feasible'
+                ? report.representation_authority.kind === 'locally_derived_candidate' ? 'Fits, owner approval required' : 'Fits, not deployed'
+                : 'Unavailable'}</td>
               <td>{report === undefined ? 'Not evaluated' : report.evidence_valid_until_unix_ms >= nowUnixMs ? 'Current' : 'Stale — recheck required'}</td>
-              <td>{reason(report?.reasons[0] ?? state?.reason ?? entry.reasons[0] ?? 'Not qualified')}</td>
+              <td>{report?.state === 'feasible' && report.representation_authority.kind === 'locally_derived_candidate'
+                ? 'Owner approval for the exact derived representation is required; no preparation has started'
+                : reason(report?.reasons[0] ?? state?.reason ?? entry.reasons[0] ?? 'Not qualified')}</td>
             </tr>;
           })}</tbody>
         </table></div>
       ) : (
         <div className={styles.tableWrap}>
           <table>
-            <thead><tr><th>Local model</th><th>Artifact</th><th>Catalog state</th><th>Feasibility envelope</th><th>Proposed contiguous allocation</th><th>Reason</th></tr></thead>
+            <thead><tr><th>Local model</th><th>Artifact</th><th>Catalog state</th><th>Representation authority</th><th>Feasibility envelope</th><th>Proposed contiguous allocation</th><th>Reason</th></tr></thead>
             <tbody>{operation.entries.map((entry) => {
               const report = reports.get(`${entry.model_id}@${entry.revision}`);
               const evidenceFresh = report !== undefined && report.evidence_valid_until_unix_ms >= nowUnixMs;
               const provisioningLabel = report?.provisioning_authorized === true
-                ? evidenceFresh ? 'provisioning authorized' : 're-evaluation required'
-                : 'transfer blocked';
+                ? evidenceFresh ? 'capacity permits preparation' : 'capacity check expired'
+                : 'capacity blocks preparation';
               return <tr key={`${entry.model_id}@${entry.revision}`}>
                 <th scope="row">{entry.model_id}<small> · {entry.revision.slice(0, 8)}</small></th>
                 <td>{entry.quantization} · {entry.num_layers ?? 'unknown'} layers · {bytes(entry.weight_bytes)}</td>
                 <td>{lifecycle.get(`${entry.model_id}@${entry.revision}`)?.state ?? entry.state}{entry.exact_tensor_accounting ? ' · exact bytes' : ''}</td>
+                <td>{report === undefined ? 'Not evaluated' : report.representation_authority.kind === 'approved_existing_immutable_representation'
+                  ? <>Approved immutable representation<small> · owner decision {report.representation_authority.owner_decision_digest?.slice(0, 18)}…{report.representation_authority.quantizer === null ? null : ` · ${report.representation_authority.quantizer}`}</small></>
+                  : 'Owner approval required for the proposed derived representation'}</td>
                 <td>{report ? <>{report.state}<small> · {provisioningLabel} · context {report.maximum_qualified_context_tokens.toLocaleString()} · concurrency {report.maximum_qualified_concurrency} · {bytes(report.cached_artifact_bytes)} cached / {bytes(report.missing_artifact_bytes)} missing · transfer {milliseconds(report.modeled_transfer_ms)} · execution {milliseconds(report.modeled_execution_ms)} · {report.resource_bottleneck.kind} bottleneck · evidence {evidenceFresh ? 'fresh' : 'stale'}</small></> : 'not evaluated'}</td>
                 <td>{report?.stages.map((stage) => `${stage.node_id} [${stage.start_layer},${stage.end_layer_exclusive}) ${stage.backend}/${stage.quantization}`).join(' → ') ?? 'None'}</td>
                 <td>{reason(report?.reasons[0] ?? entry.reasons[0] ?? 'None')}</td>

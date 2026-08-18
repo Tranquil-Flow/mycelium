@@ -183,12 +183,18 @@ allocation planner before atomically replacing the model-operation generation. I
 single-flight and visibly separate from provisioning, activation, qualification, and
 selection. Standby enrolled members still require a future capability/link probe and
 new route plan before they contribute capacity; enrollment alone is never counted.
-The 2026-08-11 three-host validation inventoried 39 local identities. An initial
-source-weight calculation admitted all five compatible local Qwen identities, but a
-subsequent serving-representation calculation superseded it: Qwen2.5-7B remains
-feasible, while Qwen3-8B is rejected because no contiguous allocation has enough safe
-BF16-to-float32-to-int8 load memory. Neither larger model is prepared, loaded,
-qualified, or selectable yet.
+The local catalogue currently inventories 39 identities. A3 selected the exact local
+Qwen2.5-7B revision `a09a35458c702b33eeacc393d103063234e8bc28` and the owner-approved
+row-wise-int8 representation
+`sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04`.
+The physical M4 Pro → Evi Mac route uses the exact dynamic-program allocation
+`node-0 [0,21) -> reviewer-mac-2 [21,28)`. Cold assignment acquisition, exact warm
+zero-transfer reacquisition, independent parity, stage-local KV execution, physical
+Router counter advance, qualified-only selection, a browser-streamed request, and
+incumbent switchback all passed. The 7B deployment is qualified standby while the
+Qwen2.5-0.5B deployment is the selected active route. Qwen3-8B remains a compatible
+local identity with no owner-approved representation; it is unqualified, unselectable,
+and no provisioning has started.
 
 The catalog now also exposes a separate local-only preparation operation. A browser
 can submit only one catalog model ID and immutable revision; the supervisor freezes a
@@ -203,9 +209,10 @@ BF16-to-int8 materialization peak exceeded the coordinator's safe memory even af
 the challenge was changed from all-stages-resident to one-stage-at-a-time. No candidate
 was published and the incumbent remained qualified. The planner now binds the
 row-wise-int8 representation digest, float32 runtime dtype, exact resident bytes, and
-modeled conversion peak into feasibility and preparation authorization. Fresh
-three-host evidence therefore rejects 8B before provisioning and selects the
-already-local Qwen2.5-7B as the next physical target.
+modeled conversion peak into feasibility and preparation authorization. Capacity alone
+never authorizes Qwen3 conversion; the already-local, explicitly authorized
+Qwen2.5-7B representation is now a physically qualified, dynamically selectable
+deployment.
 
 The A2 acquisition implementation now defines closed assignment-, representation-,
 feasibility-, graph-, member-, file-, chunk-, and Merkle-bound contracts; resumable

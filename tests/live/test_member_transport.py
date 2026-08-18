@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -15,11 +16,18 @@ from mycelium_live.member_transport import (
     _REMOTE_INSTALL_OBJECT_SCRIPT,
     _REMOTE_REGISTER_MANIFEST_SCRIPT,
     _REMOTE_STAGE_SCRIPT,
+    _availability_reconcile_timeout_seconds,
     _member_execution_status,
 )
 from mycelium_live.preparation import ModelPreparationError
 from mycelium_node.identity import load_or_create_node_signer
-from mycelium_swarm_artifacts import canonical_digest
+from mycelium_qualification.signing import generate_ed25519_signer
+from mycelium_swarm_artifacts import (
+    AVAILABILITY_BUNDLE_PROTOCOL,
+    AVAILABILITY_PROTOCOL,
+    canonical_digest,
+    sign_availability,
+)
 
 
 def _canonical(value: object) -> bytes:
@@ -111,6 +119,102 @@ def test_transport_plan_is_private_closed_and_https_only(tmp_path: Path) -> None
         match="member_artifact_source_plan_invalid",
     ):
         MemberArtifactTransport(path)
+
+
+def test_source_availability_reconcile_timeout_scales_with_assignment_bytes() -> None:
+    assert _availability_reconcile_timeout_seconds(0) == 30.0
+    assert _availability_reconcile_timeout_seconds(4 * 1024 * 1024) == 31.0
+    assert _availability_reconcile_timeout_seconds(4 * 1024**3) == 1_054.0
+    assert _availability_reconcile_timeout_seconds(100 * 1024**3) == 1_800.0
+
+
+def test_complete_signed_local_availability_avoids_manifest_retouch(
+    tmp_path: Path,
+) -> None:
+    path = _plan(tmp_path)
+    plan = json.loads(path.read_text())
+    signer = generate_ed25519_signer(endpoint_id="source-a")
+    plan["sources"][0]["verification_key"] = signer.public_key_record()
+    path.write_bytes(_canonical(plan))
+    path.chmod(0o600)
+    digest = "sha256:" + "c" * 64
+    manifest_digest = "sha256:" + "d" * 64
+    manifest = {
+        "manifest_digest": manifest_digest,
+        "chunks": [{"content_digest": digest, "size_bytes": 4}],
+    }
+    manifest_bytes = _canonical(manifest)
+    inbox = Path(plan["sources"][0]["manifest_inbox_directory"])
+    destination = inbox / (manifest_digest.removeprefix("sha256:") + ".json")
+    destination.write_bytes(manifest_bytes)
+    original_mtime = 1_000_000_000
+    destination.chmod(0o400)
+    os.utime(destination, ns=(original_mtime, original_mtime))
+    advertisement = sign_availability(
+        {
+            "protocol": AVAILABILITY_PROTOCOL,
+            "advertisement_id": "advertisement-source-a",
+            "source_member_id": "source-a",
+            "membership_generation": 4,
+            "manifest_digest": manifest_digest,
+            "available_chunk_digests": [digest],
+            "verified_bytes": 4,
+            "max_concurrent_streams": 1,
+            "max_bytes_per_second": 1_000,
+            "serving_priority": 1,
+            "transfer_health": "healthy",
+            "observed_at_unix_ms": 900,
+            "valid_until_unix_ms": 1_100,
+        },
+        signer,
+    )
+    availability = {
+        "protocol": AVAILABILITY_BUNDLE_PROTOCOL,
+        "source_member_id": "source-a",
+        "membership_generation": 4,
+        "advertisements": [advertisement],
+        "published_at_unix_ms": 900,
+    }
+    Path(plan["sources"][0]["availability_bundle_file"]).write_bytes(
+        _canonical(availability)
+    )
+    transport = MemberArtifactTransport(path, clock_unix_ms=lambda: 1_000)
+
+    transport._register_source_manifest(
+        source=transport._plan["sources"][0],
+        manifest_bytes=manifest_bytes,
+        manifest_digest=manifest_digest,
+    )
+
+    assert destination.stat().st_mtime_ns == original_mtime
+
+
+def test_incomplete_local_availability_retouches_manifest(tmp_path: Path) -> None:
+    path = _plan(tmp_path)
+    transport = MemberArtifactTransport(path, clock_unix_ms=lambda: 1_000)
+    manifest_digest = "sha256:" + "d" * 64
+    manifest_bytes = _canonical(
+        {
+            "manifest_digest": manifest_digest,
+            "chunks": [
+                {"content_digest": "sha256:" + "c" * 64, "size_bytes": 4}
+            ],
+        }
+    )
+    inbox = Path(transport._plan["sources"][0]["manifest_inbox_directory"])
+    destination = inbox / (manifest_digest.removeprefix("sha256:") + ".json")
+    destination.write_bytes(manifest_bytes)
+    destination.chmod(0o400)
+    original_mtime = 1_000_000_000
+    os.utime(destination, ns=(original_mtime, original_mtime))
+
+    transport._register_source_manifest(
+        source=transport._plan["sources"][0],
+        manifest_bytes=manifest_bytes,
+        manifest_digest=manifest_digest,
+    )
+
+    assert destination.stat().st_mtime_ns > original_mtime
 
 
 def test_source_ssh_control_is_closed_port_bound_and_argv_only(tmp_path: Path) -> None:

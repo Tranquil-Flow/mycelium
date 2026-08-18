@@ -289,6 +289,7 @@ export default function App({
     content = <>
       <ProductEvidenceSummary compact />
       <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />
+      {source.source_mode === 'live' ? <M17ModelOperationSourcePanel view="lab" /> : null}
     </>;
   } else if (activeView === 'settings') {
     content = <>
@@ -319,6 +320,7 @@ export default function App({
                 : null
           }
         />
+        {source.source_mode === 'live' ? <M17ModelOperationSourcePanel view="inference" /> : null}
       </>
     );
   } else if (rendered.sourceState.source_mode === 'live') {

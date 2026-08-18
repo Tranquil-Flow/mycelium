@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import ctypes
 from dataclasses import dataclass, replace
+import errno
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -1195,18 +1197,23 @@ def _copy_private_file(
         input_metadata = os.fstat(input_descriptor)
         if not stat.S_ISREG(input_metadata.st_mode):
             raise _invalid_local_model_source("source_file_not_regular")
-        output_descriptor = os.open(destination, output_flags, 0o600)
-        with (
-            os.fdopen(input_descriptor, "rb") as source_handle,
-            os.fdopen(output_descriptor, "wb") as destination_handle,
-        ):
+        cloned = _clone_private_file(input_descriptor, destination)
+        if cloned:
+            os.close(input_descriptor)
             input_descriptor = -1
-            output_descriptor = None
-            while True:
-                chunk = source_handle.read(1024 * 1024)
-                if not chunk:
-                    break
-                destination_handle.write(chunk)
+        else:
+            output_descriptor = os.open(destination, output_flags, 0o600)
+            with (
+                os.fdopen(input_descriptor, "rb") as source_handle,
+                os.fdopen(output_descriptor, "wb") as destination_handle,
+            ):
+                input_descriptor = -1
+                output_descriptor = None
+                while True:
+                    chunk = source_handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    destination_handle.write(chunk)
         os.chmod(destination, 0o600)
     except BaseException:
         if input_descriptor >= 0:
@@ -1219,6 +1226,32 @@ def _copy_private_file(
             pass
         raise
     return _record_private_file(destination, relative, seen_inodes)
+
+
+def _clone_private_file(source_descriptor: int, destination: Path) -> bool:
+    """Clone one verified regular file on APFS, falling back when unsupported."""
+
+    try:
+        function = ctypes.CDLL(None, use_errno=True).fclonefileat
+    except (AttributeError, OSError):
+        return False
+    function.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+    function.restype = ctypes.c_int
+    # AT_FDCWD and CLONE_NOFOLLOW keep the destination path fail-closed while the
+    # already-open source descriptor preserves the caller's no-symlink guarantee.
+    if function(source_descriptor, -2, os.fsencode(destination), 1) == 0:
+        return True
+    error = ctypes.get_errno()
+    if error in {
+        errno.ENOSYS,
+        errno.EXDEV,
+        errno.EINVAL,
+        errno.ENOTSUP,
+        errno.EOPNOTSUPP,
+    }:
+        destination.unlink(missing_ok=True)
+        return False
+    raise OSError(error, os.strerror(error), destination)
 
 
 def _materialize_local_model_source(

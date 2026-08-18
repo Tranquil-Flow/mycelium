@@ -899,6 +899,10 @@ def test_model_preparation_endpoints_accept_only_public_identity(
     preparation = SimpleNamespace(
         status=lambda: calls.append("status") or status,
         start=lambda decision: calls.append(decision) or status,
+        reacquire=lambda decision, candidate_id: calls.append(
+            ("reacquire", candidate_id, decision)
+        )
+        or status,
     )
 
     async def app(*_args):
@@ -952,6 +956,34 @@ def test_model_preparation_endpoints_accept_only_public_identity(
         connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
         connection.request(
             "POST",
+            "/__mycelium/model-preparation/reacquire",
+            body=json.dumps(
+                {
+                    "candidate_id": "candidate-1",
+                    "decision": {
+                        "protocol": "mycelium.model_representation_decision.v1",
+                        "model_id": "Qwen/Qwen3-8B",
+                        "revision": revision,
+                        "source_quantization": "bfloat16",
+                        "serving_dtype": "float32",
+                        "serving_quantization": "int8-weight-only",
+                        "representation_digest": "sha256:" + "d" * 64,
+                        "conversion_authorized": True,
+                    },
+                }
+            ),
+            headers={
+                "content-type": "application/json",
+                "origin": f"http://127.0.0.1:{server.server_port}",
+            },
+        )
+        response = connection.getresponse()
+        assert response.status == 202
+        assert json.loads(response.read()) == status
+
+        connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+        connection.request(
+            "POST",
             "/__mycelium/model-preparation/start",
             body=json.dumps(
                 {
@@ -981,6 +1013,20 @@ def test_model_preparation_endpoints_accept_only_public_identity(
                 "representation_digest": "sha256:" + "d" * 64,
                 "conversion_authorized": True,
             },
+            (
+                "reacquire",
+                "candidate-1",
+                {
+                    "protocol": "mycelium.model_representation_decision.v1",
+                    "model_id": "Qwen/Qwen3-8B",
+                    "revision": revision,
+                    "source_quantization": "bfloat16",
+                    "serving_dtype": "float32",
+                    "serving_quantization": "int8-weight-only",
+                    "representation_digest": "sha256:" + "d" * 64,
+                    "conversion_authorized": True,
+                },
+            ),
         ]
     finally:
         server.shutdown()

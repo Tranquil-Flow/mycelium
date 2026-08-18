@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -133,6 +134,136 @@ def test_builds_exact_sorted_pack_chunks_and_component_bindings(
     assert manifest["expires_at_unix_ms"] == 901_000
     assert binding["assignment_id"] == "assignment-1"
     assert binding["placement_id"] == "placement-1"
+
+
+def test_warm_manifest_verifies_exact_chunks_without_materializing_source_objects(
+    tmp_path: Path,
+) -> None:
+    bundle, pack, offer, graph, authorization = _fixture(tmp_path)
+
+    manifest, _binding = build_stage_pack_source(
+        transfer_bundle=bundle,
+        pack=pack,
+        assignment_offer=offer,
+        graph=graph,
+        authorization=authorization,
+        output_root=tmp_path / "warm-source",
+        chunk_size_bytes=65_536,
+        issued_at_unix_ms=1_000,
+        expires_at_unix_ms=901_000,
+        materialize_objects=False,
+    )
+
+    assert manifest["chunks"]
+    assert list((tmp_path / "warm-source" / "objects").iterdir()) == []
+    assert manifest["total_size_bytes"] == sum(
+        artifact["size_bytes"] for artifact in pack["artifacts"]
+    )
+
+
+def test_interrupted_source_materialization_resumes_verified_objects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle, pack, offer, graph, authorization = _fixture(tmp_path)
+    source = tmp_path / "source"
+    from mycelium_live import stage_pack_builder
+
+    original_write = stage_pack_builder._write_object
+    writes = 0
+
+    def interrupt_after_first(root: Path, digest: str, payload: bytes) -> None:
+        nonlocal writes
+        original_write(root, digest, payload)
+        writes += 1
+        if writes == 1:
+            raise RuntimeError("simulated_power_loss")
+
+    monkeypatch.setattr(stage_pack_builder, "_write_object", interrupt_after_first)
+    with pytest.raises(RuntimeError, match="simulated_power_loss"):
+        build_stage_pack_source(
+            transfer_bundle=bundle,
+            pack=pack,
+            assignment_offer=offer,
+            graph=graph,
+            authorization=authorization,
+            output_root=source,
+            chunk_size_bytes=65_536,
+            issued_at_unix_ms=1_000,
+            expires_at_unix_ms=901_000,
+        )
+    completed = next((source / "objects").iterdir())
+    completed_inode = completed.stat().st_ino
+    completed_mtime = completed.stat().st_mtime_ns
+
+    monkeypatch.setattr(stage_pack_builder, "_write_object", original_write)
+    manifest, _binding = build_stage_pack_source(
+        transfer_bundle=bundle,
+        pack=pack,
+        assignment_offer=offer,
+        graph=graph,
+        authorization=authorization,
+        output_root=source,
+        chunk_size_bytes=65_536,
+        issued_at_unix_ms=1_001,
+        expires_at_unix_ms=901_001,
+        resume_existing=True,
+    )
+
+    assert completed.stat().st_ino == completed_inode
+    assert completed.stat().st_mtime_ns == completed_mtime
+    assert len(list((source / "objects").iterdir())) == len(manifest["chunks"])
+
+
+def test_resume_rejects_untrusted_or_corrupt_source_checkpoint(tmp_path: Path) -> None:
+    bundle, pack, offer, graph, authorization = _fixture(tmp_path)
+    source = tmp_path / "source"
+    manifest, _binding = build_stage_pack_source(
+        transfer_bundle=bundle,
+        pack=pack,
+        assignment_offer=offer,
+        graph=graph,
+        authorization=authorization,
+        output_root=source,
+        chunk_size_bytes=65_536,
+        issued_at_unix_ms=1_000,
+        expires_at_unix_ms=901_000,
+    )
+    first = source / "objects" / manifest["chunks"][0]["content_digest"].removeprefix(
+        "sha256:"
+    )
+    os.chmod(first, 0o600)
+    first.write_bytes(b"x" * first.stat().st_size)
+
+    with pytest.raises(
+        StagePackBuildError, match="stage_pack_source_object_conflict"
+    ):
+        build_stage_pack_source(
+            transfer_bundle=bundle,
+            pack=pack,
+            assignment_offer=offer,
+            graph=graph,
+            authorization=authorization,
+            output_root=source,
+            chunk_size_bytes=65_536,
+            issued_at_unix_ms=1_001,
+            expires_at_unix_ms=901_001,
+            resume_existing=True,
+        )
+
+    os.chmod(source, 0o777)
+    with pytest.raises(StagePackBuildError, match="stage_pack_source_root_invalid"):
+        build_stage_pack_source(
+            transfer_bundle=bundle,
+            pack=pack,
+            assignment_offer=offer,
+            graph=graph,
+            authorization=authorization,
+            output_root=source,
+            chunk_size_bytes=65_536,
+            issued_at_unix_ms=1_001,
+            expires_at_unix_ms=901_001,
+            resume_existing=True,
+        )
 
 
 def test_rejects_path_escape_assignment_drift_and_unowned_tensor(

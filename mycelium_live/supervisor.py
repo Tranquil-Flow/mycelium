@@ -30,6 +30,7 @@ from mycelium_qualification import (
 )
 from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_request_gateway.contracts import safe_qualification_projection
+from mycelium_physical_runner import load_operator_plan
 from mycelium_m16_runtime import build_live_m16_runtime
 from mycelium_performance_budget import validate_performance_budget_v3
 from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
@@ -47,6 +48,7 @@ from mycelium_m22_release import validate_release_evidence
 from mycelium_m23_kv import validate_m23_kv_evidence
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
+from physical_inference_node import execution_graph_from_document
 
 from .activation import DeploymentActivationError, PreparedDeploymentActivation
 from .artifact_provisioner import ArtifactAcquisitionStore
@@ -55,6 +57,7 @@ from .health import RouteHealthSource
 from .model_capacity import (
     ModelCapacityRefresh,
     ModelCapacityRefreshError,
+    live_observations_document,
     recompute_model_operation,
 )
 from .local_preparer import LocalCandidatePreparer
@@ -64,6 +67,7 @@ from .registry import (
     DeploymentSelectionError,
     LiveDeploymentRegistry,
     QualifiedDeploymentRuntime,
+    UnavailableDeployment,
 )
 from .route import LiveRoute, PhysicalLiveRoute, RouteCounters, RouteIdentity
 from .router_port import LiveRouterPort
@@ -741,7 +745,7 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 return
             self._send_bytes(
                 200,
-                _json_bytes(store.ledger()),
+                _json_bytes(store.public_ledger()),
                 "application/json; charset=utf-8",
             )
 
@@ -858,6 +862,57 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 self._send_bytes(
                     400,
                     _json_bytes({"error": "invalid_model_preparation_request"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                202,
+                _json_bytes(status),
+                "application/json; charset=utf-8",
+            )
+
+        def _reacquire_model_candidate(self) -> None:
+            preparation = self.server.model_preparation
+            if preparation is None:
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "model_preparation_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            if self.headers.get("origin") != f"http://{self.headers.get('host', '')}":
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            body = self._read_body(limit=1_536)
+            if body is None:
+                return
+            try:
+                document = json.loads(body)
+                if (
+                    not isinstance(document, dict)
+                    or set(document) != {"candidate_id", "decision"}
+                    or not isinstance(document["candidate_id"], str)
+                    or not isinstance(document["decision"], dict)
+                ):
+                    raise ValueError
+                status = preparation.reacquire(
+                    document["decision"], document["candidate_id"]
+                )
+            except ModelPreparationError as exc:
+                self._send_bytes(
+                    409,
+                    _json_bytes({"error": exc.code}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_model_reacquisition_request"}),
                     "application/json; charset=utf-8",
                 )
                 return
@@ -1270,6 +1325,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 and not parsed.query
             ):
                 self._start_model_preparation()
+            elif (
+                parsed.path == "/__mycelium/model-preparation/reacquire"
+                and not parsed.query
+            ):
+                self._reacquire_model_candidate()
             elif parsed.path == "/__mycelium/candidates/canary" and not parsed.query:
                 self._canary_candidate()
             elif parsed.path == "/__mycelium/candidates/promote" and not parsed.query:
@@ -1431,7 +1491,10 @@ def _representation_authorization(path: Path | None) -> Mapping[str, Any] | None
     if (
         not isinstance(document, dict)
         or document.get("protocol")
-        != "mycelium.model_preparation_authorization.v1"
+        not in {
+            "mycelium.model_preparation_authorization.v1",
+            "mycelium.model_preparation_authorization.v2",
+        }
     ):
         raise ValueError("representation_authorization_invalid")
     return document
@@ -1733,6 +1796,47 @@ def _qualified_runtime(
         raise
 
 
+def _configured_deployment(plan: Path) -> tuple[str, str, str, int]:
+    """Read one immutable graph identity before attempting physical startup."""
+
+    config = load_operator_plan(plan)
+    run_plan = config.controller.get("run_plan")
+    nodes = run_plan.get("nodes") if isinstance(run_plan, Mapping) else None
+    if not isinstance(nodes, list) or not nodes:
+        raise ValueError("configured_deployment_graph_unavailable")
+    first = nodes[0]
+    configure = first.get("configure") if isinstance(first, Mapping) else None
+    graph_document = (
+        configure.get("graph") if isinstance(configure, Mapping) else None
+    )
+    graph = execution_graph_from_document(graph_document)
+    return (
+        graph.deployment_id,
+        graph.model_id,
+        graph.resolved_commit,
+        len(graph.stages),
+    )
+
+
+def _startup_reason(exc: Exception) -> str:
+    """Reduce a startup exception to one bounded non-sensitive public code."""
+
+    code = getattr(exc, "remote_code", None) or getattr(exc, "code", None)
+    if not isinstance(code, str) or not code:
+        code = str(exc).partition(":")[0]
+    if (
+        not code
+        or len(code) > 64
+        or not code[0].islower()
+        or any(
+            character not in "abcdefghijklmnopqrstuvwxyz0123456789_"
+            for character in code
+        )
+    ):
+        return "startup_route_unavailable"
+    return code
+
+
 def run_registry_server(
     *,
     operator_plans: Sequence[Path],
@@ -1744,13 +1848,18 @@ def run_registry_server(
     model_operation_file: Path | None = None,
     seed_url: str | None = None,
     candidate_plan_root: Path | None = None,
+    artifact_acquisition_root: Path | None = None,
     model_cache_root: Path | None = None,
     model_preparation_template_plan: Path | None = None,
+    model_preparation_execution_topology_plan: Path | None = None,
     model_preparation_root: Path | None = None,
+    model_preparation_temporary_root: Path | None = None,
+    model_preparation_artifact_bytes_per_second: int | None = None,
     member_artifact_transport_plan: Path | None = None,
     member_model_inventory_files: Sequence[Path] = (),
     member_model_inventory_authorities_file: Path | None = None,
     representation_authorization_file: Path | None = None,
+    model_capacity_live_observations_file: Path | None = None,
     historical_evidence_files: Sequence[Path] = (),
 ) -> int:
     """Open, qualify, and serve one or more immutable deployments."""
@@ -1758,6 +1867,7 @@ def run_registry_server(
     if not operator_plans:
         raise ValueError("deployment_registry_requires_one_or_more")
     runtimes: list[QualifiedDeploymentRuntime] = []
+    unavailable: list[UnavailableDeployment] = []
     server: LiveHTTPServer | None = None
     registry: LiveDeploymentRegistry | None = None
     activation: PreparedDeploymentActivation | None = None
@@ -1770,20 +1880,45 @@ def run_registry_server(
             representation_authorization_file
         )
         for plan in operator_plans:
-            runtimes.append(
-                _qualified_runtime(
-                    plan,
-                    seed_state_root=seed_state_root,
-                    model_operation_file=model_operation_file,
-                )
+            deployment_id, model_id, revision, topology_size = _configured_deployment(
+                plan
             )
+            try:
+                runtimes.append(
+                    _qualified_runtime(
+                        plan,
+                        seed_state_root=seed_state_root,
+                        model_operation_file=model_operation_file,
+                    )
+                )
+            except Exception as exc:
+                unavailable.append(
+                    UnavailableDeployment(
+                        deployment_id=deployment_id,
+                        model_id=model_id,
+                        model_revision=revision,
+                        quantization="int8-weight-only",
+                        topology_size=topology_size,
+                        reason_code=_startup_reason(exc),
+                        observed_at_unix_ms=int(time.time() * 1_000),
+                    )
+                )
         registry = LiveDeploymentRegistry(
             runtimes,
+            unavailable_deployments=tuple(unavailable),
             state_path=registry_state,
             qualification_refresher=lambda runtime: _qualify_open_route(runtime.route),
         )
+        if not runtimes and model_operation_file is not None:
+            operation = _m17_model_operation(
+                Path("."),
+                explicit_path=model_operation_file,
+            )
+            if operation is not None:
+                registry.set_m17_model_operation(operation)
         artifact_acquisition_store = ArtifactAcquisitionStore(
-            Path(seed_state_root) / "artifact-acquisitions"
+            artifact_acquisition_root
+            or (Path(seed_state_root) / "artifact-acquisitions")
         )
         if candidate_plan_root is not None:
             activation_state_root = Path(seed_state_root) / "deployment-activation"
@@ -1803,7 +1938,13 @@ def run_registry_server(
             capacity_refresh = ModelCapacityRefresh(
                 evaluator=lambda progress: recompute_model_operation(
                     cache_root=model_cache_root,
-                    live_observations=registry.m17_swarm_evidence(),
+                    live_observations=(
+                        live_observations_document(
+                            model_capacity_live_observations_file
+                        )
+                        if model_capacity_live_observations_file is not None
+                        else registry.m17_swarm_evidence()
+                    ),
                     evaluated_at_unix_ms=int(time.time() * 1_000),
                     member_inventory_files=member_model_inventory_files,
                     member_inventory_authorities_file=(
@@ -1824,8 +1965,14 @@ def run_registry_server(
                 repo_root=ROOT,
                 cache_root=model_cache_root,
                 template_plan=model_preparation_template_plan,
+                execution_topology_plan=model_preparation_execution_topology_plan,
                 workspace_root=preparation_root,
+                temporary_root=model_preparation_temporary_root,
+                artifact_transfer_bytes_per_second=(
+                    model_preparation_artifact_bytes_per_second
+                ),
                 candidate_root=candidate_plan_root,
+                seed_state_root=seed_state_root,
                 artifact_store=artifact_acquisition_store,
                 member_stage_pack_acquirer=(
                     None
@@ -1836,6 +1983,7 @@ def run_registry_server(
             model_preparation = LocalModelPreparation(
                 operation_source=registry.m17_model_operation,
                 preparer=preparer,
+                reacquirer=preparer.reacquire,
                 on_candidate_published=activation.refresh
                 if activation is not None
                 else None,
@@ -1882,9 +2030,10 @@ def run_registry_server(
                 {
                     "protocol": "mycelium.live_registry_server_started.v1",
                     "url": f"http://{host}:{port}/",
-                    "startup_qualification_complete": True,
+                    "startup_qualification_complete": bool(runtimes),
                     "simulated": False,
                     "deployment_count": len(runtimes),
+                    "unavailable_deployment_count": len(unavailable),
                 }
             ).decode("utf-8"),
             flush=True,
@@ -1929,9 +2078,11 @@ def run_physical_server(
     seed_state_root: Path,
     seed_url: str | None = None,
     model_cache_root: Path | None = None,
+    artifact_acquisition_root: Path | None = None,
     member_model_inventory_files: Sequence[Path] = (),
     member_model_inventory_authorities_file: Path | None = None,
     representation_authorization_file: Path | None = None,
+    model_capacity_live_observations_file: Path | None = None,
     historical_evidence_files: Sequence[Path] = (),
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
@@ -1979,13 +2130,20 @@ def run_physical_server(
         )
         stack.health.publish(qualification)
         artifact_acquisition_store = ArtifactAcquisitionStore(
-            Path(seed_state_root) / "artifact-acquisitions"
+            artifact_acquisition_root
+            or (Path(seed_state_root) / "artifact-acquisitions")
         )
         if model_cache_root is not None:
             capacity_refresh = ModelCapacityRefresh(
                 evaluator=lambda progress: recompute_model_operation(
                     cache_root=model_cache_root,
-                    live_observations=route.m17_swarm_evidence(),
+                    live_observations=(
+                        live_observations_document(
+                            model_capacity_live_observations_file
+                        )
+                        if model_capacity_live_observations_file is not None
+                        else route.m17_swarm_evidence()
+                    ),
                     evaluated_at_unix_ms=int(time.time() * 1_000),
                     member_inventory_files=member_model_inventory_files,
                     member_inventory_authorities_file=(
@@ -2075,6 +2233,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="read-only local Hugging Face cache used by explicit capacity rechecks",
     )
+    parser.add_argument(
+        "--model-capacity-live-observations-file",
+        type=Path,
+        help="owner-private fresh signed swarm generation used by capacity refresh",
+    )
     parser.add_argument("--static-root", type=Path)
     parser.add_argument("--registry-state", type=Path)
     parser.add_argument("--historical-evidence-file", type=Path, action="append")
@@ -2085,14 +2248,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="private directory of operator-prepared deployment plans",
     )
     parser.add_argument(
+        "--artifact-acquisition-root",
+        type=Path,
+        help="owner-private assignment artifact store (may be on another volume)",
+    )
+    parser.add_argument(
         "--model-preparation-template-plan",
         type=Path,
         help="private physical plan supplying the current peer/runtime topology",
     )
     parser.add_argument(
+        "--model-preparation-execution-topology-plan",
+        type=Path,
+        help="enrolled execution bindings ordered by the fresh capacity planner",
+    )
+    parser.add_argument(
         "--model-preparation-root",
         type=Path,
         help="owner-only workspace retaining built local model candidates",
+    )
+    parser.add_argument(
+        "--model-preparation-temporary-root",
+        type=Path,
+        help="owner-private workspace for large ephemeral conversion files",
+    )
+    parser.add_argument(
+        "--model-preparation-artifact-bytes-per-second",
+        type=int,
+        help="bounded preparation transfer rate enforced by grants and recipients",
     )
     parser.add_argument(
         "--member-artifact-transport-plan",
@@ -2141,14 +2324,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed_state_root=args.seed_state_root,
             seed_url=args.seed_url,
             model_cache_root=args.model_cache_root,
-            member_model_inventory_files=tuple(
-                args.member_model_inventory_file or ()
-            ),
+            artifact_acquisition_root=args.artifact_acquisition_root,
+            member_model_inventory_files=tuple(args.member_model_inventory_file or ()),
             member_model_inventory_authorities_file=(
                 args.member_model_inventory_authorities_file
             ),
-            representation_authorization_file=(
-                args.representation_authorization_file
+            representation_authorization_file=(args.representation_authorization_file),
+            model_capacity_live_observations_file=(
+                args.model_capacity_live_observations_file
             ),
             historical_evidence_files=tuple(args.historical_evidence_file or ()),
         )
@@ -2164,15 +2347,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_operation_file=args.model_operation_file,
         seed_url=args.seed_url,
         candidate_plan_root=args.candidate_plan_root,
+        artifact_acquisition_root=args.artifact_acquisition_root,
         model_cache_root=args.model_cache_root,
         model_preparation_template_plan=args.model_preparation_template_plan,
+        model_preparation_execution_topology_plan=(
+            args.model_preparation_execution_topology_plan
+        ),
         model_preparation_root=args.model_preparation_root,
+        model_preparation_temporary_root=args.model_preparation_temporary_root,
+        model_preparation_artifact_bytes_per_second=(
+            args.model_preparation_artifact_bytes_per_second
+        ),
         member_artifact_transport_plan=args.member_artifact_transport_plan,
         member_model_inventory_files=tuple(args.member_model_inventory_file or ()),
         member_model_inventory_authorities_file=(
             args.member_model_inventory_authorities_file
         ),
         representation_authorization_file=args.representation_authorization_file,
+        model_capacity_live_observations_file=(
+            args.model_capacity_live_observations_file
+        ),
         historical_evidence_files=tuple(args.historical_evidence_file or ()),
     )
 

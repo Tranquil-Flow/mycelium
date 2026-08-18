@@ -8,6 +8,7 @@ from mycelium_live.preparation import (
     LocalModelPreparation,
     ModelPreparationError,
     PreparationResult,
+    _digest,
 )
 
 
@@ -83,6 +84,37 @@ def _decision(**changes: object) -> dict:
     return decision
 
 
+def _decision_v2(**changes: object) -> dict:
+    decision = {
+        **_decision(),
+        "protocol": "mycelium.model_representation_decision.v2",
+        "source_artifact_digest": "sha256:" + "f" * 64,
+        "quantizer": "mycelium.rowwise_symmetric_int8.v1",
+        "download_authorized": False,
+    }
+    decision.update(changes)
+    return decision
+
+
+def _operation_v2() -> dict:
+    operation = _operation()
+    operation["entries"][0].update(
+        {
+            "artifact_digest": "sha256:" + "f" * 64,
+            "serving_representations": [
+                {
+                    "quantization": "int8-weight-only",
+                    "runtime_dtype": "float32",
+                    "representation_digest": "sha256:" + "d" * 64,
+                    "quantizer": "mycelium.rowwise_symmetric_int8.v1",
+                }
+            ],
+        }
+    )
+    operation["feasibility_reports"][0]["artifact_digest"] = "sha256:" + "f" * 64
+    return operation
+
+
 def test_preparation_freezes_fresh_authority_and_publishes_only_after_success() -> None:
     entered = threading.Event()
     release = threading.Event()
@@ -122,6 +154,9 @@ def test_preparation_freezes_fresh_authority_and_publishes_only_after_success() 
     assert status["verified_bytes"] == 140
     assert status["activation_started"] is False
     assert published == [True]
+    assert captured[0]["protocol"] == "mycelium.model_preparation_authorization.v2"
+    assert captured[0]["authorized_at_unix_ms"] == 1_000
+    assert captured[0]["evidence_valid_until_unix_ms"] == 2_000
     assert captured[0]["download_authorized"] is False
     assert captured[0]["owner_decision_digest"].startswith("sha256:")
     assert captured[0]["preparation_binding_digest"].startswith("sha256:")
@@ -129,6 +164,59 @@ def test_preparation_freezes_fresh_authority_and_publishes_only_after_success() 
         (item["start_layer"], item["end_layer_exclusive"])
         for item in captured[0]["stages"]
     ] == [(0, 30), (30, 36)]
+
+
+def test_warm_reacquisition_uses_fresh_authority_and_reports_zero_transfer() -> None:
+    captured = []
+
+    def reacquire(authorization, candidate_id, progress):
+        captured.append((authorization, candidate_id))
+        progress("verifying_local_artifacts", 0, 140)
+        progress("staging_peers", 0, 140)
+        progress("publishing_candidate", 0, 140)
+        return PreparationResult(
+            candidate_id,
+            2,
+            0,
+            140,
+            operation="warm_reacquire",
+            cache_receipt_count=2,
+            cached_verified_bytes=140,
+            transferred_verified_bytes=0,
+            origin_bytes=0,
+        )
+
+    service = LocalModelPreparation(
+        operation_source=_operation,
+        preparer=lambda *_args: pytest.fail("cold preparer was used"),
+        reacquirer=reacquire,
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    started = service.reacquire(_decision(), "candidate-1")
+    assert started["operation"] == "warm_reacquire"
+    service.close()
+
+    status = service.status()
+    assert status["state"] == "succeeded"
+    assert status["candidate_id"] == "candidate-1"
+    assert status["cache_receipt_count"] == 2
+    assert status["cached_verified_bytes"] == 140
+    assert status["transferred_verified_bytes"] == 0
+    assert status["origin_bytes"] == 0
+    assert captured[0][0]["authorized_at_unix_ms"] == 1_000
+    assert captured[0][1] == "candidate-1"
+
+
+def test_warm_reacquisition_is_unavailable_without_product_reacquirer() -> None:
+    service = LocalModelPreparation(
+        operation_source=_operation,
+        preparer=lambda *_args: PreparationResult("candidate-1", 2, 140, 140),
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    with pytest.raises(ModelPreparationError, match="model_candidate_identity_invalid"):
+        service.reacquire(_decision(), "candidate-1")
 
 
 def test_preparation_preserves_approved_immutable_representation_authority() -> None:
@@ -154,6 +242,63 @@ def test_preparation_preserves_approved_immutable_representation_authority() -> 
 
     assert captured[0]["owner_decision_digest"] == original_owner_decision_digest
     assert captured[0]["feasibility_digest"] == "sha256:" + "c" * 64
+
+
+def test_preparation_accepts_v2_decision_bound_to_source_quantizer_and_no_download() -> (
+    None
+):
+    captured = []
+    service = LocalModelPreparation(
+        operation_source=_operation_v2,
+        preparer=lambda authorization, _progress: (
+            captured.append(authorization)
+            or PreparationResult("candidate-v2", 2, 140, 140)
+        ),
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    service.start(_decision_v2())
+    service.close()
+
+    assert captured[0]["download_authorized"] is False
+    assert captured[0]["source_artifact_digest"] == "sha256:" + "f" * 64
+    assert captured[0]["quantizer"] == "mycelium.rowwise_symmetric_int8.v1"
+    assert captured[0]["preparation_binding_digest"] == _digest(
+        {
+            "feasibility_digest": "sha256:" + "c" * 64,
+            "owner_decision_digest": captured[0]["owner_decision_digest"],
+            "quantizer": "mycelium.rowwise_symmetric_int8.v1",
+            "representation_digest": "sha256:" + "d" * 64,
+            "source_artifact_digest": "sha256:" + "f" * 64,
+        }
+    )
+    assert service.status()["candidate_id"] == "candidate-v2"
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        _decision_v2(source_artifact_digest="sha256:" + "0" * 64),
+        _decision_v2(quantizer="other.quantizer"),
+        _decision_v2(download_authorized=True),
+    ],
+)
+def test_preparation_rejects_v2_source_quantizer_or_download_drift(
+    decision: dict,
+) -> None:
+    called = []
+    service = LocalModelPreparation(
+        operation_source=_operation_v2,
+        preparer=lambda *_args: called.append(True),  # type: ignore[arg-type,return-value]
+        clock_unix_ms=lambda: 1_000,
+    )
+
+    with pytest.raises(
+        ModelPreparationError,
+        match="model_representation_decision_(invalid|mismatch)",
+    ):
+        service.start(decision)
+    assert called == []
 
 
 def test_preparation_rejects_malformed_inherited_representation_authority() -> None:

@@ -273,6 +273,13 @@ def test_multi_source_acquisition_promotes_and_warm_reuse_transfers_zero(
     assert calls == []
     assert len(store.ledger()["history"]) == 2
 
+    public = store.public_ledger()
+    assert public == store.ledger()
+    store._history_path.write_text("not-json", encoding="utf-8")
+    assert store.public_ledger() == public
+    with pytest.raises(ArtifactProvisioningError, match="artifact_history_corrupt"):
+        store.ledger()
+
 
 def test_remote_terminal_status_is_rebased_into_product_ledger(
     tmp_path: Path,

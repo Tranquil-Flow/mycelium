@@ -17,6 +17,14 @@ function fixture() {
         num_layers: 36, weight_bytes: 16_381_470_720, exact_tensor_accounting: true,
         required_file_count: 6, present_file_count: 6, reasons: [],
         artifact_digest: `sha256:${'c'.repeat(64)}`,
+        serving_representations: [{
+          quantization: 'int8-weight-only', runtime_dtype: 'float32',
+          quantizer: 'mycelium.rowwise_symmetric_int8.v1',
+          representation_digest: `sha256:${'1'.repeat(64)}`,
+          resident_weight_bytes: 8_000_000_000,
+          load_peak_weight_bytes: 40_000_000_000,
+          preparation_required: true,
+        }],
       }],
     },
     feasibility_reports: [{
@@ -24,6 +32,7 @@ function fixture() {
       state: 'feasible', planner: 'capability_aware_contiguous_exact_weight_dp',
       source_quantization: 'bfloat16', serving_quantization: 'int8-weight-only',
       serving_dtype: 'float32', representation_digest: `sha256:${'1'.repeat(64)}`,
+      representation_authority: { kind: 'locally_derived_candidate' },
       evidence_generation: 15, reasons: [], feasibility_digest: `sha256:${'d'.repeat(64)}`,
       evidence_valid_until_unix_ms: 2_000_000_000_000,
       evaluated_at_unix_ms: 1_900_000_000_000,
@@ -74,6 +83,7 @@ describe('M17 model operation projection', () => {
     expect(operation.feasibility_reports[0].state).toBe('feasible');
     expect(operation.feasibility_reports[0].serving_quantization).toBe('int8-weight-only');
     expect(operation.feasibility_reports[0].serving_dtype).toBe('float32');
+    expect(operation.entries[0].serving_representations?.[0].quantizer).toBe('mycelium.rowwise_symmetric_int8.v1');
     expect(operation.selection_authority).toBe('qualified_deployment_registry');
     expect(operation.lifecycle.models[0].state).toBe('feasible');
     expect(operation.route_ready).toBe(false);
@@ -89,5 +99,11 @@ describe('M17 model operation projection', () => {
     const value = fixture();
     value.catalog.entries[0].revision = 'main';
     expect(() => decodeM17ModelOperation(value)).toThrow(/revision/);
+  });
+
+  it('rejects a malformed serving representation authority', () => {
+    const value = fixture();
+    value.catalog.entries[0].serving_representations[0].quantizer = '';
+    expect(() => decodeM17ModelOperation(value)).toThrow(/serving_representations/);
   });
 });

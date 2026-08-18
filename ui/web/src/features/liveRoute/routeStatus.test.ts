@@ -39,6 +39,45 @@ describe('live route status contract', () => {
     expect(decoded.placement?.route_ready).toBe(false);
   });
 
+  it('decodes a configured deployment becoming unavailable', () => {
+    const fixture = liveRouteStatusFixture();
+    const decoded = decodeLiveRouteStatus({
+      ...fixture,
+      route_alive: false,
+      counters: { ...fixture.counters, fatal: 'membership_member_lease_expired' },
+      incidents: [{
+        protocol: 'mycelium.live_route_incident.v1',
+        incident_id: 'registry-incident-1',
+        deployment_id: fixture.deployment_id,
+        request_id: null,
+        state: 'configured_deployment_unavailable',
+        reason: 'membership_member_lease_expired',
+        observed_at_unix_ms: 2_000,
+      }],
+    });
+
+    expect(decoded.route_alive).toBe(false);
+    expect(decoded.incidents[0].state).toBe('configured_deployment_unavailable');
+  });
+
+  it('decodes qualified service restoration after an unavailable incumbent', () => {
+    const fixture = liveRouteStatusFixture();
+    const decoded = decodeLiveRouteStatus({
+      ...fixture,
+      incidents: [{
+        protocol: 'mycelium.live_route_incident.v1',
+        incident_id: 'registry-incident-2',
+        deployment_id: fixture.deployment_id,
+        request_id: null,
+        state: 'qualified_service_restored',
+        reason: 'replaced_unavailable:incumbent-deployment',
+        observed_at_unix_ms: 2_001,
+      }],
+    });
+
+    expect(decoded.incidents[0].state).toBe('qualified_service_restored');
+  });
+
   it('decodes a complete activation-plane directed matrix without making it route authority', () => {
     const decoded = decodeLiveRouteStatus({ ...liveRouteStatusFixture(), topology: m14TopologyFixture() });
     expect(decoded.topology?.edges).toHaveLength(6);

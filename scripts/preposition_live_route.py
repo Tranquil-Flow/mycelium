@@ -33,6 +33,7 @@ def main() -> int:
     parser.add_argument("--member-transport-plan", type=Path, required=True)
     parser.add_argument("--artifact-store-root", type=Path, required=True)
     parser.add_argument("--workspace-root", type=Path, required=True)
+    parser.add_argument("--seed-state-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -48,9 +49,15 @@ def main() -> int:
         template_plan=args.operator_plan,
         workspace_root=workspace / "preparer",
         candidate_root=candidates,
+        seed_state_root=args.seed_state_root,
         artifact_store=ArtifactAcquisitionStore(args.artifact_store_root),
         member_stage_pack_acquirer=transport,
         python_executable=sys.executable,
+    )
+    preparer._preflight_local_acquisition_storage(  # noqa: SLF001
+        authorization,
+        {"nodes": plan["controller"]["peers"]},
+        attempt=attempt,
     )
     preparer._acquire_stage_packs(  # noqa: SLF001 -- exact product preparation seam.
         attempt=attempt,
