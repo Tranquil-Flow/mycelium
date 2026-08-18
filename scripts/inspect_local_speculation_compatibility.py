@@ -20,6 +20,15 @@ from mycelium_model_catalog import LocalModelEntry, scan_huggingface_cache  # no
 
 PROTOCOL = "mycelium.local_speculation_compatibility_inspection.v1"
 MAX_JSON_BYTES = 64 * 1024 * 1024
+RUNTIME_PREREQUISITES = (
+    "authorized_exact_target_and_draft_runtime_bindings",
+    "a10_physically_qualified_target_verifier_binding",
+    "identical_noncanonical_and_reserved_id_runtime_masking",
+    "runtime_position_attention_and_context_truncation_parity",
+    "separate_target_draft_and_temporary_verifier_kv_ownership",
+    "physical_output_parity_rejection_rollback_and_cleanup_gates",
+    "same_route_physical_materiality_benchmark",
+)
 
 
 def _json(path: Path) -> Mapping[str, Any]:
@@ -38,11 +47,19 @@ def _digest_bytes(value: bytes) -> str:
 
 def _digest_json(value: object) -> str:
     return _digest_bytes(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
     )
 
 
-def tokenizer_identity(snapshot: Path) -> dict[str, object]:
+def tokenizer_identity(
+    snapshot: Path, model_config: Mapping[str, Any] | None = None
+) -> dict[str, object]:
     tokenizer_path = snapshot / "tokenizer.json"
     tokenizer = _json(tokenizer_path)
     tokenizer_config = _json(snapshot / "tokenizer_config.json")
@@ -53,37 +70,91 @@ def tokenizer_identity(snapshot: Path) -> dict[str, object]:
     added = tokenizer.get("added_tokens", [])
     if not isinstance(added, list):
         raise ValueError("local_tokenizer_vocabulary_invalid")
-    token_ids: set[int] = set()
-    for token_id in vocab.values():
+    canonical_mapping: dict[str, int] = {}
+    id_to_token: dict[int, str] = {}
+
+    def add_token(token: object, token_id: object) -> None:
+        if not isinstance(token, str) or not token:
+            raise ValueError("local_tokenizer_vocabulary_invalid")
         if type(token_id) is not int or token_id < 0:
             raise ValueError("local_tokenizer_vocabulary_invalid")
-        token_ids.add(token_id)
+        existing_id = canonical_mapping.get(token)
+        existing_token = id_to_token.get(token_id)
+        if (existing_id is not None and existing_id != token_id) or (
+            existing_token is not None and existing_token != token
+        ):
+            raise ValueError("local_tokenizer_vocabulary_not_bijective")
+        canonical_mapping[token] = token_id
+        id_to_token[token_id] = token
+
+    for token, token_id in vocab.items():
+        add_token(token, token_id)
     for record in added:
-        if not isinstance(record, dict) or type(record.get("id")) is not int:
+        if not isinstance(record, dict):
             raise ValueError("local_tokenizer_vocabulary_invalid")
-        token_id = record["id"]
-        if token_id < 0:
-            raise ValueError("local_tokenizer_vocabulary_invalid")
-        token_ids.add(token_id)
+        add_token(record.get("content"), record.get("id"))
+    token_ids = set(id_to_token)
     if not token_ids or token_ids != set(range(max(token_ids) + 1)):
         raise ValueError("local_tokenizer_vocabulary_noncontiguous")
+    special_token_keys = (
+        "bos_token",
+        "eos_token",
+        "pad_token",
+        "unk_token",
+        "sep_token",
+        "cls_token",
+        "mask_token",
+        "additional_special_tokens",
+        "added_tokens_decoder",
+    )
+    special_id_keys = (
+        "bos_token_id",
+        "eos_token_id",
+        "pad_token_id",
+        "unk_token_id",
+        "sep_token_id",
+        "cls_token_id",
+        "mask_token_id",
+    )
     special = {
-        key: tokenizer_config.get(key)
+        "tokenizer_config": {
+            key: tokenizer_config.get(key) for key in special_token_keys
+        },
+        "model_config_ids": {
+            key: (model_config or {}).get(key) for key in special_id_keys
+        },
+        "special_added_tokens": [
+            record for record in added if record.get("special") is True
+        ],
+    }
+    model_without_vocab = {key: value for key, value in model.items() if key != "vocab"}
+    implementation = {
+        key: tokenizer.get(key)
         for key in (
-            "bos_token",
-            "eos_token",
-            "pad_token",
-            "unk_token",
-            "added_tokens_decoder",
+            "version",
+            "truncation",
+            "padding",
+            "normalizer",
+            "pre_tokenizer",
+            "post_processor",
+            "decoder",
         )
+    }
+    implementation["model"] = model_without_vocab
+    implementation["added_tokens"] = added
+    byte_fallback = {
+        "model_byte_fallback": model.get("byte_fallback"),
+        "decoder": tokenizer.get("decoder"),
     }
     return {
         "canonical_token_count": len(token_ids),
+        "canonical_token_id_mapping_digest": _digest_json(canonical_mapping),
         "maximum_canonical_token_id": max(token_ids),
+        "normalization_digest": _digest_json(tokenizer.get("normalizer")),
+        "byte_fallback_digest": _digest_json(byte_fallback),
         "special_token_semantics_digest": _digest_json(special),
-        "tokenizer_digest": _digest_bytes(
-            tokenizer_path.resolve(strict=True).read_bytes()
-        ),
+        "tokenizer_implementation_digest": _digest_json(implementation),
+        "tokenizer_digest": _digest_json(tokenizer),
     }
 
 
@@ -108,7 +179,7 @@ def active_position_identity(config: Mapping[str, Any]) -> dict[str, object]:
 
 def snapshot_identity(entry: LocalModelEntry) -> dict[str, object]:
     config = _json(entry.snapshot_path / "config.json")
-    tokenizer = tokenizer_identity(entry.snapshot_path)
+    tokenizer = tokenizer_identity(entry.snapshot_path, config)
     model_vocab_size = config.get("vocab_size")
     if type(model_vocab_size) is not int or model_vocab_size <= 0:
         raise ValueError("local_model_output_domain_invalid")
@@ -120,13 +191,21 @@ def snapshot_identity(entry: LocalModelEntry) -> dict[str, object]:
         ],
         "artifact_digest": entry.artifact_digest,
         "canonical_token_count": canonical_count,
+        "canonical_token_id_mapping_digest": tokenizer[
+            "canonical_token_id_mapping_digest"
+        ],
+        "byte_fallback_digest": tokenizer["byte_fallback_digest"],
         "maximum_canonical_token_id": tokenizer["maximum_canonical_token_id"],
         "model_id": entry.model_id,
         "model_output_domain_covers_tokenizer": model_vocab_size >= canonical_count,
         "model_output_domain_size": model_vocab_size,
         "revision": entry.revision,
+        "normalization_digest": tokenizer["normalization_digest"],
         "special_token_semantics_digest": tokenizer[
             "special_token_semantics_digest"
+        ],
+        "tokenizer_implementation_digest": tokenizer[
+            "tokenizer_implementation_digest"
         ],
         "tokenizer_digest": tokenizer["tokenizer_digest"],
     }
@@ -142,6 +221,12 @@ def inspect(target: LocalModelEntry, draft: LocalModelEntry) -> dict[str, object
             "active_position_semantics_digest"
         ]
         == draft_identity["active_position_semantics_digest"],
+        "byte_fallback": target_identity["byte_fallback_digest"]
+        == draft_identity["byte_fallback_digest"],
+        "canonical_token_id_mapping": target_identity[
+            "canonical_token_id_mapping_digest"
+        ]
+        == draft_identity["canonical_token_id_mapping_digest"],
         "canonical_token_count": target_identity["canonical_token_count"]
         == draft_identity["canonical_token_count"],
         "draft_output_domain_covers_tokenizer": draft_identity[
@@ -151,11 +236,15 @@ def inspect(target: LocalModelEntry, draft: LocalModelEntry) -> dict[str, object
             "special_token_semantics_digest"
         ]
         == draft_identity["special_token_semantics_digest"],
+        "normalization": target_identity["normalization_digest"]
+        == draft_identity["normalization_digest"],
         "target_output_domain_covers_tokenizer": target_identity[
             "model_output_domain_covers_tokenizer"
         ],
-        "tokenizer": target_identity["tokenizer_digest"]
-        == draft_identity["tokenizer_digest"],
+        "tokenizer_implementation": target_identity[
+            "tokenizer_implementation_digest"
+        ]
+        == draft_identity["tokenizer_implementation_digest"],
     }
     reasons = sorted(name for name, passed in checks.items() if passed is not True)
     return {
@@ -167,6 +256,8 @@ def inspect(target: LocalModelEntry, draft: LocalModelEntry) -> dict[str, object
         "checks": checks,
         "static_compatibility_observed": not reasons,
         "blockers": reasons,
+        "runtime_compatibility_evaluated": False,
+        "unresolved_runtime_prerequisites": list(RUNTIME_PREREQUISITES),
         "route_ready": False,
         "qualification_evaluated": False,
     }

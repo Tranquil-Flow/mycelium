@@ -14,6 +14,12 @@ CLAIM_BOUNDARY = (
     "frozen acceptance inputs only; no product implementation, runtime batching, "
     "overlap, verifier, benchmark, or qualification claim"
 )
+DEPENDENCY_REQUIREMENTS = {
+    "a4_physically_closed_required": True,
+    "a4_dispatch_liveness_cancellation_and_cleanup_evidence_must_be_current": True,
+    "local_inspection_may_close_a10": False,
+    "fixtures_or_synthetic_workers_may_close_a10": False,
+}
 ALL_WORKSPACES = {
     "inference",
     "device_lab",
@@ -73,6 +79,38 @@ RUNTIME_BATCH_REQUIREMENTS = {
     "candidate_membership_alone_qualifies": False,
     "concurrent_admission_alone_qualifies": False,
     "sequential_loop_alone_qualifies": False,
+}
+PHYSICAL_MEASUREMENT_REQUIREMENTS = {
+    "qualifying_source_kind": "physical_runtime",
+    "ordinary_gateway_product_path_required": True,
+    "runtime_batch_evidence_fields": [
+        "runtime_invocation_id",
+        "backend_invocation_counter_before",
+        "backend_invocation_counter_after",
+        "actual_member_ids",
+        "actual_batch_size",
+        "scatter_result_count",
+        "device_compute_counter_before",
+        "device_compute_counter_after",
+    ],
+    "single_backend_invocation_counter_delta": 1,
+    "actual_member_scatter_count_consistency_required": True,
+    "concurrent_requests_without_shared_backend_invocation_qualify": False,
+    "overlap_evidence_fields": [
+        "microbatch_id",
+        "stage_id",
+        "device_id",
+        "interval_kind",
+        "compute_start_monotonic_ns",
+        "compute_end_monotonic_ns",
+        "clock_uncertainty_ns",
+        "predecessor_completion_monotonic_ns",
+    ],
+    "overlap_interval_kind": "device_observed_stage_compute",
+    "minimum_uncertainty_adjusted_intersection_ns": 1,
+    "same_request_dependency_overlap_qualifies": False,
+    "queue_transport_or_ui_overlap_qualifies": False,
+    "local_inspection_or_fixture_measurement_may_qualify": False,
 }
 TARGET_VERIFIER_REQUIREMENTS = {
     "minimum_operations": 100,
@@ -166,6 +204,8 @@ REQUIRED_CONCERN_INVARIANTS = {
         "one_real_backend_invocation_has_multiple_members",
         "runtime_observation_owns_final_membership",
         "candidate_and_actual_membership_are_distinct",
+        "runtime_invocation_and_backend_counter_deltas_bind_member_set",
+        "member_scatter_count_equals_observed_runtime_batch_size",
         "sequential_loop_and_concurrent_admission_do_not_pass",
     },
     "continuous_late_arrival": {
@@ -174,7 +214,9 @@ REQUIRED_CONCERN_INVARIANTS = {
         "one_true_backend_batch_executes_per_iteration",
     },
     "causal_pipeline_overlap": {
+        "overlap_uses_device_observed_stage_compute_intervals",
         "compute_intersection_is_positive_after_clock_uncertainty",
+        "clock_uncertainty_is_subtracted_before_positive_intersection",
         "every_stage_predecessor_completes_before_successor_starts",
         "final_loopback_starts_only_after_target_commit",
         "queue_transport_and_ui_overlap_alone_do_not_pass",
@@ -213,6 +255,7 @@ REQUIRED_CONCERN_INVARIANTS = {
     },
     "same_route_confidence_benchmark": {
         "baseline_and_candidate_share_every_same_route_binding",
+        "baseline_and_candidate_offered_concurrency_is_identical",
         "throughput_gain_and_paired_lower_confidence_bound_meet_ten_percent",
         "interactive_p95_ttft_and_tpot_regress_no_more_than_ten_percent",
     },
@@ -236,7 +279,9 @@ def test_a10_acceptance_manifest_is_closed_bounded_and_complete() -> None:
     assert set(manifest) == {
         "protocol",
         "claim_boundary",
+        "dependency_requirements",
         "runtime_batch_requirements",
+        "physical_measurement_requirements",
         "target_verifier_requirements",
         "benchmark_requirements",
         "workspace_shared_invariants",
@@ -280,7 +325,12 @@ def test_a10_acceptance_manifest_is_closed_bounded_and_complete() -> None:
 
 def test_a10_runtime_truth_and_required_concerns_are_frozen() -> None:
     manifest = _manifest()
+    assert manifest["dependency_requirements"] == DEPENDENCY_REQUIREMENTS
     assert manifest["runtime_batch_requirements"] == RUNTIME_BATCH_REQUIREMENTS
+    assert (
+        manifest["physical_measurement_requirements"]
+        == PHYSICAL_MEASUREMENT_REQUIREMENTS
+    )
     scenarios = _scenarios_by_id()
     for scenario_id, required in REQUIRED_CONCERN_INVARIANTS.items():
         assert required <= set(scenarios[scenario_id]["required_invariants"])
@@ -292,6 +342,10 @@ def test_a10_runtime_truth_and_required_concerns_are_frozen() -> None:
     assert scenarios["overlap_trace_rejection"]["gate_kind"] == (
         "deterministic_negative"
     )
+    assert {
+        "fixture_or_modeled_intervals_never_satisfy_physical_overlap",
+        "invalid_trace_never_becomes_observed_overlap",
+    } <= set(scenarios["overlap_trace_rejection"]["required_invariants"])
 
 
 def test_a10_target_verifier_transaction_and_rollback_are_frozen() -> None:
@@ -344,5 +398,7 @@ def test_a10_workspace_inventory_is_closed_and_cross_workspace_state_is_private(
 def test_a10_specification_remains_design_only_and_names_the_inventory() -> None:
     specification = SPECIFICATION.read_text("utf-8")
     assert "**Status:** `design_only`; dependency-ready acceptance boundary" in specification
+    assert "production integration\nwaits for A4 closure" in specification
+    assert "Planning, fixtures, deterministic fakes, direct runtime calls" in specification
     assert "Until then it remains `design_only`" in specification
     assert all(f"`{scenario_id}`" in specification for scenario_id in REQUIRED_SCENARIOS)
