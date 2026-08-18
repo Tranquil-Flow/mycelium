@@ -1,0 +1,60 @@
+{
+  "protocol": "mycelium.a7_deterministic_kv_recovery_harness.v1",
+  "gate_state": "design_only",
+  "evidence_kind": "deterministic_fixture",
+  "claim_boundary": "test-only reference behavior; never KV transport, runtime recovery, Router wiring, product integration, physical recovery evidence, qualification, or promotion",
+  "depends_on": ["A4", "A6"],
+  "a6_dependency": {
+    "inventory_protocol": "mycelium.a6_replay_acceptance_inventory.v1",
+    "fallback_interface": "mycelium.full_context_recovery_runtime.v1",
+    "required_state": "physically_qualified_before_a7_integration"
+  },
+  "coverage": [
+    "kv_compatibility",
+    "successor_fencing",
+    "stage_local_ownership_transfer",
+    "stale_writer_rejection",
+    "exact_fallback_behavior",
+    "cross_representation_backend_schema_rejection"
+  ],
+  "production_interfaces_required_after_a4": [
+    {
+      "interface_id": "a7.stage_local_kv_checkpoint_export.v1",
+      "owner": "source_runtime",
+      "capability": "export bounded stage-owned KV with request, attempt, sequence, digest and compatibility identity"
+    },
+    {
+      "interface_id": "a7.standby_checkpoint_store_ack.v1",
+      "owner": "standby_runtime",
+      "capability": "durably store and acknowledge exact checkpoint bytes under the current standby incarnation"
+    },
+    {
+      "interface_id": "a7.route_wide_acknowledged_watermark.v1",
+      "owner": "checkpoint_coordinator",
+      "capability": "advance only after every replaced stage acknowledges one exact gateway-equal checkpoint"
+    },
+    {
+      "interface_id": "a7.exact_kv_successor_qualification.v1",
+      "owner": "qualifier",
+      "capability": "close compatibility over representation, layer ownership, backend, runtime and cache schema semantics"
+    },
+    {
+      "interface_id": "a7.distributed_request_fence_install.v1",
+      "owner": "gateway_router_runtimes_transport_standby",
+      "capability": "durably advance request attempt, path and fencing generations before successor publication"
+    },
+    {
+      "interface_id": "a7.stage_local_kv_ownership_transfer.v1",
+      "owner": "checkpoint_coordinator_router_runtime",
+      "capability": "transfer only replaced stages to exact acknowledged standby owners without prompt or prefix replay"
+    },
+    {
+      "interface_id": "mycelium.full_context_recovery_runtime.v1",
+      "owner": "a6_recovery_authority",
+      "capability": "continue the same ordinary request by honestly labelled A6 replay when any A7 gate fails"
+    }
+  ],
+  "physical_recovery_evidence": false,
+  "qualification_claim": false,
+  "promotion_authorized": false
+}
