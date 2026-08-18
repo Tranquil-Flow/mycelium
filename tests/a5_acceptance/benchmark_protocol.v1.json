@@ -1,0 +1,113 @@
+{
+  "protocol": "mycelium.a5_benchmark_acceptance.v1",
+  "gate_state": "design_only",
+  "claim_boundary": "test-only frozen acceptance math; no planner, runtime, qualification, promotion, or physical claim",
+  "metric": {
+    "name": "completed_generated_tokens_per_wall_clock_second",
+    "paired_fractional_improvement": "candidate_rate_divided_by_baseline_rate_minus_one",
+    "point_estimate": "arithmetic_mean_of_paired_fractional_improvements",
+    "material_threshold_fraction": 0.1
+  },
+  "confidence": {
+    "method": "paired_nonparametric_bootstrap",
+    "confidence_level": 0.95,
+    "lower_quantile": 0.025,
+    "resamples": 10000,
+    "sample_size_pairs": 6,
+    "seed": 165,
+    "statistic": "arithmetic_mean",
+    "quantile_method": "nearest_rank_ceiling"
+  },
+  "schedule": {
+    "warmup_modes": ["baseline", "candidate"],
+    "warmup_scored": false,
+    "minimum_requests_per_warmup": 60,
+    "abba_repetitions": 3,
+    "measured_windows": [
+      {"index": 0, "block": 0, "pair_id": 0, "mode": "baseline"},
+      {"index": 1, "block": 0, "pair_id": 0, "mode": "candidate"},
+      {"index": 2, "block": 0, "pair_id": 1, "mode": "candidate"},
+      {"index": 3, "block": 0, "pair_id": 1, "mode": "baseline"},
+      {"index": 4, "block": 1, "pair_id": 2, "mode": "baseline"},
+      {"index": 5, "block": 1, "pair_id": 2, "mode": "candidate"},
+      {"index": 6, "block": 1, "pair_id": 3, "mode": "candidate"},
+      {"index": 7, "block": 1, "pair_id": 3, "mode": "baseline"},
+      {"index": 8, "block": 2, "pair_id": 4, "mode": "baseline"},
+      {"index": 9, "block": 2, "pair_id": 4, "mode": "candidate"},
+      {"index": 10, "block": 2, "pair_id": 5, "mode": "candidate"},
+      {"index": 11, "block": 2, "pair_id": 5, "mode": "baseline"}
+    ],
+    "minimum_requests_per_measured_window": 60
+  },
+  "identical_binding_fields": [
+    "model_id",
+    "model_revision",
+    "representation_digest",
+    "base_deployment_id",
+    "route_generation",
+    "workload_digest",
+    "arrival_schedule_digest",
+    "prompt_output_buckets_digest",
+    "qos_mix_digest",
+    "offered_concurrency",
+    "token_limits_digest",
+    "product_session_digest",
+    "software_digest",
+    "configuration_digest",
+    "instrumentation_digest"
+  ],
+  "allowed_mode_specific_binding_fields": ["mode", "qualified_track_policy_digest"],
+  "workspace_projections": {
+    "inference": ["immutable_request_track", "queue_progress_cancellation", "terminal_history"],
+    "device_lab": ["replica_capability", "placement_qualification", "synthetic_worker_ineligibility"],
+    "network": ["candidate_qualified_active_tracks", "directed_edges", "physical_request_trace"],
+    "nodes": ["replica_group_and_role", "artifact_load_qualification", "capacity_work_and_health"],
+    "plans": ["legal_tracks_and_flow", "predicted_measured_gain", "uncertainty_failure_domain_and_reasons"],
+    "readiness": ["artifact_load_graph_edge_parity", "resource_cleanup_qualification", "benchmark_and_promotion"],
+    "incidents": ["replica_loss_and_saturation", "drain_rollback_and_scope", "bounded_outcome"],
+    "settings": ["bounded_replica_and_placement_policy", "failure_domain_qos_and_queue_policy", "benchmark_policy"]
+  },
+  "physical_gate_matrix": {
+    "positive": [
+      "qualified_replica_yields_complete_legal_tracks",
+      "ordinary_browser_requests_use_distinct_complete_tracks",
+      "per_placement_work_parity_kv_and_cleanup_proven",
+      "paired_material_throughput_without_regression"
+    ],
+    "negative": [
+      "replica_loss_rejects_affected_track_admission",
+      "lost_placement_request_aborts_without_continuity_claim",
+      "unaffected_admitted_request_completes",
+      "invalid_or_neutral_candidate_preserves_incumbent"
+    ],
+    "ordinary_browser_gateway_required": true,
+    "qualification_claim": false
+  },
+  "retained_outcomes": [
+    "completed",
+    "error",
+    "timeout",
+    "cancelled",
+    "rejected_admission",
+    "cleanup_failure"
+  ],
+  "invalidation_rules": [
+    "authority_stale",
+    "binding_mismatch",
+    "duplicate_or_missing_window",
+    "fewer_than_minimum_requests",
+    "incomplete_outcome_accounting",
+    "member_or_runtime_incarnation_changed",
+    "nonfinite_measurement",
+    "posthoc_exclusion_or_threshold_change",
+    "route_changed",
+    "server_restarted",
+    "software_configuration_or_instrumentation_changed",
+    "thermal_or_power_envelope_drift",
+    "window_order_or_pairing_changed",
+    "workload_or_session_changed"
+  ],
+  "decisions": ["inconclusive", "material", "not_material"],
+  "qualification_claim": false,
+  "promotion_authorized": false
+}

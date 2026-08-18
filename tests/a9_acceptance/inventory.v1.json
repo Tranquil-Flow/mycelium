@@ -1,0 +1,191 @@
+{
+  "protocol": "mycelium.a9_acceptance_inventory.v1",
+  "gate": "A9",
+  "state": "design_only",
+  "claim_boundary": "frozen authority, migration, qualification, and projection acceptance inputs only; no schema, implementation, migration execution, device evidence, readiness, or completion claim",
+  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
+  "decisions": [
+    {
+      "decision_id": "separated_capability_authority",
+      "authorities": ["membership_identity", "peer_profile_declaration", "capability_evidence", "class_qualification", "computed_eligibility", "planner_placement", "artifact_grant", "deployment_qualification"],
+      "required_invariants": ["platform_transport_runtime_capability_separate", "declaration_is_not_observation", "eligibility_is_not_placement", "peer_qualification_is_not_route_readiness"],
+      "forbidden_shortcuts": ["compound_device_class", "brand_derived_backend", "participation_derived_capability", "transitive_authority_grant"]
+    },
+    {
+      "decision_id": "signed_capability_binding",
+      "authorities": ["durable_member_key", "membership_generation", "member_incarnation", "profile_digest", "evidence_generation", "evidence_source_kind"],
+      "required_invariants": ["profile_signed_by_member", "capability_report_signed_by_member", "report_binds_current_profile", "report_binds_generation_and_expiry"],
+      "forbidden_shortcuts": ["unsigned_capability", "operator_authored_member_claim", "stale_profile_reuse", "mixed_generation_report"]
+    },
+    {
+      "decision_id": "unknown_remains_ineligible",
+      "authorities": ["registered_unknown_sentinel", "nullable_observation", "explicit_blocker", "registered_contract_version"],
+      "required_invariants": ["unknown_visible_with_blocker", "unknown_activation_ineligible", "missing_observation_not_zero", "unrecognized_enum_rejected"],
+      "forbidden_shortcuts": ["unknown_as_supported", "default_healthy_coercion", "platform_text_guess", "legacy_label_fallback"]
+    },
+    {
+      "decision_id": "native_synthetic_evidence_separation",
+      "authorities": ["native_observed", "synthetic_conformance", "operator_declared", "unknown_source_kind"],
+      "required_invariants": ["source_kind_per_capability_family", "native_gate_requires_native_evidence", "synthetic_history_remains_labelled", "projection_exposes_source_kind"],
+      "forbidden_shortcuts": ["synthetic_as_native", "source_kind_inheritance", "historical_fixture_relabel", "source_kind_hidden_in_ui"]
+    },
+    {
+      "decision_id": "identity_preserving_v2_migration",
+      "authorities": ["legacy_current_generation", "durable_node_key", "cryptographic_key_continuity", "new_incarnation", "monotonic_v2_generation", "migration_checkpoint"],
+      "required_invariants": ["node_id_and_key_preserved_only_with_proof", "new_incarnation_committed_atomically", "legacy_history_keeps_original_contract", "every_role_re_evaluated_without_carry_over", "v1_reader_removed_after_cutover"],
+      "forbidden_shortcuts": ["string_substitution_migration", "operator_identity_mapping", "changed_key_continuity", "eligibility_copy", "indefinite_dual_write"]
+    },
+    {
+      "decision_id": "class_specific_qualification",
+      "authorities": ["exact_platform_runtime_transport_build_tuple", "role_specific_qualifier", "profile_and_evidence_generations", "physical_positive_and_negative_evidence", "qualification_expiry"],
+      "required_invariants": ["qualification_bound_to_exact_role", "one_role_does_not_grant_another", "profile_change_withdraws_dependency", "later_authorities_remain_independent"],
+      "forbidden_shortcuts": ["platform_wide_qualification", "membership_only_placement", "eligibility_only_artifact_access", "peer_authored_route_readiness"]
+    },
+    {
+      "decision_id": "dynamic_ui_projection",
+      "authorities": ["live_authority_generation", "registered_platform_values", "registered_transport_values", "registered_runtime_values", "privacy_reduced_eligibility_projection"],
+      "required_invariants": ["all_workspaces_share_authority_generation", "registry_values_drive_projection", "freshness_blockers_constraints_visible", "withdrawal_reconstructs_after_reconnect", "browser_state_never_grants_eligibility"],
+      "forbidden_shortcuts": ["hard_coded_device_inventory", "brand_specific_ui_branch", "compound_legacy_label_current", "sealed_history_as_current", "browser_local_eligibility"]
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "case_id": "authority_dimension_independence",
+      "gate_kind": "deterministic_negative",
+      "setup": "a current signed member changes one declared platform transport runtime or capability dimension",
+      "stimulus": "recompute profile evidence qualification and eligibility bindings",
+      "required_outcomes": ["changed_dimension_generation_advances", "dependent_eligibility_withdrawn", "independent_authorities_unchanged"],
+      "forbidden_side_effects": ["other_dimension_rewritten", "placement_created", "route_readiness_granted"]
+    },
+    {
+      "case_id": "signed_capability_tamper_or_staleness",
+      "gate_kind": "deterministic_negative",
+      "setup": "capability report is unsigned tampered expired or bound to another profile generation or incarnation",
+      "stimulus": "validate the report for class qualification",
+      "required_outcomes": ["capability_report_rejected", "eligibility_remains_ineligible", "bounded_reason_recorded"],
+      "forbidden_side_effects": ["profile_mutated", "qualification_issued", "membership_lease_extended"]
+    },
+    {
+      "case_id": "unknown_future_platform_or_runtime",
+      "gate_kind": "deterministic_negative",
+      "setup": "profile uses the registered unknown sentinel or an unrecognized enum protocol field or class",
+      "stimulus": "validate and project the peer profile",
+      "required_outcomes": ["registered_unknown_visible_and_ineligible", "explicit_unknown_blocker", "unrecognized_value_rejected"],
+      "forbidden_side_effects": ["unknown_coerced_to_supported", "zero_or_healthy_fabricated", "activation_admitted"]
+    },
+    {
+      "case_id": "synthetic_native_substitution",
+      "gate_kind": "deterministic_negative",
+      "setup": "synthetic conformance passes while the role requires fresh native-observed evidence",
+      "stimulus": "request class qualification and render eligibility",
+      "required_outcomes": ["synthetic_evidence_retained_separately", "native_gate_remains_open", "source_kind_visible"],
+      "forbidden_side_effects": ["synthetic_promoted_to_native", "native_qualification_issued", "source_kind_hidden"]
+    },
+    {
+      "case_id": "identity_continuity_v2_migration",
+      "gate_kind": "physical_positive",
+      "setup": "a current non-revoked legacy member proves possession of its durable node key during bounded migration",
+      "stimulus": "commit its v2 profile through the restart-safe migration checkpoint",
+      "required_outcomes": ["node_id_and_verification_key_preserved", "new_incarnation_created", "generation_advances_exactly_once", "member_visible_but_roles_re_evaluating"],
+      "forbidden_side_effects": ["legacy_history_rewritten", "duplicate_member_created", "eligibility_carried_over"]
+    },
+    {
+      "case_id": "identity_discontinuity_migration",
+      "gate_kind": "physical_negative",
+      "setup": "legacy member is stale revoked changed-key ambiguous or cannot prove durable identity continuity",
+      "stimulus": "attempt v2 migration without a fresh invitation",
+      "required_outcomes": ["migration_rejected", "fresh_reenrollment_required", "prior_database_preserved"],
+      "forbidden_side_effects": ["operator_identity_mapping_used", "partial_v2_member_visible", "incumbent_displaced"]
+    },
+    {
+      "case_id": "eligibility_carry_over_rejection",
+      "gate_kind": "physical_negative",
+      "setup": "legacy member had prior activation eligibility but has not passed exact v2 profile and class re-evaluation",
+      "stimulus": "request assignment artifact activation registration and selection",
+      "required_outcomes": ["legacy_eligibility_not_copied", "member_visible_and_ineligible", "incumbent_remains_recoverable"],
+      "forbidden_side_effects": ["assignment_created", "artifact_disclosed", "activation_admitted", "deployment_selected"]
+    },
+    {
+      "case_id": "v1_write_after_cutover",
+      "gate_kind": "deterministic_negative",
+      "setup": "recorded cutover is complete and the bounded v1 transition reader is no longer authoritative",
+      "stimulus": "send v1 renewal capability assignment or readiness input",
+      "required_outcomes": ["v1_write_rejected", "upgrade_required_reason", "v2_generation_unchanged"],
+      "forbidden_side_effects": ["dual_write_created", "v2_lease_renewed", "migration_reader_reenabled"]
+    },
+    {
+      "case_id": "role_specific_qualification_isolation",
+      "gate_kind": "deterministic_negative",
+      "setup": "peer holds a current qualification for one role but requests a different role",
+      "stimulus": "derive eligibility and request downstream authority",
+      "required_outcomes": ["qualified_role_unchanged", "unqualified_role_rejected", "role_specific_blocker_visible"],
+      "forbidden_side_effects": ["cross_role_grant", "placement_created", "route_readiness_granted"]
+    },
+    {
+      "case_id": "dynamic_projection_withdrawal",
+      "gate_kind": "browser_positive",
+      "setup": "live profile build evidence freshness or class qualification changes for a visible member",
+      "stimulus": "refresh navigate reconnect and open a clean second browser session",
+      "required_outcomes": ["all_workspaces_share_new_generation", "withdrawal_visible_without_reload_state", "source_freshness_and_blockers_visible", "second_session_reconstructs_same_public_truth"],
+      "forbidden_side_effects": ["browser_state_preserves_eligibility", "stale_generation_rendered_current", "private_device_detail_exposed"]
+    },
+    {
+      "case_id": "dynamic_unknown_registry_value",
+      "gate_kind": "browser_negative",
+      "setup": "a registered future unknown platform transport runtime or capability value appears without qualification",
+      "stimulus": "project it through every applicable workspace",
+      "required_outcomes": ["value_rendered_without_brand_branch", "unknown_ineligible_blocker_visible", "no_hard_coded_inventory_change_required"],
+      "forbidden_side_effects": ["value_hidden", "compound_legacy_label_rendered", "eligibility_inferred"]
+    }
+  ],
+  "ui_projections": [
+    {
+      "workspace_id": "inference",
+      "required_projection": ["selected_deployment", "qualified_participating_roles", "eligibility_withdrawal"],
+      "dynamic_behavior": ["live_authority_generation", "no_installed_runtime_as_capacity", "reconnect_reconstructs"],
+      "forbidden_claims": ["membership_implies_selectable", "browser_state_grants_role"]
+    },
+    {
+      "workspace_id": "device_lab",
+      "required_projection": ["role_ladder", "source_kind", "constraints", "blockers", "consent", "freshness"],
+      "dynamic_behavior": ["registry_driven_roles", "qualification_withdrawal_live", "unknown_visible_ineligible"],
+      "forbidden_claims": ["synthetic_as_native", "compound_device_class"]
+    },
+    {
+      "workspace_id": "network",
+      "required_projection": ["transport_capabilities", "bound_path_observation", "transport_freshness"],
+      "dynamic_behavior": ["registered_transport_values", "direct_relay_unknown_live", "platform_independent_connectivity"],
+      "forbidden_claims": ["platform_implies_connectivity", "raw_endpoint_identity"]
+    },
+    {
+      "workspace_id": "nodes",
+      "required_projection": ["identity_kind", "platform_family", "architecture", "transports", "runtimes", "membership", "capabilities", "qualification", "eligibility"],
+      "dynamic_behavior": ["separate_authority_generations", "registered_values_without_brand_branch", "withdrawal_live"],
+      "forbidden_claims": ["compound_legacy_class", "brand_as_backend"]
+    },
+    {
+      "workspace_id": "plans",
+      "required_projection": ["profile_generation", "evidence_generation", "qualification_generation", "exclusion_reason"],
+      "dynamic_behavior": ["planner_intent_separate", "stale_input_withdrawn", "unknown_blocks_required_objective"],
+      "forbidden_claims": ["eligibility_implies_placement", "unknown_as_zero"]
+    },
+    {
+      "workspace_id": "readiness",
+      "required_projection": ["membership_proof", "profile_proof", "evidence_proof", "class_qualification", "artifact_proof", "load_proof", "deployment_qualification", "registration", "selection"],
+      "dynamic_behavior": ["proofs_independently_fresh", "dependent_withdrawal_live", "same_public_generation"],
+      "forbidden_claims": ["peer_qualification_is_route_ready", "membership_is_stage_ready"]
+    },
+    {
+      "workspace_id": "incidents",
+      "required_projection": ["migration_state", "stale_profile", "changed_build", "unsupported_capability", "eligibility_withdrawal"],
+      "dynamic_behavior": ["terminal_history_retained", "bounded_reason_codes", "reconnect_reconstructs"],
+      "forbidden_claims": ["private_device_detail", "fabricated_peer_failure"]
+    },
+    {
+      "workspace_id": "settings",
+      "required_projection": ["contract_versions", "supported_registries", "contribution_policy", "privacy_retention", "migration_status", "revocation"],
+      "dynamic_behavior": ["registry_updates_without_ui_inventory_edit", "redacted_diagnostics", "same_public_generation"],
+      "forbidden_claims": ["private_membership_credential", "operator_mapping_as_identity"]
+    }
+  ]
+}

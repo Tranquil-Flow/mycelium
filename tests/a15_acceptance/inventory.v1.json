@@ -1,0 +1,117 @@
+{
+  "protocol": "mycelium.a15_acceptance_inventory.v1",
+  "gate": "A15",
+  "state": "design_only",
+  "claim_boundary": "frozen release-closure acceptance inputs and rejection behavior only; no assembled result graph, signature, governance mutation, release artifact, readiness decision, or completion claim",
+  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a15-executed-release-closure.md",
+  "result_graph": {
+    "protocol": "mycelium.executed_result_graph.v1",
+    "node_protocol": "mycelium.executed_gate_result.v1",
+    "addressing": "sha256_canonical_node_bytes",
+    "root_protocol": "mycelium.astra_release_decision.v1",
+    "required_node_fields": ["node_digest", "gate_id", "result_kind", "outcome", "source_commit", "source_tree_digest", "tree_state", "provenance", "subject", "artifact_reference", "artifact_digest", "dependency_gate_ids", "dependency_digests", "verifier_policy_digest", "executed_at", "fresh_until", "contract_digest", "model_digest", "representation_digest", "runtime_digest", "environment_digest", "authority_generation"],
+    "required_root_fields": ["root_digest", "source_commit", "source_tree_digest", "tree_state", "gate_commit_digests", "result_node_digests", "digest_class_roots", "exclusion_digests", "reviewer_reproduction_digest", "decision_generation"],
+    "required_invariants": ["canonical_bytes_only", "node_digest_matches_content", "root_digest_matches_content", "acyclic_dependencies", "dependency_digests_exact", "no_duplicate_logical_result", "no_conflicting_node_identity", "all_references_resolve", "unknown_fields_rejected", "verified_outcome_only", "freshness_policy_applied", "single_source_binding", "contract_binding_required", "model_binding_required", "representation_binding_required", "runtime_binding_required", "environment_binding_required", "authority_generation_required"],
+    "forbidden_inputs": ["handwritten_complete_boolean", "handwritten_release_ready_boolean", "operator_pass_affidavit", "ui_badge_state", "unchecked_checklist_mark", "unsupported_completion_label"]
+  },
+  "source_binding": {
+    "commit_format": "git_commit_sha1_40_lower_hex",
+    "required_tree_state": "clean",
+    "required_bindings": ["exact_source_commit", "tracked_tree_digest", "submodule_commit_set", "dependency_lock_digest_set", "result_graph_root"],
+    "forbidden_substitutions": ["branch_name", "tag_name_without_digest", "abbreviated_commit", "dirty_tree_claimed_clean", "untracked_build_input", "later_equivalent_commit"]
+  },
+  "gate_graph": {
+    "required_atomic_gates": ["A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14"],
+    "allowed_external_prerequisites": ["A2"],
+    "atomic_commit_policy": "exactly_one_distinct_commit_per_gate",
+    "release_root_dependencies": ["A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14"],
+    "direct_prerequisites": [
+      {"gate_id": "A3", "dependencies": ["A2"]},
+      {"gate_id": "A4", "dependencies": ["A3"]},
+      {"gate_id": "A5", "dependencies": ["A4"]},
+      {"gate_id": "A6", "dependencies": ["A4"]},
+      {"gate_id": "A7", "dependencies": ["A6"]},
+      {"gate_id": "A8", "dependencies": ["A3"]},
+      {"gate_id": "A9", "dependencies": ["A8"]},
+      {"gate_id": "A10", "dependencies": ["A4"]},
+      {"gate_id": "A11", "dependencies": ["A10"]},
+      {"gate_id": "A12", "dependencies": ["A4", "A9"]},
+      {"gate_id": "A13", "dependencies": ["A12"]},
+      {"gate_id": "A14", "dependencies": ["A8"]}
+    ],
+    "required_commit_bindings": ["gate_id", "commit_digest", "parent_commit_digests", "source_tree_digest", "result_node_digests"],
+    "rejected_graph_shapes": ["missing_gate", "extra_gate", "missing_direct_edge", "extra_direct_edge", "duplicate_gate_commit", "shared_gate_commit", "non_ancestor_prerequisite", "cycle"]
+  },
+  "provenance_policy": {
+    "kinds": ["live", "replay", "fixture", "historical"],
+    "rules": [
+      {"kind": "live", "eligible_scope": "current_execution_only", "cannot_substitute_for": ["replay", "fixture", "historical"]},
+      {"kind": "replay", "eligible_scope": "sealed_artifact_reproduction_only", "cannot_substitute_for": ["live", "fixture", "historical", "physical"]},
+      {"kind": "fixture", "eligible_scope": "deterministic_test_only", "cannot_substitute_for": ["live", "replay", "historical", "physical", "browser", "external_reviewer"]},
+      {"kind": "historical", "eligible_scope": "inspection_only", "cannot_substitute_for": ["live", "replay", "fixture", "current", "physical", "browser", "external_reviewer"]}
+    ],
+    "required_invariants": ["provenance_explicit", "required_kind_exact", "fixture_never_promoted", "replay_retains_source_digest", "historical_never_current", "unknown_provenance_rejected"]
+  },
+  "digest_policy": {
+    "algorithm": "sha256_lower_hex",
+    "required_classes": ["test", "audit", "physical", "browser", "model", "contract", "package", "sbom"],
+    "class_bindings": [
+      {"digest_class": "test", "binds": ["test_selection", "test_runner", "executed_results"]},
+      {"digest_class": "audit", "binds": ["audit_policy", "audit_tool", "audit_findings"]},
+      {"digest_class": "physical", "binds": ["physical_case", "environment_class", "executed_artifacts"]},
+      {"digest_class": "browser", "binds": ["engine_matrix", "browser_harness", "browser_results"]},
+      {"digest_class": "model", "binds": ["model_revision", "serving_representation", "qualification_policy"]},
+      {"digest_class": "contract", "binds": ["contract_manifest", "protocol_set", "canonicalization_policy"]},
+      {"digest_class": "package", "binds": ["unsigned_payload", "package_manifest", "signing_receipt_when_applicable"]},
+      {"digest_class": "sbom", "binds": ["sbom_document", "dependency_lock_set", "license_policy"]}
+    ],
+    "rejected_states": ["missing_digest_class", "malformed_digest", "digest_mismatch", "unbound_digest", "duplicate_conflicting_digest"]
+  },
+  "exclusion_policy": {
+    "protocol": "mycelium.signed_release_exclusion.v1",
+    "maximum_exclusions_per_generation": 16,
+    "maximum_requirements_per_exclusion": 8,
+    "maximum_reason_utf8_bytes": 1024,
+    "maximum_lifetime_hours": 720,
+    "required_fields": ["exclusion_digest", "requirement_ids", "scope", "reason", "risk", "compensating_behavior", "reviewer_identity", "signer_key_id", "issued_at", "expires_at", "signature"],
+    "non_excludable_requirements": ["source_integrity", "clean_tree", "content_digest_integrity", "owner_authority", "privacy_and_credential_safety", "qualified_only_selection", "fail_closed_execution", "provenance_truth", "external_reviewer_reproduction"],
+    "required_invariants": ["signature_verified", "signer_authorized", "scope_exact", "requirement_count_bounded", "reason_size_bounded", "expiry_bounded", "affected_claims_withheld", "exclusion_never_becomes_pass"],
+    "rejected_states": ["unsigned_exclusion", "unbounded_scope", "unbounded_lifetime", "expired_exclusion", "unknown_requirement", "mandatory_requirement_excluded", "exclusion_claims_completion"]
+  },
+  "reviewer_reproduction": {
+    "protocol": "mycelium.external_reviewer_reproduction.v1",
+    "required_environment": ["independent_reviewer", "clean_checkout", "exact_source_commit", "clean_tree", "approved_offline_inputs", "no_operator_private_state"],
+    "required_steps": ["verify_source_binding", "verify_result_graph", "verify_gate_commit_graph", "verify_contract_manifest", "verify_package_digest", "verify_sbom_digest", "rerun_required_deterministic_checks", "reproduce_required_physical_positive", "reproduce_required_physical_negative", "record_signed_reproduction_result"],
+    "required_outputs": ["reviewer_result_digest", "environment_digest", "command_manifest_digest", "reproduced_result_digests", "difference_report_digest", "reviewer_signature"],
+    "forbidden_shortcuts": ["maintainer_checkout_reuse", "private_ssh_dependency", "tailscale_dependency", "operator_cache_dependency", "pre_enrolled_identity", "copied_pass_boolean", "unreviewed_binary"]
+  },
+  "revocation_policy": {
+    "protocol": "mycelium.release_revocation.v1",
+    "triggers": ["mandatory_evidence_expired", "exclusion_expired", "graph_digest_inconsistent", "source_binding_inconsistent", "dependency_edge_inconsistent", "artifact_digest_inconsistent", "provenance_inconsistent", "verifier_policy_invalidated", "reviewer_result_invalidated"],
+    "required_actions": ["append_new_generation", "derive_not_ready", "retain_historical_generation", "identify_invalidated_nodes", "propagate_to_dependents", "withhold_affected_claims"],
+    "forbidden_actions": ["edit_historical_decision", "retain_cached_ready_state", "silently_extend_expiry", "rewrite_provenance", "ignore_inconsistent_dependency"]
+  },
+  "decision_policy": {
+    "derivation": "verified_graph_only",
+    "decision_states": ["ready", "not_ready"],
+    "required_inputs": ["validated_result_graph", "exact_source_binding", "validated_gate_graph", "complete_digest_classes", "valid_exclusions", "external_reviewer_reproduction"],
+    "unsupported_claim_inputs": ["handwritten_boolean", "manual_checkbox", "operator_affidavit", "ui_state", "milestone_label", "unsigned_summary", "unverified_link"],
+    "required_rejections": ["unsupported_completion_claim", "missing_required_result", "extra_unknown_result", "stale_required_result", "inconsistent_required_result", "manually_overridden_decision"]
+  },
+  "acceptance_cases": [
+    {"case_id": "canonical_graph_accepts", "mutation": "none", "expected_result": "definition_valid", "required_findings": []},
+    {"case_id": "missing_gate_edge_rejected", "mutation": "remove_a12_a4_edge", "expected_result": "definition_invalid", "required_findings": ["gate_graph_mismatch"]},
+    {"case_id": "extra_gate_edge_rejected", "mutation": "add_a14_a3_edge", "expected_result": "definition_invalid", "required_findings": ["gate_graph_mismatch"]},
+    {"case_id": "missing_result_dependency_rejected", "mutation": "remove_node_dependency_digest", "expected_result": "release_rejected", "required_findings": ["dependency_digests_not_exact"]},
+    {"case_id": "extra_result_dependency_rejected", "mutation": "add_unknown_node_dependency_digest", "expected_result": "release_rejected", "required_findings": ["dependency_digests_not_exact"]},
+    {"case_id": "dirty_tree_rejected", "mutation": "set_tree_state_dirty", "expected_result": "release_rejected", "required_findings": ["clean_tree_required"]},
+    {"case_id": "provenance_substitution_rejected", "mutation": "replace_live_physical_with_replay", "expected_result": "release_rejected", "required_findings": ["provenance_requirement_unsatisfied"]},
+    {"case_id": "digest_class_omission_rejected", "mutation": "remove_sbom_digest", "expected_result": "release_rejected", "required_findings": ["digest_class_set_mismatch"]},
+    {"case_id": "unsigned_exclusion_rejected", "mutation": "remove_exclusion_signature", "expected_result": "release_rejected", "required_findings": ["exclusion_signature_missing"]},
+    {"case_id": "external_reproduction_missing_rejected", "mutation": "remove_reviewer_result", "expected_result": "release_rejected", "required_findings": ["reviewer_reproduction_missing"]},
+    {"case_id": "expired_evidence_revokes", "mutation": "expire_mandatory_evidence", "expected_result": "new_not_ready_generation", "required_findings": ["mandatory_evidence_expired"]},
+    {"case_id": "inconsistent_evidence_revokes", "mutation": "change_bound_artifact_digest", "expected_result": "new_not_ready_generation", "required_findings": ["artifact_digest_inconsistent"]},
+    {"case_id": "handwritten_boolean_rejected", "mutation": "add_release_ready_true", "expected_result": "release_rejected", "required_findings": ["unsupported_completion_claim"]},
+    {"case_id": "unsupported_completion_rejected", "mutation": "add_unsigned_completion_label", "expected_result": "release_rejected", "required_findings": ["unsupported_completion_claim"]}
+  ]
+}

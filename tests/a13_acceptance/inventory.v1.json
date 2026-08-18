@@ -1,0 +1,751 @@
+{
+  "protocol": "mycelium.a13_onboarding_acceptance_inventory.v1",
+  "gate": "A13",
+  "state": "design_only",
+  "claim_boundary": "frozen identity, invitation, package, consent, lifecycle, clean-device, and projection acceptance inputs only; no installer, signing operation, external account, device execution, service, evidence, qualification, or completion claim",
+  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md",
+  "identity_requirements": {
+    "creator": "target_device",
+    "algorithm": "ed25519",
+    "creation_precedes_invitation_minting": true,
+    "platform_protected_storage_required_when_available": true,
+    "private_key_export_allowed": false,
+    "silent_regeneration_on_retry_allowed": false,
+    "forbidden_private_key_consumers": [
+      "browser_ui",
+      "logs",
+      "diagnostics",
+      "qr_payload",
+      "coordinator",
+      "owner_device"
+    ]
+  },
+  "invitation_requirements": {
+    "pairing_request_contains_swarm_secret": false,
+    "recipient_bound_encryption_required": true,
+    "short_lived_required": true,
+    "single_use_required": true,
+    "identity_nonce_platform_and_seed_binding_required": true,
+    "target_local_decryption_required": true,
+    "atomic_join_required": true,
+    "plaintext_handoff_erasure_required": true,
+    "allowed_return_forms": ["qr", "registered_deep_link", "owner_private_recovery_file"],
+    "forbidden_invitation_sinks": [
+      "url_query",
+      "url_fragment",
+      "shell_argument",
+      "clipboard_projection",
+      "log",
+      "web_redirect",
+      "third_party_tracker",
+      "pasteboard",
+      "cookie",
+      "analytics_sdk"
+    ]
+  },
+  "package_update_requirements": {
+    "supported_package_classes": [
+      "signed_macos_package",
+      "signed_linux_package",
+      "signed_windows_installer",
+      "signed_android_application",
+      "signed_ios_ipados_application",
+      "limited_browser_member"
+    ],
+    "manifest_bindings": [
+      "source_revision",
+      "build_inputs",
+      "platform_architecture",
+      "package_digest",
+      "publisher_identity",
+      "minimum_os",
+      "service_descriptor",
+      "update_channel",
+      "rollback_floor",
+      "capability_protocol",
+      "privacy_notice",
+      "expiry_revocation_policy"
+    ],
+    "signature_and_publisher_verification_required": true,
+    "downgrade_below_rollback_floor_allowed": false,
+    "update_may_change_device_or_swarm_identity": false,
+    "runtime_change_requires_capability_requalification": true,
+    "package_may_embed_invite_or_owner_credential": false
+  },
+  "physical_execution_matrix": [
+    {
+      "platform_path": "signed_macos_package",
+      "claim_level": "managed_native_host",
+      "physical_execution_required": true,
+      "positive_case_ids": ["signed_package_clean_install", "clean_device_normal_user_onboarding", "unrelated_network_join_and_reconnect"],
+      "negative_case_ids": ["invalid_package_or_update_rejection", "expert_dependency_rejection", "interrupted_onboarding_recovery"]
+    },
+    {
+      "platform_path": "signed_linux_package",
+      "claim_level": "managed_native_host",
+      "physical_execution_required": true,
+      "positive_case_ids": ["signed_package_clean_install", "clean_device_normal_user_onboarding", "unrelated_network_join_and_reconnect"],
+      "negative_case_ids": ["invalid_package_or_update_rejection", "expert_dependency_rejection", "interrupted_onboarding_recovery"]
+    },
+    {
+      "platform_path": "signed_windows_installer",
+      "claim_level": "managed_native_host",
+      "physical_execution_required": true,
+      "positive_case_ids": ["signed_package_clean_install", "clean_device_normal_user_onboarding", "unrelated_network_join_and_reconnect"],
+      "negative_case_ids": ["invalid_package_or_update_rejection", "expert_dependency_rejection", "interrupted_onboarding_recovery"]
+    },
+    {
+      "platform_path": "signed_android_application",
+      "claim_level": "a12_qualified_mobile_level",
+      "physical_execution_required": true,
+      "positive_case_ids": ["signed_package_clean_install", "encrypted_recipient_pairing", "clean_device_normal_user_onboarding"],
+      "negative_case_ids": ["invalid_package_or_update_rejection", "consent_or_resource_limit_withdrawal", "interrupted_onboarding_recovery"]
+    },
+    {
+      "platform_path": "signed_ios_ipados_application",
+      "claim_level": "a12_qualified_mobile_level",
+      "physical_execution_required": true,
+      "positive_case_ids": ["signed_package_clean_install", "encrypted_recipient_pairing", "clean_device_normal_user_onboarding"],
+      "negative_case_ids": ["invalid_package_or_update_rejection", "consent_or_resource_limit_withdrawal", "interrupted_onboarding_recovery"]
+    },
+    {
+      "platform_path": "limited_browser_member",
+      "claim_level": "limited_probe_only",
+      "physical_execution_required": true,
+      "positive_case_ids": ["target_identity_creation_and_durability", "encrypted_recipient_pairing", "clean_device_normal_user_onboarding"],
+      "negative_case_ids": ["expired_reused_or_forged_invitation", "expert_dependency_rejection", "interrupted_onboarding_recovery"]
+    }
+  ],
+  "consent_requirements": {
+    "assigned_peer_visibility_disclosure_required": true,
+    "resource_policy_dimensions": [
+      "battery_power",
+      "metered_network",
+      "background_operation",
+      "storage_budget",
+      "thermal_limits",
+      "update_channel",
+      "diagnostics",
+      "revocation_consequences"
+    ],
+    "invitation_class_ceiling_is_qualification": false,
+    "installation_implies_inference_eligibility": false
+  },
+  "normal_user_path_requirements": {
+    "clean_device_required": true,
+    "unrelated_networks_required": true,
+    "excluded_dependencies": [
+      "ssh",
+      "tailscale",
+      "termux",
+      "adb",
+      "source_checkout",
+      "repository_knowledge",
+      "seed_url",
+      "endpoint_id",
+      "sidecar",
+      "shell",
+      "cli_setup",
+      "manual_model_copy"
+    ],
+    "a8_https_membership_control_required": true,
+    "authenticated_activation_plane_required": true,
+    "public_admin_endpoint_allowed": false,
+    "unencrypted_control_allowed": false
+  },
+  "onboarding_ladder": [
+    "package_verification",
+    "target_identity",
+    "pairing_request",
+    "owner_consent_and_invite_authorization",
+    "encrypted_invitation_handoff",
+    "seed_pin_and_atomic_join",
+    "signed_membership",
+    "lease",
+    "software_update",
+    "capability_probe",
+    "class_qualification",
+    "directed_link_evidence",
+    "assignment",
+    "artifact_acquisition",
+    "load",
+    "startup_challenge",
+    "deployment_qualification",
+    "selection"
+  ],
+  "managed_lifecycle_states": [
+    "install",
+    "lease_renewal",
+    "reconnect",
+    "capability_refresh",
+    "update",
+    "rollback",
+    "restart",
+    "suspend",
+    "network_loss",
+    "low_storage",
+    "revoked_membership",
+    "drain",
+    "uninstall",
+    "retained_identity_reinstall",
+    "removed_identity_reenrollment"
+  ],
+  "decisions": [
+    {
+      "decision_id": "target_device_owned_identity",
+      "required_invariants": [
+        "target_creates_identity_before_owner_mints_invite",
+        "private_key_remains_target_local_and_nonexportable",
+        "retry_never_silently_regenerates_identity",
+        "accepted_identity_generation_is_durable"
+      ],
+      "forbidden_shortcuts": [
+        "owner_generated_target_identity",
+        "coordinator_generated_target_identity",
+        "package_embedded_identity",
+        "pre_enrolled_image_as_clean_device",
+        "identity_regeneration_for_retry"
+      ]
+    },
+    {
+      "decision_id": "recipient_bound_single_use_invitation",
+      "required_invariants": [
+        "pairing_request_contains_public_binding_only",
+        "complete_invitation_encrypted_to_target_ephemeral_key",
+        "handoff_is_short_lived_single_use_and_recipient_bound",
+        "target_verifies_identity_nonce_platform_seed_and_expiry",
+        "plaintext_erased_after_atomic_join"
+      ],
+      "forbidden_shortcuts": [
+        "plaintext_invite_in_qr_or_deep_link",
+        "invite_in_url_query_or_fragment",
+        "third_party_redirect_or_tracker",
+        "clipboard_or_log_projection",
+        "reused_or_substituted_invitation"
+      ]
+    },
+    {
+      "decision_id": "platform_signed_package_update",
+      "required_invariants": [
+        "exact_platform_signed_package_verified_before_identity_mutation",
+        "manifest_binds_reproducible_build_publisher_lifecycle_and_update_policy",
+        "update_verifies_signature_publisher_digest_channel_and_rollback_floor",
+        "update_preserves_device_swarm_and_member_identity",
+        "capability_change_forces_requalification"
+      ],
+      "forbidden_shortcuts": [
+        "development_build_as_release_path",
+        "invalid_or_changed_publisher_accepted",
+        "downgrade_below_rollback_floor",
+        "update_embeds_model_or_invite",
+        "unsigned_update_applied"
+      ]
+    },
+    {
+      "decision_id": "explicit_consent_resource_limits",
+      "required_invariants": [
+        "cooperative_peer_visibility_is_disclosed_before_join",
+        "resource_policy_dimensions_are_separate_and_explicit",
+        "owner_invitation_ceiling_is_not_qualification",
+        "device_and_owner_limits_intersect_without_broadening",
+        "revocation_and_removal_consequences_are_explained"
+      ],
+      "forbidden_shortcuts": [
+        "implicit_consent",
+        "single_global_resource_toggle",
+        "invitation_ceiling_as_eligibility",
+        "installation_as_serving_capacity",
+        "unsafe_default_background_contribution"
+      ]
+    },
+    {
+      "decision_id": "normal_user_no_expert_tools",
+      "required_invariants": [
+        "clean_device_normal_user_completes_without_expert_setup",
+        "package_pairing_consent_join_and_preflight_are_product_owned",
+        "no_repository_or_network_identifier_knowledge_required",
+        "advanced_diagnostics_remain_optional_and_redacted"
+      ],
+      "forbidden_shortcuts": [
+        "ssh_dependency",
+        "tailscale_dependency",
+        "termux_dependency",
+        "adb_dependency",
+        "source_checkout_dependency",
+        "repository_knowledge_dependency",
+        "cli_or_shell_dependency"
+      ]
+    },
+    {
+      "decision_id": "dynamic_onboarding_ladder",
+      "required_invariants": [
+        "every_rung_has_live_authority_provenance_and_blockers",
+        "later_rung_never_rewrites_or_grants_earlier_rung",
+        "membership_never_implies_capability_artifact_load_or_selection",
+        "new_platform_runtime_and_role_values_are_registry_driven",
+        "active_routes_remain_immutable_during_join"
+      ],
+      "forbidden_shortcuts": [
+        "hard_coded_member_or_platform_inventory",
+        "browser_authored_eligibility",
+        "membership_as_serving_capacity",
+        "invitation_class_as_qualification",
+        "join_mutates_active_route"
+      ]
+    },
+    {
+      "decision_id": "managed_lifecycle_revocation_removal",
+      "required_invariants": [
+        "installed_agent_owns_bounded_lease_reconnect_refresh_and_drain",
+        "update_restart_suspend_and_network_loss_have_durable_states",
+        "revocation_blocks_future_work_and_withdraws_eligibility",
+        "online_uninstall_drains_before_resource_cleanup",
+        "offline_uninstall_never_claims_coordinator_revocation",
+        "identity_cache_retention_follows_explicit_user_choice"
+      ],
+      "forbidden_shortcuts": [
+        "silent_identity_change_on_update",
+        "offline_uninstall_as_revocation",
+        "unbounded_reconnect_or_drain",
+        "reinstall_bypasses_generation_or_lease",
+        "removal_presumes_secure_erasure"
+      ]
+    },
+    {
+      "decision_id": "unrelated_network_onboarding",
+      "required_invariants": [
+        "a8_https_bootstrap_works_across_unrelated_networks",
+        "authenticated_activation_plane_remains_separate",
+        "seed_pin_and_membership_authority_are_preserved",
+        "onboarding_traffic_never_counts_as_inference_traffic"
+      ],
+      "forbidden_shortcuts": [
+        "same_lan_only_claim",
+        "tailscale_fallback",
+        "public_admin_endpoint",
+        "unencrypted_control",
+        "onboarding_as_activation_evidence"
+      ]
+    },
+    {
+      "decision_id": "live_all_workspace_projection",
+      "required_invariants": [
+        "all_workspaces_share_current_public_generation",
+        "progress_blockers_actions_lifecycle_and_terminal_history_reconstruct",
+        "package_identity_membership_capability_and_serving_remain_separate",
+        "private_pairing_state_stays_in_owning_session",
+        "secrets_and_private_device_data_are_excluded"
+      ],
+      "forbidden_shortcuts": [
+        "browser_state_grants_membership_or_eligibility",
+        "sealed_history_as_current",
+        "fixed_device_or_topology_list",
+        "pairing_ciphertext_in_public_projection",
+        "private_diagnostic_exposure"
+      ]
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "case_id": "target_identity_creation_and_durability",
+      "gate_kind": "physical_positive",
+      "setup": "a clean supported target has a verified signed package and no preexisting Mycelium identity",
+      "stimulus": "create the target identity restart the package and begin pairing",
+      "required_outcomes": [
+        "identity_created_on_target_before_invite",
+        "identity_digest_stable_across_restart",
+        "private_key_never_exported",
+        "pairing_request_binds_permanent_identity_digest"
+      ],
+      "forbidden_side_effects": [
+        "owner_or_coordinator_creates_identity",
+        "identity_in_log_or_qr",
+        "pre_enrolled_identity_used"
+      ]
+    },
+    {
+      "case_id": "identity_retry_substitution_rejection",
+      "gate_kind": "deterministic_negative",
+      "setup": "a pairing retry changes the target identity digest nonce or identity storage state",
+      "stimulus": "resume authorize or decrypt the prior invitation handoff",
+      "required_outcomes": [
+        "identity_or_nonce_change_rejected",
+        "fresh_pairing_authorization_required",
+        "no_partial_member_visible",
+        "original_identity_not_silently_replaced"
+      ],
+      "forbidden_side_effects": [
+        "identity_regenerated_to_retry",
+        "old_invitation_rebound",
+        "membership_generation_created"
+      ]
+    },
+    {
+      "case_id": "signed_package_clean_install",
+      "gate_kind": "physical_positive",
+      "setup": "a clean supported platform receives the exact reviewed signed package through its normal installation channel",
+      "stimulus": "verify manifest signature publisher digest platform lifecycle and rollback floor before launch",
+      "required_outcomes": [
+        "package_signature_and_publisher_verified",
+        "manifest_bindings_match_exact_platform",
+        "managed_lifecycle_installed_with_least_privilege",
+        "identity_creation_allowed_only_after_verification"
+      ],
+      "forbidden_side_effects": [
+        "package_contains_invite_or_owner_credential",
+        "identity_created_before_package_verification",
+        "unsupported_platform_coerced"
+      ]
+    },
+    {
+      "case_id": "invalid_package_or_update_rejection",
+      "gate_kind": "physical_negative",
+      "setup": "package or update has invalid signature digest publisher notarization platform lifecycle expiry or rollback floor",
+      "stimulus": "attempt install update downgrade rollback or service start",
+      "required_outcomes": [
+        "package_or_update_rejected_before_identity_or_membership_mutation",
+        "current_verified_version_remains_usable_when_safe",
+        "exact_recovery_action_recorded",
+        "capability_state_unchanged"
+      ],
+      "forbidden_side_effects": [
+        "unsigned_update_applied",
+        "publisher_identity_changed",
+        "downgrade_floor_bypassed",
+        "member_identity_changed"
+      ]
+    },
+    {
+      "case_id": "encrypted_recipient_pairing",
+      "gate_kind": "physical_positive",
+      "setup": "target displays a current pairing request and owner explicitly authorizes one bounded invitation",
+      "stimulus": "return encrypted QR or registered deep link decrypt locally verify bindings and join atomically",
+      "required_outcomes": [
+        "pairing_request_contains_no_swarm_secret",
+        "invitation_ciphertext_recipient_bound",
+        "target_verifies_seed_identity_nonce_platform_and_expiry",
+        "single_use_join_commits_one_member_generation",
+        "plaintext_handoff_state_erased"
+      ],
+      "forbidden_side_effects": [
+        "plaintext_invite_in_qr_or_link",
+        "third_party_receives_invitation_material",
+        "partial_member_visible"
+      ]
+    },
+    {
+      "case_id": "expired_reused_or_forged_invitation",
+      "gate_kind": "physical_negative",
+      "setup": "invitation is expired already consumed forged changed or replayed after durable acceptance",
+      "stimulus": "decrypt validate consume and attempt membership join",
+      "required_outcomes": [
+        "invalid_or_reused_invitation_rejected",
+        "existing_accepted_outcome_may_be_shown_idempotently",
+        "no_second_member_generation_created",
+        "bounded_failure_reason_recorded"
+      ],
+      "forbidden_side_effects": [
+        "invite_reuse_accepted",
+        "partial_member_visible",
+        "target_identity_regenerated",
+        "active_route_mutated"
+      ]
+    },
+    {
+      "case_id": "recipient_nonce_seed_substitution",
+      "gate_kind": "deterministic_negative",
+      "setup": "ciphertext recipient identity nonce platform claim seed pin or public routing metadata differs from authorization",
+      "stimulus": "open handoff verify authenticated bindings and submit canonical join",
+      "required_outcomes": [
+        "substituted_binding_rejected",
+        "recipient_only_decryption_preserved",
+        "atomic_join_not_started",
+        "fresh_owner_authorization_required"
+      ],
+      "forbidden_side_effects": [
+        "ciphertext_rebound_to_other_target",
+        "seed_pin_bypassed",
+        "member_generation_created"
+      ]
+    },
+    {
+      "case_id": "deep_link_secret_sink_rejection",
+      "gate_kind": "deterministic_negative",
+      "setup": "deep link QR recovery or telemetry path attempts to expose invitation material outside the registered application",
+      "stimulus": "validate closed payload routing tracker pasteboard cookie analytics log and clipboard boundaries",
+      "required_outcomes": [
+        "unregistered_or_open_payload_rejected",
+        "invitation_material_stays_in_registered_application",
+        "no_plaintext_or_ciphertext_public_projection",
+        "security_incident_reason_bounded"
+      ],
+      "forbidden_side_effects": [
+        "web_redirect_receives_invite",
+        "tracker_receives_invite",
+        "pasteboard_receives_invite",
+        "analytics_receives_invite",
+        "log_receives_invite"
+      ]
+    },
+    {
+      "case_id": "explicit_consent_and_resource_policy",
+      "gate_kind": "browser_positive",
+      "setup": "normal user reviews cooperative peer visibility and every contribution resource policy before owner authorization",
+      "stimulus": "accept selected consent scopes quotas update diagnostics and revocation consequences",
+      "required_outcomes": [
+        "visibility_disclosure_acknowledged",
+        "resource_dimensions_stored_separately",
+        "device_and_owner_bounds_intersect",
+        "accepted_class_ceiling_recorded_as_nonqualification",
+        "join_may_continue_only_after_required_consent"
+      ],
+      "forbidden_side_effects": [
+        "implicit_consent_used",
+        "resource_bounds_broadened",
+        "invitation_ceiling_qualifies_role",
+        "installation_becomes_capacity"
+      ]
+    },
+    {
+      "case_id": "consent_or_resource_limit_withdrawal",
+      "gate_kind": "physical_negative",
+      "setup": "user denies or revokes required consent or lowers power network background storage or thermal bounds",
+      "stimulus": "recompute contribution eligibility and drain any affected managed work",
+      "required_outcomes": [
+        "dependent_future_work_withheld",
+        "active_work_drains_or_cancels_boundedly",
+        "unaffected_membership_state_remains_truthful",
+        "exact_policy_blocker_visible"
+      ],
+      "forbidden_side_effects": [
+        "consent_inferred",
+        "policy_limit_ignored",
+        "active_route_mutated",
+        "deployment_failed"
+      ]
+    },
+    {
+      "case_id": "clean_device_normal_user_onboarding",
+      "gate_kind": "physical_positive",
+      "setup": "clean supported device and normal invited user have no source checkout expert network setup or preenrollment",
+      "stimulus": "install pair consent join preflight and observe qualification ladder across unrelated networks",
+      "required_outcomes": [
+        "signed_package_installed_through_normal_channel",
+        "target_owned_identity_created",
+        "encrypted_single_use_pairing_completed",
+        "unrelated_network_join_completed",
+        "signed_member_visible_but_unqualified",
+        "all_relevant_workspaces_show_current_progress"
+      ],
+      "forbidden_side_effects": [
+        "expert_setup_required",
+        "pre_enrolled_image_used",
+        "membership_as_serving_capacity",
+        "active_route_mutated"
+      ]
+    },
+    {
+      "case_id": "expert_dependency_rejection",
+      "gate_kind": "physical_negative",
+      "setup": "onboarding depends on SSH Tailscale Termux ADB repository source seed URL EndpointID shell sidecar or CLI knowledge",
+      "stimulus": "attempt to satisfy the normal-user clean-device gate",
+      "required_outcomes": [
+        "normal_user_gate_remains_open",
+        "dependency_labelled_development_or_operator_only",
+        "missing_product_step_identified",
+        "no_clean_device_claim_published"
+      ],
+      "forbidden_side_effects": [
+        "ssh_as_normal_path",
+        "tailscale_as_normal_path",
+        "termux_as_normal_path",
+        "adb_as_normal_path",
+        "repository_knowledge_as_normal_path"
+      ]
+    },
+    {
+      "case_id": "unrelated_network_join_and_reconnect",
+      "gate_kind": "physical_positive",
+      "setup": "owner and clean target are on unrelated networks with current A8 bootstrap and signed package trust",
+      "stimulus": "pair join renew lease lose network and reconnect through managed product control",
+      "required_outcomes": [
+        "https_bootstrap_succeeds_without_same_lan",
+        "authenticated_membership_and_activation_planes_remain_separate",
+        "lease_and_member_generation_reconstruct",
+        "network_loss_and_reconnect_are_durable_states",
+        "onboarding_traffic_not_counted_as_inference"
+      ],
+      "forbidden_side_effects": [
+        "tailscale_fallback_used",
+        "public_admin_endpoint_opened",
+        "unencrypted_control_used",
+        "network_location_grants_eligibility"
+      ]
+    },
+    {
+      "case_id": "dynamic_ladder_authority_isolation",
+      "gate_kind": "deterministic_negative",
+      "setup": "one onboarding rung advances fails expires or is revoked while earlier and unrelated authorities remain current",
+      "stimulus": "recompute progress capability qualification artifact load readiness and selection projections",
+      "required_outcomes": [
+        "changed_rung_and_provenance_recorded",
+        "dependent_later_rungs_withdraw",
+        "earlier_history_not_rewritten",
+        "unrelated_authorities_unchanged",
+        "next_safe_action_visible"
+      ],
+      "forbidden_side_effects": [
+        "transitive_rung_grant",
+        "browser_state_advances_rung",
+        "placement_created",
+        "deployment_selected",
+        "active_route_mutated"
+      ]
+    },
+    {
+      "case_id": "managed_update_requalification",
+      "gate_kind": "physical_positive",
+      "setup": "current member receives a reviewed signed update with unchanged publisher identity and valid rollback floor",
+      "stimulus": "verify apply restart preserve identity refresh capability and requalify changed runtime support",
+      "required_outcomes": [
+        "signed_update_verified_and_applied",
+        "device_swarm_and_member_identity_preserved",
+        "lease_reconnect_and_lifecycle_resume_boundedly",
+        "changed_capability_withdraws_dependent_eligibility",
+        "requalification_required_before_new_placement"
+      ],
+      "forbidden_side_effects": [
+        "eligibility_carried_across_changed_runtime",
+        "assignment_or_selected_deployment_changed",
+        "model_downloaded_as_application_update"
+      ]
+    },
+    {
+      "case_id": "revocation_during_managed_work",
+      "gate_kind": "physical_negative",
+      "setup": "owner revokes a current member while the installed agent has active or queued managed contribution work",
+      "stimulus": "stop admission drain cancel clean resources withdraw eligibility and publish bounded incident",
+      "required_outcomes": [
+        "future_work_and_lease_renewal_blocked",
+        "active_work_drains_or_cancels_boundedly",
+        "request_owned_resources_cleanup_exact",
+        "eligibility_and_assignment_withdraw",
+        "other_members_and_active_route_remain_usable"
+      ],
+      "forbidden_side_effects": [
+        "revoked_member_reconnects_as_current",
+        "deployment_global_failure",
+        "another_member_mutated",
+        "secret_material_exposed"
+      ]
+    },
+    {
+      "case_id": "online_and_offline_uninstall",
+      "gate_kind": "physical_negative",
+      "setup": "user removes an installed member while online or offline and chooses whether to retain identity and cache",
+      "stimulus": "drain when reachable stop admission clean resources uninstall and report coordinator state",
+      "required_outcomes": [
+        "online_uninstall_requests_bounded_drain",
+        "offline_uninstall_does_not_claim_revocation",
+        "identity_and_cache_follow_explicit_choice",
+        "owner_revocation_action_visible_when_needed",
+        "retained_identity_resume_checks_generation_and_lease"
+      ],
+      "forbidden_side_effects": [
+        "offline_revocation_fabricated",
+        "secure_erasure_fabricated",
+        "retained_identity_bypasses_lease",
+        "active_work_left_owned"
+      ]
+    },
+    {
+      "case_id": "interrupted_onboarding_recovery",
+      "gate_kind": "physical_negative",
+      "setup": "clean-device onboarding is interrupted during package pairing consent join bootstrap lease or progress persistence",
+      "stimulus": "restart reconnect resume or abandon from the last durable authority-owned state",
+      "required_outcomes": [
+        "last_durable_rung_reconstructs",
+        "partial_identity_or_member_not_fabricated",
+        "expired_or_consumed_invite_not_reused",
+        "next_safe_recovery_action_visible",
+        "unrelated_members_and_routes_unchanged"
+      ],
+      "forbidden_side_effects": [
+        "progress_guessed_from_browser",
+        "identity_regenerated_silently",
+        "partial_member_visible",
+        "active_route_mutated"
+      ]
+    },
+    {
+      "case_id": "all_workspace_live_reconstruction",
+      "gate_kind": "browser_positive",
+      "setup": "package identity pairing membership lifecycle capability qualification or removal state changes in the current generation",
+      "stimulus": "navigate refresh use back forward reconnect and open a clean second browser session across all workspaces",
+      "required_outcomes": [
+        "all_workspaces_share_current_generation",
+        "progress_blockers_actions_and_terminal_history_reconstruct",
+        "membership_capability_and_serving_capacity_remain_separate",
+        "private_pairing_state_confined_to_owning_session",
+        "clean_second_session_reconstructs_public_truth"
+      ],
+      "forbidden_side_effects": [
+        "browser_state_grants_membership",
+        "sealed_history_rendered_current",
+        "fixed_device_or_topology_inventory_required",
+        "pairing_secret_or_ciphertext_exposed",
+        "private_diagnostics_exposed"
+      ]
+    }
+  ],
+  "ui_projections": [
+    {
+      "workspace_id": "inference",
+      "required_projection": ["selected_deployment", "qualified_capacity_only", "membership_not_capacity"],
+      "dynamic_behavior": ["new_capacity_enters_through_normal_authorities", "active_route_immutable", "reconnect_reconstructs"],
+      "forbidden_claims": ["joined_member_is_serving", "browser_state_selects_member"]
+    },
+    {
+      "workspace_id": "device_lab",
+      "required_projection": ["installation_pairing_wizard", "consent", "progress_ladder", "supported_class", "preflight", "next_safe_action"],
+      "dynamic_behavior": ["live_authority_provenance", "current_blockers", "registry_driven_platforms"],
+      "forbidden_claims": ["invitation_ceiling_is_qualification", "fixed_supported_device_list"]
+    },
+    {
+      "workspace_id": "network",
+      "required_projection": ["membership_reachability", "qualified_activation_paths", "network_transition"],
+      "dynamic_behavior": ["onboarding_inference_traffic_separate", "unrelated_network_state", "reconnect_reconstructs"],
+      "forbidden_claims": ["onboarding_traffic_is_inference", "raw_endpoint_or_address"]
+    },
+    {
+      "workspace_id": "nodes",
+      "required_projection": ["pseudonymous_member_generation", "platform", "package_version", "lease", "lifecycle", "capability", "eligibility", "assignment", "contribution_state"],
+      "dynamic_behavior": ["authority_dimensions_separate", "update_requalification_live", "revocation_withdrawal_live"],
+      "forbidden_claims": ["membership_implies_eligibility", "private_device_name"]
+    },
+    {
+      "workspace_id": "plans",
+      "required_projection": ["candidate_member_input", "current_evidence", "exclusion_reason", "immutable_active_route"],
+      "dynamic_behavior": ["candidate_not_assignment", "stale_input_withdrawn", "new_qualification_recomputes"],
+      "forbidden_claims": ["new_member_auto_placed", "join_mutates_route"]
+    },
+    {
+      "workspace_id": "readiness",
+      "required_projection": ["package", "target_identity", "seed_pin", "invitation", "membership", "lease", "capability", "qualification", "artifact", "load", "serving"],
+      "dynamic_behavior": ["rungs_independently_fresh", "exact_blockers", "same_public_generation"],
+      "forbidden_claims": ["rung_success_grants_later_rung", "membership_is_route_ready"]
+    },
+    {
+      "workspace_id": "incidents",
+      "required_projection": ["install", "pairing", "invite", "update", "lifecycle", "reconnect", "revoke", "uninstall"],
+      "dynamic_behavior": ["bounded_reason_and_recovery", "terminal_history_retained", "no_secret_material"],
+      "forbidden_claims": ["plaintext_invitation", "private_device_diagnostics"]
+    },
+    {
+      "workspace_id": "settings",
+      "required_projection": ["invite_approve_revoke", "quota", "audit", "update_policy", "consent", "retained_identity_cache_policy", "redacted_diagnostics"],
+      "dynamic_behavior": ["owner_authorization_explicit", "future_policy_only", "revocation_and_removal_current"],
+      "forbidden_claims": ["owner_can_supply_target_private_key", "secret_in_audit_projection"]
+    }
+  ]
+}

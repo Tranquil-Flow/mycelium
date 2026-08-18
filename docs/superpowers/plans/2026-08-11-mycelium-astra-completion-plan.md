@@ -75,6 +75,257 @@ its architectural capability remains design-only or unintegrated.
 15. Refresh, Back/Forward, workspace switching, reconnect, and a second browser session
     preserve or truthfully reconstruct evidence and terminal history.
 
+### 3.1 Accelerated execution discipline
+
+Acceleration changes execution order and work-in-progress limits only. It does not
+remove, merge, defer beyond A15, or weaken any capability, physical gate, negative
+gate, UI projection, documentation obligation, regression, or release criterion in
+this plan.
+
+1. Maintain exactly one primary capability gate on the completion critical path. A
+   gate remains primary until its specification, product integration, physical
+   positive and negative evidence, all-eight-workspace UI verification, regressions,
+   ledger/handover updates, and atomic feature commit are complete.
+2. Freeze the primary gate to its written acceptance boundary. Do not add adjacent
+   polish, future-gate behavior, or opportunistic architecture changes unless they are
+   required to pass that boundary.
+3. Long transfers, remote staging, model loading, qualification runs, and temporarily
+   unavailable devices may be overlapped only with independent work that cannot alter
+   the active physical run: the next dependency-ready specification, focused tests,
+   reusable automation, or a shared foundation explicitly required by multiple named
+   upcoming gates.
+4. Shared foundations are implemented once at the earliest gate that needs them and
+   must name every immediate consumer. They do not authorize claiming, committing, or
+   presenting a later gate as integrated before its own physical and UI evidence
+   passes.
+5. Prefer repeatable product-path automation for evidence capture, staging,
+   qualification, browser verification, and release assembly. Automation must retain
+   the same fresh-source, authority, privacy, and fail-closed requirements as the
+   manual gate.
+6. A device-dependent delay does not broaden the gate or lower its evidence standard.
+   Continue safe independent work, preserve the incumbent demo, and resume the exact
+   physical gate when an eligible device returns.
+7. Run focused tests throughout implementation. Run the gate's full required
+   regression and audit set once the implementation and evidence shape are stable,
+   then rerun only suites invalidated by subsequent fixes before the atomic commit.
+8. Keep a live gate checklist mapped to the dependency graph and all eight product
+   workspaces. Deferred items retain an explicit owner gate and cannot disappear into
+   prose, a generic backlog, or a later release assertion.
+9. After the primary gate's atomic commit, advance immediately to the next
+   dependency-ready gate. Follow the dependency graph rather than internal milestone
+   numbering or whichever implementation happens to be easiest.
+
+The default critical path from the current checkpoint is A3, then A4, followed by the
+dependency-ready branches shown below, with A15 remaining the executed closure over
+every completed branch.
+
+### 3.2 Parallel execution model
+
+Parallel work is organized into isolated lanes. Dependency readiness permits work; it
+does not permit two lanes to edit or exercise the same integration surface at once.
+
+| Lane | Ordered gates | May proceed alongside | Integration constraint |
+| --- | --- | --- | --- |
+| Model qualification | A3 | dependency-ready design and preflight only | A3 owns the active physical route and model artifacts until its atomic close |
+| Runtime resilience | A4 -> A6 -> A7 | A5, A10-A11, and the internet/platform lane after A4 | one integrator owns gateway, dispatcher, Router, route lifecycle, cancellation, and liveness wiring |
+| Capacity | A5 | A6-A7, A10-A11, internet/platform | isolated planner/replica modules may build in parallel; shared route wiring and physical hosts are serialized |
+| Scheduling | A10 -> A11 | A5-A7 and internet/platform | isolated scheduler/verifier modules may build in parallel; dispatcher and stage-runtime wiring are serialized |
+| Internet/platform | A8 -> A9 -> A12/A13, plus A14 after A8 | A4-A11 runtime, capacity, and scheduling work | bootstrap/transport and platform packages stay isolated; supervisor, membership, contracts, and shared UI wiring are integrated by their designated owner |
+| Release | A15 | none as a completion claim | begins only after every required predecessor has an atomic commit and fresh evidence |
+
+At most one gate owns shared integration at a time. Up to three additional worktrees may
+perform dependency-ready isolated implementation, tests, specifications, or preflight.
+Before A4 closes, later runtime gates may write specifications, acceptance tests, and
+new leaf modules, but may not integrate against guessed concurrency or liveness APIs.
+
+The preferred execution waves are:
+
+1. Close A3. In parallel, finish A4 acceptance tests and A8 infrastructure decisions.
+2. Integrate and close A4. In parallel, build isolated A8 bootstrap/transport components
+   and prepare A5, A6, and A10 test harnesses against the frozen A4 specification.
+3. After A4, implement A5, A6, and A10 in separate worktrees while A8 continues. Merge
+   shared runtime wiring one gate at a time; reserve physical hosts for one gate run at a
+   time. Start A7 only after A6 closes and A11 only after A10 closes.
+4. After A8, run A9 contract migration once. A14a (accessible route table and logical
+   graph) may then proceed immediately; A14b (coarse globe and region evidence) follows
+   its region-vocabulary freeze. A12 waits on A4 and A9, and A13 waits on A12. Only the
+   optional A12 speculative-draft-worker claim waits on physically closed A11. Build
+   each package in isolation once its exact prerequisites close.
+5. Run A15 only from the integrated branch after every required gate and external
+   prerequisite is closed.
+
+### 3.3 Worktree and integration protocol
+
+Every parallel assignment starts from a recorded base commit and has a gate packet with:
+
+- one gate identifier, frozen specification, and exact acceptance/negative gates;
+- an allowed-path set, a prohibited shared-path set, and a named integration owner;
+- private ports, run IDs, member identities, seed databases, cache/artifact roots, and
+  evidence directories;
+- focused test commands, contract/privacy checks, and the required physical devices;
+- a list of assumptions that must be confirmed before shared wiring or physical claims.
+
+Use a dedicated `codex/aNN-short-name` branch and worktree for each gate. A feature worker
+adds leaf modules and focused tests without opportunistic cleanup. Only the current
+integration owner edits shared entry points. The integrator reviews and applies one
+atomic gate commit in prerequisite order, then runs the invalidated focused suites and
+the gate regression. Generated fixtures are regenerated once by the integrator after
+source contracts settle; parallel workers do not hand-edit them.
+
+The following are exclusive integration surfaces and require an explicit reservation:
+
+- request gateway, dispatcher, Router port, route/session lifecycle, cancellation,
+  liveness, registry, activation, and supervisor wiring;
+- `ui/web/src/App.tsx`, `LiveRouteWorkspace.tsx`, global navigation, route status, and
+  cross-workspace live-source composition;
+- membership schemas, contract manifests, compatibility fixtures, generators, and the
+  governance ledger;
+- the live device fleet, listening ports, seed/member databases, model/artifact caches,
+  registry state, and physical evidence output roots;
+- current-state ledgers, release handover, and any document that asserts completion.
+
+Two lanes may not share a physical peer during destructive failure, thermal, memory,
+network-loss, or performance qualification. Read-only observation may overlap only when
+it cannot change load or measurements. A failed integration is fixed in its feature
+worktree or reverted as one atomic commit; unrelated in-flight work is not patched into
+the integration branch to rescue it.
+
+### 3.4 Blocker preflight
+
+Preflight is required before production integration begins. A failed preflight blocks
+only the affected physical claim; specification, isolated tests, and unrelated lanes may
+continue.
+
+| Gate | Must be resolved before integration or physical qualification |
+| --- | --- |
+| A3 | exact local model/revision and authorized representation; resumable artifact path; stable source and target storage; reference backend; eligible route capacity |
+| A4 | frozen lock/worker/cancellation/liveness ownership model; deterministic fault injector; latency budgets; no active A3 route mutation |
+| A5 | enough independently eligible placements for two complete legal tracks with a replicated stage; identical workload; frozen material-throughput threshold |
+| A6 | two compatible qualified immutable paths; controlled assigned-peer failure; committed-token authority and replay budget |
+| A7 | standby memory and runtime compatibility for the exact layer/KV identity; watermark/fencing contract; proven A6 fallback |
+| A8 | reachable authenticated membership bootstrap; domain/certificate and relay/rendezvous decisions; NAT/firewall test matrix; revocation authority; off-tailnet test peer |
+| A9 | one versioned migration plan for every producer and consumer; unknown-field and downgrade policy; re-enrollment behavior |
+| A10 | representative concurrent workload; frozen throughput and interactive tail-latency thresholds; deterministic slow-consumer/cancellation harness |
+| A11 | locally present compatible draft candidate or an approved measured-disabled outcome; frozen gain/confidence threshold; target-only baseline |
+| A12 | two Android device families for a general Android claim; an available iOS/iPadOS test device; native runtime, signing, lifecycle, thermal, and power test access |
+| A13 | frozen supported-platform release matrix; signing/notarization/TestFlight/installer credentials and owners; clean install targets; update/revocation service |
+| A14 | privacy-approved region evidence and accessible non-globe fallback; live A8 direct/relay/transition evidence |
+| A15 | clean off-network reviewer/device scheduled; stable release matrix; fresh evidence runners; no required gate still relying on fixture or sealed history |
+
+For A5, A10, and A11, the gate specification must define `material`, the measurement
+window, repetitions, confidence calculation, allowed regression, and pass/fail treatment
+before candidate measurements are seen. For A12-A13, unavailable hardware, accounts, or
+signing authority must be reported as an explicit external blocker rather than absorbed
+into implementation time or weakened into a simulated completion claim.
+
+### 3.5 Gate flow and stop rules
+
+Each gate uses the same short pipeline:
+
+1. `ready_to_build`: dependencies, specification, contracts, thresholds, allowed paths,
+   and deterministic test harness are frozen.
+2. `ready_to_integrate`: isolated implementation and focused positive/negative tests pass;
+   shared-surface conflicts are absent or assigned to the integrator.
+3. `ready_to_qualify`: required devices, identities, storage, network, models, ports, and
+   evidence roots pass preflight; the incumbent demo remains recoverable.
+4. `ready_to_commit`: product-path positive and negative gates, all relevant UI views,
+   refresh/reconnect, audits, and invalidated regressions pass from fresh sources.
+5. `closed`: one atomic feature commit exists and ledgers describe only observed scope.
+
+Stop and return a gate to the prior state when an API is guessed, a threshold is chosen
+after results are known, a physical resource is shared with another load-bearing run,
+evidence provenance becomes ambiguous, or the implementation requires an unapproved
+model representation, download, external service, credential, platform, or scope change.
+Do not spend repeated days retrying an environmental failure: after one reproducible
+failure and one controlled retry, record the blocker, preserve diagnostics, release the
+fleet reservation, and advance another dependency-ready lane.
+
+### 3.6 Long-operation liveness and work conservation
+
+Conversion, sharding, hashing, acquisition, peer staging, model loading, physical
+qualification, browser automation, and full regression are product operations rather
+than opaque shell waits. Every remaining gate that launches one of these operations
+must keep the operation recoverable, observable, and independent from the agent's
+ability to continue safe dependency-ready work.
+
+1. **Durable supervision.** Long work runs under a durable product supervisor with a
+   stable operation identity, bounded cancellation, terminal status, private logs, and
+   a read-only status surface. An interactive agent polls it briefly; the agent does
+   not occupy its primary lane with a single blocking wait or depend on a terminal
+   session remaining attached.
+2. **Checkpoint before repeating bytes.** At minimum, applicable operations durably
+   checkpoint `authority_frozen`, `source_verified`, every
+   `representation_shard_verified`, `candidate_manifested`,
+   `local_challenge_passed`, `current_membership_bound`, every
+   `assignment_acquired`, every `peer_staged`, `parity_passed`,
+   `activation_passed`, `physical_qualification_passed`,
+   `browser_verification_passed`, and `evidence_sealed`. A checkpoint is canonical,
+   private, atomically replaced, fsynced, and bound to the filesystem identity,
+   immutable model/representation/assignment authority, and exact artifact digests.
+   Restart validates the checkpoint and resumes after the latest completed phase; it
+   does not reconvert, recopy, or retransmit already verified bytes.
+3. **Warm-first execution.** Before cold work, the product searches authorized
+   content-addressed stores for the exact representation and stage objects. Exact warm
+   reacquisition invokes the ordinary local and remote acquisition paths and records a
+   new terminal receipt for every stage with cached verified bytes equal to total
+   bytes, zero transferred/origin/peer bytes, and the unchanged promotion digest.
+   File presence, an earlier receipt, or a build report alone is insufficient.
+4. **Physical preflight before expensive work.** Preflight verifies source digests,
+   owner authority, peer reachability, sleep/power/thermal policy, current available
+   memory, runtime/backend support, removable-volume identity and stability, negotiated
+   storage-link rate, and free bytes for source, object, promotion, temporary, and
+   safety-reserve footprints. Required capacity is calculated from the exact operation;
+   no generic "disk available" boolean may launch a long cold path. A failed preflight
+   publishes a bounded recovery action before model bytes are scanned or copied.
+5. **Progress is product evidence.** The live API and relevant UI expose operation,
+   phase, current shard/file or bounded work unit, completed and total bytes, cached
+   and transferred bytes, rolling throughput, elapsed time, ETA when supportable,
+   last-progress time, latest checkpoint, lease expiries and their exact scope, active
+   blocker, retry count, and recommended recovery. Unknown values remain unknown.
+   Refresh, reconnect, Back/Forward, and a clean second session reconstruct this state
+   from durable product authority.
+6. **Phase-aware stall detection.** Each long phase declares an expected byte/work
+   budget, observed rate, progress heartbeat, no-progress threshold, bounded retry
+   policy, and cleanup owner before launch. A watchdog diagnoses storage wait, peer
+   loss, lease risk, process exit, memory pressure, thermal pressure, or genuine lack
+   of progress. It does not kill a healthy hashing, compilation, or storage operation
+   merely because no token or browser event has appeared.
+7. **Resource-aware parallelism.** The primary gate reserves its physical peers,
+   memory, storage bandwidth, ports, and evidence roots. Parallel lanes may use only
+   non-overlapping resources and may not run a second preparation against the same
+   disk, a heavy regression against a memory-bound inference host, or a destructive
+   fault test against a participating peer. CPU-heavy verification should use an idle
+   eligible host where practical. Process count is not a throughput metric.
+8. **Work-conserving scheduling.** While the primary gate is legitimately waiting on
+   physical I/O or an unavailable peer, the integration owner selects the highest
+   dependency-ready non-conflicting item: next-gate specification/RED tests, focused
+   regression, evidence review, browser automation preparation, or reusable preflight
+   tooling. Parallel output cannot claim a later gate, edit a reserved integration
+   surface, or invalidate the running physical operation.
+9. **Just-in-time lease refresh.** Capacity leases remain short-lived safety evidence.
+   A valid preparation start may freeze immutable deterministic build authority and a
+   bounded acquisition grant may cover approved bytes, but warm reacquisition,
+   activation, selection, and physical qualification recapture fresh authority at
+   their owning boundary. Refresh adds eligibility; it never silently rewrites the
+   frozen representation or placement. An incompatible refresh preserves completed
+   immutable work, withholds publication, and returns an explicit replanning blocker.
+10. **Verification economy.** Focused tests run during implementation. The complete
+    gate regression/audit set runs after contracts and evidence shapes stabilize, then
+    only invalidated suites rerun after bounded fixes before the atomic commit. Build,
+    dependency, browser, and immutable artifact caches may be reused when their exact
+    digests remain valid; physical and freshness claims may not be cached across their
+    declared authority boundary.
+11. **Measured retrospective.** Every atomic gate close records cold and warm duration,
+    materialized/hashed/transferred/reused bytes, time waiting on storage/network/
+    leases/peers/tests/browser work, retries, checkpoint recoveries, duplicate bytes,
+    and the next gate's approved throughput improvements. The following gate's
+    preflight incorporates those observed bottlenecks rather than relying on prose.
+
+The long-operation requirements are acceptance criteria wherever applicable. A gate is
+not `ready_to_commit` when its happy path completes only while one terminal, peer,
+volume, browser session, or unexpired short observation lease remains continuously
+available.
+
 ## 4. Corrected Astra coverage baseline
 
 | Astra section | Accepted baseline | Closing gate |
@@ -139,30 +390,72 @@ its own milestone commit.
 ## 5. Dependency graph
 
 ```text
-A0 ledger/audits
-  -> A1 live evidence mechanism
-      -> A2 artifact + representation authority
-          -> A3 larger-model qualification
-      -> A4 concurrency foundation + traffic liveness
-          -> A5 multi-stage replicas
-          -> A6 replay recovery
-              -> A7 fenced KV recovery
-          -> A10 real batching + batched target verification
-              -> A11 speculative decoding
-      -> A8 off-tailnet control + direct/relay data plane
-          -> A9 platform-neutral peer capabilities
-              -> A12 Android/iOS activation
-              -> A13 user installation and invitation UX
-          -> A14 globe/route explorer
+A0 -> A1 -> A2 -> A3
+A3 -> A4
+A3 -> A8
+A4 -> A5
+A4 -> A6 -> A7
+A4 -> A10 -> A11
+A8 -> A9
+A8 -> A14
+A4 -> A12
+A9 -> A12
+A11 -[optional mobile speculative-draft-worker claim]-> A12
+A12 -> A13
 
 A15 release closure depends on every required Astra gate above.
 ```
+
+The diagram is sequencing authority, not only architectural ancestry. A4 and A8 do not
+enter production integration until A3 has its separate atomic close. The exact direct
+prerequisites are:
+
+| Gate | Direct prerequisite(s) |
+| --- | --- |
+| A0 | none |
+| A1 | A0 |
+| A2 | A1 |
+| A3 | A2 |
+| A4 | A3 |
+| A5 | A4 |
+| A6 | A4 |
+| A7 | A6 |
+| A8 | A3 |
+| A9 | A8 |
+| A10 | A4 |
+| A11 | A10 |
+| A12 | A4; A9 (see the resolved A12 owner decision below) |
+| A13 | A12 |
+| A14 | A8; A1 is already transitive |
+| A15 | A0-A14 required gates |
 
 A5 is not a prerequisite for A6. Replay may use any newly qualified compatible path;
 replicas are one useful successor source, not the definition of recovery. A6 is a
 prerequisite for A7 because truthful replay is the fallback when compatible KV cannot
 be resumed. A10 precedes A11 because useful speculation requires a real multi-position
 target-verification primitive.
+
+**A12 and A13 corrections (2026-08-18).** The earlier rows `A12 | A9` and `A13 | A9` did
+not fully express the mobile lifecycle and onboarding sequence.
+
+`docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md` declares
+"**Depends on:** A4 scoped lifecycle and A9 membership/capability v2 physically closed;
+A11 physically closed before a [draft role]". A4 and A9 are the exact direct A12 gate
+prerequisites. A8 remains transitive through A9. A11 is not a blanket gate prerequisite.
+
+`docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md` declares
+"implementation waits for A8, A9, and A12" and "**Depends on:** A8 Internet-native
+bootstrap; A9 capability membership; A12 qualified platform activation levels". A13 is
+downstream of A12, not a sibling of it, which makes A13 the last gate before A15.
+
+**Resolved owner decision — A12 A11 scope (2026-08-18).** The owner resolves the former
+§4.3/§12 inconsistency by making A4 and A9 the exact direct prerequisites for generic
+A12 closure. A general Android or exact iOS/iPadOS activation claim may close after its
+full A12 matrix with A4 and A9 closed while A11 remains incomplete. The optional
+`speculative_draft_worker` claim retains a separate, explicit, fail-closed prerequisite:
+A11 must be physically closed and bound to the exact target workload. Missing, stale,
+disabled, or mismatched A11 authority rejects only that optional claim; it neither
+blocks generic A12 closure nor becomes draft authority through an A12 gate state.
 
 ## 6. Gates
 
@@ -316,6 +609,12 @@ history from the Provisioner's live authority rather than browser-local state.
 **Outcome:** Qwen2.5-7B and Qwen3-8B are honest catalog operations, with only physically
 qualified representations selectable.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-15-mycelium-a3-useful-local-model-qualification.md`.
+A3 remains the sole primary gate until its physical runtime, selector, live browser,
+regression, handover, and atomic commit requirements pass. Deterministic parity and an
+interrupted candidate preparation do not qualify, register, or select the 7B deployment.
+
 - Qualify `Qwen/Qwen2.5-7B-Instruct` first using one explicit representation decision.
 - Run a memory-tier A/B, not only a compute-coefficient A/B, and require a traceable
   allocation change or an evidence-backed explanation for stability.
@@ -327,6 +626,27 @@ qualified representations selectable.
   preparation, and physical qualification; it is never a hidden builder default.
 - Scope every qualification to one model revision, representation, evidence generation,
   workload, host set, topology, and runtime set.
+- Complete the active exact 7B preparation without retroactively invalidating its
+  valid-at-start authorization. Before any subsequent cold start, require a stable fast
+  preparation root: prefer an internal SSD with the exact calculated footprint plus at
+  least 20 GB operating headroom, otherwise a directly connected SSD or storage link
+  negotiated at 5 Gbps or faster. A slower explicitly accepted recovery run remains
+  visibly degraded and cannot hide its measured rate or ETA.
+- Separate `representation_shard_verified` and `candidate_manifested` checkpoints from
+  the bounded startup challenge so a process, storage, or lease interruption after
+  materialization cannot force another full representation copy. Preserve the source
+  checkpoint and owner authorization unchanged.
+- Show preparation phase, current shard, completed/total/cached/transferred bytes,
+  rolling rate, ETA, last progress, checkpoint, and lease scope in the Models/Settings,
+  Plans, Readiness, and Incidents projections before A3 closes.
+- After the cold candidate is published, execute exact warm reacquisition with fresh
+  eligibility and prove one new zero-transfer terminal receipt per stage before
+  activation. Recapture capacity and physical route health just in time for activation
+  and qualification rather than rebuilding the completed immutable candidate.
+- Capture memory-pressure A/B evidence first, then remove artificial pressure, connect
+  participating laptops to stable power, prevent sleep for the bounded gate, and
+  recapture clean capacity before the final serving allocation. Do not mutate the
+  assignment of an in-flight preparation.
 
 **Negative gate:** an infeasible, stale, incomplete, mismatched, unqualified, or dead
 deployment cannot enter the selector.
@@ -340,11 +660,22 @@ resident bytes; Readiness parity/qualification; Incidents preparation or load fa
 **Outcome:** live traffic detects failure promptly without unnecessarily killing the
 entire deployment.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md`.
+It was written as dependency-ready design work while A3 awaited removable storage;
+A4 remains `design_only` and no A4 production or completion claim may begin before the
+separate atomic A3 close.
+
 - Decompose the generation-long route-global lock into bounded per-request, per-session,
   per-stage, and authority locks.
 - Replace the single dispatch thread with a bounded dispatcher/worker pool that preserves
   admission, QoS, ordering, backpressure, cancellation, and exact cleanup.
-- Make blocked stage/transport commands interruptible within declared budgets.
+- Use cooperative, request-scoped cancellation at bounded prefill and decode work-unit
+  boundaries. Every command carries a correlated command ID and is fenced by request ID,
+  request attempt, cancellation generation, and topology/deployment generation.
+- A backend is A4-ineligible unless it proves both interruption and exact request-owned
+  cleanup within one 2,000 ms bound. Terminating a shared node process cannot satisfy
+  request-scoped cancellation.
 - Integrate traffic-aware receipts, receipt suppression, idle keepalive, active failure,
   suspect/quarantine/recovery, and generation conflict into the live route.
 - Replace route-global fatal latching with request/edge/placement/peer/deployment scope.
@@ -365,6 +696,12 @@ detector policy.
 ### A5 — Multi-stage data-parallel stage replication
 
 **Outcome:** Astra 4.8 is proven through the normal product path.
+
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a5-multistage-replication.md`.
+It reconciles the earlier M18 baseline with A1–A4 authority and runtime boundaries while
+physical peers are unavailable. A5 remains `design_only`; no planner fixture, written
+benchmark, or historical whole-model replica run satisfies its product or physical gate.
 
 - Re-specify replication as replicas of one or more contiguous stages inside a graph
   containing at least two pipeline stages.
@@ -396,6 +733,14 @@ tensor/hybrid parallelism.
 **Outcome:** a real browser request continues after an assigned peer/path failure without
 duplicate output.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md`.
+It freezes gateway-owned committed-delivery authority, private prompt/token-prefix
+replay, request-scoped cutover and generation fencing, independently qualified
+successors, exact cleanup, explicit no-successor abort, and ordinary browser-path proof.
+A6 remains `design_only`; a scripted failover or authored sealing record cannot satisfy
+its continuity gate.
+
 - Store the original encoded prompt, committed-token count/digest, attempt, path,
   generation, and terminal authority in the live request lifecycle rather than a script.
 - A successor is any newly qualified compatible immutable path; it need not be a replica
@@ -421,6 +766,13 @@ gates; Incidents complete timeline and breaker state.
 
 **Outcome:** a compatible standby resumes from acknowledged KV without stale publication.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a7-fenced-kv-successor-recovery.md`.
+It permits no-replay continuation only from a route-wide acknowledged KV watermark that
+exactly equals the gateway committed watermark, with byte-exact v1 backend/runtime/cache
+compatibility. Every lag or mismatch falls back through qualified A6 or aborts honestly.
+A7 remains `design_only`; standby capacity is not A5 replica eligibility.
+
 - Bind source and successor to identical model representation, layer range, KV schema,
   attention layout, dtype, RoPE, decode mode, checkpoint digest, attempt, and generation.
 - Replicate monotonic acknowledged watermarks and fence old processes/generations.
@@ -441,6 +793,12 @@ cutover, cleanup, and terminal result without exposing token IDs or KV data.
 
 **Outcome:** a device can join, be measured, qualify, and serve across unrelated networks
 without Tailscale as a product dependency.
+
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md`.
+It was written as dependency-ready infrastructure design while A3 awaited its physical
+peers. A8 remains `design_only`; no public listener, production integration, or completion
+claim exists until its separate integration and physical gates execute.
 
 - Make the membership/control endpoint safely reachable off-tailnet through an approved
   authenticated bootstrap design; do not solve only the activation data plane.
@@ -468,6 +826,12 @@ Settings bootstrap/relay policy.
 **Outcome:** eligibility derives from signed capabilities and class-specific
 qualification, not device brands.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md`.
+It freezes separated platform/transport/runtime/capability authority, unknown-ineligible
+handling, native-versus-synthetic truth, one-time identity-preserving migration without
+eligibility carry-over, and class-specific qualification. A9 remains `design_only`.
+
 - Version the membership contract before adding more mobile platforms.
 - Separate identity class, platform, transport, runtime backend, and capability profile.
 - Support platform values including macOS, Linux, Windows, Android, iOS, iPadOS, browser,
@@ -493,6 +857,12 @@ from stage-ready.
 
 **Outcome:** Astra 4.7 is physically complete and speculation has a real verifier.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md`.
+It freezes actual runtime batch membership, continuous arrival, causal pipeline-overlap
+evidence, bounded QoS/queues/slow-consumer behavior, transactional target verification,
+and a same-route confidence-bound benchmark. A10 remains `design_only`.
+
 - Integrate the batching policy into the live physical path.
 - Add a versioned bounded multi-position target verification operation with explicit KV
   prefix, rollback-to-prefix, parity, cancellation, and resource semantics.
@@ -517,6 +887,13 @@ Settings QoS/batch policy.
 
 **Outcome:** optional target-authoritative speculation improves a useful workload or is
 honestly disabled.
+
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a11-target-authoritative-speculative-decoding.md`.
+It freezes exact target/draft identity and separate KV, off-by-default preference,
+adaptive deadlines and circuit breaking, target-authoritative commit/rollback/fallback,
+desktop-first qualification, and a confidence-bound same-session benchmark. A11 remains
+`design_only`; a neutral result produces a measured disabled decision.
 
 - Use A10's runtime-advertised multi-position verification capability; delete phantom
   capability fields inferred only by a qualification script.
@@ -544,12 +921,23 @@ disabled reason.
 
 **Outcome:** mobile participation is capability-based, staged, and physically qualified.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md`.
+It freezes a generic native Android/Apple-mobile architecture, the four independent
+eligibility rungs, two-family Android proof, foreground-only initial Apple eligibility,
+and lifecycle/thermal/power/memory/network/artifact/parity gates. A12 remains
+`design_only`; Termux, ADB, and SSH are development tools, not the user product path.
+
 Eligibility progresses independently through:
 
 1. signed member;
 2. probe/evidence contributor;
 3. speculative draft worker;
 4. qualified model stage.
+
+A12 directly depends on A4 and A9. Ordinary qualified mobile participation may close
+without A11. The optional speculative-draft-worker rung remains visibly ineligible until
+A11 physically closes and the exact mobile peer passes the additional draft gates.
 
 Android requirements:
 
@@ -587,6 +975,13 @@ or CLI knowledge. The product remains an open-ended private swarm rather than a 
 demo inventory: authorized users can invite additional members, observe their evidence
 and eligibility, and use newly qualified capacity without changing frontend code.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md`.
+It freezes target-owned identity, encrypted recipient-bound QR/deep-link handoff,
+platform-signed packages, explicit consent, eligibility ladders, managed lifecycle, and
+dynamic live-authority UI. A13 remains `design_only`; development tools, package
+metadata, or a pre-enrolled device cannot satisfy its normal-user physical gate.
+
 - Provide signed packages/apps for supported platforms and durable managed services where
   the OS permits them.
 - Use a short-lived, single-use QR/deep-link invitation. The target device creates and
@@ -619,6 +1014,13 @@ Incidents join failures; Settings invite, quota, audit, update, and revocation c
 missing metrics become zero, relay identity leaks an address, or the live Network/Plans/
 Readiness/Incidents workspaces remain fixture-only fallbacks.
 
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a14-route-explorer.md`.
+It freezes coarse-region authority, an explicit unknown-region tray, independent path
+and transport dimensions, accessible table/2D alternatives, reduced-motion/low-power
+behavior, and a read-only projection boundary. A map or animation never becomes route,
+qualification, or physical evidence.
+
 - Define a coarse-region evidence contract using operator-declared region, privacy-safe
   relay region, or a labelled latency-distance class. Never infer or expose exact peer
   coordinates from IP data.
@@ -639,6 +1041,13 @@ labelled historical; the globe cannot become planner or qualification authority.
 ### A15 — Executed-artifact release closure
 
 **Outcome:** release readiness is computed from executions, not an operator affidavit.
+
+**Frozen specification:**
+`docs/superpowers/specs/2026-08-18-mycelium-a15-executed-release-closure.md`.
+It replaces manual release booleans with a verified content-addressed result graph,
+strict live/replay/fixture provenance, bounded signed exclusions, reproducible package
+and SBOM bindings, a clean external-reviewer path, and fail-closed release revocation.
+A15 cannot pass before current A3–A14 atomic commits and required executions validate.
 
 - Replace hand-written release booleans with digests and results from executed tests,
   audits, physical runs, browser runs, source revisions, model/representation manifests,
@@ -698,7 +1107,11 @@ The Astra architecture is complete only when:
 12. a reviewer can add another supported device and select another locally discovered,
     physically qualified model through the frontend without editing a fixture, plan,
     source file, or hard-coded inventory; unsafe or oversized choices remain visible
-    with their real blocker and cannot be forced into service.
+    with their real blocker and cannot be forced into service;
+13. every applicable long product operation survives bounded process, storage, network,
+    peer, and lease interruption from its latest verified checkpoint, exposes truthful
+    progress and recovery in the UI, and proves exact warm reuse without duplicate
+    transfer.
 
 ## 9. Separately reviewed future program
 

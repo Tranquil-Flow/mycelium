@@ -1,0 +1,292 @@
+{
+  "protocol": "mycelium.a6_replay_acceptance_inventory.v1",
+  "gate_state": "design_only",
+  "claim_boundary": "frozen acceptance inventory only; no replay implementation, physical evidence, qualification, or promotion claim",
+  "authority_owners": {
+    "canonical_encoded_prompt": "request_gateway",
+    "committed_generated_prefix": "request_gateway",
+    "delivery_ledger_and_watermark": "request_gateway",
+    "logical_terminal_result": "request_gateway",
+    "request_attempt_and_immutable_path": "router",
+    "request_scoped_cutover": "router",
+    "observed_failure_and_scope": "a4_liveness_authority",
+    "successor_compatibility_and_readiness": "qualifier",
+    "future_request_deployment_selection": "deployment_registry"
+  },
+  "request_bindings": [
+    "session_id",
+    "request_id",
+    "source_attempt",
+    "source_path_generation",
+    "checkpoint_digest",
+    "prompt_digest",
+    "generation_settings_digest",
+    "committed_token_count",
+    "committed_prefix_digest",
+    "delivery_cursor",
+    "recovery_attempt",
+    "successor_attempt",
+    "successor_path_generation",
+    "successor_qualification_generation"
+  ],
+  "state_machine": {
+    "states": [
+      "active",
+      "failure_observed",
+      "checkpoint_frozen",
+      "successor_pending",
+      "recovery_prefill",
+      "cutover_pending",
+      "recovered_decode",
+      "cleanup",
+      "terminal",
+      "aborted"
+    ],
+    "recovery_chain": [
+      "active",
+      "failure_observed",
+      "checkpoint_frozen",
+      "successor_pending",
+      "recovery_prefill",
+      "cutover_pending",
+      "recovered_decode",
+      "cleanup",
+      "terminal"
+    ],
+    "abortable_states": [
+      "failure_observed",
+      "checkpoint_frozen",
+      "successor_pending",
+      "recovery_prefill",
+      "cutover_pending",
+      "recovered_decode"
+    ],
+    "abort_chain": ["cleanup", "aborted"],
+    "cutover_scope": "request",
+    "cutover_operation": "durable_compare_and_swap",
+    "generation_rule": "increment_request_attempt_and_path_generation",
+    "stale_generation_action": "reject_without_publication_or_ledger_advance"
+  },
+  "workspace_projections": {
+    "inference": ["recovery_mode_and_phase", "committed_prefix_progress", "one_terminal_result"],
+    "device_lab": ["successor_compatibility", "qualification_freshness", "cleanup_state"],
+    "network": ["source_and_successor_paths", "request_scoped_cutover", "generation_fencing"],
+    "nodes": ["source_successor_attempts", "reservation_and_command_state", "resource_cleanup"],
+    "plans": ["qualified_successor_candidates", "immutable_request_path", "no_successor_reason"],
+    "readiness": ["checkpoint_authority", "successor_qualification", "cutover_and_cleanup_proofs"],
+    "incidents": ["failure_scope", "fallback_abort_or_cancel", "bounded_terminal_reason"],
+    "settings": ["future_request_selection_unchanged", "bounded_recovery_policy", "privacy_retention"]
+  },
+  "required_coverage": [
+    "gateway_prompt_authority",
+    "committed_prefix_authority",
+    "request_scoped_cutover",
+    "generation_fencing",
+    "duplicate_output_prevention",
+    "independently_qualified_successor",
+    "cancellation_and_cleanup",
+    "no_successor_abort",
+    "ordinary_browser_path_continuation"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "gateway_checkpoint_authority",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "browser_or_non_gateway_checkpoint_claim",
+      "expected_scope": "request",
+      "coverage": ["gateway_prompt_authority", "committed_prefix_authority"],
+      "required_invariants": [
+        "gateway_is_only_canonical_prompt_authority",
+        "gateway_is_only_committed_prefix_authority",
+        "browser_cursor_and_reconstructed_text_are_not_authority",
+        "invalid_checkpoint_fails_before_successor_model_work",
+        "private_prompt_and_prefix_absent_from_public_records"
+      ]
+    },
+    {
+      "scenario_id": "committed_prefix_replay_exactness",
+      "gate_kind": "deterministic_positive",
+      "stimulus": "source_failure_after_nonzero_gateway_commit",
+      "expected_scope": "request",
+      "coverage": [
+        "gateway_prompt_authority",
+        "committed_prefix_authority",
+        "duplicate_output_prevention"
+      ],
+      "required_invariants": [
+        "original_encoded_prompt_replayed",
+        "exact_committed_prefix_count_and_digest_replayed",
+        "reconstructed_prefix_output_fully_suppressed",
+        "first_publication_is_strictly_after_committed_watermark",
+        "regressed_skipped_repeated_or_conflicting_watermark_rejected"
+      ]
+    },
+    {
+      "scenario_id": "request_scoped_cutover_isolation",
+      "gate_kind": "deterministic_positive",
+      "stimulus": "cutover_while_unrelated_request_is_active",
+      "expected_scope": "request",
+      "coverage": ["request_scoped_cutover"],
+      "required_invariants": [
+        "durable_cutover_compare_and_swap_is_request_scoped",
+        "only_bound_request_attempt_and_path_change",
+        "future_request_deployment_selection_unchanged",
+        "unrelated_request_authority_and_progress_unchanged",
+        "duplicate_or_conflicting_cutover_rejected"
+      ]
+    },
+    {
+      "scenario_id": "stale_generation_fencing",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "late_source_attempt_frames_after_cutover",
+      "expected_scope": "request",
+      "coverage": ["generation_fencing", "duplicate_output_prevention"],
+      "required_invariants": [
+        "request_attempt_and_path_generation_increment",
+        "old_output_terminal_receipt_cancel_and_cleanup_rejected",
+        "stale_events_do_not_advance_delivery_ledger",
+        "current_successor_authority_unchanged",
+        "one_logical_terminal_result"
+      ]
+    },
+    {
+      "scenario_id": "duplicate_delivery_prevention",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "duplicate_successor_frame_and_browser_reconnect_replay",
+      "expected_scope": "request",
+      "coverage": ["duplicate_output_prevention"],
+      "required_invariants": [
+        "delivery_identity_binds_session_request_and_event_sequence",
+        "ledger_append_and_watermark_advance_are_atomic",
+        "duplicate_event_never_appended_twice",
+        "noncontiguous_or_conflicting_event_rejected",
+        "reconnect_reconstructs_without_duplicate_history"
+      ]
+    },
+    {
+      "scenario_id": "independently_qualified_successor",
+      "gate_kind": "physical_browser_positive",
+      "stimulus": "current_compatible_successor_on_independent_physical_path",
+      "expected_scope": "request",
+      "coverage": [
+        "independently_qualified_successor",
+        "ordinary_browser_path_continuation"
+      ],
+      "required_invariants": [
+        "successor_has_current_exact_compatibility_qualification",
+        "successor_has_own_assignment_load_graph_path_and_cleanup_proofs",
+        "a5_replica_membership_is_not_required_or_sufficient",
+        "historical_qualification_and_candidate_intent_are_insufficient",
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_or_test_only_seam"
+      ]
+    },
+    {
+      "scenario_id": "unqualified_successor_rejection",
+      "gate_kind": "physical_browser_negative",
+      "stimulus": "stale_incomplete_mismatched_saturated_or_dead_successor",
+      "expected_scope": "request",
+      "coverage": ["independently_qualified_successor"],
+      "required_invariants": [
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_or_test_only_seam",
+        "successor_rejected_before_recovery_prefill_or_cutover",
+        "planner_ui_membership_and_cached_artifacts_cannot_author_readiness",
+        "incumbent_deployment_authority_unchanged",
+        "unrelated_requests_remain_governed_by_a4_scope",
+        "no_recovery_success_claim"
+      ]
+    },
+    {
+      "scenario_id": "cancel_before_cutover",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "current_generation_cancel_during_successor_pending_or_prefill",
+      "expected_scope": "request",
+      "coverage": ["cancellation_and_cleanup", "generation_fencing"],
+      "required_invariants": [
+        "current_cancel_generation_terminates_request_once",
+        "source_and_successor_work_interrupted",
+        "cutover_not_published",
+        "source_and_successor_resources_return_to_baseline",
+        "late_completion_and_cleanup_are_idempotently_rejected"
+      ]
+    },
+    {
+      "scenario_id": "cancel_after_cutover",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "current_generation_cancel_during_recovered_decode",
+      "expected_scope": "request",
+      "coverage": ["cancellation_and_cleanup", "generation_fencing"],
+      "required_invariants": [
+        "successor_current_generation_cancelled_once",
+        "old_attempt_cancel_cannot_mutate_successor",
+        "one_terminal_cancel_result",
+        "all_source_and_successor_live_resources_released",
+        "durable_delivery_history_retained_separately_from_live_resources"
+      ]
+    },
+    {
+      "scenario_id": "successor_failure_cleanup",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "successor_failure_during_prefill_or_recovered_decode",
+      "expected_scope": "request",
+      "coverage": ["cancellation_and_cleanup"],
+      "required_invariants": [
+        "one_bounded_terminal_outcome",
+        "source_and_successor_path_reservations_released_exactly_once",
+        "capacity_commands_receipts_streams_replay_commands_and_kv_return_to_baseline",
+        "cleanup_ownership_failure_does_not_widen_scope",
+        "unrelated_requests_continue"
+      ]
+    },
+    {
+      "scenario_id": "no_successor_explicit_abort",
+      "gate_kind": "physical_browser_negative",
+      "stimulus": "no_current_compatible_qualified_successor_inside_bounded_policy",
+      "expected_scope": "request",
+      "coverage": [
+        "no_successor_abort",
+        "cancellation_and_cleanup",
+        "ordinary_browser_path_continuation"
+      ],
+      "required_invariants": [
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_or_test_only_seam",
+        "request_explicitly_aborts_with_bounded_reason",
+        "no_silent_restart_from_prompt",
+        "no_replay_or_continuity_success_claim",
+        "one_terminal_history",
+        "all_request_owned_resources_return_to_baseline",
+        "incumbent_and_unrelated_requests_unchanged"
+      ]
+    },
+    {
+      "scenario_id": "ordinary_browser_replay_continuation",
+      "gate_kind": "physical_browser_positive",
+      "stimulus": "ordinary_browser_request_loses_assigned_path_after_nonzero_prefix",
+      "expected_scope": "request",
+      "coverage": [
+        "ordinary_browser_path_continuation",
+        "request_scoped_cutover",
+        "generation_fencing",
+        "duplicate_output_prevention",
+        "independently_qualified_successor",
+        "cancellation_and_cleanup"
+      ],
+      "required_invariants": [
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_or_test_only_seam",
+        "observed_a4_failure_source_and_scope",
+        "nonzero_gateway_committed_prefix",
+        "full_context_replay_on_current_qualified_successor",
+        "request_scoped_generation_fenced_cutover",
+        "no_duplicate_or_missing_logical_output_event",
+        "exactly_one_terminal_result",
+        "positive_source_and_successor_physical_counters",
+        "zero_terminal_live_resource_delta"
+      ]
+    }
+  ],
+  "qualification_claim": false,
+  "promotion_authorized": false
+}

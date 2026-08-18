@@ -1,0 +1,424 @@
+{
+  "protocol": "mycelium.a7_kv_successor_acceptance_inventory.v1",
+  "gate_state": "design_only",
+  "claim_boundary": "frozen acceptance inventory only; no KV transport, runtime recovery, Router wiring, UI implementation, physical evidence, qualification, or promotion claim",
+  "authority_owners": {
+    "gateway_committed_output_watermark": "request_gateway",
+    "stage_local_kv_checkpoint": "source_runtime",
+    "stored_checkpoint_acknowledgement": "standby_runtime",
+    "route_wide_acknowledged_watermark": "checkpoint_coordinator",
+    "request_attempt_path_and_fencing_generation": "checkpoint_coordinator_router",
+    "observed_failure_and_scope": "a4_liveness_authority",
+    "successor_compatibility_and_readiness": "qualifier",
+    "full_context_replay_fallback": "a6_recovery_authority",
+    "future_request_deployment_selection": "deployment_registry"
+  },
+  "watermark_contract": {
+    "route_advance_requires": [
+      "all_replaced_stages_acknowledged",
+      "same_request_attempt",
+      "same_committed_token_count",
+      "same_committed_prefix_digest",
+      "contiguous_checkpoint_predecessor_chain",
+      "current_standby_membership_incarnations",
+      "stored_checkpoint_digests_verified"
+    ],
+    "gateway_equality_requires": [
+      "route_acknowledged_token_count_equals_gateway_committed_token_count",
+      "route_acknowledged_prefix_digest_equals_gateway_committed_prefix_digest"
+    ],
+    "partial_acknowledgement_action": "report_lag_without_cutover_authority",
+    "ahead_of_gateway_action": "reject_kv_successor",
+    "behind_gateway_action": "require_a6_fallback_or_abort",
+    "exact_repeat_action": "idempotent_without_authority_advance",
+    "skipped_regressed_or_conflicting_action": "reject_kv_successor"
+  },
+  "compatibility_fields": {
+    "model": [
+      "model_id",
+      "immutable_revision",
+      "representation_manifest_digest",
+      "architecture",
+      "tokenizer_semantics",
+      "checkpoint_schema_version"
+    ],
+    "layer_assignment": [
+      "half_open_layer_range",
+      "component_roles",
+      "placement_assignment_id",
+      "complete_model_operation_path"
+    ],
+    "runtime": [
+      "backend",
+      "runtime_family",
+      "runtime_build",
+      "decode_mode",
+      "device_layout_encoding",
+      "byte_order"
+    ],
+    "cache": [
+      "cache_implementation",
+      "attention_layout",
+      "query_head_count",
+      "kv_head_count",
+      "head_dimension",
+      "batch_shape",
+      "dtype",
+      "quantization_effect",
+      "rope_configuration_and_scaling",
+      "position_semantics",
+      "sequence_semantics",
+      "context_policy"
+    ],
+    "authority_and_freshness": [
+      "session_id",
+      "request_id",
+      "source_attempt",
+      "source_path_generation",
+      "source_membership_incarnation",
+      "successor_membership_incarnation",
+      "checkpoint_sequence_and_digest",
+      "source_load_and_qualification_generation",
+      "successor_load_and_qualification_generation",
+      "directed_path_evidence_generation",
+      "resource_reservation_generation"
+    ]
+  },
+  "fencing_contract": {
+    "monotonic_fields": [
+      "request_attempt",
+      "path_generation",
+      "fencing_generation"
+    ],
+    "installers": [
+      "request_gateway",
+      "router",
+      "surviving_stage_runtimes",
+      "transport_ingress",
+      "standby_runtime"
+    ],
+    "advance_timing": "durable_before_successor_decode_or_publication",
+    "old_generation_action": "reject_without_ledger_or_authority_mutation",
+    "failed_install_action": "withhold_cutover_and_require_a6_fallback_or_abort",
+    "maximum_publishers": 1
+  },
+  "outcomes": {
+    "fenced_kv_successor": [
+      "exact_route_and_gateway_watermark_equality",
+      "current_exact_compatibility_and_qualification",
+      "fence_installed_by_all_participants",
+      "no_recovery_prefill",
+      "no_prompt_or_committed_prefix_transfer",
+      "next_contiguous_position_only"
+    ],
+    "full_context_replay": [
+      "ordinary_a6_product_interface",
+      "kv_outcome_rejected_or_unavailable",
+      "replay_label_visible",
+      "never_relabelled_as_kv_continuation"
+    ],
+    "aborted": [
+      "neither_a7_nor_a6_has_current_qualified_authority",
+      "explicit_bounded_terminal_reason",
+      "no_silent_prompt_restart",
+      "no_recovery_success_claim"
+    ]
+  },
+  "browser_evidence": {
+    "required_public_fields": [
+      "request_id",
+      "recovery_mode",
+      "recovery_phase",
+      "gateway_committed_token_count",
+      "route_acknowledged_token_count",
+      "watermark_lag",
+      "checkpoint_freshness",
+      "compatibility_state",
+      "successor_qualification_state",
+      "current_attempt",
+      "fencing_generation",
+      "fallback_or_abort_reason",
+      "cancellation_state",
+      "cleanup_state",
+      "terminal_outcome"
+    ],
+    "forbidden_public_fields": [
+      "raw_kv",
+      "encoded_prompt",
+      "token_ids",
+      "decoded_output",
+      "activations",
+      "encryption_keys",
+      "network_addresses",
+      "private_paths"
+    ],
+    "required_behaviors": [
+      "no_replay_and_replay_are_distinct",
+      "unknown_lag_compatibility_or_cleanup_never_defaults_ready",
+      "refresh_reconnect_and_terminal_history_reconstruct_same_generation",
+      "tab_private_prompt_and_output_remain_session_scoped"
+    ]
+  },
+  "workspace_projections": {
+    "inference": ["recovery_mode_and_phase", "committed_and_acknowledged_watermarks", "terminal_outcome"],
+    "device_lab": ["successor_compatibility", "checkpoint_freshness", "qualification_and_cleanup"],
+    "network": ["source_successor_path_generations", "fence_installation", "fallback_path"],
+    "nodes": ["stage_acknowledgements", "kv_checkpoint_ownership", "live_resource_cleanup"],
+    "plans": ["exact_compatibility_decision", "kv_successor_or_a6_fallback", "honest_abort_reason"],
+    "readiness": ["route_gateway_watermark_equality", "current_successor_qualification", "fencing_and_cleanup_proofs"],
+    "incidents": ["old_generation_rejection", "fallback_cancel_or_abort", "bounded_terminal_reason"],
+    "settings": ["future_selection_unchanged", "bounded_checkpoint_policy", "privacy_retention"]
+  },
+  "required_coverage": [
+    "route_wide_acknowledged_watermark",
+    "gateway_watermark_exact_equality",
+    "model_layer_runtime_cache_compatibility",
+    "monotonic_fencing",
+    "old_generation_rejection",
+    "no_replay_continuation",
+    "a6_fallback",
+    "honest_abort",
+    "cancellation",
+    "exact_cleanup",
+    "browser_visible_recovery_evidence"
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "route_wide_ack_requires_every_stage",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "partial_or_mixed_stage_acknowledgements",
+      "expected_scope": "request",
+      "coverage": ["route_wide_acknowledged_watermark"],
+      "required_invariants": [
+        "every_replaced_stage_acknowledges_same_attempt_count_and_digest",
+        "every_acknowledgement_binds_current_standby_incarnation",
+        "checkpoint_predecessor_chain_is_contiguous",
+        "partial_acknowledgement_reports_lag_only",
+        "route_watermark_does_not_advance_without_complete_acknowledgement_set",
+        "no_kv_cutover_authority"
+      ]
+    },
+    {
+      "scenario_id": "gateway_watermark_exact_equality",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "route_watermark_ahead_behind_or_digest_mismatched",
+      "expected_scope": "request",
+      "coverage": [
+        "route_wide_acknowledged_watermark",
+        "gateway_watermark_exact_equality",
+        "a6_fallback"
+      ],
+      "required_invariants": [
+        "gateway_committed_state_is_frozen_before_decision",
+        "route_and_gateway_token_counts_equal",
+        "route_and_gateway_prefix_digests_equal",
+        "ahead_checkpoint_rejected",
+        "behind_checkpoint_requires_a6_fallback_or_abort",
+        "digest_mismatch_rejected_before_successor_work"
+      ]
+    },
+    {
+      "scenario_id": "watermark_monotonicity_and_conflict",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "repeated_skipped_regressed_conflicting_or_stale_checkpoint",
+      "expected_scope": "request",
+      "coverage": [
+        "route_wide_acknowledged_watermark",
+        "monotonic_fencing",
+        "old_generation_rejection"
+      ],
+      "required_invariants": [
+        "exact_sequence_and_digest_repeat_is_idempotent",
+        "conflicting_repeat_rejected",
+        "skipped_predecessor_rejected",
+        "regressed_position_rejected",
+        "old_attempt_generation_or_incarnation_rejected",
+        "acknowledged_watermark_never_regresses"
+      ]
+    },
+    {
+      "scenario_id": "exact_compatibility_identity",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "unknown_or_mismatched_model_layer_runtime_or_cache_identity",
+      "expected_scope": "request",
+      "coverage": ["model_layer_runtime_cache_compatibility", "a6_fallback"],
+      "required_invariants": [
+        "model_revision_representation_and_tokenizer_match_exactly",
+        "half_open_layer_range_and_component_roles_match_exactly",
+        "backend_runtime_family_and_build_match_exactly",
+        "cache_schema_layout_dtype_shape_rope_and_position_semantics_match_exactly",
+        "unknown_or_converted_compatibility_is_incompatible",
+        "current_qualifier_result_required_for_complete_replacement_path",
+        "mismatch_requires_a6_fallback_or_abort"
+      ]
+    },
+    {
+      "scenario_id": "monotonic_fence_installation",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "participant_cannot_install_new_fencing_generation",
+      "expected_scope": "request",
+      "coverage": ["monotonic_fencing", "a6_fallback"],
+      "required_invariants": [
+        "request_attempt_path_and_fencing_generations_advance_monotonically",
+        "generation_advance_is_durable_before_successor_decode",
+        "gateway_router_runtimes_transport_and_standby_install_fence",
+        "failed_fence_withholds_cutover",
+        "at_most_one_generation_can_publish",
+        "failed_fence_requires_a6_fallback_or_abort"
+      ]
+    },
+    {
+      "scenario_id": "old_generation_rejection",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "late_old_generation_event_after_fence",
+      "expected_scope": "request",
+      "coverage": ["old_generation_rejection", "monotonic_fencing"],
+      "required_invariants": [
+        "old_checkpoint_ack_frame_output_cancel_cleanup_and_terminal_rejected",
+        "old_process_return_cannot_reclaim_publication_authority",
+        "gateway_delivery_ledger_does_not_advance",
+        "current_successor_authority_unchanged",
+        "one_publisher_and_one_terminal_result"
+      ]
+    },
+    {
+      "scenario_id": "ordinary_browser_no_replay_continuation",
+      "gate_kind": "physical_browser_positive",
+      "stimulus": "assigned_source_fails_after_exact_nonzero_route_acknowledgement",
+      "expected_scope": "request",
+      "coverage": [
+        "gateway_watermark_exact_equality",
+        "model_layer_runtime_cache_compatibility",
+        "monotonic_fencing",
+        "old_generation_rejection",
+        "no_replay_continuation",
+        "exact_cleanup",
+        "browser_visible_recovery_evidence"
+      ],
+      "required_invariants": [
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_runtime_or_test_only_seam",
+        "real_a4_failure_observation",
+        "route_acknowledged_count_and_digest_equal_gateway_committed_state",
+        "current_exact_qualified_successor",
+        "no_recovery_prefill",
+        "no_prompt_or_committed_prefix_transfer",
+        "first_successor_publication_is_next_contiguous_position",
+        "old_generation_publication_rejected",
+        "no_duplicate_or_missing_output",
+        "one_publisher_and_terminal_result",
+        "zero_terminal_live_resource_delta"
+      ]
+    },
+    {
+      "scenario_id": "ordinary_browser_a6_fallback",
+      "gate_kind": "physical_browser_fallback",
+      "stimulus": "kv_watermark_compatibility_qualification_resource_or_fence_rejected",
+      "expected_scope": "request",
+      "coverage": [
+        "a6_fallback",
+        "honest_abort",
+        "exact_cleanup",
+        "browser_visible_recovery_evidence"
+      ],
+      "required_invariants": [
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_runtime_or_test_only_seam",
+        "kv_successor_work_and_publication_withheld",
+        "ordinary_a6_product_interface_invoked",
+        "kv_outcome_rejected_or_unavailable",
+        "browser_evidence_labels_full_context_replay",
+        "fallback_never_relabelled_as_kv_continuation",
+        "no_duplicate_or_missing_output",
+        "one_terminal_result",
+        "zero_terminal_live_resource_delta"
+      ]
+    },
+    {
+      "scenario_id": "ordinary_browser_honest_abort",
+      "gate_kind": "physical_browser_negative",
+      "stimulus": "neither_a7_nor_a6_has_current_qualified_authority",
+      "expected_scope": "request",
+      "coverage": [
+        "a6_fallback",
+        "honest_abort",
+        "exact_cleanup",
+        "browser_visible_recovery_evidence"
+      ],
+      "required_invariants": [
+        "ordinary_gateway_browser_submission",
+        "no_direct_router_runtime_or_test_only_seam",
+        "explicit_bounded_abort_reason",
+        "no_silent_prompt_restart",
+        "no_kv_recovery_or_replay_success_claim",
+        "one_terminal_history",
+        "all_request_owned_resources_return_to_baseline",
+        "incumbent_and_unrelated_requests_unchanged"
+      ]
+    },
+    {
+      "scenario_id": "cancel_before_kv_cutover",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "current_generation_cancel_during_checkpoint_or_cutover_pending",
+      "expected_scope": "request",
+      "coverage": ["cancellation", "monotonic_fencing", "exact_cleanup"],
+      "required_invariants": [
+        "current_cancel_generation_terminates_request_once",
+        "successor_decode_and_publication_withheld",
+        "source_standby_and_transfer_work_interrupted",
+        "checkpoint_buffers_shadow_kv_and_reservations_released",
+        "late_ack_output_terminal_and_cleanup_rejected",
+        "unrelated_requests_continue"
+      ]
+    },
+    {
+      "scenario_id": "cancel_after_kv_cutover",
+      "gate_kind": "deterministic_negative",
+      "stimulus": "current_generation_cancel_during_successor_decode",
+      "expected_scope": "request",
+      "coverage": ["cancellation", "monotonic_fencing", "exact_cleanup"],
+      "required_invariants": [
+        "successor_current_generation_cancelled_once",
+        "old_generation_cancel_cannot_mutate_successor",
+        "one_terminal_cancel_result",
+        "source_and_successor_kv_and_live_resources_released",
+        "bounded_terminal_history_retained_separately",
+        "unrelated_requests_continue"
+      ]
+    },
+    {
+      "scenario_id": "terminal_cleanup_all_outcomes",
+      "gate_kind": "deterministic_positive",
+      "stimulus": "success_fallback_abort_timeout_standby_loss_source_return_or_shutdown",
+      "expected_scope": "request",
+      "coverage": ["exact_cleanup", "cancellation"],
+      "required_invariants": [
+        "checkpoint_buffers_shadow_source_and_successor_kv_released_exactly_once",
+        "path_capacity_and_memory_reservations_released_exactly_once",
+        "commands_acknowledgements_receipts_and_streams_released_exactly_once",
+        "source_and_standby_live_counters_return_to_baseline",
+        "cleanup_ownership_failure_does_not_widen_scope",
+        "durable_history_accounted_separately_from_live_resources"
+      ]
+    },
+    {
+      "scenario_id": "browser_visible_recovery_evidence",
+      "gate_kind": "browser_contract",
+      "stimulus": "shadowing_cutover_fallback_abort_refresh_and_reconnect",
+      "expected_scope": "request",
+      "coverage": ["browser_visible_recovery_evidence"],
+      "required_invariants": [
+        "real_committed_acknowledged_counts_and_lag_visible",
+        "recovery_mode_phase_attempt_and_fence_generation_visible",
+        "compatibility_qualification_fallback_cancel_cleanup_and_terminal_state_visible",
+        "no_replay_replay_and_abort_are_distinct",
+        "unknown_values_never_default_ready_or_recovered",
+        "refresh_reconnect_and_terminal_history_reconstruct_same_generation",
+        "raw_kv_prompt_tokens_output_activations_keys_addresses_and_paths_absent",
+        "tab_private_prompt_and_output_remain_session_scoped"
+      ]
+    }
+  ],
+  "qualification_claim": false,
+  "promotion_authorized": false
+}

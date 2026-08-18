@@ -1,0 +1,677 @@
+{
+  "protocol": "mycelium.a12_mobile_acceptance_inventory.v1",
+  "gate": "A12",
+  "state": "design_only",
+  "claim_boundary": "frozen mobile authority, platform, native-path, qualification, and projection acceptance inputs only; no application, runtime, device evidence, eligibility, readiness, or completion claim",
+  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
+  "reviewed_design_inputs": [
+    {
+      "gate": "A9",
+      "commit": "0f79a2b1a7f553499579b24c6c9362e801809dab",
+      "protocol": "mycelium.a9_acceptance_inventory.v1",
+      "adopted_boundaries": [
+        "separated_capability_authority",
+        "signed_capability_binding",
+        "unknown_remains_ineligible",
+        "native_synthetic_evidence_separation",
+        "class_specific_qualification",
+        "dynamic_ui_projection"
+      ]
+    }
+  ],
+  "dependency_policy": {
+    "exact_gate_dependencies": ["A4", "A9"],
+    "transitive_dependencies": ["A3", "A8"],
+    "optional_claim_prerequisites": [
+      {
+        "claim_id": "speculative_draft_worker",
+        "dependencies": ["A11"],
+        "required_dependency_state": "physically_closed",
+        "failure_mode": "claim_rejected_gate_closure_unchanged"
+      }
+    ],
+    "forbidden_blanket_dependencies": ["A8", "A10", "A11"]
+  },
+  "eligibility_rungs": [
+    {
+      "rung_id": "signed_membership",
+      "authority": "a9_membership_authority",
+      "requires": [
+        "durable_device_owned_key",
+        "signed_a9_v2_profile",
+        "current_lease_incarnation_and_generation",
+        "revocation_checks",
+        "consent",
+        "authenticated_reconnect"
+      ],
+      "grants": ["current_signed_membership"],
+      "cannot_grant": [
+        "capability_eligibility",
+        "artifact_access",
+        "artifact_readiness",
+        "operation_qualification",
+        "planner_placement",
+        "deployment_selection"
+      ]
+    },
+    {
+      "rung_id": "capability_eligibility",
+      "authority": "a9_role_class_qualifier",
+      "requires": [
+        "current_signed_membership",
+        "registered_platform_runtime_transport_and_build",
+        "fresh_native_observations",
+        "role_specific_constraints",
+        "sustainable_resource_and_lifecycle_evidence"
+      ],
+      "grants": ["exact_role_capability_eligibility"],
+      "cannot_grant": [
+        "artifact_grant",
+        "artifact_readiness",
+        "operation_qualification",
+        "planner_placement",
+        "route_readiness",
+        "deployment_selection"
+      ]
+    },
+    {
+      "rung_id": "artifact_readiness",
+      "authority": "a2_provisioner",
+      "requires": [
+        "assignment_scoped_grant",
+        "exact_artifact_model_and_representation",
+        "digest_and_component_integrity",
+        "supported_inert_format",
+        "bounded_resumable_acquisition",
+        "quota_and_sustainable_headroom",
+        "thermal_power_storage_and_cancellation_policy",
+        "atomic_promotion"
+      ],
+      "grants": ["assignment_local_artifact_ready"],
+      "cannot_grant": [
+        "capability_eligibility",
+        "operation_qualification",
+        "runtime_load_proof",
+        "planner_placement",
+        "route_readiness",
+        "deployment_selection"
+      ]
+    },
+    {
+      "rung_id": "operation_qualification",
+      "authority": "mobile_role_operation_qualifier",
+      "requires": [
+        "current_applicable_rung_proofs",
+        "exact_native_runtime_build_and_operation",
+        "physical_positive_and_negative_evidence",
+        "thermal_power_memory_lifecycle_network_gates",
+        "artifact_integrity_when_applicable",
+        "native_parity_when_applicable",
+        "cancellation_cleanup_and_load_proof"
+      ],
+      "grants": ["exact_platform_runtime_build_and_role_operation_qualification"],
+      "cannot_grant": [
+        "another_role_qualification",
+        "another_platform_qualification",
+        "planner_placement",
+        "provisioner_grant",
+        "deployment_qualification",
+        "registry_selection"
+      ]
+    }
+  ],
+  "platform_requirements": {
+    "android": {
+      "architecture": "generic_registered_native_android",
+      "minimum_device_families": 2,
+      "different_manufacturers_required": true,
+      "brand_or_model_specific_branching_allowed": false,
+      "signed_native_application_required": true
+    },
+    "apple_mobile": {
+      "platform_families": ["ios", "ipados"],
+      "initial_inference_eligibility": "foreground_active_only",
+      "physical_device_required": true,
+      "simulator_may_qualify": false,
+      "ios_ipados_qualification_carryover_allowed": false
+    },
+    "excluded_normal_product_paths": ["termux", "adb", "ssh"]
+  },
+  "required_gate_families": [
+    "thermal",
+    "power",
+    "memory",
+    "lifecycle",
+    "network",
+    "artifact",
+    "parity"
+  ],
+  "decisions": [
+    {
+      "decision_id": "four_rung_authority",
+      "required_invariants": [
+        "membership_capability_artifact_and_operation_are_separate",
+        "each_rung_has_own_authority_generation_blockers_and_expiry",
+        "later_rung_consumes_but_never_rewrites_prior_proof",
+        "artifact_free_role_uses_closed_not_applicable_reason"
+      ],
+      "forbidden_shortcuts": [
+        "membership_implies_capability",
+        "capability_implies_artifact",
+        "cache_implies_artifact_readiness",
+        "artifact_implies_operation",
+        "operation_implies_placement"
+      ]
+    },
+    {
+      "decision_id": "generic_platform_architecture",
+      "required_invariants": [
+        "platform_runtime_transport_operation_and_qualification_drive_behavior",
+        "unknown_manufacturer_requires_no_contract_or_ui_change",
+        "pixel_is_one_conformance_device_only",
+        "ios_and_ipados_keep_exact_platform_bindings"
+      ],
+      "forbidden_shortcuts": [
+        "pixel_specific_product_path",
+        "brand_derived_backend",
+        "hard_coded_supported_device_inventory",
+        "ipados_qualifies_ios",
+        "ios_qualifies_ipados"
+      ]
+    },
+    {
+      "decision_id": "two_android_family_proof",
+      "required_invariants": [
+        "two_independently_manufactured_android_families_required",
+        "both_use_same_signed_native_product_contracts",
+        "both_pass_same_claimed_role_gate_matrix",
+        "family_diversity_is_owner_private_and_publicly_pseudonymous"
+      ],
+      "forbidden_shortcuts": [
+        "one_phone_generic_android_claim",
+        "two_models_same_family_as_diversity",
+        "termux_as_second_family",
+        "simulator_as_second_family"
+      ]
+    },
+    {
+      "decision_id": "apple_foreground_initial",
+      "required_invariants": [
+        "initial_ios_ipados_inference_is_foreground_active_only",
+        "background_transition_stops_admission_and_drains",
+        "old_process_is_fenced_before_later_publication",
+        "foreground_return_uses_fresh_incarnation_and_generation"
+      ],
+      "forbidden_shortcuts": [
+        "background_inference_assumed",
+        "simulator_as_physical_device",
+        "android_evidence_qualifies_apple",
+        "stale_apple_process_publication"
+      ]
+    },
+    {
+      "decision_id": "sustainable_mobile_gates",
+      "required_invariants": [
+        "thermal_power_memory_lifecycle_network_artifact_and_parity_are_independent",
+        "fresh_sustainable_capacity_required",
+        "missing_measurement_is_unknown_and_blocking",
+        "withdrawal_withholds_new_work_and_drains_active_work",
+        "fenced_generation_cannot_publish"
+      ],
+      "forbidden_shortcuts": [
+        "marketing_memory_as_capacity",
+        "single_free_memory_sample",
+        "instantaneous_thermal_pass",
+        "missing_api_as_healthy",
+        "platform_wide_gate_carryover"
+      ]
+    },
+    {
+      "decision_id": "a11_bound_optional_draft",
+      "required_invariants": [
+        "mobile_draft_role_is_optional",
+        "a11_must_be_physically_closed_for_exact_target_workload",
+        "target_authority_and_separate_kv_are_preserved",
+        "draft_loss_or_drain_returns_target_to_target_only",
+        "no_target_kv_corruption_or_mobile_stage_promotion"
+      ],
+      "forbidden_shortcuts": [
+        "a11_design_only_as_draft_authority",
+        "desktop_draft_qualification_carryover",
+        "draft_role_implies_stage_role",
+        "draft_emits_target_output",
+        "shared_target_draft_kv"
+      ]
+    },
+    {
+      "decision_id": "native_product_path_only",
+      "required_invariants": [
+        "signed_native_application_is_normal_product_path",
+        "embedded_authenticated_transport_and_lifecycle_supervision_required",
+        "termux_adb_and_ssh_are_development_or_conformance_only",
+        "ordinary_user_never_requires_shell_endpoint_or_manual_copy"
+      ],
+      "forbidden_shortcuts": [
+        "termux_as_product_runtime",
+        "adb_dependency_during_gate",
+        "ssh_dependency_during_gate",
+        "manual_model_copy_as_artifact_readiness",
+        "operator_boolean_as_native_evidence"
+      ]
+    },
+    {
+      "decision_id": "dynamic_mobile_projection",
+      "required_invariants": [
+        "all_workspaces_share_current_public_generation",
+        "four_rungs_roles_source_freshness_constraints_and_blockers_are_separate",
+        "platform_values_are_registry_driven_without_brand_branch",
+        "withdrawal_drain_revocation_and_reconnect_reconstruct",
+        "private_device_and_session_data_are_excluded"
+      ],
+      "forbidden_shortcuts": [
+        "browser_state_grants_rung",
+        "brand_specific_ui_branch",
+        "synthetic_as_native_projection",
+        "stale_generation_as_current",
+        "private_device_identifier_projection"
+      ]
+    }
+  ],
+  "acceptance_cases": [
+    {
+      "case_id": "rung_authority_isolation",
+      "gate_kind": "deterministic_negative",
+      "setup": "one mobile authority rung changes while the other three retain their prior generations",
+      "stimulus": "recompute mobile readiness and downstream role eligibility",
+      "required_outcomes": [
+        "changed_rung_generation_advances",
+        "dependent_later_rungs_withdraw",
+        "independent_prior_rungs_unchanged",
+        "exact_blocker_visible"
+      ],
+      "forbidden_side_effects": [
+        "other_rung_rewritten",
+        "transitive_rung_grant",
+        "placement_created",
+        "deployment_selected"
+      ]
+    },
+    {
+      "case_id": "signed_member_only",
+      "gate_kind": "physical_positive",
+      "setup": "a native mobile app joins with durable key signed profile current lease consent and revocation checks",
+      "stimulus": "project membership and request capability artifact and operation access",
+      "required_outcomes": [
+        "signed_membership_current",
+        "capability_artifact_and_operation_remain_unearned",
+        "no_model_content_or_inference_traffic",
+        "member_visible_with_later_rung_blockers"
+      ],
+      "forbidden_side_effects": [
+        "capability_auto_granted",
+        "artifact_disclosed",
+        "operation_qualified",
+        "route_mutated"
+      ]
+    },
+    {
+      "case_id": "capability_without_artifact",
+      "gate_kind": "deterministic_negative",
+      "setup": "a current signed member passes exact native capability eligibility but has no assignment scoped artifact grant",
+      "stimulus": "request model artifact readiness and operation qualification",
+      "required_outcomes": [
+        "capability_eligibility_current",
+        "artifact_readiness_blocked",
+        "operation_qualification_blocked",
+        "assignment_grant_required"
+      ],
+      "forbidden_side_effects": [
+        "artifact_chunk_disclosed",
+        "cache_treated_ready",
+        "operation_started",
+        "placement_created"
+      ]
+    },
+    {
+      "case_id": "artifact_without_operation",
+      "gate_kind": "deterministic_negative",
+      "setup": "an assigned artifact passes acquisition integrity and atomic promotion but native operation gates are incomplete",
+      "stimulus": "request runtime load activation placement and selection",
+      "required_outcomes": [
+        "artifact_readiness_current",
+        "operation_qualification_blocked",
+        "artifact_retained_as_inert_assignment_local_data",
+        "operation_blockers_visible"
+      ],
+      "forbidden_side_effects": [
+        "artifact_implies_load_proof",
+        "activation_admitted",
+        "placement_created",
+        "deployment_selected"
+      ]
+    },
+    {
+      "case_id": "first_android_family_insufficient",
+      "gate_kind": "physical_negative",
+      "setup": "one Android device family passes the native gate matrix for an exact role",
+      "stimulus": "attempt to publish a generic Android role claim",
+      "required_outcomes": [
+        "first_family_result_retained",
+        "generic_android_claim_blocked",
+        "second_independent_family_required"
+      ],
+      "forbidden_side_effects": [
+        "one_phone_generic_claim",
+        "pixel_label_as_platform_authority",
+        "other_android_family_inferred"
+      ]
+    },
+    {
+      "case_id": "two_android_family_native_proof",
+      "gate_kind": "physical_positive",
+      "setup": "two independently manufactured Android families use the same signed native app and registered product contracts",
+      "stimulus": "run the same exact role positive negative sustainability lifecycle and network matrix on both",
+      "required_outcomes": [
+        "two_family_diversity_proved_privately",
+        "both_family_role_gates_pass",
+        "generic_android_role_claim_exactly_bounded",
+        "public_family_references_pseudonymous"
+      ],
+      "forbidden_side_effects": [
+        "brand_specific_product_branch",
+        "hardware_identifier_exposed",
+        "unproven_android_role_broadened"
+      ]
+    },
+    {
+      "case_id": "brand_specific_shortcut_rejection",
+      "gate_kind": "deterministic_negative",
+      "setup": "a profile or UI path attempts to infer backend role or support from Pixel brand or model text",
+      "stimulus": "derive capability operation eligibility and product projection",
+      "required_outcomes": [
+        "registered_platform_runtime_and_qualification_used",
+        "brand_text_ignored_as_authority",
+        "unknown_model_remains_supported_only_by_capability"
+      ],
+      "forbidden_side_effects": [
+        "pixel_specific_runtime_selected",
+        "brand_derived_eligibility",
+        "hard_coded_device_inventory_required"
+      ]
+    },
+    {
+      "case_id": "android_sustainability_withdrawal",
+      "gate_kind": "physical_negative",
+      "setup": "qualified Android native evidence crosses memory thermal battery power or sustainable workspace limits",
+      "stimulus": "request new work and drain any active bounded operation",
+      "required_outcomes": [
+        "new_mobile_work_withheld",
+        "active_work_drains_or_cancels_boundedly",
+        "generation_fenced_before_late_publication",
+        "target_or_incumbent_remains_usable",
+        "resource_cleanup_returns_to_baseline"
+      ],
+      "forbidden_side_effects": [
+        "route_global_failure",
+        "deployment_fatal_from_mobile_withdrawal",
+        "late_result_published",
+        "missing_measurement_as_healthy"
+      ]
+    },
+    {
+      "case_id": "android_lifecycle_network_transitions",
+      "gate_kind": "physical_positive",
+      "setup": "a signed Android native app exercises foreground drain background process death resume handoff and airplane mode",
+      "stimulus": "observe lifecycle network generation cancellation reconnect and cleanup outcomes",
+      "required_outcomes": [
+        "every_transition_has_bounded_signed_or_observed_outcome",
+        "old_process_generation_cannot_publish",
+        "reconnect_uses_current_generation",
+        "network_loss_does_not_fabricate_corruption",
+        "assigned_resources_cleanup_exact"
+      ],
+      "forbidden_side_effects": [
+        "stale_process_publication",
+        "duplicate_terminal_event",
+        "route_global_failure",
+        "unassigned_data_received"
+      ]
+    },
+    {
+      "case_id": "apple_foreground_operation",
+      "gate_kind": "physical_positive",
+      "setup": "an available physical iOS or iPadOS signed native app is foreground active with exact current rung proofs",
+      "stimulus": "perform the exact qualified role through the ordinary authenticated product path",
+      "required_outcomes": [
+        "foreground_active_only_constraint_enforced",
+        "exact_platform_family_and_role_recorded",
+        "native_operation_and_parity_execute",
+        "product_path_counters_bind_operation",
+        "terminal_cleanup_exact"
+      ],
+      "forbidden_side_effects": [
+        "background_eligibility_inferred",
+        "other_apple_platform_qualified",
+        "simulator_result_used"
+      ]
+    },
+    {
+      "case_id": "apple_background_drain_and_fence",
+      "gate_kind": "physical_negative",
+      "setup": "a foreground qualified iOS or iPadOS app enters background suspension memory pressure or termination",
+      "stimulus": "stop admission drain bounded work release state fence process and later reconnect",
+      "required_outcomes": [
+        "new_work_stops_before_background",
+        "bounded_grace_finishes_or_cancels_work",
+        "reservations_request_and_local_kv_release",
+        "old_incarnation_fenced",
+        "foreground_return_uses_fresh_incarnation",
+        "mobile_availability_outcome_not_automatically_fatal"
+      ],
+      "forbidden_side_effects": [
+        "background_work_assumed",
+        "stale_result_published",
+        "peer_corruption_fabricated",
+        "deployment_fatal_fabricated"
+      ]
+    },
+    {
+      "case_id": "apple_platform_substitution_rejection",
+      "gate_kind": "physical_negative",
+      "setup": "simulator Android iOS or iPadOS evidence is offered for a different exact Apple platform role gate",
+      "stimulus": "attempt physical operation qualification and generic Apple-mobile claim",
+      "required_outcomes": [
+        "substituted_evidence_rejected",
+        "affected_exact_platform_role_remains_blocked",
+        "external_physical_device_blocker_visible"
+      ],
+      "forbidden_side_effects": [
+        "simulator_as_physical",
+        "android_qualifies_apple",
+        "ios_ipados_carryover",
+        "generic_apple_claim"
+      ]
+    },
+    {
+      "case_id": "sustainability_gate_matrix_fail_closed",
+      "gate_kind": "deterministic_negative",
+      "setup": "one required thermal power memory lifecycle network artifact or parity observation is missing stale or failing",
+      "stimulus": "derive capability eligibility artifact readiness and operation qualification",
+      "required_outcomes": [
+        "failed_gate_named_exactly",
+        "unknown_or_stale_gate_blocks_dependent_rung",
+        "independent_prior_rungs_remain_truthful",
+        "new_work_withheld"
+      ],
+      "forbidden_side_effects": [
+        "missing_gate_as_zero",
+        "missing_gate_as_healthy",
+        "other_platform_evidence_substituted",
+        "operation_qualified"
+      ]
+    },
+    {
+      "case_id": "artifact_assignment_integrity",
+      "gate_kind": "physical_negative",
+      "setup": "mobile artifact request is unassigned revoked corrupt partial over quota thermally blocked or in an unsupported format",
+      "stimulus": "attempt acquisition resume integrity verification promotion and runtime load",
+      "required_outcomes": [
+        "artifact_request_rejected_or_paused_with_exact_reason",
+        "no_atomic_promotion_without_full_integrity",
+        "cache_presence_grants_no_readiness",
+        "operation_qualification_remains_blocked",
+        "retention_or_eviction_reported_truthfully"
+      ],
+      "forbidden_side_effects": [
+        "unassigned_chunk_disclosed",
+        "partial_artifact_promoted",
+        "manual_copy_accepted",
+        "runtime_loaded"
+      ]
+    },
+    {
+      "case_id": "native_parity_and_operation_binding",
+      "gate_kind": "physical_negative",
+      "setup": "native draft or stage runtime output drifts from the independent reference or changes build operation context or representation",
+      "stimulus": "validate parity load proof and exact operation qualification binding",
+      "required_outcomes": [
+        "parity_or_binding_mismatch_rejected",
+        "operation_qualification_withdrawn",
+        "artifact_and_membership_history_unchanged",
+        "incumbent_not_displaced"
+      ],
+      "forbidden_side_effects": [
+        "parity_failure_ignored",
+        "changed_build_inherits_qualification",
+        "stage_role_inferred",
+        "deployment_selected"
+      ]
+    },
+    {
+      "case_id": "optional_draft_requires_a11",
+      "gate_kind": "deterministic_negative",
+      "setup": "mobile runtime is draft compatible but A11 is design only stale disabled or bound to another exact target workload",
+      "stimulus": "request mobile speculative draft operation qualification and admission",
+      "required_outcomes": [
+        "mobile_draft_operation_blocked",
+        "exact_a11_binding_blocker_visible",
+        "target_only_remains_available",
+        "other_mobile_roles_unchanged"
+      ],
+      "forbidden_side_effects": [
+        "a11_design_input_as_authority",
+        "desktop_draft_carryover",
+        "draft_admitted",
+        "stage_role_granted"
+      ]
+    },
+    {
+      "case_id": "mobile_draft_loss_target_fallback",
+      "gate_kind": "physical_negative",
+      "setup": "an exactly A11 bound qualified mobile draft drains loses network or is terminated during an active request",
+      "stimulus": "fence draft generation clean draft resources and continue through target authority",
+      "required_outcomes": [
+        "draft_generation_fenced",
+        "draft_kv_and_proposal_resources_cleaned",
+        "target_resumes_from_committed_watermark",
+        "target_output_remains_exact",
+        "no_target_kv_corruption"
+      ],
+      "forbidden_side_effects": [
+        "draft_emits_output",
+        "draft_rolls_back_target_kv",
+        "target_deployment_failed",
+        "request_restarts_silently"
+      ]
+    },
+    {
+      "case_id": "development_tool_path_rejection",
+      "gate_kind": "physical_negative",
+      "setup": "Termux ADB SSH manual shell bridge or operator boolean is the only path producing mobile evidence or runtime work",
+      "stimulus": "attempt native product path installation lifecycle artifact and operation qualification",
+      "required_outcomes": [
+        "development_or_conformance_source_labelled",
+        "normal_product_path_gate_remains_open",
+        "native_installation_and_lifecycle_unproven",
+        "exact_blocker_visible"
+      ],
+      "forbidden_side_effects": [
+        "termux_as_normal_path",
+        "adb_gate_dependency_accepted",
+        "ssh_gate_dependency_accepted",
+        "operator_boolean_as_native_evidence",
+        "manual_copy_as_artifact_ready"
+      ]
+    },
+    {
+      "case_id": "dynamic_mobile_projection_reconstruction",
+      "gate_kind": "browser_positive",
+      "setup": "mobile rung role source freshness lifecycle network revocation or blocker changes in the current authority generation",
+      "stimulus": "refresh navigate switch workspaces reconnect and open a clean second browser session",
+      "required_outcomes": [
+        "all_workspaces_share_current_generation",
+        "four_rungs_and_roles_remain_separate",
+        "source_freshness_constraints_and_blockers_visible",
+        "drain_withdrawal_and_reconnect_reconstruct",
+        "second_session_reconstructs_same_public_truth"
+      ],
+      "forbidden_side_effects": [
+        "browser_state_grants_eligibility",
+        "brand_branch_required",
+        "synthetic_as_native",
+        "stale_generation_current",
+        "private_device_or_session_data_exposed"
+      ]
+    }
+  ],
+  "ui_projections": [
+    {
+      "workspace_id": "inference",
+      "required_projection": ["qualified_mobile_participation", "foreground_and_drain_state", "fallback_or_recovery"],
+      "dynamic_behavior": ["current_operation_generation", "target_authority_preserved", "reconnect_reconstructs"],
+      "forbidden_claims": ["membership_implies_participation", "device_payload_exposed"]
+    },
+    {
+      "workspace_id": "device_lab",
+      "required_projection": ["four_rung_ladder", "role_qualification", "source_kind", "freshness", "constraints", "blockers"],
+      "dynamic_behavior": ["native_synthetic_separate", "rung_withdrawal_live", "registered_platform_values"],
+      "forbidden_claims": ["role_ladder_collapses_rungs", "synthetic_as_native", "brand_as_capability"]
+    },
+    {
+      "workspace_id": "network",
+      "required_projection": ["bound_mobile_edges", "direct_relay_unknown", "network_loss", "reconnect_transition"],
+      "dynamic_behavior": ["a8_observation_authority", "nullable_measurements", "generation_fenced_reconnect"],
+      "forbidden_claims": ["platform_implies_connectivity", "raw_endpoint_identity"]
+    },
+    {
+      "workspace_id": "nodes",
+      "required_projection": ["pseudonymous_platform_family", "architecture", "runtime", "transport", "lifecycle", "sustainable_capacity", "thermal_power_class", "four_rungs", "role_eligibility"],
+      "dynamic_behavior": ["authority_generations_separate", "registered_values_without_brand_branch", "withdrawal_live"],
+      "forbidden_claims": ["pixel_specific_backend", "membership_as_stage_ready"]
+    },
+    {
+      "workspace_id": "plans",
+      "required_projection": ["mobile_candidate_intent", "constraints", "exclusions", "artifact_need", "selection_reason"],
+      "dynamic_behavior": ["intent_not_assignment", "rung_blockers_current", "sustainable_capacity_only"],
+      "forbidden_claims": ["eligibility_implies_placement", "cache_implies_artifact_ready"]
+    },
+    {
+      "workspace_id": "readiness",
+      "required_projection": ["signed_membership", "capability_eligibility", "artifact_readiness", "operation_qualification", "deployment_qualification", "registration", "selection"],
+      "dynamic_behavior": ["proofs_independently_fresh", "dependent_withdrawal_live", "same_public_generation"],
+      "forbidden_claims": ["rung_collapse", "peer_qualification_is_route_ready"]
+    },
+    {
+      "workspace_id": "incidents",
+      "required_projection": ["thermal_power_withdrawal", "lifecycle_drain", "network_loss", "revocation", "stale_generation", "artifact_runtime_failure", "recovery_outcome"],
+      "dynamic_behavior": ["narrow_scope", "terminal_history_retained", "reconnect_reconstructs"],
+      "forbidden_claims": ["mobile_withdrawal_is_deployment_fatal", "private_device_detail"]
+    },
+    {
+      "workspace_id": "settings",
+      "required_projection": ["role_opt_in", "charging_battery_network_storage_thermal_lifecycle_policy", "consent", "privacy_retention", "revoke_remove"],
+      "dynamic_behavior": ["owner_and_swarm_bounds_intersect", "future_work_only", "redacted_diagnostics"],
+      "forbidden_claims": ["unsafe_policy_broadening", "development_tool_as_product_path"]
+    }
+  ]
+}

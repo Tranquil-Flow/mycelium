@@ -1,0 +1,353 @@
+{
+  "protocol": "mycelium.a4_acceptance_scenarios.v1",
+  "claim_boundary": "frozen acceptance inputs only; no product implementation or qualification claim",
+  "state_ownership": {
+    "deployment_readiness": "deployment_qualifier",
+    "future_request_model_selection": "deployment_registry",
+    "browser_session_replay_cursor_and_private_content": "request_gateway",
+    "request_path_dispatch_and_event_sequence": "router",
+    "complete_path_reservations_and_terminal_cleanup": "admission_ledger",
+    "stage_command_deadline_and_cancellation_generation": "command_controller",
+    "stage_placement_capacity_and_kv_state": "placement_runtime",
+    "physical_send_connection_and_receipt_observations": "transport",
+    "peer_lease_and_incarnation_generation": "membership",
+    "subject_freshness_and_scoped_incidents": "liveness_detector"
+  },
+  "workspace_shared_invariants": [
+    "same_backend_generation",
+    "capability_language_without_milestone_labels",
+    "privacy_reduced_owner_projection_only",
+    "stale_degraded_unavailable_and_unknown_are_explicit",
+    "missing_measurements_never_default_to_zero_or_healthy"
+  ],
+  "workspace_requirements": {
+    "inference": [
+      "request_phase_and_independent_progress",
+      "bounded_retry_interruption_and_terminal_reason",
+      "active_reconnect_replay_and_cancellation"
+    ],
+    "device_lab": [
+      "interruptible_command_receipt_keepalive_and_generation_fencing_capabilities",
+      "maximum_concurrent_commands",
+      "synthetic_browser_workers_remain_model_stage_ineligible"
+    ],
+    "network": [
+      "directed_edge_freshness_observation_source_and_connection_reuse",
+      "suspect_quarantine_and_affected_current_paths"
+    ],
+    "nodes": [
+      "incarnation_detector_command_queue_reservation_and_recovery_state",
+      "private_identity_is_excluded"
+    ],
+    "plans": [
+      "immutable_current_paths_and_retained_legal_paths",
+      "narrow_failure_scope_and_successor_recovery_deferral"
+    ],
+    "readiness": [
+      "qualification_dispatcher_interruption_cleanup_liveness_and_fatal_checks",
+      "observed_budgets"
+    ],
+    "incidents": [
+      "source_scope_affected_owners_action_latency_cleanup_and_outcome",
+      "active_failure_and_idle_staleness_are_separate"
+    ],
+    "settings": [
+      "bounded_worker_queue_and_detector_policy",
+      "future_only_edits_do_not_mutate_active_paths"
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario_id": "overlapping_requests",
+      "gate_kind": "physical_positive",
+      "fault_kind": "none",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "two_product_requests_overlap",
+        "independent_terminal_states",
+        "physical_counters_bind_each_request",
+        "true_batch_mode_reported",
+        "zero_resource_delta_after_cleanup"
+      ],
+      "required_workspaces": ["inference", "device_lab", "network", "nodes", "plans", "readiness", "settings"]
+    },
+    {
+      "scenario_id": "route_global_lock_absence",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "blocked_request_scope",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "no_generation_long_route_global_lock",
+        "metadata_lock_released_before_blocking_work",
+        "blocked_request_does_not_stop_other_dispatch",
+        "cancel_during_blocking_work_terminates_once",
+        "request_owned_cleanup_exact",
+        "no_cross_request_ownership_mutation"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "lock_order_deadlock_detection",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "lock_order_inversion",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "lock_cycle_rejected_before_physical_execution",
+        "held_and_requested_scopes_reported_without_private_data",
+        "no_physical_command_issued",
+        "owned_locks_and_request_resources_released",
+        "unaffected_dispatch_continues",
+        "deployment_fatal_rejected"
+      ],
+      "required_workspaces": ["inference", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "cancel_isolation",
+      "gate_kind": "physical_positive",
+      "fault_kind": "request_cancel",
+      "expected_scope": "request",
+      "maximum_latency_ms": 2000,
+      "required_invariants": [
+        "cancelled_request_terminates_once",
+        "other_request_continues",
+        "cancelled_request_cleanup_exact",
+        "deployment_remains_admissible",
+        "cooperative_request_scoped_cancellation",
+        "bounded_prefill_decode_work_units",
+        "correlated_command_ids",
+        "attempt_and_generation_fence_late_work",
+        "shared_node_process_survives_cancel",
+        "interrupt_and_cleanup_complete_within_budget",
+        "backend_ineligible_without_bounded_proof"
+      ],
+      "required_workspaces": ["inference", "nodes", "plans", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "participating_active_disconnect",
+      "gate_kind": "physical_positive",
+      "fault_kind": "active_disconnect",
+      "expected_scope": "edge",
+      "maximum_latency_ms": 2000,
+      "required_invariants": [
+        "verified_active_failure_observed",
+        "blocked_command_interrupted_before_old_timeout",
+        "affected_request_terminates_explicitly",
+        "request_owned_resources_return_to_baseline",
+        "unaffected_scopes_not_failed",
+        "shared_node_process_survives_cancel",
+        "interrupt_and_cleanup_complete_within_budget"
+      ],
+      "required_workspaces": ["inference", "device_lab", "network", "nodes", "plans", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "participating_idle_staleness",
+      "gate_kind": "physical_positive",
+      "fault_kind": "idle_keepalive_loss",
+      "expected_scope": "edge",
+      "maximum_latency_ms": 15000,
+      "required_invariants": [
+        "traffic_freshness_expires_before_probe",
+        "two_misses_only_suspect",
+        "three_misses_and_stale_budget_quarantine",
+        "affected_new_admission_fails_closed",
+        "no_active_failure_fabricated"
+      ],
+      "required_workspaces": ["device_lab", "network", "plans", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "nonparticipating_peer_exit",
+      "gate_kind": "physical_positive",
+      "fault_kind": "nonparticipating_peer_exit",
+      "expected_scope": "peer",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "active_route_request_completes",
+        "subsequent_unaffected_admission_completes",
+        "selected_deployment_not_failed",
+        "membership_evidence_changes_without_route_mutation"
+      ],
+      "required_workspaces": ["network", "nodes", "plans", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "one_missed_receipt",
+      "gate_kind": "physical_negative",
+      "fault_kind": "receipt_miss",
+      "expected_scope": "edge",
+      "maximum_latency_ms": 5000,
+      "required_invariants": [
+        "subject_becomes_suspect_only",
+        "unaffected_admission_available",
+        "no_peer_quarantine",
+        "no_deployment_fatal_state"
+      ],
+      "required_workspaces": ["device_lab", "network", "plans", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "stale_incarnation_receipt",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "stale_receipt",
+      "expected_scope": "edge",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "receipt_rejected",
+        "current_subject_not_refreshed",
+        "generation_not_rolled_back",
+        "unrelated_subject_unchanged"
+      ],
+      "required_workspaces": ["device_lab", "network", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "late_command_result",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "late_command_result",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "stale_attempt_result_rejected",
+        "new_attempt_unchanged",
+        "one_terminal_result",
+        "cleanup_idempotent"
+      ],
+      "required_workspaces": ["inference", "device_lab", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "queue_saturation",
+      "gate_kind": "physical_negative",
+      "fault_kind": "queue_saturation",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "bounded_backpressure_returned",
+        "retry_hint_bounded",
+        "no_worker_leak",
+        "no_reservation_leak",
+        "accepted_requests_continue"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "worker_exit",
+      "gate_kind": "physical_negative",
+      "fault_kind": "worker_exit",
+      "expected_scope": "request",
+      "maximum_latency_ms": 2000,
+      "required_invariants": [
+        "only_owned_request_failed",
+        "other_queue_entries_retained",
+        "owned_resources_cleaned",
+        "deployment_not_poisoned"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "bounded_shutdown",
+      "gate_kind": "physical_negative",
+      "fault_kind": "shutdown",
+      "expected_scope": "deployment",
+      "maximum_latency_ms": 4000,
+      "required_invariants": [
+        "new_admission_stops",
+        "active_commands_interrupted",
+        "all_workers_joined",
+        "zero_queue_commands_reservations_receipts_streams_and_kv"
+      ],
+      "required_workspaces": ["device_lab", "nodes", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "fatal_allowlist_rejection",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "unexpected_worker_exception",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "owning_request_failed",
+        "bounded_incident_opened",
+        "deployment_fatal_rejected",
+        "unaffected_admission_available"
+      ],
+      "required_workspaces": ["plans", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "active_request_reconnect",
+      "gate_kind": "browser_positive",
+      "fault_kind": "gateway_disconnect",
+      "expected_scope": "session",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "request_continues_while_stream_is_detached",
+        "replay_resumes_after_last_applied_sequence",
+        "no_duplicate_or_missing_output",
+        "one_live_subscriber_enforced",
+        "invalid_future_or_expired_cursor_fails_closed",
+        "reconnect_cannot_cross_session_boundary",
+        "cancel_after_reconnect_terminates_once",
+        "request_owned_cleanup_exact",
+        "private_prompt_output_remains_session_scoped",
+        "other_request_dispatch_continues"
+      ],
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "network",
+        "nodes",
+        "plans",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
+    },
+    {
+      "scenario_id": "state_subset_ownership_boundaries",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "cross_owner_mutation",
+      "expected_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "only_declared_owner_mutates_each_state_subset",
+        "readers_use_detached_same_generation_snapshots",
+        "public_projection_is_strict_privacy_reduced_subset",
+        "missing_or_unknown_state_never_becomes_healthy",
+        "cross_owner_mutation_fails_closed",
+        "non_owner_cleanup_rejected",
+        "unowned_resources_not_released",
+        "unaffected_state_subsets_unchanged"
+      ],
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "network",
+        "nodes",
+        "plans",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
+    },
+    {
+      "scenario_id": "second_session_privacy",
+      "gate_kind": "browser_positive",
+      "fault_kind": "none",
+      "expected_scope": "session",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "sessions_submit_concurrently",
+        "public_generation_shared",
+        "private_prompt_output_isolated",
+        "refresh_back_forward_and_reconnect_reconstruct"
+      ],
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "network",
+        "nodes",
+        "plans",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
+    }
+  ]
+}

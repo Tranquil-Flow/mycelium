@@ -1,0 +1,378 @@
+{
+  "protocol": "mycelium.a10_acceptance_scenarios.v1",
+  "claim_boundary": "frozen acceptance inputs only; no product implementation, runtime batching, overlap, verifier, benchmark, or qualification claim",
+  "runtime_batch_requirements": {
+    "final_membership_authority": "stage_runtime",
+    "minimum_physical_batch_members": 2,
+    "backend_invocations_per_observed_batch": 1,
+    "candidate_membership_alone_qualifies": false,
+    "concurrent_admission_alone_qualifies": false,
+    "sequential_loop_alone_qualifies": false
+  },
+  "target_verifier_requirements": {
+    "minimum_operations": 100,
+    "qualified_width_classes": ["one", "qualified_default", "qualified_maximum"],
+    "minimum_prefix_length_buckets": 2,
+    "generation_policy": "deterministic_greedy",
+    "transaction_modes": [
+      "rollback_to_prefix",
+      "commit_verified_prefix",
+      "commit_verified_prefix_plus_target_correction"
+    ],
+    "single_backend_call_required": true,
+    "sequential_target_parity_required": true
+  },
+  "benchmark_requirements": {
+    "paired_window_order": [
+      "baseline_candidate",
+      "candidate_baseline",
+      "baseline_candidate"
+    ],
+    "measured_windows": 6,
+    "warmup_windows_per_mode": 1,
+    "minimum_completed_requests_per_window": 60,
+    "minimum_interactive_requests_per_window": 20,
+    "minimum_late_arrivals_per_window": 20,
+    "minimum_prompt_length_buckets": 2,
+    "minimum_output_length_buckets": 2,
+    "throughput_improvement_percent": 10,
+    "paired_bootstrap_confidence_percent": 95,
+    "throughput_lower_bound_percent": 10,
+    "maximum_interactive_p95_ttft_regression_percent": 10,
+    "maximum_interactive_p95_tpot_regression_percent": 10,
+    "same_route_bindings": [
+      "target",
+      "representation",
+      "route",
+      "product_sessions",
+      "workload",
+      "arrival_schedule",
+      "token_limits",
+      "measurement_window",
+      "instrumentation"
+    ],
+    "failed_cancelled_overflowed_and_slow_consumers_remain_in_denominator": true,
+    "exact_output_parity_required": true,
+    "zero_residual_resources_required": true
+  },
+  "workspace_shared_invariants": [
+    "same_current_public_generation",
+    "live_stale_historical_fixture_modeled_unknown_disabled_and_failed_are_distinct",
+    "missing_observations_never_default_to_zero_or_success",
+    "private_prompt_output_and_token_data_are_excluded",
+    "navigation_reconnect_terminal_history_and_second_session_reconstruct"
+  ],
+  "workspace_requirements": {
+    "inference": [
+      "actual_batch_identity_size_member_position_qos_and_collection_reason",
+      "slow_consumer_cancellation_verifier_use_and_terminal_attribution"
+    ],
+    "device_lab": [
+      "backend_batch_and_verifier_limits_parity_cleanup_incarnation_and_freshness",
+      "synthetic_workers_remain_nonqualifying"
+    ],
+    "network": [
+      "physical_stage_batch_flow_and_uncertainty_aware_overlap",
+      "modeled_queue_and_transport_only_concurrency_are_distinct"
+    ],
+    "nodes": [
+      "runtime_mode_actual_size_bytes_limits_queue_reservation_kv_and_utilization",
+      "verifier_support_and_freshness"
+    ],
+    "plans": [
+      "modeled_choice_observed_membership_workload_exclusions_and_bottleneck",
+      "predicted_observed_gain_and_same_route_baseline_comparison"
+    ],
+    "readiness": [
+      "independent_batch_arrival_overlap_parity_verifier_latency_and_throughput_proofs",
+      "cleanup_and_freshness_proofs"
+    ],
+    "incidents": [
+      "overflow_starvation_slow_consumer_cancellation_partial_failure_and_stale_result",
+      "verifier_rollback_and_bounded_cleanup_with_narrow_scope"
+    ],
+    "settings": [
+      "qualified_future_request_qos_batch_window_slow_consumer_and_verifier_limits",
+      "unsafe_or_unqualified_values_disabled_with_reason"
+    ]
+  },
+  "scenarios": [
+    {
+      "scenario_id": "real_runtime_batch_membership",
+      "gate_kind": "physical_positive",
+      "fault_kind": "none",
+      "acceptance_scope": "batch",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "one_real_backend_invocation_has_multiple_members",
+        "runtime_observation_owns_final_membership",
+        "candidate_and_actual_membership_are_distinct",
+        "every_member_has_committed_complete_path_reservation",
+        "per_member_identity_scatter_order_and_result_are_exact",
+        "physical_counters_bind_every_member",
+        "sequential_loop_and_concurrent_admission_do_not_pass",
+        "zero_residual_resources"
+      ],
+      "required_workspaces": ["inference", "device_lab", "nodes", "plans", "readiness"]
+    },
+    {
+      "scenario_id": "continuous_late_arrival",
+      "gate_kind": "physical_positive",
+      "fault_kind": "none",
+      "acceptance_scope": "batch",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "late_arrival_joins_only_at_iteration_boundary",
+        "existing_prefixes_and_event_order_remain_unchanged",
+        "one_true_backend_batch_executes_per_iteration",
+        "ready_member_set_is_bounded",
+        "arrival_cancellation_deadline_pressure_and_qos_are_reevaluated",
+        "per_request_terminal_attribution_remains_independent"
+      ],
+      "required_workspaces": ["inference", "nodes", "plans", "readiness"]
+    },
+    {
+      "scenario_id": "causal_pipeline_overlap",
+      "gate_kind": "physical_positive",
+      "fault_kind": "none",
+      "acceptance_scope": "path",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "different_microbatches_compute_on_different_stages",
+        "compute_intersection_is_positive_after_clock_uncertainty",
+        "every_stage_predecessor_completes_before_successor_starts",
+        "final_loopback_starts_only_after_target_commit",
+        "every_request_keeps_one_immutable_complete_path",
+        "queue_transport_and_ui_overlap_alone_do_not_pass"
+      ],
+      "required_workspaces": ["network", "nodes", "plans", "readiness"]
+    },
+    {
+      "scenario_id": "overlap_trace_rejection",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "invalid_causal_trace",
+      "acceptance_scope": "path",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "reversed_or_impossible_intervals_are_rejected",
+        "missing_predecessor_and_same_request_dependency_overlap_are_rejected",
+        "duplicate_or_skipped_stage_application_is_rejected",
+        "activation_attempt_and_path_mismatch_are_rejected",
+        "early_final_loopback_is_rejected",
+        "invalid_trace_never_becomes_observed_overlap"
+      ],
+      "required_workspaces": ["network", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "bounded_queue_qos_aging",
+      "gate_kind": "physical_negative",
+      "fault_kind": "queue_saturation",
+      "acceptance_scope": "placement",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "member_byte_and_active_batch_limits_are_finite",
+        "overflow_rejects_before_runtime_dispatch",
+        "retry_hint_is_bounded",
+        "interactive_deadline_guard_limits_collection",
+        "aged_eligible_batch_work_cannot_starve",
+        "ties_and_exclusion_reasons_are_deterministic",
+        "accepted_members_continue",
+        "queue_and_reservation_state_returns_to_baseline"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "slow_consumer_isolation",
+      "gate_kind": "physical_negative",
+      "fault_kind": "slow_consumer",
+      "acceptance_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "bounded_gateway_buffer_fills_without_unbounded_growth",
+        "slow_member_is_detached_from_future_scheduling",
+        "declared_policy_cancels_or_terminates_only_slow_member",
+        "batch_peers_continue_and_receive_one_result",
+        "stage_transport_sse_replay_and_evidence_buffers_remain_bounded",
+        "request_owned_resources_return_to_baseline",
+        "private_output_does_not_cross_member_boundary"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "cancellation_boundary_isolation",
+      "gate_kind": "physical_negative",
+      "fault_kind": "member_cancellation",
+      "acceptance_scope": "request",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "cancellation_checked_before_collection_and_backend_launch",
+        "cancellation_checked_after_backend_before_forwarding_and_at_command_points",
+        "cancelled_member_is_removed_before_launch_when_possible",
+        "post_launch_cancelled_result_is_discarded",
+        "only_cancelled_member_kv_rolls_back",
+        "remaining_members_receive_exactly_one_result",
+        "cancelled_member_cleanup_is_exact",
+        "deployment_and_unrelated_batches_remain_usable"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "batch_fail_closed_rollback",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "invalid_backend_result",
+      "acceptance_scope": "batch",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "wrong_count_order_or_member_identity_fails_closed",
+        "partial_kv_commit_nonfinite_output_and_stale_incarnation_fail_closed",
+        "every_uncommitted_member_rolls_back_to_committed_prefix",
+        "no_invalid_result_reaches_gateway_or_decode",
+        "unrelated_batches_queues_paths_and_deployment_remain_usable",
+        "packed_buffers_transactions_and_handles_return_to_baseline"
+      ],
+      "required_workspaces": ["inference", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "cross_member_kv_isolation",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "cross_member_kv_access",
+      "acceptance_scope": "batch",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "every_member_has_distinct_request_attempt_path_and_kv_identity",
+        "member_cannot_address_retain_commit_or_rollback_peer_kv",
+        "shared_temporary_tensor_storage_cannot_escape_invocation",
+        "padding_and_shape_metadata_never_become_generated_positions",
+        "cross_member_access_fails_closed",
+        "committed_peer_prefixes_remain_unchanged",
+        "zero_kv_or_result_contamination"
+      ],
+      "required_workspaces": ["device_lab", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "target_verifier_transaction",
+      "gate_kind": "physical_positive",
+      "fault_kind": "none",
+      "acceptance_scope": "verifier_operation",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "one_target_backend_call_evaluates_all_bounded_positions_causally",
+        "minimum_operation_width_and_prefix_matrix_executes",
+        "every_position_decision_matches_sequential_target_execution",
+        "rollback_prefix_commit_and_correction_commit_modes_execute",
+        "commit_is_atomic_monotonic_and_idempotent_for_identical_digest",
+        "final_committed_kv_position_matches_sequential_target",
+        "candidate_token_ids_remain_on_private_runtime_path",
+        "tentative_kv_and_results_never_enter_decode_or_browser_output"
+      ],
+      "required_workspaces": ["inference", "device_lab", "nodes", "readiness", "settings"]
+    },
+    {
+      "scenario_id": "target_verifier_rollback_to_prefix",
+      "gate_kind": "physical_negative",
+      "fault_kind": "verifier_transaction_failure",
+      "acceptance_scope": "verifier_operation",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "stale_prefix_conflicting_duplicate_and_excess_width_fail_closed",
+        "wrong_generation_cancellation_timeout_backend_and_parity_failure_fail_closed",
+        "transaction_rolls_back_to_exact_original_prefix",
+        "no_tentative_kv_or_uncommitted_result_escapes",
+        "rollback_is_request_local",
+        "reservation_transaction_buffer_and_command_cleanup_is_exact"
+      ],
+      "required_workspaces": ["inference", "device_lab", "nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "target_verifier_sampling_rejection",
+      "gate_kind": "deterministic_negative",
+      "fault_kind": "unsupported_generation_policy",
+      "acceptance_scope": "verifier_operation",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "unsupported_sampling_fails_admission",
+        "generation_policy_never_silently_switches_to_greedy",
+        "no_verifier_transaction_or_backend_call_starts",
+        "committed_prefix_and_kv_remain_unchanged",
+        "unsupported_capability_is_disabled_with_reason"
+      ],
+      "required_workspaces": ["inference", "device_lab", "readiness", "incidents", "settings"]
+    },
+    {
+      "scenario_id": "same_route_confidence_benchmark",
+      "gate_kind": "physical_positive",
+      "fault_kind": "none",
+      "acceptance_scope": "benchmark",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "frozen_three_pair_order_and_warmups_execute",
+        "every_window_meets_request_mix_and_bucket_minima",
+        "baseline_and_candidate_share_every_same_route_binding",
+        "only_declared_batching_overlap_policy_changes",
+        "throughput_gain_and_paired_lower_confidence_bound_meet_ten_percent",
+        "interactive_p95_ttft_and_tpot_regress_no_more_than_ten_percent",
+        "completed_output_matches_target_only_execution",
+        "reliability_cleanup_starvation_and_queue_bounds_do_not_regress",
+        "zero_residual_resources_and_cross_request_contamination"
+      ],
+      "required_workspaces": ["inference", "nodes", "plans", "readiness"]
+    },
+    {
+      "scenario_id": "invalid_benchmark_pair",
+      "gate_kind": "physical_negative",
+      "fault_kind": "benchmark_binding_drift",
+      "acceptance_scope": "benchmark",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "route_churn_thermal_drift_stale_evidence_and_software_mismatch_invalidate_pair",
+        "missing_measurement_invalidates_pair_instead_of_becoming_zero",
+        "failed_cancelled_overflowed_and_slow_consumers_remain_in_denominator",
+        "confidence_uses_paired_windows_not_individual_tokens",
+        "posthoc_threshold_and_exclusion_changes_are_rejected",
+        "invalid_pair_cannot_publish_material_gain"
+      ],
+      "required_workspaces": ["plans", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "runtime_exit_shutdown_cleanup",
+      "gate_kind": "physical_negative",
+      "fault_kind": "runtime_exit_or_shutdown",
+      "acceptance_scope": "placement",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "owning_invocation_members_terminate_with_narrow_scope",
+        "unrelated_batches_queues_paths_and_deployment_are_not_poisoned",
+        "queue_reservations_commands_packed_buffers_and_transactions_return_to_baseline",
+        "receipts_gateway_buffers_and_stage_local_kv_return_to_baseline",
+        "cleanup_completes_within_inherited_a4_budget",
+        "no_uncommitted_result_is_forwarded"
+      ],
+      "required_workspaces": ["nodes", "readiness", "incidents"]
+    },
+    {
+      "scenario_id": "all_workspace_reconstruction_privacy",
+      "gate_kind": "browser_positive",
+      "fault_kind": "none",
+      "acceptance_scope": "session",
+      "maximum_latency_ms": null,
+      "required_invariants": [
+        "all_eight_workspaces_use_same_current_public_generation",
+        "actual_modeled_fixture_unknown_disabled_and_failed_states_remain_distinct",
+        "refresh_navigation_back_forward_switching_and_reconnect_reconstruct",
+        "bounded_terminal_history_reconstructs",
+        "clean_second_session_cannot_read_private_prompt_output_or_tokens",
+        "live_batch_cancellation_overlap_verifier_and_benchmark_attribution_is_truthful"
+      ],
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "network",
+        "nodes",
+        "plans",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
+    }
+  ]
+}

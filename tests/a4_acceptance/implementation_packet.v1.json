@@ -1,0 +1,610 @@
+{
+  "protocol": "mycelium.a4_implementation_packet.v1",
+  "gate_state": "design_only",
+  "base_acceptance_commit": "4bde254f3f53bd77ce9a642397e8cfc297425334",
+  "claim_boundary": "machine-checked implementation handover only; no production, contract, UI, service, device, evidence, or qualification change",
+  "implementation_base": {
+    "packet_source_commit": "641eba4a78185fb23982bed1cdbe43b66b96983a",
+    "required_base": "905786df41ffdad5718d3464733e2f5cb8727532",
+    "insufficient_bases": [
+      "641eba4a78185fb23982bed1cdbe43b66b96983a",
+      "95fe9b77d9fb6f43e96cdd35e7d5ee02e8dc136d"
+    ],
+    "rule": "implementation_must_branch_from_or_rebase_onto_exact_atomic_a3_commit_905786df41ffdad5718d3464733e2f5cb8727532_before_any_production_edit"
+  },
+  "allowed_source_paths": [
+    "mycelium_m16_runtime.py",
+    "mycelium_live/health.py",
+    "mycelium_live/registry.py",
+    "mycelium_live/route.py",
+    "mycelium_live/router_port.py",
+    "mycelium_membership/contracts.py",
+    "mycelium_node/process.py",
+    "mycelium_request_gateway/asgi.py",
+    "mycelium_request_gateway/backend.py",
+    "mycelium_request_gateway/contracts.py",
+    "mycelium_request_gateway/service.py",
+    "mycelium_router/contracts.py",
+    "mycelium_router/entry.py",
+    "mycelium_router/live_ports.py",
+    "mycelium_router/mlx_runtime.py",
+    "mycelium_router/numpy_runtime.py",
+    "mycelium_router/relay.py",
+    "mycelium_router/transports/iroh.py",
+    "mycelium_seed/state.py",
+    "physical_inference_node.py"
+  ],
+  "planned_new_source_paths": [
+    "mycelium_live/command_controller.py",
+    "mycelium_live/liveness.py"
+  ],
+  "conditional_source_paths": [
+    {
+      "path": "mycelium_router/router.py",
+      "condition": "only_if_the_router_facade_exposes_attempt_aware_a4_apis"
+    },
+    {
+      "path": "mycelium_mobile/pixel_runtime.py",
+      "condition": "only_if_the_pixel_backend_remains_a4_eligible_after_bounded_cancellation_proof"
+    }
+  ],
+  "physical_command_surfaces": [
+    {
+      "path": "mycelium_node/process.py",
+      "role": "controller_process_command_transport"
+    },
+    {
+      "path": "physical_inference_node.py",
+      "role": "physical_node_command_service"
+    },
+    {
+      "path": "mycelium_router/transports/iroh.py",
+      "role": "physical_router_data_transport"
+    }
+  ],
+  "implementation_lane_prohibited_paths": [
+    "contracts/contract-manifest.v1.json",
+    "contracts/compatibility-fixtures/**",
+    "docs/qualification/**",
+    "mycelium_layer_planner/**",
+    "mycelium_m18_replication.py",
+    "mycelium_m19_recovery.py",
+    "mycelium_m20_speculation.py",
+    "mycelium_m23_kv.py",
+    "mycelium_physical_runner/**",
+    "mycelium_ui_gateway/**",
+    "physical_inference_qualification.py",
+    "release/**",
+    "scripts/**",
+    "tests/evidence/**",
+    "ui/**"
+  ],
+  "lock_ownership": [
+    {
+      "lock_id": "authority",
+      "order_rank": 10,
+      "owner": "deployment_registry_and_qualifier",
+      "source_path": "mycelium_live/registry.py",
+      "primitive": "short_metadata_rlock",
+      "protects": [
+        "selected_deployment_identity",
+        "qualification_generation",
+        "fatal_allowlist_transition"
+      ],
+      "blocking_work_allowed": false
+    },
+    {
+      "lock_id": "session",
+      "order_rank": 30,
+      "owner": "request_gateway",
+      "source_path": "mycelium_request_gateway/service.py",
+      "primitive": "per_session_condition",
+      "protects": [
+        "subscriber_identity",
+        "replay_cursor",
+        "private_event_ledger",
+        "terminal_publication"
+      ],
+      "blocking_work_allowed": false
+    },
+    {
+      "lock_id": "request",
+      "order_rank": 40,
+      "owner": "router",
+      "source_path": "mycelium_live/router_port.py",
+      "primitive": "per_request_condition",
+      "protects": [
+        "request_attempt",
+        "lifecycle_sequence",
+        "worker_claim",
+        "immutable_path_binding"
+      ],
+      "blocking_work_allowed": false
+    },
+    {
+      "lock_id": "cancellation",
+      "order_rank": 40,
+      "owner": "command_controller",
+      "source_path": "mycelium_live/command_controller.py",
+      "primitive": "request_bound_cancellation_generation",
+      "protects": [
+        "absolute_deadline",
+        "cancellation_generation",
+        "command_terminal_compare_and_swap"
+      ],
+      "blocking_work_allowed": false
+    },
+    {
+      "lock_id": "stage",
+      "order_rank": 60,
+      "owner": "placement_runtime",
+      "source_path": "physical_inference_node.py",
+      "primitive": "per_placement_command_slots_and_per_request_state_lock",
+      "protects": [
+        "placement_capacity",
+        "stage_command_state",
+        "stage_local_kv_ownership"
+      ],
+      "blocking_work_allowed": false
+    },
+    {
+      "lock_id": "liveness",
+      "order_rank": 80,
+      "owner": "liveness_detector",
+      "source_path": "mycelium_live/liveness.py",
+      "primitive": "per_subject_lock",
+      "protects": [
+        "subject_freshness",
+        "miss_counter",
+        "scoped_incident_sequence"
+      ],
+      "blocking_work_allowed": false
+    }
+  ],
+  "lock_order": [
+    "authority",
+    "deployment",
+    "session",
+    "request",
+    "path",
+    "placement",
+    "transport",
+    "detector"
+  ],
+  "replacement_map": [
+    {
+      "replacement_id": "m16_route_global_metadata_lock",
+      "current_source_path": "mycelium_m16_runtime.py",
+      "current_symbol": "M16RuntimeCoordinator._lock_and__synchronized",
+      "current_problem": "admission_queue_status_cancel_and_completion_share_one_route_wide_lock",
+      "replacement_source_path": "mycelium_m16_runtime.py",
+      "replacement": "short_deployment_metadata_lock_plus_request_records_and_ledger_owned_locks",
+      "required_proof": "blocked_request_never_blocks_other_dispatch_or_cancellation"
+    },
+    {
+      "replacement_id": "single_active_request_slot",
+      "current_source_path": "mycelium_m16_runtime.py",
+      "current_symbol": "M16RuntimeCoordinator._active_request_id",
+      "current_problem": "only_one_request_can_leave_the_queue",
+      "replacement_source_path": "mycelium_m16_runtime.py",
+      "replacement": "bounded_active_claims_keyed_by_request_attempt_and_worker",
+      "required_proof": "two_requests_overlap_without_claiming_runtime_batching"
+    },
+    {
+      "replacement_id": "single_dispatch_thread",
+      "current_source_path": "mycelium_live/router_port.py",
+      "current_symbol": "LiveRouterPort._dispatcher_and__dispatch_loop",
+      "current_problem": "one_thread_runs_each_route_to_terminal_before_claiming_next_request",
+      "replacement_source_path": "mycelium_live/router_port.py",
+      "replacement": "fixed_worker_pool_over_existing_bounded_admission_queue",
+      "required_proof": "queue_claim_is_atomic_bounded_fair_and_generation_checked"
+    },
+    {
+      "replacement_id": "generation_long_route_execution_lock",
+      "current_source_path": "mycelium_live/route.py",
+      "current_symbol": "PhysicalLiveRoute._lock_around_infer",
+      "current_problem": "remote_commands_decode_browser_emission_snapshots_and_cleanup_hold_one_route_lock",
+      "replacement_source_path": "mycelium_live/route.py",
+      "replacement": "short_route_metadata_snapshot_plus_request_execution_and_per_placement_command_slots",
+      "required_proof": "no_lock_is_held_during_remote_io_browser_write_wait_or_cleanup"
+    },
+    {
+      "replacement_id": "qualification_session_command_lock",
+      "current_source_path": "physical_inference_qualification.py",
+      "current_symbol": "NodeProcessSession._request_lock",
+      "current_problem": "qualification_only_json_lines_session_serializes_cancel_behind_blocked_command",
+      "replacement_source_path": "mycelium_live/command_controller.py",
+      "replacement": "production_request_scoped_command_channels_with_out_of_band_interrupt_and_deadline",
+      "required_proof": "cancel_or_active_failure_interrupts_blocked_command_within_2000ms"
+    },
+    {
+      "replacement_id": "physical_node_exchange_lock",
+      "current_source_path": "mycelium_node/process.py",
+      "current_symbol": "PhysicalNodeProcess._exchange_lock_and_command",
+      "current_problem": "one_lock_spans_stdin_write_response_wait_and_blocks_correlated_cancel_or_cleanup",
+      "replacement_source_path": "mycelium_node/process.py",
+      "replacement": "short_frame_write_lock_plus_command_id_correlated_waiters_and_reader_demultiplexing",
+      "required_proof": "concurrent_commands_correlate_exactly_and_cancel_is_not_queued_behind_a_blocked_response"
+    },
+    {
+      "replacement_id": "physical_node_inline_command_loop",
+      "current_source_path": "physical_inference_node.py",
+      "current_symbol": "main_stdin_loop_and_PhysicalNodeService.dispatch",
+      "current_problem": "stdin_reading_stops_while_each_command_executes_inline",
+      "replacement_source_path": "physical_inference_node.py",
+      "replacement": "responsive_stdin_dispatch_to_bounded_command_workers_with_serialized_correlated_responses",
+      "required_proof": "cancel_deadline_and_cleanup_commands_are_accepted_while_bounded_runtime_work_executes"
+    },
+    {
+      "replacement_id": "gateway_thread_per_request",
+      "current_source_path": "mycelium_request_gateway/service.py",
+      "current_symbol": "RequestGatewayService.submit_threading_Thread",
+      "current_problem": "accepted_sessions_can_create_up_to_max_sessions_daemon_threads",
+      "replacement_source_path": "mycelium_request_gateway/service.py",
+      "replacement": "bounded_gateway_submission_executor_with_session_owned_stream_conditions",
+      "required_proof": "slow_or_detached_browser_never_consumes_unbounded_threads_or_blocks_dispatch"
+    }
+  ],
+  "asynchronous_command_architecture": {
+    "transport_write_lock": "short_canonical_frame_write_only",
+    "response_correlation": "command_id_correlated_waiters",
+    "lock_may_span_request_response": false,
+    "node_command_handling": "responsive_stdin_plus_bounded_command_workers",
+    "runtime_work_units": "bounded_cooperative_prefill_and_decode_units",
+    "command_protocol_fields": [
+      "request_id",
+      "request_attempt",
+      "path_digest",
+      "absolute_deadline",
+      "cancellation_generation",
+      "idempotency_digest",
+      "terminal_compare_and_swap",
+      "cleanup_result"
+    ],
+    "cancellation_correlation_fields": [
+      "request_id",
+      "request_attempt",
+      "path_digest",
+      "absolute_deadline",
+      "cancellation_generation"
+    ],
+    "interruption_and_cleanup_budget_ms": 2000,
+    "backend_eligibility": "proof_required_or_backend_unavailable",
+    "shared_node_termination_is_request_scoped_cancellation": false,
+    "noncooperative_backend_policy": "unavailable_without_gate_weakening",
+    "failure_and_cleanup_scope": "request_path_attempt",
+    "deployment_global_fatal_promotion": "explicit_allowlist_only",
+    "automatic_replay_recovery": false,
+    "replay_recovery_owner": "A6"
+  },
+  "worker_pool": {
+    "configuration": {
+      "worker_count": {"default": 4, "minimum": 1, "maximum": 64},
+      "queue_maximum_items": {"default": 256, "minimum": 1, "maximum": 4096},
+      "queue_maximum_bytes": {"default": 67108864, "minimum": 1048576, "maximum": 1073741824},
+      "per_placement_maximum_commands": {"default": 2, "minimum": 1, "maximum": 64},
+      "browser_event_buffer_items": {"default": 64, "minimum": 2, "maximum": 65536},
+      "request_scoped_interruption_and_cleanup_ms": {"default": 2000, "minimum": 1, "maximum": 2000},
+      "shutdown_join_ms": {"default": 4000, "minimum": 1, "maximum": 4000}
+    },
+    "configuration_scope": "future_request_generation_only",
+    "interfaces": [
+      {
+        "operation": "enqueue",
+        "input": "validated_request_attempt_and_complete_path_reservation",
+        "output": "queued_identity_or_bounded_backpressure_with_retry_hint"
+      },
+      {
+        "operation": "claim",
+        "input": "worker_identity_and_expected_request_generation",
+        "output": "single_owned_claim_or_stale_cancelled_expired_terminal_rejection"
+      },
+      {
+        "operation": "dispatch_stage_command",
+        "input": "request_attempt_path_digest_deadline_cancellation_generation_idempotency_digest_and_expected_terminal_cas",
+        "output": "command_id_correlated_terminal_cas_and_cleanup_result"
+      },
+      {
+        "operation": "cancel",
+        "input": "request_attempt_and_new_cancellation_generation",
+        "output": "accepted_once_or_stale_duplicate_rejection"
+      },
+      {
+        "operation": "complete",
+        "input": "worker_claim_and_terminal_compare_and_swap",
+        "output": "one_terminal_record_and_owner_scoped_cleanup"
+      },
+      {
+        "operation": "shutdown",
+        "input": "deployment_generation_and_absolute_deadline",
+        "output": "joined_workers_and_zero_live_resource_delta_or_explicit_failure"
+      }
+    ]
+  },
+  "reconnect_and_generation_reset": {
+    "owner": "primary_integrator",
+    "disconnect_mid_request": "detach_only_subscription_request_and_backend_continue",
+    "reconnect_authority": "same_authenticated_session_request_and_captured_generation",
+    "resume_cursor": "last_client_applied_event_sequence",
+    "replay_rule": "replay_strictly_after_cursor_with_same_event_identity",
+    "single_subscriber_rule": "one_live_subscriber_per_request_session",
+    "invalid_cursor_rule": "future_expired_cross_session_or_cross_generation_cursor_fails_closed",
+    "cancel_after_reconnect": "targets_same_request_attempt_and_advances_cancellation_generation_once",
+    "backend_generation_change": "active_request_remains_pinned_new_admission_uses_new_generation",
+    "publisher_generation_reset": "emit_full_authoritative_snapshot_and_never_union_old_and_new_generations",
+    "terminal_rule": "exactly_one_terminal_event_survives_reconnect_and_reset"
+  },
+  "cancellation_and_cleanup_ownership": {
+    "browser_cancel_authentication": "request_gateway",
+    "request_cancellation_generation": "command_controller",
+    "request_path_cancellation": "router",
+    "complete_path_reservations": "m16_admission_ledger",
+    "stage_capacity_and_kv": "placement_runtime",
+    "transport_stream_and_receipts": "transport",
+    "terminal_publication": "request_gateway",
+    "cleanup_record": "m16_admission_ledger",
+    "rules": [
+      "cleanup_requires_matching_request_attempt_generation_and_recorded_owner",
+      "cleanup_is_idempotent_only_for_same_canonical_digest",
+      "non_owner_cleanup_cannot_release_resources",
+      "late_result_or_cleanup_cannot_mutate_newer_generation",
+      "terminal_history_is_not_counted_as_live_resource",
+      "unknown_exception_fails_owned_request_not_deployment",
+      "failure_and_cleanup_are_scoped_by_request_path_and_attempt",
+      "request_failure_is_not_automatically_promoted_to_deployment_fatal",
+      "automatic_replay_and_recovery_are_disabled_and_owned_by_a6"
+    ]
+  },
+  "primary_integrator_prerequisites": {
+    "owner": "primary_integrator",
+    "must_precede_a4_implementation": true,
+    "versioned_contracts": [
+      "mycelium.concurrent_request_runtime.v1",
+      "mycelium.traffic_liveness.v1",
+      "mycelium.scoped_runtime_incident.v1",
+      "mycelium.interruptible_stage_command.v1",
+      "mycelium.product_concurrency_liveness_qualification.v1"
+    ],
+    "compatibility_fixtures": "preland_all_five_versioned_contract_fixtures",
+    "manifest_entries": "preland_all_five_versioned_contract_manifest_entries",
+    "session_publisher_generation_interface": "preland_versioned_same_session_and_publisher_generation_interface",
+    "exclusive_ownership": [
+      "request_gateway_service",
+      "a4_physical_fault_browser_harness_and_evidence_root",
+      "shared_contract_generation",
+      "live_supervisor_composition",
+      "same_session_reconnect",
+      "publisher_generation_reset",
+      "shared_ui"
+    ]
+  },
+  "migration_order": [
+    {"step": 1, "name": "branch_from_or_rebase_onto_exact_atomic_a3_commit_905786df41ffdad5718d3464733e2f5cb8727532", "activation": false},
+    {"step": 2, "name": "primary_integrator_prelands_five_contracts_fixtures_manifest_and_generation_interface", "activation": false},
+    {"step": 3, "name": "freeze_deterministic_harness", "activation": false},
+    {"step": 4, "name": "extract_asynchronous_command_controller_and_responsive_node_service", "activation": false},
+    {"step": 5, "name": "decompose_route_coordinator_and_owner_locks", "activation": false},
+    {"step": 6, "name": "install_bounded_worker_pool_in_single_worker_compatibility_mode", "activation": false},
+    {"step": 7, "name": "enable_multiworker_dispatch_and_request_scoped_cooperative_cancellation", "activation": false},
+    {"step": 8, "name": "install_traffic_receipt_liveness_and_narrow_failure_scope", "activation": false},
+    {"step": 9, "name": "primary_integrator_wires_same_session_reconnect_shared_ui_and_generation_reset", "activation": false},
+    {"step": 10, "name": "run_focused_full_physical_and_browser_gates", "activation": false},
+    {"step": 11, "name": "owner_reviews_evidence_before_any_activation", "activation": true}
+  ],
+  "rollback_boundary": {
+    "boundary": "before_owner_approved_a4_contract_generation_activation",
+    "pre_boundary_action": "disable_or_revert_the_entire_a4_capability_and_retain_prior_qualified_route",
+    "post_boundary_action": "publish_new_generation_requalify_and_rerun_all_physical_browser_gates",
+    "prohibited_partial_rollback": [
+      "restore_route_global_lock_while_worker_pool_is_live",
+      "mix_old_and_new_request_or_cancellation_generations",
+      "reuse_pre_rollback_physical_or_browser_evidence",
+      "leave_new_ui_projection_on_old_backend_contracts"
+    ]
+  },
+  "primary_integrator_ui": {
+    "owner": "primary_integrator",
+    "reserved_paths": [
+      "mycelium_ui_gateway/app.py",
+      "mycelium_ui_gateway/coordinator.py",
+      "mycelium_ui_gateway/validation.py",
+      "ui/contracts/product/product-ui-inference-v1.schema.json",
+      "ui/contracts/product/product-ui-observatory-v1.schema.json",
+      "ui/web/src/app/ProductState.ts",
+      "ui/web/src/app/ProductNodesWorkspace.tsx",
+      "ui/web/src/components/RouteCanvas.tsx",
+      "ui/web/src/features/deviceLab/DeviceLabWorkspace.tsx",
+      "ui/web/src/features/inference/InferenceWorkspace.tsx",
+      "ui/web/src/features/inference/requestClient.ts",
+      "ui/web/src/features/inference/sessionStore.ts",
+      "ui/web/src/features/inference/useInferenceSession.ts",
+      "ui/web/src/features/liveRoute/M16RuntimePanel.tsx",
+      "ui/web/src/features/liveRoute/m16Runtime.ts",
+      "ui/web/src/features/nodes/NodesWorkspace.tsx",
+      "ui/web/src/features/plans/PlansView.test.tsx",
+      "ui/web/src/features/plans/planModel.ts",
+      "ui/web/src/features/readiness/IncidentsView.test.tsx",
+      "ui/web/src/features/readiness/readinessModel.ts",
+      "ui/web/src/features/settings/SettingsWorkspace.tsx",
+      "ui/web/src/views/IncidentsView.tsx",
+      "ui/web/src/views/NetworkView.tsx"
+    ],
+    "workspace_bindings": {
+      "inference": "request_progress_reconnect_cancel_and_terminal",
+      "device_lab": "interruptible_command_keepalive_generation_and_capacity",
+      "network": "directed_subject_freshness_scope_and_current_paths",
+      "nodes": "worker_queue_command_reservation_and_cleanup",
+      "plans": "retained_legal_paths_and_narrow_failure_scope",
+      "readiness": "qualification_dispatch_interruption_cleanup_and_liveness",
+      "incidents": "source_scope_action_latency_cleanup_and_outcome",
+      "settings": "future_only_worker_queue_and_detector_policy"
+    },
+    "rule": "backend_lanes_publish_only_privacy_reduced_same_generation_snapshots_primary_integrator_owns_shared_ui_edits"
+  },
+  "scenario_mappings": [
+    {
+      "scenario_id": "overlapping_requests",
+      "production_paths": ["mycelium_m16_runtime.py", "mycelium_live/router_port.py", "mycelium_live/route.py"],
+      "focused_tests": ["tests/live/test_a4_concurrency.py::test_overlapping_requests_advance_independently"],
+      "primary_integrator_paths": ["ui/web/src/features/inference/InferenceWorkspace.tsx"]
+    },
+    {
+      "scenario_id": "route_global_lock_absence",
+      "production_paths": ["mycelium_m16_runtime.py", "mycelium_live/router_port.py", "mycelium_live/route.py"],
+      "focused_tests": ["tests/live/test_a4_concurrency.py::test_every_blocking_boundary_allows_other_dispatch_and_cancel"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "lock_order_deadlock_detection",
+      "production_paths": ["mycelium_m16_runtime.py", "mycelium_live/router_port.py", "mycelium_router/relay.py"],
+      "focused_tests": ["tests/live/test_a4_concurrency.py::test_lock_inversion_fails_before_physical_command"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "cancel_isolation",
+      "production_paths": ["mycelium_live/command_controller.py", "mycelium_live/router_port.py", "mycelium_request_gateway/backend.py", "mycelium_request_gateway/service.py"],
+      "focused_tests": ["tests/request_gateway/test_a4_cancellation.py::test_cancel_one_request_does_not_mutate_another"],
+      "primary_integrator_paths": ["ui/web/src/features/inference/useInferenceSession.ts"]
+    },
+    {
+      "scenario_id": "participating_active_disconnect",
+      "production_paths": ["mycelium_live/command_controller.py", "mycelium_live/liveness.py", "mycelium_live/route.py", "mycelium_router/transports/iroh.py", "physical_inference_node.py"],
+      "focused_tests": ["tests/live/test_a4_liveness.py::test_active_disconnect_interrupts_owned_command_within_budget"],
+      "primary_integrator_paths": ["ui/web/src/views/IncidentsView.tsx"]
+    },
+    {
+      "scenario_id": "participating_idle_staleness",
+      "production_paths": ["mycelium_live/liveness.py", "mycelium_membership/contracts.py", "mycelium_router/transports/iroh.py"],
+      "focused_tests": ["tests/live/test_a4_liveness.py::test_idle_subject_quarantines_only_after_frozen_threshold"],
+      "primary_integrator_paths": ["ui/web/src/views/NetworkView.tsx"]
+    },
+    {
+      "scenario_id": "nonparticipating_peer_exit",
+      "production_paths": ["mycelium_live/liveness.py", "mycelium_live/registry.py", "mycelium_seed/state.py"],
+      "focused_tests": ["tests/live/test_a4_liveness.py::test_nonparticipating_peer_exit_does_not_mutate_active_route"],
+      "primary_integrator_paths": ["ui/web/src/features/nodes/NodesWorkspace.tsx"]
+    },
+    {
+      "scenario_id": "one_missed_receipt",
+      "production_paths": ["mycelium_live/liveness.py", "mycelium_router/transports/iroh.py"],
+      "focused_tests": ["tests/live/test_a4_liveness.py::test_one_missed_receipt_is_suspect_only"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "stale_incarnation_receipt",
+      "production_paths": ["mycelium_live/liveness.py", "mycelium_membership/contracts.py", "mycelium_router/transports/iroh.py"],
+      "focused_tests": ["tests/live/test_a4_liveness.py::test_stale_incarnation_receipt_cannot_refresh_subject"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "late_command_result",
+      "production_paths": ["mycelium_live/command_controller.py", "mycelium_live/router_port.py", "physical_inference_node.py"],
+      "focused_tests": ["tests/live/test_a4_commands.py::test_late_result_cannot_mutate_new_request_generation"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "queue_saturation",
+      "production_paths": ["mycelium_m16_runtime.py", "mycelium_live/router_port.py"],
+      "focused_tests": ["tests/live/test_a4_concurrency.py::test_queue_saturation_returns_bounded_backpressure_without_leak"],
+      "primary_integrator_paths": ["ui/web/src/features/settings/SettingsWorkspace.tsx"]
+    },
+    {
+      "scenario_id": "worker_exit",
+      "production_paths": ["mycelium_m16_runtime.py", "mycelium_live/router_port.py"],
+      "focused_tests": ["tests/live/test_a4_concurrency.py::test_worker_exit_fails_only_owned_request_and_releases_resources"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "bounded_shutdown",
+      "production_paths": ["mycelium_live/command_controller.py", "mycelium_live/router_port.py", "mycelium_live/route.py", "physical_inference_node.py"],
+      "focused_tests": ["tests/live/test_a4_concurrency.py::test_shutdown_interrupts_joins_and_returns_all_counters_to_zero"],
+      "primary_integrator_paths": []
+    },
+    {
+      "scenario_id": "fatal_allowlist_rejection",
+      "production_paths": ["mycelium_live/health.py", "mycelium_live/liveness.py", "mycelium_live/registry.py"],
+      "focused_tests": ["tests/live/test_a4_liveness.py::test_unknown_worker_exception_cannot_latch_deployment_fatal"],
+      "primary_integrator_paths": ["ui/web/src/views/IncidentsView.tsx"]
+    },
+    {
+      "scenario_id": "active_request_reconnect",
+      "production_paths": ["mycelium_request_gateway/asgi.py", "mycelium_request_gateway/contracts.py", "mycelium_request_gateway/service.py"],
+      "focused_tests": ["tests/request_gateway/test_a4_reconnect.py::test_mid_request_reconnect_replays_without_duplicate_or_cancel"],
+      "primary_integrator_paths": ["ui/web/src/features/inference/requestClient.ts", "ui/web/src/features/inference/sessionStore.ts", "ui/web/src/features/inference/useInferenceSession.ts"]
+    },
+    {
+      "scenario_id": "state_subset_ownership_boundaries",
+      "production_paths": ["mycelium_live/health.py", "mycelium_live/liveness.py", "mycelium_live/registry.py", "mycelium_live/router_port.py", "mycelium_request_gateway/service.py"],
+      "focused_tests": ["tests/live/test_a4_ownership.py::test_cross_owner_mutation_and_cleanup_fail_closed"],
+      "primary_integrator_paths": ["mycelium_ui_gateway/validation.py", "ui/web/src/app/ProductState.ts"]
+    },
+    {
+      "scenario_id": "second_session_privacy",
+      "production_paths": ["mycelium_request_gateway/asgi.py", "mycelium_request_gateway/contracts.py", "mycelium_request_gateway/service.py"],
+      "focused_tests": ["tests/request_gateway/test_a4_reconnect.py::test_second_session_cannot_observe_or_resume_private_request"],
+      "primary_integrator_paths": ["mycelium_ui_gateway/app.py", "ui/web/src/features/inference/sessionStore.ts"]
+    }
+  ],
+  "regression_commands": {
+    "packet": [
+      "python3 -m pytest -q tests/a4_acceptance",
+      "ruff check tests/a4_acceptance"
+    ],
+    "focused_implementation": [
+      "python3 -m pytest -q tests/live/test_a4_concurrency.py tests/live/test_a4_commands.py tests/live/test_a4_liveness.py tests/live/test_a4_ownership.py tests/request_gateway/test_a4_cancellation.py tests/request_gateway/test_a4_reconnect.py",
+      "python3 -m pytest -q tests/live/test_m16_runtime.py tests/live/test_router_port.py tests/live/test_fake_route.py tests/request_gateway tests/router tests/membership tests/ui_gateway"
+    ],
+    "full": [
+      "python3 -m pytest -q",
+      "cd ui/web && npm run check",
+      "cd ui/web && npm run test:e2e"
+    ]
+  },
+  "physical_browser_gates": [
+    {
+      "gate_id": "physical_overlapping_requests",
+      "kind": "physical_positive",
+      "requirements": [
+        "two_ordinary_gateway_requests_overlap_on_qualified_route",
+        "both_requests_show_positive_physical_work",
+        "one_waiting_or_decoding_request_does_not_block_other",
+        "zero_terminal_live_resource_delta"
+      ]
+    },
+    {
+      "gate_id": "physical_active_disconnect",
+      "kind": "physical_positive",
+      "requirements": [
+        "controlled_participating_failure_is_observed_by_a4_liveness",
+        "owned_blocked_command_interrupts_within_2000ms",
+        "cleanup_completes_within_2000ms",
+        "unaffected_request_and_qualified_tracks_continue"
+      ]
+    },
+    {
+      "gate_id": "browser_reconnect_mid_request",
+      "kind": "browser_positive",
+      "requirements": [
+        "ordinary_browser_disconnects_during_wait_prefill_decode_and_terminal_boundaries",
+        "same_session_reconnect_uses_last_applied_sequence",
+        "no_duplicate_or_missing_output_and_one_terminal_result",
+        "cancel_after_reconnect_cleans_exactly_once",
+        "second_session_remains_private",
+        "all_eight_workspaces_show_same_public_generation"
+      ]
+    },
+    {
+      "gate_id": "physical_negative_scope_and_shutdown",
+      "kind": "physical_negative",
+      "requirements": [
+        "one_miss_is_suspect_only",
+        "nonparticipating_peer_exit_does_not_fail_active_route",
+        "queue_saturation_and_worker_exit_remain_request_scoped",
+        "bounded_shutdown_joins_workers_and_zeroes_live_resources",
+        "unknown_exception_cannot_bypass_fatal_allowlist"
+      ]
+    }
+  ],
+  "qualification_claim": false,
+  "promotion_authorized": false
+}

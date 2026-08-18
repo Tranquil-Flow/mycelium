@@ -1,0 +1,59 @@
+{
+  "protocol": "mycelium.a12_acceptance_scenarios.v1",
+  "claim_boundary": "frozen acceptance inputs only; no mobile implementation or qualification claim",
+  "scenarios": [
+    {
+      "scenario_id": "ordinary_mobile_stage_after_a4_a9",
+      "claim_kind": "required_a12_closure",
+      "role": "qualified_model_stage",
+      "direct_dependencies": ["A4", "A9"],
+      "a11_required": false,
+      "expected_eligibility": "eligible_after_exact_role_gates",
+      "required_invariants": [
+        "ordinary_mobile_participation_does_not_wait_for_a11",
+        "request_scoped_cancellation_qualified_by_a4",
+        "platform_capability_qualified_by_a9",
+        "exact_mobile_stage_gates_still_required"
+      ]
+    },
+    {
+      "scenario_id": "ordinary_mobile_probe_after_a4_a9",
+      "claim_kind": "required_a12_closure",
+      "role": "probe_contributor",
+      "direct_dependencies": ["A4", "A9"],
+      "a11_required": false,
+      "expected_eligibility": "eligible_after_exact_role_gates",
+      "required_invariants": [
+        "ordinary_mobile_participation_does_not_wait_for_a11",
+        "native_and_synthetic_evidence_remain_distinct",
+        "exact_mobile_probe_gates_still_required"
+      ]
+    },
+    {
+      "scenario_id": "mobile_draft_before_a11",
+      "claim_kind": "optional_draft_claim",
+      "role": "speculative_draft_worker",
+      "direct_dependencies": ["A4", "A9"],
+      "a11_required": true,
+      "expected_eligibility": "ineligible_a11_physical_qualification_required",
+      "required_invariants": [
+        "a12_can_close_with_draft_role_ineligible",
+        "mobile_draft_not_promoted_before_a11_physical_close",
+        "ordinary_mobile_roles_remain_independently_eligible"
+      ]
+    },
+    {
+      "scenario_id": "mobile_draft_after_a11",
+      "claim_kind": "optional_draft_claim",
+      "role": "speculative_draft_worker",
+      "direct_dependencies": ["A4", "A9"],
+      "a11_required": true,
+      "expected_eligibility": "eligible_after_a11_and_exact_draft_gates",
+      "required_invariants": [
+        "a11_physical_close_is_necessary_not_sufficient",
+        "exact_mobile_draft_qualification_still_required",
+        "target_authority_remains_with_a11_verifier"
+      ]
+    }
+  ]
+}

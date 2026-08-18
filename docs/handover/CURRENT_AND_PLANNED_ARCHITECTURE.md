@@ -474,6 +474,32 @@ full-model data parallelism, cross-backend KV migration, prefix caching, disaggr
 prefill/decode, expert parallelism, and sequence parallelism remain separately reviewed
 future programs rather than additions to the Astra completion plan.
 
+### Frozen A3-A15 execution boundaries
+
+The machine-checked live progress register is
+`docs/handover/astra-completion-checklist.v1.json`; `scripts/astra_completion_audit.py`
+requires exactly one primary gate, binds every gate to its specification, partitions all
+closure requirements into completed/partial/pending state, and requires all eight UI
+workspaces. The register is navigation, not qualification evidence. A3 remains the sole
+primary gate; A4-A15 remain `design_only` even where their dependency-ready specification
+and deterministic acceptance inputs now exist.
+
+| Gate | Current state | Frozen boundary |
+| --- | --- | --- |
+| A3 | `integrated_unqualified` | Exact authorized local Qwen2.5-7B preparation, qualification, selector, physical runtime, and live browser gate |
+| A4 | `design_only` | Concurrent dispatch, interruptible commands, traffic-aware scoped liveness, cleanup, and second-session privacy |
+| A5 | `design_only` | Request-level replicas of a contiguous stage in a real multi-stage graph, complete legal tracks, and measured marginal gain |
+| A6 | `design_only` | Gateway-committed full-context replay with request-scoped cutover, exact-once delivery, and explicit no-successor abort |
+| A7 | `design_only` | Byte-compatible acknowledged KV successor with generation fencing and mandatory A6/abort fallback |
+| A8 | `design_only` | Pinned public-HTTPS membership control plus EndpointID-authenticated Iroh direct/relay activation without Tailscale dependency |
+| A9 | `design_only` | Versioned platform-neutral membership/profile/capability/qualification with unknown-ineligible and no legacy eligibility carry-over |
+| A10 | `design_only` | Runtime-authoritative continuous batches, causal pipeline overlap, and transactional multi-position target verification |
+| A11 | `design_only` | Off-by-default target-authoritative speculation promoted only by same-route parity and confidence-bound material gain |
+| A12 | `design_only` | Generic native Android and Apple-mobile eligibility, separately qualified by role, lifecycle, thermal, power, memory, and network evidence |
+| A13 | `design_only` | Signed normal-user packages, target-owned identity, encrypted recipient-bound invitation handoff, consent, and managed lifecycle |
+| A14 | `design_only` | Read-only privacy-preserving coarse-region/logical route explorer with unknown tray and accessible non-map equivalents |
+| A15 | `design_only` | Release decision derived from validated executed-artifact provenance, reproducible packages/SBOM, and a clean external reviewer path |
+
 ## Reviewer rules
 
 Treat executing code and fresh tests as stronger than prose. Treat private evidence as

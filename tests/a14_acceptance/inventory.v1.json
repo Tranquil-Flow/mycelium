@@ -1,0 +1,227 @@
+{
+  "protocol": "mycelium.a14_acceptance_inventory.v1",
+  "gate": "A14",
+  "state": "design_only",
+  "claim_boundary": "frozen split-delivery, region, privacy, accessibility, and read-only acceptance inputs only; no production ui, map asset, coordinate, network observation, membership record, evidence, readiness, or completion claim",
+  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a14-route-explorer.md",
+  "slices": [
+    {
+      "slice_id": "A14a",
+      "state": "design_only",
+      "dependencies": ["A8"],
+      "deliverables": ["accessible_route_table_timeline", "logical_route_graph", "unknown_region_tray", "independent_path_transport_filters"],
+      "required_acceptance": ["complete_semantics_without_globe", "keyboard_and_screen_reader_complete", "live_generation_reconstructs", "read_only_projection_only"],
+      "forbidden_dependencies": ["map_asset", "geographic_region", "coordinate", "canvas", "webgl", "animation"]
+    },
+    {
+      "slice_id": "A14b",
+      "state": "design_only",
+      "dependencies": ["A14a"],
+      "deliverables": ["optional_coarse_globe", "macro_region_display_cells", "unknown_region_off_globe", "synchronized_accessible_alternative"],
+      "required_acceptance": ["shared_region_vocabulary_only", "a14a_semantics_remain_normative", "globe_disable_loses_no_information", "no_coordinate_projection"],
+      "forbidden_dependencies": ["ip_geolocation", "exact_location", "raw_relay_identity", "motion_for_meaning", "globe_as_authority"]
+    }
+  ],
+  "region_vocabulary": {
+    "protocol": "mycelium.coarse_region.v1",
+    "values": ["africa", "americas_north", "americas_south", "asia", "europe", "oceania", "polar", "unknown"],
+    "unknown_value": "unknown",
+    "geographic_authority_sources": ["owner_declared", "reviewed_relay_metadata"],
+    "non_geographic_sources": ["latency_distance_class"],
+    "normalization_rules": ["central_america_and_caribbean_to_americas_north", "antarctica_and_arctic_only_to_polar", "unmapped_to_unknown", "ambiguous_to_unknown", "conflicting_to_unknown", "stale_to_unknown", "unauthorized_to_unknown"],
+    "forbidden_derivations": ["ip_address", "dns_name", "hostname", "endpoint_id", "rtt", "jitter", "loss", "goodput", "route_shape", "time_zone", "locale", "device_setting"]
+  },
+  "decisions": [
+    {
+      "decision_id": "coarse_region_authority",
+      "authorities": ["owner_declared_region", "reviewed_relay_region", "signed_region_evidence", "versioned_region_vocabulary"],
+      "required_invariants": ["exactly_one_reviewed_geographic_source", "relay_region_locates_relay_only", "declaration_is_not_verified_location", "projection_uses_vocabulary_code_only"],
+      "forbidden_shortcuts": ["free_form_region", "provider_region_passthrough", "latency_class_as_geography", "display_cell_as_asserted_location"]
+    },
+    {
+      "decision_id": "unknown_region_handling",
+      "authorities": ["explicit_unknown_value", "unknown_region_tray", "logical_topology", "region_blocker"],
+      "required_invariants": ["missing_region_remains_unknown", "conflict_remains_unknown", "unknown_peer_remains_visible", "unknown_never_gets_default_cell"],
+      "forbidden_shortcuts": ["nearest_region_guess", "default_region", "unknown_peer_hidden", "zero_as_missing_region"]
+    },
+    {
+      "decision_id": "direct_relay_transition_evidence",
+      "authorities": ["bound_live_transport_observation", "path_generation", "connection_generation", "immutable_transition_history"],
+      "required_invariants": ["direct_requires_current_observation", "relay_requires_current_observation", "transition_creates_new_segment", "prior_segment_not_rewritten"],
+      "forbidden_shortcuts": ["configured_path_as_observed", "network_type_path_guess", "transition_rewrites_history", "animation_as_transport_evidence"]
+    },
+    {
+      "decision_id": "independent_path_transport_dimensions",
+      "authorities": ["path_status", "transport_class", "traffic_phase", "path_role", "provenance", "freshness"],
+      "required_invariants": ["path_status_independent_of_transport", "phase_independent_of_path_role", "provenance_independent_of_freshness", "filters_compose_without_authority_change"],
+      "forbidden_shortcuts": ["selected_implies_observed", "relay_implies_failed", "direct_implies_live", "historical_implies_disconnected"]
+    },
+    {
+      "decision_id": "privacy_no_ip_coordinates",
+      "authorities": ["pseudonymous_node_reference", "coarse_region_code", "privacy_safe_relay_reference", "fixed_product_display_cell"],
+      "required_invariants": ["projection_contains_no_coordinates", "network_identity_cannot_derive_region", "map_assets_receive_no_member_data", "hostile_labels_rejected"],
+      "forbidden_shortcuts": ["ip_geolocation", "dns_geolocation", "raw_endpoint_projection", "exact_coordinate", "map_tile_telemetry"]
+    },
+    {
+      "decision_id": "accessible_alternatives",
+      "authorities": ["normative_route_table", "synchronized_logical_graph", "optional_coarse_globe", "semantic_generation"],
+      "required_invariants": ["table_contains_complete_semantics", "color_not_only_signal", "keyboard_and_screen_reader_complete", "globe_disabled_without_information_loss"],
+      "forbidden_shortcuts": ["pointer_only_interaction", "canvas_only_semantics", "spatial_reasoning_required", "globe_only_filter"]
+    },
+    {
+      "decision_id": "reduced_motion_low_power",
+      "authorities": ["user_reduced_motion_preference", "user_low_power_preference", "bounded_refresh_policy", "static_marker_mode"],
+      "required_invariants": ["reduced_motion_disables_automatic_animation", "pause_available", "low_power_uses_static_markers", "semantic_updates_continue_bounded"],
+      "forbidden_shortcuts": ["motion_required_for_state", "unbounded_refresh", "low_power_hides_history", "preference_changes_authority"]
+    },
+    {
+      "decision_id": "read_only_projection_authority",
+      "authorities": ["live_source_authority", "privacy_reduced_projection", "immutable_path_record", "source_digest"],
+      "required_invariants": ["projection_never_mutates_source", "render_action_never_changes_route", "region_declaration_uses_separate_action", "sealed_history_never_renders_live"],
+      "forbidden_shortcuts": ["map_action_mutates_plan", "filter_changes_evidence", "browser_authors_readiness", "projection_mints_incident"]
+    }
+  ],
+  "workspace_projections": {
+    "inference": ["selected_request_route", "observed_transport_class", "terminal_history"],
+    "device_lab": ["path_observation_capability", "region_authority_source", "current_blockers"],
+    "network": ["normative_route_table", "logical_route_graph", "direct_relay_transition_history"],
+    "nodes": ["pseudonymous_member", "coarse_region_or_unknown", "path_freshness"],
+    "plans": ["proposed_selected_observed_paths", "independent_transport_dimensions", "unknown_inputs"],
+    "readiness": ["observation_provenance", "region_authority", "privacy_and_accessibility_checks"],
+    "incidents": ["stale_conflicting_or_unauthorized_region", "path_transition_failure", "bounded_recovery"],
+    "settings": ["region_declaration_entry_point", "reduced_motion_low_power", "privacy_retention"]
+  },
+  "physical_gate_matrix": {
+    "positive": ["direct_relay_transition_history"],
+    "negative": ["forged_or_stale_transition_rejected"],
+    "live_transport_observation_required": true,
+    "browser_projection_required": true
+  },
+  "acceptance_cases": [
+    {
+      "case_id": "a14a_without_geographic_region",
+      "gate_kind": "browser_positive",
+      "setup": "all peers and paths have current logical authority while every geographic region is unknown",
+      "stimulus": "open the table and logical graph using keyboard and screen reader flows",
+      "required_outcomes": ["all_peers_visible", "all_path_semantics_available", "unknown_tray_complete", "no_globe_dependency"],
+      "forbidden_side_effects": ["peer_hidden", "default_region_assigned", "coordinate_created"]
+    },
+    {
+      "case_id": "a14b_before_a14a_rejected",
+      "gate_kind": "deterministic_negative",
+      "setup": "coarse globe work is proposed before the normative table and logical graph are accepted",
+      "stimulus": "evaluate the split delivery dependency",
+      "required_outcomes": ["a14b_blocked", "a14a_scope_unchanged", "a14_remains_design_only"],
+      "forbidden_side_effects": ["globe_claim_created", "a14a_skipped", "region_authority_created"]
+    },
+    {
+      "case_id": "authorized_region_normalization",
+      "gate_kind": "deterministic_positive",
+      "setup": "one authorized owner declaration or reviewed relay region maps unambiguously to the shared vocabulary",
+      "stimulus": "validate region evidence and produce the read-only projection",
+      "required_outcomes": ["single_region_code_emitted", "source_kind_visible", "relay_region_labels_relay_only"],
+      "forbidden_side_effects": ["peer_location_verified", "provider_region_exposed", "coordinate_emitted"]
+    },
+    {
+      "case_id": "unknown_conflicting_or_stale_region",
+      "gate_kind": "deterministic_negative",
+      "setup": "region evidence is missing unmapped ambiguous conflicting stale withdrawn or unauthorized",
+      "stimulus": "project the member and its route",
+      "required_outcomes": ["region_unknown", "peer_kept_in_logical_view", "region_blocker_visible"],
+      "forbidden_side_effects": ["nearest_region_selected", "default_cell_assigned", "peer_hidden"]
+    },
+    {
+      "case_id": "network_derived_location_rejected",
+      "gate_kind": "deterministic_negative",
+      "setup": "candidate region or display position is derived from network address endpoint dns timing locale or route shape",
+      "stimulus": "validate region evidence and the route-explorer projection",
+      "required_outcomes": ["network_derived_region_rejected", "projection_contains_no_coordinates", "region_unknown"],
+      "forbidden_side_effects": ["raw_network_identity_emitted", "display_cell_inferred", "map_asset_request_leaks_member"]
+    },
+    {
+      "case_id": "direct_relay_transition_history",
+      "gate_kind": "physical_positive",
+      "setup": "bound live transport evidence observes direct then relay for one path across distinct connection generations",
+      "stimulus": "project the transition in table graph and optional globe",
+      "required_outcomes": ["direct_segment_retained", "relay_segment_added", "transition_generation_visible", "presentations_semantically_equal"],
+      "forbidden_side_effects": ["direct_segment_rewritten", "configured_path_claimed_observed", "animation_counted_as_evidence"]
+    },
+    {
+      "case_id": "forged_or_stale_transition_rejected",
+      "gate_kind": "physical_negative",
+      "setup": "a physical path report is stale unbound to the current connection generation or contradicts the live transport observation",
+      "stimulus": "project the candidate transition through the ordinary browser route explorer",
+      "required_outcomes": ["transition_rejected", "current_history_unchanged", "path_class_unknown_or_prior_current"],
+      "forbidden_side_effects": ["forged_segment_added", "current_segment_rewritten", "configured_path_claimed_observed"]
+    },
+    {
+      "case_id": "path_transport_filter_independence",
+      "gate_kind": "deterministic_positive",
+      "setup": "records span proposed selected observed failed recovered historical and direct relay unknown dimensions",
+      "stimulus": "compose path status transport phase role provenance and freshness filters",
+      "required_outcomes": ["each_dimension_filters_independently", "composed_result_deterministic", "source_authority_unchanged"],
+      "forbidden_side_effects": ["selected_promoted_to_observed", "relay_promoted_to_failed", "historical_promoted_to_disconnected"]
+    },
+    {
+      "case_id": "sealed_or_historical_not_live",
+      "gate_kind": "deterministic_negative",
+      "setup": "sealed replay fixture or historical path records coexist with a current live generation",
+      "stimulus": "render and filter current and historical routes",
+      "required_outcomes": ["provenance_labels_preserved", "historical_generation_separate", "live_state_uses_live_authority_only"],
+      "forbidden_side_effects": ["sealed_record_rendered_live", "fixture_animates_as_traffic", "history_rewrites_current"]
+    },
+    {
+      "case_id": "accessible_presentation_equivalence",
+      "gate_kind": "browser_positive",
+      "setup": "table logical graph and optional globe receive the same bounded semantic generation",
+      "stimulus": "navigate filter expand clusters refresh reconnect and use a clean second session",
+      "required_outcomes": ["table_semantics_complete", "graph_matches_table", "globe_subset_matches_region_rows", "second_session_reconstructs"],
+      "forbidden_side_effects": ["globe_only_fact", "color_only_state", "pointer_only_action", "private_state_cross_session"]
+    },
+    {
+      "case_id": "reduced_motion_and_low_power",
+      "gate_kind": "browser_positive",
+      "setup": "reduced-motion and low-power preferences are enabled independently and together",
+      "stimulus": "observe live transition history and bounded refresh behavior",
+      "required_outcomes": ["automatic_animation_disabled", "static_markers_used", "semantic_history_complete", "refresh_remains_bounded"],
+      "forbidden_side_effects": ["motion_required_for_meaning", "history_hidden", "authority_generation_changed"]
+    },
+    {
+      "case_id": "projection_mutation_attempt",
+      "gate_kind": "browser_negative",
+      "setup": "a filter globe table graph cluster or display interaction attempts to change source authority",
+      "stimulus": "exercise every route-explorer interaction surface",
+      "required_outcomes": ["interaction_remains_local_view_state", "source_generation_unchanged", "separate_region_action_required"],
+      "forbidden_side_effects": ["planner_input_mutated", "route_selected", "membership_mutated", "readiness_changed", "incident_minted"]
+    }
+  ],
+  "presentations": [
+    {
+      "presentation_id": "accessible_route_table_timeline",
+      "slice_id": "A14a",
+      "normative": true,
+      "requires_region": false,
+      "requires_motion": false,
+      "required_semantics": ["all_peers", "path_status", "direction", "phase", "pseudonymous_endpoints", "transport_class", "region_source", "nullable_metrics", "freshness", "request_track_generation", "provenance", "transition_history"],
+      "fallback_behavior": ["works_without_graph", "works_without_globe", "works_without_pointer", "works_without_color"]
+    },
+    {
+      "presentation_id": "logical_route_graph",
+      "slice_id": "A14a",
+      "normative": false,
+      "requires_region": false,
+      "requires_motion": false,
+      "required_semantics": ["all_peers", "unknown_region_tray", "directed_edges", "path_generation", "transport_class", "transition_history"],
+      "fallback_behavior": ["table_contains_complete_semantics", "static_layout_available", "keyboard_selection_synchronized"]
+    },
+    {
+      "presentation_id": "coarse_globe_region_visualization",
+      "slice_id": "A14b",
+      "normative": false,
+      "requires_region": true,
+      "requires_motion": false,
+      "required_semantics": ["authorized_region_codes_only", "fixed_schematic_cells", "relay_region_labels_relay_only", "synchronized_selected_rows"],
+      "fallback_behavior": ["unknown_stays_off_globe", "table_contains_complete_semantics", "globe_can_be_disabled", "static_markers_available"]
+    }
+  ]
+}
