@@ -1,13 +1,13 @@
-# Mycelium Astra Completion Plan
+# Mycelium Completion Plan
 
 **Status:** governing successor plan
 **Date:** 2026-08-11
-**Primary architecture:** `docs/superpowers/specs/2026-08-09-mycelium-astra-architecture-product-design.md`
+**Primary architecture:** `docs/superpowers/specs/2026-08-09-mycelium-architecture-product-design.md`
 **Current-state ledger:** `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md`
 
 ## 1. Purpose and authority
 
-This plan closes every part of Astra's architecture that is not physically integrated
+This plan closes every part of the synthesized architecture that is not physically integrated
 on the browser product path. It supersedes any linear successor sequence that assumes
 M18-M22 are complete merely because a planner, contract, fixture, qualification script,
 sealed JSON document, or UI panel exists.
@@ -24,7 +24,7 @@ When two documents disagree, the narrower physically observed claim wins. Histor
 evidence remains valuable, but it must never be projected as current runtime state.
 
 Tensor parallelism and hybrid pipeline/tensor/data parallelism are not part of this
-completion plan. Astra required a separate future specification for tensor parallelism.
+completion plan. The source synthesis required a separate future specification for tensor parallelism.
 They remain review-only future decisions until separately approved.
 
 ## 2. Claim vocabulary
@@ -326,9 +326,9 @@ not `ready_to_commit` when its happy path completes only while one terminal, pee
 volume, browser session, or unexpired short observation lease remains continuously
 available.
 
-## 4. Corrected Astra coverage baseline
+## 4. Synthesized architecture coverage baseline
 
-| Astra section | Accepted baseline | Closing gate |
+| Architecture section | Accepted baseline | Closing gate |
 | --- | --- | --- |
 | 4.1 Evidence-driven planning | Qualified, subject to live provenance audit | A0-A1 |
 | 4.2 Capability-aware contiguous allocation | Qualified; re-prove memory-tier sensitivity for larger models | A2-A3 |
@@ -403,7 +403,7 @@ A9 -> A12
 A11 -[optional mobile speculative-draft-worker claim]-> A12
 A12 -> A13
 
-A15 release closure depends on every required Astra gate above.
+A15 release closure depends on every required architecture gate above.
 ```
 
 The diagram is sequencing authority, not only architectural ancestry. A4 and A8 do not
@@ -695,7 +695,7 @@ detector policy.
 
 ### A5 — Multi-stage data-parallel stage replication
 
-**Outcome:** Astra 4.8 is proven through the normal product path.
+**Outcome:** Architecture section 4.8 is proven through the normal product path.
 
 **Frozen specification:**
 `docs/superpowers/specs/2026-08-18-mycelium-a5-multistage-replication.md`.
@@ -712,7 +712,7 @@ benchmark, or historical whole-model replica run satisfies its product or physic
 - Compare primary-only and replicated configurations at identical offered concurrency
   and workload.
 - Relabel the existing single-stage whole-model replica observation as historical whole-
-  model replication or remove it from the Astra 4.8 claim.
+  model replication or remove it from the architecture section 4.8 claim.
 
 **Physical positive:** at least two concurrent browser requests use distinct legal tracks
 on a multi-stage pipeline with a replicated stage, per-placement work counters, parity,
@@ -855,7 +855,7 @@ from stage-ready.
 
 ### A10 — Real continuous batching, pipeline overlap, and target batch verification
 
-**Outcome:** Astra 4.7 is physically complete and speculation has a real verifier.
+**Outcome:** Architecture section 4.7 is physically complete and speculation has a real verifier.
 
 **Frozen specification:**
 `docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md`.
@@ -1059,7 +1059,7 @@ A15 cannot pass before current A3–A14 atomic commits and required executions v
   replica, batching, and model-selection gates.
 - A clean external reviewer joins without Tailscale, contributes only after qualification,
   runs a real prompt, observes route evidence in the UI, and reproduces the negative case.
-- Seal exact exclusions. No public or complete-Astra claim survives an unapproved required
+- Seal exact exclusions. No public or complete-architecture claim survives an unapproved required
   exclusion.
 
 **Negative gate:** altered, absent, stale, unsigned, manually asserted, fixture-only, or
@@ -1082,7 +1082,7 @@ responsive layouts, keyboard use, reduced motion, privacy redaction, and accessi
 
 ## 8. Completion definition
 
-The Astra architecture is complete only when:
+The synthesized architecture is complete only when:
 
 1. every Section 4 capability is physically qualified on the product path and visible in
    the UI, or the owner separately approves an explicit rejection;

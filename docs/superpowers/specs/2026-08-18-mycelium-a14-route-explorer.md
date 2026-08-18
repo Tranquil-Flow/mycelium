@@ -2,7 +2,7 @@
 
 **Status:** `design_only`; split route-explorer acceptance boundary
 **Gate:** A14
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Direct prerequisite:** A8 direct/relay observations; A1 live/sealed separation is
 already transitive
 **Slice order:** A14a accessible table/logical graph, then A14b coarse globe/region

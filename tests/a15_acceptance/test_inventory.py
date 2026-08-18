@@ -230,7 +230,7 @@ def test_content_addressed_result_graph_requires_exact_verified_dependencies() -
     assert graph["protocol"] == "mycelium.executed_result_graph.v1"
     assert graph["node_protocol"] == "mycelium.executed_gate_result.v1"
     assert graph["addressing"] == "sha256_canonical_node_bytes"
-    assert graph["root_protocol"] == "mycelium.astra_release_decision.v1"
+    assert graph["root_protocol"] == "mycelium.executed_release_decision.v1"
     assert {
         "node_digest",
         "source_commit",

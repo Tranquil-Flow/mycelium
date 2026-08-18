@@ -2,7 +2,7 @@
 
 **Status:** `design_only`; dependency-ready mobile qualification boundary
 **Gate:** A12
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Depends on:** A4 scoped lifecycle and A9 membership/capability v2 physically closed.
 A8 is transitive through A9. A11 is not a blanket gate prerequisite; it must be
 physically closed before an optional mobile draft-worker claim.
@@ -10,7 +10,7 @@ physically closed before an optional mobile draft-worker claim.
 `0f79a2b1a7f553499579b24c6c9362e801809dab`; its separated authority,
 signed-capability, unknown-ineligible, native/synthetic, role-specific qualification,
 and dynamic-projection decisions are adopted as design inputs, not execution evidence
-**Architecture:** Astra sections 4.5, 4.10, 4.12, 4.14, and 4.15
+**Architecture:** Synthesized architecture sections 4.5, 4.10, 4.12, 4.14, and 4.15
 
 ## 1. Outcome and claim boundary
 

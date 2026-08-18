@@ -17,7 +17,7 @@ from mycelium_node.durable_membership import load_membership_state
 from mycelium_seed.http import SeedHTTPClient
 
 
-PROTOCOL = "mycelium.astra_reviewer_preflight.v1"
+PROTOCOL = "mycelium.external_reviewer_preflight.v1"
 
 
 def _memory_bytes() -> int:

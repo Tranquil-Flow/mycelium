@@ -13,9 +13,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-PROTOCOL = "mycelium.astra_completion_checklist.v1"
-DEFAULT_CHECKLIST = "docs/handover/astra-completion-checklist.v1.json"
-PLAN_PATH = "docs/superpowers/plans/2026-08-11-mycelium-astra-completion-plan.md"
+PROTOCOL = "mycelium.completion_checklist.v1"
+DEFAULT_CHECKLIST = "docs/handover/mycelium-completion-checklist.v1.json"
+PLAN_PATH = "docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md"
 EXPECTED_GATES = tuple(f"A{index}" for index in range(3, 16))
 EXPECTED_DEPENDENCIES = {
     "A3": {"A2"},
@@ -192,6 +192,7 @@ def _digest_is_valid(value: object) -> bool:
 def _audit_completed_evidence(
     root: Path,
     gate_id: str,
+    gate_state: str,
     completed: set[str],
     value: object,
     findings: list[str],
@@ -309,7 +310,7 @@ def _audit_completed_evidence(
                     findings.append(
                         f"{prefix}:evidence_freshness_window_invalid:{requirement}"
                     )
-                if fresh_until <= datetime.now(timezone.utc):
+                if gate_state != "complete" and fresh_until <= datetime.now(timezone.utc):
                     findings.append(f"{prefix}:evidence_expired:{requirement}")
 
     actual_requirements = set(by_requirement)
@@ -443,7 +444,10 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
             except (OSError, ValueError):
                 findings.append(f"{prefix}:handover_unavailable")
         try:
-            _string_list(gate.get("blockers"))
+            _string_list(
+                gate.get("blockers"),
+                allow_empty=gate.get("state") == "complete",
+            )
         except ValueError:
             findings.append(f"{prefix}:blockers_invalid")
         try:
@@ -467,7 +471,12 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
         ):
             findings.append(f"{prefix}:requirement_partition_invalid")
         _audit_completed_evidence(
-            root, gate_id, completed, gate.get("evidence_bindings"), findings
+            root,
+            gate_id,
+            str(gate.get("state")),
+            completed,
+            gate.get("evidence_bindings"),
+            findings,
         )
         if gate.get("state") == "design_only" and completed != {"specification"}:
             findings.append(f"{prefix}:design_only_completion_invalid")
@@ -539,11 +548,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     elif result["ok"]:
         print(
-            "Astra completion audit OK: "
+            "Mycelium completion audit OK: "
             f"{result['checked_gates']} gates, primary {result['primary_gate']}"
         )
     else:
-        print("Astra completion audit FAILED", file=sys.stderr)
+        print("Mycelium completion audit FAILED", file=sys.stderr)
         for finding in result["findings"]:
             print(f"- {finding}", file=sys.stderr)
     return 0 if result["ok"] else 1

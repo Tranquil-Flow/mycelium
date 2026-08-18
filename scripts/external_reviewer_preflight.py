@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the read-only Mycelium preflight for Astra's invited Mac."""
+"""Run the read-only Mycelium preflight for an invited external Mac."""
 
 from __future__ import annotations
 

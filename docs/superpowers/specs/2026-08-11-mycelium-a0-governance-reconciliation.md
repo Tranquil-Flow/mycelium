@@ -1,7 +1,7 @@
 # Mycelium A0 governance reconciliation specification
 
 **Status:** implementation target
-**Governing plan:** `../plans/2026-08-11-mycelium-astra-completion-plan.md`
+**Governing plan:** `../plans/2026-08-11-mycelium-completion-plan.md`
 **Independent review amendment:** local review attachment dated 2026-08-11
 
 ## 1. Outcome and claim boundary
@@ -24,7 +24,7 @@ The accepted baseline is:
   real and measured.
 - M21: durable heterogeneous membership and a physical MLX/NumPy route are real;
   platform-neutral mobile and off-tailnet closure are partial.
-- M22: the release bundle is sealed historical evidence, not a current complete-Astra
+- M22: the release bundle is sealed historical evidence, not a current complete-architecture
   or public-release claim.
 - M23: heterogeneous stage-local KV is qualified only within its recorded topology,
   model representation, parity, and measurement boundary.
@@ -50,7 +50,7 @@ path allow-list without review.
 A closed, versioned `mycelium.governance_ledger.v1` document is the machine-readable
 authority for:
 
-- Astra capability state;
+- synthesized architecture capability state;
 - milestone state and the capability it claims;
 - permitted state ordering;
 - boundary protocol and owner-source versions;

@@ -13,7 +13,7 @@ from typing import Any
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
-PROTOCOL = "mycelium.astra_reviewer_bundle.v1"
+PROTOCOL = "mycelium.external_reviewer_bundle.v1"
 
 
 def _tar_info(name: str, size: int, mode: int) -> tarfile.TarInfo:

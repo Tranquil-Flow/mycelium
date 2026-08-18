@@ -2,11 +2,11 @@
 
 **Status:** `design_only`; dependency-ready infrastructure decision boundary
 **Gate:** A8
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Direct prerequisite:** A3 atomic completion before integration
 **Shared authority:** A1 product authority; coordinate final shared-runtime wiring with
 the current A4 integration owner
-**Architecture:** Astra sections 4.12 and 4.14
+**Architecture:** Synthesized architecture sections 4.12 and 4.14
 
 ## 1. Outcome and claim boundary
 

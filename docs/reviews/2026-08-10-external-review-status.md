@@ -33,7 +33,7 @@ supersede those stale environmental observations.
 | M11 has no coherent sealed release manifest | Confirmed and still open. Task 0 of the post-M11 plan is the release gate before M12. |
 | Live-clock membership uses an ephemeral seed signer | Confirmed and still open. It prevents frozen expiry but is not durable seed identity. Unified persistent membership remains M20 scope unless separately pulled forward. |
 | Quality refusal was described as model behavior | Confirmed documentation issue. The refusal is deterministic gateway policy; three other cases are model output. Canonical architecture text now says so explicitly. |
-| `ASTRA_CURRENT.md` was dangerously stale | Confirmed. It now points to `CURRENT_AND_PLANNED_ARCHITECTURE.md` as the canonical review entry point. |
+| `ARCHITECTURE_HANDOVER.md` was dangerously stale | Confirmed. It now points to `CURRENT_AND_PLANNED_ARCHITECTURE.md` as the canonical review entry point. |
 | Live UI has split special status/registry projections | Confirmed, accepted MVP limitation. M12 unifies the evidence spine. |
 
 ## Rejected or stale Hermes findings
@@ -60,4 +60,4 @@ The stable remote peer, normal browser inference, browser cancellation, zero-KV
 cleanup, and post-review Python/UI/Rust/contract/security gates have now been rerun.
 
 Until these close, the correct verdict is **M11 review candidate, conditional no-go
-for sealing, suitable for Astra architecture review**.
+for sealing, suitable for external architecture review**.

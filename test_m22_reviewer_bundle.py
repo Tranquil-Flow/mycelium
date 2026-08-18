@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from mycelium_reviewer_bundle import build_reviewer_bundle, verify_reviewer_bundle
-from scripts.build_astra_reviewer_bundle import _runtime_files
+from scripts.build_external_reviewer_bundle import _runtime_files
 
 
 def test_reviewer_bundle_is_deterministic_credential_free_and_verified(
@@ -18,10 +18,10 @@ def test_reviewer_bundle_is_deterministic_credential_free_and_verified(
     second = tmp_path / "second.tar"
     files = {"scripts/preflight.py": script, "bin/sidecar": sidecar}
     manifest = build_reviewer_bundle(
-        version="astras-macbook-m22-1", files=files, output=first
+        version="external-mac-reviewer-m22-1", files=files, output=first
     )
     build_reviewer_bundle(
-        version="astras-macbook-m22-1",
+        version="external-mac-reviewer-m22-1",
         files=dict(reversed(tuple(files.items()))),
         output=second,
     )
@@ -53,5 +53,5 @@ def test_reviewer_runtime_includes_durable_service_packager(tmp_path: Path) -> N
     files = _runtime_files(sidecar)
 
     assert files["scripts/package_m22_service.py"].is_file()
-    assert files["scripts/astra_reviewer_preflight.py"].is_file()
+    assert files["scripts/external_reviewer_preflight.py"].is_file()
     assert files["bin/mycelium-iroh-sidecar"] == sidecar

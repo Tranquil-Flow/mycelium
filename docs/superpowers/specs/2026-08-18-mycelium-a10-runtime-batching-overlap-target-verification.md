@@ -5,7 +5,7 @@ waits for A4 closure
 
 **Gate:** A10
 
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 
 **Supersedes for this gate:** the runtime-batch exclusion in M16 and the unqualified
 batching notes in `docs/router-phase-aware-batching.md`
@@ -13,7 +13,7 @@ batching notes in `docs/router-phase-aware-batching.md`
 **Depends on:** A3 qualified useful target; A4 concurrent dispatcher, interruptible
 commands, scoped liveness, bounded cleanup, and ordinary browser request path
 
-**Architecture:** Astra sections 4.4 and 4.7; provides the verifier prerequisite for
+**Architecture:** Synthesized architecture sections 4.4 and 4.7; provides the verifier prerequisite for
 A11
 
 ## 1. Outcome and claim boundary

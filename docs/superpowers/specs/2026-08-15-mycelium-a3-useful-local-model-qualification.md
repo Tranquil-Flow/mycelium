@@ -2,7 +2,7 @@
 
 **Status:** implementation specification
 **Gate:** A3
-**Parent plan:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent plan:** `2026-08-11-mycelium-completion-plan.md`
 **Depends on:** completed A2 assignment and representation authority
 
 ## 1. Outcome and claim boundary

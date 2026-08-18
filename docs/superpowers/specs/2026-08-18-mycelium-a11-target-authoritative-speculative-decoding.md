@@ -5,7 +5,7 @@ waits for A10 closure
 
 **Gate:** A11
 
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 
 **Supersedes for this gate:** `2026-08-11-mycelium-m20-speculative-decoding.md` and
 the unintegrated `mycelium.m20_*` evidence surfaces
@@ -14,7 +14,7 @@ the unintegrated `mycelium.m20_*` evidence surfaces
 path; A6/A7 target-path recovery policy when available; A10 physically qualified
 multi-position target verifier and runtime batching
 
-**Architecture:** Astra section 4.9
+**Architecture:** Synthesized architecture section 4.9
 
 ## 1. Outcome and claim boundary
 

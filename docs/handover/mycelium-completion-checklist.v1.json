@@ -1,0 +1,382 @@
+{
+  "protocol": "mycelium.completion_checklist.v1",
+  "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
+  "updated_on": "2026-08-18",
+  "primary_gate": "A4",
+  "workspace_ids": [
+    "inference",
+    "device_lab",
+    "network",
+    "nodes",
+    "plans",
+    "readiness",
+    "incidents",
+    "settings"
+  ],
+  "closure_requirements": [
+    "specification",
+    "implementation",
+    "product_integration",
+    "deterministic_positive",
+    "deterministic_negative",
+    "physical_positive",
+    "physical_negative",
+    "ui_live_all_eight",
+    "browser_navigation_reconnect",
+    "browser_second_session",
+    "full_regressions_audits",
+    "architecture_handover",
+    "atomic_feature_commit"
+  ],
+  "gates": [
+    {
+      "gate_id": "A3",
+      "name": "Useful local model qualification",
+      "dependencies": ["A2"],
+      "specification": "docs/superpowers/specs/2026-08-15-mycelium-a3-useful-local-model-qualification.md",
+      "state": "complete",
+      "blockers": [],
+      "completed_requirements": [
+        "specification",
+        "implementation",
+        "product_integration",
+        "deterministic_positive",
+        "deterministic_negative",
+        "physical_positive",
+        "physical_negative",
+        "ui_live_all_eight",
+        "browser_navigation_reconnect",
+        "browser_second_session",
+        "full_regressions_audits",
+        "architecture_handover",
+        "atomic_feature_commit"
+      ],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-15-mycelium-a3-useful-local-model-qualification.md", "artifact_digest": "sha256:367eca966dd959c1f3d7d8f67ccf6d8d561830ab6e845267c55c6fe8d4cc350d", "provenance": "source", "subject": "A3:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "implementation", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:implementation", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "product_integration", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:product_integration", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "deterministic_positive", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:deterministic_positive", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "deterministic_negative", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:deterministic_negative", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "physical_positive", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:physical_positive", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "physical_negative", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:physical_negative", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "ui_live_all_eight", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:ui_live_all_eight", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "browser_navigation_reconnect", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:browser_navigation_reconnect", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "browser_second_session", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:browser_second_session", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "full_regressions_audits", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "live", "subject": "A3:full_regressions_audits", "observed_at": "2026-08-18T15:49:35.779Z", "fresh_until": "2026-08-18T16:49:35.567Z", "binding_scope": "model_runtime", "bindings": {"contract_digest": "sha256:7dfd4b3b48beefa49fd5c3a4c8b6a44ad8b0f8fd0ce032963261a69d8d494707", "model_digest": "sha256:e9595b0aca297e2a522f6a6b7816370204bb0b3ccd915f21a20e73968ee4c2f0", "representation_digest": "sha256:c3029635eddc32a7e2f7e8c004a5ab4e96dd4366425a9e10e9e98f5bf2e63d04", "runtime_digest": "sha256:b63e673ad0c55d80af7fcb35cfdc68c099ad0445f93f5afa040918ecc812ce7f", "environment_digest": "sha256:a72fb5d3047eebc88592b536e26b259990ccaf29e1990a47d59e7dd5639ce0e0", "authority_generation": 1787068175779}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "architecture_handover", "artifact_reference": "docs/handover/A3_PROGRESS_2026-08-15.md", "artifact_digest": "sha256:731680d81fc281560fb895d9469ee4ee6a4715c50afc78775cb16da3156ca346", "provenance": "source", "subject": "A3:architecture_handover", "observed_at": "2026-08-18T20:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}},
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "atomic_feature_commit", "artifact_reference": "docs/handover/a3-completion-record.v1.json", "artifact_digest": "sha256:462d7232ab006ba7bbde12f578d948e766f45b9a60b10f79764935c05e65333d", "provenance": "source", "subject": "A3:atomic_feature_commit", "observed_at": "2026-08-18T20:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": "docs/handover/A3_PROGRESS_2026-08-15.md"
+    },
+    {
+      "gate_id": "A4",
+      "name": "Concurrent dispatch and scoped liveness",
+      "dependencies": ["A3"],
+      "specification": "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md",
+      "state": "design_only",
+      "blockers": ["implementation, product integration, physical/browser qualification, and atomic A4 closure remain"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md", "artifact_digest": "sha256:5731f4c31977f3c5ed82365ac6452dd9b5cfdf00d2ab7eb35ba667ca2782da72", "provenance": "source", "subject": "A4:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A5",
+      "name": "Multi-stage data-parallel replication",
+      "dependencies": ["A4"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a5-multistage-replication.md",
+      "state": "design_only",
+      "blockers": ["dependency A4 atomic completion", "eligible physical replica placement"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a5-multistage-replication.md", "artifact_digest": "sha256:923f47d265b6a597604852b352ae5b2f78c98abefd546da4289697cc62db93de", "provenance": "source", "subject": "A5:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A6",
+      "name": "Full-context replay recovery",
+      "dependencies": ["A4"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md",
+      "state": "design_only",
+      "blockers": ["dependency A4 atomic completion", "qualified successor physical path"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md", "artifact_digest": "sha256:438a90da7dc1abbbd46c0ad1520aa3257a6a4a9cb2f15a1947bf74afad6a411b", "provenance": "source", "subject": "A6:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A7",
+      "name": "Fenced KV-successor recovery",
+      "dependencies": ["A6"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a7-fenced-kv-successor-recovery.md",
+      "state": "design_only",
+      "blockers": ["dependency A6 atomic completion", "byte-compatible physical standby"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a7-fenced-kv-successor-recovery.md", "artifact_digest": "sha256:e611b9760a6bd8fb0bb937d5b7417e7371459ceedcda0762ece61e18dff66596", "provenance": "source", "subject": "A7:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A8",
+      "name": "Internet-native control and activation",
+      "dependencies": ["A3"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+      "state": "design_only",
+      "blockers": ["dependency A3 atomic completion", "public HTTPS and off-tailnet test peer"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md", "artifact_digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9", "provenance": "source", "subject": "A8:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A9",
+      "name": "Platform-neutral peer capability",
+      "dependencies": ["A8"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
+      "state": "design_only",
+      "blockers": ["dependency A8 atomic completion", "membership migration test window"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md", "artifact_digest": "sha256:01aa7ab7b8f9a0540f398f8bc77ec04456b6c61209dd4823fe56b649d3dd8670", "provenance": "source", "subject": "A9:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A10",
+      "name": "Runtime batching, overlap, and target verification",
+      "dependencies": ["A4"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md",
+      "state": "design_only",
+      "blockers": ["dependency A4 atomic completion", "physical benchmark route"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md", "artifact_digest": "sha256:37a1610f7292d56af2043abbc1210d9adea81893f572b4cd3b9bcae1182a3b7d", "provenance": "source", "subject": "A10:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A11",
+      "name": "Target-authoritative speculative decoding",
+      "dependencies": ["A10"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a11-target-authoritative-speculative-decoding.md",
+      "state": "design_only",
+      "blockers": ["dependency A10 atomic completion", "eligible local draft/target physical route"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a11-target-authoritative-speculative-decoding.md", "artifact_digest": "sha256:b83d68c5e870e96725a95c7d1bc6ba8371441deed215c6e73ed57deb4c71b0f6", "provenance": "source", "subject": "A11:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A12",
+      "name": "Generic mobile activation",
+      "dependencies": ["A4", "A9"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md",
+      "state": "design_only",
+      "blockers": [
+        "dependencies A4 and A9 atomic completion",
+        "two Android families and Apple test device",
+        "optional speculative mobile draft role remains ineligible until A11 physical completion"
+      ],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a12-generic-mobile-activation.md", "artifact_digest": "sha256:bd825c5e3de166be43b730d647a164e692b978be378a23469e96184e7f6c5df8", "provenance": "source", "subject": "A12:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A13",
+      "name": "Cross-platform installation and invitation",
+      "dependencies": ["A12"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md",
+      "state": "design_only",
+      "blockers": ["dependency A12 atomic completion", "platform signing and clean-device test inventory"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md", "artifact_digest": "sha256:0966c3a42e15cf4cbeaeb90386aa22de0df3b131ad6defa3da03a8f4af46beae", "provenance": "source", "subject": "A13:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A14",
+      "name": "Privacy-preserving route explorer",
+      "dependencies": ["A8"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a14-route-explorer.md",
+      "state": "design_only",
+      "blockers": ["dependency A8 atomic completion", "live direct/relay/transition evidence"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a14-route-explorer.md", "artifact_digest": "sha256:af6aafbcae0dd63ea988afd6c513d2d51fbecb8e1eb89d347893686b056ad4bd", "provenance": "source", "subject": "A14:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    },
+    {
+      "gate_id": "A15",
+      "name": "Executed-artifact release closure",
+      "dependencies": ["A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11", "A12", "A13", "A14"],
+      "specification": "docs/superpowers/specs/2026-08-18-mycelium-a15-executed-release-closure.md",
+      "state": "design_only",
+      "blockers": ["A3 through A14 atomic completion", "clean external reviewer execution"],
+      "completed_requirements": ["specification"],
+      "evidence_bindings": [
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a15-executed-release-closure.md", "artifact_digest": "sha256:8f1c5b7d5a29fde58e4237087dab810372f5fd0a6ab391af325803746cc76eae", "provenance": "source", "subject": "A15:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+      ],
+      "partial_requirements": [],
+      "pending_requirements": [
+        "implementation", "product_integration", "deterministic_positive",
+        "deterministic_negative", "physical_positive", "physical_negative",
+        "ui_live_all_eight", "browser_navigation_reconnect",
+        "browser_second_session", "full_regressions_audits",
+        "architecture_handover", "atomic_feature_commit"
+      ],
+      "ui_workspaces": [
+        "inference", "device_lab", "network", "nodes", "plans", "readiness",
+        "incidents", "settings"
+      ],
+      "handover": null
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 **Status:** `design_only`; approved dependency-ready onboarding acceptance boundary;
 implementation waits for A8, A9, and A12
 **Gate:** A13
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Depends on:** A8 Internet-native bootstrap; A9 capability membership; A12 qualified
 platform activation levels
 

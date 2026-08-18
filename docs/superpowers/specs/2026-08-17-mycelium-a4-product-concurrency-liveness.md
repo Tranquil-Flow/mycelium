@@ -2,8 +2,8 @@
 
 **Status:** `design_only`; approved dependency-ready acceptance boundary; implementation waits for A3 closure
 **Gate:** A4
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
-**Architecture:** Astra sections 4.6, 4.7, 4.11, and 4.13
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
+**Architecture:** Synthesized architecture sections 4.6, 4.7, 4.11, and 4.13
 
 ## 1. Outcome and claim boundary
 

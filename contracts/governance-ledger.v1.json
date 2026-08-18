@@ -7,7 +7,7 @@
     "partial",
     "qualified"
   ],
-  "governing_plan": "docs/superpowers/plans/2026-08-11-mycelium-astra-completion-plan.md",
+  "governing_plan": "docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md",
   "architecture_ledger": "docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md",
   "contract_manifest": {
     "path": "contracts/contract-manifest.v1.json",

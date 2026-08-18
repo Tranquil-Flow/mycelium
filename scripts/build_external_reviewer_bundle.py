@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the credential-free, no-checkout Astra reviewer runtime bundle."""
+"""Build the credential-free, no-checkout external reviewer runtime bundle."""
 
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ def _runtime_files(sidecar: Path) -> dict[str, Path]:
                 if "__pycache__" not in child.parts:
                     files[str(child.relative_to(ROOT))] = child
     for relative in (
-        "scripts/astra_reviewer_preflight.py",
+        "scripts/external_reviewer_preflight.py",
         "scripts/package_m22_service.py",
         "release/python-requirements.lock",
-        "docs/release/astras-macbook-reviewer.md",
+        "docs/release/external-mac-reviewer.md",
     ):
         files[relative] = ROOT / relative
     files["bin/mycelium-iroh-sidecar"] = sidecar
@@ -40,7 +40,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sidecar", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--version", default="astras-macbook-m22-1")
+    parser.add_argument("--version", default="external-mac-reviewer-m22-1")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     if args.check:

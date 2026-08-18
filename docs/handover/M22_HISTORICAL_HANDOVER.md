@@ -1,4 +1,7 @@
-# Astra current handover
+# Historical M22 handover
+
+> **Historical:** retained as executed provenance. It is not the current architecture
+> handover or an active machine-identity source.
 
 Mycelium now serves Qwen2.5-3B-Instruct through a qualified, three-host physical
 pipeline over EndpointID-authenticated Iroh. Layers are contiguous: macOS/MLX
@@ -26,10 +29,10 @@ qualification, and selection.
 Start here:
 
 - Current and planned architecture: `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md`
-- Governing product architecture: `docs/superpowers/specs/2026-08-09-mycelium-astra-architecture-product-design.md`
+- Governing product architecture: `docs/superpowers/specs/2026-08-09-mycelium-architecture-product-design.md`
 - Latest physical/KV evidence: `docs/handover/M23_PROGRESS_2026-08-11.md`
 - Operator runbook: `docs/live-mvp-operator-runbook.md`
-- External reviewer procedure: `docs/release/astras-macbook-reviewer.md`
+- External reviewer procedure: `docs/release/external-mac-reviewer.md`
 - Release UI contract: `docs/release/m22-ui-requirements.v1.json`
 
 The UI exposes membership, directed topology, contiguous allocation, runtime

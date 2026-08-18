@@ -2,12 +2,12 @@
 
 **Status:** approved design boundary; implementation waits for A6 completion
 **Gate:** A7
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Reconciles:** `2026-08-11-mycelium-m19-scoped-recovery.md` KV slice and
 `2026-08-11-mycelium-m23-heterogeneous-stage-local-kv.md`
 **Depends on:** A4 interruptible scoped liveness and cleanup; A6 physically qualified
 full-context replay fallback; current stage-local KV qualification
-**Architecture:** Astra sections 4.6, 4.10, 4.11, 4.13, and 4.15
+**Architecture:** Synthesized architecture sections 4.6, 4.10, 4.11, 4.13, and 4.15
 
 ## 1. Outcome and claim boundary
 

@@ -1,6 +1,6 @@
 {
   "protocol": "mycelium.m22_ui_audit.v1",
-  "source": "Astra successor spec section 5 plus M22.1 synthesis of the 2026-07-15 Observatory and 2026-07-19 Product UI plans",
+  "source": "architecture successor spec section 5 plus M22.1 synthesis of the 2026-07-15 Observatory and 2026-07-19 Product UI plans",
   "requirements": [
     {"id":"network-layouts","status":"verified","evidence":["ui/web/src/views/NetworkView.tsx","ui/web/src/graph/graph.test.ts"],"boundary":"Fixture layouts remain illustrative; live M14/M21 panels label observed topology."},
     {"id":"network-filters-inspector-formulas","status":"verified","evidence":["ui/web/src/views/NetworkView.tsx","ui/web/src/views/PlansView.tsx","ui/web/src/features/liveRoute/M15WorkloadPanel.tsx"],"boundary":"Unknown formula inputs render as unavailable."},

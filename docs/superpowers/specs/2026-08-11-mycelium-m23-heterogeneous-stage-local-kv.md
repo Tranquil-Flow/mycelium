@@ -2,7 +2,7 @@
 
 **Status:** implementation specification
 **Milestone:** M23
-**Parent architecture:** `2026-08-09-mycelium-astra-architecture-product-design.md`
+**Parent architecture:** `2026-08-09-mycelium-architecture-product-design.md`
 
 ## 1. Outcome and boundary
 

@@ -1,7 +1,7 @@
 # Mycelium A2 swarm artifact acquisition specification
 
 **Status:** approved implementation target
-**Parent plan:** `2026-08-11-mycelium-astra-completion-plan.md` A2
+**Parent plan:** `2026-08-11-mycelium-completion-plan.md` A2
 **Protocol family:** `mycelium.swarm_artifact_acquisition.v1`
 
 ## 1. Outcome and boundary

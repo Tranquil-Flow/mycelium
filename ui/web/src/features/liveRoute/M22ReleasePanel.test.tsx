@@ -25,7 +25,7 @@ describe('M22 release panel', () => {
     expect(screen.getByText('Foreground route restart')).toBeVisible();
     expect(screen.getByText('Managed-service restart')).toBeVisible();
     rerender(<M22ReleasePanel evidence={m22ReleaseFixture} view="lab" />);
-    expect(screen.getByText(/astras-macbook-m22-1/i)).toBeVisible();
+    expect(screen.getByText(/external-mac-reviewer-m22-1/i)).toBeVisible();
     expect(screen.getAllByText('Verified').length).toBeGreaterThan(0);
   });
 });

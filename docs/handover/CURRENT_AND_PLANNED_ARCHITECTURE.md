@@ -1,7 +1,7 @@
 # Mycelium current and planned architecture
 
-**Status:** Canonical review entry point, updated 2026-08-15. This document supersedes
-the operational status in `ASTRA_CURRENT.md`; the older file remains historical
+**Status:** Canonical review entry point, updated 2026-08-18. This document supersedes
+the operational status in `ARCHITECTURE_HANDOVER.md`; the older file remains historical
 provenance. Milestone evidence through M23 exists; remaining unchecked gates in the
 governing plan are still authoritative.
 
@@ -13,39 +13,35 @@ Review these sources in order:
 2. `docs/superpowers/specs/2026-08-09-mycelium-live-mvp-design.md` for the bounded
    M0-M11 product contract;
 3. `docs/live-mvp-operator-runbook.md` for current operation and limitations;
-4. `docs/superpowers/specs/2026-08-09-mycelium-astra-architecture-product-design.md`
+4. `docs/superpowers/specs/2026-08-09-mycelium-architecture-product-design.md`
    for the target architecture;
-5. `docs/superpowers/plans/2026-08-09-mycelium-post-m11-astra-architecture.md` for
-   M12-M21 execution order;
+5. `docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md` for
+   the current A-stage execution order;
 6. `docs/reviews/2026-08-10-external-review-status.md` for independent findings and
    their disposition.
 
-Repository baseline: branch `integration/wave8-two-device-g4`. Milestone commits are
-`e8654cb` (M0-M11), `27a3478` (M12), `d6249c1` (M13), and `2ff804d` (M14); M15 is
-recorded by `docs/handover/M15_PROGRESS_2026-08-10.md`. The two implementation plans
-remain intentionally untracked pending review. Never infer a source revision from an
-evidence timestamp alone.
+Repository baseline: branch `codex/flexible-swarm-catalog`. The A3 physical feature is
+closed by `905786df41ffdad5718d3464733e2f5cb8727532`; the hardened A4-A15 acceptance
+baseline follows at `e61e780`. Earlier M-stage commits and evidence remain historical
+inputs, not substitutes for the current A-stage gates. Never infer a source revision
+from an evidence timestamp alone.
 
-For Astra: review the staged working-tree diff in addition to the recorded HEAD.
+For an external architecture review, inspect the working-tree diff in addition to the recorded HEAD.
 Private evidence paths in this document are host-local and may not resolve on another
 machine; verify the recorded digests or request an explicit evidence bundle rather than
 assuming absence. The complete physical/MLX gate must run on a compatible macOS host.
 The authoritative remaining release conditions are the numbered conditions in the
 external-review status document.
 
-Current gate checkpoint: A2 code, physical recipient gates, ordinary-product cold/warm
-ledger gate, browser persistence/reconnect gate, final integrated regression, and the
-atomic milestone commit are green. A2 is complete; A3 is the next active gate.
-The current live route is the Lenovo-independent M4 Pro/MLX `node-0 [0,23)` to
-Surface/NumPy `node-2 [23,24)` Qwen2.5-0.5B deployment. Two-source cold transfer,
-zero-transfer warm reuse, serving-concurrent pacing, source disappearance, corruption,
-disk, substitution, replay, writer conflict, cancellation, no-source, and interrupted-
-restart recovery have physical evidence. The final ordinary product acquisition uses
-the durable M4 source plus the platform-neutral mobile HTTPS source; the latter is not a
-compute stage. Lenovo's expired historical lease is not a close-gate dependency and it
-must rejoin normally before any future plan can use it. The owner authorized only the
-exact local-revision `int8-weight-only` representation; no download or substitution was
-authorized or performed.
+Current gate checkpoint: A2 and A3 are complete. A3 qualified the exact local
+Qwen2.5-7B `int8-weight-only` representation over the M4 Pro/MLX → Surface/NumPy
+physical route, proved cold acquisition and exact zero-transfer warm reacquisition,
+streamed a real browser answer, exercised fail-closed selector negatives, and restored
+the qualified Qwen2.5-0.5B incumbent. The 7B candidate remains qualified standby; the
+0.5B route remains active and selected. No download or model substitution occurred.
+A4 request-scoped concurrency, cooperative cancellation, liveness, and fencing is the
+next primary gate. Current qualification may expire independently without invalidating
+the retained, atomically committed A3 completion record.
 
 ## As-built request path
 
@@ -83,8 +79,8 @@ Browser cancellation now sets a request-local cancellation signal. The physical
 route observes it between bounded node commands, sends `infer_cancel`, verifies
 every peer's cleanup state, and returns `CANCELLED`. Adapter and physical prompt/
 output token state is released after terminal lifecycle. A transport command that
-is already blocked cannot yet be interrupted before its command timeout; M18 adds
-traffic-aware liveness and scoped recovery.
+is already blocked cannot yet prove request-scoped interruption and cleanup within
+2,000 ms; A4 owns that cooperative cancellation and liveness closure.
 
 ## Current deployments and topology
 
@@ -309,12 +305,12 @@ The external-tester contract and operator procedure are in
 `docs/contracts/external-tester-boundary.md` and
 `docs/swarm-multi-device-onboarding.md`.
 
-## As-built capability matrix against the Astra specification
+## As-built capability matrix against the synthesized architecture specification
 
 `qualified` means physical evidence exists for only the boundary stated. It does not
 promote the rest of a composite capability.
 
-| Astra capability | State | Exact current boundary |
+| Architecture capability | State | Exact current boundary |
 | --- | --- | --- |
 | 4.1 Evidence-driven planning | `qualified` | One signed, source-bound M13 bundle coherently supplies membership, status, runtime/decode mode, memory tiers, and required directed edges to the selected live candidate; stale or mismatched evidence fails closed. |
 | 4.2 Capability-aware contiguous allocation | `qualified` | Deterministic contiguous DP selected the M13 two-Mac 15/9 split and the M14 measured-order three-host 1/1/22 split. Compute-only and fast-memory-only physical A/B inputs produced distinct allocations with `planner_v2` provenance. |
@@ -385,7 +381,7 @@ references, not public release artifacts.
 | M19 | `implemented_unintegrated` | Historical liveness/recovery contracts and script-driven positive replay evidence exist. They are no longer exposed as live sources. The qualification script now measures detection, delivery, and cleanup and marks the unexecuted negative gate explicitly instead of fabricating success. | Integrate traffic-aware detection, scoped failure, full-context replay, fenced KV successors, circuit breakers, restart reconciliation, and observed positive/negative browser-path recovery |
 | M20 | `design_only` | Target-authoritative speculative contracts and pure decoders remain; the stored disabled decision is not a live browser authority and no speculative capability endpoint is exposed. | Add real multi-position target verification, same-session measurement, bounded draft fallback, and either measured material gain or an honestly measured disabled decision |
 | M21 | `partial` | Durable heterogeneous membership and physical MLX/NumPy execution are real. Participation and OS class no longer fabricate per-member connectivity or external-network proof; current direct-path observations remain historical. | Derive member connectivity only from bound activation observations, prove off-tailnet join plus direct/relay serving, version generic peer capabilities, and separately qualify Android/iOS eligibility |
-| M22 | `partial` | A historical release/service/UI/reviewer bundle exists; it is not exposed as current evidence and is not a current complete-Astra or public-release claim. | Replace operator-authored gate booleans with executed-artifact provenance and rerun closure only after the open Astra gates pass |
+| M22 | `partial` | A historical release/service/UI/reviewer bundle exists; it is not exposed as current evidence and is not a current complete-architecture or public-release claim. | Replace operator-authored gate booleans with executed-artifact provenance and rerun closure only after the open architecture gates pass |
 | M23 | `partial` | One three-host MLX/MLX/NumPy stage-local-KV route is physically qualified with exact output parity, one-token decode on every stage, terminal cleanup, and measured performance gain. The exact sealed record is available only under `Recorded evidence` with its original capture time. | Preserve that exact result while replay recovery, tensor parallelism, continuous batching, KV migration, and mobile activation remain open |
 
 The deterministic credential-theft refusal is a gateway safety policy and performs no
@@ -465,19 +461,19 @@ signed membership + capability + load + directed-link evidence
 | M23 | Architecture-scoped heterogeneous stage-local KV, physical replay A/B, per-placement runtime evidence, and fail-closed mode negotiation |
 
 The governing remaining sequence is
-`docs/superpowers/plans/2026-08-11-mycelium-astra-completion-plan.md`. It reopens
+`docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md`. It reopens
 M18-M20 as product-path capability gates, separates sealed historical evidence from live
 runtime state, decouples replay recovery from replica capacity, moves real batched target
 verification before speculation, and gives Android/iOS, off-tailnet onboarding, direct/relay
 transport, installation, and UI closure explicit gates. Tensor/hybrid parallelism,
 full-model data parallelism, cross-backend KV migration, prefix caching, disaggregated
 prefill/decode, expert parallelism, and sequence parallelism remain separately reviewed
-future programs rather than additions to the Astra completion plan.
+future programs rather than additions to the Mycelium completion plan.
 
 ### Frozen A3-A15 execution boundaries
 
 The machine-checked live progress register is
-`docs/handover/astra-completion-checklist.v1.json`; `scripts/astra_completion_audit.py`
+`docs/handover/mycelium-completion-checklist.v1.json`; `scripts/mycelium_completion_audit.py`
 requires exactly one primary gate, binds every gate to its specification, partitions all
 closure requirements into completed/partial/pending state, and requires all eight UI
 workspaces. The register is navigation, not qualification evidence. A3 remains the sole

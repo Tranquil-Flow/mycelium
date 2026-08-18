@@ -289,8 +289,8 @@ drain, coordinator restart/rejoin, health, and log rotation on the installed hos
 package generation alone is not runtime proof.
 
 Build the deterministic reviewer bundle with
-`scripts/build_astra_reviewer_bundle.py`. On a clean Mac, unpack it into an owner-only
-directory and run `scripts/astra_reviewer_preflight.py` twice with the same unique
+`scripts/build_external_reviewer_bundle.py`. On a clean Mac, unpack it into an owner-only
+directory and run `scripts/external_reviewer_preflight.py` twice with the same unique
 invitation. The second result must be an idempotent status read, not a second join.
 Membership is not stage participation; placement, artifact load, and a physical
 qualification must still pass before the reviewer host appears in an inference route.

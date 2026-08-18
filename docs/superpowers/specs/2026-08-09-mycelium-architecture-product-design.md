@@ -1,10 +1,11 @@
-# Mycelium Astra Architecture Product Design
+# Mycelium Architecture Product Design
 
 **Status:** Successor specification. Implementation begins only after the active
 M7–M11 plan is complete, sealed, and accepted. This document does not widen any
 current milestone.
 
-**Goal:** Complete the architecture recorded across Astra's synthesis, planner,
+**Goal:** Complete the synthesized architecture, incorporating Astra's contributions,
+and recorded across the synthesis, planner,
 Router, recovery, membership, and Network Observatory plans as one testable
 product. Every architectural capability must produce executable evidence and a
 truthful frontend projection; no feature is complete when it exists only as a
@@ -332,7 +333,7 @@ The implementation plan elaborates these gates:
 
 ## 7. Final definition of done
 
-The Astra architecture program is complete only when:
+The synthesized architecture program is complete only when:
 
 1. every capability in Section 4 is either physically qualified and visible in the
    product or explicitly rejected by a separately approved scope decision;

@@ -2,7 +2,7 @@
 
 **Status:** implementation baseline
 **Milestone:** M18
-**Parent architecture:** `2026-08-09-mycelium-astra-architecture-product-design.md`
+**Parent architecture:** `2026-08-09-mycelium-architecture-product-design.md`
 
 ## 1. Outcome
 

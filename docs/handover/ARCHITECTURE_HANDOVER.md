@@ -1,7 +1,7 @@
 # Mycelium — historical Astra handoff
 
 > **Superseded 2026-08-11.** Do not use the operational status or commands below as
-> the current handoff. Start with `docs/handover/ASTRA_M22_HANDOVER.md`, then
+> the current handoff. Start with `docs/handover/M22_HISTORICAL_HANDOVER.md`, then
 > `docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md`, and finally
 > `docs/handover/M23_PROGRESS_2026-08-11.md`. The remainder of this file is retained
 > unchanged as July provenance.
@@ -75,7 +75,7 @@ GitHub CLI credential before changing remotes. Do not print tokens.
 
 From `$MYC`:
 
-1. `docs/handover/ASTRA_CURRENT.md` — this current handoff.
+1. `docs/handover/ARCHITECTURE_HANDOVER.md` — this current handoff.
 2. `docs/handover/MVP_COMPLETION_PLAN.md` — execution plan snapshot from 2026-07-23.
 3. `docs/handover/mycelium-demo-plan.md` — latest Desktop plan snapshot and RED cases.
 4. `docs/handover/NEXT_SESSIONS_AND_DEVICE_PREP_2026-07-23.md` — device preparation and staged prompts.
@@ -85,7 +85,7 @@ From `$MYC`:
 8. `docs/handover/mycelium-handover.md` and `ORIGINAL_TOMORROW_PROMPT_20260722.md` — historical prompts.
 9. `docs/handover/a8-reviews/` — both durable A8 review reports referenced by the prompts.
 10. `docs/handover/tools/run_full_suite_locked_20260723.py` — exact historical suite-lock runner.
-11. `docs/handover/ASTRA_SOURCE_MANIFEST.sha256` — checksums of previously local-only sources.
+11. `docs/handover/ARCHITECTURE_SOURCE_MANIFEST.sha256` — checksums of previously local-only sources.
 12. `REQUEST_AND_INTER_LAYER_ROUTER_DESIGN.md` — Router invariants.
 13. `FAULT_TOLERANT_LAYER_REPLANNER.md` — failure authority and control loops.
 14. `GOSSIP_PROTOCOL.md`, `BROADCAST_PROTOCOL.md` — evidence and peer discovery.

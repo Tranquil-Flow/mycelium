@@ -8,7 +8,7 @@
     "protocol": "mycelium.executed_result_graph.v1",
     "node_protocol": "mycelium.executed_gate_result.v1",
     "addressing": "sha256_canonical_node_bytes",
-    "root_protocol": "mycelium.astra_release_decision.v1",
+    "root_protocol": "mycelium.executed_release_decision.v1",
     "required_node_fields": ["node_digest", "gate_id", "result_kind", "outcome", "source_commit", "source_tree_digest", "tree_state", "provenance", "subject", "artifact_reference", "artifact_digest", "dependency_gate_ids", "dependency_digests", "verifier_policy_digest", "executed_at", "fresh_until", "contract_digest", "model_digest", "representation_digest", "runtime_digest", "environment_digest", "authority_generation"],
     "required_root_fields": ["root_digest", "source_commit", "source_tree_digest", "tree_state", "gate_commit_digests", "result_node_digests", "digest_class_roots", "exclusion_digests", "reviewer_reproduction_digest", "decision_generation"],
     "required_invariants": ["canonical_bytes_only", "node_digest_matches_content", "root_digest_matches_content", "acyclic_dependencies", "dependency_digests_exact", "no_duplicate_logical_result", "no_conflicting_node_identity", "all_references_resolve", "unknown_fields_rejected", "verified_outcome_only", "freshness_policy_applied", "single_source_binding", "contract_binding_required", "model_binding_required", "representation_binding_required", "runtime_binding_required", "environment_binding_required", "authority_generation_required"],

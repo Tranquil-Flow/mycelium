@@ -2,11 +2,11 @@
 
 **Status:** approved design boundary; implementation waits for A4 completion
 **Gate:** A6
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Reconciles:** `2026-08-11-mycelium-m19-scoped-recovery.md` replay slice
 **Depends on:** A1 live authority; A3 qualified model operation; A4 concurrent,
 interruptible request lifecycle, scoped liveness, and exact cleanup
-**Architecture:** Astra sections 4.6, 4.10, 4.11, 4.13, and 4.15
+**Architecture:** Synthesized architecture sections 4.6, 4.10, 4.11, 4.13, and 4.15
 
 ## 1. Outcome and claim boundary
 

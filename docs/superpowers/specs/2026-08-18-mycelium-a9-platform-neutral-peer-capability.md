@@ -2,9 +2,9 @@
 
 **Status:** `design_only`; dependency-ready contract and migration boundary
 **Gate:** A9
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Depends on:** A8 internet-native control and activation physically closed
-**Architecture:** Astra sections 4.5, 4.12, 4.14, and 4.15
+**Architecture:** Synthesized architecture sections 4.5, 4.12, 4.14, and 4.15
 
 ## 1. Outcome and claim boundary
 

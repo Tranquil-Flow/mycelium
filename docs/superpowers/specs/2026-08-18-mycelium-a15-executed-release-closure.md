@@ -2,7 +2,7 @@
 
 **Status:** `design_only`; approved acceptance boundary; execution waits for A3–A14
 **Gate:** A15
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Supersedes for final closure:** `2026-08-11-mycelium-m22-release-closure.md`
 
 ## 1. Outcome and claim boundary
@@ -20,7 +20,7 @@ replace the required engine matrix; a local model file cannot replace qualificat
 an owner-approved exclusion cannot silently become a completed capability.
 
 A15 makes no public-security, Byzantine, anonymous-compute, or multi-tenant claim beyond
-the approved cooperative private-swarm threat model. Any public or complete-Astra claim
+the approved cooperative private-swarm threat model. Any public or complete-architecture claim
 is withheld while a required gate or unapproved critical/important review finding
 remains.
 
@@ -176,7 +176,7 @@ Tailscale, a reviewer:
    blocked or a separately qualified alternative is selected with the exact reason.
 
 The reviewer records actionable usability findings. Critical and important findings must
-be fixed and the invalidated matrices rerun. Astra's actual laptop may be final reviewer
+be fixed and the invalidated matrices rerun. An invited external Mac may be the final reviewer
 acceptance but is not pre-enrolled or assumed available by the release artifact.
 
 ## 7. UI closure
@@ -231,7 +231,7 @@ release.
 
 ## 9. Completion
 
-`mycelium.astra_release_decision.v1` binds the complete validated executed-result graph,
+`mycelium.executed_release_decision.v1` binds the complete validated executed-result graph,
 source/package/SBOM identities, exact model and serving representations, physical and
 browser evidence, exclusions, reviewer findings, public claim boundary, final decision,
 and release generation. Its public projection is privacy-reduced and contains no

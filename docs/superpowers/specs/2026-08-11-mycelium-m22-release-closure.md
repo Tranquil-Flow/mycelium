@@ -2,7 +2,7 @@
 
 **Status:** implementation baseline
 **Milestone:** M22
-**Parent architecture:** `2026-08-09-mycelium-astra-architecture-product-design.md`
+**Parent architecture:** `2026-08-09-mycelium-architecture-product-design.md`
 
 ## 1. Outcome
 
@@ -73,14 +73,14 @@ distinct and cannot satisfy one another's gates.
 
 ## 5. Reviewer path
 
-The `astras-macbook` bundle works without a source checkout, shared LAN, private SSH,
+The `external-mac-reviewer` bundle works without a source checkout, shared LAN, private SSH,
 or Tailscale. One idempotent preflight reports supported OS/architecture, coordinator
 and relay reachability, invitation/identity state, resources, runtime compatibility,
 assigned artifact bytes, cache reuse, qualification, and actionable failures. Tailscale
 may be documented only as optional operator convenience; EndpointID-authenticated Iroh
 is the product transport.
 
-The readiness proof may use a clean surrogate Mac. Astra's actual laptop remains
+The readiness proof may use a clean surrogate Mac. An invited external Mac remains
 post-build reviewer acceptance and must independently pass qualification before route
 placement. Membership alone is never described as inference participation.
 
@@ -103,7 +103,7 @@ placement. Membership alone is never described as inference participation.
 6. A clean surrogate reviewer joins, qualifies, contributes an assigned stage, runs a
    real prompt, and can reconstruct the proof in the UI; the negative unavailable-node
    case blocks or selects a separately qualified alternative with the exact reason.
-7. The final Astra handover is at most 250 words, links governing specs, milestone
+7. The final external-reviewer handover is at most 250 words, links governing specs, milestone
    commits, evidence, runbook, reviewer entry point, limitations, and the separately
    proposed future decisions for stronger KV, continuous batching, autoscaling, and
    hybrid parallelism.

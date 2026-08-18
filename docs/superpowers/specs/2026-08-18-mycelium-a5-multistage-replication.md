@@ -2,11 +2,11 @@
 
 **Status:** approved design boundary; implementation waits for A4 completion
 **Gate:** A5
-**Parent:** `2026-08-11-mycelium-astra-completion-plan.md`
+**Parent:** `2026-08-11-mycelium-completion-plan.md`
 **Supersedes for this gate:** `2026-08-11-mycelium-m18-replicated-throughput.md`
 **Depends on:** A1 product authority; A2 assignment-local acquisition; A3 qualified
 model; A4 concurrent dispatcher, interruptible commands, scoped liveness, and cleanup
-**Architecture:** Astra section 4.8
+**Architecture:** Synthesized architecture section 4.8
 
 ## 1. Outcome and claim boundary
 

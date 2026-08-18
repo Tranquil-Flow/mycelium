@@ -91,7 +91,7 @@ def values() -> dict[str, object]:
             "claim_boundary": True,
         },
         "reviewer": {
-            "bundle_version": "astras-macbook-m22-1",
+            "bundle_version": "external-mac-reviewer-m22-1",
             "bundle_manifest_digest": "sha256:" + "f" * 64,
             "preflight_idempotent": True,
             "surrogate_verified": True,

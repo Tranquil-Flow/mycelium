@@ -1,4 +1,4 @@
-# Astra's MacBook reviewer path (M22)
+# External Mac reviewer path (historical M22)
 
 Supported reviewer target: macOS 13 or newer on Apple silicon, Python 3.14, the
 digest-pinned Iroh sidecar in the onboarding bundle, and MLX from
@@ -6,9 +6,9 @@ digest-pinned Iroh sidecar in the onboarding bundle, and MLX from
 private SSH access, or Tailscale. Tailscale is optional operator convenience only;
 EndpointID-authenticated Iroh is the product transport.
 
-1. Unpack the digest-verified `astras-macbook-m22-1.tar` into an owner-only directory.
+1. Unpack the digest-verified `external-mac-reviewer-m22-1.tar` into an owner-only directory.
 2. Save the separately delivered single-use invitation as an owner-only file.
-3. Run `python3 runtime/scripts/astra_reviewer_preflight.py --invite-bundle INVITE`.
+3. Run `python3 runtime/scripts/external_reviewer_preflight.py --invite-bundle INVITE`.
    Success means coordinator identity verified, Apple-silicon/MLX/resource checks pass,
    and `activation_eligible=true`. It does not mean route qualification.
 4. Save the operator-supplied `service-config.json`, then build and install its durable
