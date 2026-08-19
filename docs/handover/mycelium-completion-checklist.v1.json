@@ -133,7 +133,7 @@
       "blockers": ["dependency A4 atomic completion", "qualified successor physical path"],
       "completed_requirements": ["specification"],
       "evidence_bindings": [
-        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md", "artifact_digest": "sha256:438a90da7dc1abbbd46c0ad1520aa3257a6a4a9cb2f15a1947bf74afad6a411b", "provenance": "source", "subject": "A6:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md", "artifact_digest": "sha256:19611deb138d1b2716e23535ecc2aea823b0f2433baee40b53f6d54d642dba5c", "provenance": "source", "subject": "A6:specification", "observed_at": "2026-08-19T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
       ],
       "partial_requirements": [],
       "pending_requirements": [

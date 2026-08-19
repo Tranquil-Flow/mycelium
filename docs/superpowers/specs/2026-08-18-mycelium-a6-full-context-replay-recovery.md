@@ -36,10 +36,18 @@ test can satisfy the A6 product or physical gate.
 
 All earlier fail-closed boundaries remain in force:
 
-- **Request gateway:** owns private prompt/output, the browser delivery ledger, session
-  replay cursor, logical terminal result, and client-visible committed watermark.
-- **Router/runtime:** owns request attempts, immutable paths, physical commands, recovery
-  prefill, decode, cutover, and request-scoped cleanup.
+- **Request gateway:** owns private prompt/output, the committed-delivery ledger, the
+  session replay cursor, the publisher generation, the logical terminal result, and the
+  client-visible committed watermark. Recovery reads that ledger; only the gateway
+  advances it.
+- **M16 admission ledger:** owns the canonical immutable `PathManifest` identity
+  (`path_id`, `path_digest`, `path_attempt`), complete-path reservations, and the exact
+  request/attempt/path cleanup record.
+- **Router/runtime:** owns request-attempt advancement, immutable path binding, physical
+  command issue, recovery prefill, decode, and the request-scoped cutover mutation.
+- **A4 command controller:** owns command identity, the absolute cancellation deadline,
+  the cancellation generation, the terminal compare-and-swap revision, and the cleanup
+  receipt revision.
 - **A4 liveness authority:** owns the observed failure source and narrow request, edge,
   placement, peer, or deployment scope. Recovery cannot author its own failure.
 - **Planner:** proposes deterministic compatible successor intent, preserves surviving
@@ -58,6 +66,41 @@ One integrator owns gateway, dispatcher, Router, liveness, route lifecycle, and 
 wiring. A6 does not begin shared integration until the separate atomic A4 close. A6 lands
 as one atomic feature commit; no A7 implementation or claim is included in it.
 
+## 2.1 Authority consumption boundary
+
+A6 is an authority consumer, not an authority issuer. Recovery code proposes or requests a
+transition; an A4 owner decides it, mints the identity, and returns the grant that recovery
+must then quote back verbatim.
+
+A6, the Router recovery path, the Planner, the qualifier projection, the checkpoint store,
+the UI, and every A6 test helper are forbidden from independently minting:
+
+- request attempts;
+- path attempts;
+- path generations or canonical `PathManifest` identity;
+- command IDs;
+- cancellation generations;
+- publisher generations;
+- terminal revisions; or
+- cleanup authority or cleanup receipts.
+
+Each recovery mutation carries the owner-issued grant plus the expected revision the owner
+published with it. A mutation whose quoted authority is absent, stale, forged, partially
+copied, or self-minted fails closed before any successor model work, before any ledger
+advance, and before any physical command. Fail-closed here means: no publication, no
+watermark movement, no reservation release, no terminal result, and no state advance —
+only a bounded rejection reason on the owning request.
+
+**Unresolved A4 commit binding.** The final atomic A4 commit digest is a required binding
+of every A6 authority grant, acceptance record, and integration authorization. Until A4
+closes it is recorded as unresolved (`null`) in
+`tests/a6_acceptance/inventory.v1.json` under `unresolved_bindings.a4_atomic_commit`.
+While it is unresolved, A6 integration authorization fails closed with
+`unresolved_a4_atomic_commit_binding`. No A6 lane may substitute a dirty worktree digest,
+a predecessor commit, a branch name, or a placeholder for it. Resolving the sentinel is an
+owner action performed after atomic A4 closure, and it is a precondition of A6
+integration, not a product of A6 work.
+
 ## 3. Immutable recovery compatibility
 
 A compatible replay successor binds the same:
@@ -70,15 +113,36 @@ A compatible replay successor binds the same:
 - owner authority, request identity, source attempt, committed watermark, and recovery
   attempt.
 
+Every recovery mutation, command, receipt, and acceptance record binds the complete
+canonical identity:
+
+1. deployment ID and deployment epoch;
+2. qualification digest;
+3. request ID and request attempt;
+4. canonical M16 `PathManifest` path ID, path digest, and path attempt;
+5. topology/deployment generation;
+6. command ID;
+7. cancellation generation;
+8. publisher generation; and
+9. recovery transition identity and recovery revision.
+
+A record missing any element, or carrying an element from a different generation, is
+invalid. Partial identity is never completed by inference, by placement inspection, by the
+Planner, or by the UI.
+
 The successor may use a different qualified placement sequence, stage allocation, graph,
 path, or compatible backend. Its own assignment, stage packs, load proofs, directed edges,
 graph, path manifest, backend/runtime compatibility, cleanup proof, and qualification must
 be current and internally exact. Compatibility is an explicit closed qualifier result,
 not equality guessed by the Planner or UI.
 
-An A6 cutover increments request attempt and path generation. It never mutates the old
-immutable path. The gateway and every participating runtime reject late frames, output,
-cleanup, or terminal publication from the fenced attempt.
+An A6 cutover consumes an owner-issued request attempt and an owner-issued canonical
+`PathManifest` identity for the successor. Recovery never increments either value itself,
+never derives a path attempt from placement data, and never hardcodes an attempt. It never
+mutates the old immutable path. The old attempt is fenced before the successor may publish
+anything, and the gateway, ledger, command controller, and every participating runtime
+reject late frames, output, cancellation results, cleanup receipts, liveness mutations, and
+terminal publication from the fenced attempt.
 
 ## 4. Private replay checkpoint and committed delivery
 
@@ -100,11 +164,28 @@ encrypted, request-scoped runtime command to an assigned qualified successor. It
 bounded, deadline bounded, digest checked, zeroized/released at terminal cleanup, and
 never persisted on a peer beyond its declared request/KV lifecycle.
 
-A generated token is client-committed only after the gateway atomically appends its
-ordered output event to the durable tab-session delivery ledger and advances the prefix
-count/digest. Emission and reconnect replay use that event identity. A reconnect may replay
-an already recorded event to reconstruct the session, but the UI de-duplicates by session,
-request, and event sequence and never appends it twice to prompt/response history.
+The gateway-owned committed-delivery ledger is the single canonical record of what the
+browser has received. A generated token is client-committed only after the gateway
+atomically appends its ordered output event to that durable tab-session ledger and advances
+the prefix count/digest. Emission and reconnect replay use that event identity.
+
+Reconnect replay reconstructs a session from the ledger; it never advances the committed
+watermark. Replaying, resubscribing, resetting the publisher, opening a second subscriber,
+or reconstructing text in the browser produces no ledger mutation. The UI de-duplicates by
+session, request, and event sequence and never appends an event twice to prompt/response
+history.
+
+Publisher generation fences delivery end to end: SSE events, replay cursors, event
+persistence, reconnect authority, and every UI reducer are bound to the current
+gateway-owned publisher generation. A publisher reset advances that generation by
+gateway-owned compare-and-swap and emits one authoritative snapshot; clients never union an
+old and a new generation, and an event, cursor, or reducer carrying a stale publisher
+generation is rejected without changing the ledger.
+
+Duplicate, skipped, regressed, conflicting, and late token positions fail closed. Successor
+output begins strictly after the committed watermark; a position at or before the watermark
+is suppressed, and a position beyond the next contiguous one is rejected rather than
+buffered into a gap.
 
 Generated but uncommitted work may be discarded. A replay command contains the original
 encoded prompt plus exactly the committed generated-token prefix. Recovery prefill may
@@ -140,6 +221,22 @@ also freeze before physical measurement:
 - per-deployment recovery concurrency and memory/KV reservations; and
 - exact reason codes for timeout, incompatibility, capacity, breaker, and cleanup failure.
 
+**Deadline semantics.** Recovery may run under a bounded owner-issued recovery policy
+covering successor discovery, qualification, reservation, prefill, and cutover. That policy
+governs recovery only. Once cancellation is observed on the owning request, the original
+A4 absolute cancellation deadline governs interruption, cleanup, backend release, and
+terminal publication for both the source and the successor. No A6 layer — recovery
+controller, planner, qualifier, checkpoint store, gateway projection, or successor runtime
+— may restart that budget, add a second 2,000 ms cancellation budget, extend the absolute
+deadline, or reset it at cutover. Cutover does not create a new cancellation clock; the
+successor inherits the same absolute deadline.
+
+Cancellation takes precedence over any pending recovery. An observed cancellation
+terminates the recovery attempt, is published as a cancellation terminal result, and is
+never relabelled as recovery failure, successor incompatibility, deadline expiry, or an
+abort reason. A recovery deadline that expires after cancellation was observed does not
+overwrite the cancellation outcome.
+
 The Planner's normal candidate hysteresis remains three equivalent generations over at
 least ten seconds. An observed loss of every usable incumbent track may use an emergency
 candidate, but cannot bypass artifact, load, graph, compatibility, qualification,
@@ -147,26 +244,64 @@ reservation, fencing, or cleanup gates.
 
 ## 6. Cutover, publication, and exact cleanup
 
-Before successor work, the Router freezes the latest gateway-owned checkpoint and fences
-the old request attempt. It reserves one complete currently qualified successor path and
-issues recovery prefill with the frozen digest. The successor proves that the reconstructed
-prefix ends at the exact committed count before it may decode the next position.
+Before successor work, recovery requests a checkpoint freeze from the gateway and requests
+that the owner fence the old request attempt. Fencing precedes successor publication: a
+stale source cannot publish tokens, terminal state, cancellation results, cleanup receipts,
+or liveness mutations once the fence is installed, and the successor may not publish before
+it is installed. Recovery then requests one complete currently qualified successor path
+reservation and issues owner-authorized recovery prefill with the frozen digest. The
+successor proves that the reconstructed prefix ends at the exact committed count before it
+may decode the next position.
 
-Cutover is one durable compare-and-swap from old attempt/path to the new attempt/path.
-The gateway accepts output and terminal events only from that current authority. Late old
-commands, stale cancellation generations, old receipts, duplicated cutover, and duplicated
-terminal results are rejected without advancing the stream.
+Cutover is an owner-issued, request-scoped, expected-revision durable compare-and-swap from
+the old attempt/path to the owner-issued successor attempt/path. Recovery supplies the
+expected current revision it observed; the owner rejects the swap if that revision no longer
+holds. A repeated cutover with the same canonical digest is idempotent; a conflicting
+cutover is rejected. A failed cutover leaves exactly one current authority in place and
+cannot partially advance the delivery ledger, split publication between two attempts, or
+leave the request without an owner. The gateway accepts output and terminal events only
+from the current authority. Late old commands, stale cancellation generations, stale
+publisher generations, old receipts, duplicated cutover, and duplicated terminal results are
+rejected without advancing the stream.
+
+**Exact cleanup and terminal ordering.** Cleanup is request/attempt/path-specific.
+Recovery consumes owner-issued cleanup receipts and their expected revisions; it neither
+performs nor authorizes release on its own. Cleanup proof names the exact request, attempt,
+and canonical path and must remain valid while unrelated requests legitimately retain
+capacity, KV, reservations, transport streams, and receipts. Node-global or
+deployment-global zero counters are not cleanup proof and never satisfy an A6 gate.
+
+Terminal publication for a recovered or aborted request occurs only after real source and
+successor cleanup has been recorded by its owner, or else publishes an explicit
+cleanup-failure terminal according to A4 authority. There is no terminal result that
+silently precedes, skips, or assumes cleanup. A6 must never terminate a shared node
+process as proof of cleanup; doing so destroys unrelated request, path, and attempt
+ownership and fails the gate.
 
 Completion, cancellation, deadline, successor failure, browser disconnect, breaker open,
-and shutdown release each owned resource exactly once. Baseline-to-terminal accounting
-must prove zero leaked source or successor path reservations, capacity reservations,
-commands, pending deliveries, transport receipts/streams, temporary replay commands, and
-stage-local KV states. The retained bounded delivery/history and incident records are
-intentional durable product state and are reported separately from live resources.
+and shutdown release each owned resource exactly once. Baseline-to-terminal accounting is
+per request/attempt/path and must prove zero leaked source or successor path reservations,
+capacity reservations, commands, pending deliveries, transport receipts/streams, temporary
+replay commands, and stage-local KV states for that exact subject. The retained bounded
+delivery/history and incident records are intentional durable product state and are
+reported separately from live resources.
+
+Late results from a fenced source attempt and from a superseded or failed successor are
+discarded as bounded rejections. They must not fail unrelated waiters, stop a response
+reader, release another owner's resources, mutate the current attempt, or terminate a
+shared node process.
 
 If cleanup cannot prove ownership, only the affected request or placement fails unless an
 A4 deployment-fatal allowlist invariant is truly contradicted. Recovery code cannot widen
 an unknown exception into deployment-fatal state.
+
+**Liveness consumption.** A4 liveness owns the observed failure and its exact subject.
+A6 consumes that observation and may not author, synthesize, escalate, or widen the failure
+that grants its own recovery authority. Request, edge, and placement failures remain at
+their observed scope. A deployment-fatal transition requires A4's explicit fatal allowlist
+and its recorded reason and evidence generation; recovery cannot latch fatal state because
+a successor was unavailable, a candidate was rejected, or an exception was unexpected. A
+failed successor poisons neither the incumbent deployment nor unrelated requests.
 
 ## 7. Closed contracts and persistence
 
@@ -190,8 +325,18 @@ duplicate identities, stale generations, invalid transitions, unsupported protoc
 and digest mismatches fail closed. Cross-process records are canonically digested and
 governance-pinned.
 
-After coordinator or gateway restart, every nonterminal request reconciles to exactly one
-of `resumed`, `aborted`, or `already_terminal`. The current attempt, committed watermark,
+Prompt tokens and the committed token prefix live only in the bounded owner-private
+checkpoint. Public contracts, projections, incidents, metrics, logs, and acceptance records
+contain no prompt text, output text, token IDs, KV, activations, raw addresses,
+credentials, or private filesystem paths.
+
+After coordinator or gateway restart, every nonterminal request — in every nonterminal
+phase, including `failure_observed`, `checkpoint_frozen`, `successor_pending`,
+`recovery_prefill`, `cutover_pending`, `recovered_decode`, and `cleanup` — reconciles
+exactly once to exactly one of `resumed`, `aborted`, or `already_terminal`. Reconciliation
+trusts only the owner-private durable checkpoint and the owner ledgers. Browser-authored
+cursors, reconstructed text, orphaned temporary checkpoint files, and partially written
+records are rejected rather than resumed. The current attempt, committed watermark,
 cutover, and terminal compare-and-swap survive restart. A stale process cannot reacquire
 publication authority. Refresh, reconnect, Back/Forward, workspace switching, and a clean
 second browser session reconstruct public recovery state; tab-private prompt/output remains
@@ -240,17 +385,35 @@ terminal result. Browser cursors, reconstructed text, the Router, Planner, succe
 fixtures, and evidence cannot replace or advance that authority. Private prompt and prefix
 material remains excluded from public acceptance records.
 
-Cutover is request-scoped and compare-and-swaps only that request's current attempt and
-immutable path. It does not change the selected deployment or any unrelated request. Both
-request-attempt and path generation advance, and stale source frames, output, terminal
-publication, cancellation, receipts, and cleanup are fenced without changing the current
-ledger or successor authority.
+Cutover is request-scoped and is an owner-issued, expected-revision compare-and-swap over
+only that request's current attempt and canonical immutable path. It does not change the
+selected deployment or any unrelated request. The owner advances request attempt and
+canonical path attempt; recovery consumes those values and never mints them. Stale source
+frames, output, terminal publication, cancellation, receipts, cleanup, and liveness
+mutations are fenced without changing the current ledger or successor authority, and a
+failed cutover leaves exactly one current authority without partially advancing the
+delivery ledger.
 
 Replay uses the original encoded prompt plus exactly the gateway-committed prefix. Every
 reconstructed prefix position is suppressed, and only the next contiguous position may be
 appended under its durable event identity. Duplicate or conflicting delivery, watermark
 rollback, skip, repeat, and late old-attempt output fail closed, including across ordinary
 browser reconnect and ledger replay.
+
+Cleanup is exact per request, attempt, and canonical path, is proven by owner-issued
+receipts and expected revisions, and remains provable while unrelated requests stay active.
+Node-global zero counters are not proof, and terminating a shared node process is never
+cleanup. Terminal publication follows recorded cleanup or is an explicit A4-authorized
+cleanup-failure terminal. Once cancellation is observed, the original A4 absolute
+cancellation deadline governs interruption, cleanup, backend release, and terminal
+publication; no A6 layer restarts that budget, and cancellation is never recorded as
+recovery failure. A4 liveness owns the observed failure and its scope, deployment-fatal
+transitions require A4's fatal allowlist, and a failed successor cannot poison the
+incumbent deployment or unrelated requests.
+
+The final atomic A4 commit digest remains an unresolved binding sentinel. While
+`unresolved_bindings.a4_atomic_commit` is `null`, A6 integration authorization fails closed
+and no inventory result may be read as integration readiness.
 
 A successor is eligible only through its own current, exact compatibility and physical
 qualification for the bound operation. A5 membership, candidate intent, cached artifacts,
@@ -278,6 +441,19 @@ reports `gate_state=design_only`, `qualification_claim=false`, and
 - Deterministic interleavings cover failure/output commit, cancel/failure, timeout/cutover,
   old-result/new-attempt, reconnect/replay, shutdown/recovery, restart/terminal, and
   projection during mutation.
+- Authority-consumption tests prove that a self-minted or stale request attempt, path
+  attempt, canonical path identity, command ID, cancellation generation, publisher
+  generation, terminal revision, or cleanup receipt is rejected before any successor model
+  work, ledger advance, or physical command.
+- Deadline tests prove that recovery policy never extends or restarts the original absolute
+  cancellation deadline, that cancellation preempts pending recovery, and that cancellation
+  is never published as recovery failure.
+- Cleanup tests prove exact request/attempt/path cleanup receipts while an unrelated request
+  is active, cleanup-before-terminal ordering or an explicit cleanup-failure terminal, and
+  that no shared node process is terminated.
+- Restart tests cover every nonterminal phase and prove exactly-once reconciliation without
+  trusting browser-authored state or orphaned checkpoint files.
+- The unresolved A4 atomic-commit binding is exercised as a fail-closed integration gate.
 - Replay tests cover zero-token and multi-token prefixes, prompt/context bounds, watermark
   rollback/skip/repeat/conflict, prefix suppression, one next-position publication,
   tokenizer/settings mismatch, backend compatibility, successor saturation, breaker,
@@ -327,4 +503,32 @@ ledger/handover with observed scope, and lands as one atomic A6 feature commit.
 
 Until those gates execute, A6 remains `design_only`. An implemented replay library,
 private checkpoint, planner candidate, deterministic test, sealed artifact, or fixture UI
-does not promote it.
+does not promote it. A6 implementation may not begin, and A6 integration authorization
+fails closed, while `unresolved_bindings.a4_atomic_commit` is unresolved.
+
+## 12. Unresolved interfaces requiring reconciliation with atomic A4
+
+The following A4 surfaces are provisional at the time of this revision. A6 names the
+*authority* it consumes, never a final API. Each item must be reconciled against the atomic
+A4 commit before A6 implementation begins; none may be treated as frozen here.
+
+1. **Owner-issued grant shape.** The concrete envelope that carries deployment epoch,
+   qualification digest, request ID/attempt, canonical path ID/digest/attempt, topology
+   generation, command ID, cancellation generation, and publisher generation.
+2. **Request-attempt advancement seam.** Which A4 owner mints the successor request attempt,
+   and the exact precondition that the previous attempt is closed before a higher attempt is
+   accepted.
+3. **Canonical path issuance seam.** How the M16 admission ledger issues the successor
+   `PathManifest` identity and its attempt to a recovery consumer.
+4. **Terminal and cleanup revision seam.** The expected-revision compare-and-swap surface for
+   terminal publication and for owner-scoped cleanup receipts, including the exact rejection
+   reasons.
+5. **Publisher-generation seam.** The gateway-owned compare-and-swap that advances publisher
+   generation across SSE, cursors, persistence, reconnect, and UI reducers.
+6. **Cancellation-deadline seam.** How the original absolute cancellation deadline is carried
+   into recovery so that no recovery layer can supply a later deadline.
+7. **Liveness observation seam.** The read-only form in which A4's observed failure and its
+   exact subject/scope reach recovery, and the fatal-allowlist check recovery must defer to.
+8. **Committed-delivery ledger seam.** The gateway-owned append/watermark operation and its
+   read-only projection for recovery, including the replay path that must not advance it.
+9. **Final atomic A4 commit digest.** Unresolved; recorded as `null` and fail-closed.
