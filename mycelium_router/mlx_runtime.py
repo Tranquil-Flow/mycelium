@@ -503,8 +503,11 @@ class MLXRuntimePort:
       self._decode_operation_count = 0
       self._decode_input_token_count = 0
       self._activation_output_bytes = 0
+      self._maximum_observed_work_unit_ms = 0.0
+      self._observed_work_unit_count = 0
       self._closed = False
       self._state_lock = RLock()
+      self._cancellation_lock = RLock()
 
    @staticmethod
    def _validate_graph_stage_roles(graph: ExecutionGraph) -> None:
@@ -682,10 +685,16 @@ class MLXRuntimePort:
 
       if not isinstance(path_id, str):
          return
-      with self._state_lock:
+      with self._cancellation_lock:
          self._remember_path_marker(self._cancelled_paths, path_id, None)
+      with self._state_lock:
          self._release_state(path_id, "cancellation")
          self._purge_path_replays(path_id)
+
+   def _checkpoint_path(self, path_id: str) -> None:
+      with self._cancellation_lock:
+         if path_id in self._cancelled_paths:
+            _reject("path_cancelled")
 
    @staticmethod
    def _failure(reason: str) -> RuntimeResult:
@@ -850,6 +859,8 @@ class MLXRuntimePort:
             "decode_operation_count": self._decode_operation_count,
             "decode_input_token_count": self._decode_input_token_count,
             "activation_output_bytes": self._activation_output_bytes,
+            "maximum_observed_work_unit_ms": self._maximum_observed_work_unit_ms,
+            "observed_work_unit_count": self._observed_work_unit_count,
             "release_counts": dict(sorted(self._release_counts.items())),
          }
 
@@ -861,8 +872,10 @@ class MLXRuntimePort:
       with self._state_lock:
          if self._closed:
             return self._failure("runtime_closed")
-         if item.path_id in self._cancelled_paths:
-            return self._failure("path_cancelled")
+         try:
+            self._checkpoint_path(item.path_id)
+         except MLXRuntimeError as exc:
+            return self._failure(exc.code)
          try:
             self.expire_leases()
             return self._execute_bound(item)
@@ -933,6 +946,8 @@ class MLXRuntimePort:
       hidden_states: mx.array | None,
       position: int,
       past_layers: Mapping[int, tuple[mx.array, mx.array]],
+      path_id: str,
+      produce_logits: bool = True,
    ) -> tuple[mx.array, dict[int, tuple[mx.array, mx.array]]]:
       config = runtime["model_config"]
       tensors = loaded.tensors
@@ -951,6 +966,8 @@ class MLXRuntimePort:
             hidden = hidden_states
          next_layers: dict[int, tuple[mx.array, mx.array]] = {}
          for layer in range(start, end):
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
             hidden, layer_kv = _qwen2_block_with_kv(
                hidden,
                tensors,
@@ -961,13 +978,30 @@ class MLXRuntimePort:
                runtime["architecture"],
             )
             next_layers[layer] = layer_kv
-         if "final_norm" in stage.component_roles:
+            mx.eval(hidden, *layer_kv)
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
+         # KV state covers the complete chunk; only its final position is
+         # required for the next autoregressive vocabulary projection.
+         if (
+            produce_logits
+            and "lm_head" in stage.component_roles
+            and int(hidden.shape[1]) > 1
+         ):
+            hidden = hidden[:, -1:, :]
+         if produce_logits and "final_norm" in stage.component_roles:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
             hidden = _rms_norm(
                hidden,
                tensors["model.norm.weight"],
                float(config["rms_norm_epsilon"]),
             )
-         if "lm_head" in stage.component_roles:
+            mx.eval(hidden)
+            self._observe_cooperative_work_unit(work_unit_started)
+         if produce_logits and "lm_head" in stage.component_roles:
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
             aliases = loaded.resolved_aliases
             if not isinstance(aliases, Mapping):
                _reject("invalid_loaded_stage_aliases")
@@ -982,6 +1016,9 @@ class MLXRuntimePort:
             ):
                _reject("invalid_loaded_stage_aliases")
             hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
+            mx.eval(hidden)
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
          mx.eval(
             hidden,
             *(array for pair in next_layers.values() for array in pair),
@@ -1015,6 +1052,8 @@ class MLXRuntimePort:
       epsilon = float(config["layer_norm_epsilon"])
       next_layers: dict[int, tuple[mx.array, mx.array]] = {}
       for layer in range(start, end):
+         self._checkpoint_path(path_id)
+         work_unit_started = time.monotonic()
          hidden, layer_kv = _gpt2_block_with_kv(
             hidden,
             tensors,
@@ -1024,14 +1063,23 @@ class MLXRuntimePort:
             past_layers.get(layer),
          )
          next_layers[layer] = layer_kv
+         mx.eval(hidden, *layer_kv)
+         self._observe_cooperative_work_unit(work_unit_started)
+         self._checkpoint_path(path_id)
       if "final_norm" in stage.component_roles:
+         self._checkpoint_path(path_id)
+         work_unit_started = time.monotonic()
          hidden = _layer_norm(
             hidden,
             tensors[f"{namespace}ln_f.weight"],
             tensors[f"{namespace}ln_f.bias"],
             epsilon,
          )
+         mx.eval(hidden)
+         self._observe_cooperative_work_unit(work_unit_started)
       if "lm_head" in stage.component_roles:
+         self._checkpoint_path(path_id)
+         work_unit_started = time.monotonic()
          aliases = loaded.resolved_aliases
          if not isinstance(aliases, Mapping):
             _reject("invalid_loaded_stage_aliases")
@@ -1046,18 +1094,33 @@ class MLXRuntimePort:
          ):
             _reject("invalid_loaded_stage_aliases")
          hidden = mx.matmul(hidden, tensors[head_keys[0]].transpose(1, 0))
+         mx.eval(hidden)
+         self._observe_cooperative_work_unit(work_unit_started)
+         self._checkpoint_path(path_id)
       mx.eval(hidden, *(array for pair in next_layers.values() for array in pair))
       if not bool(mx.all(mx.isfinite(hidden)).item()):
          _reject("nonfinite_stage_output")
       return hidden, next_layers
+
+   def _observe_cooperative_work_unit(self, started_at: float) -> None:
+      elapsed_ms = max(0.0, (time.monotonic() - started_at) * 1_000.0)
+      self._observed_work_unit_count += 1
+      self._maximum_observed_work_unit_ms = max(
+         self._maximum_observed_work_unit_ms,
+         elapsed_ms,
+      )
 
    def _runtime_result(
       self,
       stage: Stage,
       runtime: Mapping[str, Any],
       output: mx.array,
+      *,
+      produce_token: bool = True,
    ) -> RuntimeResult:
       if stage.stage_id == self.graph.final_stage_id:
+         if not produce_token:
+            return RuntimeResult(success=True)
          expected = (1, int(output.shape[1]), runtime["model_config"]["vocab_size"])
          if tuple(int(value) for value in output.shape) != expected:
             _reject("invalid_final_stage_output")
@@ -1129,9 +1192,14 @@ class MLXRuntimePort:
       return result
 
    def _execute_bound(self, item: HopWorkItem) -> RuntimeResult:
-      if item.phase == "PREFILL_CHUNK":
+      if item.phase == "PREFILL_CHUNK" and self.decode_mode != "stage_local_kv":
          _reject("prefill_chunk_requires_kv_continuity")
-      if item.phase not in {"PREFILL", "RECOVERY_PREFILL", "DECODE"}:
+      if item.phase not in {
+         "PREFILL",
+         "PREFILL_CHUNK",
+         "RECOVERY_PREFILL",
+         "DECODE",
+      }:
          _reject("unsupported_runtime_phase")
       if not isinstance(item.payload, bytes):
          _reject("runtime_payload_must_be_bytes")
@@ -1176,11 +1244,20 @@ class MLXRuntimePort:
             sequence,
             fingerprint,
          )
-      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+      starts_kv = item.phase in {"PREFILL", "RECOVERY_PREFILL"} or (
+         item.phase == "PREFILL_CHUNK" and item.token_index == 0
+      )
+      produce_token = item.phase != "PREFILL_CHUNK" or item.emits_token
+      continues_prefill = (
+         item.phase == "PREFILL_CHUNK" and item.token_index > 0
+      )
+      if starts_kv:
          if item.phase == "PREFILL" and item.token_index != -1:
             _reject("kv_prefill_sequence_mismatch")
          if item.phase == "RECOVERY_PREFILL" and item.token_index < 0:
             _reject("kv_recovery_sequence_mismatch")
+         if item.phase == "PREFILL_CHUNK" and item.token_index != 0:
+            _reject("kv_prefill_chunk_sequence_mismatch")
          if item.position != 0:
             _reject("kv_position_mismatch")
          if item.path_id in self._kv_states:
@@ -1201,8 +1278,15 @@ class MLXRuntimePort:
             hidden_states=hidden_states,
             position=item.position,
             past_layers={},
+            path_id=item.path_id,
+            produce_logits=produce_token,
          )
-         result = self._runtime_result(stage, runtime, output)
+         result = self._runtime_result(
+            stage,
+            runtime,
+            output,
+            produce_token=produce_token,
+         )
          state = _KVState(
             request_id=item.request_id,
             path_id=item.path_id,
@@ -1213,7 +1297,11 @@ class MLXRuntimePort:
             deployment_epoch=self.graph.deployment_epoch,
             lease_expires_at=float(item.lease_expires_at),
             next_position=sequence,
-            next_sequence=1 if item.phase == "PREFILL" else item.token_index + 1,
+            next_sequence=(
+               item.token_index + 1
+               if item.phase == "RECOVERY_PREFILL"
+               else 1
+            ),
             cached_context_tokens=sequence,
             layers=layers,
          )
@@ -1236,8 +1324,10 @@ class MLXRuntimePort:
             _reject("kv_placement_id_mismatch")
          if item.position != state.next_position:
             _reject("kv_position_mismatch")
-         if item.token_index != state.next_sequence:
+         if not continues_prefill and item.token_index != state.next_sequence:
             _reject("kv_sequence_mismatch")
+         if continues_prefill and item.token_index < 1:
+            _reject("kv_prefill_chunk_sequence_mismatch")
          if float(item.lease_expires_at) != state.lease_expires_at:
             _reject("kv_lease_mismatch")
          if float(self._clock()) >= state.lease_expires_at:
@@ -1251,17 +1341,25 @@ class MLXRuntimePort:
             hidden_states=hidden_states,
             position=item.position,
             past_layers=state.layers,
+            path_id=item.path_id,
+            produce_logits=produce_token,
          )
-         result = self._runtime_result(stage, runtime, output)
+         result = self._runtime_result(
+            stage,
+            runtime,
+            output,
+            produce_token=produce_token,
+         )
          state.layers = layers
          state.next_position += sequence
-         state.next_sequence += 1
+         if not continues_prefill:
+            state.next_sequence += 1
          state.cached_context_tokens += sequence
          self._update_kv_watermark()
 
       self._applied_operation_count += 1
       self._activation_output_bytes += len(result.payload or b"")
-      if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
+      if item.phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}:
          self._prefill_operation_count += 1
          self._prefill_input_token_count += sequence
       else:
@@ -1310,7 +1408,10 @@ class MLXRuntimePort:
    ) -> None:
       if key is None:
          _reject("missing_runtime_batch_key")
-      if phase in {"PREFILL", "RECOVERY_PREFILL"} and key.token_span != sequence:
+      if (
+         phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}
+         and key.token_span != sequence
+      ):
          _reject("batch_key_token_span_mismatch")
       if phase == "DECODE" and key.token_span != 1:
          _reject("batch_key_token_span_mismatch")

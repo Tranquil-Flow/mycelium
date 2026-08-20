@@ -27,4 +27,4 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"lane audit error: {exc}", file=sys.stderr)
         return 2
     print(canonical_json(report))
-    return 0
+    return 0 if report["ownership_safe_to_dispatch"] else 1

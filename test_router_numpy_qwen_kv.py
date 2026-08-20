@@ -222,7 +222,7 @@ def _case(root: Path, architecture: str, *, clock=None) -> SimpleNamespace:
     )
 
 
-def _run(case: SimpleNamespace, token_ids: tuple[int, ...], *, phase: str, path_id: str, request_id: str, token_index: int, position: int, terminal: bool = False):
+def _run(case: SimpleNamespace, token_ids: tuple[int, ...], *, phase: str, path_id: str, request_id: str, token_index: int, position: int, emits_token: bool = False, terminal: bool = False):
     payload = encode_token_ids(token_ids)
     for stage_index, port in enumerate(case.ports):
         result = port.execute(
@@ -236,6 +236,7 @@ def _run(case: SimpleNamespace, token_ids: tuple[int, ...], *, phase: str, path_
                 path_id=path_id,
                 token_index=token_index,
                 position=position,
+                emits_token=emits_token,
                 terminal=terminal,
                 lease_expires_at=1_000_000_000_000.0,
             )
@@ -244,6 +245,46 @@ def _run(case: SimpleNamespace, token_ids: tuple[int, ...], *, phase: str, path_
         if result.payload is not None:
             payload = result.payload
     return result.token_id
+
+
+def test_numpy_final_prefill_chunk_keeps_live_request_kv(tmp_path: Path) -> None:
+    case = _case(tmp_path, "qwen2")
+    request_id = "request:qwen2:chunk-kv"
+    path_id = "path:qwen2:chunk-kv"
+
+    _run(
+        case,
+        (1, 2),
+        phase="PREFILL_CHUNK",
+        path_id=path_id,
+        request_id=request_id,
+        token_index=0,
+        position=0,
+    )
+    first_token = _run(
+        case,
+        (3,),
+        phase="PREFILL_CHUNK",
+        path_id=path_id,
+        request_id=request_id,
+        token_index=1,
+        position=2,
+        emits_token=True,
+    )
+
+    assert first_token is not None
+    assert all(port.kv_snapshot()["active_state_count"] == 1 for port in case.ports)
+    _run(
+        case,
+        (first_token,),
+        phase="DECODE",
+        path_id=path_id,
+        request_id=request_id,
+        token_index=1,
+        position=3,
+        terminal=True,
+    )
+    assert all(port.kv_snapshot()["active_state_count"] == 0 for port in case.ports)
 
 
 def _reference(case: SimpleNamespace, tokens: tuple[int, ...]) -> int:

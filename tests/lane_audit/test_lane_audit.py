@@ -228,6 +228,89 @@ def test_clean_commits_report_target_and_pairwise_path_overlap(tmp_path: Path) -
     assert report["summary"]["pairwise_overlap_count"] == 1
 
 
+def test_declared_path_overlap_fails_before_branches_exist(tmp_path: Path) -> None:
+    repo, base = _init_repo(tmp_path)
+    manifest = _manifest(
+        base,
+        [
+            _lane(
+                name="lane-a",
+                branch="feature/a",
+                base=base,
+                allowed=["shared/**", "only-a.py"],
+            ),
+            _lane(
+                name="lane-b",
+                branch="feature/b",
+                base=base,
+                allowed=["shared/service.py", "only-b.py"],
+            ),
+        ],
+    )
+
+    report = audit_repository(repo, manifest)
+
+    assert report["ownership_safe_to_dispatch"] is False
+    assert report["pairwise_path_overlaps"] == []
+    assert report["pairwise_declared_path_overlaps"] == [
+        {
+            "lanes": ["lane-a", "lane-b"],
+            "patterns": [
+                {"left": "shared/**", "right": "shared/service.py"}
+            ],
+        }
+    ]
+    assert report["summary"]["pairwise_declared_overlap_count"] == 1
+
+
+def test_cli_exits_nonzero_for_declared_ownership_overlap(tmp_path: Path) -> None:
+    repo, base = _init_repo(tmp_path)
+    manifest_path = tmp_path / "overlap.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "protocol": MANIFEST_PROTOCOL,
+                "target_branch": "main",
+                "lanes": [
+                    _lane(
+                        name="lane-a",
+                        branch="feature/a",
+                        base=base,
+                        allowed=["shared/**"],
+                    ),
+                    _lane(
+                        name="lane-b",
+                        branch="feature/b",
+                        base=base,
+                        allowed=["shared/file.py"],
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mycelium_lane_audit",
+            "--repo-root",
+            str(repo),
+            "--manifest",
+            str(manifest_path),
+        ],
+        cwd=ROOT,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["ownership_safe_to_dispatch"] is False
+
+
 def test_lane_that_does_not_descend_from_declared_base_is_not_reviewable(
     tmp_path: Path,
 ) -> None:

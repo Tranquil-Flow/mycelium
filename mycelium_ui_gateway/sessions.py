@@ -73,7 +73,15 @@ class ProductSessionStore:
             if existing is not None:
                 return existing
             if len(self._sessions) >= self._max_sessions:
-                raise SessionCapacityError
+                # Evict the session whose nearest expiry is smallest. This keeps
+                # the live product healthy when the e2e or a recycled browser
+                # tab creates many short-lived sessions faster than the wall-
+                # clock TTL would retire them, without thrashing a stable
+                # session that polling SSE streams briefly close and reopen.
+                victims = sorted(
+                    self._sessions.values(), key=lambda s: s.expires_at_unix_ms
+                )
+                self._sessions.pop(victims[0].session_id, None)
             session_id = self._new_unique_token()
             csrf_token = self._token_source(32)
             session = ProductSession(

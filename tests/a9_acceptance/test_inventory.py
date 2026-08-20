@@ -13,9 +13,9 @@ SPECIFICATION = (
 )
 PROTOCOL = "mycelium.a9_acceptance_inventory.v1"
 CLAIM_BOUNDARY = (
-    "frozen authority, migration, qualification, and projection acceptance inputs "
-    "only; no schema, implementation, migration execution, device evidence, readiness, "
-    "or completion claim"
+    "frozen authority, migration, runtime efficiency, qualification, benchmark, and "
+    "projection acceptance inputs only; no schema, implementation, migration or "
+    "benchmark execution, device evidence, readiness, or completion claim"
 )
 REQUIRED_DECISIONS = {
     "separated_capability_authority",
@@ -24,6 +24,10 @@ REQUIRED_DECISIONS = {
     "native_synthetic_evidence_separation",
     "identity_preserving_v2_migration",
     "class_specific_qualification",
+    "accelerated_windows_backend",
+    "persistent_int8_execution",
+    "qualified_activation_precision",
+    "component_aware_performance_authority",
     "dynamic_ui_projection",
 }
 REQUIRED_CASES = {
@@ -36,6 +40,12 @@ REQUIRED_CASES = {
     "eligibility_carry_over_rejection",
     "v1_write_after_cutover",
     "role_specific_qualification_isolation",
+    "windows_accelerated_physical_positive",
+    "numpy_reference_not_performance_eligible",
+    "int8_decode_materialization_rejection",
+    "reduced_precision_activation_qualification",
+    "activation_codec_withdrawal",
+    "component_cost_and_single_request_floor",
     "dynamic_projection_withdrawal",
     "dynamic_unknown_registry_value",
 }
@@ -153,6 +163,10 @@ def test_a9_decisions_separate_authority_and_reject_eligibility_shortcuts() -> N
         "planner_placement",
         "artifact_grant",
         "deployment_qualification",
+        "runtime_efficiency_qualifier",
+        "activation_codec_qualifier",
+        "component_performance_observer",
+        "single_request_benchmark_authority",
     } <= authorities
     assert {
         "platform_transport_runtime_capability_separate",
@@ -162,6 +176,11 @@ def test_a9_decisions_separate_authority_and_reject_eligibility_shortcuts() -> N
         "every_role_re_evaluated_without_carry_over",
         "qualification_bound_to_exact_role",
         "all_workspaces_share_authority_generation",
+        "windows_acceleration_physically_observed",
+        "zero_warm_decode_full_weight_materialization",
+        "activation_dtype_exactly_negotiated",
+        "vocabulary_head_cost_explicit",
+        "single_request_floor_precedes_a10",
     } <= invariants
     assert {
         "compound_device_class",
@@ -171,6 +190,11 @@ def test_a9_decisions_separate_authority_and_reject_eligibility_shortcuts() -> N
         "eligibility_copy",
         "platform_wide_qualification",
         "hard_coded_device_inventory",
+        "numpy_as_accelerated_backend",
+        "per_token_full_weight_cast",
+        "silent_dtype_coercion",
+        "equal_layer_cost_assumption",
+        "aggregate_throughput_as_tpot",
     } <= shortcuts
 
 
@@ -202,6 +226,13 @@ def test_a9_acceptance_cases_cover_migration_fail_closed_and_dynamic_truth() -> 
         "unqualified_role_rejected",
         "all_workspaces_share_new_generation",
         "no_hard_coded_inventory_change_required",
+        "windows_acceleration_qualified",
+        "performance_role_rejected",
+        "materialization_detected",
+        "activation_codec_qualified",
+        "activation_bytes_reduced",
+        "vocabulary_head_cost_measured",
+        "single_request_floor_passed",
     } <= outcomes
     assert {
         "qualification_issued",
@@ -214,6 +245,11 @@ def test_a9_acceptance_cases_cover_migration_fail_closed_and_dynamic_truth() -> 
         "cross_role_grant",
         "browser_state_preserves_eligibility",
         "eligibility_inferred",
+        "numpy_as_acceleration",
+        "storage_quantization_promoted",
+        "silent_dtype_coercion",
+        "equal_layer_cost_used",
+        "aggregate_throughput_substituted",
     } <= side_effects
 
 
@@ -242,6 +278,14 @@ def test_a9_ui_inventory_is_dynamic_generation_bound_and_all_workspace_complete(
         "exclusion_reason",
         "migration_state",
         "supported_registries",
+        "backend_provider",
+        "provider_kernel_precision",
+        "activation_dtype_bytes",
+        "component_service_rates",
+        "component_cost_breakdown",
+        "vocabulary_head_cost",
+        "windows_acceleration_proof",
+        "single_request_performance_proof",
     } <= required
     assert {
         "live_authority_generation",
@@ -252,6 +296,8 @@ def test_a9_ui_inventory_is_dynamic_generation_bound_and_all_workspace_complete(
         "proofs_independently_fresh",
         "terminal_history_retained",
         "registry_updates_without_ui_inventory_edit",
+        "performance_withdrawal_live",
+        "component_cost_generation_bound",
     } <= dynamic
     assert {
         "browser_state_grants_role",
@@ -262,4 +308,6 @@ def test_a9_ui_inventory_is_dynamic_generation_bound_and_all_workspace_complete(
         "peer_qualification_is_route_ready",
         "private_device_detail",
         "operator_mapping_as_identity",
+        "correctness_implies_acceleration",
+        "equal_layer_cost_assumed",
     } <= forbidden

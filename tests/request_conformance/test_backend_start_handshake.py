@@ -98,8 +98,8 @@ def test_cancel_in_logical_start_to_run_entry_gap_is_sticky_and_resource_free():
         assert backend.run_lookup.wait(timeout=2)
 
         assert service.cancel(request_id) is True
-        events = drain(service, request_id)
         backend.release_lookup.set()
+        events = drain(service, request_id)
         assert backend.finished.wait(timeout=2)
 
         assert [event.kind for event in events] == ["accepted", "cancelled"]

@@ -301,6 +301,7 @@ describe('frozen product UI wire contracts', () => {
       protocol: 'mycelium.request_event.v1',
       request_id: requestId,
       sequence: 1,
+      publisher_generation: 1,
       type: 'token',
       token_index: 0,
       text: 'moon',
@@ -321,6 +322,7 @@ describe('frozen product UI wire contracts', () => {
         protocol: 'mycelium.request_event.v1',
         request_id: requestId,
         sequence: 2,
+        publisher_generation: 1,
         type: 'failed',
       },
     ]) {
@@ -334,6 +336,7 @@ describe('frozen product UI wire contracts', () => {
       protocol: 'mycelium.request_event.v2',
       request_id: requestId,
       sequence: 1,
+      publisher_generation: 1,
       type: 'lifecycle',
       phase: 'prefill',
     };

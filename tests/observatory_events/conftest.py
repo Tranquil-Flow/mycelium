@@ -38,6 +38,7 @@ def request_event_bytes(
         "protocol": protocol,
         "request_id": request_id,
         "sequence": sequence,
+        "publisher_generation": 1,
         "type": kind,
     }
     if kind == "token":

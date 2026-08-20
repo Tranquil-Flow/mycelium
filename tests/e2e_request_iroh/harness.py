@@ -744,8 +744,15 @@ def run_complete_request(native_binary: Path) -> CompleteRequestEvidence:
         request_id = accepted_body.get("request_id")
         if request_id != REQUEST_ID:
             raise AssertionError(f"unexpected_request_id:{request_id}")
+        session_token = accepted_body.get("session_token")
+        if not isinstance(session_token, str):
+            raise AssertionError("missing_session_token")
 
-        first = service.subscribe(request_id, last_event_id=None)
+        first = service.subscribe(
+            request_id,
+            last_event_id=None,
+            owner_token=session_token,
+        )
         try:
             accepted_event = first.next_event(timeout=5.0)
             if accepted_event is None or accepted_event.kind != "accepted":
@@ -761,7 +768,11 @@ def run_complete_request(native_binary: Path) -> CompleteRequestEvidence:
         finally:
             first.close()
 
-        resumed = service.subscribe(request_id, last_event_id=first_token.sequence)
+        resumed = service.subscribe(
+            request_id,
+            last_event_id=first_token.sequence,
+            owner_token=session_token,
+        )
         replayed: list[int] = []
         last_token_cursor = first_token.sequence
         try:
@@ -836,11 +847,14 @@ def run_cancellation_probe(native_binary: Path) -> CancellationEvidence:
         status, body = _post(app, submission)
         if status != 202 or body.get("request_id") != REQUEST_ID:
             raise AssertionError(f"cancellation_admission_failed:{status}:{body}")
+        session_token = body.get("session_token")
+        if not isinstance(session_token, str):
+            raise AssertionError("missing_session_token")
         if not topology.runtime_c.block_entered.wait(timeout=5.0):
             raise AssertionError("remote_decode_interlock_not_reached")
         record = topology.router_a.get_request(REQUEST_ID)
         path_id = record.manifest.path_id
-        if not service.cancel(REQUEST_ID):
+        if not service.cancel(REQUEST_ID, owner_token=session_token):
             raise AssertionError("gateway_cancellation_not_started")
         topology.runtime_c.block_release.set()
         _wait_worker_done(service, REQUEST_ID)

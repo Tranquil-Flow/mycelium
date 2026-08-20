@@ -53,6 +53,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--operator-plan", type=Path, required=True)
     parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        help="isolated transfer bundle to bind instead of mutating the plan's source",
+    )
     parser.add_argument("--path", action="append", required=True)
     parser.add_argument("--existing-path", action="append", default=[])
     parser.add_argument("--staging-root", action="append", default=[])
@@ -66,7 +71,12 @@ def main() -> int:
     source_root_value = controller.get("source_root")
     if not isinstance(source_root_value, str):
         raise ValueError("operator plan source root is invalid")
-    source_root = Path(source_root_value).resolve(strict=True)
+    source_root = (
+        args.source_root.resolve(strict=True)
+        if args.source_root is not None
+        else Path(source_root_value).resolve(strict=True)
+    )
+    controller["source_root"] = str(source_root)
     repo_root = args.repo_root.resolve(strict=True)
     transfer_manifest = controller.get("transfer_manifest")
     node_manifests = controller.get("node_transfer_manifests")

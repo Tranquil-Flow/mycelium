@@ -17,6 +17,12 @@ from mycelium_live.registry import (
 from mycelium_live.route import FakeLiveRoute
 
 
+def test_registry_advertises_delegated_a4_router_capabilities() -> None:
+    assert LiveDeploymentRegistry.requires_qualification_binding is True
+    assert LiveDeploymentRegistry.supports_workload_profiles is True
+    assert LiveDeploymentRegistry.supports_publisher_generation is True
+
+
 class _Codec:
     def __init__(self, prefix: str) -> None:
         self.prefix = prefix

@@ -13,8 +13,9 @@ from .manifest import AuditManifest, LaneSpec
 
 AUDIT_PROTOCOL = "mycelium.lane_topology_audit.v1"
 CLAIM_BOUNDARY = (
-    "read-only structural Git topology only; does not run or verify tests, semantics, "
-    "conflict resolution, physical qualification, route readiness, or release readiness"
+    "read-only declared ownership and structural Git topology only; does not run or "
+    "verify tests, semantics, conflict resolution, physical qualification, route "
+    "readiness, or release readiness"
 )
 
 
@@ -155,6 +156,38 @@ def _path_is_allowed(path: str, patterns: Iterable[str]) -> bool:
     return False
 
 
+def _fixed_pattern_prefix(pattern: str) -> str:
+    positions = [
+        position
+        for token in ("*", "?", "[")
+        if (position := pattern.find(token)) >= 0
+    ]
+    return pattern if not positions else pattern[: min(positions)]
+
+
+def _patterns_overlap(left: str, right: str) -> bool:
+    """Conservatively detect whether two ownership patterns can name one path."""
+
+    if left == right:
+        return True
+    left_literal = _fixed_pattern_prefix(left) == left
+    right_literal = _fixed_pattern_prefix(right) == right
+    if left_literal:
+        return _path_is_allowed(left, (right,))
+    if right_literal:
+        return _path_is_allowed(right, (left,))
+
+    left_prefix = _fixed_pattern_prefix(left).rstrip("/")
+    right_prefix = _fixed_pattern_prefix(right).rstrip("/")
+    if not left_prefix or not right_prefix:
+        return True
+    return (
+        left_prefix == right_prefix
+        or left_prefix.startswith(right_prefix + "/")
+        or right_prefix.startswith(left_prefix + "/")
+    )
+
+
 def _structural_state(
     *,
     branch_exists: bool,
@@ -270,6 +303,19 @@ def audit_repository(repo_root: str | Path, manifest: AuditManifest) -> dict[str
                 {"lanes": [left["name"], right["name"]], "paths": paths}
             )
 
+    pairwise_declared_path_overlaps: list[dict[str, Any]] = []
+    for left, right in combinations(manifest.lanes, 2):
+        patterns = [
+            {"left": left_pattern, "right": right_pattern}
+            for left_pattern in left.allowed_paths
+            for right_pattern in right.allowed_paths
+            if _patterns_overlap(left_pattern, right_pattern)
+        ]
+        if patterns:
+            pairwise_declared_path_overlaps.append(
+                {"lanes": [left.name, right.name], "patterns": patterns}
+            )
+
     report = {
         "protocol": AUDIT_PROTOCOL,
         "manifest_protocol": manifest.protocol,
@@ -277,6 +323,7 @@ def audit_repository(repo_root: str | Path, manifest: AuditManifest) -> dict[str
         "route_ready": False,
         "release_ready": False,
         "tests_evaluated": False,
+        "ownership_safe_to_dispatch": not pairwise_declared_path_overlaps,
         "target": {
             "branch": manifest.target_branch,
             "exists": target_head is not None,
@@ -284,6 +331,7 @@ def audit_repository(repo_root: str | Path, manifest: AuditManifest) -> dict[str
         },
         "lanes": lanes,
         "pairwise_path_overlaps": pairwise_path_overlaps,
+        "pairwise_declared_path_overlaps": pairwise_declared_path_overlaps,
         "summary": {
             "lane_count": len(lanes),
             "missing_branch_count": sum(
@@ -297,6 +345,9 @@ def audit_repository(repo_root: str | Path, manifest: AuditManifest) -> dict[str
                 bool(lane["target_path_overlap"]) for lane in lanes
             ),
             "pairwise_overlap_count": len(pairwise_path_overlaps),
+            "pairwise_declared_overlap_count": len(
+                pairwise_declared_path_overlaps
+            ),
             "structurally_reviewable_count": sum(
                 lane["structural_state"]
                 in {"structurally_reviewable", "reviewable_with_target_overlap"}

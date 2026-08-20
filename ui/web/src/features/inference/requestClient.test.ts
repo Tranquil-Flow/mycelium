@@ -162,21 +162,23 @@ describe('ProductInferenceClient', () => {
 
   it('decodes bounded SSE frames and resumes after the last fully applied event ID', async () => {
     const sse = [
-      'id: 0',
+      'id: 2:0',
       'event: accepted',
       `data: ${JSON.stringify({
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: 'request-a',
         sequence: 0,
+        publisher_generation: 2,
         type: 'accepted',
       })}`,
       '',
-      'id: 1',
+      'id: 2:1',
       'event: token',
       `data: ${JSON.stringify({
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: 'request-a',
         sequence: 1,
+        publisher_generation: 2,
         type: 'token',
         token_index: 0,
         text: 'synthetic fragment',
@@ -207,11 +209,13 @@ describe('ProductInferenceClient', () => {
       },
       0,
       (event) => events.push(event),
+      undefined,
+      1,
     );
 
     expect(events.map((event) => event.sequence)).toEqual([0, 1]);
     const [, streamInit] = vi.mocked(fetch).mock.calls[2];
-    expect(headers(streamInit).get('Last-Event-ID')).toBe('0');
+    expect(headers(streamInit).get('Last-Event-ID')).toBe('1:0');
     expect(headers(streamInit).get('Accept')).toBe('text/event-stream');
     expect(streamInit?.referrerPolicy).toBe('no-referrer');
   });

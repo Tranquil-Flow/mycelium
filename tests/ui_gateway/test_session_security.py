@@ -89,7 +89,7 @@ def test_bootstrap_creates_bounded_http_only_strict_session(app) -> None:
     assert "Bearer " not in serialized
 
 
-def test_bootstrap_reuses_valid_session_and_capacity_does_not_evict_live_session(upstreams, coordinator) -> None:
+def test_bootstrap_reuses_valid_session_and_capacity_evicts_oldest_session(upstreams, coordinator) -> None:
     observatory, request_gateway = upstreams
     now = [1_000.0]
     app = create_product_gateway_application(
@@ -106,18 +106,27 @@ def test_bootstrap_reuses_valid_session_and_capacity_does_not_evict_live_session
         "/api/v1/bootstrap",
         headers=[(b"cookie", cookie_pair(first))],
     )
-    denied = request(app, "/api/v1/bootstrap")
-
+    # Reusing the live session must not evict it, even when capacity is 1.
     assert reused.status == 200
     assert cookie_pair(reused) == cookie_pair(first)
     assert reused.json()["session"] == first.json()["session"]
-    assert denied.status == 503
-    assert denied.json()["code"] == "session_capacity"
 
-    now[0] += 11
-    replaced = request(app, "/api/v1/bootstrap")
-    assert replaced.status == 200
-    assert cookie_pair(replaced) != cookie_pair(first)
+    # A NEW bootstrap from a different client exceeds capacity; under pressure
+    # the oldest session is evicted so the live product can keep serving.
+    now[0] += 1
+    displaced = request(app, "/api/v1/bootstrap")
+    assert displaced.status == 200
+    assert cookie_pair(displaced) != cookie_pair(first)
+
+    # The previously-live session is no longer valid; bootstrap re-issues.
+    now[0] += 1
+    stale = request(
+        app,
+        "/api/v1/bootstrap",
+        headers=[(b"cookie", cookie_pair(first))],
+    )
+    assert stale.status == 200
+    assert cookie_pair(stale) != cookie_pair(first)
 
 
 def test_loopback_mode_rejects_remote_clients_and_host_rebinding(app) -> None:
@@ -264,3 +273,4 @@ def test_all_json_and_stream_responses_are_no_store(app, bootstrap) -> None:
         result = request(app, path, headers=headers)
         assert result.header("cache-control") == "no-store"
         assert result.header("access-control-allow-origin") is None
+

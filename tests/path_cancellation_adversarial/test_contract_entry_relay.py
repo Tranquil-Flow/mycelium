@@ -11,7 +11,12 @@ import time
 
 import pytest
 
-from mycelium_router.contracts import PathCancellation, RouterConfig
+from mycelium_router.contracts import (
+   PathCancellation,
+   PathHop,
+   PathManifest,
+   RouterConfig,
+)
 from mycelium_router.fakes import (
    FakeCapacityPort,
    FakeDeviceStateProvider,
@@ -19,6 +24,7 @@ from mycelium_router.fakes import (
    FakeTopologyProvider,
    FakeTransportPort,
    InMemoryClientSink,
+   InProcessMesh,
    ManualClock,
    SequenceIdSource,
 )
@@ -29,6 +35,60 @@ from test_router_inprocess_mesh import three_device_graph
 from test_router_policy import request_fixture, state_table
 
 from ._harness import build_mesh_case
+
+
+def test_entry_executes_exact_owner_locked_manifest_without_rebuilding_path() -> None:
+   graph = three_device_graph()
+   states = state_table(slow_b_bandwidth=True)
+   states["node-d"] = replace(states["node-a"], node_id="node-d")
+   mesh = InProcessMesh()
+   clock = ManualClock()
+   capacity = FakeCapacityPort()
+   routers = {}
+   for node_id in ("node-a", "node-c", "node-d"):
+      router = Router(
+         node_id=node_id,
+         topology=FakeTopologyProvider(graph),
+         device_states=FakeDeviceStateProvider(states),
+         capacity=capacity,
+         runtime=FakeRuntimePort(),
+         transport=mesh.transport_for(node_id),
+         clock=clock,
+         id_source=SequenceIdSource(),
+         config=RouterConfig(prefill_chunk_size_tokens=0),
+      )
+      mesh.register_router(node_id, router)
+      routers[node_id] = router
+   request = request_fixture(request_id="request-owner-locked", max_new_tokens=2)
+   manifest = PathManifest(
+      path_id="path-m16-owner-locked",
+      path_attempt=7,
+      request_id=request.request_id,
+      deployment_id=graph.deployment_id,
+      deployment_epoch=graph.deployment_epoch,
+      topology_version=graph.topology_version,
+      manifest_digest=graph.manifest_digest,
+      ordered_hops=(
+         PathHop("stage-000", "node-a-stage-000", "m16-reservation-0", 100.0, graph.deployment_epoch),
+         PathHop("stage-001", "node-c-stage-001", "m16-reservation-1", 100.0, graph.deployment_epoch),
+         PathHop("stage-002", "node-d-stage-002", "m16-reservation-2", 100.0, graph.deployment_epoch),
+      ),
+      loopback_edge_id="loop-2a-0a",
+   )
+   sink = InMemoryClientSink()
+
+   routers["node-a"].start_locked_distributed_prefill(
+      request,
+      sink,
+      manifest=manifest,
+      pinned_deployment=graph,
+   )
+
+   assert routers["node-a"].get_request(request.request_id).manifest == manifest
+   assert routers["node-a"].request_status(request.request_id) == "DECODING"
+   assert mesh.manifest_locks[-1][1].manifest == manifest
+   assert routers["node-a"].decode_one_distributed(request.request_id)
+   assert sink.token_ids
 
 
 def _mutate_wire_body(frame: bytes, field: str, value: object) -> bytes:

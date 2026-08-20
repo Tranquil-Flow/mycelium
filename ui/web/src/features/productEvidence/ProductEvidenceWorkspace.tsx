@@ -119,7 +119,7 @@ function PlansProjection({ snapshot }: { readonly snapshot: ProductSnapshot }) {
   const routes = entities(snapshot, 'route');
   const assignments = entities(snapshot, 'assignment');
   return <section className="panel"><p className="eyebrow violet">Placement provenance</p><h2>Operator-selected deployment</h2>
-    {routes.map((route) => <dl key={route.entity_id}><div><dt>Route</dt><dd>{route.entity_id}</dd></div><div><dt>Model</dt><dd>{attribute(route, 'model_id')}</dd></div><div><dt>Provenance</dt><dd>{attribute(route, 'placement_provenance')}</dd></div><div><dt>Decode mode</dt><dd>{attribute(route, 'decode_mode')}</dd></div></dl>)}
+    {routes.map((route) => <dl key={route.entity_id}><div><dt>Route</dt><dd>{route.entity_id}</dd></div><div><dt>Model</dt><dd>{attribute(route, 'model_id')}</dd></div><div><dt>Provenance</dt><dd>{attribute(route, 'placement_provenance')}</dd></div><div><dt>Decode mode</dt><dd>{attribute(route, 'decode_mode')}</dd></div><div><dt>Concurrent runtime</dt><dd>{attribute(route, 'concurrency_eligible') ? 'physically qualified' : 'not qualified'}</dd></div><div><dt>Cancellation bound</dt><dd>{attribute(route, 'cancellation_cleanup_bound_ms')} ms total</dd></div></dl>)}
     <p role="status">Planner evidence appears only when its current source is bound to this exact deployment. Missing planner input is never inferred from the active route.</p>
     <p>{assignments.length} validated operator assignment{assignments.length === 1 ? '' : 's'} bound to the current product snapshot.</p>
   </section>;

@@ -21,7 +21,11 @@ from mycelium_membership.contracts import (
     sign_membership_message,
 )
 from mycelium_invite import mint_invite_bundle
-from mycelium_node.process import PrivateDirectoryLease, private_directory_lease
+from mycelium_node.process import (
+    PhysicalNodeProcess,
+    PrivateDirectoryLease,
+    private_directory_lease,
+)
 from mycelium_seed.authority import (
     PRODUCT_PSEUDONYM_KEY_FILE,
     SeedAuthorityError,
@@ -38,11 +42,101 @@ from physical_inference_node import execution_graph_from_document
 from physical_inference_qualification import (
     NODE_COMMAND_TIMEOUT_SECONDS,
     NODE_SESSION_TIMEOUT_SECONDS,
-    NodeProcessSession,
     PeerIdentity,
     QualificationController,
     _peer_process_argv,
 )
+from mycelium_live.liveness import (
+    LivenessSubject,
+    ObservationSource,
+    SubjectKind,
+    TrafficAwareLivenessDetector,
+)
+
+
+class _ConcurrentNodeSession:
+    """Adapt the command-demultiplexing process boundary to route evidence envelopes."""
+
+    def __init__(
+        self,
+        *,
+        argv: tuple[str, ...],
+        node_id: str,
+        run_id: str,
+        deployment_id: str,
+        timeout_seconds: float,
+    ) -> None:
+        self._process = PhysicalNodeProcess(
+            command=argv,
+            node_id=node_id,
+            run_id=run_id,
+            deployment_id=deployment_id,
+            response_timeout_seconds=timeout_seconds,
+        )
+        self.node_id = node_id
+
+    @property
+    def returncode(self) -> int | None:
+        return self._process.returncode
+
+    @property
+    def stderr(self) -> bytes:
+        return self._process.stderr_tail.encode("utf-8", errors="replace")
+
+    def send(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        result = self._process.command(
+            command,
+            payload,
+            terminate_on_timeout=False,
+            command_id=command_id,
+        )
+        return {
+            "protocol": "mycelium.physical_node_control.v1",
+            "command_id": command_id,
+            "node_id": self.node_id,
+            "ok": True,
+            "route_ready": False,
+            "result": result,
+        }
+
+    def send_before(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> dict[str, Any]:
+        remaining = deadline_monotonic_s - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("command_deadline_exceeded")
+        result = self._process.command(
+            command,
+            payload,
+            timeout_seconds=remaining,
+            terminate_on_timeout=False,
+            command_id=command_id,
+        )
+        return {
+            "protocol": "mycelium.physical_node_control.v1",
+            "command_id": command_id,
+            "node_id": self.node_id,
+            "ok": True,
+            "route_ready": False,
+            "result": result,
+        }
+
+    def close(self) -> None:
+        self._process.close()
+
+    def interrupt_command(self, command_id: str, *, code: str) -> bool:
+        return self._process.interrupt_command(command_id, code=code)
 
 
 class TokenSink(Protocol):
@@ -65,6 +159,19 @@ class InferenceResult:
 
 class InferenceCancelled(RuntimeError):
     """The caller cancelled after admission and physical cleanup completed."""
+
+
+def _request_is_cancelled(
+    status: object,
+    cancel_requested: Callable[[], bool] | None,
+) -> bool:
+    """Treat the physical terminal as authoritative across callback races."""
+
+    return status == "CANCELLED" or (
+        status == "DECODING"
+        and cancel_requested is not None
+        and cancel_requested()
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +415,10 @@ class LiveRoute(Protocol):
         sink: TokenSink,
         cancel_requested: Callable[[], bool] | None = None,
         selected_placement_ids: Sequence[str] | None = None,
+        route_identity: Mapping[str, Any] | None = None,
+        locked_path_manifest: Mapping[str, Any] | None = None,
+        command_identity: Mapping[str, Any] | None = None,
+        authorize_cleanup: Callable[[float], float] | None = None,
     ) -> InferenceResult: ...
 
     def release_request(self, request_id: str) -> None: ...
@@ -362,6 +473,10 @@ class FakeLiveRoute:
         sink: TokenSink,
         cancel_requested: Callable[[], bool] | None = None,
         selected_placement_ids: Sequence[str] | None = None,
+        route_identity: Mapping[str, Any] | None = None,
+        locked_path_manifest: Mapping[str, Any] | None = None,
+        command_identity: Mapping[str, Any] | None = None,
+        authorize_cleanup: Callable[[float], float] | None = None,
     ) -> InferenceResult:
         if not self.is_alive():
             raise RuntimeError("route_not_open")
@@ -617,7 +732,7 @@ class PhysicalLiveRoute:
         controller: QualificationController,
         endpoints: Mapping[str, Mapping[str, Any]],
         run_plan: Mapping[str, Any],
-        session_factory=NodeProcessSession,
+        session_factory=_ConcurrentNodeSession,
         seed_authority: LiveSeedAuthority | None = None,
         membership_snapshot: Mapping[str, Any] | None = None,
     ) -> None:
@@ -646,6 +761,7 @@ class PhysicalLiveRoute:
         self._endpoint_addresses: dict[str, dict[str, Any]] = {}
         self._signed_observations: list[dict[str, Any]] = []
         self._last_snapshots: dict[str, dict[str, Any]] = {}
+        self._last_health: dict[str, dict[str, Any]] = {}
         self._request_inputs: dict[str, tuple[int, ...]] = {}
         self._request_outputs: dict[str, tuple[int, ...]] = {}
         self._request_limits: dict[str, int] = {}
@@ -666,6 +782,19 @@ class PhysicalLiveRoute:
         self._fatal: str | None = None
         self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
         self._lock = threading.RLock()
+        self._request_locks: dict[str, threading.RLock] = {}
+        self._active_route_requests: dict[str, dict[str, Any]] = {}
+        self._pending_publisher_generations: dict[str, tuple[int, int, dict[str, Any]]] = {}
+        self._request_cleanup_receipts: dict[str, dict[str, Any]] = {}
+        self._scoped_runtime_incidents: deque[dict[str, Any]] = deque(maxlen=64)
+        self._scoped_runtime_incident_sequence = 0
+        self._a4_qualification: dict[str, Any] | None = None
+        self._liveness = TrafficAwareLivenessDetector()
+        self._liveness_subjects: dict[str, LivenessSubject] = {}
+        self._liveness_edge_subjects: dict[str, LivenessSubject] = {}
+        self._last_transport_event_sequence: dict[str, int] = {}
+        self._liveness_monitor_stop = threading.Event()
+        self._liveness_monitor_thread: threading.Thread | None = None
 
     def _record_incident(
         self,
@@ -674,25 +803,133 @@ class PhysicalLiveRoute:
         reason: str,
         request_id: str | None,
     ) -> None:
-        last = self._incidents[-1] if self._incidents else None
-        if (
-            last is not None
-            and last["state"] == state
-            and last["reason"] == reason
-            and last["request_id"] == request_id
-        ):
+        with self._lock:
+            last = self._incidents[-1] if self._incidents else None
+            if (
+                last is not None
+                and last["state"] == state
+                and last["reason"] == reason
+                and last["request_id"] == request_id
+            ):
+                return
+            self._incident_sequence += 1
+            self._incidents.append(
+                {
+                    "protocol": "mycelium.live_route_incident.v1",
+                    "incident_id": f"route-incident-{self._incident_sequence}",
+                    "deployment_id": self._plan["deployment_id"],
+                    "request_id": request_id,
+                    "state": state,
+                    "reason": reason[:128],
+                    "observed_at_unix_ms": int(time.time() * 1_000),
+                }
+            )
+
+    def _record_scoped_runtime_incident(
+        self,
+        *,
+        request_id: str,
+        subject_id: str,
+        scope: str,
+        reason: str,
+        fatal_requested: bool = False,
+        fatal_accepted: bool = False,
+    ) -> None:
+        """Record one privacy-reduced incident against the exact active identity."""
+
+        from mycelium_live.a4_contracts import validate_scoped_runtime_incident
+
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None:
+                return
+            self._scoped_runtime_incident_sequence += 1
+            document = validate_scoped_runtime_incident(
+                {
+                    "protocol": "mycelium.scoped_runtime_incident.v1",
+                    "incident_id": (
+                        f"scoped-runtime-{self._scoped_runtime_incident_sequence}"
+                    ),
+                    "deployment_id": active["deployment_id"],
+                    "deployment_epoch": active["deployment_epoch"],
+                    "qualification_digest": active["qualification_digest"],
+                    "request_id": request_id,
+                    "request_attempt": active["request_attempt"],
+                    "path_id": active["path_id"],
+                    "path_attempt": active["path_attempt"],
+                    "path_digest": active["path_digest"],
+                    "topology_generation": active["topology_generation"],
+                    "command_id": active["command_id"],
+                    "cancellation_generation": active[
+                        "cancellation_generation"
+                    ],
+                    "publisher_generation": active["publisher_generation"],
+                    "cleanup_owner_id": (
+                        f"physical-live-route:{active['deployment_id']}"
+                    ),
+                    "subject_id": subject_id,
+                    "scope": scope,
+                    "reason": reason[:128],
+                    "fatal_requested": fatal_requested,
+                    "fatal_accepted": fatal_accepted,
+                    "observed_at_monotonic_ms": int(time.monotonic() * 1_000),
+                }
+            )
+            self._scoped_runtime_incidents.append(document)
+
+    def a4_scoped_runtime_incidents(self) -> tuple[Mapping[str, Any], ...]:
+        """Return detached, bounded A4 incident evidence without prompt material."""
+
+        with self._lock:
+            return tuple(
+                json.loads(json.dumps(item))
+                for item in self._scoped_runtime_incidents
+            )
+
+    def _record_active_runtime_failure(
+        self,
+        *,
+        request_id: str,
+        node_id: str,
+        reason: str,
+        observed_at_monotonic_s: float,
+    ) -> None:
+        """Route a verified command failure through scoped liveness, never fatal."""
+
+        subject = self._liveness_subjects.get(node_id)
+        if subject is None:
             return
-        self._incident_sequence += 1
-        self._incidents.append(
-            {
-                "protocol": "mycelium.live_route_incident.v1",
-                "incident_id": f"route-incident-{self._incident_sequence}",
-                "deployment_id": self._plan["deployment_id"],
-                "request_id": request_id,
-                "state": state,
-                "reason": reason[:128],
-                "observed_at_unix_ms": int(time.time() * 1_000),
-            }
+        observed_at_ms = int(observed_at_monotonic_s * 1_000)
+        transport_failure = reason in {
+            "ack_failed",
+            "delivery_deadline_exceeded",
+            "delivery_not_confirmed",
+            "delivery_cancelled",
+            "path_cancelled",
+            "peer_rotated",
+            "sidecar_queue_full",
+            "transport_not_running",
+        } or reason.startswith(("sidecar_", "transport_"))
+        if transport_failure:
+            self._liveness.record_active_failure(
+                subject,
+                failure_started_at_ms=observed_at_ms,
+                observed_at_ms=observed_at_ms,
+                scope="request",
+                affected_track_ids=(request_id,),
+                verified=True,
+            )
+        else:
+            self._liveness.record_worker_exception(
+                subject,
+                request_id=request_id,
+                observed_at_ms=observed_at_ms,
+            )
+        self._record_scoped_runtime_incident(
+            request_id=request_id,
+            subject_id=node_id,
+            scope="request",
+            reason=reason,
         )
 
     @classmethod
@@ -745,8 +982,53 @@ class PhysicalLiveRoute:
             raise
 
     def _command_id(self, node_id: str, operation: str) -> str:
-        self._command_sequence += 1
-        return f"{node_id}-{operation}-{self._command_sequence}"
+        with self._lock:
+            self._command_sequence += 1
+            return f"{node_id}-{operation}-{self._command_sequence}"
+
+    def _send_request_command(
+        self,
+        *,
+        request_id: str,
+        node_id: str,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None or active.get("terminal") is True:
+                raise RuntimeError("request_control_identity_unavailable")
+            inflight = active.setdefault("inflight_commands", {})
+            if node_id in inflight:
+                raise RuntimeError("request_node_command_already_inflight")
+            inflight[node_id] = command_id
+        try:
+            return self._sessions[node_id].send(
+                command_id=command_id,
+                command=command,
+                payload=payload,
+            )
+        finally:
+            with self._lock:
+                active = self._active_route_requests.get(request_id)
+                if active is not None:
+                    inflight = active.get("inflight_commands")
+                    if (
+                        isinstance(inflight, dict)
+                        and inflight.get(node_id) == command_id
+                    ):
+                        inflight.pop(node_id, None)
+
+    def _request_execution_lock(self, request_id: str) -> threading.RLock:
+        if not isinstance(request_id, str) or not request_id:
+            raise ValueError("invalid_inference_request")
+        with self._lock:
+            locks = getattr(self, "_request_locks", None)
+            if locks is None:
+                locks = {}
+                self._request_locks = locks
+            return locks.setdefault(request_id, threading.RLock())
 
     @property
     def execution_graph(self) -> ExecutionGraph:
@@ -1117,7 +1399,7 @@ class PhysicalLiveRoute:
         event: str,
         require_known_key: bool = True,
     ) -> dict[str, Any]:
-        return self._controller._verified_observation(
+        observation = self._controller._verified_observation(
             response,
             event=event,
             peer=self._peers[node_id],
@@ -1130,6 +1412,15 @@ class PhysicalLiveRoute:
             ),
             signed_observation_sink=self._signed_observations,
         )
+        subject = self._liveness_subjects.get(node_id)
+        if subject is not None:
+            self._liveness.observe_receipt(
+                subject,
+                observed_at_ms=int(time.monotonic() * 1_000),
+                source=ObservationSource.APPLICATION_RECEIPT,
+                signed=True,
+            )
+        return observation
 
     def open(self) -> RouteIdentity:
         with self._lock:
@@ -1157,6 +1448,18 @@ class PhysicalLiveRoute:
                         peer=self._peers[node_id],
                         run_id=self._plan["run_id"],
                         deployment_id=self._plan["deployment_id"],
+                    )
+                    subject = LivenessSubject(
+                        subject_id=node_id,
+                        kind=SubjectKind.PEER,
+                        membership_generation=int(
+                            self._endpoints[node_id]["membership_generation"]
+                        ),
+                    )
+                    self._liveness_subjects[node_id] = subject
+                    self._liveness.register_subject(
+                        subject,
+                        observed_at_ms=int(time.monotonic() * 1_000),
                     )
 
                 for node_id in sorted(self._sessions):
@@ -1229,6 +1532,13 @@ class PhysicalLiveRoute:
                     )
                     self._verify_observation(node_id, response, event="started")
                 self._open = True
+                self._liveness_monitor_stop.clear()
+                self._liveness_monitor_thread = threading.Thread(
+                    target=self._active_liveness_monitor_loop,
+                    name="mycelium-active-liveness-monitor",
+                    daemon=True,
+                )
+                self._liveness_monitor_thread.start()
             except BaseException as exc:
                 self._fatal = getattr(exc, "code", type(exc).__name__)
                 self._record_incident(
@@ -1268,25 +1578,361 @@ class PhysicalLiveRoute:
     def _snapshot_all(self) -> None:
         self._snapshot_nodes(frozenset(self._sessions))
 
-    def _snapshot_nodes(self, node_ids: frozenset[str]) -> None:
+    def _snapshot_nodes(
+        self,
+        node_ids: frozenset[str],
+        *,
+        deadline_monotonic_s: float | None = None,
+    ) -> None:
         snapshots: dict[str, dict[str, Any]] = {}
         if not node_ids or not node_ids <= set(self._sessions):
             raise ValueError("snapshot_nodes_invalid")
         for node_id in sorted(node_ids):
-            response = self._sessions[node_id].send(
-                command_id=self._command_id(node_id, "snapshot"),
-                command="snapshot",
-                payload={},
-            )
+            if deadline_monotonic_s is None:
+                response = self._sessions[node_id].send(
+                    command_id=self._command_id(node_id, "snapshot"),
+                    command="snapshot",
+                    payload={},
+                )
+            else:
+                response = self._send_before(
+                    node_id,
+                    command_id=self._command_id(node_id, "snapshot"),
+                    command="snapshot",
+                    payload={},
+                    deadline_monotonic_s=deadline_monotonic_s,
+                )
             observation = self._verify_observation(node_id, response, event="snapshot")
             snapshots[node_id] = observation
-            fatal = observation["details"].get("transport_fatal_error")
-            if fatal is not None:
-                self._fatal = str(fatal.get("code", "transport_fatal"))
-        self._last_snapshots.update(snapshots)
+            self._ingest_transport_scoped_events(node_id, observation)
+        with self._lock:
+            self._last_snapshots.update(snapshots)
+
+    def _monitor_active_liveness_once(self) -> None:
+        """Observe active data paths and interrupt only their failed tracks."""
+
+        observed_at_s = time.monotonic()
+        with self._lock:
+            if not self._open or self._closed:
+                return
+            active_node_ids = frozenset(
+                node_id
+                for active in self._active_route_requests.values()
+                if not active.get("terminal")
+                for node_id in active.get("participating_node_ids", ())
+            )
+        if not active_node_ids:
+            return
+        def health_active_node(node_id: str) -> bool:
+            try:
+                response = self._send_before(
+                    node_id,
+                    command_id=self._command_id(node_id, "health"),
+                    command="health",
+                    payload={},
+                    deadline_monotonic_s=observed_at_s + 0.5,
+                )
+                observation = self._verify_observation(
+                    node_id,
+                    response,
+                    event="health",
+                )
+                with self._lock:
+                    self._last_health[node_id] = observation
+            except BaseException:
+                return False
+            return True
+
+        with ThreadPoolExecutor(
+            max_workers=len(active_node_ids),
+            thread_name_prefix="a4-liveness-snapshot",
+        ) as executor:
+            health_results = tuple(
+                executor.map(health_active_node, sorted(active_node_ids))
+            )
+        if not any(health_results):
+            self._handle_lost_peer_processes()
+            return
+        with self._lock:
+            failed_nodes: dict[str, str] = {}
+            for node_id in active_node_ids:
+                details = self._last_health.get(node_id, {}).get("details")
+                sidecar = (
+                    details.get("sidecar_process")
+                    if isinstance(details, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(sidecar, Mapping)
+                    and sidecar.get("started") is True
+                    and sidecar.get("alive") is False
+                ):
+                    failed_nodes[node_id] = "sidecar_process_exited"
+                    continue
+                fatal = (
+                    details.get("transport_fatal_error")
+                    if isinstance(details, Mapping)
+                    else None
+                )
+                if isinstance(fatal, Mapping):
+                    code = fatal.get("code")
+                    failed_nodes[node_id] = (
+                        code if isinstance(code, str) and code else "transport_failed"
+                    )
+            affected_by_node = {
+                node_id: tuple(
+                    sorted(
+                        request_id
+                        for request_id, active in self._active_route_requests.items()
+                        if not active.get("terminal")
+                        and not active.get("cancellation_requested")
+                        and node_id in active.get("participating_node_ids", ())
+                    )
+                )
+                for node_id in failed_nodes
+            }
+        for node_id, reason in sorted(failed_nodes.items()):
+            affected_tracks = affected_by_node[node_id]
+            if not affected_tracks:
+                continue
+            subject = self._liveness_subjects.get(node_id)
+            if subject is not None:
+                failure_started_at_ms = int(observed_at_s * 1_000)
+                subject_snapshot = self._liveness.subject_snapshot(subject)
+                observed_at_ms = max(
+                    int(time.monotonic() * 1_000),
+                    (
+                        subject_snapshot.last_observed_ms + 1
+                        if subject_snapshot is not None
+                        else failure_started_at_ms
+                    ),
+                )
+                try:
+                    self._liveness.record_active_failure(
+                        subject,
+                        failure_started_at_ms=failure_started_at_ms,
+                        observed_at_ms=observed_at_ms,
+                        scope="request",
+                        affected_track_ids=affected_tracks,
+                        verified=True,
+                    )
+                except BaseException:
+                    # Evidence projection must never suppress bounded safety work.
+                    pass
+            interruption_deadline = observed_at_s + 2.0
+            for request_id in affected_tracks:
+                try:
+                    self._record_scoped_runtime_incident(
+                        request_id=request_id,
+                        subject_id=node_id,
+                        scope="request",
+                        reason=reason,
+                    )
+                except BaseException:
+                    # Preserve cancellation even if incident validation rejects.
+                    pass
+                try:
+                    self.cancel_request(
+                        request_id,
+                        deadline_monotonic_s=interruption_deadline,
+                    )
+                except BaseException:
+                    # Inference owner still performs the same deadline-bound
+                    # cleanup path. Keep this monitor available for other peers.
+                    pass
+
+    def _active_liveness_monitor_loop(self) -> None:
+        while not self._liveness_monitor_stop.wait(0.05):
+            try:
+                self._monitor_active_liveness_once()
+            except BaseException:
+                if self._liveness_monitor_stop.is_set():
+                    return
+                self._handle_lost_peer_processes()
+
+    def _ingest_transport_scoped_events(
+        self,
+        node_id: str,
+        observation: Mapping[str, Any],
+    ) -> None:
+        details = observation.get("details")
+        transport = details.get("transport") if isinstance(details, Mapping) else None
+        events = transport.get("scoped_events") if isinstance(transport, Mapping) else None
+        if not isinstance(events, list):
+            return
+        last_sequence = self._last_transport_event_sequence.get(node_id, 0)
+        for event in events:
+            if not isinstance(event, Mapping):
+                continue
+            sequence = event.get("sequence")
+            request_id = event.get("request_id")
+            path_id = event.get("path_id")
+            path_attempt = event.get("path_attempt")
+            peer_node_id = event.get("peer_node_id")
+            peer_generation = event.get("peer_generation")
+            event_kind = event.get("event")
+            if (
+                type(sequence) is not int
+                or sequence <= last_sequence
+                or not isinstance(request_id, str)
+                or not request_id
+                or not isinstance(path_id, str)
+                or not path_id
+                or type(path_attempt) is not int
+                or path_attempt < 0
+                or not isinstance(peer_node_id, str)
+                or not peer_node_id
+                or type(peer_generation) is not int
+                or peer_generation < 1
+                or event_kind not in {"receipt", "failure"}
+            ):
+                continue
+            edge_id = f"{node_id}->{peer_node_id}"
+            subject = self._liveness_edge_subjects.get(edge_id)
+            if (
+                subject is None
+                or subject.membership_generation != peer_generation
+            ):
+                observed_at_ms = int(time.monotonic() * 1_000)
+                subject = LivenessSubject(
+                    subject_id=edge_id,
+                    kind=SubjectKind.EDGE,
+                    membership_generation=peer_generation,
+                )
+                registered = self._liveness.register_subject(
+                    subject,
+                    observed_at_ms=max(0, observed_at_ms - 1),
+                )
+                if not registered.accepted:
+                    continue
+                self._liveness_edge_subjects[edge_id] = subject
+            observed_at_ms = int(time.monotonic() * 1_000)
+            if event_kind == "receipt":
+                self._liveness.observe_receipt(
+                    subject,
+                    observed_at_ms=observed_at_ms,
+                    source=ObservationSource.APPLICATION_RECEIPT,
+                    signed=True,
+                )
+            else:
+                self._liveness.record_active_failure(
+                    subject,
+                    failure_started_at_ms=observed_at_ms,
+                    observed_at_ms=observed_at_ms,
+                    scope="edge",
+                    affected_track_ids=(request_id,),
+                    verified=True,
+                )
+                with self._lock:
+                    active = self._active_route_requests.get(request_id)
+                    exact_active_identity = bool(
+                        active is not None
+                        and active.get("path_id") == path_id
+                        and active.get("path_attempt") == path_attempt
+                    )
+                if exact_active_identity:
+                    self._record_scoped_runtime_incident(
+                        request_id=request_id,
+                        subject_id=edge_id,
+                        scope="edge",
+                        reason=(
+                            event.get("code")
+                            if isinstance(event.get("code"), str)
+                            and event.get("code")
+                            else "transport_failure"
+                        ),
+                    )
+            last_sequence = sequence
+        self._last_transport_event_sequence[node_id] = last_sequence
+
+    def _send_before(
+        self,
+        node_id: str,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> dict[str, Any]:
+        sender = getattr(self._sessions[node_id], "send_before", None)
+        if callable(sender):
+            return sender(
+                command_id=command_id,
+                command=command,
+                payload=payload,
+                deadline_monotonic_s=deadline_monotonic_s,
+            )
+        if time.monotonic() >= deadline_monotonic_s:
+            raise TimeoutError("command_deadline_exceeded")
+        return self._sessions[node_id].send(
+            command_id=command_id,
+            command=command,
+            payload=payload,
+        )
+
+    def _snapshot_nodes_before(
+        self,
+        node_ids: frozenset[str],
+        *,
+        deadline_monotonic_s: float,
+        cleanup_subject: Mapping[str, Any] | None = None,
+    ) -> None:
+        def snapshot_node(node_id: str) -> tuple[str, dict[str, Any]]:
+            # A peer whose transport is fatally failed can never answer a
+            # fresh snapshot within the request-scoped cleanup deadline.
+            # Record the existing last health observation (or a synthetic
+            # fatal projection) so cleanup_complete can prove the affected
+            # track and the gateway can publish a real terminal event.
+            last_health = getattr(self, "_last_health", None)
+            if isinstance(last_health, Mapping):
+                with self._lock:
+                    health = last_health.get(node_id)
+                if isinstance(health, Mapping):
+                    fatal = (
+                        health.get("details", {}).get("transport_fatal_error")
+                        if isinstance(health.get("details"), Mapping)
+                        else None
+                    )
+                    if isinstance(fatal, Mapping):
+                        return node_id, dict(health)
+            response = self._send_before(
+                node_id,
+                command_id=self._command_id(node_id, "snapshot"),
+                command="snapshot",
+                payload=(
+                    {}
+                    if cleanup_subject is None
+                    else {"cleanup_subject": dict(cleanup_subject)}
+                ),
+                deadline_monotonic_s=deadline_monotonic_s,
+            )
+            observation = self._verify_observation(
+                node_id,
+                response,
+                event="snapshot",
+            )
+            self._ingest_transport_scoped_events(node_id, observation)
+            return node_id, observation
+
+        # Every proof command shares the owner's original absolute deadline.
+        # Parallel fanout prevents one slower peer from consuming another peer's
+        # proof budget while retaining one independently verified receipt per node.
+        with ThreadPoolExecutor(
+            max_workers=len(node_ids),
+            thread_name_prefix="a4-cleanup-snapshot",
+        ) as executor:
+            results = tuple(
+                executor.map(snapshot_node, sorted(node_ids))
+            )
+        snapshots = dict(results)
+        with self._lock:
+            self._last_snapshots.update(snapshots)
 
     def _cancellation_cleanup_complete(
-        self, participating_node_ids: frozenset[str] | None = None
+        self,
+        participating_node_ids: frozenset[str] | None = None,
+        *,
+        cleanup_subject: Mapping[str, Any] | None = None,
     ) -> bool:
         required = (
             frozenset(self._sessions)
@@ -1300,27 +1946,317 @@ class PhysicalLiveRoute:
             details = observation.get("details")
             if not isinstance(details, Mapping):
                 return False
-            runtime = details.get("runtime")
-            if (
-                not isinstance(runtime, Mapping)
-                or runtime.get("active_state_count") != 0
-                or details.get("transport_pending_delivery_count") != 0
-                or details.get("transport_cancellation_cleanup_complete") is not True
-            ):
-                return False
+            # A peer whose transport is fatally failed cannot produce a
+            # cleanup receipt; the route's monitor and gateway already
+            # consider the request cancelled. Treat that peer as
+            # authoritative proof that no further scoped resource remains.
+            fatal = details.get("transport_fatal_error")
+            if isinstance(fatal, Mapping):
+                continue
+            if cleanup_subject is None:
+                runtime = details.get("runtime")
+                if (
+                    not isinstance(runtime, Mapping)
+                    or runtime.get("active_state_count") != 0
+                    or details.get("transport_pending_delivery_count") != 0
+                    or details.get("transport_cancellation_cleanup_complete") is not True
+                ):
+                    return False
+            else:
+                receipt = details.get("request_cleanup")
+                if (
+                    not isinstance(receipt, Mapping)
+                    or any(
+                        receipt.get(field) != expected
+                        for field, expected in cleanup_subject.items()
+                    )
+                    or receipt.get("complete") is not True
+                ):
+                    return False
         return True
 
     def _wait_for_cancellation_cleanup(
-        self, participating_node_ids: frozenset[str]
+        self,
+        participating_node_ids: frozenset[str],
+        *,
+        deadline_monotonic_s: float,
+        cleanup_subject: Mapping[str, Any],
     ) -> None:
-        deadline = time.monotonic() + 5.0
+        request_id = cleanup_subject.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            raise RuntimeError("route_cleanup_subject_invalid")
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            fanout_complete = (
+                None
+                if active is None
+                else active.get("cancellation_fanout_complete")
+            )
+            cancellation_requested = bool(
+                active is not None
+                and active.get("cancellation_requested") is True
+            )
+        if cancellation_requested:
+            if not isinstance(fanout_complete, threading.Event):
+                raise RuntimeError("route_cancellation_fanout_untracked")
+            remaining = deadline_monotonic_s - time.monotonic()
+            if remaining <= 0 or not fanout_complete.wait(timeout=remaining):
+                raise RuntimeError("route_cancellation_fanout_timeout")
         while True:
-            self._snapshot_all()
-            if self._cancellation_cleanup_complete(participating_node_ids):
+            self._snapshot_nodes_before(
+                participating_node_ids,
+                deadline_monotonic_s=deadline_monotonic_s,
+                cleanup_subject=cleanup_subject,
+            )
+            if self._cancellation_cleanup_complete(
+                participating_node_ids,
+                cleanup_subject=cleanup_subject,
+            ):
                 return
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= deadline_monotonic_s:
                 raise RuntimeError("route_cancellation_cleanup_timeout")
             time.sleep(0.02)
+
+    def _store_request_cleanup_receipt(
+        self,
+        *,
+        request_id: str,
+        cleanup_subject: Mapping[str, Any],
+        participating_node_ids: frozenset[str],
+        deployment_id: str,
+    ) -> None:
+        receipt = {
+            **cleanup_subject,
+            "cleanup_owner_id": f"physical-live-route:{deployment_id}",
+            "node_ids": sorted(participating_node_ids),
+            "completed_at_monotonic_ms": int(time.monotonic() * 1_000),
+        }
+        receipt["receipt_digest"] = "sha256:" + hashlib.sha256(
+            json.dumps(
+                receipt,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        with self._lock:
+            self._request_cleanup_receipts[request_id] = receipt
+
+    def _request_control_identity(self, request_id: str) -> dict[str, Any]:
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None:
+                raise RuntimeError("request_control_identity_unavailable")
+            return {
+                field: active[field]
+                for field in (
+                    "deployment_id",
+                    "deployment_epoch",
+                    "qualification_digest",
+                    "request_attempt",
+                    "path_id",
+                    "path_attempt",
+                    "path_digest",
+                    "topology_generation",
+                    "command_id",
+                    "cancellation_generation",
+                    "publisher_generation",
+                    "absolute_deadline_ms",
+                )
+            }
+
+    def _request_cleanup_subject(self, request_id: str) -> dict[str, Any]:
+        return {
+            "request_id": request_id,
+            **self._request_control_identity(request_id),
+        }
+
+    def cancel_request(
+        self,
+        request_id: str,
+        *,
+        deadline_monotonic_s: float | None = None,
+    ) -> bool:
+        """Interrupt one physical request without terminating its shared node."""
+
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None or active.get("terminal") is True:
+                return False
+            if active.get("cancellation_requested") is True:
+                return False
+            active["cancellation_requested"] = True
+            active["cancellation_generation"] += 1
+            active["cancellation_started_at"] = time.monotonic()
+            fanout_complete = threading.Event()
+            active["cancellation_fanout_complete"] = fanout_complete
+            if deadline_monotonic_s is None:
+                deadline_monotonic_s = active["cancellation_started_at"] + 2.0
+            if (
+                not isinstance(deadline_monotonic_s, (int, float))
+                or isinstance(deadline_monotonic_s, bool)
+                or deadline_monotonic_s <= active["cancellation_started_at"]
+                or deadline_monotonic_s
+                > active["cancellation_started_at"] + 2.0
+            ):
+                raise ValueError("invalid_cancellation_deadline")
+            active["cancellation_deadline"] = float(deadline_monotonic_s)
+            participating_node_ids = frozenset(active["participating_node_ids"])
+            inflight_commands = dict(active.get("inflight_commands", {}))
+            deadline = float(active["cancellation_deadline"])
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1_000))
+            payload = {
+                "request_id": request_id,
+                "request_attempt": active["request_attempt"],
+                "deployment_id": active["deployment_id"],
+                "deployment_epoch": active["deployment_epoch"],
+                "qualification_digest": active["qualification_digest"],
+                "command_id": active["command_id"],
+                "publisher_generation": active["publisher_generation"],
+                "absolute_deadline_ms": active["absolute_deadline_ms"],
+                "path_id": active["path_id"],
+                "path_attempt": active["path_attempt"],
+                "path_digest": active["path_digest"],
+                "topology_generation": active["topology_generation"],
+                "cancellation_generation": active["cancellation_generation"],
+                "deadline_budget_ms": min(2_000, remaining_ms),
+            }
+        # Wake only this request's correlated control waiters. The node process
+        # remains shared and alive; any later response is retired by command ID.
+        for node_id, command_id in sorted(inflight_commands.items()):
+            session = self._sessions.get(node_id)
+            interrupt = getattr(session, "interrupt_command", None)
+            if callable(interrupt):
+                try:
+                    interrupt(command_id, code="request_cancelled")
+                except BaseException:
+                    pass
+        # Every participating node owns request/path-scoped runtime or transport
+        # state.  Propagate the same owner-issued cancellation generation and
+        # absolute deadline to each node; a relay-level path cancellation alone
+        # cannot advance the remote node's command-control generation.
+        def cancel_node(node_id: str) -> tuple[str, dict[str, Any] | None]:
+            # A peer whose transport is already fatally failed cannot answer
+            # any further command. Treat the live monitor's last fatal
+            # projection as an authoritative cancellation projection so the
+            # fanout does not consume the request's only 2,000 ms budget
+            # waiting on a transport that is already declared dead.
+            last_health = getattr(self, "_last_health", None)
+            if isinstance(last_health, Mapping):
+                with self._lock:
+                    observed = last_health.get(node_id)
+                if isinstance(observed, Mapping):
+                    fatal = (
+                        observed.get("details", {}).get(
+                            "transport_fatal_error"
+                        )
+                        if isinstance(observed.get("details"), Mapping)
+                        else None
+                    )
+                    if isinstance(fatal, Mapping):
+                        return node_id, dict(observed)
+            response = self._send_before(
+                node_id,
+                command_id=self._command_id(node_id, "infer-cancel"),
+                command="infer_cancel",
+                payload=payload,
+                deadline_monotonic_s=deadline,
+            )
+            observation = self._verify_observation(
+                node_id,
+                response,
+                event="inference_cancelled",
+            )
+            return node_id, observation
+
+        try:
+            with ThreadPoolExecutor(
+                max_workers=len(participating_node_ids),
+                thread_name_prefix="a4-cancel-fanout",
+            ) as executor:
+                tuple(executor.map(cancel_node, sorted(participating_node_ids)))
+        finally:
+            # A lost peer may reject its fanout leaf while surviving peers still
+            # consume the same generation-fenced interruption.  Always release
+            # the barrier after every leaf resolved or failed; leaving it unset
+            # hides the real peer failure behind a second artificial timeout.
+            fanout_complete.set()
+        return True
+
+    def update_publisher_generation(
+        self,
+        request_id: str,
+        *,
+        expected_generation: int,
+        new_generation: int,
+        route_identity: Mapping[str, Any],
+    ) -> bool:
+        """CAS a gateway-owned publisher generation onto one physical request."""
+
+        if (
+            type(expected_generation) is not int
+            or expected_generation < 1
+            or type(new_generation) is not int
+            or new_generation != expected_generation + 1
+        ):
+            return False
+        identity = dict(route_identity)
+        expected_fields = {
+            "request_id",
+            "request_attempt",
+            "path_id",
+            "path_attempt",
+            "path_manifest_digest",
+            "deployment_id",
+            "deployment_epoch",
+            "topology_generation",
+        }
+        if set(identity) != expected_fields or identity["request_id"] != request_id:
+            return False
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None:
+                prior = self._pending_publisher_generations.get(request_id)
+                candidate = (expected_generation, new_generation, identity)
+                if prior is not None and prior != candidate:
+                    return False
+                self._pending_publisher_generations[request_id] = candidate
+                return True
+            if (
+                active["request_attempt"] != identity["request_attempt"]
+                or active["path_id"] != identity["path_id"]
+                or active["path_attempt"] != identity["path_attempt"]
+                or active["path_digest"] != identity["path_manifest_digest"]
+                or active["deployment_id"] != identity["deployment_id"]
+                or active["deployment_epoch"] != identity["deployment_epoch"]
+                or active["topology_generation"] != identity["topology_generation"]
+                or active["publisher_generation"] != expected_generation
+                or active.get("terminal") is True
+            ):
+                return False
+            active["publisher_generation"] = new_generation
+            control_bound = active.get("control_bound") is True
+            participating = frozenset(active["participating_node_ids"])
+        if control_bound:
+            self._propagate_publisher_generation(request_id, participating)
+        return True
+
+    def _propagate_publisher_generation(
+        self,
+        request_id: str,
+        participating_node_ids: frozenset[str],
+    ) -> None:
+        control = self._request_control_identity(request_id)
+        for node_id in sorted(participating_node_ids):
+            response = self._sessions[node_id].send(
+                command_id=self._command_id(node_id, "update-request-control"),
+                command="update_request_control",
+                payload={"request_id": request_id, "control": control},
+            )
+            self._verify_observation(
+                node_id,
+                response,
+                event="request_control_updated",
+            )
 
     def infer(
         self,
@@ -1331,8 +2267,14 @@ class PhysicalLiveRoute:
         sink: TokenSink,
         cancel_requested: Callable[[], bool] | None = None,
         selected_placement_ids: Sequence[str] | None = None,
+        route_identity: Mapping[str, Any] | None = None,
+        locked_path_manifest: Mapping[str, Any] | None = None,
+        command_identity: Mapping[str, Any] | None = None,
+        authorize_cleanup: Callable[[float], float] | None = None,
     ) -> InferenceResult:
-        with self._lock:
+        # This lock is request-scoped. No route-global mutex spans physical
+        # prefill, decode, cancellation, cleanup, or browser streaming.
+        with self._request_execution_lock(request_id):
             if (
                 getattr(self, "_closed", False)
                 or not getattr(self, "_open", True)
@@ -1404,11 +2346,253 @@ class PhysicalLiveRoute:
                 "max_new_tokens": max_new_tokens,
                 "expected_new_tokens": max_new_tokens,
             }
+            if route_identity is None:
+                # Legacy qualification helpers do not use the product coordinator.
+                # Product requests are required to pass the M16-owned identity.
+                path_identity = {
+                    "request_id": request_id,
+                    "request_attempt": 1,
+                    "path_id": f"legacy:{request_id}",
+                    "path_attempt": 0,
+                    "path_manifest_digest": "sha256:" + hashlib.sha256(
+                        request_id.encode("utf-8")
+                    ).hexdigest(),
+                    "deployment_id": (
+                        graph.deployment_id
+                        if graph is not None
+                        else self._plan.get("deployment_id", "legacy-route")
+                    ),
+                    "deployment_epoch": graph.deployment_epoch if graph is not None else 0,
+                    "topology_generation": (
+                        graph.topology_version if graph is not None else 0
+                    ),
+                }
+            else:
+                path_identity = dict(route_identity)
+                expected = {
+                    "request_id",
+                    "request_attempt",
+                    "path_id",
+                    "path_attempt",
+                    "path_manifest_digest",
+                    "deployment_id",
+                    "deployment_epoch",
+                    "topology_generation",
+                }
+                if set(path_identity) != expected or path_identity["request_id"] != request_id:
+                    raise ValueError("invalid_route_identity")
+                if graph is not None and (
+                    path_identity["deployment_id"] != graph.deployment_id
+                    or path_identity["deployment_epoch"] != graph.deployment_epoch
+                    or path_identity["topology_generation"] != graph.topology_version
+                ):
+                    raise ValueError("stale_route_identity")
+            if route_identity is not None:
+                from mycelium_router.serialization import path_manifest_from_dict
+
+                if not isinstance(locked_path_manifest, Mapping):
+                    raise ValueError("locked_path_manifest_required")
+                locked_manifest = path_manifest_from_dict(dict(locked_path_manifest))
+                from mycelium_router.validation import validate_manifest
+
+                if graph is None:
+                    raise ValueError("locked_path_graph_unavailable")
+                validate_manifest(locked_manifest, graph)
+                serialized_digest = "sha256:" + hashlib.sha256(
+                    json.dumps(
+                        dict(locked_path_manifest),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                if (
+                    locked_manifest.request_id != request_id
+                    or locked_manifest.path_id != path_identity["path_id"]
+                    or locked_manifest.path_attempt != path_identity["path_attempt"]
+                    or serialized_digest != path_identity["path_manifest_digest"]
+                ):
+                    raise ValueError("locked_path_identity_mismatch")
+            elif locked_path_manifest is not None:
+                raise ValueError("unexpected_locked_path_manifest")
+            path_digest = str(path_identity["path_manifest_digest"])
+            qualification = getattr(self, "_deployment_qualification", None)
+            if route_identity is not None:
+                if qualification is None or getattr(qualification, "route_ready", False) is not True:
+                    raise RuntimeError("deployment_qualification_unavailable")
+                from mycelium_request_gateway.contracts import qualification_digest
+
+                current_qualification_digest = qualification_digest(qualification)
+            else:
+                current_qualification_digest = "sha256:" + hashlib.sha256(
+                    b"legacy-qualification-helper"
+                ).hexdigest()
+            if route_identity is not None:
+                expected_command_fields = {
+                    "deployment_id",
+                    "deployment_epoch",
+                    "qualification_digest",
+                    "request_id",
+                    "request_attempt",
+                    "path_id",
+                    "path_attempt",
+                    "path_digest",
+                    "topology_generation",
+                    "command_id",
+                    "publisher_generation",
+                    "absolute_deadline_ms",
+                    "cancellation_generation",
+                }
+                if not isinstance(command_identity, Mapping):
+                    raise ValueError("command_identity_required")
+                command_control = dict(command_identity)
+                if (
+                    set(command_control) != expected_command_fields
+                    or command_control["request_id"] != request_id
+                    or command_control["deployment_id"] != path_identity["deployment_id"]
+                    or command_control["deployment_epoch"] != path_identity["deployment_epoch"]
+                    or command_control["qualification_digest"]
+                    != current_qualification_digest
+                    or command_control["request_attempt"]
+                    != path_identity["request_attempt"]
+                    or command_control["path_id"] != path_identity["path_id"]
+                    or command_control["path_attempt"] != path_identity["path_attempt"]
+                    or command_control["path_digest"] != path_digest
+                    or command_control["topology_generation"]
+                    != path_identity["topology_generation"]
+                    or not isinstance(command_control["command_id"], str)
+                    or not command_control["command_id"]
+                    or type(command_control["publisher_generation"]) is not int
+                    or command_control["publisher_generation"] < 1
+                    or type(command_control["absolute_deadline_ms"]) is not int
+                    or command_control["absolute_deadline_ms"]
+                    <= int(time.monotonic() * 1_000)
+                    or command_control["cancellation_generation"] != 0
+                ):
+                    raise ValueError("invalid_command_identity")
+                with self._lock:
+                    pending_publisher = self._pending_publisher_generations.pop(
+                        request_id,
+                        None,
+                    )
+                if pending_publisher is not None:
+                    expected_publisher, new_publisher, pending_identity = (
+                        pending_publisher
+                    )
+                    if (
+                        pending_identity != path_identity
+                        or command_control["publisher_generation"]
+                        != expected_publisher
+                        or new_publisher != expected_publisher + 1
+                    ):
+                        raise ValueError("stale_publisher_generation")
+                    command_control["publisher_generation"] = new_publisher
+            elif command_identity is not None:
+                raise ValueError("unexpected_command_identity")
+            if route_identity is not None and authorize_cleanup is None:
+                raise ValueError("cleanup_authority_required")
+            if route_identity is None and authorize_cleanup is not None:
+                raise ValueError("unexpected_cleanup_authority")
+            with self._lock:
+                active_requests = getattr(self, "_active_route_requests", None)
+                if active_requests is None:
+                    active_requests = {}
+                    self._active_route_requests = active_requests
+                self._active_route_requests[request_id] = {
+                    "request_attempt": path_identity["request_attempt"],
+                    "path_id": path_identity["path_id"],
+                    "path_attempt": path_identity["path_attempt"],
+                    "path_digest": path_digest,
+                    "deployment_id": path_identity["deployment_id"],
+                    "deployment_epoch": path_identity["deployment_epoch"],
+                    "qualification_digest": current_qualification_digest,
+                    "topology_generation": path_identity["topology_generation"],
+                    "command_id": (
+                        command_control["command_id"]
+                        if route_identity is not None
+                        else f"legacy:{request_id}"
+                    ),
+                    "publisher_generation": (
+                        command_control["publisher_generation"]
+                        if route_identity is not None
+                        else 1
+                    ),
+                    "absolute_deadline_ms": (
+                        command_control["absolute_deadline_ms"]
+                        if route_identity is not None
+                        else int(time.monotonic() * 1_000) + 3_600_000
+                    ),
+                    "entry_node_id": entry_node_id,
+                    "participating_node_ids": participating_node_ids,
+                    "cancellation_generation": 0,
+                    "cancellation_requested": False,
+                    "cancellation_started_at": None,
+                    "cancellation_deadline": None,
+                    "cancellation_fanout_complete": None,
+                    "terminal": False,
+                    "control_bound": False,
+                }
+            cleanup_subject = self._request_cleanup_subject(request_id)
             try:
+                if route_identity is not None:
+                    bind_control = self._request_control_identity(request_id)
+                    for node_id in sorted(participating_node_ids):
+                        bound_response = self._send_request_command(
+                            request_id=request_id,
+                            node_id=node_id,
+                            command_id=self._command_id(
+                                node_id,
+                                "bind-request-control",
+                            ),
+                            command="bind_request_control",
+                            payload={
+                                "request_id": request_id,
+                                "control": bind_control,
+                            },
+                        )
+                        self._verify_observation(
+                            node_id,
+                            bound_response,
+                            event="request_control_bound",
+                        )
+                    with self._lock:
+                        active = self._active_route_requests[request_id]
+                        active["control_bound"] = True
+                        publisher_changed_during_bind = (
+                            active["publisher_generation"]
+                            != bind_control["publisher_generation"]
+                        )
+                    if publisher_changed_during_bind:
+                        self._propagate_publisher_generation(
+                            request_id,
+                            participating_node_ids,
+                        )
                 start_payload: dict[str, Any] = {"request": request}
+                if route_identity is not None:
+                    start_payload["control"] = {
+                        "request_attempt": path_identity["request_attempt"],
+                        "path_id": path_identity["path_id"],
+                        "path_attempt": path_identity["path_attempt"],
+                        "path_digest": path_digest,
+                        "deployment_id": path_identity["deployment_id"],
+                        "deployment_epoch": path_identity["deployment_epoch"],
+                        "qualification_digest": current_qualification_digest,
+                        "topology_generation": path_identity["topology_generation"],
+                        "cancellation_generation": 0,
+                        "command_id": command_control["command_id"],
+                        "publisher_generation": command_control[
+                            "publisher_generation"
+                        ],
+                        "absolute_deadline_ms": command_control[
+                            "absolute_deadline_ms"
+                        ],
+                    }
+                if locked_path_manifest is not None:
+                    start_payload["path_manifest"] = dict(locked_path_manifest)
                 if excluded_placement_ids:
                     start_payload["excluded_placement_ids"] = excluded_placement_ids
-                started_response = self._sessions[entry_node_id].send(
+                started_response = self._send_request_command(
+                    request_id=request_id,
+                    node_id=entry_node_id,
                     command_id=self._command_id(entry_node_id, "infer-start"),
                     command="infer_start",
                     payload=start_payload,
@@ -1433,10 +2617,9 @@ class PhysicalLiveRoute:
                     return tokens
 
                 output = truncate_at_stop(output)
-                cancelled_for_request = (
-                    cancel_requested is not None
-                    and cancel_requested()
-                    and status == "DECODING"
+                cancelled_for_request = _request_is_cancelled(
+                    status,
+                    cancel_requested,
                 )
 
                 def emit_new_tokens(tokens: tuple[int, ...]) -> None:
@@ -1454,10 +2637,20 @@ class PhysicalLiveRoute:
                     and not stopped
                     and not cancelled_for_request
                 ):
-                    decoded_response = self._sessions[entry_node_id].send(
+                    decode_payload: dict[str, Any] = {
+                        "request_id": request_id,
+                        "count": 1,
+                    }
+                    if route_identity is not None:
+                        decode_payload["control"] = self._request_control_identity(
+                            request_id
+                        )
+                    decoded_response = self._send_request_command(
+                        request_id=request_id,
+                        node_id=entry_node_id,
                         command_id=self._command_id(entry_node_id, "infer-decode"),
                         command="infer_decode",
-                        payload={"request_id": request_id, "count": 1},
+                        payload=decode_payload,
                     )
                     decoded = self._verify_observation(
                         entry_node_id,
@@ -1466,11 +2659,12 @@ class PhysicalLiveRoute:
                     )
                     next_output = self._output_tokens(decoded)
                     status = decoded["details"].get("status")
-                    cancelled_for_request = (
-                        cancel_requested is not None
-                        and cancel_requested()
-                        and status == "DECODING"
+                    cancelled_for_request = _request_is_cancelled(
+                        status,
+                        cancel_requested,
                     )
+                    if status == "CANCELLED":
+                        break
                     if len(next_output) <= len(output):
                         if status == "COMPLETED":
                             break
@@ -1479,43 +2673,181 @@ class PhysicalLiveRoute:
                     if not cancelled_for_request:
                         emit_new_tokens(output)
                 cancelled_for_stop = stopped and status == "DECODING"
-                if cancelled_for_stop or cancelled_for_request:
-                    cancelled_response = self._sessions[entry_node_id].send(
-                        command_id=self._command_id(entry_node_id, "infer-cancel"),
-                        command="infer_cancel",
-                        payload={"request_id": request_id},
-                    )
-                    self._verify_observation(
-                        entry_node_id,
-                        cancelled_response,
-                        event="inference_cancelled",
-                    )
+                if cancelled_for_stop:
+                    if route_identity is None:
+                        cancelled_response = self._sessions[entry_node_id].send(
+                            command_id=self._command_id(entry_node_id, "infer-cancel"),
+                            command="infer_cancel",
+                            payload={"request_id": request_id},
+                        )
+                        self._verify_observation(
+                            entry_node_id,
+                            cancelled_response,
+                            event="inference_cancelled",
+                        )
+                    elif not self.cancel_request(request_id):
+                        raise RuntimeError("route_cancellation_rejected")
                 output = output[:max_new_tokens]
                 if cancelled_for_stop or cancelled_for_request:
-                    self._wait_for_cancellation_cleanup(participating_node_ids)
+                    with self._lock:
+                        cancellation_deadline = self._active_route_requests[
+                            request_id
+                        ].get("cancellation_deadline")
+                    if cancellation_deadline is None:
+                        cancellation_deadline = time.monotonic() + 2.0
+                    if authorize_cleanup is not None:
+                        cancellation_deadline = authorize_cleanup(
+                            float(cancellation_deadline)
+                        )
+                    cleanup_subject = self._request_cleanup_subject(request_id)
+                    self._wait_for_cancellation_cleanup(
+                        participating_node_ids,
+                        deadline_monotonic_s=float(cancellation_deadline),
+                        cleanup_subject=cleanup_subject,
+                    )
+                elif route_identity is not None:
+                    # A completed request still owns Router path registration,
+                    # stage-local KV, transport forwarding state, and capacity
+                    # reservations until an exact generation-fenced teardown is
+                    # issued. Observing snapshots cannot cause that cleanup. Use
+                    # the same request-scoped cooperative interrupt operation as
+                    # cancellation, but retain the already-determined completed
+                    # terminal outcome after cleanup is proven.
+                    cleanup_deadline = time.monotonic() + 2.0
+                    assert authorize_cleanup is not None
+                    cleanup_deadline = authorize_cleanup(cleanup_deadline)
+                    if not self.cancel_request(
+                        request_id,
+                        deadline_monotonic_s=cleanup_deadline,
+                    ):
+                        raise RuntimeError("route_completion_cleanup_rejected")
+                    cleanup_subject = self._request_cleanup_subject(request_id)
+                    self._wait_for_cancellation_cleanup(
+                        participating_node_ids,
+                        deadline_monotonic_s=cleanup_deadline,
+                        cleanup_subject=cleanup_subject,
+                    )
                 elif explicit_selection:
                     self._snapshot_nodes(participating_node_ids)
                 else:
                     self._snapshot_all()
+                if route_identity is not None:
+                    self._store_request_cleanup_receipt(
+                        request_id=request_id,
+                        cleanup_subject=cleanup_subject,
+                        participating_node_ids=participating_node_ids,
+                        deployment_id=path_identity["deployment_id"],
+                    )
                 if self._fatal is not None:
                     raise RuntimeError(self._fatal)
                 if cancelled_for_request:
                     raise InferenceCancelled("inference_cancelled")
-            except InferenceCancelled:
-                raise
             except BaseException as exc:
-                self._fatal = getattr(
-                    exc,
-                    "remote_code",
-                    getattr(exc, "code", str(exc) or type(exc).__name__),
+                failure_observed_at = time.monotonic()
+                remote_reason = getattr(exc, "remote_code", None)
+                reason = str(
+                    remote_reason
+                    if isinstance(remote_reason, str) and remote_reason
+                    else getattr(exc, "code", str(exc) or type(exc).__name__)
                 )
+                with self._lock:
+                    active_request = self._active_route_requests.get(request_id)
+                    cancellation_requested = bool(
+                        active_request is not None
+                        and active_request.get("cancellation_requested") is True
+                    )
+                if (
+                    cancellation_requested
+                    and reason == "request_cancelled"
+                ):
+                    # The cooperative interrupt retired this request's inflight
+                    # node command after the owner (or scoped liveness)
+                    # requested cancellation.  This is the expected
+                    # interruption outcome, not a runtime failure: complete
+                    # the owner-scoped cleanup below and surface the request's
+                    # terminal as cancelled.
+                    exc = InferenceCancelled("inference_cancelled")
+                if not isinstance(exc, InferenceCancelled):
+                    self._record_active_runtime_failure(
+                        request_id=request_id,
+                        node_id=entry_node_id,
+                        reason=reason,
+                        observed_at_monotonic_s=failure_observed_at,
+                    )
+                if (
+                    route_identity is not None
+                    and self.request_cleanup_receipt(request_id) is None
+                ):
+                    with self._lock:
+                        active = self._active_route_requests.get(request_id)
+                        existing_deadline = (
+                            None
+                            if active is None
+                            else active.get("cancellation_deadline")
+                        )
+                        cancellation_requested = bool(
+                            active is not None
+                            and active.get("cancellation_requested") is True
+                        )
+                    cleanup_deadline = (
+                        float(existing_deadline)
+                        if existing_deadline is not None
+                        else failure_observed_at + 2.0
+                    )
+                    if not cancellation_requested:
+                        try:
+                            assert authorize_cleanup is not None
+                            cleanup_deadline = authorize_cleanup(cleanup_deadline)
+                            self.cancel_request(
+                                request_id,
+                                deadline_monotonic_s=cleanup_deadline,
+                            )
+                        except BaseException:
+                            # A failed interrupt command is not cleanup evidence.
+                            # Exact per-node snapshots below remain authoritative.
+                            pass
+                    cleanup_subject = self._request_cleanup_subject(request_id)
+                    try:
+                        self._wait_for_cancellation_cleanup(
+                            participating_node_ids,
+                            deadline_monotonic_s=cleanup_deadline,
+                            cleanup_subject=cleanup_subject,
+                        )
+                    except BaseException as cleanup_error:
+                        self._record_incident(
+                            state="request_cleanup_unproven",
+                            reason=str(
+                                getattr(
+                                    cleanup_error,
+                                    "code",
+                                    str(cleanup_error)
+                                    or type(cleanup_error).__name__,
+                                )
+                            ),
+                            request_id=request_id,
+                        )
+                        raise RuntimeError(
+                            "request_terminal_blocked_cleanup_unproven"
+                        ) from exc
+                    self._store_request_cleanup_receipt(
+                        request_id=request_id,
+                        cleanup_subject=cleanup_subject,
+                        participating_node_ids=participating_node_ids,
+                        deployment_id=path_identity["deployment_id"],
+                    )
+                if isinstance(exc, InferenceCancelled):
+                    raise exc
                 self._record_incident(
-                    state="route_failed_closed",
-                    reason=str(self._fatal),
+                    state="request_failed_closed",
+                    reason=reason,
                     request_id=request_id,
                 )
                 raise
 
+            with self._lock:
+                active = self._active_route_requests.get(request_id)
+                if active is not None:
+                    active["terminal"] = True
             self._request_outputs[request_id] = output
             self._request_inputs[request_id] = tuple(token_ids)
             self._request_limits[request_id] = max_new_tokens
@@ -1995,6 +3327,92 @@ class PhysicalLiveRoute:
             self._request_outputs.pop(request_id, None)
             self._request_limits.pop(request_id, None)
             self._request_entry_nodes.pop(request_id, None)
+            self._request_locks.pop(request_id, None)
+            self._active_route_requests.pop(request_id, None)
+            getattr(self, "_pending_publisher_generations", {}).pop(
+                request_id,
+                None,
+            )
+            self._request_cleanup_receipts.pop(request_id, None)
+
+    def request_cleanup_receipt_scoped(
+        self,
+        request_id: str,
+        *,
+        request_attempt: int,
+        path_id: str,
+        path_attempt: int,
+        path_digest: str,
+        cleanup_owner_id: str,
+    ) -> Mapping[str, Any] | None:
+        """Read a cleanup receipt only for the owner's exact immutable subject."""
+
+        expected = {
+            "request_id": request_id,
+            "request_attempt": request_attempt,
+            "path_id": path_id,
+            "path_attempt": path_attempt,
+            "path_digest": path_digest,
+            "cleanup_owner_id": cleanup_owner_id,
+        }
+        with self._lock:
+            receipt = self._request_cleanup_receipts.get(request_id)
+            if receipt is None or any(
+                receipt.get(field) != value for field, value in expected.items()
+            ):
+                return None
+            return dict(receipt)
+
+    def release_request_scoped(
+        self,
+        request_id: str,
+        *,
+        request_attempt: int,
+        path_id: str,
+        path_attempt: int,
+        path_digest: str,
+        cleanup_owner_id: str,
+    ) -> None:
+        """Release only after exact cleanup proof; stale attempts cannot erase state."""
+
+        receipt = self.request_cleanup_receipt_scoped(
+            request_id,
+            request_attempt=request_attempt,
+            path_id=path_id,
+            path_attempt=path_attempt,
+            path_digest=path_digest,
+            cleanup_owner_id=cleanup_owner_id,
+        )
+        if receipt is None:
+            raise RuntimeError("request_scoped_release_cleanup_unproven")
+        with self._lock:
+            active = self._active_route_requests.get(request_id)
+            if active is None or any(
+                active.get(field) != value
+                for field, value in (
+                    ("request_attempt", request_attempt),
+                    ("path_id", path_id),
+                    ("path_attempt", path_attempt),
+                    ("path_digest", path_digest),
+                )
+            ):
+                raise RuntimeError("request_scoped_release_identity_mismatch")
+            self._request_inputs.pop(request_id, None)
+            self._request_outputs.pop(request_id, None)
+            self._request_limits.pop(request_id, None)
+            self._request_entry_nodes.pop(request_id, None)
+            self._request_locks.pop(request_id, None)
+            self._active_route_requests.pop(request_id, None)
+            getattr(self, "_pending_publisher_generations", {}).pop(
+                request_id,
+                None,
+            )
+            self._request_cleanup_receipts.pop(request_id, None)
+
+    def request_cleanup_receipt(self, request_id: str) -> Mapping[str, Any] | None:
+        with self._lock:
+            receipt = self._request_cleanup_receipts.get(request_id)
+            return None if receipt is None else dict(receipt)
 
     def _peer_counters(self) -> dict[str, dict[str, int]]:
         counters: dict[str, dict[str, int]] = {}
@@ -2032,25 +3450,116 @@ class PhysicalLiveRoute:
             fatal=self._fatal,
         )
 
+    def a4_liveness_status(self) -> Mapping[str, Any]:
+        """Return the detector-owned privacy-reduced liveness projection."""
+
+        from mycelium_live.a4_contracts import validate_traffic_liveness
+
+        snapshots = self._liveness.snapshots()
+        incidents = self._liveness.incidents()
+        return validate_traffic_liveness({
+            "protocol": "mycelium.traffic_liveness.v1",
+            "deployment_id": self._graph.deployment_id,
+            "generated_at_monotonic_ms": int(time.monotonic() * 1_000),
+            "subjects": [
+                {
+                    "subject_id": item.identity.subject_id,
+                    "kind": item.identity.kind.value,
+                    "membership_generation": item.identity.membership_generation,
+                    "state": item.state.value,
+                    "last_fresh_ms": item.last_fresh_ms,
+                    "last_observed_ms": item.last_observed_ms,
+                    "next_keepalive_due_ms": item.next_keepalive_due_ms,
+                    "consecutive_misses": item.consecutive_misses,
+                    "last_source": item.last_source.value,
+                }
+                for item in snapshots
+            ],
+            "incidents": [
+                {
+                    "sequence": item.sequence,
+                    "source": item.source.value,
+                    "scope": item.scope,
+                    "subject_id": item.subject.subject_id,
+                    "membership_generation": item.subject.membership_generation,
+                    "observed_at_ms": item.observed_at_ms,
+                    "affected_track_ids": list(item.affected_track_ids),
+                    "action": item.action,
+                    "outcome": item.outcome,
+                    "detection_latency_ms": item.detection_latency_ms,
+                    "within_detection_budget": item.within_detection_budget,
+                }
+                for item in incidents
+            ],
+            "deployment_fatal_reason": self._liveness.deployment_fatal_reason,
+        })
+
+    def _handle_lost_peer_processes(self) -> None:
+        """Interrupt only active requests whose physical participant exited."""
+
+        observed_at_s = time.monotonic()
+        with self._lock:
+            if not self._open or self._closed:
+                return
+            lost = tuple(
+                node_id
+                for node_id, session in sorted(self._sessions.items())
+                if session.returncode is not None
+            )
+        for node_id in lost:
+            with self._lock:
+                active_tracks = tuple(
+                    request_id
+                    for request_id, active in self._active_route_requests.items()
+                    if active.get("terminal") is not True
+                    and active.get("cancellation_requested") is not True
+                    and node_id in active["participating_node_ids"]
+                )
+            subject = self._liveness_subjects.get(node_id)
+            if subject is not None:
+                snapshot = self._liveness.subject_snapshot(subject)
+                if snapshot is not None and snapshot.state.value not in {
+                    "failed",
+                    "quarantined",
+                }:
+                    now_ms = int(observed_at_s * 1_000)
+                    if active_tracks:
+                        self._liveness.record_active_failure(
+                            subject,
+                            failure_started_at_ms=now_ms,
+                            observed_at_ms=now_ms,
+                            scope="peer",
+                            affected_track_ids=active_tracks,
+                            verified=True,
+                        )
+                    else:
+                        self._liveness.record_nonparticipating_peer_exit(
+                            subject,
+                            observed_at_ms=now_ms,
+                        )
+            interruption_deadline = observed_at_s + 2.0
+            for request_id in active_tracks:
+                try:
+                    self.cancel_request(
+                        request_id,
+                        deadline_monotonic_s=interruption_deadline,
+                    )
+                except BaseException:
+                    # The request worker remains responsible for fail-closed
+                    # terminal publication and exact cleanup proof.  A dead
+                    # fanout leaf must not prevent interruption of live peers.
+                    pass
+            self._record_incident(
+                state="peer_process_lost",
+                reason="route_peer_process_lost",
+                request_id=None,
+            )
+
     def public_status(self) -> Mapping[str, Any]:
         """Return a bounded, prompt-free projection of the running route."""
 
+        self._handle_lost_peer_processes()
         with self._lock:
-            lost_process = next(
-                (
-                    node_id
-                    for node_id, session in sorted(self._sessions.items())
-                    if session.returncode is not None
-                ),
-                None,
-            )
-            if self._open and not self._closed and lost_process is not None:
-                self._fatal = self._fatal or "route_peer_process_lost"
-                self._record_incident(
-                    state="route_failed_closed",
-                    reason=self._fatal,
-                    request_id=None,
-                )
             peer_counters = self._peer_counters()
             stages: list[dict[str, Any]] = []
             placements_by_node: dict[str, list[dict[str, Any]]] = {
@@ -2076,7 +3585,15 @@ class PhysicalLiveRoute:
             for node_id in sorted(self._peers):
                 observation = self._last_snapshots.get(node_id, {})
                 details = observation.get("details", {})
+                health_observation = self._last_health.get(node_id, {})
+                health_details = health_observation.get("details", {})
+                sidecar_process = (
+                    health_details.get("sidecar_process")
+                    if isinstance(health_details, Mapping)
+                    else None
+                )
                 runtime = details.get("runtime", {})
+                interruptibility = details.get("interruptibility")
                 resources = details.get("host_resources", {})
                 mode = runtime.get("mode")
                 if isinstance(mode, str):
@@ -2107,6 +3624,23 @@ class PhysicalLiveRoute:
                             [str(value) for value in supported_modes]
                             if isinstance(supported_modes, (list, tuple))
                             else []
+                        ),
+                        "data_plane_health_observed": bool(health_observation),
+                        "sidecar_process_alive": (
+                            sidecar_process.get("alive")
+                            if isinstance(sidecar_process, Mapping)
+                            and type(sidecar_process.get("alive")) is bool
+                            else None
+                        ),
+                        "transport_running": (
+                            health_details.get("transport_running")
+                            if isinstance(health_details, Mapping)
+                            and type(health_details.get("transport_running")) is bool
+                            else None
+                        ),
+                        "transport_fatal": bool(
+                            isinstance(health_details, Mapping)
+                            and health_details.get("transport_fatal_error") is not None
                         ),
                         "active_kv_state_count": int(
                             runtime.get("active_state_count", 0)
@@ -2150,6 +3684,11 @@ class PhysicalLiveRoute:
                             if isinstance(release_counts, Mapping)
                             else {}
                         ),
+                        "interruptibility": (
+                            dict(interruptibility)
+                            if isinstance(interruptibility, Mapping)
+                            else None
+                        ),
                     }
                 )
             identity_material = json.dumps(
@@ -2188,12 +3727,54 @@ class PhysicalLiveRoute:
                 "peers": peers,
                 "recent_inferences": list(self._recent_inferences),
                 "incidents": list(self._incidents),
+                "liveness": self.a4_liveness_status(),
+                "concurrency_liveness_qualification": (
+                    dict(self._a4_qualification)
+                    if self._a4_qualification is not None
+                    else self._unqualified_a4_status()
+                ),
             }
             if self._placement_projection is not None:
                 status["placement"] = json.loads(json.dumps(self._placement_projection))
             if self._topology_projection is not None:
                 status["topology"] = json.loads(json.dumps(self._topology_projection))
             return status
+
+    def _unqualified_a4_status(self) -> dict[str, Any]:
+        return {
+            "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+            "deployment_id": self._graph.deployment_id,
+            "qualification_digest": "sha256:"
+            + hashlib.sha256(b"a4-physical-proof-unavailable").hexdigest(),
+            "maximum_concurrent_requests": 4,
+            "cancellation_and_cleanup_bound_ms": 2_000,
+            "cooperative_interruption_proven": False,
+            "request_scoped_cleanup_proven": False,
+            "shared_process_termination_used": False,
+            "publisher_generation_fencing_proven": False,
+            "scoped_liveness_proven": False,
+            "eligible": False,
+            "evidence_digest": "sha256:"
+            + hashlib.sha256(b"a4-physical-evidence-unavailable").hexdigest(),
+        }
+
+    def set_a4_qualification(self, document: Mapping[str, Any]) -> None:
+        """Install only an externally sealed physical A4 qualification record."""
+
+        from mycelium_live.a4_contracts import validate_product_qualification
+        from mycelium_request_gateway.contracts import qualification_digest
+
+        validated = validate_product_qualification(document)
+        current = self._deployment_qualification
+        if (
+            validated["deployment_id"] != self._graph.deployment_id
+            or validated["eligible"] is not True
+            or current is None
+            or validated["qualification_digest"] != qualification_digest(current)
+        ):
+            raise ValueError("a4_qualification_binding_mismatch")
+        with self._lock:
+            self._a4_qualification = dict(validated)
 
     def membership_status(self, *, qualification: Any | None) -> Mapping[str, Any]:
         """Project durable members independently from execution-graph placement."""
@@ -2460,6 +4041,10 @@ class PhysicalLiveRoute:
         )
 
     def close(self) -> None:
+        self._liveness_monitor_stop.set()
+        monitor = self._liveness_monitor_thread
+        if monitor is not None and monitor is not threading.current_thread():
+            monitor.join(timeout=1.0)
         with self._lock:
             if self._closed:
                 return

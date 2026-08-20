@@ -97,8 +97,13 @@ export function ProductEvidenceProvider({
         return [...current, accepted].slice(-64);
       });
       setLoading(false);
-    }).catch(() => {
+    }).catch((err: unknown) => {
       if (!active) return;
+      if (typeof console !== 'undefined') {
+        // Surface loadInitial failures so the operator and harness can see why
+        // the live evidence gate is closed when the network call rejects.
+        console.error('product_evidence_load_initial_failed:', String(err));
+      }
       const recovered = source.getState();
       if (recovered !== null) {
         setLatest(recovered);
@@ -128,6 +133,14 @@ export function ProductEvidenceProvider({
     resume: () => setFrozenState(null),
   }), [errorCode, frozenState, history, latest, loading, source]);
 
+  // Mirror the latest evidence status onto document.body[data-evidence] so the
+  // e2e harness and operator can wait on the React tree itself instead of
+  // inferring state from the textbox disabled-flag, which races the effect
+  // that runs loadInitial.
+  if (typeof document !== 'undefined' && document.body) {
+    const status = latest?.status ?? (loading ? 'loading' : (errorCode ?? 'idle'));
+    document.body.dataset.evidence = status;
+  }
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 

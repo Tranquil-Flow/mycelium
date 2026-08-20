@@ -296,6 +296,10 @@ def _route(value: object) -> bool:
         "decode_mode",
         "placement_provenance",
         "route_alive",
+        "concurrency_eligible",
+        "cancellation_cleanup_bound_ms",
+        "publisher_generation_fenced",
+        "scoped_liveness_proven",
     }
     return (
         _exact(value, fields)
@@ -309,6 +313,10 @@ def _route(value: object) -> bool:
             "frozen_fixture",
         }
         and type(value["route_alive"]) is bool
+        and type(value["concurrency_eligible"]) is bool
+        and _integer(value["cancellation_cleanup_bound_ms"], minimum=1)
+        and type(value["publisher_generation_fenced"]) is bool
+        and type(value["scoped_liveness_proven"]) is bool
     )
 
 

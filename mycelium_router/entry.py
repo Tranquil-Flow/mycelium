@@ -23,6 +23,7 @@ from mycelium_router.payloads import encode_token_ids
 from mycelium_router.routing import RoutingError
 from mycelium_router.state import RequestStateMachine
 from mycelium_router.validation import validate_manifest
+from mycelium_router.leases import validate_hop_leases
 
 
 @dataclass
@@ -259,12 +260,131 @@ class EntryCoordinator:
       self.transport.send_hop(header, context)
       return request.request_id
 
+   def start_locked_distributed_prefill(
+      self,
+      request: RequestContext,
+      client_sink,
+      *,
+      manifest: PathManifest,
+      pinned_deployment: ExecutionGraph,
+   ) -> str:
+      """Execute the exact Router-owned locked path without rebuilding it."""
+
+      if (
+         request.request_id in self._requests
+         or request.request_id in self._pending_prefills
+      ):
+         raise ValueError("duplicate_request_id")
+      graph = self.topology.snapshot()
+      if graph != pinned_deployment:
+         raise RoutingError("stale_pinned_deployment")
+      validate_manifest(manifest, graph)
+      if manifest.request_id != request.request_id:
+         raise RoutingError("path_request_mismatch")
+      validate_hop_leases(
+         manifest.ordered_hops,
+         deployment_epoch=graph.deployment_epoch,
+         now=self.clock.now(),
+      )
+      placement_by_id = {
+         placement.placement_id: placement
+         for stage in graph.stages
+         for placement in stage.placements
+      }
+      if placement_by_id[manifest.ordered_hops[0].placement_id].node_id != self.node_id:
+         raise RoutingError("locked_path_entry_mismatch")
+      self.transport.remember_entry(request.request_id, self.node_id)
+      build = PathBuildState(
+         request=request,
+         graph=graph,
+         path_id=manifest.path_id,
+         path_attempt=manifest.path_attempt,
+         ordered_hops=manifest.ordered_hops,
+      )
+      state_machine = RequestStateMachine(path_attempt=manifest.path_attempt)
+      state_machine.transition("PREFILL", path_attempt=manifest.path_attempt)
+      state_machine.transition("LOCKED", path_attempt=manifest.path_attempt)
+      chunks = self._prefill_chunks(request.prompt_token_ids)
+      record = RequestRecord(
+         request=request,
+         graph=graph,
+         manifest=manifest,
+         client_sink=client_sink,
+         state_machine=state_machine,
+         prefill_chunks=chunks,
+      )
+      self._requests[request.request_id] = record
+      generation = self.relay.register_path_with_generation(
+         request,
+         manifest,
+         graph,
+         entry_node_id=self.node_id,
+      )
+      if generation is None:
+         self._cleanup_record(record)
+         raise RoutingError("path_registration_failed")
+      record.path_generation = generation
+      try:
+         self.transport.send_manifest_locked(
+            ManifestLocked(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               manifest=manifest,
+               build=build,
+            )
+         )
+         first = manifest.ordered_hops[0]
+         header = HopHeader(
+            request_id=request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            phase="PREFILL_CHUNK",
+            token_index=0,
+            hop_index=0,
+            source_placement_id="",
+            destination_placement_id=first.placement_id,
+            topology_version=manifest.topology_version,
+            idempotency_key=hop_idempotency_key(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               phase="PREFILL_CHUNK",
+               token_index=0,
+               hop_index=0,
+            ),
+            prefill_chunk_token_count=len(chunks[0]),
+         )
+         if not self.relay.dispatch_if_current(
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            generation=generation,
+            sender=lambda: self.transport.send_hop(
+               header,
+               encode_token_ids(chunks[0]),
+            ),
+         ):
+            raise RoutingError("path_cancelled")
+      except BaseException:
+         self._cleanup_record(record)
+         raise
+      return request.request_id
+
    def receive_manifest_locked(
       self,
       locked: ManifestLocked,
       *,
       source_node_id: str | None = None,
    ) -> bool:
+      existing = self._requests.get(locked.request_id)
+      if existing is not None:
+         with existing.lock:
+            return (
+               existing.manifest == locked.manifest
+               and existing.graph == locked.build.graph
+               and existing.request == locked.build.request
+               and existing.status in {"LOCKED", "DECODING"}
+            )
       pending = self._pending_prefills.get(locked.request_id)
       if pending is None or pending.state_machine.state != "PREFILL":
          return False

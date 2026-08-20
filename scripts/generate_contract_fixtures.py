@@ -102,6 +102,7 @@ from mycelium_live.activation import (
     ACTIVATION_PROTOCOL,
     validate_activation_status,
 )
+from mycelium_live.a4_contracts import compatibility_fixtures as a4_fixtures
 from mycelium_live.preparation import AUTHORIZATION_PROTOCOL
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
@@ -1577,6 +1578,17 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
                 "last_release_reason": "normal_completion",
                 "retained_result_count": 0,
                 "release_counts": {"normal_completion": 1},
+                "interruptibility": {
+                    "runtime_backend": "numpy",
+                    "decode_mode": "stage_local_kv",
+                    "work_unit": "transformer_layer",
+                    "maximum_observed_work_unit_ms": 125.0,
+                    "observed_work_unit_count": 24,
+                    "maximum_total_cleanup_ms": 2_000,
+                    "physical_proof_required": True,
+                    "backend_candidate": True,
+                    "cooperative_bound_candidate": True,
+                },
             }
         )
     identity_digest = hashlib.sha256(canonical_bytes(graph_document)).hexdigest()
@@ -1599,6 +1611,28 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
         "peers": peers,
         "recent_inferences": [],
         "incidents": [],
+        "liveness": {
+            "protocol": "mycelium.traffic_liveness.v1",
+            "deployment_id": graph_document["deployment_id"],
+            "generated_at_monotonic_ms": 1,
+            "subjects": [],
+            "incidents": [],
+            "deployment_fatal_reason": None,
+        },
+        "concurrency_liveness_qualification": {
+            "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+            "deployment_id": graph_document["deployment_id"],
+            "qualification_digest": "sha256:" + "a" * 64,
+            "maximum_concurrent_requests": 4,
+            "cancellation_and_cleanup_bound_ms": 2_000,
+            "cooperative_interruption_proven": False,
+            "request_scoped_cleanup_proven": False,
+            "shared_process_termination_used": False,
+            "publisher_generation_fencing_proven": False,
+            "scoped_liveness_proven": False,
+            "eligible": False,
+            "evidence_digest": "sha256:" + "b" * 64,
+        },
     }
 
 
@@ -1888,7 +1922,7 @@ def request_gateway_submission_v2() -> dict[str, Any]:
 def m16_runtime_status() -> dict[str, Any]:
     return validate_m16_runtime_status(
         {
-            "protocol": "mycelium.m16_runtime_status.v1",
+            "protocol": "mycelium.concurrent_request_runtime.v1",
             "generated_at_monotonic_s": 100.0,
             "deployment_id": "deployment-fixture",
             "deployment_epoch": 16,
@@ -1901,7 +1935,8 @@ def m16_runtime_status() -> dict[str, Any]:
                 "maximum_bytes": 268435456,
                 "interactive_depth": 0,
                 "batch_depth": 0,
-                "active_request_id": None,
+                "active_request_ids": [],
+                "maximum_active_requests": 4,
             },
             "placements": [
                 {
@@ -1923,13 +1958,13 @@ def m16_runtime_status() -> dict[str, Any]:
             "requests": [],
             "incidents": [],
             "batch_state": {
-                "mode": "sequential_dispatch",
+                "mode": "concurrent_request_sequential_stage_dispatch",
                 "maximum_runtime_batch_size": 20,
                 "observed_batches": [],
                 "continuous_batching": False,
                 "pipeline_overlap": False,
             },
-            "claim_boundary": "bounded admission and sequential physical dispatch",
+            "claim_boundary": "bounded concurrent requests and sequential stage dispatch",
             "performance_budgets": [],
         }
     )
@@ -1942,6 +1977,7 @@ def request_event() -> dict[str, Any]:
         kind="token",
         token_index=0,
         text="fixture-token",
+        publisher_generation=1,
     ).to_dict()
 
 
@@ -1951,6 +1987,7 @@ def request_event_v2() -> dict[str, Any]:
         sequence=2,
         kind="lifecycle",
         phase="prefill",
+        publisher_generation=1,
         protocol=REQUEST_EVENT_PROTOCOL_V2,
     ).to_dict()
 
@@ -2180,7 +2217,8 @@ def documents() -> dict[str, dict[str, Any]]:
         "transport-path-observation-v1.json": transport_path_observation(),
         "m14-topology-projection-v1.json": m14_topology_projection(),
         "m15-plan-comparison-v1.json": m15_plan_comparison(),
-        "m16-runtime-status-v1.json": m16_runtime_status(),
+        "concurrent-request-runtime-v1.json": m16_runtime_status(),
+        **a4_fixtures(),
         "m23-kv-gate-v1.json": m23_kv_gate(),
         "product-snapshot-v1.json": product_snapshot(),
         "product-event-v1.json": product_event(),

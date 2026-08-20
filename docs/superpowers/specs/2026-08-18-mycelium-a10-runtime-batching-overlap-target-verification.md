@@ -1,7 +1,7 @@
 # Mycelium A10 Runtime Batching, Pipeline Overlap, and Target Verification Specification
 
 **Status:** `design_only`; dependency-ready acceptance boundary; production integration
-waits for A4 closure
+waits for atomic A4 and A9 closure
 
 **Gate:** A10
 
@@ -11,7 +11,10 @@ waits for A4 closure
 batching notes in `docs/router-phase-aware-batching.md`
 
 **Depends on:** A3 qualified useful target; A4 concurrent dispatcher, interruptible
-commands, scoped liveness, bounded cleanup, and ordinary browser request path
+commands, scoped liveness, bounded cleanup, and ordinary browser request path; A9
+physically qualified platform-neutral runtime profiles, accelerated Windows backend,
+efficient int8 execution, activation codec, component/edge timing, and single-request
+performance baseline
 
 **Architecture:** Synthesized architecture sections 4.4 and 4.7; provides the verifier prerequisite for
 A11
@@ -53,6 +56,11 @@ performance, overlap, runtime-batch, target-verifier, browser, or physical claim
 - The scheduler owns bounded queueing, QoS, aging, collection deadlines, and candidate
   grouping. The stage runtime owns final membership, actual backend batch execution,
   per-member results, and physical timing.
+- A9 owns runtime/provider performance readiness, activation-codec qualification,
+  component and edge service observations, and the frozen single-request baseline. A10
+  may change only its declared batching/overlap policy during the paired benchmark; it
+  cannot hide backend, precision, materialization, component-placement, or transport
+  changes inside a scheduling result.
 - Each target stage owns only its request-local KV. The multi-position verifier owns a
   temporary target-KV transaction until commit or rollback.
 - The request gateway owns prompts, decoded output, private token traffic, and bounded

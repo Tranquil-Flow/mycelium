@@ -97,6 +97,24 @@ class SlowCancelBackend:
         self.worker_release.set()
 
 
+class RejectingCancelBackend:
+    def __init__(self, *, raise_on_cancel: bool = False) -> None:
+        self.run_entered = threading.Event()
+        self.worker_release = threading.Event()
+        self.raise_on_cancel = raise_on_cancel
+
+    def run(self, request_id, submission, emit_token, is_cancelled):
+        self.run_entered.set()
+        self.worker_release.wait(timeout=2)
+        return "completed"
+
+    def cancel(self, request_id: str) -> bool:
+        self.worker_release.set()
+        if self.raise_on_cancel:
+            raise RuntimeError("synthetic_cancel_failure")
+        return False
+
+
 def _submission(qualification, max_new_tokens: int = 8) -> InferenceSubmission:
     return InferenceSubmission(
         prompt="sensitive prompt never log",
@@ -252,7 +270,11 @@ def test_reconnect_can_replay_last_server_acked_event_if_client_did_not_apply_it
 
         resumed = service.subscribe(request_id, last_event_id=accepted.sequence)
         replayed = resumed.next_event(timeout=1)
-        assert replayed == token
+        assert replayed is not None
+        assert replayed.sequence == token.sequence
+        assert replayed.kind == token.kind
+        assert replayed.text == token.text
+        assert replayed.publisher_generation == token.publisher_generation + 1
         resumed.ack(replayed.sequence)
         backend.release.set()
         remaining = _drain(resumed)
@@ -558,6 +580,7 @@ def test_accepted_cancellation_wins_completion_race():
         deadline = time.monotonic() + 1
         while service.terminal_event_count(request_id) == 0 and time.monotonic() < deadline:
             time.sleep(0.005)
+        assert service.terminal_event_count(request_id) == 0
         backend.allow_cancel_return.set()
         cancellation.join(timeout=1)
 
@@ -566,6 +589,51 @@ def test_accepted_cancellation_wins_completion_race():
         assert events[-1].kind == "cancelled"
     finally:
         backend.allow_cancel_return.set()
+        service.close()
+
+
+def test_backend_terminal_rejection_rolls_back_provisional_cancellation() -> None:
+    qualification = _synthetic_qualification()
+    backend = RejectingCancelBackend()
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "cancel-rejected-001",
+    )
+    try:
+        request_id = service.submit(_submission(qualification))
+        assert backend.run_entered.wait(timeout=2)
+
+        assert service.cancel(request_id) is False
+        events = _drain(service.subscribe(request_id, last_event_id=None))
+
+        assert events[-1].kind == "completed"
+        assert service._sessions[request_id].cancellation_started is False
+    finally:
+        backend.worker_release.set()
+        service.close()
+
+
+def test_backend_cancellation_exception_fails_closed() -> None:
+    qualification = _synthetic_qualification()
+    backend = RejectingCancelBackend(raise_on_cancel=True)
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "cancel-error-001",
+    )
+    try:
+        request_id = service.submit(_submission(qualification))
+        assert backend.run_entered.wait(timeout=2)
+
+        assert service.cancel(request_id) is True
+        events = _drain(service.subscribe(request_id, last_event_id=None))
+
+        assert events[-1].kind == "failed"
+        assert events[-1].code == "cancellation_cleanup_deadline_exceeded"
+        assert service._sessions[request_id].cancellation_within_bound is False
+    finally:
+        backend.worker_release.set()
         service.close()
 
 

@@ -317,6 +317,8 @@ def test_post_inference_uses_authenticated_service_contract(runtime, qualificati
 
     assert denied[0] == 401
     assert accepted[0] == 202
+    session_token = accepted[2].pop("session_token")
+    assert isinstance(session_token, str) and len(session_token) >= 32
     assert accepted[2] == {
         "cancel_path": "/v1/inference/request-001",
         "request_id": "request-001",

@@ -353,18 +353,32 @@ class RelayEngine:
       except Exception:
          return tuple(self._runtime_unavailable() for _ in batch.items)
 
-   @staticmethod
-   def _kv_position(request: RequestContext, phase: str, token_index: int) -> int:
+   def _kv_position(self, request: RequestContext, phase: str, token_index: int) -> int:
       if phase in {"PREFILL", "RECOVERY_PREFILL"}:
          return 0
+      if phase == "PREFILL_CHUNK":
+         size = self.scheduler.config.prefill_chunk_size_tokens
+         return 0 if size <= 0 else token_index * size
       if phase == "DECODE":
          return len(request.prompt_token_ids) + token_index - 1
       return 0
 
-   @staticmethod
-   def _is_terminal(request: RequestContext, phase: str, token_index: int) -> bool:
+   def _is_terminal(
+      self,
+      request: RequestContext,
+      phase: str,
+      token_index: int,
+      prefill_chunk_token_count: int = 0,
+   ) -> bool:
       if phase == "PREFILL":
          return request.max_new_tokens == 1
+      if phase == "PREFILL_CHUNK":
+         return (
+            self._kv_position(request, phase, token_index)
+            + prefill_chunk_token_count
+            >= len(request.prompt_token_ids)
+            and request.max_new_tokens == 1
+         )
       if phase == "RECOVERY_PREFILL":
          return token_index + 1 >= request.max_new_tokens
       if phase == "DECODE":
@@ -1015,7 +1029,18 @@ class RelayEngine:
          payload=accepted_payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
          position=self._kv_position(request, header.phase, header.token_index),
-         terminal=self._is_terminal(request, header.phase, header.token_index),
+         emits_token=(
+            header.phase == "PREFILL_CHUNK"
+            and self._kv_position(request, header.phase, header.token_index)
+            + header.prefill_chunk_token_count
+            >= len(request.prompt_token_ids)
+         ),
+         terminal=self._is_terminal(
+            request,
+            header.phase,
+            header.token_index,
+            header.prefill_chunk_token_count,
+         ),
          lease_expires_at=hop.reservation_expires_at,
          batch_key=self._runtime_batch_key(
             graph=graph,
@@ -1125,34 +1150,15 @@ class RelayEngine:
          self._remember_hop(header, result, payload_digest, generation)
          return result
 
-      if header.phase == "PREFILL_CHUNK":
-         event = PrefillChunkCompleted(
-            request_id=request.request_id,
-            path_id=manifest.path_id,
-            path_attempt=manifest.path_attempt,
-            chunk_index=header.token_index,
-            token_count=header.prefill_chunk_token_count,
-         )
-         if not self._send_if_path_current(
-            header.path_id,
-            header.path_attempt,
-            generation,
-            lambda: self.transport.send_prefill_chunk_completed(event),
-         ):
-            return HopReceiveResult("REJECTED", "path_cancelled")
-         state.transition("FORWARDED", path_attempt=header.path_attempt)
-         result = HopReceiveResult(
-            "COMPLETED",
-            prefill_chunk_completed=event,
-         )
-         self._remember_hop(header, result, payload_digest, generation)
-         return result
-      if header.phase != "DECODE":
-         state.transition("FORWARDED", path_attempt=header.path_attempt)
-         result = HopReceiveResult("COMPLETED")
-         self._remember_hop(header, result, payload_digest, generation)
-         return result
-      if runtime_result.token_id is None:
+      final_prefill_chunk = (
+         self.decode_mode == "stage_local_kv"
+         and header.phase == "PREFILL_CHUNK"
+         and selected.position + header.prefill_chunk_token_count
+         >= len(request.prompt_token_ids)
+      )
+      if (
+         header.phase == "DECODE" or final_prefill_chunk
+      ) and runtime_result.token_id is None:
          state.transition("FAILED", path_attempt=header.path_attempt)
          report = FailureReport(
             request_id=request.request_id,
@@ -1176,6 +1182,53 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
+         self._remember_hop(header, result, payload_digest, generation)
+         return result
+
+      if header.phase == "PREFILL_CHUNK":
+         event = PrefillChunkCompleted(
+            request_id=request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            chunk_index=header.token_index,
+            token_count=header.prefill_chunk_token_count,
+         )
+         token_event = (
+            TokenEvent(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               token_index=0,
+               token_id=runtime_result.token_id,
+               sampling_counter=1,
+            )
+            if final_prefill_chunk
+            else None
+         )
+
+         def send_prefill_result() -> None:
+            self.transport.send_prefill_chunk_completed(event)
+            if token_event is not None:
+               self.transport.send_token_event(token_event)
+
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            send_prefill_result,
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
+         state.transition("FORWARDED", path_attempt=header.path_attempt)
+         result = HopReceiveResult(
+            "COMPLETED",
+            prefill_chunk_completed=event,
+            token_event=token_event,
+         )
+         self._remember_hop(header, result, payload_digest, generation)
+         return result
+      if header.phase != "DECODE":
+         state.transition("FORWARDED", path_attempt=header.path_attempt)
+         result = HopReceiveResult("COMPLETED")
          self._remember_hop(header, result, payload_digest, generation)
          return result
       event = TokenEvent(
@@ -1284,7 +1337,18 @@ class RelayEngine:
          payload=accepted_payload,
          prefill_chunk_token_count=header.prefill_chunk_token_count,
          position=self._kv_position(request, header.phase, header.token_index),
-         terminal=self._is_terminal(request, header.phase, header.token_index),
+         emits_token=(
+            header.phase == "PREFILL_CHUNK"
+            and self._kv_position(request, header.phase, header.token_index)
+            + header.prefill_chunk_token_count
+            >= len(request.prompt_token_ids)
+         ),
+         terminal=self._is_terminal(
+            request,
+            header.phase,
+            header.token_index,
+            header.prefill_chunk_token_count,
+         ),
          lease_expires_at=hop.reservation_expires_at,
          batch_key=self._runtime_batch_key(
             graph=graph,
@@ -1527,32 +1591,15 @@ class RelayEngine:
          self._remember_hop(header, result, payload_digest, generation)
          return result
 
-      if header.phase == "PREFILL_CHUNK":
-         event = PrefillChunkCompleted(
-            request_id=request.request_id,
-            path_id=manifest.path_id,
-            path_attempt=manifest.path_attempt,
-            chunk_index=header.token_index,
-            token_count=header.prefill_chunk_token_count,
-         )
-         if not self._send_if_path_current(
-            header.path_id,
-            header.path_attempt,
-            generation,
-            lambda: self.transport.send_prefill_chunk_completed(event),
-         ):
-            return HopReceiveResult("REJECTED", "path_cancelled")
-         result = HopReceiveResult(
-            "COMPLETED",
-            prefill_chunk_completed=event,
-         )
-         self._remember_hop(header, result, payload_digest, generation)
-         return result
-      if header.phase != "DECODE":
-         result = HopReceiveResult("COMPLETED")
-         self._remember_hop(header, result, payload_digest, generation)
-         return result
-      if runtime_result.token_id is None:
+      final_prefill_chunk = (
+         self.decode_mode == "stage_local_kv"
+         and header.phase == "PREFILL_CHUNK"
+         and item.position + header.prefill_chunk_token_count
+         >= len(request.prompt_token_ids)
+      )
+      if (
+         header.phase == "DECODE" or final_prefill_chunk
+      ) and runtime_result.token_id is None:
          report = FailureReport(
             request_id=request.request_id,
             path_id=manifest.path_id,
@@ -1575,6 +1622,51 @@ class RelayEngine:
             reason=report.reason,
             failure_report=report,
          )
+         self._remember_hop(header, result, payload_digest, generation)
+         return result
+
+      if header.phase == "PREFILL_CHUNK":
+         event = PrefillChunkCompleted(
+            request_id=request.request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            chunk_index=header.token_index,
+            token_count=header.prefill_chunk_token_count,
+         )
+         token_event = (
+            TokenEvent(
+               request_id=request.request_id,
+               path_id=manifest.path_id,
+               path_attempt=manifest.path_attempt,
+               token_index=0,
+               token_id=runtime_result.token_id,
+               sampling_counter=1,
+            )
+            if final_prefill_chunk
+            else None
+         )
+
+         def send_prefill_result() -> None:
+            self.transport.send_prefill_chunk_completed(event)
+            if token_event is not None:
+               self.transport.send_token_event(token_event)
+
+         if not self._send_if_path_current(
+            header.path_id,
+            header.path_attempt,
+            generation,
+            send_prefill_result,
+         ):
+            return HopReceiveResult("REJECTED", "path_cancelled")
+         result = HopReceiveResult(
+            "COMPLETED",
+            prefill_chunk_completed=event,
+            token_event=token_event,
+         )
+         self._remember_hop(header, result, payload_digest, generation)
+         return result
+      if header.phase != "DECODE":
+         result = HopReceiveResult("COMPLETED")
          self._remember_hop(header, result, payload_digest, generation)
          return result
       event = TokenEvent(

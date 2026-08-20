@@ -160,10 +160,12 @@ class ProgressivePathBuilder:
       states: dict[str, DeviceState],
       *,
       now: float,
+      lease_now: float | None = None,
    ) -> PathBuildState:
       if self.is_complete(build):
          raise RoutingError("path_already_complete")
       current = build
+      lease_base = now if lease_now is None else lease_now
       while True:
          try:
             decision = self.policy.choose_next(current, states, now=now)
@@ -184,14 +186,14 @@ class ProgressivePathBuilder:
                kv_bytes=kv_bytes,
                deployment_epoch=current.graph.deployment_epoch,
                lease_expires_at=(
-                  now + self.policy.scorer.config.reservation_lease_seconds
+                  lease_base + self.policy.scorer.config.reservation_lease_seconds
                ),
             )
          )
          reservation_is_live = (
             reservation.accepted
             and reservation.deployment_epoch == current.graph.deployment_epoch
-            and reservation.expires_at > now
+            and reservation.expires_at > lease_base
          )
          if reservation_is_live:
             hop = PathHop(
@@ -222,10 +224,17 @@ class ProgressivePathBuilder:
       build: PathBuildState,
       *,
       now: float | None = None,
+      lease_now: float | None = None,
    ) -> PathManifest:
       if not self.is_complete(build):
          raise RoutingError("path_incomplete")
-      lock_time = build.request.admitted_at if now is None else now
+      lock_time = (
+         build.request.admitted_at
+         if now is None and lease_now is None
+         else now
+         if lease_now is None
+         else lease_now
+      )
       try:
          validate_hop_leases(
             build.ordered_hops,

@@ -79,18 +79,19 @@
       "name": "Concurrent dispatch and scoped liveness",
       "dependencies": ["A3"],
       "specification": "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md",
-      "state": "design_only",
-      "blockers": ["implementation, product integration, physical/browser qualification, and atomic A4 closure remain"],
+      "state": "integrated_unqualified",
+      "blockers": ["physical fault qualification, live browser qualification, evidence sealing, architecture handover, and atomic A4 closure remain"],
       "completed_requirements": ["specification"],
       "evidence_bindings": [
-        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md", "artifact_digest": "sha256:5731f4c31977f3c5ed82365ac6452dd9b5cfdf00d2ab7eb35ba667ca2782da72", "provenance": "source", "subject": "A4:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-17-mycelium-a4-product-concurrency-liveness.md", "artifact_digest": "sha256:e4a0037d01b810e53e84df488a0b94a7577e8ca58e18e6c8be6b4863ab8d32df", "provenance": "source", "subject": "A4:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
       ],
-      "partial_requirements": [],
-      "pending_requirements": [
+      "partial_requirements": [
         "implementation", "product_integration", "deterministic_positive",
-        "deterministic_negative", "physical_positive", "physical_negative",
-        "ui_live_all_eight", "browser_navigation_reconnect",
-        "browser_second_session", "full_regressions_audits",
+        "deterministic_negative", "ui_live_all_eight", "full_regressions_audits"
+      ],
+      "pending_requirements": [
+        "physical_positive", "physical_negative", "browser_navigation_reconnect",
+        "browser_second_session",
         "architecture_handover", "atomic_feature_commit"
       ],
       "ui_workspaces": [
@@ -201,14 +202,14 @@
     },
     {
       "gate_id": "A9",
-      "name": "Platform-neutral peer capability",
+      "name": "Platform-neutral capability and accelerated runtime efficiency",
       "dependencies": ["A8"],
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
       "state": "design_only",
-      "blockers": ["dependency A8 atomic completion", "membership migration test window"],
+      "blockers": ["dependency A8 atomic completion", "membership migration test window", "native accelerated Windows x86_64 provider and device", "qualified efficient int8 kernels and reduced-precision activation codec", "frozen component-aware single-request benchmark"],
       "completed_requirements": ["specification"],
       "evidence_bindings": [
-        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md", "artifact_digest": "sha256:01aa7ab7b8f9a0540f398f8bc77ec04456b6c61209dd4823fe56b649d3dd8670", "provenance": "source", "subject": "A9:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md", "artifact_digest": "sha256:65f2ebc829d64dfb3a466a5321be097a2078403f9077235c74bdcd08679e1d8e", "provenance": "source", "subject": "A9:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
       ],
       "partial_requirements": [],
       "pending_requirements": [
@@ -227,13 +228,13 @@
     {
       "gate_id": "A10",
       "name": "Runtime batching, overlap, and target verification",
-      "dependencies": ["A4"],
+      "dependencies": ["A4", "A9"],
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md",
       "state": "design_only",
-      "blockers": ["dependency A4 atomic completion", "physical benchmark route"],
+      "blockers": ["dependencies A4 and A9 atomic completion", "physical benchmark route"],
       "completed_requirements": ["specification"],
       "evidence_bindings": [
-        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md", "artifact_digest": "sha256:37a1610f7292d56af2043abbc1210d9adea81893f572b4cd3b9bcae1182a3b7d", "provenance": "source", "subject": "A10:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a10-runtime-batching-overlap-target-verification.md", "artifact_digest": "sha256:63882c82049f62cff6d2a1e4c5478934963e035a91c36045c4c809b28feb368e", "provenance": "source", "subject": "A10:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
       ],
       "partial_requirements": [],
       "pending_requirements": [

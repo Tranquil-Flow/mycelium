@@ -350,7 +350,9 @@ class InProcessMesh:
             locked.build.request,
             locked.manifest,
             graph,
-            source_node_id=source_node_id,
+            source_node_id=(
+               None if source_node_id == entry_node_id else source_node_id
+            ),
             entry_node_id=entry_node_id,
          )
          if not accepted:

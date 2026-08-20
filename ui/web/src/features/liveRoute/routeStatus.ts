@@ -44,6 +44,67 @@ export interface LiveRoutePeer {
   readonly last_release_reason: string | null;
   readonly retained_result_count: number;
   readonly release_counts: Readonly<Record<string, number>>;
+  readonly interruptibility: null | Readonly<{
+    runtime_backend: string | null;
+    decode_mode: string | null;
+    work_unit: 'transformer_layer';
+    maximum_observed_work_unit_ms: number | null;
+    observed_work_unit_count: number;
+    maximum_total_cleanup_ms: 2000;
+    physical_proof_required: true;
+    backend_candidate: boolean;
+    cooperative_bound_candidate: boolean;
+  }>;
+}
+
+export interface A4QualificationStatus {
+  readonly protocol: 'mycelium.product_concurrency_liveness_qualification.v1';
+  readonly deployment_id: string;
+  readonly qualification_digest: string;
+  readonly maximum_concurrent_requests: number;
+  readonly cancellation_and_cleanup_bound_ms: 2000;
+  readonly cooperative_interruption_proven: boolean;
+  readonly request_scoped_cleanup_proven: boolean;
+  readonly shared_process_termination_used: false;
+  readonly publisher_generation_fencing_proven: boolean;
+  readonly scoped_liveness_proven: boolean;
+  readonly eligible: boolean;
+  readonly evidence_digest: string;
+}
+
+export interface TrafficLivenessStatus {
+  readonly protocol: 'mycelium.traffic_liveness.v1';
+  readonly deployment_id: string;
+  readonly generated_at_monotonic_ms: number;
+  readonly subjects: readonly TrafficLivenessSubject[];
+  readonly incidents: readonly TrafficLivenessIncident[];
+  readonly deployment_fatal_reason: string | null;
+}
+
+export interface TrafficLivenessSubject {
+  readonly subject_id: string;
+  readonly kind: 'edge' | 'placement' | 'peer' | 'deployment';
+  readonly membership_generation: number;
+  readonly state: 'fresh' | 'suspect' | 'quarantined' | 'failed' | 'recovered';
+  readonly last_fresh_ms: number;
+  readonly last_observed_ms: number;
+  readonly next_keepalive_due_ms: number;
+  readonly consecutive_misses: number;
+  readonly last_source: 'application_receipt' | 'activation_receipt' | 'signed_keepalive' | 'idle_keepalive' | 'command_deadline' | 'active_transport_failure' | 'membership_exit' | 'worker_exception' | 'deployment_fatal';
+}
+
+export interface TrafficLivenessIncident {
+  readonly sequence: number;
+  readonly source: TrafficLivenessSubject['last_source'];
+  readonly scope: 'request' | 'edge' | 'placement' | 'peer' | 'deployment';
+  readonly subject_id: string;
+  readonly membership_generation: number;
+  readonly observed_at_ms: number;
+  readonly affected_track_ids: readonly string[];
+  readonly action: string;
+  readonly outcome: string;
+  readonly detection_latency_ms: number | null;
+  readonly within_detection_budget: boolean | null;
 }
 
 export interface LiveRouteInferenceTiming {
@@ -66,7 +127,7 @@ export interface LiveRouteIncident {
   readonly incident_id: string;
   readonly deployment_id: string;
   readonly request_id: string | null;
-  readonly state: 'route_failed_closed' | 'configured_deployment_unavailable' | 'qualified_service_restored' | 'qualified_failover_selected' | 'qualified_deployment_selected' | 'qualified_candidate_promoted' | 'qualified_candidate_rolled_back';
+  readonly state: 'route_failed_closed' | 'request_failed_closed' | 'request_cleanup_unproven' | 'peer_process_lost' | 'configured_deployment_unavailable' | 'qualified_service_restored' | 'qualified_failover_selected' | 'qualified_deployment_selected' | 'qualified_candidate_promoted' | 'qualified_candidate_rolled_back';
   readonly reason: string;
   readonly observed_at_unix_ms: number;
 }
@@ -182,6 +243,8 @@ export interface LiveRouteStatus {
   readonly incidents: readonly LiveRouteIncident[];
   readonly placement: M13PlacementProjection | null;
   readonly topology: M14TopologyProjection | null;
+  readonly liveness: TrafficLivenessStatus;
+  readonly concurrency_liveness_qualification: A4QualificationStatus;
 }
 
 function record(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
@@ -316,6 +379,7 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       'last_release_reason',
       'retained_result_count',
       'release_counts',
+      'interruptibility',
     ],
     path,
   );
@@ -339,6 +403,30 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       integer(count, `${path}.release_counts.${reason}`),
     ]),
   );
+  let interruptibility: LiveRoutePeer['interruptibility'] = null;
+  if (item.interruptibility !== null) {
+    const control = record(item.interruptibility, [
+      'runtime_backend', 'decode_mode', 'work_unit', 'maximum_observed_work_unit_ms',
+      'observed_work_unit_count', 'maximum_total_cleanup_ms',
+      'physical_proof_required', 'backend_candidate', 'cooperative_bound_candidate',
+    ], `${path}.interruptibility`);
+    if (
+      control.work_unit !== 'transformer_layer'
+      || control.maximum_total_cleanup_ms !== 2_000
+      || control.physical_proof_required !== true
+      || typeof control.backend_candidate !== 'boolean'
+      || typeof control.cooperative_bound_candidate !== 'boolean'
+    ) throw new TypeError(`${path}.interruptibility is invalid`);
+    interruptibility = Object.freeze({
+      runtime_backend: control.runtime_backend === null ? null : identifier(control.runtime_backend, `${path}.interruptibility.runtime_backend`),
+      decode_mode: control.decode_mode === null ? null : identifier(control.decode_mode, `${path}.interruptibility.decode_mode`),
+      maximum_observed_work_unit_ms: optionalFinite(control.maximum_observed_work_unit_ms, `${path}.interruptibility.maximum_observed_work_unit_ms`),
+      observed_work_unit_count: integer(control.observed_work_unit_count, `${path}.interruptibility.observed_work_unit_count`),
+      work_unit: 'transformer_layer', maximum_total_cleanup_ms: 2_000,
+      physical_proof_required: true, backend_candidate: control.backend_candidate,
+      cooperative_bound_candidate: control.cooperative_bound_candidate,
+    });
+  }
   const base = counters(
     {
       frames_sent: item.frames_sent,
@@ -374,6 +462,112 @@ function peer(value: unknown, path: string): LiveRoutePeer {
     last_release_reason: lastReleaseReason === null ? null : identifier(lastReleaseReason, `${path}.last_release_reason`),
     retained_result_count: integer(item.retained_result_count, `${path}.retained_result_count`),
     release_counts: Object.freeze(releases),
+    interruptibility,
+  });
+}
+
+function a4Qualification(value: unknown): A4QualificationStatus {
+  const item = record(value, [
+    'protocol', 'deployment_id', 'qualification_digest', 'maximum_concurrent_requests',
+    'cancellation_and_cleanup_bound_ms', 'cooperative_interruption_proven',
+    'request_scoped_cleanup_proven', 'shared_process_termination_used',
+    'publisher_generation_fencing_proven', 'scoped_liveness_proven', 'eligible',
+    'evidence_digest',
+  ], 'route_status.concurrency_liveness_qualification');
+  const gates = [
+    item.cooperative_interruption_proven, item.request_scoped_cleanup_proven,
+    item.publisher_generation_fencing_proven, item.scoped_liveness_proven,
+  ];
+  if (
+    item.protocol !== 'mycelium.product_concurrency_liveness_qualification.v1'
+    || item.cancellation_and_cleanup_bound_ms !== 2_000
+    || item.shared_process_termination_used !== false
+    || gates.some((gate) => typeof gate !== 'boolean')
+    || typeof item.eligible !== 'boolean'
+    || item.eligible !== gates.every(Boolean)
+    || integer(item.maximum_concurrent_requests, 'route_status.concurrency_liveness_qualification.maximum_concurrent_requests') < 2
+  ) throw new TypeError('route_status concurrency qualification is invalid');
+  return Object.freeze({
+    protocol: 'mycelium.product_concurrency_liveness_qualification.v1',
+    deployment_id: identifier(item.deployment_id, 'route_status.concurrency_liveness_qualification.deployment_id'),
+    qualification_digest: digest(item.qualification_digest, 'route_status.concurrency_liveness_qualification.qualification_digest'),
+    maximum_concurrent_requests: integer(item.maximum_concurrent_requests, 'route_status.concurrency_liveness_qualification.maximum_concurrent_requests'),
+    cancellation_and_cleanup_bound_ms: 2_000,
+    cooperative_interruption_proven: item.cooperative_interruption_proven as boolean,
+    request_scoped_cleanup_proven: item.request_scoped_cleanup_proven as boolean,
+    shared_process_termination_used: false,
+    publisher_generation_fencing_proven: item.publisher_generation_fencing_proven as boolean,
+    scoped_liveness_proven: item.scoped_liveness_proven as boolean,
+    eligible: item.eligible as boolean,
+    evidence_digest: digest(item.evidence_digest, 'route_status.concurrency_liveness_qualification.evidence_digest'),
+  });
+}
+
+function trafficLiveness(value: unknown): TrafficLivenessStatus {
+  const item = record(value, [
+    'protocol', 'deployment_id', 'generated_at_monotonic_ms', 'subjects', 'incidents',
+    'deployment_fatal_reason',
+  ], 'route_status.liveness');
+  if (item.protocol !== 'mycelium.traffic_liveness.v1') throw new TypeError('route_status liveness is invalid');
+  if (item.deployment_fatal_reason !== null && typeof item.deployment_fatal_reason !== 'string') throw new TypeError('route_status liveness fatal reason is invalid');
+  const subjectKinds = new Set(['edge', 'placement', 'peer', 'deployment']);
+  const scopes = new Set(['request', 'edge', 'placement', 'peer', 'deployment']);
+  const states = new Set(['fresh', 'suspect', 'quarantined', 'failed', 'recovered']);
+  const sources = new Set(['application_receipt', 'activation_receipt', 'signed_keepalive', 'idle_keepalive', 'command_deadline', 'active_transport_failure', 'membership_exit', 'worker_exception', 'deployment_fatal']);
+  const subjects = array(item.subjects, 'route_status.liveness.subjects').map((value, index) => {
+    const subject = record(value, [
+      'subject_id', 'kind', 'membership_generation', 'state', 'last_fresh_ms',
+      'last_observed_ms', 'next_keepalive_due_ms', 'consecutive_misses', 'last_source',
+    ], `route_status.liveness.subjects[${index}]`);
+    if (!subjectKinds.has(String(subject.kind)) || !states.has(String(subject.state)) || !sources.has(String(subject.last_source))) {
+      throw new TypeError(`route_status.liveness.subjects[${index}] is invalid`);
+    }
+    return Object.freeze({
+      subject_id: identifier(subject.subject_id, `route_status.liveness.subjects[${index}].subject_id`),
+      kind: subject.kind as TrafficLivenessSubject['kind'],
+      membership_generation: integer(subject.membership_generation, `route_status.liveness.subjects[${index}].membership_generation`),
+      state: subject.state as TrafficLivenessSubject['state'],
+      last_fresh_ms: integer(subject.last_fresh_ms, `route_status.liveness.subjects[${index}].last_fresh_ms`),
+      last_observed_ms: integer(subject.last_observed_ms, `route_status.liveness.subjects[${index}].last_observed_ms`),
+      next_keepalive_due_ms: integer(subject.next_keepalive_due_ms, `route_status.liveness.subjects[${index}].next_keepalive_due_ms`),
+      consecutive_misses: integer(subject.consecutive_misses, `route_status.liveness.subjects[${index}].consecutive_misses`),
+      last_source: subject.last_source as TrafficLivenessSubject['last_source'],
+    });
+  });
+  const incidents = array(item.incidents, 'route_status.liveness.incidents').map((value, index) => {
+    const incident = record(value, [
+      'sequence', 'source', 'scope', 'subject_id', 'membership_generation',
+      'observed_at_ms', 'affected_track_ids', 'action', 'outcome',
+      'detection_latency_ms', 'within_detection_budget',
+    ], `route_status.liveness.incidents[${index}]`);
+    if (!sources.has(String(incident.source)) || !scopes.has(String(incident.scope))) {
+      throw new TypeError(`route_status.liveness.incidents[${index}] is invalid`);
+    }
+    const latency = incident.detection_latency_ms === null ? null : integer(incident.detection_latency_ms, `route_status.liveness.incidents[${index}].detection_latency_ms`);
+    if (incident.within_detection_budget !== null && typeof incident.within_detection_budget !== 'boolean') {
+      throw new TypeError(`route_status.liveness.incidents[${index}].within_detection_budget is invalid`);
+    }
+    return Object.freeze({
+      sequence: integer(incident.sequence, `route_status.liveness.incidents[${index}].sequence`),
+      source: incident.source as TrafficLivenessIncident['source'],
+      scope: incident.scope as TrafficLivenessIncident['scope'],
+      subject_id: identifier(incident.subject_id, `route_status.liveness.incidents[${index}].subject_id`),
+      membership_generation: integer(incident.membership_generation, `route_status.liveness.incidents[${index}].membership_generation`),
+      observed_at_ms: integer(incident.observed_at_ms, `route_status.liveness.incidents[${index}].observed_at_ms`),
+      affected_track_ids: Object.freeze(array(incident.affected_track_ids, `route_status.liveness.incidents[${index}].affected_track_ids`).map((track, trackIndex) => identifier(track, `route_status.liveness.incidents[${index}].affected_track_ids[${trackIndex}]`))),
+      action: identifier(incident.action, `route_status.liveness.incidents[${index}].action`),
+      outcome: identifier(incident.outcome, `route_status.liveness.incidents[${index}].outcome`),
+      detection_latency_ms: latency,
+      within_detection_budget: incident.within_detection_budget as boolean | null,
+    });
+  });
+  return Object.freeze({
+    protocol: 'mycelium.traffic_liveness.v1',
+    deployment_id: identifier(item.deployment_id, 'route_status.liveness.deployment_id'),
+    generated_at_monotonic_ms: integer(item.generated_at_monotonic_ms, 'route_status.liveness.generated_at_monotonic_ms'),
+    subjects: Object.freeze(subjects),
+    incidents: Object.freeze(incidents),
+    deployment_fatal_reason: item.deployment_fatal_reason as string | null,
   });
 }
 
@@ -418,7 +612,7 @@ function incident(value: unknown, path: string): LiveRouteIncident {
     throw new TypeError(`${path}.protocol is unsupported`);
   }
   if (
-    !['route_failed_closed', 'configured_deployment_unavailable', 'qualified_service_restored', 'qualified_failover_selected', 'qualified_deployment_selected', 'qualified_candidate_promoted', 'qualified_candidate_rolled_back'].includes(String(item.state))
+    !['route_failed_closed', 'request_failed_closed', 'request_cleanup_unproven', 'peer_process_lost', 'configured_deployment_unavailable', 'qualified_service_restored', 'qualified_failover_selected', 'qualified_deployment_selected', 'qualified_candidate_promoted', 'qualified_candidate_rolled_back'].includes(String(item.state))
   ) {
     throw new TypeError(`${path}.state is invalid`);
   }
@@ -677,6 +871,8 @@ export function decodeLiveRouteStatus(value: unknown): LiveRouteStatus {
       'incidents',
       'placement',
       'topology',
+      'liveness',
+      'concurrency_liveness_qualification',
     ],
     'route_status',
   );
@@ -704,6 +900,8 @@ export function decodeLiveRouteStatus(value: unknown): LiveRouteStatus {
     incidents: Object.freeze(array(item.incidents, 'route_status.incidents').map((candidate, index) => incident(candidate, `route_status.incidents[${index}]`))),
     placement: placement(item.placement, 'route_status.placement'),
     topology: topology(item.topology, 'route_status.topology'),
+    liveness: trafficLiveness(item.liveness),
+    concurrency_liveness_qualification: a4Qualification(item.concurrency_liveness_qualification),
   });
 }
 

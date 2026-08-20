@@ -109,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--model-capacity-live-observations-file", type=Path)
     serve.add_argument("--registry-state", type=Path)
     serve.add_argument("--historical-evidence-file", type=Path, action="append")
+    serve.add_argument("--a4-positive-observation", type=Path, action="append")
+    serve.add_argument("--a4-negative-data-plane-observation", type=Path, action="append")
+    serve.add_argument("--a4-negative-qualification-observation", type=Path)
+    serve.add_argument("--a4-negative-shutdown-observation", type=Path)
+    serve.add_argument("--save-live-qualification", type=Path)
     serve.add_argument("--seed-state-root", type=Path)
     serve.add_argument("--candidate-plan-root", type=Path)
     serve.add_argument("--artifact-acquisition-root", type=Path)
@@ -139,6 +144,26 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         result.extend(("--operator-plan", str(operator_plan)))
     for evidence_file in args.historical_evidence_file or ():
         result.extend(("--historical-evidence-file", str(evidence_file)))
+    for observation in args.a4_positive_observation or ():
+        result.extend(("--a4-positive-observation", str(observation)))
+    for observation in args.a4_negative_data_plane_observation or ():
+        result.extend(("--a4-negative-data-plane-observation", str(observation)))
+    if args.a4_negative_qualification_observation is not None:
+        result.extend(
+            (
+                "--a4-negative-qualification-observation",
+                str(args.a4_negative_qualification_observation),
+            )
+        )
+    if args.a4_negative_shutdown_observation is not None:
+        result.extend(
+            (
+                "--a4-negative-shutdown-observation",
+                str(args.a4_negative_shutdown_observation),
+            )
+        )
+    if args.save_live_qualification is not None:
+        result.extend(("--save-live-qualification", str(args.save_live_qualification)))
     for inventory_file in args.member_model_inventory_file or ():
         result.extend(("--member-model-inventory-file", str(inventory_file)))
     optional_paths = (

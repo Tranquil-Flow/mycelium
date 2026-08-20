@@ -2895,14 +2895,14 @@ while True:
             supervised.shutdown_timeout_seconds = 1.0
         supervised.close()
         supervised.close()
-    # In the full suite, pytest/plugin-owned descriptors can legitimately close
-    # while this cleanup probe runs. The process-boundary invariant is
-    # leak-shaped: closing a node process must not leave any new parent
-    # descriptor behind.
+    # In the full suite, pytest/plugin-owned descriptors and worker threads can
+    # legitimately close while this cleanup probe runs. The process-boundary
+    # invariant is leak-shaped: closing a node process must not leave any new
+    # parent descriptor or live thread behind.
     assert descriptors() - baseline_descriptors == set()
     assert {
         thread.name for thread in threading.enumerate() if thread.is_alive()
-    } == baseline_threads
+    } - baseline_threads == set()
 
 
 def test_handshake_release_failure_closes_fds_and_reaps_blocked_launcher(

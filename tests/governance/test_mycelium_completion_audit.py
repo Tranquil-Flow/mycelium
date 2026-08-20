@@ -16,7 +16,7 @@ NULL_BINDINGS = {
     "environment_digest": None,
     "authority_generation": None,
 }
-MODEL_GATES = {"A3", "A5", "A6", "A7", "A10", "A11", "A15"}
+MODEL_GATES = {"A3", "A5", "A6", "A7", "A9", "A10", "A11", "A15"}
 SOURCE_REQUIREMENTS = {
     "specification",
     "architecture_handover",
@@ -181,7 +181,12 @@ def test_completed_requirement_without_evidence_is_rejected(tmp_path: Path) -> N
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
     gate = checklist["gates"][1]
     gate["completed_requirements"].append("deterministic_positive")
-    gate["pending_requirements"].remove("deterministic_positive")
+    source = (
+        gate["partial_requirements"]
+        if "deterministic_positive" in gate["partial_requirements"]
+        else gate["pending_requirements"]
+    )
+    source.remove("deterministic_positive")
     relative = "unbound-completion.json"
     (tmp_path / relative).write_text(json.dumps(checklist), "utf-8")
 
@@ -295,6 +300,18 @@ def test_completed_gate_retains_expired_live_evidence_as_historical_proof(
 def test_audit_accepts_dependency_ready_parallel_primary_gate(tmp_path: Path) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
     checklist["primary_gate"] = "A8"
+    checklist["gates"][1].update(
+        {
+            "state": "design_only",
+            "completed_requirements": ["specification"],
+            "partial_requirements": [],
+            "pending_requirements": [
+                requirement
+                for requirement in checklist["closure_requirements"]
+                if requirement != "specification"
+            ],
+        }
+    )
     _minimal_repo(tmp_path, checklist)
     _complete_gate(tmp_path, checklist, "A3")
     checklist["gates"][5].update(

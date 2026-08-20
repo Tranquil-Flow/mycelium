@@ -2,11 +2,11 @@
   "batch_state": {
     "continuous_batching": false,
     "maximum_runtime_batch_size": 20,
-    "mode": "sequential_dispatch",
+    "mode": "concurrent_request_sequential_stage_dispatch",
     "observed_batches": [],
     "pipeline_overlap": false
   },
-  "claim_boundary": "bounded admission and sequential physical dispatch",
+  "claim_boundary": "bounded concurrent requests and sequential stage dispatch",
   "deployment_epoch": 16,
   "deployment_id": "deployment-fixture",
   "generated_at_monotonic_s": 100.0,
@@ -30,12 +30,13 @@
       "workspace_capacity_bytes": 250000
     }
   ],
-  "protocol": "mycelium.m16_runtime_status.v1",
+  "protocol": "mycelium.concurrent_request_runtime.v1",
   "queue": {
-    "active_request_id": null,
+    "active_request_ids": [],
     "batch_depth": 0,
     "depth": 0,
     "interactive_depth": 0,
+    "maximum_active_requests": 4,
     "maximum_bytes": 268435456,
     "maximum_items": 1024,
     "queued_bytes": 0

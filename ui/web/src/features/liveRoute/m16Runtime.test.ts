@@ -3,8 +3,8 @@ import { decodeM16RuntimeStatus } from './m16Runtime';
 
 export function m16RuntimeFixture() {
   return {
-    protocol: 'mycelium.m16_runtime_status.v1', generated_at_monotonic_s: 100, deployment_id: 'deployment-m16', deployment_epoch: 16, topology_version: 7, graph_digest: `sha256:${'1'.repeat(64)}`,
-    queue: { depth: 1, maximum_items: 64, queued_bytes: 32, maximum_bytes: 1024, interactive_depth: 1, batch_depth: 0, active_request_id: null },
+    protocol: 'mycelium.concurrent_request_runtime.v1', generated_at_monotonic_s: 100, deployment_id: 'deployment-m16', deployment_epoch: 16, topology_version: 7, graph_digest: `sha256:${'1'.repeat(64)}`,
+    queue: { depth: 1, maximum_items: 64, queued_bytes: 32, maximum_bytes: 1024, interactive_depth: 1, batch_depth: 0, active_request_ids: [], maximum_active_requests: 4 },
     placements: [{ placement_id: 'placement-a', node_id: 'node-a', memory_capacity_bytes: 1000, reserved_memory_bytes: 100, free_memory_bytes: 900, kv_capacity_bytes: 500, reserved_kv_bytes: 50, free_kv_bytes: 450, workspace_capacity_bytes: 250, reserved_workspace_bytes: 50, free_workspace_bytes: 200, active_reservations: 1, maximum_reservations: 4 }],
     requests: [{ request_id: 'request-a', workload_profile_id: 'interactive_chat_v1', qos_class: 'interactive', phase: 'queued', path_id: 'path-a', path_attempt: 0, path_manifest_digest: `sha256:${'2'.repeat(64)}`, topology_version: 7, path_state: 'locked', candidate_placement_ids: ['placement-a'], placement_ids: ['placement-a'], reservation_count: 1, admitted_at_monotonic_s: 100, queued_at_monotonic_s: 100, dispatch_at_monotonic_s: null, terminal_at_monotonic_s: null, queue_wait_ms: null, terminal_state: null }],
     incidents: [],

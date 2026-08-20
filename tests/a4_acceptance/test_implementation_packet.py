@@ -737,7 +737,7 @@ def test_frozen_spec_records_owner_approved_bounded_step_cancellation() -> None:
         "Cancellation is correlated by request, attempt, path digest, absolute deadline, and cancellation generation",
         "expected terminal compare-and-swap and bounded cleanup-result envelope",
         "short write lock for one canonical frame and command-ID-correlated waiters",
-        "Interruption and request-owned cleanup must together complete within one 2,000 ms end-to-end bound",
+        "Interruption, request-owned cleanup, backend release, and terminal publication must together complete within one original absolute 2,000 ms end-to-end bound",
         "backend that cannot prove this bound is A4-ineligible",
         "Killing a shared node is never request-scoped cancellation",
         "remain scoped by request, path, and attempt",

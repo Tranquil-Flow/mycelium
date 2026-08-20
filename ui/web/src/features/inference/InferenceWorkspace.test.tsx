@@ -98,6 +98,7 @@ class WaitingWorkspaceClient extends WorkspaceClient {
       protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
       request_id: accepted.request_id,
       sequence: 0,
+      publisher_generation: 1,
       type: 'accepted',
     });
     await new Promise<void>((resolve) => {
@@ -256,12 +257,14 @@ describe('InferenceWorkspace', () => {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 0,
+        publisher_generation: 1,
         type: 'accepted',
       },
       {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 1,
+        publisher_generation: 1,
         type: 'token',
         token_index: 0,
         text: 'synthetic output',
@@ -270,6 +273,7 @@ describe('InferenceWorkspace', () => {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 2,
+        publisher_generation: 1,
         type: 'completed',
       },
     ]);
@@ -352,9 +356,9 @@ describe('InferenceWorkspace', () => {
   it('attributes history to the selected M15 workload, QoS, and robust policy', async () => {
     const client = new WorkspaceClient(qualification(true));
     client.streams.push([
-      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 0, type: 'accepted' },
-      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 1, type: 'token', token_index: 0, text: 'batch output' },
-      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 2, type: 'completed' },
+      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 0, publisher_generation: 1, type: 'accepted' },
+      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 1, publisher_generation: 1, type: 'token', token_index: 0, text: 'batch output' },
+      { protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL, request_id: accepted.request_id, sequence: 2, publisher_generation: 1, type: 'completed' },
     ]);
     render(
       <InferenceWorkspace
@@ -386,12 +390,14 @@ describe('InferenceWorkspace', () => {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 0,
+        publisher_generation: 1,
         type: 'accepted',
       },
       {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 1,
+        publisher_generation: 1,
         type: 'token',
         token_index: 0,
         text: 'restored output',
@@ -400,6 +406,7 @@ describe('InferenceWorkspace', () => {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 2,
+        publisher_generation: 1,
         type: 'completed',
       },
     ]);
@@ -428,6 +435,7 @@ describe('InferenceWorkspace', () => {
         protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
         request_id: accepted.request_id,
         sequence: 0,
+        publisher_generation: 1,
         type: 'accepted',
       },
     ]);

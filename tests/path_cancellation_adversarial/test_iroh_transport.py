@@ -8,8 +8,13 @@ import time
 
 import pytest
 
-from mycelium_router.contracts import PathCancellation
-from mycelium_router.transports.iroh import IrohTransport, IrohTransportError
+from mycelium_router.contracts import HopHeader, PathCancellation, TokenEvent
+from mycelium_router.transports.iroh import (
+   IrohTransport,
+   IrohTransportError,
+   _InboundFrame,
+   _PendingSend,
+)
 from mycelium_router.wire import decode_frame, encode_frame
 from test_router_iroh_integration import _locked_route
 from test_router_iroh_transport import (
@@ -97,6 +102,21 @@ def test_iroh_cancellation_frame_is_control_only_then_path_is_forgotten() -> Non
       assert decoded.message == cancellation
       assert decoded.payload == b""
       assert generation == transport.peer_binding.generation
+      assert transport.cancellation_observed(
+         cancellation.request_id,
+         cancellation.path_id,
+         cancellation.path_attempt,
+      )
+      assert not transport.cancellation_observed(
+         cancellation.request_id,
+         cancellation.path_id,
+         cancellation.path_attempt + 1,
+      )
+      assert not transport.cancellation_observed(
+         "unrelated-request",
+         cancellation.path_id,
+         cancellation.path_attempt,
+      )
       assert cancellation.path_id not in transport._participant_nodes_by_path
       assert cancellation.request_id not in transport._entry_nodes
       with pytest.raises(IrohTransportError, match="path_cancellation_source_not_entry"):
@@ -105,6 +125,172 @@ def test_iroh_cancellation_frame_is_control_only_then_path_is_forgotten() -> Non
    finally:
       transport.close()
    _assert_all_clients_closed(hub)
+
+
+def test_cleanup_observation_ignores_unrelated_request_traffic() -> None:
+   hub = _Hub()
+   transport = _transport(hub)
+   with transport._state_lock:
+      transport._pending[b"p" * 16] = _PendingSend(
+         7,
+         "request-b",
+         "path-b",
+         0,
+      )
+      transport._inflight_received[b"i" * 16] = _InboundFrame(
+         b"digest",
+         "request-b",
+         "path-b",
+         0,
+      )
+
+   assert transport.cancellation_cleanup_complete("request-a", "path-a", 0)
+   assert not transport.cancellation_cleanup_complete("request-b", "path-b", 0)
+
+
+def test_cleanup_observation_requires_exact_path_attempt() -> None:
+   hub = _Hub()
+   transport = _transport(hub)
+   with transport._state_lock:
+      transport._pending[b"a" * 16] = _PendingSend(
+         7,
+         "request-a",
+         "path-a",
+         None,
+      )
+
+   assert not transport.cancellation_cleanup_complete("request-a", "path-a", 1)
+   assert not transport.cancellation_cleanup_complete("request-a", "path-a")
+
+
+def test_cleanup_observation_isolated_from_newer_attempt() -> None:
+   hub = _Hub()
+   transport = _transport(hub)
+   with transport._state_lock:
+      transport._pending[b"n" * 16] = _PendingSend(
+         7,
+         "request-a",
+         "path-a",
+         2,
+      )
+
+   assert transport.cancellation_cleanup_complete("request-a", "path-a", 1)
+   assert not transport.cancellation_cleanup_complete("request-a", "path-a", 2)
+
+
+def test_scoped_send_failure_does_not_latch_shared_transport_fatal() -> None:
+   hub = _Hub()
+   hub.send_failure = RuntimeError("request-local delivery failure")
+   transport = _transport(hub)
+   transport.bind_router(_CancellationRouter())
+   transport.start()
+   try:
+      frame = encode_frame(PathCancellation("request-a", "path-a", 0, 1))
+      with pytest.raises(IrohTransportError, match="delivery_not_confirmed"):
+         transport.send_router_frame(frame, destination_node_id="peer-node")
+
+      assert transport.running is True
+      assert transport.fatal_error is None
+      events = transport.evidence().scoped_events
+      assert events[-1] == {
+         "protocol": "mycelium.iroh_scoped_transport_event.v1",
+         "sequence": 1,
+         "event": "failure",
+         "request_id": "request-a",
+         "path_id": "path-a",
+         "path_attempt": 0,
+         "peer_node_id": "peer-node",
+         "peer_generation": 7,
+         "code": "delivery_not_confirmed",
+      }
+   finally:
+      transport.close()
+
+
+def test_scoped_dispatch_failure_keeps_reader_alive_for_unrelated_request() -> None:
+   class _OneRequestFailsRouter(_CancellationRouter):
+      def receive_path_cancellation(self, cancellation, *, source_node_id=None):
+         if cancellation.request_id == "request-fails":
+            raise RuntimeError("request-local dispatch failure")
+         return super().receive_path_cancellation(
+            cancellation,
+            source_node_id=source_node_id,
+         )
+
+   hub = _Hub()
+   router = _OneRequestFailsRouter()
+   transport = _transport(hub)
+   transport.bind_router(router)
+   transport.start()
+   try:
+      hub.deliver(
+         b"f" * 16,
+         encode_frame(PathCancellation("request-fails", "path-fails", 0, 1)),
+      )
+      _wait_until(lambda: b"f" * 16 in hub.acks)
+      assert transport.running is True
+      assert transport.fatal_error is None
+
+      survivor = PathCancellation("request-survives", "path-survives", 0, 1)
+      hub.deliver(b"s" * 16, encode_frame(survivor))
+      assert router.received.wait(timeout=1)
+      _wait_until(lambda: b"s" * 16 in hub.acks)
+
+      assert router.calls == [(survivor, "peer-node")]
+      assert transport.running is True
+      assert transport.evidence().scoped_events[-1]["request_id"] == "request-fails"
+   finally:
+      transport.close()
+
+
+def test_dispatcher_schedules_downstream_frame_before_ack_without_cycle() -> None:
+   """A peer response must not hold the one inbound dispatcher awaiting itself."""
+
+   hub = _Hub()
+   hub.block_confirmed_send = True
+   transport = _transport(hub, delivery_timeout_seconds=0.5)
+
+   class _RespondingRouter(_CancellationRouter):
+      def receive_hop(self, header, payload, *, source_node_id=None):
+         response = TokenEvent(
+            request_id="request-response",
+            path_id="path-response",
+            path_attempt=0,
+            token_index=0,
+            token_id=7,
+            sampling_counter=1,
+         )
+         transport._send_or_dispatch("peer-node", encode_frame(response))
+         self.received.set()
+         return True
+
+   router = _RespondingRouter()
+   transport.bind_router(router)
+   transport.start()
+   inbound_id = b"d" * 16
+   try:
+      inbound = HopHeader(
+         request_id="request-inbound",
+         path_id="path-inbound",
+         path_attempt=0,
+         phase="DECODE",
+         token_index=0,
+         hop_index=1,
+         source_placement_id="placement-a",
+         destination_placement_id="placement-b",
+         topology_version=1,
+         idempotency_key="hop-response-cycle",
+      )
+      hub.deliver(inbound_id, encode_frame(inbound, b"activation"))
+
+      assert hub.confirmed_send_entered.wait(timeout=1.0)
+      _wait_until(lambda: inbound_id in hub.acks)
+      assert router.received.is_set()
+      assert transport.running is True
+      assert transport.fatal_error is None
+   finally:
+      hub.release_confirmed_send.set()
+      transport.close()
 
 
 def test_iroh_cancellation_fans_out_to_every_configured_path_participant() -> None:

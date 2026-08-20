@@ -129,8 +129,8 @@ does not permit two lanes to edit or exercise the same integration surface at on
 | Model qualification | A3 | dependency-ready design and preflight only | A3 owns the active physical route and model artifacts until its atomic close |
 | Runtime resilience | A4 -> A6 -> A7 | A5, A10-A11, and the internet/platform lane after A4 | one integrator owns gateway, dispatcher, Router, route lifecycle, cancellation, and liveness wiring |
 | Capacity | A5 | A6-A7, A10-A11, internet/platform | isolated planner/replica modules may build in parallel; shared route wiring and physical hosts are serialized |
-| Scheduling | A10 -> A11 | A5-A7 and internet/platform | isolated scheduler/verifier modules may build in parallel; dispatcher and stage-runtime wiring are serialized |
-| Internet/platform | A8 -> A9 -> A12/A13, plus A14 after A8 | A4-A11 runtime, capacity, and scheduling work | bootstrap/transport and platform packages stay isolated; supervisor, membership, contracts, and shared UI wiring are integrated by their designated owner |
+| Scheduling | A9 -> A10 -> A11 | A5-A7 and internet/platform | A9 closes the accelerated-runtime and component-cost prerequisite; isolated scheduler/verifier modules may then build in parallel while dispatcher and stage-runtime wiring remain serialized |
+| Internet/platform | A8 -> A9 -> A12/A13, plus A14 after A8 | A4-A11 runtime, capacity, and scheduling work | bootstrap/transport and platform packages stay isolated; A9 also owns the physically qualified accelerated Windows/runtime-efficiency boundary; supervisor, membership, contracts, and shared UI wiring are integrated by their designated owner |
 | Release | A15 | none as a completion claim | begins only after every required predecessor has an atomic commit and fresh evidence |
 
 At most one gate owns shared integration at a time. Up to three additional worktrees may
@@ -143,10 +143,13 @@ The preferred execution waves are:
 1. Close A3. In parallel, finish A4 acceptance tests and A8 infrastructure decisions.
 2. Integrate and close A4. In parallel, build isolated A8 bootstrap/transport components
    and prepare A5, A6, and A10 test harnesses against the frozen A4 specification.
-3. After A4, implement A5, A6, and A10 in separate worktrees while A8 continues. Merge
-   shared runtime wiring one gate at a time; reserve physical hosts for one gate run at a
-   time. Start A7 only after A6 closes and A11 only after A10 closes.
-4. After A8, run A9 contract migration once. A14a (accessible route table and logical
+3. After A4, implement A5 and A6 in separate worktrees while A8 continues; A10 may
+   prepare isolated harnesses but cannot integrate or qualify until A9 closes. Merge shared
+   runtime wiring one gate at a time; reserve physical hosts for one gate run at a time.
+   Start A7 only after A6 closes and A11 only after A10 closes.
+4. After A8, run A9 contract migration once, then close its accelerated Windows backend,
+   activation-efficiency, component-cost, and single-request performance gates. A14a
+   (accessible route table and logical
    graph) may then proceed immediately; A14b (coarse globe and region evidence) follows
    its region-vocabulary freeze. A12 waits on A4 and A9, and A13 waits on A12. Only the
    optional A12 speculative-draft-worker claim waits on physically closed A11. Build
@@ -204,8 +207,8 @@ continue.
 | A6 | two compatible qualified immutable paths; controlled assigned-peer failure; committed-token authority and replay budget |
 | A7 | standby memory and runtime compatibility for the exact layer/KV identity; watermark/fencing contract; proven A6 fallback |
 | A8 | reachable authenticated membership bootstrap; domain/certificate and relay/rendezvous decisions; NAT/firewall test matrix; revocation authority; off-tailnet test peer |
-| A9 | one versioned migration plan for every producer and consumer; unknown-field and downgrade policy; re-enrollment behavior |
-| A10 | representative concurrent workload; frozen throughput and interactive tail-latency thresholds; deterministic slow-consumer/cancellation harness |
+| A9 | one versioned migration plan for every producer and consumer; unknown-field and downgrade policy; re-enrollment behavior; one native accelerated Windows x86_64 runtime candidate; exact backend/provider/build and int8-kernel evidence; float16/bfloat16 activation candidate; component-aware compute/serialization/transport instrumentation; frozen reference-versus-candidate single-request corpus and performance floor |
+| A10 | dependencies A4 and A9 atomically closed; representative concurrent workload; frozen throughput and interactive tail-latency thresholds; deterministic slow-consumer/cancellation harness |
 | A11 | locally present compatible draft candidate or an approved measured-disabled outcome; frozen gain/confidence threshold; target-only baseline |
 | A12 | two Android device families for a general Android claim; an available iOS/iPadOS test device; native runtime, signing, lifecycle, thermal, and power test access |
 | A13 | frozen supported-platform release matrix; signing/notarization/TestFlight/installer credentials and owners; clean install targets; update/revocation service |
@@ -397,6 +400,7 @@ A4 -> A5
 A4 -> A6 -> A7
 A4 -> A10 -> A11
 A8 -> A9
+A9 -> A10
 A8 -> A14
 A4 -> A12
 A9 -> A12
@@ -422,7 +426,7 @@ prerequisites are:
 | A7 | A6 |
 | A8 | A3 |
 | A9 | A8 |
-| A10 | A4 |
+| A10 | A4; A9 |
 | A11 | A10 |
 | A12 | A4; A9 (see the resolved A12 owner decision below) |
 | A13 | A12 |
@@ -432,8 +436,10 @@ prerequisites are:
 A5 is not a prerequisite for A6. Replay may use any newly qualified compatible path;
 replicas are one useful successor source, not the definition of recovery. A6 is a
 prerequisite for A7 because truthful replay is the fallback when compatible KV cannot
-be resumed. A10 precedes A11 because useful speculation requires a real multi-position
-target-verification primitive.
+be resumed. A9 is a direct prerequisite for A10 because batching measurements are not
+meaningful on a reference-only Windows backend or a route whose component, conversion,
+serialization, and transport costs are not separately observed. A10 precedes A11 because
+useful speculation requires a real multi-position target-verification primitive.
 
 **A12 and A13 corrections (2026-08-18).** The earlier rows `A12 | A9` and `A13 | A9` did
 not fully express the mobile lifecycle and onboarding sequence.
@@ -671,17 +677,28 @@ separate atomic A3 close.
 - Replace the single dispatch thread with a bounded dispatcher/worker pool that preserves
   admission, QoS, ordering, backpressure, cancellation, and exact cleanup.
 - Use cooperative, request-scoped cancellation at bounded prefill and decode work-unit
-  boundaries. Every command carries a correlated command ID and is fenced by request ID,
-  request attempt, cancellation generation, and topology/deployment generation.
+  boundaries. Every command consumes M16's canonical `PathManifest` identity and carries
+  deployment epoch, qualification digest, request ID/attempt, path ID/digest/attempt,
+  topology generation, command ID, cancellation generation, and publisher generation.
 - A backend is A4-ineligible unless it proves both interruption and exact request-owned
-  cleanup within one 2,000 ms bound. Terminating a shared node process cannot satisfy
-  request-scoped cancellation.
+  cleanup, backend release, and terminal publication within one original absolute
+  2,000 ms deadline. No layer may restart that budget. Terminating a shared node process
+  cannot satisfy request-scoped cancellation.
+- Terminal and cleanup mutations use expected-revision, owner-scoped, generation-fenced
+  compare-and-swap receipts. Cleanup is request/attempt/path-specific and must remain
+  provable while unrelated requests are active; node-global zero counters are insufficient.
+- Reconnect advances publisher generation through gateway, Router, physical command,
+  event/cursor persistence, and all UI reducers. Late command results are discarded without
+  failing unrelated waiters, stopping the response reader, or terminating a shared node.
 - Integrate traffic-aware receipts, receipt suppression, idle keepalive, active failure,
   suspect/quarantine/recovery, and generation conflict into the live route.
 - Replace route-global fatal latching with request/edge/placement/peer/deployment scope.
 - A non-participating peer failure must not affect the active route. A participating peer
   affects only tracks containing it unless a deployment-wide invariant is actually lost.
 - Enumerate and justify the few errors that remain deployment-fatal.
+- Keep A5 physical execution and A8 shared integration/contract regeneration blocked until
+  the atomic A4 close. Rebase and redesign A6/A7 after A4 rather than integrating their
+  pre-A4 Router-owned generation and cleanup behavior unchanged.
 
 **Physical positive:** measured active-disconnect and idle-staleness detection on a
 browser request, including interruption before the old command timeout.
@@ -821,10 +838,12 @@ serving still work; unauthorized bootstrap and stale/revoked identities fail clo
 selected path; Plans path costs; Readiness transport proof; Incidents transitions;
 Settings bootstrap/relay policy.
 
-### A9 — Platform-neutral peer and capability contract
+### A9 — Platform-neutral capability and accelerated runtime efficiency
 
 **Outcome:** eligibility derives from signed capabilities and class-specific
-qualification, not device brands.
+qualification, not device brands, and the ordinary product path has a physically
+qualified accelerated Windows backend plus an efficient, component-aware distributed
+execution baseline before A10 changes scheduling.
 
 **Frozen specification:**
 `docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md`.
@@ -842,16 +861,53 @@ eligibility carry-over, and class-specific qualification. A9 remains `design_onl
 - Rename `pixel_http`/`pixel-stdlib` product identities to generic Android/mobile
   capability values. Pixel remains a test device, not a protocol or backend class.
 - Update external-participant policy and every backend/eligibility/UI consumer once.
+- Implement and physically qualify at least one native accelerated Windows x86_64
+  runtime provider for the exact Qwen2.5-0.5B serving representation. Portable NumPy
+  remains a correctness/reference backend and cannot satisfy the accelerated Windows
+  or performance-ready stage class by itself.
+- Bind provider, device, driver/runtime build, kernel/precision support, model adapter,
+  cancellation/cleanup behavior, thermal envelope, and evidence freshness. DirectML,
+  ONNX Runtime, oneDNN, or another provider may be selected only through measured
+  qualification; the product contract remains vendor-neutral.
+- Prohibit decode-time whole-weight materialization for a performance-qualified int8
+  backend. Loading may create bounded persistent packed/kernel-owned state, but each
+  decode operation must prove it does not cast or expand the full int8 matrices again.
+- Qualify float16 or bfloat16 activation transport where both adjacent stages support it,
+  with exact output parity, finite-value, shape/dtype, cancellation, replay, and byte-
+  reduction evidence. Unsupported edges stay on their qualified dtype; there is no
+  silent coercion or precision downgrade.
+- Measure compute, quantization/materialization, serialization, queue, transport, and
+  result/token-selection time separately for prefill and decode. Record component costs
+  for embeddings, decoder ranges, final normalization, and the vocabulary head; feed
+  confidence-bounded component and edge costs into placement rather than treating equal
+  layer counts as equal service cost.
+- Freeze a same-hardware reference-versus-accelerated single-request benchmark before
+  observing the candidate. For the exact two-host Qwen2.5-0.5B route, A9 requires output
+  parity, stage-local KV, at least a 2x median decode-rate improvement whose paired 95%
+  confidence lower bound exceeds 1.5x, median decode at or above 8 tokens/s, interactive
+  p95 TTFT at or below 1,500 ms, and no cleanup/reliability regression. A documented
+  miss keeps the Windows backend visible but performance-ineligible and blocks A10.
 
-**Physical positive:** existing macOS/Linux members preserve identity and re-enroll or
-upgrade across the version transition without gaining unearned eligibility.
+**Physical positive:** existing macOS/Linux/Windows members preserve identity and
+re-enroll or upgrade across the version transition without gaining unearned eligibility;
+the Windows member then completes the accelerated-backend, efficient-int8, activation-
+precision, component-timing, planner, browser-inference, and single-request performance
+gates through the ordinary product path.
 
 **Negative gate:** unknown fields/classes fail closed; membership alone never grants
-placement; claimed capabilities without class qualification remain ineligible.
+placement; claimed capabilities without class qualification remain ineligible; NumPy-
+only, unaccelerated, silently dequantizing, falsely compressed, stale, thermally drifted,
+or below-floor Windows candidates cannot satisfy performance-ready eligibility or unblock
+A10.
 
-**UI:** Nodes separately shows platform, transport, runtime, capabilities, membership,
-and eligibility; Device Lab shows each qualification gate; Readiness distinguishes member
-from stage-ready.
+**UI:** Nodes separately shows platform, transport, runtime/provider, capabilities,
+membership, eligibility, precision, and measured component rates; Device Lab shows each
+qualification gate; Network shows activation dtype/bytes and compute-versus-transport
+timing; Plans shows component-aware predicted/observed placement and vocabulary-head
+bottlenecks; Inference shows TTFT/TPOT/tokens-per-second and the qualified backend without
+internal milestone labels; Readiness distinguishes member, correctness-only stage, and
+performance-ready stage; Incidents and Settings expose bounded fallback reasons and only
+qualified future-request policies.
 
 ### A10 — Real continuous batching, pipeline overlap, and target batch verification
 
@@ -1112,6 +1168,11 @@ The synthesized architecture is complete only when:
     peer, and lease interruption from its latest verified checkpoint, exposes truthful
     progress and recovery in the UI, and proves exact warm reuse without duplicate
     transfer.
+14. before A10 changes scheduling, A9 physically qualifies one accelerated Windows
+    x86_64 backend, proves persistent int8 execution without warm decode-time whole-weight
+    materialization, qualifies reduced-precision activation transport, feeds component-
+    and edge-specific observations including vocabulary-head cost into placement, and
+    passes its frozen single-request TTFT/TPOT/tokens-per-second floor through the browser.
 
 ## 9. Separately reviewed future program
 

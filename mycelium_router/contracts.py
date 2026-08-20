@@ -306,6 +306,7 @@ class HopWorkItem:
    batch_key: RuntimeBatchKey | None = None
    deadline_at: float = float("inf")
    position: int = 0
+   emits_token: bool = False
    terminal: bool = False
    lease_expires_at: float = float("inf")
 

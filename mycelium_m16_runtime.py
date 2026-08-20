@@ -34,7 +34,7 @@ from mycelium_router.serialization import (
 from mycelium_performance_budget import PerformanceBudgetError, validate_performance_budget_v3
 
 
-PROTOCOL = "mycelium.m16_runtime_status.v1"
+PROTOCOL = "mycelium.concurrent_request_runtime.v1"
 _PRIVATE_FIELDS = {
     "prompt",
     "response",
@@ -93,6 +93,17 @@ class _MonotonicClock:
     @staticmethod
     def now() -> float:
         return time.monotonic()
+
+
+class _DistributedProtocolClock:
+    """Unix-aligned lease time that remains monotonic within this process."""
+
+    def __init__(self) -> None:
+        self._unix_origin = time.time()
+        self._monotonic_origin = time.monotonic()
+
+    def now(self) -> float:
+        return self._unix_origin + (time.monotonic() - self._monotonic_origin)
 
 
 class _UuidIdSource:
@@ -334,6 +345,8 @@ class M16RuntimeCoordinator:
         clock: object,
         id_source: object,
         config: RouterConfig,
+        lease_clock: object | None = None,
+        max_concurrent_requests: int = 1,
     ) -> None:
         if (
             not workload_profiles
@@ -344,12 +357,20 @@ class M16RuntimeCoordinator:
         self._states = dict(device_states)
         self._profiles = dict(workload_profiles)
         self._clock = clock
+        self._lease_clock = clock if lease_clock is None else lease_clock
         self._config = config
+        if (
+            not isinstance(max_concurrent_requests, int)
+            or isinstance(max_concurrent_requests, bool)
+            or not 1 <= max_concurrent_requests <= 64
+        ):
+            raise ValueError("invalid_max_concurrent_requests")
+        self._max_concurrent_requests = max_concurrent_requests
         self._lock = threading.RLock()
         self._ledger = _ResourceLedgerCapacityPort(
             graph=graph,
             placement_capacities=placement_capacities,
-            clock=clock,
+            clock=self._lease_clock,
             id_source=id_source,
         )
         self._builder = ProgressivePathBuilder(
@@ -359,11 +380,15 @@ class M16RuntimeCoordinator:
         )
         self._scheduler = HopScheduler(config)
         self._requests: dict[str, dict[str, Any]] = {}
-        self._active_request_id: str | None = None
+        self._active_request_ids: set[str] = set()
         self._incidents: list[dict[str, Any]] = []
         self._incident_sequence = 0
         self._graph_digest = _digest(execution_graph_to_dict(graph))
         self._performance_budgets: list[dict[str, Any]] = []
+
+    @property
+    def maximum_concurrent_requests(self) -> int:
+        return self._max_concurrent_requests
 
     @_synchronized
     def admit(
@@ -384,8 +409,13 @@ class M16RuntimeCoordinator:
                     build,
                     self._states,
                     now=self._clock.now(),
+                    lease_now=self._lease_clock.now(),
                 )
-            manifest = self._builder.lock(build, now=self._clock.now())
+            manifest = self._builder.lock(
+                build,
+                now=self._clock.now(),
+                lease_now=self._lease_clock.now(),
+            )
         except RoutingError as exc:
             self._record_incident(
                 "admission_rejected",
@@ -441,12 +471,15 @@ class M16RuntimeCoordinator:
 
     @_synchronized
     def next_dispatch(self) -> str | None:
-        if self._active_request_id is not None or self._scheduler.queue_depth() == 0:
+        if (
+            len(self._active_request_ids) >= self._max_concurrent_requests
+            or self._scheduler.queue_depth() == 0
+        ):
             return None
         item = self._scheduler.pop_next(now=self._clock.now())
         record = self._requests[item.request_id]
         if any(
-            reservation.expires_at <= self._clock.now()
+            reservation.expires_at <= self._lease_clock.now()
             for reservation in self._ledger.request_reservations(item.request_id)
         ):
             self._ledger.release_request(item.request_id)
@@ -460,14 +493,14 @@ class M16RuntimeCoordinator:
                 "failed",
             )
             return self.next_dispatch()
-        self._active_request_id = item.request_id
+        self._active_request_ids.add(item.request_id)
         record["phase"] = "prefill"
         record["dispatch_at"] = self._clock.now()
         return item.request_id
 
     @_synchronized
     def mark_phase(self, request_id: str, phase: str) -> None:
-        if request_id != self._active_request_id or phase not in {
+        if request_id not in self._active_request_ids or phase not in {
             "prefill",
             "first_token",
             "decode",
@@ -478,7 +511,7 @@ class M16RuntimeCoordinator:
 
     @_synchronized
     def complete(self, request_id: str, *, state: str = "completed") -> None:
-        if request_id != self._active_request_id or state not in {
+        if request_id not in self._active_request_ids or state not in {
             "completed",
             "failed",
             "cancelled",
@@ -489,7 +522,7 @@ class M16RuntimeCoordinator:
         record["phase"] = state
         record["terminal_state"] = state
         record["terminal_at"] = self._clock.now()
-        self._active_request_id = None
+        self._active_request_ids.discard(request_id)
 
     @_synchronized
     def cancel(self, request_id: str) -> bool:
@@ -502,8 +535,7 @@ class M16RuntimeCoordinator:
         record["phase"] = "cancelled"
         record["terminal_state"] = "cancelled"
         record["terminal_at"] = self._clock.now()
-        if self._active_request_id == request_id:
-            self._active_request_id = None
+        self._active_request_ids.discard(request_id)
         self._record_incident(
             "cancellation_cleanup",
             request_id,
@@ -537,13 +569,14 @@ class M16RuntimeCoordinator:
                 "batch_depth": sum(
                     item["request"].qos_class == "batch" for item in queue_items
                 ),
-                "active_request_id": self._active_request_id,
+                "active_request_ids": sorted(self._active_request_ids),
+                "maximum_active_requests": self._max_concurrent_requests,
             },
             "placements": self._ledger.placement_status(),
             "requests": [self._request_projection(item) for item in self._requests.values()],
             "incidents": list(self._incidents[-256:]),
             "batch_state": {
-                "mode": "sequential_dispatch",
+                "mode": "concurrent_request_sequential_stage_dispatch",
                 "maximum_runtime_batch_size": self._config.maximum_runtime_batch_size,
                 "observed_batches": [],
                 "continuous_batching": False,
@@ -561,6 +594,40 @@ class M16RuntimeCoordinator:
     def phase(self, request_id: str) -> str | None:
         record = self._requests.get(request_id)
         return None if record is None else str(record["phase"])
+
+    @_synchronized
+    def route_identity(self, request_id: str) -> dict[str, Any]:
+        """Return the Router-owned immutable identity for one admitted request.
+
+        Downstream execution must consume this projection instead of rebuilding a
+        path digest from the selected placements.  The projection deliberately
+        excludes prompt/token material.
+        """
+
+        record = self._requests.get(request_id)
+        if record is None:
+            raise M16AdmissionError("request_not_admitted")
+        request = record["request"]
+        manifest = record["manifest"]
+        return {
+            "request_id": request.request_id,
+            "request_attempt": 1,
+            "path_id": manifest.path_id,
+            "path_attempt": manifest.path_attempt,
+            "path_manifest_digest": record["path_manifest_digest"],
+            "deployment_id": self._graph.deployment_id,
+            "deployment_epoch": manifest.deployment_epoch,
+            "topology_generation": manifest.topology_version,
+        }
+
+    @_synchronized
+    def path_manifest(self, request_id: str) -> dict[str, Any]:
+        """Return the exact Router-owned manifest consumed by physical execution."""
+
+        record = self._requests.get(request_id)
+        if record is None:
+            raise M16AdmissionError("request_not_admitted")
+        return path_manifest_to_dict(record["manifest"])
 
     @_synchronized
     def attach_performance_budget(self, document: Mapping[str, Any]) -> None:
@@ -651,7 +718,8 @@ def validate_m16_runtime_status(document: Mapping[str, Any]) -> dict[str, Any]:
         "maximum_bytes",
         "interactive_depth",
         "batch_depth",
-        "active_request_id",
+        "active_request_ids",
+        "maximum_active_requests",
     }:
         raise ValueError("M16 runtime status queue shape is invalid")
     placement_fields = {
@@ -831,8 +899,10 @@ def build_live_m16_runtime(
         placement_capacities=capacities,
         workload_profiles=profiles,
         clock=_MonotonicClock(),
+        lease_clock=_DistributedProtocolClock(),
         id_source=_UuidIdSource(),
         config=config or RouterConfig(reservation_lease_seconds=3_600.0),
+        max_concurrent_requests=4,
     )
 
 

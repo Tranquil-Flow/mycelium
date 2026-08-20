@@ -266,6 +266,7 @@ interface InferenceEventBase {
   readonly protocol: typeof PRODUCT_INFERENCE_EVENT_PROTOCOL | typeof PRODUCT_INFERENCE_EVENT_PROTOCOL_V2;
   readonly request_id: string;
   readonly sequence: number;
+  readonly publisher_generation: number;
 }
 
 export type InferenceEvent =
@@ -688,12 +689,12 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
   );
   const expected =
     type === 'token'
-      ? ['protocol', 'request_id', 'sequence', 'type', 'token_index', 'text']
+      ? ['protocol', 'request_id', 'sequence', 'publisher_generation', 'type', 'token_index', 'text']
       : type === 'failed'
-        ? ['protocol', 'request_id', 'sequence', 'type', 'code']
+        ? ['protocol', 'request_id', 'sequence', 'publisher_generation', 'type', 'code']
         : type === 'lifecycle'
-          ? ['protocol', 'request_id', 'sequence', 'type', 'phase']
-        : ['protocol', 'request_id', 'sequence', 'type'];
+          ? ['protocol', 'request_id', 'sequence', 'publisher_generation', 'type', 'phase']
+        : ['protocol', 'request_id', 'sequence', 'publisher_generation', 'type'];
   const candidate = exactRecord(value, expected, 'inference_event');
   const protocol = readOwn(candidate, 'protocol', 'inference_event.protocol');
   if (protocol !== PRODUCT_INFERENCE_EVENT_PROTOCOL && protocol !== PRODUCT_INFERENCE_EVENT_PROTOCOL_V2) {
@@ -702,6 +703,13 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
   if (type === 'lifecycle' && protocol !== PRODUCT_INFERENCE_EVENT_PROTOCOL_V2) {
     return fail('inference_event.protocol', 'lifecycle requires v2');
   }
+  const publisherGeneration = safeInteger(
+    readOwn(candidate, 'publisher_generation', 'inference_event.publisher_generation'),
+    'inference_event.publisher_generation',
+  );
+  if (publisherGeneration < 1) {
+    return fail('inference_event.publisher_generation', 'must be positive');
+  }
   const base = {
     protocol,
     request_id: requestIdentifier(
@@ -709,6 +717,7 @@ export function decodeInferenceEvent(value: unknown): InferenceEvent {
       'inference_event.request_id',
     ),
     sequence: safeInteger(readOwn(candidate, 'sequence', 'inference_event.sequence'), 'inference_event.sequence'),
+    publisher_generation: publisherGeneration,
   };
   if (type === 'token') {
     const textValue = readOwn(candidate, 'text', 'inference_event.text');

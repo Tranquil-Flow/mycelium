@@ -402,7 +402,11 @@ def _validate_message(message: object) -> None:
       if message.token_index < 0 or message.sampling_counter < 1:
          raise WireError("invalid_token_event")
    elif isinstance(message, PrefillChunkCompleted):
-      if message.chunk_index < 1 or message.token_count < 1:
+      # Locked-path stage-local KV starts with chunk zero. Progressive route
+      # discovery starts completion reporting at chunk one because its first
+      # chunk constructs the path, so both protocols require a non-negative
+      # chunk index rather than a one-based index.
+      if message.chunk_index < 0 or message.token_count < 1:
          raise WireError("invalid_prefill_chunk_completed")
    elif isinstance(message, FailureReport):
       if not message.scope or not message.reason:

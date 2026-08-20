@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections import deque
+from collections import OrderedDict, deque
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 import ctypes
@@ -15,6 +15,7 @@ from pathlib import Path
 from queue import Empty, Queue
 import re
 import selectors
+import shutil
 import signal
 import stat
 import subprocess
@@ -148,6 +149,11 @@ class _RemoteNodeError(NodeProcessError):
 
 @dataclass(frozen=True)
 class _ReaderError:
+    code: str
+
+
+@dataclass(frozen=True)
+class _CommandInterrupted:
     code: str
 
 
@@ -584,6 +590,11 @@ def capture_executable_identity(
             raise ValueError("executable path is not canonical")
         path = supplied
     else:
+        if supplied.parent == Path(".") and not supplied.is_absolute():
+            located = shutil.which(str(supplied))
+            if located is None:
+                raise ValueError("executable is unavailable")
+            supplied = Path(located)
         try:
             path = supplied.resolve(strict=True)
         except (OSError, RuntimeError) as exc:
@@ -1310,11 +1321,19 @@ class PhysicalNodeProcess:
             raise ValueError("max_frame_bytes is invalid")
         self.max_frame_bytes = max_frame_bytes
         self._command = tuple(command)
-        self._exchange_lock = threading.Lock()
+        # A4: only a single canonical frame write is serialized. Responses are
+        # correlated to bounded per-command waiters by the dedicated reader.
+        self._write_lock = threading.Lock()
+        self._waiters_lock = threading.RLock()
+        self._close_lock = threading.Lock()
+        self._waiters: dict[
+            str,
+            Queue[bytes | object | _ReaderError | _CommandInterrupted],
+        ] = {}
+        self._retired_command_ids: OrderedDict[str, None] = OrderedDict()
         self._state_lock = threading.RLock()
         self._closed = False
         self._cleanup_complete = False
-        self._responses: Queue[bytes | object | _ReaderError] = Queue(maxsize=8)
         self._stderr_lock = threading.Lock()
         self._stderr_chunks: deque[bytes] = deque()
         self._stderr_size = 0
@@ -1351,6 +1370,11 @@ class PhysicalNodeProcess:
                 launch_command = (running_interpreter.path, *self._command[1:])
             else:
                 launch_command = (sys.executable, *self._command[1:])
+        elif launch_command == self._command:
+            # Execute the exact PATH-resolved object that was fingerprinted.
+            # Leaving a bare command name here would allow PATH resolution to
+            # diverge between validation and the descriptor-bound launch.
+            launch_command = (command_identity.path, *self._command[1:])
         try:
             launcher_identity = _inventory_process(os.getpid()).executable
         except (OSError, RuntimeError, TypeError, ValueError):
@@ -1490,15 +1514,52 @@ class PhysicalNodeProcess:
             return not self._closed and self._process.poll() is None
 
     @property
+    def returncode(self) -> int | None:
+        return self._process.poll()
+
+    @property
     def stderr_tail(self) -> str:
         with self._stderr_lock:
             return b"".join(self._stderr_chunks).decode("utf-8", errors="replace")
 
-    def _enqueue_response(self, item: bytes | object | _ReaderError) -> None:
+    def _fail_waiters(self, item: object | _ReaderError) -> None:
+        with self._waiters_lock:
+            waiters = tuple(self._waiters.values())
+        for waiter in waiters:
+            try:
+                waiter.put_nowait(item)
+            except Exception:
+                continue
+
+    def _deliver_response(self, raw: bytes) -> bool:
         try:
-            self._responses.put_nowait(item)
+            document = _canonical_json_loads(raw)
+        except (TypeError, ValueError):
+            self._fail_waiters(_ReaderError("invalid_node_response"))
+            return False
+        command_id = document.get("command_id") if isinstance(document, dict) else None
+        if not isinstance(command_id, str) or not command_id:
+            self._fail_waiters(_ReaderError("invalid_node_response"))
+            return False
+        with self._waiters_lock:
+            waiter = self._waiters.get(command_id)
+        if waiter is None:
+            # A timed-out command may still finish cooperatively.  Its late
+            # result is fenced by command ID and can be discarded without
+            # failing unrelated waiters or stopping this shared response loop.
+            with self._waiters_lock:
+                retired = command_id in self._retired_command_ids
+            if retired:
+                return True
+            # A genuinely unsolicited command ID is still a protocol violation.
+            self._fail_waiters(_ReaderError("response_command_mismatch"))
+            return False
+        try:
+            waiter.put_nowait(raw)
         except Exception:
-            self._abort()
+            self._fail_waiters(_ReaderError("invalid_node_response"))
+            return False
+        return True
 
     def _read_stdout(self) -> None:
         stream = self._process.stdout
@@ -1507,14 +1568,15 @@ class PhysicalNodeProcess:
             while True:
                 line = stream.readline(self.max_frame_bytes + 2)
                 if not line:
-                    self._enqueue_response(_EOF)
+                    self._fail_waiters(_EOF)
                     return
                 if len(line) > self.max_frame_bytes + 1 or not line.endswith(b"\n"):
-                    self._enqueue_response(_ReaderError("invalid_node_response_frame"))
+                    self._fail_waiters(_ReaderError("invalid_node_response_frame"))
                     return
-                self._enqueue_response(line[:-1])
+                if not self._deliver_response(line[:-1]):
+                    return
         except (OSError, ValueError):
-            self._enqueue_response(_ReaderError("node_response_read_failed"))
+            self._fail_waiters(_ReaderError("node_response_read_failed"))
 
     def _read_stderr(self) -> None:
         stream = self._process.stderr
@@ -1849,55 +1911,50 @@ class PhysicalNodeProcess:
             raise NodeProcessError("invalid_node_response")
         raise _RemoteNodeError(error["code"])
 
-    def command(self, operation: str, payload: Mapping[str, Any] | None = None) -> Any:
-        if not isinstance(operation, str) or not _OPERATION_RE.fullmatch(operation):
-            raise ValueError("operation is invalid")
-        if payload is None:
-            payload_document: dict[str, Any] = {}
-        elif not isinstance(payload, Mapping) or not all(
-            isinstance(key, str) for key in payload
-        ):
-            raise ValueError("payload must be a JSON object")
-        else:
-            payload_document = dict(payload)
-        with self._exchange_lock:
-            with self._state_lock:
-                if self._closed:
-                    raise NodeProcessError("node_process_closed")
-                if self._process.poll() is not None:
-                    self._closed = True
-                    raise NodeProcessError("node_process_exited")
-            command_id = str(uuid.uuid4())
-            document = {
-                "protocol": NODE_CONTROL_PROTOCOL,
-                "command_id": command_id,
-                "run_id": self.run_id,
-                "deployment_id": self.deployment_id,
-                "command": operation,
-                "payload": payload_document,
-            }
-            try:
-                frame = canonical_json_bytes(document)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("command fields are not canonical JSON") from exc
-            if len(frame) + 1 > self.max_frame_bytes:
-                raise NodeProcessError("node_command_too_large")
+    def _exchange_frame(
+        self,
+        *,
+        command_id: str,
+        frame: bytes,
+        timeout: float,
+        terminate_on_timeout: bool,
+    ) -> Any:
+        waiter: Queue[bytes | object | _ReaderError | _CommandInterrupted] = Queue(
+            maxsize=1
+        )
+        with self._waiters_lock:
+            if command_id in self._waiters:
+                raise NodeProcessError("duplicate_command_id")
+            self._waiters[command_id] = waiter
+        try:
             stdin = self._process.stdin
             assert stdin is not None
             try:
-                stdin.write(frame + b"\n")
-                stdin.flush()
+                with self._write_lock:
+                    with self._state_lock:
+                        if self._closed:
+                            raise NodeProcessError("node_process_closed")
+                        if self._process.poll() is not None:
+                            self._closed = True
+                            raise NodeProcessError("node_process_exited")
+                    stdin.write(frame + b"\n")
+                    stdin.flush()
+            except NodeProcessError:
+                raise
             except (BrokenPipeError, OSError, ValueError) as exc:
                 self._abort()
                 raise NodeProcessError("node_process_unavailable") from exc
             try:
-                item = self._responses.get(timeout=self.response_timeout_seconds)
+                item = waiter.get(timeout=timeout)
             except Empty as exc:
-                self._abort()
+                if terminate_on_timeout:
+                    self._abort()
                 raise NodeProcessError("node_response_timeout") from exc
             if item is _EOF:
                 self._abort()
                 raise NodeProcessError("node_process_exited")
+            if isinstance(item, _CommandInterrupted):
+                raise NodeProcessError(item.code)
             if isinstance(item, _ReaderError):
                 self._abort()
                 raise NodeProcessError(item.code)
@@ -1909,20 +1966,87 @@ class PhysicalNodeProcess:
             except NodeProcessError:
                 self._abort()
                 raise
+        finally:
+            with self._waiters_lock:
+                self._waiters.pop(command_id, None)
+                self._retired_command_ids[command_id] = None
+                self._retired_command_ids.move_to_end(command_id)
+                while len(self._retired_command_ids) > 1_024:
+                    self._retired_command_ids.popitem(last=False)
+
+    def command(
+        self,
+        operation: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        timeout_seconds: float | None = None,
+        terminate_on_timeout: bool = True,
+        command_id: str | None = None,
+    ) -> Any:
+        if not isinstance(operation, str) or not _OPERATION_RE.fullmatch(operation):
+            raise ValueError("operation is invalid")
+        if payload is None:
+            payload_document: dict[str, Any] = {}
+        elif not isinstance(payload, Mapping) or not all(
+            isinstance(key, str) for key in payload
+        ):
+            raise ValueError("payload must be a JSON object")
+        else:
+            payload_document = dict(payload)
+        timeout = self.response_timeout_seconds if timeout_seconds is None else _positive_seconds(
+            timeout_seconds, "timeout_seconds"
+        )
+        if not isinstance(terminate_on_timeout, bool):
+            raise ValueError("terminate_on_timeout is invalid")
+        command_id = (
+            str(uuid.uuid4())
+            if command_id is None
+            else _required_identifier(command_id, "command_id")
+        )
+        document = {
+            "protocol": NODE_CONTROL_PROTOCOL,
+            "command_id": command_id,
+            "run_id": self.run_id,
+            "deployment_id": self.deployment_id,
+            "command": operation,
+            "payload": payload_document,
+        }
+        try:
+            frame = canonical_json_bytes(document)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("command fields are not canonical JSON") from exc
+        if len(frame) + 1 > self.max_frame_bytes:
+            raise NodeProcessError("node_command_too_large")
+        return self._exchange_frame(
+            command_id=command_id,
+            frame=frame,
+            timeout=timeout,
+            terminate_on_timeout=terminate_on_timeout,
+        )
+
+    def interrupt_command(self, command_id: str, *, code: str) -> bool:
+        """Retire one correlated waiter without stopping the shared node process."""
+
+        command_id = _required_identifier(command_id, "command_id")
+        if not isinstance(code, str) or not _OPERATION_RE.fullmatch(code):
+            raise ValueError("interrupt code is invalid")
+        with self._waiters_lock:
+            waiter = self._waiters.get(command_id)
+        if waiter is None:
+            return False
+        try:
+            waiter.put_nowait(_CommandInterrupted(code))
+        except Exception:
+            return False
+        return True
 
     def close(self) -> None:
-        deadline = time.monotonic() + self.shutdown_timeout_seconds
-        lock_budget = min(
-            0.25,
-            max(0.0, deadline - time.monotonic()) / 4,
-        )
-        acquired = self._exchange_lock.acquire(timeout=lock_budget)
-        try:
+        with self._close_lock:
+            deadline = time.monotonic() + self.shutdown_timeout_seconds
             with self._state_lock:
                 if self._cleanup_complete:
                     return
-                self._closed = True
-            if acquired and self._process.poll() is None:
+            if self._process.poll() is None:
                 stop_timeout = min(
                     self.response_timeout_seconds,
                     0.5,
@@ -1933,10 +2057,10 @@ class PhysicalNodeProcess:
                         self._command_stop(timeout=stop_timeout)
                     except NodeProcessError:
                         pass
+            with self._state_lock:
+                self._closed = True
+            self._fail_waiters(_ReaderError("node_process_closed"))
             cleaned = self._cleanup_resources(deadline, terminate=True)
-        finally:
-            if acquired:
-                self._exchange_lock.release()
         if not cleaned:
             raise NodeProcessError("node_process_cleanup_failed")
 
@@ -1954,20 +2078,18 @@ class PhysicalNodeProcess:
                 "payload": {},
             }
         )
-        stdin = self._process.stdin
-        assert stdin is not None
         response_timeout = (
             self.response_timeout_seconds if timeout is None else float(timeout)
         )
         try:
-            stdin.write(frame + b"\n")
-            stdin.flush()
-            item = self._responses.get(timeout=response_timeout)
-        except (BrokenPipeError, OSError, ValueError, Empty) as exc:
+            self._exchange_frame(
+                command_id=command_id,
+                frame=frame,
+                timeout=response_timeout,
+                terminate_on_timeout=False,
+            )
+        except NodeProcessError as exc:
             raise NodeProcessError("node_stop_failed") from exc
-        if not isinstance(item, bytes):
-            raise NodeProcessError("node_stop_failed")
-        self._validate_response(item, command_id)
 
     def __enter__(self) -> "PhysicalNodeProcess":
         return self

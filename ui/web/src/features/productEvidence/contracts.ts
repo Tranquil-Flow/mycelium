@@ -300,7 +300,7 @@ const ATTRIBUTE_KEYS: Readonly<Record<ProductEntityKind, readonly string[]>> = O
   load_proof: ['proof_digest', 'assignment_id', 'load_generation', 'ready'],
   qualification: ['qualification_digest', 'route_ready', 'issued_at_unix_ms', 'expires_at_unix_ms', 'reason_codes'],
   request: ['state', 'path_attempt', 'sequence', 'qualification_id'],
-  route: ['deployment_id', 'model_id', 'topology_version', 'decode_mode', 'placement_provenance', 'route_alive'],
+  route: ['deployment_id', 'model_id', 'topology_version', 'decode_mode', 'placement_provenance', 'route_alive', 'concurrency_eligible', 'cancellation_cleanup_bound_ms', 'publisher_generation_fenced', 'scoped_liveness_proven'],
   runtime_kv_ownership: ['device_id', 'stage_id', 'decode_mode', 'kv_state_count', 'kv_byte_budget', 'proof_digest'],
   source_provenance: ['authority', 'source_protocol', 'source_generation', 'evidence_digest'],
   stage: ['stage_index', 'start_layer', 'end_layer_exclusive', 'component_roles', 'decode_mode'],
@@ -349,6 +349,10 @@ function decodeAttributes(kind: ProductEntityKind, value: unknown, field: string
       enumeration(read('decode_mode'), ['stage_local_kv', 'complete_context_replay'] as const, `${field}.decode_mode`);
       enumeration(read('placement_provenance'), ['operator_selected', 'planner_v2', 'frozen_fixture'] as const, `${field}.placement_provenance`);
       literalBoolean(read('route_alive'), `${field}.route_alive`);
+      literalBoolean(read('concurrency_eligible'), `${field}.concurrency_eligible`);
+      integer(read('cancellation_cleanup_bound_ms'), `${field}.cancellation_cleanup_bound_ms`);
+      literalBoolean(read('publisher_generation_fenced'), `${field}.publisher_generation_fenced`);
+      literalBoolean(read('scoped_liveness_proven'), `${field}.scoped_liveness_proven`);
       break;
     case 'qualification':
       text(read('qualification_digest'), `${field}.qualification_digest`, DIGEST);

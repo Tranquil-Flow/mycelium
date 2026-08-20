@@ -61,6 +61,7 @@ const session: InferenceSessionState = {
   output: 'useful output',
   token_count: 2,
   last_applied_sequence: 3,
+  publisher_generation: 2,
   error_code: null,
   form_error: null,
   cancellation_requested: false,

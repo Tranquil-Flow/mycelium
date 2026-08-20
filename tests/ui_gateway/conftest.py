@@ -250,22 +250,28 @@ async def default_request(scope, body):
                         "request_id": "request-1",
                         "stream_path": "/v1/inference/request-1/events",
                         "cancel_path": "/v1/inference/request-1",
+                        "session_token": "session-owner-token-0000000000000001",
                     }
                 )
             ],
         )
     if path == "/v1/inference/request-1/events":
+        publisher_generation = 2 if any(
+            name.lower() == b"last-event-id" for name, _value in scope["headers"]
+        ) else 1
         events = [
             {
                 "protocol": "mycelium.request_event.v1",
                 "request_id": "request-1",
                 "sequence": 0,
+                "publisher_generation": publisher_generation,
                 "type": "accepted",
             },
             {
                 "protocol": "mycelium.request_event.v1",
                 "request_id": "request-1",
                 "sequence": 1,
+                "publisher_generation": publisher_generation,
                 "type": "token",
                 "token_index": 0,
                 "text": "hello",
@@ -274,11 +280,12 @@ async def default_request(scope, body):
                 "protocol": "mycelium.request_event.v1",
                 "request_id": "request-1",
                 "sequence": 2,
+                "publisher_generation": publisher_generation,
                 "type": "completed",
             },
         ]
         frames = [
-            f"id: {event['sequence']}\nevent: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'), sort_keys=True)}\n\n".encode()
+            f"id: {event['publisher_generation']}:{event['sequence']}\nevent: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'), sort_keys=True)}\n\n".encode()
             for event in events
         ]
         return 200, [(b"content-type", b"text/event-stream; charset=utf-8")], frames

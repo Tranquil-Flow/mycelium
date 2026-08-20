@@ -282,18 +282,23 @@ def validate_qualification(document: Mapping[str, Any]) -> None:
         raise GatewayValidationError("invalid_upstream_qualification")
 
 
-def validate_inference_accept(document: Mapping[str, Any]) -> str:
-    if not _exact(document, {"request_id", "stream_path", "cancel_path"}):
+def validate_inference_accept(document: Mapping[str, Any]) -> tuple[str, str]:
+    if not _exact(
+        document,
+        {"request_id", "stream_path", "cancel_path", "session_token"},
+    ):
         raise GatewayValidationError("invalid_upstream_response")
     value = document["request_id"]
     if (
         not request_id(value)
         or document["stream_path"] != f"/v1/inference/{value}/events"
         or document["cancel_path"] != f"/v1/inference/{value}"
+        or not isinstance(document["session_token"], str)
+        or not 32 <= len(document["session_token"]) <= 256
     ):
         raise GatewayValidationError("invalid_upstream_response")
     assert isinstance(value, str)
-    return value
+    return value, document["session_token"]
 
 
 def validate_cancel_response(document: Mapping[str, Any], expected_id: str) -> bool:
@@ -587,7 +592,7 @@ def validate_observatory_envelope(document: Mapping[str, Any]) -> None:
 
 
 def validate_stream_event(document: Mapping[str, Any], expected_id: str) -> tuple[int, str]:
-    common = {"protocol", "request_id", "sequence", "type"}
+    common = {"protocol", "request_id", "sequence", "type", "publisher_generation"}
     event_type = document.get("type")
     expected = set(common)
     if event_type == "token":
@@ -602,6 +607,8 @@ def validate_stream_event(document: Mapping[str, Any], expected_id: str) -> tupl
         document["protocol"] not in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2}
         or document["request_id"] != expected_id
         or not safe_integer(document["sequence"])
+        or not safe_integer(document["publisher_generation"])
+        or document["publisher_generation"] < 1
         or event_type not in {"accepted", "token", "completed", "cancelled", "failed", "lifecycle"}
         or (event_type == "lifecycle" and document["protocol"] != REQUEST_EVENT_PROTOCOL_V2)
     ):
@@ -638,7 +645,31 @@ def validate_last_event_id(values: Sequence[bytes]) -> bytes | None:
         text = values[0].decode("ascii")
     except UnicodeDecodeError:
         raise GatewayValidationError("invalid_last_event_id") from None
-    if not text or not text.isdecimal() or int(text) > MAX_SAFE_INTEGER:
+    if (
+        not text.isdecimal()
+        or int(text) < 0
+        or int(text) > MAX_SAFE_INTEGER
+    ):
+        raise GatewayValidationError("invalid_last_event_id")
+    return values[0]
+
+
+def validate_request_event_id(values: Sequence[bytes]) -> bytes | None:
+    if not values:
+        return None
+    if len(values) != 1:
+        raise GatewayValidationError("invalid_last_event_id")
+    try:
+        text = values[0].decode("ascii")
+    except UnicodeDecodeError:
+        raise GatewayValidationError("invalid_last_event_id") from None
+    parts = text.split(":")
+    if (
+        len(parts) != 2
+        or any(not part.isdecimal() for part in parts)
+        or int(parts[0]) < 1
+        or any(int(part) > MAX_SAFE_INTEGER for part in parts)
+    ):
         raise GatewayValidationError("invalid_last_event_id")
     return values[0]
 
@@ -772,6 +803,7 @@ __all__ = [
     "validate_cancel_response",
     "validate_inference_accept",
     "validate_last_event_id",
+    "validate_request_event_id",
     "validate_observatory_envelope",
     "validate_qualification",
     "validate_stream_event",

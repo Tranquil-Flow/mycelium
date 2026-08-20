@@ -10,6 +10,7 @@ enters a serialization-facing object.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import fields, is_dataclass, replace
 import hashlib
@@ -24,6 +25,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from typing import Any, Callable, Mapping
@@ -37,6 +39,7 @@ from mycelium_router.contracts import (
     DeviceState,
     ExecutionGraph,
     LayerRange,
+    PathCancellation,
     Placement,
     PlacementEdge,
     RequestContext,
@@ -44,6 +47,7 @@ from mycelium_router.contracts import (
     Stage,
     StageCost,
 )
+from mycelium_router.serialization import path_manifest_from_dict
 from mycelium_router.live_ports import (
     PublishedDeviceStateProvider,
     PublishedTopologyProvider,
@@ -51,7 +55,7 @@ from mycelium_router.live_ports import (
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.router import Router
 from mycelium_router.transports.iroh import IrohTransport, PeerBinding
-from mycelium_router.validation import validate_execution_graph
+from mycelium_router.validation import validate_execution_graph, validate_manifest
 from physical_sqlite_capacity import SQLiteQualificationCapacityPort
 
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
@@ -62,6 +66,22 @@ _MAX_IROH_DELIVERY_TIMEOUT_SECONDS = 240.0
 _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS = 240.0
 _COMMAND_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
+)
+_REQUEST_CONTROL_FIELDS = frozenset(
+    {
+        "deployment_id",
+        "deployment_epoch",
+        "qualification_digest",
+        "command_id",
+        "publisher_generation",
+        "absolute_deadline_ms",
+        "request_attempt",
+        "path_id",
+        "path_attempt",
+        "path_digest",
+        "topology_generation",
+        "cancellation_generation",
+    }
 )
 
 
@@ -527,6 +547,17 @@ class NativeSidecarProcess:
         _require(self._bootstrap_material is not None, "sidecar_not_started")
         return self._bootstrap_material
 
+    def status(self) -> dict[str, Any]:
+        """Return bounded child health without exposing process identity."""
+
+        process = self.process
+        returncode = None if process is None else process.poll()
+        return {
+            "started": process is not None,
+            "alive": process is not None and returncode is None,
+            "returncode": returncode,
+        }
+
     def _argv(self, bootstrap_fd: int) -> list[str]:
         command = [
             str(self.binary),
@@ -741,9 +772,21 @@ class PhysicalNodeService:
         self.peer_generation = 0
         self._ids = _UuidSource()
         self._clock = _DistributedProtocolClock()
-        self._router_config = RouterConfig()
+        self._router_config = RouterConfig(
+            prefill_chunk_size_tokens=(
+                8 if requested_decode_mode == "stage_local_kv" else 0
+            )
+        )
         self._sinks: dict[str, _CaptureSink] = {}
         self._last_cancellation: dict[str, Any] | None = None
+        self._cancellations_by_subject: dict[
+            tuple[str, str, int], dict[str, Any]
+        ] = {}
+        self._control_lock = threading.RLock()
+        self._request_controls: dict[str, dict[str, Any]] = {}
+        self._pending_cancellations: dict[str, dict[str, Any]] = {}
+        self._cancellation_controls: dict[str, dict[str, Any]] = {}
+        self._request_cleanup_receipts: dict[str, dict[str, Any]] = {}
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
         _require(
@@ -1492,8 +1535,268 @@ class PhysicalNodeService:
             },
         )
 
+    def _validated_request_control(
+        self,
+        value: object,
+        *,
+        code: str,
+        initial: bool,
+    ) -> dict[str, Any]:
+        control = _exact_fields(value, set(_REQUEST_CONTROL_FIELDS), code)
+        _require(
+            isinstance(control["deployment_id"], str)
+            and bool(control["deployment_id"])
+            and type(control["deployment_epoch"]) is int
+            and control["deployment_epoch"] >= 1
+            and isinstance(control["qualification_digest"], str)
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", control["qualification_digest"])
+            is not None
+            and isinstance(control["command_id"], str)
+            and bool(control["command_id"])
+            and len(control["command_id"].encode("utf-8")) <= 256
+            and type(control["publisher_generation"]) is int
+            and control["publisher_generation"] >= 1
+            and type(control["absolute_deadline_ms"]) is int
+            and control["absolute_deadline_ms"] > 0
+            and type(control["request_attempt"]) is int
+            and control["request_attempt"] >= 1
+            and isinstance(control["path_id"], str)
+            and bool(control["path_id"])
+            and type(control["path_attempt"]) is int
+            and control["path_attempt"] >= 0
+            and isinstance(control["path_digest"], str)
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", control["path_digest"])
+            is not None
+            and type(control["topology_generation"]) is int
+            and control["topology_generation"] >= 1
+            and type(control["cancellation_generation"]) is int
+            and control["cancellation_generation"] >= 0
+            and (not initial or control["cancellation_generation"] == 0)
+            and self.graph is not None
+            and control["deployment_id"] == self.graph.deployment_id
+            and control["deployment_epoch"] == self.graph.deployment_epoch
+            and control["topology_generation"] == self.graph.topology_version,
+            code,
+        )
+        return control
+
+    def _bind_request_control(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = _exact_fields(
+            payload,
+            {"request_id", "control"},
+            "invalid_bind_request_control_fields",
+        )
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_bind_request_control",
+        )
+        _require(
+            isinstance(data["request_id"], str) and bool(data["request_id"]),
+            "invalid_request_id",
+        )
+        control = self._validated_request_control(
+            data["control"],
+            code="invalid_bind_request_control",
+            initial=True,
+        )
+        with self._control_lock:
+            _require(
+                data["request_id"] not in self._request_cleanup_receipts,
+                "request_already_cleaned",
+            )
+            current = self._request_controls.get(data["request_id"])
+            pending_cancel = self._pending_cancellations.get(data["request_id"])
+            bound_control = dict(control)
+            if current is not None:
+                immutable_fields = _REQUEST_CONTROL_FIELDS - {
+                    "cancellation_generation"
+                }
+                cancellation_control = self._cancellation_controls.get(
+                    data["request_id"]
+                )
+                advanced_duplicate = (
+                    all(current[field] == control[field] for field in immutable_fields)
+                    and current["cancellation_generation"]
+                    == control["cancellation_generation"] + 1
+                    and cancellation_control is not None
+                    and all(
+                        cancellation_control[field] == current[field]
+                        for field in _REQUEST_CONTROL_FIELDS
+                    )
+                )
+                _require(
+                    current == control or advanced_duplicate,
+                    "conflicting_request_control",
+                )
+                bound_control = dict(current)
+            elif pending_cancel is not None:
+                _require(
+                    all(
+                        pending_cancel[field] == control[field]
+                        for field in (
+                            "deployment_id",
+                            "deployment_epoch",
+                            "qualification_digest",
+                            "command_id",
+                            "publisher_generation",
+                            "absolute_deadline_ms",
+                            "request_attempt",
+                            "path_id",
+                            "path_attempt",
+                            "path_digest",
+                            "topology_generation",
+                        )
+                    )
+                    and pending_cancel["cancellation_generation"]
+                    == control["cancellation_generation"] + 1,
+                    "stale_infer_cancel_generation",
+                )
+                bound_control["cancellation_generation"] = pending_cancel[
+                    "cancellation_generation"
+                ]
+                self._cancellation_controls[data["request_id"]] = {
+                    key: value
+                    for key, value in pending_cancel.items()
+                    if key != "deadline_budget_ms"
+                }
+                self._pending_cancellations.pop(data["request_id"], None)
+            self._request_controls[data["request_id"]] = bound_control
+        return self._signed_result(
+            "request_control_bound",
+            {
+                "request_id": data["request_id"],
+                "control_digest": "sha256:"
+                + hashlib.sha256(
+                    canonical_json_bytes(bound_control)
+                ).hexdigest(),
+            },
+        )
+
+    def _update_request_control(self, payload: dict[str, Any]) -> dict[str, Any]:
+        data = _exact_fields(
+            payload,
+            {"request_id", "control"},
+            "invalid_update_request_control_fields",
+        )
+        _require(
+            self.state == "RUNNING" and self.router is not None,
+            "invalid_state_for_update_request_control",
+        )
+        _require(
+            isinstance(data["request_id"], str) and bool(data["request_id"]),
+            "invalid_request_id",
+        )
+        control = self._validated_request_control(
+            data["control"],
+            code="invalid_update_request_control",
+            initial=False,
+        )
+        with self._control_lock:
+            current = self._request_controls.get(data["request_id"])
+            immutable = _REQUEST_CONTROL_FIELDS - {"publisher_generation"}
+            _require(current is not None, "request_control_unknown")
+            _require(
+                all(current[field] == control[field] for field in immutable),
+                "request_control_identity_mismatch",
+            )
+            if control["publisher_generation"] == current["publisher_generation"]:
+                duplicate = True
+            else:
+                _require(
+                    control["publisher_generation"]
+                    == current["publisher_generation"] + 1,
+                    "publisher_generation_cas_mismatch",
+                )
+                duplicate = False
+                self._request_controls[data["request_id"]] = dict(control)
+        return self._signed_result(
+            "request_control_updated",
+            {
+                "request_id": data["request_id"],
+                "publisher_generation": control["publisher_generation"],
+                "duplicate": duplicate,
+            },
+        )
+
+    def _health(self, payload: dict[str, Any]) -> dict[str, Any]:
+        _exact_fields(payload, set(), "invalid_health_fields")
+        _require(self.state in {"CONFIGURED", "RUNNING"}, "invalid_state_for_health")
+        fatal = None if self.transport is None else self.transport.fatal_error
+        return self._signed_result(
+            "health",
+            {
+                "state": self.state,
+                "sidecar_process": (
+                    None if self.sidecar is None else self.sidecar.status()
+                ),
+                "transport_fatal_error": (
+                    None
+                    if fatal is None
+                    else {"code": fatal.code, "detail": fatal.detail}
+                ),
+                "transport_running": (
+                    False if self.transport is None else self.transport.running
+                ),
+            },
+        )
+
     def _snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
-        _exact_fields(payload, set(), "invalid_snapshot_fields")
+        _require(
+            set(payload) in (set(), {"cleanup_subject"}),
+            "invalid_snapshot_fields",
+        )
+        cleanup_subject = payload.get("cleanup_subject")
+        if cleanup_subject is not None:
+            cleanup_subject = _exact_fields(
+                cleanup_subject,
+                {
+                    "deployment_id",
+                    "deployment_epoch",
+                    "qualification_digest",
+                    "request_id",
+                    "request_attempt",
+                    "path_id",
+                    "path_attempt",
+                    "path_digest",
+                    "topology_generation",
+                    "command_id",
+                    "cancellation_generation",
+                    "publisher_generation",
+                    "absolute_deadline_ms",
+                },
+                "invalid_cleanup_subject",
+            )
+            _require(
+                isinstance(cleanup_subject["deployment_id"], str)
+                and bool(cleanup_subject["deployment_id"])
+                and type(cleanup_subject["deployment_epoch"]) is int
+                and cleanup_subject["deployment_epoch"] >= 1
+                and isinstance(cleanup_subject["qualification_digest"], str)
+                and cleanup_subject["qualification_digest"].startswith("sha256:")
+                and len(cleanup_subject["qualification_digest"]) == 71
+                and isinstance(cleanup_subject["request_id"], str)
+                and bool(cleanup_subject["request_id"])
+                and type(cleanup_subject["request_attempt"]) is int
+                and cleanup_subject["request_attempt"] >= 1
+                and isinstance(cleanup_subject["path_id"], str)
+                and bool(cleanup_subject["path_id"])
+                and type(cleanup_subject["path_attempt"]) is int
+                and cleanup_subject["path_attempt"] >= 0
+                and isinstance(cleanup_subject["path_digest"], str)
+                and cleanup_subject["path_digest"].startswith("sha256:")
+                and len(cleanup_subject["path_digest"]) == 71
+                and type(cleanup_subject["topology_generation"]) is int
+                and cleanup_subject["topology_generation"] >= 1
+                and isinstance(cleanup_subject["command_id"], str)
+                and bool(cleanup_subject["command_id"])
+                and type(cleanup_subject["cancellation_generation"]) is int
+                and cleanup_subject["cancellation_generation"] >= 0
+                and type(cleanup_subject["publisher_generation"]) is int
+                and cleanup_subject["publisher_generation"] >= 1
+                and type(cleanup_subject["absolute_deadline_ms"]) is int
+                and cleanup_subject["absolute_deadline_ms"] > 0,
+                "invalid_cleanup_subject",
+            )
         _require(self.state in {"CONFIGURED", "RUNNING"}, "invalid_state_for_snapshot")
         assert self.runtime is not None
         details: dict[str, Any] = {
@@ -1503,7 +1806,37 @@ class PhysicalNodeService:
             else _plain_json(self.capacity.snapshot()),
             "host_resources": self._host_resources(),
             "transport": None,
+            "sidecar_process": (
+                None if self.sidecar is None else self.sidecar.status()
+            ),
         }
+        details["interruptibility"] = {
+            "runtime_backend": details["runtime"].get("backend"),
+            "decode_mode": details["runtime"].get("mode"),
+            "work_unit": "transformer_layer",
+            "maximum_observed_work_unit_ms": details["runtime"].get(
+                "maximum_observed_work_unit_ms"
+            ),
+            "observed_work_unit_count": details["runtime"].get(
+                "observed_work_unit_count", 0
+            ),
+            "maximum_total_cleanup_ms": 2_000,
+            "physical_proof_required": True,
+            "backend_candidate": details["runtime"].get("mode")
+            == "stage_local_kv",
+            "cooperative_bound_candidate": (
+                details["runtime"].get("mode") == "stage_local_kv"
+                and type(details["runtime"].get("observed_work_unit_count")) is int
+                and details["runtime"].get("observed_work_unit_count", 0) > 0
+                and isinstance(
+                    details["runtime"].get("maximum_observed_work_unit_ms"),
+                    (int, float),
+                )
+                and details["runtime"].get("maximum_observed_work_unit_ms", 2_000)
+                < 2_000
+            ),
+        }
+        cancellation = self._last_cancellation
         if self.transport is not None:
             details["transport"] = _plain_json(self.transport.evidence())
             fatal = self.transport.fatal_error
@@ -1512,11 +1845,14 @@ class PhysicalNodeService:
             )
             details["transport_worker_threads"] = self.transport.worker_threads_alive
             details["transport_dispatcher_phase"] = self.transport.dispatcher_phase
+            details["transport_last_dispatch_error"] = (
+                self.transport.last_dispatch_error
+            )
             details["transport_outbound_trace"] = list(self.transport.outbound_trace)
             details["transport_pending_delivery_count"] = (
                 self.transport.pending_delivery_count
             )
-            cancellation = self._last_cancellation or self.transport.last_cancellation
+            cancellation = cancellation or self.transport.last_cancellation
             details["transport_cancellation_cleanup_complete"] = (
                 False
                 if cancellation is None
@@ -1525,6 +1861,152 @@ class PhysicalNodeService:
                     str(cancellation["path_id"]),
                 )
             )
+        if cleanup_subject is not None:
+            with self._control_lock:
+                stored_cleanup = self._request_cleanup_receipts.get(
+                    cleanup_subject["request_id"]
+                )
+            if stored_cleanup is not None:
+                _require(
+                    all(
+                        stored_cleanup.get(field) == value
+                        for field, value in cleanup_subject.items()
+                    ),
+                    "cleanup_receipt_identity_mismatch",
+                )
+                details["request_cleanup"] = dict(stored_cleanup)
+                return self._signed_result("snapshot", details)
+            runtime_states = details["runtime"].get("states", {})
+            runtime_subject_clean = not any(
+                path_id == cleanup_subject["path_id"]
+                and state.get("request_id") == cleanup_subject["request_id"]
+                and state.get("path_attempt") == cleanup_subject["path_attempt"]
+                for path_id, state in runtime_states.items()
+            )
+            transport_subject_clean = (
+                True
+                if self.transport is None
+                else self.transport.cancellation_cleanup_complete(
+                    cleanup_subject["request_id"],
+                    cleanup_subject["path_id"],
+                    cleanup_subject["path_attempt"],
+                )
+            )
+            details["request_cleanup"] = {
+                **cleanup_subject,
+                "runtime_clean": runtime_subject_clean,
+                "transport_clean": transport_subject_clean,
+                "complete": runtime_subject_clean and transport_subject_clean,
+            }
+            if self.transport is not None:
+                details["request_cleanup"]["transport_state"] = (
+                    self.transport.cancellation_cleanup_state(
+                        cleanup_subject["request_id"],
+                        cleanup_subject["path_id"],
+                        cleanup_subject["path_attempt"],
+                    )
+                )
+            if runtime_subject_clean and transport_subject_clean:
+                with self._control_lock:
+                    cancellation_control = self._cancellation_controls.get(
+                        cleanup_subject["request_id"]
+                    )
+                cancellation_observed = (
+                    cleanup_subject["request_id"],
+                    cleanup_subject["path_id"],
+                    cleanup_subject["path_attempt"],
+                ) in self._cancellations_by_subject
+                if self.transport is not None:
+                    cancellation_observed = (
+                        cancellation_observed
+                        or self.transport.cancellation_observed(
+                            cleanup_subject["request_id"],
+                            cleanup_subject["path_id"],
+                            cleanup_subject["path_attempt"],
+                        )
+                    )
+                if cancellation_control is not None:
+                    cancellation_observed = cancellation_observed or all(
+                        cancellation_control.get(field) == value
+                        for field, value in cleanup_subject.items()
+                    )
+                with self._control_lock:
+                    control = self._request_controls.get(
+                        cleanup_subject["request_id"]
+                    )
+                    if control is None:
+                        # Cancel-before-start: this node received the owner's
+                        # infer_cancel before any infer_start/infer_decode
+                        # bound a request control (e.g. cancellation won the
+                        # race with the first stage's prefill). The recorded
+                        # pending cancellation is the authoritative subject
+                        # identity; seed the control from it so the standard
+                        # immutable-field and generation verification below
+                        # applies exactly as it does for started requests.
+                        pending = self._pending_cancellations.get(
+                            cleanup_subject["request_id"]
+                        )
+                        if pending is not None and all(
+                            pending.get(field) == value
+                            for field, value in cleanup_subject.items()
+                            if field != "cancellation_generation"
+                        ):
+                            control = {
+                                key: value
+                                for key, value in pending.items()
+                                if key != "deadline_budget_ms"
+                            }
+                            control["cancellation_generation"] = (
+                                cleanup_subject["cancellation_generation"]
+                            )
+                            self._request_controls[
+                                cleanup_subject["request_id"]
+                            ] = dict(control)
+                    immutable_fields = _REQUEST_CONTROL_FIELDS - {
+                        "cancellation_generation"
+                    }
+                    if (
+                        control is not None
+                        and cleanup_subject["cancellation_generation"]
+                        == control["cancellation_generation"] + 1
+                    ):
+                        _require(
+                            cancellation_observed,
+                            "cleanup_cancellation_generation_unproven",
+                        )
+                        control["cancellation_generation"] = cleanup_subject[
+                            "cancellation_generation"
+                        ]
+                    _require(
+                        control is not None
+                        and all(
+                            cleanup_subject[field] == control[field]
+                            for field in immutable_fields
+                        ),
+                        "cleanup_subject_generation_mismatch",
+                    )
+                    _require(
+                        cleanup_subject["cancellation_generation"]
+                        == control["cancellation_generation"],
+                        "cleanup_cancellation_generation_mismatch",
+                    )
+                    receipt = dict(details["request_cleanup"])
+                    if len(self._request_cleanup_receipts) >= 256:
+                        oldest_request_id = next(iter(self._request_cleanup_receipts))
+                        self._request_cleanup_receipts.pop(oldest_request_id, None)
+                    self._request_cleanup_receipts[
+                        cleanup_subject["request_id"]
+                    ] = receipt
+                    self._request_controls.pop(
+                        cleanup_subject["request_id"], None
+                    )
+                    self._pending_cancellations.pop(
+                        cleanup_subject["request_id"], None
+                    )
+                    self._cancellation_controls.pop(
+                        cleanup_subject["request_id"], None
+                    )
+                self._sinks.pop(cleanup_subject["request_id"], None)
         return self._signed_result("snapshot", details)
 
     def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1577,13 +2059,27 @@ class PhysicalNodeService:
                 "path_id": path_id,
                 "path_attempt": path_attempt,
             }
+            self._cancellations_by_subject[
+                (request_id, path_id, path_attempt)
+            ] = dict(self._last_cancellation)
         return self._signed_result(
             "cancelled", {"request_id": request_id, "result": _plain_json(result)}
         )
 
     def _infer_start(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(
-            set(payload) in ({"request"}, {"request", "excluded_placement_ids"}),
+            set(payload)
+            in (
+                {"request"},
+                {"request", "excluded_placement_ids"},
+                {"request", "control", "path_manifest"},
+                {
+                    "request",
+                    "control",
+                    "path_manifest",
+                    "excluded_placement_ids",
+                },
+            ),
             "invalid_infer_start_fields",
         )
         data = payload
@@ -1630,12 +2126,119 @@ class PhysicalNodeService:
             "invalid_excluded_placement_ids",
         )
         _require(request.request_id not in self._sinks, "duplicate_request_id")
+        control_data = data.get("control")
+        if control_data is not None:
+            control = self._validated_request_control(
+                control_data,
+                code="invalid_infer_start_control",
+                initial=True,
+            )
+            with self._control_lock:
+                current = self._request_controls.get(request.request_id)
+                immutable_fields = _REQUEST_CONTROL_FIELDS - {
+                    "cancellation_generation"
+                }
+                cancellation_preceded_start = bool(
+                    current is not None
+                    and current["cancellation_generation"]
+                    == control["cancellation_generation"] + 1
+                    and all(current[field] == control[field] for field in immutable_fields)
+                )
+                _require(
+                    current is None or current == control or cancellation_preceded_start,
+                    "conflicting_request_control",
+                )
+                if not cancellation_preceded_start:
+                    self._request_controls[request.request_id] = dict(control)
+                pending_cancel = self._pending_cancellations.pop(
+                    request.request_id, None
+                )
+                if cancellation_preceded_start or pending_cancel is not None:
+                    if pending_cancel is None:
+                        pending_cancel = current
+                    assert pending_cancel is not None
+                    _require(
+                        all(
+                            pending_cancel[field] == control[field]
+                            for field in (
+                                "deployment_id",
+                                "deployment_epoch",
+                                "qualification_digest",
+                                "command_id",
+                                "publisher_generation",
+                                "absolute_deadline_ms",
+                                "request_attempt",
+                                "path_id",
+                                "path_attempt",
+                                "path_digest",
+                                "topology_generation",
+                            )
+                        )
+                        and pending_cancel["cancellation_generation"] == 1,
+                        "stale_infer_cancel_generation",
+                    )
+                    self._request_controls[request.request_id][
+                        "cancellation_generation"
+                    ] = 1
+                    cancellation_controls = getattr(
+                        self,
+                        "_cancellation_controls",
+                        None,
+                    )
+                    if cancellation_controls is None:
+                        cancellation_controls = {}
+                        self._cancellation_controls = cancellation_controls
+                    cancellation_controls[request.request_id] = {
+                        key: value
+                        for key, value in pending_cancel.items()
+                        if key != "deadline_budget_ms"
+                    }
+                    return self._signed_result(
+                        "inference_started",
+                        {
+                            "request_id": request.request_id,
+                            "status": "CANCELLED",
+                            "output": {"token_indexes": [], "token_ids": []},
+                            "path": None,
+                        },
+                    )
         sink = _CaptureSink()
-        request_id = self.router.start_distributed_prefill(
-            request,
-            sink,
-            excluded_placements=frozenset(excluded_placement_ids),
-        )
+        if control_data is None:
+            request_id = self.router.start_distributed_prefill(
+                request,
+                sink,
+                excluded_placements=frozenset(excluded_placement_ids),
+            )
+        else:
+            _require(not excluded_placement_ids, "locked_path_cannot_exclude_placements")
+            manifest_data = data.get("path_manifest")
+            _require(isinstance(manifest_data, dict), "invalid_path_manifest")
+            try:
+                manifest = path_manifest_from_dict(manifest_data)
+                _require(self.graph is not None, "missing_execution_graph")
+                validate_manifest(manifest, self.graph)
+            except (TypeError, ValueError):
+                raise NodeCommandError("invalid_path_manifest") from None
+            manifest_digest = "sha256:" + hashlib.sha256(
+                json.dumps(
+                    manifest_data,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            _require(
+                manifest.request_id == request.request_id
+                and manifest.path_id == control["path_id"]
+                and manifest.path_attempt == control["path_attempt"]
+                and manifest_digest == control["path_digest"],
+                "path_manifest_identity_mismatch",
+            )
+            request_id = self.router.start_locked_distributed_prefill(
+                request,
+                sink,
+                manifest=manifest,
+                pinned_deployment=self.graph,
+            )
         _require(request_id == request.request_id, "request_id_changed")
         self._sinks[request_id] = sink
         deadline = time.monotonic() + min(
@@ -1643,13 +2246,19 @@ class PhysicalNodeService:
             _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS,
         )
         status = self.router.request_status(request_id)
-        while status == "PREFILL" and time.monotonic() < deadline:
+        while status in {"PREFILL", "LOCKED"} and time.monotonic() < deadline:
             if self.transport is not None and self.transport.fatal_error is not None:
                 raise NodeCommandError(self.transport.fatal_error.code)
             time.sleep(0.01)
             status = self.router.request_status(request_id)
-        _require(status != "PREFILL", "prefill_completion_timeout")
+        _require(status not in {"PREFILL", "LOCKED"}, "prefill_completion_timeout")
         if getattr(self.runtime, "decode_mode", None) == "stage_local_kv":
+            # PrefillChunkCompleted and the first TokenEvent are separately
+            # ordered physical frames. The former may transition the entry to
+            # DECODING just before the latter reaches its sink. Stage-local KV
+            # cannot dispatch decode until that first generated token exists,
+            # so wait for the correlated event instead of issuing an invalid
+            # early decode command.
             while (
                 status == "DECODING"
                 and not sink.token_ids
@@ -1685,9 +2294,15 @@ class PhysicalNodeService:
         )
 
     def _infer_decode(self, payload: dict[str, Any]) -> dict[str, Any]:
-        data = _exact_fields(
-            payload, {"request_id", "count"}, "invalid_infer_decode_fields"
+        fields = set(payload)
+        _require(
+            fields in (
+                {"request_id", "count"},
+                {"request_id", "count", "control"},
+            ),
+            "invalid_infer_decode_fields",
         )
+        data = payload
         _require(
             isinstance(data["request_id"], str) and bool(data["request_id"]),
             "invalid_request_id",
@@ -1704,6 +2319,31 @@ class PhysicalNodeService:
         )
         sink = self._sinks.get(data["request_id"])
         _require(sink is not None, "unknown_request_id")
+        if "control" in data:
+            control = _exact_fields(
+                data["control"],
+                {
+                    "deployment_id",
+                    "deployment_epoch",
+                    "qualification_digest",
+                    "request_attempt",
+                    "path_id",
+                    "path_attempt",
+                    "path_digest",
+                    "topology_generation",
+                    "command_id",
+                    "cancellation_generation",
+                    "publisher_generation",
+                    "absolute_deadline_ms",
+                },
+                "invalid_infer_decode_control",
+            )
+            with self._control_lock:
+                current = self._request_controls.get(data["request_id"])
+                _require(
+                    current is not None and control == current,
+                    "stale_infer_decode_generation",
+                )
         dispatched = 0
         for _ in range(data["count"]):
             output_count = len(sink.token_ids)
@@ -1728,7 +2368,8 @@ class PhysicalNodeService:
                 time.sleep(0.01)
                 status = self.router.request_status(data["request_id"])
             _require(
-                len(sink.token_ids) > output_count or status == "COMPLETED",
+                len(sink.token_ids) > output_count
+                or status in {"COMPLETED", "CANCELLED", "FAILED"},
                 "decode_completion_timeout",
             )
         return self._signed_result(
@@ -1742,7 +2383,31 @@ class PhysicalNodeService:
         )
 
     def _infer_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
-        data = _exact_fields(payload, {"request_id"}, "invalid_infer_cancel_fields")
+        fields = set(payload)
+        _require(
+            fields
+            in (
+                {"request_id"},
+                {
+                    "request_id",
+                    "deployment_id",
+                    "deployment_epoch",
+                    "qualification_digest",
+                    "command_id",
+                    "publisher_generation",
+                    "absolute_deadline_ms",
+                    "request_attempt",
+                    "path_id",
+                    "path_attempt",
+                    "path_digest",
+                    "topology_generation",
+                    "cancellation_generation",
+                    "deadline_budget_ms",
+                },
+            ),
+            "invalid_infer_cancel_fields",
+        )
+        data = payload
         _require(
             isinstance(data["request_id"], str) and bool(data["request_id"]),
             "invalid_request_id",
@@ -1751,13 +2416,103 @@ class PhysicalNodeService:
             self.state == "RUNNING" and self.router is not None,
             "invalid_state_for_infer_cancel",
         )
+        if len(fields) > 1:
+            cancel_control = self._validated_request_control(
+                {
+                    field: data[field]
+                    for field in _REQUEST_CONTROL_FIELDS
+                },
+                code="invalid_infer_cancel_control",
+                initial=False,
+            )
+            _require(
+                cancel_control["cancellation_generation"] >= 1
+                and type(data["deadline_budget_ms"]) is int
+                and 1 <= data["deadline_budget_ms"] <= 2_000,
+                "invalid_infer_cancel_control",
+            )
+            with self._control_lock:
+                control = self._request_controls.get(data["request_id"])
+                if control is None:
+                    previous = self._pending_cancellations.get(data["request_id"])
+                    _require(
+                        previous is None or previous == dict(data),
+                        "conflicting_pending_cancellation",
+                    )
+                    self._pending_cancellations[data["request_id"]] = dict(data)
+                    return self._signed_result(
+                        "inference_cancelled",
+                        {
+                            "request_id": data["request_id"],
+                            "cancelled": True,
+                            "status": "CANCELLED",
+                            "pending_start": True,
+                        },
+                    )
+                _require(
+                    all(
+                        data[field] == control[field]
+                        for field in (
+                            "deployment_id",
+                            "deployment_epoch",
+                            "qualification_digest",
+                            "command_id",
+                            "publisher_generation",
+                            "absolute_deadline_ms",
+                            "request_attempt",
+                            "path_id",
+                            "path_attempt",
+                            "path_digest",
+                            "topology_generation",
+                        )
+                    )
+                    and data["cancellation_generation"]
+                    == control["cancellation_generation"] + 1,
+                    "stale_infer_cancel_generation",
+                )
+                control["cancellation_generation"] = data[
+                    "cancellation_generation"
+                ]
         cancelled = self.router.cancel(data["request_id"])
+        transport = getattr(self, "transport", None)
+        if not cancelled and len(fields) > 1 and transport is not None:
+            transport.send_path_cancellation_if_entry(
+                PathCancellation(
+                    request_id=data["request_id"],
+                    path_id=data["path_id"],
+                    path_attempt=data["path_attempt"],
+                    topology_version=data["topology_generation"],
+                )
+            )
+        if len(fields) > 1:
+            with self._control_lock:
+                cancellation_controls = getattr(
+                    self,
+                    "_cancellation_controls",
+                    None,
+                )
+                if cancellation_controls is None:
+                    cancellation_controls = {}
+                    self._cancellation_controls = cancellation_controls
+                cancellation_controls[data["request_id"]] = {
+                    key: value
+                    for key, value in data.items()
+                    if key != "deadline_budget_ms"
+                }
+        try:
+            status = self.router.request_status(data["request_id"])
+        except KeyError:
+            # Successful Router cleanup may retire the request before this
+            # command builds its observation.  Absence after the exact,
+            # generation-fenced cancellation is the expected cancelled state;
+            # cleanup snapshots still prove every request/path-scoped resource.
+            status = "CANCELLED"
         return self._signed_result(
             "inference_cancelled",
             {
                 "request_id": data["request_id"],
                 "cancelled": bool(cancelled),
-                "status": self.router.request_status(data["request_id"]),
+                "status": status,
             },
         )
 
@@ -1829,8 +2584,11 @@ class PhysicalNodeService:
             "hello": self._hello,
             "configure": self._configure,
             "start": self._start,
+            "health": self._health,
             "snapshot": self._snapshot,
             "cancel": self._cancel,
+            "bind_request_control": self._bind_request_control,
+            "update_request_control": self._update_request_control,
             "infer_start": self._infer_start,
             "infer_decode": self._infer_decode,
             "infer_cancel": self._infer_cancel,
@@ -1938,11 +2696,49 @@ def main() -> int:
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
 
+    write_lock = threading.Lock()
+    active_lock = threading.Lock()
+    active_command_ids: set[str] = set()
+    capacity = threading.BoundedSemaphore(16)
+
+    def emit(document: dict[str, Any]) -> None:
+        with write_lock:
+            _emit(document)
+
+    def execute(command: Any, command_id: str) -> None:
+        try:
+            # Long inference commands own absolute deadlines and cooperative
+            # cancellation points. The stdin reader must stay free to accept
+            # cancellation, cleanup, probes, and unrelated request commands.
+            result = service.dispatch(command)
+            emit(_response(service, command_id=command_id, ok=True, result=result))
+        except NodeCommandError as exc:
+            emit(_response(service, command_id=command_id, ok=False, error_code=exc.code))
+        except BaseException as exc:
+            print(
+                f"physical-node command failed: {type(exc).__name__}",
+                file=sys.stderr,
+            )
+            traceback.print_exc(file=sys.stderr)
+            emit(
+                _response(
+                    service,
+                    command_id=command_id,
+                    ok=False,
+                    error_code="node_command_failed",
+                )
+            )
+        finally:
+            with active_lock:
+                active_command_ids.discard(command_id)
+            capacity.release()
+
+    executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mycelium-node-command")
     try:
         for raw_line in sys.stdin.buffer:
             command_id = "unknown"
             if len(raw_line) > MAX_COMMAND_BYTES:
-                _emit(
+                emit(
                     _response(
                         service,
                         command_id=command_id,
@@ -1953,29 +2749,45 @@ def main() -> int:
                 continue
             try:
                 command = canonical_json_loads(raw_line.rstrip(b"\n"), path="stdin")
-                if isinstance(command, dict) and isinstance(
-                    command.get("command_id"), str
-                ):
+                if isinstance(command, dict) and isinstance(command.get("command_id"), str):
                     command_id = command["command_id"]
-                with _command_deadline(service.command_timeout):
-                    result = service.dispatch(command)
-                _emit(_response(service, command_id=command_id, ok=True, result=result))
-            except NodeCommandError as exc:
-                _emit(
-                    _response(
-                        service, command_id=command_id, ok=False, error_code=exc.code
+                if not capacity.acquire(blocking=False):
+                    emit(
+                        _response(
+                            service,
+                            command_id=command_id,
+                            ok=False,
+                            error_code="command_capacity_exhausted",
+                        )
                     )
-                )
-                if exc.code == "command_timeout":
-                    service.close()
-                    return 3
+                    continue
+                with active_lock:
+                    if command_id in active_command_ids:
+                        capacity.release()
+                        emit(
+                            _response(
+                                service,
+                                command_id=command_id,
+                                ok=False,
+                                error_code="duplicate_command_id",
+                            )
+                        )
+                        continue
+                    active_command_ids.add(command_id)
+                executor.submit(execute, command, command_id)
+                if (
+                    isinstance(command, dict)
+                    and command.get("command") == "stop"
+                ):
+                    break
+            except NodeCommandError as exc:
+                emit(_response(service, command_id=command_id, ok=False, error_code=exc.code))
             except BaseException as exc:
                 print(
                     f"physical-node command failed: {type(exc).__name__}",
                     file=sys.stderr,
                 )
-                traceback.print_exc(file=sys.stderr)
-                _emit(
+                emit(
                     _response(
                         service,
                         command_id=command_id,
@@ -1983,11 +2795,9 @@ def main() -> int:
                         error_code="node_command_failed",
                     )
                 )
-            if service.stop_requested:
-                return 0
-        service.close()
         return 0
     finally:
+        executor.shutdown(wait=True, cancel_futures=False)
         for signum, handler in prior_signal_handlers.items():
             signal.signal(signum, handler)
         service.close()

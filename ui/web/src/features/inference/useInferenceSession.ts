@@ -69,6 +69,7 @@ const initialState: InferenceSessionState = Object.freeze({
   output: '',
   token_count: 0,
   last_applied_sequence: -1,
+  publisher_generation: 0,
   error_code: null,
   form_error: null,
   cancellation_requested: false,
@@ -237,6 +238,7 @@ export function inferenceSessionReducer(
         output: '',
         token_count: 0,
         last_applied_sequence: -1,
+        publisher_generation: 0,
         error_code: null,
         form_error: null,
         cancellation_requested: false,
@@ -254,6 +256,16 @@ export function inferenceSessionReducer(
       if (state.accepted_request === null || action.event.request_id !== state.accepted_request.request_id) {
         return failStream(state, 'stream_request_mismatch', action.now);
       }
+      if (
+        action.event.publisher_generation < state.publisher_generation
+        || action.event.publisher_generation > state.publisher_generation + 1
+      ) {
+        return failStream(state, 'stream_publisher_generation_invalid', action.now);
+      }
+      const publisherGeneration = Math.max(
+        state.publisher_generation,
+        action.event.publisher_generation,
+      );
       if (action.event.sequence <= state.last_applied_sequence) return state;
       if (action.event.sequence !== state.last_applied_sequence + 1) {
         return failStream(state, 'stream_sequence_invalid', action.now);
@@ -262,7 +274,12 @@ export function inferenceSessionReducer(
         if (action.event.sequence !== 0 || state.last_applied_sequence !== -1) {
           return failStream(state, 'stream_sequence_invalid', action.now);
         }
-        return Object.freeze({ ...state, last_applied_sequence: 0, error_code: null });
+        return Object.freeze({
+          ...state,
+          last_applied_sequence: 0,
+          publisher_generation: publisherGeneration,
+          error_code: null,
+        });
       }
       if (state.last_applied_sequence < 0) {
         return failStream(state, 'stream_sequence_invalid', action.now);
@@ -279,6 +296,7 @@ export function inferenceSessionReducer(
           output: state.output + action.event.text,
           token_count: state.token_count + 1,
           last_applied_sequence: action.event.sequence,
+          publisher_generation: publisherGeneration,
           error_code: null,
         });
       }
@@ -286,6 +304,7 @@ export function inferenceSessionReducer(
         return Object.freeze({
           ...state,
           last_applied_sequence: action.event.sequence,
+          publisher_generation: publisherGeneration,
           error_code: null,
         });
       }
@@ -295,6 +314,7 @@ export function inferenceSessionReducer(
         ...state,
         phase,
         last_applied_sequence: action.event.sequence,
+        publisher_generation: publisherGeneration,
         error_code: errorCode,
         history: terminalHistory(state, phase, action.now, errorCode),
       });
@@ -447,6 +467,7 @@ export function useInferenceSession({
               if (isTerminalInferencePhase(stateRef.current.phase)) controller.abort();
             },
             controller.signal,
+            cursor === null ? undefined : stateRef.current.publisher_generation,
           );
           const latest = stateRef.current;
           if (!isTerminalInferencePhase(latest.phase)) {

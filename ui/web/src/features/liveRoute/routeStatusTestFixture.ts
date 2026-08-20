@@ -69,6 +69,7 @@ export function liveRouteStatusFixture(): LiveRouteStatus {
         activation_output_bytes: 8192,
         release_state: 'released', last_release_reason: 'normal_completion',
         release_counts: { request_complete: 1 },
+        interruptibility: { runtime_backend: 'mlx', decode_mode: 'stage_local_kv', work_unit: 'transformer_layer', maximum_observed_work_unit_ms: 125, observed_work_unit_count: 24, maximum_total_cleanup_ms: 2_000, physical_proof_required: true, backend_candidate: true, cooperative_bound_candidate: true },
       },
     ],
     recent_inferences: [
@@ -83,6 +84,8 @@ export function liveRouteStatusFixture(): LiveRouteStatus {
     incidents: [],
     placement: null,
     topology: null,
+    liveness: { protocol: 'mycelium.traffic_liveness.v1', deployment_id: 'deployment-1', generated_at_monotonic_ms: 100, subjects: [], incidents: [], deployment_fatal_reason: null },
+    concurrency_liveness_qualification: { protocol: 'mycelium.product_concurrency_liveness_qualification.v1', deployment_id: 'deployment-1', qualification_digest: `sha256:${'b'.repeat(64)}`, maximum_concurrent_requests: 4, cancellation_and_cleanup_bound_ms: 2_000, cooperative_interruption_proven: false, request_scoped_cleanup_proven: false, shared_process_termination_used: false, publisher_generation_fencing_proven: false, scoped_liveness_proven: false, eligible: false, evidence_digest: `sha256:${'c'.repeat(64)}` },
   };
 }
 

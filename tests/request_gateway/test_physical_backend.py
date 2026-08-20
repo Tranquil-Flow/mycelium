@@ -6,6 +6,7 @@ qualifier-owned current record may open the qualification-gated request path.
 from __future__ import annotations
 
 from dataclasses import replace
+import threading
 
 import pytest
 
@@ -788,6 +789,32 @@ class DefaultSnapshotRouter:
         return True
 
 
+class CleanupGatedRouter(ReusableRouter):
+    def __init__(self, deployment):
+        super().__init__(deployment)
+        self.cancel_requested = threading.Event()
+        self.cleanup_complete = threading.Event()
+        self.deadlines = []
+
+    def cancel_with_deadline(self, request_id, *, deadline_monotonic_s):
+        del request_id
+        self.cancel_calls += 1
+        self.deadlines.append(deadline_monotonic_s)
+        self.cancel_requested.set()
+        return True
+
+    def request_status(self, request_id):
+        del request_id
+        if self.cleanup_complete.is_set():
+            return "CANCELLED"
+        return self.status
+
+    def decode_one(self, request_id):
+        del request_id
+        self.cleanup_complete.wait(timeout=1.0)
+        return False
+
+
 def test_ungated_compatibility_caller_retains_default_snapshot_admission():
     graph = _synthetic_execution_graph()
     _router, clock, _capacity, _runtime = _runtime_stack(graph=graph)
@@ -858,6 +885,51 @@ def test_cancel_state_is_request_local_and_does_not_poison_reused_id():
     assert backend._internally_cancelled == set()
     assert backend._external_cancellation_observed == set()
     assert backend._awaiting_cancel_ack == set()
+
+
+def test_backend_waits_for_router_cleanup_terminal_and_preserves_deadline():
+    record = _synthetic_qualification()
+    graph = _synthetic_execution_graph()
+    _router, clock, _capacity, _runtime = _runtime_stack(graph=graph)
+    router = CleanupGatedRouter(graph)
+    backend = RouterSessionBackend(
+        router=router,
+        codec=RecordingCodec(),
+        clock=clock.now,
+        qualification_source=CurrentAuthority(record),
+    )
+    stop = threading.Event()
+    outcome = []
+
+    worker = threading.Thread(
+        target=lambda: outcome.append(
+            backend.run(
+                "cleanup-gated-cancel",
+                submission(record),
+                lambda *_: None,
+                stop.is_set,
+            )
+        )
+    )
+    worker.start()
+    while router.status != "DECODING":
+        worker.join(timeout=0.001)
+        assert worker.is_alive()
+
+    backend.cancel_with_deadline(
+        "cleanup-gated-cancel",
+        deadline_monotonic_s=123.5,
+    )
+    stop.set()
+    assert router.cancel_requested.wait(timeout=1.0)
+    assert worker.is_alive()
+    assert outcome == []
+
+    router.cleanup_complete.set()
+    worker.join(timeout=1.0)
+    assert not worker.is_alive()
+    assert outcome == ["cancelled"]
+    assert router.deadlines == [123.5]
 
 
 def test_client_cancellation_reaches_router_once_and_private_material_stays_out_of_error(

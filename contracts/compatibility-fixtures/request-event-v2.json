@@ -1,6 +1,7 @@
 {
   "phase": "prefill",
   "protocol": "mycelium.request_event.v2",
+  "publisher_generation": 1,
   "request_id": "request-fixture",
   "sequence": 2,
   "type": "lifecycle"

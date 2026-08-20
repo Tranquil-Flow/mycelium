@@ -495,8 +495,25 @@ class ProductProjector:
             and placement_members_present
             and placement_members_eligible
         )
+        a4_status: Mapping[str, Any] | None = None
+        concurrency_eligible = False
+        publisher_generation_fenced = False
+        scoped_liveness_proven = False
         if route_current:
             assert route_status is not None
+            a4_status = route_status.get("concurrency_liveness_qualification")
+            a4_status = a4_status if isinstance(a4_status, Mapping) else None
+            concurrency_eligible = (
+                a4_status is not None and a4_status.get("eligible") is True
+            )
+            publisher_generation_fenced = (
+                a4_status is not None
+                and a4_status.get("publisher_generation_fencing_proven") is True
+            )
+            scoped_liveness_proven = (
+                a4_status is not None
+                and a4_status.get("scoped_liveness_proven") is True
+            )
             identity = route_status.get("route_identity_digest")
             identity = identity if isinstance(identity, str) and _DIGEST.fullmatch(identity) else _digest(route_status)
             route_id = f"route-{identity.split(':', 1)[1][:20]}"
@@ -538,6 +555,14 @@ class ProductProjector:
                             else "operator_selected"
                         ),
                         "route_alive": route_status.get("route_alive") is True,
+                        "concurrency_eligible": concurrency_eligible,
+                        "cancellation_cleanup_bound_ms": int(
+                            a4_status.get("cancellation_and_cleanup_bound_ms", 2_000)
+                            if a4_status is not None
+                            else 2_000
+                        ),
+                        "publisher_generation_fenced": publisher_generation_fenced,
+                        "scoped_liveness_proven": scoped_liveness_proven,
                     },
                 }
             )
@@ -890,9 +915,40 @@ class ProductProjector:
                 {
                     "scope_id": scope_id,
                     "dimension": "transport",
-                    "state": "unknown",
-                    "reason_code": "transport_path_observation_unavailable",
+                    "state": (
+                        "ready"
+                        if route_current and scoped_liveness_proven
+                        else "not_ready"
+                        if route_current and a4_status is not None
+                        else "unknown"
+                    ),
+                    "reason_code": (
+                        None
+                        if route_current and scoped_liveness_proven
+                        else "scoped_liveness_unqualified"
+                        if route_current and a4_status is not None
+                        else "transport_path_observation_unavailable"
+                    ),
                     "source_id": "transport-path-source",
+                },
+                {
+                    "scope_id": scope_id,
+                    "dimension": "runtime",
+                    "state": (
+                        "ready"
+                        if route_current and concurrency_eligible
+                        else "not_ready"
+                        if route_current and a4_status is not None
+                        else "unknown"
+                    ),
+                    "reason_code": (
+                        None
+                        if route_current and concurrency_eligible
+                        else "concurrency_liveness_unqualified"
+                        if route_current and a4_status is not None
+                        else "runtime_qualification_unavailable"
+                    ),
+                    "source_id": "runtime-source",
                 },
                 {
                     "scope_id": scope_id,

@@ -274,11 +274,18 @@ class StreamEvent:
     text: str | None = None
     code: str | None = None
     phase: str | None = None
+    publisher_generation: int = 0
     protocol: str = REQUEST_EVENT_PROTOCOL
 
     def __post_init__(self) -> None:
         _require(
             isinstance(self.request_id, str) and bool(self.request_id),
+            "invalid_stream_event",
+        )
+        _require(
+            isinstance(self.publisher_generation, int)
+            and not isinstance(self.publisher_generation, bool)
+            and self.publisher_generation >= 0,
             "invalid_stream_event",
         )
         _require(
@@ -345,6 +352,7 @@ class StreamEvent:
             "request_id": self.request_id,
             "sequence": self.sequence,
             "type": self.kind,
+            "publisher_generation": self.publisher_generation,
         }
         if self.kind == "token":
             document["token_index"] = self.token_index
@@ -358,7 +366,7 @@ class StreamEvent:
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> "StreamEvent":
         _require(isinstance(document, Mapping), "invalid_stream_event")
-        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "text", "code", "phase"}
+        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "text", "code", "phase", "publisher_generation"}
         _require(set(document).issubset(allowed), "invalid_stream_event")
         _require(
             document.get("protocol") in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2},
@@ -367,7 +375,7 @@ class StreamEvent:
         kind_value = document.get("type")
         _require(isinstance(kind_value, str), "invalid_stream_event")
         kind = kind_value
-        required = {"protocol", "request_id", "sequence", "type"}
+        required = {"protocol", "request_id", "sequence", "type", "publisher_generation"}
         if kind == "token":
             required.update({"token_index", "text"})
         elif kind == "failed":
@@ -383,5 +391,6 @@ class StreamEvent:
             text=document.get("text"),
             code=document.get("code"),
             phase=document.get("phase"),
+            publisher_generation=document["publisher_generation"],
             protocol=document["protocol"],
         )

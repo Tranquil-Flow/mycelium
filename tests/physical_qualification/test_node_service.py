@@ -676,6 +676,145 @@ def test_infer_decode_accepts_eos_completion_without_visible_token(
     }
 
 
+def test_a4_decode_and_cleanup_require_bound_canonical_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-a4-identity",
+        deployment_id="deployment-a4-identity",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+
+    class Router:
+        def decode_one_distributed(self, request_id: str) -> bool:
+            assert request_id == "request-a4-identity"
+            return False
+
+        def request_status(self, request_id: str) -> str:
+            assert request_id == "request-a4-identity"
+            return "DECODING"
+
+    class Runtime:
+        @staticmethod
+        def kv_snapshot():
+            return {"backend": "numpy", "mode": "stage_local_kv", "states": {}}
+
+    service.state = "RUNNING"
+    service.graph = type(
+        "Graph",
+        (),
+        {
+            "deployment_id": "deployment-a4-identity",
+            "deployment_epoch": 4,
+            "topology_version": 7,
+        },
+    )()
+    service.router = Router()  # type: ignore[assignment]
+    service.runtime = Runtime()  # type: ignore[assignment]
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+    service._host_resources = lambda: {}  # type: ignore[method-assign]
+    service._sinks["request-a4-identity"] = node_module._CaptureSink()
+    control = {
+        "deployment_id": "deployment-a4-identity",
+        "deployment_epoch": 4,
+        "qualification_digest": "sha256:" + "a" * 64,
+        "command_id": "command-a4-identity",
+        "publisher_generation": 3,
+        "absolute_deadline_ms": 99_000,
+        "request_attempt": 2,
+        "path_id": "path-a4-identity",
+        "path_attempt": 1,
+        "path_digest": "sha256:" + "b" * 64,
+        "topology_generation": 7,
+        "cancellation_generation": 0,
+    }
+
+    bound = service._bind_request_control(
+        {"request_id": "request-a4-identity", "control": control}
+    )
+    assert bound["event"] == "request_control_bound"
+    updated_control = {**control, "publisher_generation": 4}
+    updated = service._update_request_control(
+        {
+            "request_id": "request-a4-identity",
+            "control": updated_control,
+        }
+    )
+    assert updated["event"] == "request_control_updated"
+    assert updated["details"]["publisher_generation"] == 4
+    with pytest.raises(NodeCommandError, match="stale_infer_decode_generation"):
+        service._infer_decode(
+            {
+                "request_id": "request-a4-identity",
+                "count": 1,
+                "control": dict(control),
+            }
+        )
+    control = updated_control
+    decoded = service._infer_decode(
+        {
+            "request_id": "request-a4-identity",
+            "count": 1,
+            "control": dict(control),
+        }
+    )
+    assert decoded["event"] == "inference_decoded"
+
+    stale = {**control, "path_attempt": 0}
+    with pytest.raises(NodeCommandError, match="stale_infer_decode_generation"):
+        service._infer_decode(
+            {
+                "request_id": "request-a4-identity",
+                "count": 1,
+                "control": stale,
+            }
+        )
+
+    cleanup = service._snapshot(
+        {
+            "cleanup_subject": {
+                "request_id": "request-a4-identity",
+                **control,
+            }
+        }
+    )
+    assert cleanup["details"]["request_cleanup"]["complete"] is True
+    assert "request-a4-identity" not in service._request_controls
+    duplicate_cleanup = service._snapshot(
+        {
+            "cleanup_subject": {
+                "request_id": "request-a4-identity",
+                **control,
+            }
+        }
+    )
+    assert duplicate_cleanup["details"]["request_cleanup"] == cleanup["details"][
+        "request_cleanup"
+    ]
+    with pytest.raises(NodeCommandError, match="cleanup_receipt_identity_mismatch"):
+        service._snapshot(
+            {
+                "cleanup_subject": {
+                    "request_id": "request-a4-identity",
+                    **{**control, "path_attempt": control["path_attempt"] + 1},
+                }
+            }
+        )
+
+
 def test_stage_local_infer_start_waits_for_prefill_token_event(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -750,6 +889,55 @@ def test_stage_local_infer_start_waits_for_prefill_token_event(
         "token_ids": [42],
     }
     assert service.router.status_calls == 2
+
+
+def test_native_sidecar_status_reports_child_exit_without_process_identity() -> None:
+    class _ExitedProcess:
+        @staticmethod
+        def poll() -> int:
+            return 9
+
+    sidecar = NativeSidecarProcess.__new__(NativeSidecarProcess)
+    sidecar.__dict__["process"] = _ExitedProcess()
+
+    assert sidecar.status() == {
+        "started": True,
+        "alive": False,
+        "returncode": 9,
+    }
+
+
+def test_node_health_reports_sidecar_exit_without_runtime_snapshot() -> None:
+    service = PhysicalNodeService.__new__(PhysicalNodeService)
+    service.state = "RUNNING"
+    service.sidecar = type(
+        "Sidecar",
+        (),
+        {
+            "status": staticmethod(
+                lambda: {"started": True, "alive": False, "returncode": 9}
+            )
+        },
+    )()
+    service.transport = None
+    service._signed_result = lambda event, details=None: {
+        "event": event,
+        "details": details,
+    }
+
+    assert service._health({}) == {
+        "event": "health",
+        "details": {
+            "state": "RUNNING",
+            "sidecar_process": {
+                "started": True,
+                "alive": False,
+                "returncode": 9,
+            },
+            "transport_fatal_error": None,
+            "transport_running": False,
+        },
+    }
 
 
 def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:

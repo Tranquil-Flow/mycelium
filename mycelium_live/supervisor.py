@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
@@ -29,7 +30,10 @@ from mycelium_qualification import (
     route_qualification_to_dict,
 )
 from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
-from mycelium_request_gateway.contracts import safe_qualification_projection
+from mycelium_request_gateway.contracts import (
+    qualification_digest,
+    safe_qualification_projection,
+)
 from mycelium_physical_runner import load_operator_plan
 from mycelium_m16_runtime import build_live_m16_runtime
 from mycelium_performance_budget import validate_performance_budget_v3
@@ -71,6 +75,7 @@ from .registry import (
 )
 from .route import LiveRoute, PhysicalLiveRoute, RouteCounters, RouteIdentity
 from .router_port import LiveRouterPort
+from .a4_install import A4EvidenceError, build_a4_qualification, load_a4_evidence_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1678,6 +1683,30 @@ def _historical_evidence(
     return tuple(records)
 
 
+def _save_live_qualification(qualification: Any, path: Path) -> None:
+    """Persist the freshly issued live-route qualification to a sealed file."""
+
+    from mycelium_qualification.contracts import route_qualification_to_dict
+    from mycelium_qualification.evidence import canonical_json_bytes
+
+    document = route_qualification_to_dict(qualification)
+    if path.exists() or path.is_symlink():
+        raise ValueError("live_qualification_output_exists")
+    body = canonical_json_bytes(document) + b"\n"
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(body)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+
+
+
 def _explicit_historical_evidence(
     paths: Sequence[Path],
 ) -> tuple[Mapping[str, Any], ...]:
@@ -1764,6 +1793,10 @@ def _qualified_runtime(
         if progress is not None:
             progress("qualifying_route")
         qualification = _qualify_open_route(route)
+        # The physical command path revalidates the exact qualifier-owned
+        # digest at every mutation boundary. Registry-backed serving must bind
+        # that authority just like the single-deployment server does.
+        route.set_deployment_qualification(qualification)
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         codec = prompt_codec_from_deployment(selected_deployment_dir)
         route.set_stop_token_ids(getattr(codec, "stop_token_ids", frozenset()))
@@ -2084,6 +2117,8 @@ def run_physical_server(
     representation_authorization_file: Path | None = None,
     model_capacity_live_observations_file: Path | None = None,
     historical_evidence_files: Sequence[Path] = (),
+    a4_evidence: Mapping[str, Any] | None = None,
+    save_live_qualification: Path | None = None,
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
@@ -2107,6 +2142,17 @@ def run_physical_server(
 
         qualification = _qualify_open_route(route)
         route.set_deployment_qualification(qualification)
+        if save_live_qualification is not None:
+            _save_live_qualification(qualification, save_live_qualification)
+        if a4_evidence is not None:
+            graph = route.execution_graph
+            a4_document = build_a4_qualification(
+                **a4_evidence,
+                qualification_digest=qualification_digest(qualification),
+                graph_digest=getattr(graph, "graph_digest", None),
+                manifest_digest=getattr(graph, "manifest_digest", None),
+            )
+            route.set_a4_qualification(a4_document)
 
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         route.set_public_projections(
@@ -2219,6 +2265,34 @@ class _DiscardSink:
         return
 
 
+def _a4_evidence_from_args(args: argparse.Namespace) -> Mapping[str, Any] | None:
+    """Load owner-supplied A4 gate artifacts; None when no flag was supplied."""
+
+    if not any(
+        (
+            args.a4_positive_observation,
+            args.a4_negative_data_plane_observation,
+            args.a4_negative_qualification_observation,
+            args.a4_negative_shutdown_observation,
+        )
+    ):
+        return None
+    flags = (
+        args.a4_positive_observation,
+        args.a4_negative_data_plane_observation,
+        args.a4_negative_qualification_observation,
+        args.a4_negative_shutdown_observation,
+    )
+    if any(flag is None for flag in flags):
+        raise SystemExit("--a4-* evidence flags require all four artifact kinds")
+    return load_a4_evidence_files(
+        positive=tuple(args.a4_positive_observation),
+        data_plane=tuple(args.a4_negative_data_plane_observation),
+        qualification=args.a4_negative_qualification_observation,
+        shutdown=args.a4_negative_shutdown_observation,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3.14 -m mycelium_demo serve --mode live"
@@ -2302,6 +2376,33 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed-url",
         help="network URL advertised by the live durable seed; enables owner enrollment",
     )
+    parser.add_argument(
+        "--a4-positive-observation",
+        type=Path,
+        action="append",
+        help="sealed A4 positive product observation; repeat for multiple runs",
+    )
+    parser.add_argument(
+        "--a4-negative-data-plane-observation",
+        type=Path,
+        action="append",
+        help="sealed A4 negative data-plane observation; repeat for multiple runs",
+    )
+    parser.add_argument(
+        "--a4-negative-qualification-observation",
+        type=Path,
+        help="sealed A4 negative qualification observation (stale-qualification 409)",
+    )
+    parser.add_argument(
+        "--a4-negative-shutdown-observation",
+        type=Path,
+        help="sealed A4 negative shutdown observation (bounded SIGTERM)",
+    )
+    parser.add_argument(
+        "--save-live-qualification",
+        type=Path,
+        help="if set, persist the freshly issued live-route qualification to this path",
+    )
     return parser
 
 
@@ -2334,6 +2435,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.model_capacity_live_observations_file
             ),
             historical_evidence_files=tuple(args.historical_evidence_file or ()),
+            save_live_qualification=args.save_live_qualification,
+            a4_evidence=_a4_evidence_from_args(args),
         )
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")

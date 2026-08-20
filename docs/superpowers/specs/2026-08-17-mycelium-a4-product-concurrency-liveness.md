@@ -187,7 +187,9 @@ receipts, stream buffers, and stage-local KV states.
 Every stage or transport command binds:
 
 - deployment ID/epoch and qualification digest;
-- request ID, request attempt, path ID/digest, and topology generation;
+- request ID, request attempt, and the M16-owned canonical `PathManifest` path
+  ID/digest/attempt (never a recomputed placement approximation);
+- topology generation and gateway-owned publisher generation;
 - stage, placement, assignment, and operation ID;
 - command kind (`prefill`, `decode`, `cleanup`, `shutdown`, or `probe`);
 - issue and absolute monotonic deadline;
@@ -195,7 +197,8 @@ Every stage or transport command binds:
 - expected terminal compare-and-swap and bounded cleanup-result envelope;
 - maximum request/response bytes.
 
-The controller owns the deadline and cancellation generation. The node acknowledges
+The controller owns the deadline and cancellation generation; the gateway owns publisher
+generation and advances it by compare-and-swap through every live command boundary. The node acknowledges
 start, periodically reaches bounded cancellation points, and returns exactly one of
 `completed`, `cancelled`, `deadline_exceeded`, `peer_unavailable`, or a closed bounded
 error code. A stale cancellation generation or late result cannot mutate a newer
@@ -211,8 +214,10 @@ terminal compare-and-swap or cleanup.
 Command transport uses a short write lock for one canonical frame and
 command-ID-correlated waiters; no lock spans request and response. A bounded command
 worker may execute runtime work, but the node continues reading cancellation, deadline,
-cleanup, and unrelated commands from stdin. Interruption and request-owned cleanup must
-together complete within one 2,000 ms end-to-end bound. A backend that cannot prove this bound is A4-ineligible
+cleanup, and unrelated commands from stdin. Interruption, request-owned cleanup, backend
+release, and terminal publication must together complete within one original absolute
+2,000 ms end-to-end bound. No detector, controller, Router, runtime, or gateway layer may
+restart that budget. A backend that cannot prove this bound is A4-ineligible
 and remains unavailable rather than weakening the gate.
 
 Dedicated request-owned process and SSH wrappers may use process groups and bounded
@@ -226,6 +231,13 @@ request/path/attempt ownership and cannot satisfy this gate. Command failure and
 remain scoped by request, path, and attempt and are not promoted automatically to
 deployment-global fatal state. A4 disables automatic replay or recovery; an affected
 request terminates explicitly, and replay/recovery remains owned by A6.
+
+Terminal publication and cleanup are expected-revision, owner-scoped,
+generation-fenced compare-and-swap operations. Cleanup proof names the exact
+request/attempt/path and remains valid while unrelated requests legitimately retain
+capacity, KV, or transport state. Node-global zero counters are not cleanup proof.
+Late command results are safely discarded without failing unrelated waiters, stopping
+the response reader, or terminating the shared node process.
 
 The active-disconnect gate requires the blocked command to return cooperatively and all
 request-owned cleanup to finish no later than 2,000 ms after the detector's verified

@@ -49,6 +49,7 @@ export interface InferenceSessionState {
   readonly output: string;
   readonly token_count: number;
   readonly last_applied_sequence: number;
+  readonly publisher_generation: number;
   readonly error_code: string | null;
   readonly form_error: string | null;
   readonly cancellation_requested: boolean;

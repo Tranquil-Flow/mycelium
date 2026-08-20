@@ -1,5 +1,6 @@
 {
   "protocol": "mycelium.request_event.v1",
+  "publisher_generation": 1,
   "request_id": "request-fixture",
   "sequence": 1,
   "text": "fixture-token",

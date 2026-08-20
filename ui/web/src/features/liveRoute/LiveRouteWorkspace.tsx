@@ -24,6 +24,7 @@ import {
 } from './m17ModelOperation';
 import { PreparedDeploymentsSourcePanel } from './PreparedDeploymentsSourcePanel';
 import { GovernanceReadinessSource } from '../governance/GovernanceReadinessSource';
+import { ConcurrencyLivenessProjection } from './ConcurrencyLivenessPanel';
 
 export interface LiveRouteWorkspaceProps {
   readonly view: 'network' | 'plans' | 'readiness' | 'incidents';
@@ -185,6 +186,7 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
         <div><dt>Evidence</dt><dd>{freshness}</dd></div>
         <div><dt>Route identity</dt><dd>{status.route_identity_digest ?? 'Unavailable'}</dd></div>
       </dl>
+      <ConcurrencyLivenessProjection status={status} view={view} />
       {runtime === null && runtimeError !== null ? (
         <p role="alert">Runtime admission evidence unavailable: {runtimeError}</p>
       ) : null}
@@ -243,6 +245,10 @@ export function LiveRouteWorkspace({ view, qualification, freshness, client, wor
               <div><dt>Fatal route state</dt><dd>{status.counters.fatal ?? 'None'}</dd></div>
               <div><dt>Frames sent / received</dt><dd>{status.counters.frames_sent} / {status.counters.frames_received}</dd></div>
               <div><dt>Applied operations</dt><dd>{status.counters.applied_operation_count}</dd></div>
+              <div><dt>Concurrent runtime</dt><dd>{status.concurrency_liveness_qualification.eligible ? 'Physically qualified' : 'Awaiting physical proof'}</dd></div>
+              <div><dt>Cancellation + cleanup</dt><dd>{status.concurrency_liveness_qualification.cancellation_and_cleanup_bound_ms.toLocaleString()} ms total bound</dd></div>
+              <div><dt>Scoped liveness</dt><dd>{status.concurrency_liveness_qualification.scoped_liveness_proven ? 'Proven' : 'Not yet proven'}</dd></div>
+              <div><dt>Publisher fencing</dt><dd>{status.concurrency_liveness_qualification.publisher_generation_fencing_proven ? 'Proven' : 'Not yet proven'}</dd></div>
             </dl>
           </section>
           <PeerTable status={status} />
@@ -306,6 +312,7 @@ function PeerTable({ status }: { readonly status: LiveRouteStatus }) {
                     <small>
                       {peer.architecture ?? 'unknown architecture'} · position {peer.current_position ?? 'released'} · peak {bytes(peer.peak_kv_bytes)} · {peer.release_state}{peer.last_release_reason === null ? '' : ` (${peer.last_release_reason})`}
                       {' · '}decode work {peer.decode_input_token_count} input tokens / {peer.decode_operation_count} operations · {bytes(peer.activation_output_bytes)} activations
+                      {' · '}{peer.interruptibility === null ? 'interruptibility unknown' : `${peer.interruptibility.work_unit.replaceAll('_', ' ')} cancellation candidate${peer.interruptibility.backend_candidate ? '' : ' (ineligible)'}`}
                     </small>
                   </td>
                 </tr>

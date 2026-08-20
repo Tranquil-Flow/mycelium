@@ -9,6 +9,7 @@ import pytest
 from mycelium_m16_runtime import (
     M16AdmissionError,
     M16RuntimeCoordinator,
+    build_live_m16_runtime,
     validate_m16_runtime_status,
 )
 from mycelium_router.contracts import (
@@ -25,6 +26,22 @@ from mycelium_router.contracts import (
 from mycelium_router.fakes import ManualClock, SequenceIdSource
 from mycelium_live.route import InferenceCancelled
 from mycelium_live.router_port import LiveRouterPort
+
+
+def test_live_manifest_uses_cross_host_lease_clock_and_exact_identity() -> None:
+    coordinator = build_live_m16_runtime(_graph())
+    request = _request("request-cross-host-lease")
+
+    manifest = coordinator.admit(
+        request,
+        workload_profile_id="interactive_chat_v1",
+    )
+    identity = coordinator.route_identity(request.request_id)
+    document = coordinator.path_manifest(request.request_id)
+
+    assert min(hop.reservation_expires_at for hop in manifest.ordered_hops) > time.time()
+    assert document["path_id"] == identity["path_id"] == manifest.path_id
+    assert document["path_attempt"] == identity["path_attempt"]
 
 
 def _placement(identifier: str, node_id: str) -> Placement:
@@ -181,6 +198,8 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
     coordinator, _ = _coordinator()
 
     class ControlledRoute:
+        is_simulated = True
+
         def __init__(self) -> None:
             self.started: list[str] = []
             self.selected: dict[str, tuple[str, ...]] = {}

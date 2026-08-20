@@ -18,7 +18,7 @@ import {
 const PRODUCT_BOOTSTRAP_PATH = '/api/v1/bootstrap';
 const MAX_JSON_RESPONSE_UTF8_BYTES = 1_048_576;
 const MAX_SSE_EVENT_UTF8_BYTES = 300_000;
-const SSE_EVENT_ID = /^(0|[1-9][0-9]{0,15})$/;
+const SSE_EVENT_ID = /^([1-9][0-9]{0,15}):(0|[1-9][0-9]{0,15})$/;
 
 export type InferenceFetch = (
   input: RequestInfo | URL,
@@ -36,6 +36,7 @@ export interface InferenceClient {
     lastEventId: number | null,
     onEvent: (event: InferenceEvent) => void,
     signal?: AbortSignal,
+    publisherGeneration?: number,
   ): Promise<void>;
   cancel(
     request: InferenceAcceptedResponse,
@@ -174,8 +175,12 @@ function decodeFrame(frame: SseFrame, requestId: string): InferenceEvent {
     throw clientError('invalid_event_stream', false);
   }
   if (!SSE_EVENT_ID.test(frame.id)) throw clientError('invalid_event_stream', false);
-  const sequence = Number(frame.id);
-  if (!Number.isSafeInteger(sequence)) throw clientError('invalid_event_stream', false);
+  const [generationText, sequenceText] = frame.id.split(':');
+  const publisherGeneration = Number(generationText);
+  const sequence = Number(sequenceText);
+  if (!Number.isSafeInteger(sequence) || !Number.isSafeInteger(publisherGeneration)) {
+    throw clientError('invalid_event_stream', false);
+  }
   let payload: unknown;
   try {
     payload = JSON.parse(frame.data.join('\n')) as unknown;
@@ -191,6 +196,7 @@ function decodeFrame(frame: SseFrame, requestId: string): InferenceEvent {
   if (
     decoded.request_id !== requestId ||
     decoded.sequence !== sequence ||
+    decoded.publisher_generation !== publisherGeneration ||
     decoded.type !== frame.event
   ) {
     throw clientError('invalid_event_stream', false);
@@ -324,6 +330,7 @@ export class ProductInferenceClient implements InferenceClient {
     lastEventId: number | null,
     onEvent: (event: InferenceEvent) => void,
     signal?: AbortSignal,
+    publisherGeneration?: number,
   ): Promise<void> {
     let accepted: InferenceAcceptedResponse;
     try {
@@ -333,12 +340,15 @@ export class ProductInferenceClient implements InferenceClient {
     }
     if (
       lastEventId !== null &&
-      (!Number.isSafeInteger(lastEventId) || lastEventId < 0)
+      (!Number.isSafeInteger(lastEventId) || lastEventId < 0 ||
+        !Number.isSafeInteger(publisherGeneration) || (publisherGeneration ?? 0) < 1)
     ) {
       throw clientError('invalid_resume_cursor', false);
     }
     const headers: Record<string, string> = { Accept: 'text/event-stream' };
-    if (lastEventId !== null) headers['Last-Event-ID'] = String(lastEventId);
+    if (lastEventId !== null) {
+      headers['Last-Event-ID'] = `${publisherGeneration}:${lastEventId}`;
+    }
     const response = await fetchSafe(
       this.fetchImplementation,
       accepted.event_path,

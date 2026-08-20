@@ -20,6 +20,31 @@ must begin from, or rebase onto, the exact atomic A3 commit
 packet and its earlier acceptance lineage are reviewed design inputs, not substitutes
 for atomic A3 closure.
 
+## Current integration-review authority
+
+The 2026-08-18 integration review of the active dirty A4 substrate is authoritative over
+read-only reports that inspected only the committed pre-A4 baseline. Before physical
+qualification, the primary lane closes these deterministic P0s through the ordinary
+gateway -> Router port -> physical route -> node -> Iroh path:
+
+- wire the command controller and traffic-aware liveness detector as production owners;
+- carry one original cancellation deadline through interruption, exact cleanup, backend
+  release, and terminal publication;
+- consume the canonical M16 path identity and propagate the complete deployment,
+  qualification, request, path, command, cancellation, topology, and publisher identity;
+- use owner-scoped, generation-fenced terminal/cleanup CAS receipts and prove exact cleanup
+  while unrelated requests remain active;
+- discard late command results without harming unrelated waiters or the shared node;
+- route exact-subject Iroh receipts/failures through scoped liveness and apply the reviewed
+  deployment-fatal allowlist; and
+- fence SSE events, reconnect cursors, persistence, and all eight UI reducers by publisher
+  generation.
+
+A5 physical execution remains blocked. A8 retains a separate atomic commit and may not
+regenerate shared contracts until A4 closes. A6/A7 must be rebased and redesigned after
+A4 because their reviewed pre-A4 form minted Router-owned generations and bypassed A4
+terminal/cleanup ownership.
+
 ## 1. Source boundary
 
 The future backend implementation allowlist is exact:

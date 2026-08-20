@@ -58,7 +58,10 @@ def _sse_documents(body: bytes):
         for line in block.splitlines():
             key, value = line.split(":", 1)
             fields[key] = value.lstrip()
-        documents.append((int(fields["id"]), fields["event"], json.loads(fields["data"])))
+        generation, sequence = fields["id"].split(":", 1)
+        documents.append(
+            ((int(generation), int(sequence)), fields["event"], json.loads(fields["data"]))
+        )
     return documents
 
 
@@ -86,13 +89,22 @@ def test_sse_resume_uses_last_event_id_and_never_replays_older_tokens():
         while service.terminal_event_count(request_id) == 0 and time.monotonic() < deadline:
             time.sleep(0.005)
 
+        first_subscription = service.subscribe(request_id, last_event_id=None)
+        accepted = first_subscription.next_event(timeout=1)
+        assert accepted is not None and accepted.sequence == 0
+        first_subscription.ack(accepted.sequence)
+        first_token = first_subscription.next_event(timeout=1)
+        assert first_token is not None and first_token.sequence == 1
+        first_subscription.ack(first_token.sequence)
+        first_subscription.close()
+
         status, headers, body = asyncio.run(
             _run_stream(
                 app,
                 f"/v1/inference/{request_id}/events",
                 headers=[
                     (b"authorization", b"Bearer request-secret"),
-                    (b"last-event-id", b"1"),
+                    (b"last-event-id", b"1:1"),
                 ],
             )
         )
@@ -100,9 +112,9 @@ def test_sse_resume_uses_last_event_id_and_never_replays_older_tokens():
 
         assert status == 200
         assert headers[b"content-type"] == b"text/event-stream; charset=utf-8"
-        assert [(sequence, kind) for sequence, kind, _ in documents] == [
-            (2, "token"),
-            (3, "completed"),
+        assert [(identity, kind) for identity, kind, _ in documents] == [
+            ((2, 2), "token"),
+            ((2, 3), "completed"),
         ]
         assert documents[0][2]["text"] == "one"
         assert b"zero" not in body

@@ -1,0 +1,14 @@
+{
+  "cancellation_and_cleanup_bound_ms": 2000,
+  "cooperative_interruption_proven": true,
+  "deployment_id": "deployment-fixture",
+  "eligible": true,
+  "evidence_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "maximum_concurrent_requests": 4,
+  "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+  "publisher_generation_fencing_proven": true,
+  "qualification_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "request_scoped_cleanup_proven": true,
+  "scoped_liveness_proven": true,
+  "shared_process_termination_used": false
+}

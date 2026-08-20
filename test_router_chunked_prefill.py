@@ -134,6 +134,19 @@ class ChunkedPrefillTests(unittest.TestCase):
       self.assertEqual(self.entry.request_status(self.request.request_id), "DECODING")
       self.assertTrue(self.entry.decode_one_distributed(self.request.request_id))
 
+   def test_only_last_locked_prefill_chunk_is_terminal(self):
+      relay = self.entry.relay
+
+      self.assertFalse(
+         relay._is_terminal(self.request, "PREFILL_CHUNK", 0, 2)
+      )
+      self.assertFalse(
+         relay._is_terminal(self.request, "PREFILL_CHUNK", 1, 2)
+      )
+      self.assertTrue(
+         relay._is_terminal(self.request, "PREFILL_CHUNK", 2, 1)
+      )
+
    def test_chunk_completion_round_trips_through_wire(self):
       event = PrefillChunkCompleted(
          request_id="request-wire-chunk",

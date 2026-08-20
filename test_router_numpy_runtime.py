@@ -236,6 +236,7 @@ def _work_item(
    batch_key=None,
    token_index=None,
    position=None,
+   emits_token=False,
    terminal=False,
    lease_expires_at=None,
    idempotency_key=None,
@@ -264,6 +265,7 @@ def _work_item(
       payload=payload,
       batch_key=key,
       position=position,
+      emits_token=emits_token,
       terminal=terminal,
       lease_expires_at=lease_expires_at,
    )
@@ -288,11 +290,14 @@ def _run_two_stage(
    request_id=None,
    token_index=None,
    position=None,
+   emits_token=False,
    terminal=False,
    ports=None,
 ):
    token_span = (
-      len(token_ids) if phase in {"PREFILL", "RECOVERY_PREFILL"} else 1
+      len(token_ids)
+      if phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}
+      else 1
    )
    request_id = request_id or f"request:{path_id}"
    ports = ports or case.ports
@@ -307,6 +312,7 @@ def _run_two_stage(
          path_id=path_id,
          token_index=token_index,
          position=position,
+         emits_token=emits_token,
          terminal=terminal,
       )
    )
@@ -322,6 +328,7 @@ def _run_two_stage(
          path_id=path_id,
          token_index=token_index,
          position=position,
+         emits_token=emits_token,
          terminal=terminal,
       )
    )

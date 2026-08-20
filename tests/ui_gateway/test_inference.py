@@ -162,7 +162,7 @@ def test_inference_stream_forwards_resume_and_validated_events(app, bootstrap, u
     response = request(
         app,
         "/api/v1/inference/request-1/events",
-        headers=session_headers(bootstrap) + [(b"last-event-id", b"0")],
+        headers=session_headers(bootstrap) + [(b"last-event-id", b"1:0")],
     )
     _observatory, request_gateway = upstreams
 
@@ -175,7 +175,7 @@ def test_inference_stream_forwards_resume_and_validated_events(app, bootstrap, u
     scope, _body = request_gateway.calls[-1]
     assert scope["path"] == "/v1/inference/request-1/events"
     assert [value for name, value in scope["headers"] if name.lower() == b"last-event-id"] == [
-        b"0"
+        b"1:0"
     ]
 
 
@@ -188,9 +188,10 @@ def test_inference_stream_rejects_request_id_mismatch(upstreams, coordinator) ->
                 "protocol": "mycelium.request_event.v1",
                 "request_id": "other-request",
                 "sequence": 0,
+                "publisher_generation": 1,
                 "type": "accepted",
             }
-            frame = b"id: 0\nevent: accepted\ndata: " + json_body(event) + b"\n\n"
+            frame = b"id: 1:0\nevent: accepted\ndata: " + json_body(event) + b"\n\n"
             return 200, [(b"content-type", b"text/event-stream; charset=utf-8")], [frame]
         return await default_request(scope, body)
 
@@ -251,6 +252,9 @@ def test_per_session_request_history_is_bounded(upstreams, coordinator) -> None:
                             "request_id": request_id,
                             "stream_path": f"/v1/inference/{request_id}/events",
                             "cancel_path": f"/v1/inference/{request_id}",
+                            "session_token": (
+                                "session-owner-token-0000000000000002"
+                            ),
                         }
                     )
                 ],

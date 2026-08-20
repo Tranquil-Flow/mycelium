@@ -212,6 +212,7 @@ def _work_item(
    batch_key=None,
    token_index=None,
    position=None,
+   emits_token=False,
    terminal=False,
    lease_expires_at=1_000_000_000_000.0,
    idempotency_key=None,
@@ -240,6 +241,7 @@ def _work_item(
       payload=payload,
       batch_key=key,
       position=position,
+      emits_token=emits_token,
       terminal=terminal,
       lease_expires_at=lease_expires_at,
    )
@@ -261,12 +263,15 @@ def _run_two_stage(
    request_id=None,
    token_index=None,
    position=None,
+   emits_token=False,
    terminal=False,
    ports=None,
    lease_expires_at=1_000_000_000_000.0,
 ):
    token_span = (
-      len(token_ids) if phase in {"PREFILL", "RECOVERY_PREFILL"} else 1
+      len(token_ids)
+      if phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}
+      else 1
    )
    request_id = request_id or f"request:{path_id}"
    ports = ports or case.ports
@@ -281,6 +286,7 @@ def _run_two_stage(
          path_id=path_id,
          token_index=token_index,
          position=position,
+         emits_token=emits_token,
          terminal=terminal,
          lease_expires_at=lease_expires_at,
       )
@@ -297,6 +303,7 @@ def _run_two_stage(
          path_id=path_id,
          token_index=token_index,
          position=position,
+         emits_token=emits_token,
          terminal=terminal,
          lease_expires_at=lease_expires_at,
       )
@@ -326,6 +333,52 @@ def _assert_failure(result, reason):
 
 
 KV_NUMERIC_TOLERANCE = 1e-5
+
+
+def test_final_prefill_chunk_emits_token_without_releasing_live_request_kv(
+   runtime_case,
+):
+   ports = _fresh_ports(runtime_case)
+   request_id = "request:chunk-kv-continuity"
+   path_id = "path:chunk-kv-continuity"
+
+   _run_two_stage(
+      runtime_case,
+      (1, 2),
+      phase="PREFILL_CHUNK",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=0,
+      position=0,
+      ports=ports,
+   )
+   _, first_token = _run_two_stage(
+      runtime_case,
+      (3,),
+      phase="PREFILL_CHUNK",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=1,
+      position=2,
+      emits_token=True,
+      terminal=False,
+      ports=ports,
+   )
+
+   assert first_token is not None
+   assert all(port.kv_snapshot()["active_state_count"] == 1 for port in ports)
+   _run_two_stage(
+      runtime_case,
+      (first_token,),
+      phase="DECODE",
+      path_id=path_id,
+      request_id=request_id,
+      token_index=1,
+      position=3,
+      terminal=True,
+      ports=ports,
+   )
+   assert all(port.kv_snapshot()["active_state_count"] == 0 for port in ports)
 
 
 def test_stage_local_kv_prefill_and_eight_single_token_decodes_match_reference(
@@ -669,18 +722,56 @@ def test_token_and_position_bounds_fail_closed_on_entry_and_activation(runtime_c
    _assert_failure(result, "position_bounds_exceeded")
 
 
-def test_prefill_chunk_is_explicitly_unsupported_without_kv_continuity(runtime_case):
-   result = runtime_case.ports[0].execute(
+def test_prefill_chunks_extend_stage_local_kv_without_advancing_decode_sequence(
+   runtime_case,
+):
+   port = _fresh_ports(runtime_case)[0]
+   initial = port.execute(
       _work_item(
          runtime_case,
          0,
          encode_token_ids((1, 2)),
          phase="PREFILL_CHUNK",
          token_span=2,
+         request_id="request-prefill-chunk",
          path_id="path-prefill-chunk",
+         token_index=0,
+         position=0,
       )
    )
-   _assert_failure(result, "prefill_chunk_requires_kv_continuity")
+   continued = port.execute(
+      _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((3,)),
+         phase="PREFILL_CHUNK",
+         token_span=1,
+         request_id="request-prefill-chunk",
+         path_id="path-prefill-chunk",
+         token_index=1,
+         position=2,
+      )
+   )
+   decoded = port.execute(
+      _work_item(
+         runtime_case,
+         0,
+         encode_token_ids((4,)),
+         phase="DECODE",
+         token_span=1,
+         request_id="request-prefill-chunk",
+         path_id="path-prefill-chunk",
+         token_index=1,
+         position=3,
+      )
+   )
+
+   assert initial.success
+   assert continued.success
+   assert decoded.success
+   state = port.kv_snapshot()["states"]["path-prefill-chunk"]
+   assert state["cached_context_tokens"] == 4
+   assert state["next_sequence"] == 2
 
 
 def test_cancellation_is_idempotent_and_isolated_by_path(runtime_case):
@@ -831,7 +922,7 @@ def test_kv_state_mutates_only_after_output_validation(runtime_case, monkeypatch
    )
    original_runtime_result = port._runtime_result
 
-   def reject_output(stage, runtime, output):
+   def reject_output(stage, runtime, output, **_kwargs):
       raise MLXRuntimeError("forced_output_rejection")
 
    monkeypatch.setattr(port, "_runtime_result", reject_output)

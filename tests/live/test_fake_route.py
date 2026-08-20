@@ -21,6 +21,11 @@ def test_route_is_not_alive_before_open():
     assert route.is_alive() is False
 
 
+def test_physical_cancelled_status_wins_before_local_callback_is_visible() -> None:
+    assert live_route_module._request_is_cancelled("CANCELLED", lambda: False) is True
+    assert live_route_module._request_is_cancelled("DECODING", lambda: False) is False
+
+
 def test_infer_emits_each_token_and_route_stays_alive():
     route = FakeLiveRoute(scripted_tokens=(1, 2, 3))
     route.open()

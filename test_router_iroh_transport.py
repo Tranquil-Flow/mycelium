@@ -1122,10 +1122,17 @@ def test_rejected_manifest_registration_is_never_acked_as_delivered() -> None:
         hub.deliver(message_id, frame)
         assert router.registration_attempted.wait(1)
         deadline = time.monotonic() + 1
-        while transport.fatal_error is None and time.monotonic() < deadline:
+        while not transport.evidence().scoped_events and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert transport.fatal_error is not None
-        assert transport.fatal_error.code == "manifest_registration_rejected"
+        while (
+            transport._dispatcher_phase != "idle"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert transport.fatal_error is None
+        assert transport.evidence().scoped_events[-1]["code"] == (
+            "manifest_registration_rejected"
+        )
         assert hub.acks == []
     finally:
         transport.close()
@@ -2269,10 +2276,17 @@ def test_manifest_delta_sink_is_bounded_and_never_false_acks() -> None:
         while len(hub.acks) < 1 and time.monotonic() < deadline:
             time.sleep(0.01)
         hub.deliver(b"2" * 16, frame)
-        while transport.fatal_error is None and time.monotonic() < deadline:
+        while len(transport.evidence().scoped_events) < 1 and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert transport.fatal_error is not None
-        assert transport.fatal_error.code == "manifest_delta_queue_full"
+        while (
+            transport._dispatcher_phase != "idle"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert transport.fatal_error is None
+        assert transport.evidence().scoped_events[-1]["code"] == (
+            "manifest_delta_queue_full"
+        )
         assert hub.acks == [b"1" * 16]
     finally:
         transport.close()

@@ -2,7 +2,7 @@
   "protocol": "mycelium.a9_acceptance_inventory.v1",
   "gate": "A9",
   "state": "design_only",
-  "claim_boundary": "frozen authority, migration, qualification, and projection acceptance inputs only; no schema, implementation, migration execution, device evidence, readiness, or completion claim",
+  "claim_boundary": "frozen authority, migration, runtime efficiency, qualification, benchmark, and projection acceptance inputs only; no schema, implementation, migration or benchmark execution, device evidence, readiness, or completion claim",
   "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
   "decisions": [
     {
@@ -40,6 +40,30 @@
       "authorities": ["exact_platform_runtime_transport_build_tuple", "role_specific_qualifier", "profile_and_evidence_generations", "physical_positive_and_negative_evidence", "qualification_expiry"],
       "required_invariants": ["qualification_bound_to_exact_role", "one_role_does_not_grant_another", "profile_change_withdraws_dependency", "later_authorities_remain_independent"],
       "forbidden_shortcuts": ["platform_wide_qualification", "membership_only_placement", "eligibility_only_artifact_access", "peer_authored_route_readiness"]
+    },
+    {
+      "decision_id": "accelerated_windows_backend",
+      "authorities": ["runtime_efficiency_qualifier", "windows_provider_identity", "provider_build_digest", "device_and_driver_identity", "physical_acceleration_evidence"],
+      "required_invariants": ["windows_acceleration_physically_observed", "provider_build_exactly_bound", "numpy_remains_reference_only", "performance_role_separate_from_correctness"],
+      "forbidden_shortcuts": ["platform_implies_acceleration", "package_presence_as_qualification", "numpy_as_accelerated_backend", "synthetic_kernel_as_physical_evidence"]
+    },
+    {
+      "decision_id": "persistent_int8_execution",
+      "authorities": ["weight_materialization_observer", "persistent_packed_state", "runtime_workspace_accounting", "int8_kernel_qualification"],
+      "required_invariants": ["zero_warm_decode_full_weight_materialization", "packed_state_bounded_after_warmup", "int8_compute_separate_from_storage_quantization", "materialization_counters_component_scoped"],
+      "forbidden_shortcuts": ["per_token_full_weight_cast", "hidden_decode_repacking", "unbounded_packed_state_growth", "storage_quantization_as_compute_acceleration"]
+    },
+    {
+      "decision_id": "qualified_activation_precision",
+      "authorities": ["activation_codec_qualifier", "adjacent_runtime_builds", "edge_generation", "activation_byte_counters"],
+      "required_invariants": ["activation_dtype_exactly_negotiated", "reduced_precision_token_parity", "activation_byte_reduction_observed", "codec_withdrawal_fails_closed"],
+      "forbidden_shortcuts": ["silent_dtype_coercion", "weight_precision_implies_activation_precision", "unqualified_activation_compression", "stale_codec_reuse"]
+    },
+    {
+      "decision_id": "component_aware_performance_authority",
+      "authorities": ["component_performance_observer", "directed_edge_performance_observer", "component_cost_planner", "single_request_benchmark_authority"],
+      "required_invariants": ["vocabulary_head_cost_explicit", "compute_and_transport_costs_separate", "planner_uses_confidence_bounded_costs", "single_request_floor_precedes_a10"],
+      "forbidden_shortcuts": ["equal_layer_cost_assumption", "vocabulary_head_hidden_as_layer", "aggregate_throughput_as_tpot", "post_measurement_threshold_change"]
     },
     {
       "decision_id": "dynamic_ui_projection",
@@ -122,6 +146,54 @@
       "forbidden_side_effects": ["cross_role_grant", "placement_created", "route_readiness_granted"]
     },
     {
+      "case_id": "windows_accelerated_physical_positive",
+      "gate_kind": "physical_positive",
+      "setup": "a native Windows x86_64 member has an exact candidate provider build and the qualified Qwen int8 stage",
+      "stimulus": "run the frozen reference and accelerated product benchmark with native observations",
+      "required_outcomes": ["windows_acceleration_qualified", "performance_role_earned", "token_output_parity", "a10_prerequisite_satisfied"],
+      "forbidden_side_effects": ["platform_only_qualification", "reference_backend_promoted", "threshold_changed_after_measurement"]
+    },
+    {
+      "case_id": "numpy_reference_not_performance_eligible",
+      "gate_kind": "deterministic_negative",
+      "setup": "a Windows member exposes portable NumPy or an installed provider without physical acceleration evidence",
+      "stimulus": "request performance-ready stage eligibility and A10 readiness",
+      "required_outcomes": ["correctness_role_retained", "performance_role_rejected", "a10_remains_blocked"],
+      "forbidden_side_effects": ["numpy_as_acceleration", "package_presence_promoted", "deployment_selection_changed"]
+    },
+    {
+      "case_id": "int8_decode_materialization_rejection",
+      "gate_kind": "physical_negative",
+      "setup": "candidate stores int8 weights but casts or repacks complete matrices during each warm decode operation",
+      "stimulus": "execute the materialization and bounded-workspace challenge window",
+      "required_outcomes": ["materialization_detected", "performance_role_rejected", "correctness_evidence_unchanged"],
+      "forbidden_side_effects": ["storage_quantization_promoted", "unbounded_workspace_accepted", "a10_prerequisite_satisfied"]
+    },
+    {
+      "case_id": "reduced_precision_activation_qualification",
+      "gate_kind": "physical_positive",
+      "setup": "adjacent exact runtime builds advertise one common reduced precision activation codec",
+      "stimulus": "run parity byte reduction replay cancellation and corruption gates on the physical edge",
+      "required_outcomes": ["activation_codec_qualified", "activation_bytes_reduced", "committed_tokens_match_reference", "cleanup_remains_exact"],
+      "forbidden_side_effects": ["silent_dtype_coercion", "private_activation_exposed", "unqualified_codec_selected"]
+    },
+    {
+      "case_id": "activation_codec_withdrawal",
+      "gate_kind": "physical_negative",
+      "setup": "the codec evidence is stale mismatched corrupted nonfinite or unsupported by one adjacent runtime build",
+      "stimulus": "attempt activation admission and reconnect through the changed edge generation",
+      "required_outcomes": ["codec_admission_rejected", "performance_readiness_withdrawn", "qualified_fallback_explicit"],
+      "forbidden_side_effects": ["stale_codec_reused", "corrupt_frame_executed", "silent_precision_downgrade"]
+    },
+    {
+      "case_id": "component_cost_and_single_request_floor",
+      "gate_kind": "physical_positive",
+      "setup": "the frozen paired corpus has exact component edge thermal and workload identities before candidate observation",
+      "stimulus": "measure component costs replan and evaluate the declared single request confidence thresholds",
+      "required_outcomes": ["vocabulary_head_cost_measured", "compute_transport_costs_separate", "planner_prediction_error_reported", "single_request_floor_passed"],
+      "forbidden_side_effects": ["equal_layer_cost_used", "aggregate_throughput_substituted", "failed_sample_excluded_silently", "threshold_changed_after_measurement"]
+    },
+    {
       "case_id": "dynamic_projection_withdrawal",
       "gate_kind": "browser_positive",
       "setup": "live profile build evidence freshness or class qualification changes for a visible member",
@@ -141,49 +213,49 @@
   "ui_projections": [
     {
       "workspace_id": "inference",
-      "required_projection": ["selected_deployment", "qualified_participating_roles", "eligibility_withdrawal"],
-      "dynamic_behavior": ["live_authority_generation", "no_installed_runtime_as_capacity", "reconnect_reconstructs"],
-      "forbidden_claims": ["membership_implies_selectable", "browser_state_grants_role"]
+      "required_projection": ["selected_deployment", "qualified_participating_roles", "backend_provider", "activation_precision", "ttft_tpot_tokens_per_second", "eligibility_withdrawal"],
+      "dynamic_behavior": ["live_authority_generation", "no_installed_runtime_as_capacity", "performance_withdrawal_live", "reconnect_reconstructs"],
+      "forbidden_claims": ["membership_implies_selectable", "correctness_implies_acceleration", "browser_state_grants_role"]
     },
     {
       "workspace_id": "device_lab",
-      "required_projection": ["role_ladder", "source_kind", "constraints", "blockers", "consent", "freshness"],
+      "required_projection": ["role_ladder", "source_kind", "provider_kernel_precision", "materialization_gate", "constraints", "blockers", "consent", "freshness"],
       "dynamic_behavior": ["registry_driven_roles", "qualification_withdrawal_live", "unknown_visible_ineligible"],
       "forbidden_claims": ["synthetic_as_native", "compound_device_class"]
     },
     {
       "workspace_id": "network",
-      "required_projection": ["transport_capabilities", "bound_path_observation", "transport_freshness"],
+      "required_projection": ["transport_capabilities", "bound_path_observation", "activation_dtype_bytes", "compute_serialization_transport_timing", "transport_freshness"],
       "dynamic_behavior": ["registered_transport_values", "direct_relay_unknown_live", "platform_independent_connectivity"],
       "forbidden_claims": ["platform_implies_connectivity", "raw_endpoint_identity"]
     },
     {
       "workspace_id": "nodes",
-      "required_projection": ["identity_kind", "platform_family", "architecture", "transports", "runtimes", "membership", "capabilities", "qualification", "eligibility"],
+      "required_projection": ["identity_kind", "platform_family", "architecture", "transports", "runtimes", "runtime_provider", "component_service_rates", "materialization_state", "membership", "capabilities", "qualification", "eligibility"],
       "dynamic_behavior": ["separate_authority_generations", "registered_values_without_brand_branch", "withdrawal_live"],
       "forbidden_claims": ["compound_legacy_class", "brand_as_backend"]
     },
     {
       "workspace_id": "plans",
-      "required_projection": ["profile_generation", "evidence_generation", "qualification_generation", "exclusion_reason"],
-      "dynamic_behavior": ["planner_intent_separate", "stale_input_withdrawn", "unknown_blocks_required_objective"],
-      "forbidden_claims": ["eligibility_implies_placement", "unknown_as_zero"]
+      "required_projection": ["profile_generation", "evidence_generation", "qualification_generation", "component_cost_breakdown", "vocabulary_head_cost", "predicted_observed_performance", "exclusion_reason"],
+      "dynamic_behavior": ["planner_intent_separate", "component_cost_generation_bound", "stale_input_withdrawn", "unknown_blocks_required_objective"],
+      "forbidden_claims": ["eligibility_implies_placement", "equal_layer_cost_assumed", "unknown_as_zero"]
     },
     {
       "workspace_id": "readiness",
-      "required_projection": ["membership_proof", "profile_proof", "evidence_proof", "class_qualification", "artifact_proof", "load_proof", "deployment_qualification", "registration", "selection"],
+      "required_projection": ["membership_proof", "profile_proof", "evidence_proof", "class_qualification", "windows_acceleration_proof", "int8_materialization_proof", "activation_codec_proof", "single_request_performance_proof", "artifact_proof", "load_proof", "deployment_qualification", "registration", "selection"],
       "dynamic_behavior": ["proofs_independently_fresh", "dependent_withdrawal_live", "same_public_generation"],
       "forbidden_claims": ["peer_qualification_is_route_ready", "membership_is_stage_ready"]
     },
     {
       "workspace_id": "incidents",
-      "required_projection": ["migration_state", "stale_profile", "changed_build", "unsupported_capability", "eligibility_withdrawal"],
+      "required_projection": ["migration_state", "stale_profile", "changed_build", "unsupported_capability", "provider_fallback", "precision_withdrawal", "prediction_drift", "performance_floor_failure", "eligibility_withdrawal"],
       "dynamic_behavior": ["terminal_history_retained", "bounded_reason_codes", "reconnect_reconstructs"],
       "forbidden_claims": ["private_device_detail", "fabricated_peer_failure"]
     },
     {
       "workspace_id": "settings",
-      "required_projection": ["contract_versions", "supported_registries", "contribution_policy", "privacy_retention", "migration_status", "revocation"],
+      "required_projection": ["contract_versions", "supported_registries", "qualified_precision_policy", "performance_policy", "contribution_policy", "privacy_retention", "migration_status", "revocation"],
       "dynamic_behavior": ["registry_updates_without_ui_inventory_edit", "redacted_diagnostics", "same_public_generation"],
       "forbidden_claims": ["private_membership_credential", "operator_mapping_as_identity"]
     }

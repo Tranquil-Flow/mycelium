@@ -5,6 +5,7 @@ import asyncio
 import hmac
 import inspect
 import ipaddress
+import threading
 import time
 from typing import Any, Awaitable, Callable, Mapping, Sequence, Union
 from urllib.parse import urlsplit
@@ -38,6 +39,7 @@ from .validation import (
     validate_cancel_response,
     validate_inference_accept,
     validate_last_event_id,
+    validate_request_event_id,
     validate_observatory_envelope,
     validate_qualification,
     validate_stream_event,
@@ -262,6 +264,8 @@ class ProductGatewayASGIApplication:
         self._credential_bytes = tuple(
             value for value in (request_token, observatory_token) if value is not None
         )
+        self._request_owner_tokens: dict[str, bytes] = {}
+        self._request_owner_tokens_lock = threading.RLock()
         self._access_policy = access_policy
         self._sessions = ProductSessionStore(
             clock=clock,
@@ -462,13 +466,20 @@ class ProductGatewayASGIApplication:
         )
 
     def _upstream_headers(
-        self, token: bytes | None, *, cursor: bytes | None = None, json_body: bool = False
+        self,
+        token: bytes | None,
+        *,
+        cursor: bytes | None = None,
+        json_body: bool = False,
+        session_token: bytes | None = None,
     ) -> tuple[tuple[bytes, bytes], ...]:
         headers: list[tuple[bytes, bytes]] = []
         if token is not None:
             headers.append((b"authorization", b"Bearer " + token))
         if cursor is not None:
             headers.append((b"last-event-id", cursor))
+        if session_token is not None:
+            headers.append((b"x-mycelium-session", session_token))
         if json_body:
             headers.append((b"content-type", b"application/json"))
         return tuple(headers)
@@ -491,12 +502,17 @@ class ProductGatewayASGIApplication:
         path: str,
         token: bytes | None,
         body: bytes = b"",
+        session_token: bytes | None = None,
     ) -> tuple[int, Mapping[str, Any]]:
         response = await self._client.request(
             app,
             method=method,
             path=path,
-            headers=self._upstream_headers(token, json_body=bool(body)),
+            headers=self._upstream_headers(
+                token,
+                json_body=bool(body),
+                session_token=session_token,
+            ),
             body=body,
         )
         self._check_no_credentials(response.body)
@@ -695,8 +711,10 @@ class ProductGatewayASGIApplication:
                 token=self._request_token,
                 body=body,
             )
-            identifier = validate_inference_accept(upstream)
+            identifier, owner_token = validate_inference_accept(upstream)
             self._sessions.commit_request(session, identifier)
+            with self._request_owner_tokens_lock:
+                self._request_owner_tokens[identifier] = owner_token.encode("ascii")
         except Exception:
             self._sessions.release_request_reservation(session)
             raise
@@ -717,11 +735,16 @@ class ProductGatewayASGIApplication:
         self, send: Send, session: ProductSession, identifier: str
     ) -> None:
         self._require_owned_request(session, identifier)
+        with self._request_owner_tokens_lock:
+            owner_token = self._request_owner_tokens.get(identifier)
+        if owner_token is None:
+            raise BrowserRequestError(404, "request_not_found")
         status, document = await self._json_upstream(
             self._request_gateway_app,
             method="DELETE",
             path=f"/v1/inference/{identifier}",
             token=self._request_token,
+            session_token=owner_token,
         )
         cancelled = validate_cancel_response(document, identifier)
         if cancelled and status != 202:
@@ -781,8 +804,14 @@ class ProductGatewayASGIApplication:
         identifier: str,
     ) -> None:
         self._require_owned_request(session, identifier)
+        with self._request_owner_tokens_lock:
+            owner_token = self._request_owner_tokens.get(identifier)
+        if owner_token is None:
+            raise BrowserRequestError(404, "request_not_found")
         try:
-            cursor = validate_last_event_id(_header_values(scope, b"last-event-id"))
+            cursor = validate_request_event_id(
+                _header_values(scope, b"last-event-id")
+            )
         except GatewayValidationError as exc:
             raise BrowserRequestError(400, exc.code) from None
 
@@ -791,12 +820,13 @@ class ProductGatewayASGIApplication:
             lines = raw[:-2].split(b"\n")
             if len(lines) != 3 or not lines[0].startswith(b"id: ") or not lines[1].startswith(b"event: ") or not lines[2].startswith(b"data: "):
                 raise GatewayValidationError("invalid_upstream_event")
-            event_id = validate_last_event_id([lines[0][4:]])
+            event_id = validate_request_event_id([lines[0][4:]])
             document = strict_json_document(lines[2][6:], code="invalid_upstream_event")
             sequence, event_type = validate_stream_event(document, identifier)
             if (
                 event_id is None
-                or int(event_id) != sequence
+                or event_id.decode("ascii")
+                != f"{document['publisher_generation']}:{sequence}"
                 or lines[1][7:].decode("ascii", errors="ignore") != event_type
             ):
                 raise GatewayValidationError("invalid_upstream_event")
@@ -818,6 +848,7 @@ class ProductGatewayASGIApplication:
             receive=receive,
             send=send,
             validator=validate,
+            session_token=owner_token,
         )
 
     async def _forward_sse(
@@ -830,11 +861,16 @@ class ProductGatewayASGIApplication:
         receive: Receive,
         send: Send,
         validator: Callable[[bytes], bytes],
+        session_token: bytes | None = None,
     ) -> None:
         response = await self._sse.forward(
             app,
             path=path,
-            headers=self._upstream_headers(token, cursor=cursor),
+            headers=self._upstream_headers(
+                token,
+                cursor=cursor,
+                session_token=session_token,
+            ),
             client_receive=receive,
             client_send=send,
             validate_frame=validator,

@@ -11,6 +11,7 @@ from mycelium_router.contracts import (
    PathBuildState,
    PathHop,
    PathManifest,
+   PrefillChunkCompleted,
    ProgressivePrefillContext,
    ReservationCommitResult,
    ReservationRequest,
@@ -98,6 +99,28 @@ class RouterWireTests(unittest.TestCase):
             decoded = decode_frame(encode_frame(message, b"\x00activation\xff"))
             self.assertEqual(decoded.message, message)
             self.assertEqual(decoded.payload, b"\x00activation\xff")
+
+   def test_locked_path_first_prefill_chunk_uses_zero_based_index(self):
+      completed = PrefillChunkCompleted(
+         request_id="request",
+         path_id="path",
+         path_attempt=0,
+         chunk_index=0,
+         token_count=8,
+      )
+
+      self.assertEqual(decode_frame(encode_frame(completed)).message, completed)
+
+      with self.assertRaisesRegex(WireError, "invalid_prefill_chunk_completed"):
+         encode_frame(
+            PrefillChunkCompleted(
+               request_id="request",
+               path_id="path",
+               path_attempt=0,
+               chunk_index=-1,
+               token_count=8,
+            )
+         )
 
    def test_progressive_prefill_round_trip_reconstructs_domain_context(self):
       graph = graph_fixture()

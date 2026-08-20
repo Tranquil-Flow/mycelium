@@ -61,6 +61,7 @@ function event(
     protocol: PRODUCT_INFERENCE_EVENT_PROTOCOL,
     request_id: accepted.request_id,
     sequence,
+    publisher_generation: 1,
     ...value,
   } as InferenceEvent;
 }
@@ -246,6 +247,7 @@ describe('useInferenceSession', () => {
       output: 'A',
       token_count: 1,
       last_applied_sequence: 1,
+      publisher_generation: 1,
       error_code: null,
       form_error: null,
       cancellation_requested: false,
@@ -277,6 +279,7 @@ describe('useInferenceSession', () => {
       output: '',
       token_count: 0,
       last_applied_sequence: 0,
+      publisher_generation: 1,
       error_code: 'stream_disconnected',
       form_error: null,
       cancellation_requested: false,
@@ -332,6 +335,7 @@ describe('useInferenceSession', () => {
       output: 'A',
       token_count: 1,
       last_applied_sequence: 1,
+      publisher_generation: 1,
       error_code: null,
       form_error: null,
       cancellation_requested: false,

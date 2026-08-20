@@ -289,7 +289,23 @@ export class LiveProductEvidenceSource {
       && current !== null
       && snapshot.publication.cursor !== current.publication.cursor + 1
     ) {
-      this.disconnect('product_cursor_gap');
+      // Recover from a concurrent-publisher cursor gap with one fresh snapshot
+      // fetch instead of livelocking on the mismatched replay frame.
+      const gapCursor = current.publication.cursor;
+      void this.fetchSnapshot(true)
+        .then(() => {
+          const state = this.state;
+          if (
+            state === null
+            || state.snapshot.publication.cursor <= gapCursor
+            || state.status !== 'connected'
+          ) {
+            this.disconnect('product_cursor_gap');
+          }
+        })
+        .catch(() => {
+          this.disconnect('product_cursor_gap');
+        });
       return;
     }
     const stale = this.now() - snapshot.publication.published_at_unix_ms > this.staleAfterMs;

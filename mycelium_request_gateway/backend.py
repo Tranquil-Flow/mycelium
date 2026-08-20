@@ -41,6 +41,21 @@ class RouterPort(Protocol):
 
     def cancel(self, request_id: str) -> bool: ...
 
+    def cancel_with_deadline(
+        self,
+        request_id: str,
+        *,
+        deadline_monotonic_s: float,
+    ) -> bool: ...
+
+    def update_publisher_generation(
+        self,
+        request_id: str,
+        *,
+        expected_generation: int,
+        new_generation: int,
+    ) -> bool: ...
+
 
 @dataclass(frozen=True)
 class _AdmissionDecision:
@@ -101,6 +116,9 @@ class RouterSessionBackend:
         self._internally_cancelled: set[str] = set()
         self._external_cancellation_observed: set[str] = set()
         self._awaiting_cancel_ack: set[str] = set()
+        self._cancellation_deadlines: dict[str, float] = {}
+        self._publisher_generations: dict[str, int] = {}
+        self._router_admitted: set[str] = set()
 
     def run(
         self,
@@ -135,6 +153,9 @@ class RouterSessionBackend:
                 self._cancelled.discard(request_id)
                 self._internally_cancelled.discard(request_id)
                 self._external_cancellation_observed.discard(request_id)
+                self._cancellation_deadlines.pop(request_id, None)
+                self._publisher_generations.pop(request_id, None)
+                self._router_admitted.discard(request_id)
 
     def _run(
         self,
@@ -195,7 +216,25 @@ class RouterSessionBackend:
             admission_kwargs: dict[str, object] = {
                 "excluded_placements": admission.excluded_placements,
             }
-            if submission.workload_profile_id is not None:
+            with self._lock:
+                admitted_publisher_generation = self._publisher_generations.get(
+                    request_id,
+                    1,
+                )
+            if getattr(
+                self._router,
+                "supports_publisher_generation",
+                False,
+            ):
+                admission_kwargs["publisher_generation"] = (
+                    admitted_publisher_generation
+                )
+            if getattr(self._router, "requires_qualification_binding", False):
+                admission_kwargs["qualification_binding"] = submission.qualification
+            if (
+                submission.workload_profile_id is not None
+                and getattr(self._router, "supports_workload_profiles", False)
+            ):
                 admission_kwargs["workload_profile_id"] = submission.workload_profile_id
             if admission.graph is None:
                 admitted_id = self._router.admit(
@@ -213,10 +252,33 @@ class RouterSessionBackend:
             if admitted_id != request_id:
                 raise AdmissionError("router_request_id_mismatch")
             admitted = True
+            with self._lock:
+                self._router_admitted.add(request_id)
+                current_publisher_generation = self._publisher_generations.get(
+                    request_id,
+                    admitted_publisher_generation,
+                )
+            if current_publisher_generation != admitted_publisher_generation:
+                update = getattr(
+                    self._router,
+                    "update_publisher_generation",
+                    None,
+                )
+                if not callable(update):
+                    raise AdmissionError("publisher_generation_sync_failed")
+                for publisher_generation in range(
+                    admitted_publisher_generation,
+                    current_publisher_generation,
+                ):
+                    if update(
+                        request_id,
+                        expected_generation=publisher_generation,
+                        new_generation=publisher_generation + 1,
+                    ) is not True:
+                        raise AdmissionError("publisher_generation_sync_failed")
             while True:
                 if is_cancelled() or self._is_cancelled(request_id):
                     self._cancel_once(request_id)
-                    return "cancelled"
                 status = self._router.request_status(request_id)
                 if status == "COMPLETED":
                     return "completed"
@@ -224,6 +286,8 @@ class RouterSessionBackend:
                     return "cancelled"
                 if status == "FAILED":
                     return "failed"
+                if status == "TERMINAL_BLOCKED":
+                    return "terminal_blocked"
                 if status != "DECODING":
                     raise AdmissionError("invalid_router_state")
                 progressed = self._router.decode_one(request_id)
@@ -384,35 +448,130 @@ class RouterSessionBackend:
             raise AdmissionError("qualification_mismatch")
         return frozenset(selected_placements)
 
-    def cancel(self, request_id: str) -> None:
-        self._cancel_once(request_id, external=True)
+    def cancel(self, request_id: str) -> bool:
+        return self._cancel_once(request_id, external=True)
+
+    def cancel_with_deadline(
+        self,
+        request_id: str,
+        *,
+        deadline_monotonic_s: float,
+    ) -> bool:
+        """Propagate the gateway's one original cancellation deadline."""
+
+        if (
+            not isinstance(deadline_monotonic_s, (int, float))
+            or isinstance(deadline_monotonic_s, bool)
+        ):
+            raise ValueError("invalid_cancellation_deadline")
+        return self._cancel_once(
+            request_id,
+            external=True,
+            deadline_monotonic_s=float(deadline_monotonic_s),
+        )
 
     def release(self, request_id: str) -> None:
         release = getattr(self._router, "release_request", None)
         if callable(release):
             release(request_id)
 
-    def _cancel_once(self, request_id: str, *, external: bool = False) -> None:
+    def update_publisher_generation(
+        self,
+        request_id: str,
+        *,
+        expected_generation: int,
+        new_generation: int,
+    ) -> bool:
+        if (
+            type(expected_generation) is not int
+            or expected_generation < 0
+            or type(new_generation) is not int
+            or new_generation != expected_generation + 1
+        ):
+            return False
         with self._lock:
+            current = self._publisher_generations.get(request_id, 1)
+            if expected_generation == 0 and new_generation == 1 and current == 1:
+                self._publisher_generations[request_id] = 1
+                return True
+            if current != expected_generation:
+                return False
+            self._publisher_generations[request_id] = new_generation
+            admitted = request_id in self._router_admitted
+        if not admitted:
+            return True
+        if not getattr(
+            self._router,
+            "supports_publisher_generation",
+            False,
+        ):
+            return True
+        update = getattr(self._router, "update_publisher_generation", None)
+        if callable(update) and update(
+            request_id,
+            expected_generation=expected_generation,
+            new_generation=new_generation,
+        ) is True:
+            return True
+        try:
+            status = self._router.request_status(request_id)
+        except Exception:
+            return False
+        # A terminal/retired physical request has no remaining mutation
+        # boundary to update. Replay still advances the gateway-owned
+        # publisher generation and cannot revive that command.
+        return status in {
+            "COMPLETED",
+            "CANCELLED",
+            "FAILED",
+            "TERMINAL_BLOCKED",
+            "UNKNOWN",
+        }
+
+    def _cancel_once(
+        self,
+        request_id: str,
+        *,
+        external: bool = False,
+        deadline_monotonic_s: float | None = None,
+    ) -> bool:
+        with self._lock:
+            if deadline_monotonic_s is not None:
+                existing_deadline = self._cancellation_deadlines.get(request_id)
+                if (
+                    existing_deadline is not None
+                    and existing_deadline != deadline_monotonic_s
+                ):
+                    raise ValueError("cancellation_deadline_conflict")
+                self._cancellation_deadlines[request_id] = deadline_monotonic_s
             if external and request_id in self._awaiting_cancel_ack:
                 self._awaiting_cancel_ack.discard(request_id)
-                return
+                return True
             if request_id not in self._active:
                 if not external or request_id in self._pending_cancelled:
-                    return
+                    return True
                 self._pending_cancelled.add(request_id)
             elif request_id in self._cancelled:
                 if external:
                     self._external_cancellation_observed.add(request_id)
                     self._internally_cancelled.discard(request_id)
-                return
+                return True
             else:
                 self._cancelled.add(request_id)
                 if external:
                     self._external_cancellation_observed.add(request_id)
                 else:
                     self._internally_cancelled.add(request_id)
-        self._router.cancel(request_id)
+            effective_deadline = self._cancellation_deadlines.get(request_id)
+        cancel_with_deadline = getattr(self._router, "cancel_with_deadline", None)
+        if effective_deadline is not None and callable(cancel_with_deadline):
+            cancelled = cancel_with_deadline(
+                request_id,
+                deadline_monotonic_s=effective_deadline,
+            )
+        else:
+            cancelled = self._router.cancel(request_id)
+        return cancelled is not False
 
     def _is_cancelled(self, request_id: str) -> bool:
         with self._lock:

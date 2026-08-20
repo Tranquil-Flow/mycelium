@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 from typing import Any, Awaitable, Callable, Mapping
 
 from .auth import Authenticator
@@ -85,7 +86,7 @@ def _inference_route(path: object) -> tuple[str, str | None] | None:
     return None
 
 
-def _last_event_id(scope: Mapping[str, Any]) -> int | None:
+def _last_event_id(scope: Mapping[str, Any]) -> tuple[int, int] | None:
     headers = scope.get("headers", ())
     if not isinstance(headers, (list, tuple)):
         raise AdmissionError("invalid_last_event_id")
@@ -106,18 +107,45 @@ def _last_event_id(scope: Mapping[str, Any]) -> int | None:
         text = values[0].decode("ascii")
     except UnicodeDecodeError:
         raise AdmissionError("invalid_last_event_id") from None
-    if not text.isdigit():
+    parts = text.split(":")
+    if len(parts) != 2 or any(not part.isdigit() for part in parts):
         raise AdmissionError("invalid_last_event_id")
-    value = int(text)
-    if value > 9_223_372_036_854_775_807:
+    generation, sequence = (int(part) for part in parts)
+    if generation < 1 or max(generation, sequence) > 9_223_372_036_854_775_807:
         raise AdmissionError("invalid_last_event_id")
-    return value
+    return generation, sequence
+
+
+def _session_token(scope: Mapping[str, Any]) -> str | None:
+    headers = scope.get("headers", ())
+    if not isinstance(headers, (list, tuple)):
+        raise AdmissionError("invalid_session_token")
+    values: list[bytes] = []
+    for item in headers:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise AdmissionError("invalid_session_token")
+        name, value = item
+        if isinstance(name, bytes) and name.lower() == b"x-mycelium-session":
+            if not isinstance(value, bytes):
+                raise AdmissionError("invalid_session_token")
+            values.append(value)
+    if not values:
+        return None
+    if len(values) != 1:
+        raise AdmissionError("invalid_session_token")
+    try:
+        token = values[0].decode("ascii")
+    except UnicodeDecodeError:
+        raise AdmissionError("invalid_session_token") from None
+    if not 32 <= len(token) <= 256:
+        raise AdmissionError("invalid_session_token")
+    return token
 
 
 def _sse_bytes(event: StreamEvent) -> bytes:
     data = _json_bytes(event.to_dict()).decode("utf-8")
     return (
-        f"id: {event.sequence}\n"
+        f"id: {event.publisher_generation}:{event.sequence}\n"
         f"event: {event.kind}\n"
         f"data: {data}\n\n"
     ).encode("utf-8")
@@ -138,9 +166,13 @@ class RequestGatewayASGIApplication:
         service: RequestGatewayService,
         *,
         authenticator: Authenticator,
+        session_token_source: Callable[[], str] | None = None,
     ) -> None:
         self._service = service
         self._authenticator = authenticator
+        self._session_token_source = session_token_source or (
+            lambda: secrets.token_urlsafe(32)
+        )
 
     async def __call__(self, scope: Mapping[str, Any], receive: Receive, send: Send) -> None:
         scope_type = scope.get("type")
@@ -197,7 +229,7 @@ class RequestGatewayASGIApplication:
         elif route_kind == "events":
             await self._events(method, request_id or "", scope, receive, send)
         else:
-            await self._cancel(method, request_id or "", send)
+            await self._cancel(method, request_id or "", scope, send)
 
     async def _submit(self, method: object, receive: Receive, send: Send) -> None:
         if method != "POST":
@@ -206,7 +238,8 @@ class RequestGatewayASGIApplication:
         try:
             document = await _read_json(receive)
             submission = InferenceSubmission.from_dict(document)
-            request_id = self._service.submit(submission)
+            owner_token = self._session_token_source()
+            request_id = self._service.submit(submission, owner_token=owner_token)
         except AdmissionError as exc:
             status = 409 if exc.code in {
                 "deployment_epoch_changed",
@@ -225,6 +258,7 @@ class RequestGatewayASGIApplication:
                 "request_id": request_id,
                 "stream_path": f"/v1/inference/{request_id}/events",
                 "cancel_path": f"/v1/inference/{request_id}",
+                "session_token": owner_token,
             },
         )
 
@@ -241,7 +275,11 @@ class RequestGatewayASGIApplication:
             return
         try:
             cursor = _last_event_id(scope)
-            subscription = self._service.subscribe(request_id, last_event_id=cursor)
+            subscription = self._service.subscribe(
+                request_id,
+                last_event_id=cursor,
+                owner_token=_session_token(scope),
+            )
         except AdmissionError as exc:
             status = 404 if exc.code == "unknown_request" else 409
             await _send_json(send, status, {"error": exc.code})
@@ -295,12 +333,21 @@ class RequestGatewayASGIApplication:
             )
             subscription.ack(event.sequence)
 
-    async def _cancel(self, method: object, request_id: str, send: Send) -> None:
+    async def _cancel(
+        self,
+        method: object,
+        request_id: str,
+        scope: Mapping[str, Any],
+        send: Send,
+    ) -> None:
         if method != "DELETE":
             await self._method_not_allowed(send, "DELETE")
             return
         try:
-            cancelled = self._service.cancel(request_id)
+            cancelled = self._service.cancel(
+                request_id,
+                owner_token=_session_token(scope),
+            )
         except AdmissionError as exc:
             status = 404 if exc.code == "unknown_request" else 409
             await _send_json(send, status, {"error": exc.code})

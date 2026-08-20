@@ -27,6 +27,7 @@ import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
 import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
 import { LiveRouteWorkspace } from './features/liveRoute/LiveRouteWorkspace';
+import { ConcurrencyLivenessSource } from './features/liveRoute/ConcurrencyLivenessPanel';
 import { M17ModelOperationSourcePanel } from './features/liveRoute/M17ModelOperationSourcePanel';
 import { ModelCatalogControlSource } from './features/models/ModelCatalogControlSource';
 import { ArtifactAcquisitionSource } from './features/models/ArtifactAcquisitionSource';
@@ -288,6 +289,7 @@ export default function App({
   if (activeView === 'lab') {
     content = <>
       <ProductEvidenceSummary compact />
+      {source.source_mode === 'live' ? <ConcurrencyLivenessSource view="lab" /> : null}
       <DeviceLabWorkspace operatorToken={deviceLabOperatorToken} />
       {source.source_mode === 'live' ? <M17ModelOperationSourcePanel view="lab" /> : null}
     </>;
@@ -295,6 +297,7 @@ export default function App({
     content = <>
       <ProductEvidenceSummary compact />
       <ProductEvidenceSettings />
+      {source.source_mode === 'live' ? <ConcurrencyLivenessSource view="settings" /> : null}
       {source.source_mode === 'live' ? <GovernanceReadinessSource /> : null}
       <SettingsWorkspace workloadClient={source.source_mode === 'live' ? liveM15ComparisonClient : null} deploymentClient={source.source_mode === 'live' ? liveDeploymentRegistryClient : null} />
       {source.source_mode === 'live' ? <ModelCatalogControlSource /> : null}
@@ -308,6 +311,7 @@ export default function App({
     content = (
       <>
         <ProductEvidenceSummary compact />
+        {source.source_mode === 'live' ? <ConcurrencyLivenessSource view="inference" /> : null}
         {source.source_mode === 'live' ? <LiveKvStatusPanel view="inference" freshness={rendered.sourceState.freshness} /> : null}
         <InferenceWorkspace
           client={source.source_mode !== 'live' ? fixtureInferenceClient : undefined}
@@ -328,7 +332,7 @@ export default function App({
       ? (
           <>
             {activeView === 'nodes' ? (
-              <><ProductEvidenceWorkspace view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
+              <><ProductEvidenceWorkspace view="nodes" /><ConcurrencyLivenessSource view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /><PreparedDeploymentsSourcePanel view="nodes" hideUnavailable /><M17ModelOperationSourcePanel view="nodes" /></>
             ) : activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents' ? (
               <>
                 <ProductEvidenceWorkspace view={activeView} />
@@ -349,7 +353,7 @@ export default function App({
           </>
         )
       : activeView === 'nodes'
-        ? <><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /></>
+        ? <><ConcurrencyLivenessSource view="nodes" /><LiveKvStatusPanel view="nodes" freshness={rendered.sourceState.freshness} /><ProductNodesWorkspace sourceMode="live" /><ArtifactAcquisitionSource view="nodes" /></>
         : isProductEventState(rendered.sourceState)
           ? activeView === 'network' || activeView === 'plans' || activeView === 'readiness' || activeView === 'incidents'
             ? (

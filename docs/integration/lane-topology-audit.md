@@ -2,7 +2,7 @@
 
 `mycelium_lane_audit` gives the integration driver a deterministic, read-only view of concurrent Git feature lanes before any cherry-pick or merge attempt.
 
-It exists because clean worktree status alone is insufficient. A lane can be clean while based on the wrong commit, can modify paths outside its declared ownership, or can collide with another lane or with changes already present on the integration target.
+It exists because clean worktree status alone is insufficient. A lane can be clean while based on the wrong commit, can modify paths outside its declared ownership, or can collide with another lane or with changes already present on the integration target. Declared ownership patterns are compared before branches exist, so two lanes cannot silently reserve the same future path.
 
 ## Current invocation
 
@@ -33,6 +33,9 @@ For every lane:
 - structural state such as `in_progress_dirty`, `ownership_violation`, `no_feature_commit`, `structurally_reviewable`, or `reviewable_with_target_overlap`.
 
 It also reports exact path intersections between each pair of lanes.
+It separately reports conservative intersections between declared ownership patterns.
+`ownership_safe_to_dispatch=false` makes the CLI exit nonzero even when every affected
+branch is still missing and therefore has no observed changed paths.
 
 The implementation uses only read-oriented Git commands: `rev-parse`, `cat-file -e`, `merge-base --is-ancestor`, `rev-list`, `diff --name-only`, `worktree list`, and `status --porcelain`. `GIT_OPTIONAL_LOCKS=0` is set for every command. It does not edit an index, branch, ref, worktree file, or product state.
 

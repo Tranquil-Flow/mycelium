@@ -1,4 +1,18 @@
 {
+  "concurrency_liveness_qualification": {
+    "cancellation_and_cleanup_bound_ms": 2000,
+    "cooperative_interruption_proven": false,
+    "deployment_id": "12345678-1234-5678-1234-567812345678",
+    "eligible": false,
+    "evidence_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "maximum_concurrent_requests": 4,
+    "protocol": "mycelium.product_concurrency_liveness_qualification.v1",
+    "publisher_generation_fencing_proven": false,
+    "qualification_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "request_scoped_cleanup_proven": false,
+    "scoped_liveness_proven": false,
+    "shared_process_termination_used": false
+  },
   "counters": {
     "applied_operation_count": 0,
     "fatal": null,
@@ -8,6 +22,14 @@
   "decode_mode": "stage_local_kv",
   "deployment_id": "12345678-1234-5678-1234-567812345678",
   "incidents": [],
+  "liveness": {
+    "deployment_fatal_reason": null,
+    "deployment_id": "12345678-1234-5678-1234-567812345678",
+    "generated_at_monotonic_ms": 1,
+    "incidents": [],
+    "protocol": "mycelium.traffic_liveness.v1",
+    "subjects": []
+  },
   "model_id": "org/model",
   "peers": [
     {
@@ -22,6 +44,17 @@
       "decode_operation_count": 8,
       "frames_received": 0,
       "frames_sent": 0,
+      "interruptibility": {
+        "backend_candidate": true,
+        "cooperative_bound_candidate": true,
+        "decode_mode": "stage_local_kv",
+        "maximum_observed_work_unit_ms": 125.0,
+        "maximum_total_cleanup_ms": 2000,
+        "observed_work_unit_count": 24,
+        "physical_proof_required": true,
+        "runtime_backend": "numpy",
+        "work_unit": "transformer_layer"
+      },
       "last_release_reason": "normal_completion",
       "node_id": "node-a",
       "peak_kv_bytes": 4096,
@@ -63,6 +96,17 @@
       "decode_operation_count": 8,
       "frames_received": 0,
       "frames_sent": 0,
+      "interruptibility": {
+        "backend_candidate": true,
+        "cooperative_bound_candidate": true,
+        "decode_mode": "stage_local_kv",
+        "maximum_observed_work_unit_ms": 125.0,
+        "maximum_total_cleanup_ms": 2000,
+        "observed_work_unit_count": 24,
+        "physical_proof_required": true,
+        "runtime_backend": "numpy",
+        "work_unit": "transformer_layer"
+      },
       "last_release_reason": "normal_completion",
       "node_id": "node-b",
       "peak_kv_bytes": 4096,

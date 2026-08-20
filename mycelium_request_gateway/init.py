@@ -41,6 +41,7 @@ def create_request_gateway_application(
         request_id_source=request_id_source or (lambda: str(uuid.uuid4())),
         max_buffered_events=max_buffered_events,
         max_sessions=max_sessions,
+        clock=clock,
     )
     return RequestGatewayASGIApplication(
         service,

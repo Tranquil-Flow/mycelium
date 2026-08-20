@@ -350,13 +350,53 @@ CONTRACT_SPECS = (
         ),
     ),
     ContractSpec(
-        "m16-runtime-status-v1.json",
-        "mycelium.m16_runtime_status.v1",
+        "concurrent-request-runtime-v1.json",
+        "mycelium.concurrent_request_runtime.v1",
         (
             "mycelium_m16_runtime.py",
             "mycelium_live/router_port.py",
             "ui/web/src/features/liveRoute/m16Runtime.ts",
             "ui/web/src/features/liveRoute/M16RuntimePanel.tsx",
+        ),
+    ),
+    ContractSpec(
+        "interruptible-stage-command-v1.json",
+        "mycelium.interruptible_stage_command.v1",
+        (
+            "mycelium_live/a4_contracts.py",
+            "mycelium_live/command_controller.py",
+            "mycelium_live/router_port.py",
+            "physical_inference_node.py",
+        ),
+    ),
+    ContractSpec(
+        "traffic-liveness-v1.json",
+        "mycelium.traffic_liveness.v1",
+        (
+            "mycelium_live/a4_contracts.py",
+            "mycelium_live/liveness.py",
+            "mycelium_live/route.py",
+            "mycelium_router/transports/iroh.py",
+        ),
+    ),
+    ContractSpec(
+        "scoped-runtime-incident-v1.json",
+        "mycelium.scoped_runtime_incident.v1",
+        (
+            "mycelium_live/a4_contracts.py",
+            "mycelium_live/liveness.py",
+            "mycelium_live/route.py",
+        ),
+    ),
+    ContractSpec(
+        "product-concurrency-liveness-qualification-v1.json",
+        "mycelium.product_concurrency_liveness_qualification.v1",
+        (
+            "mycelium_live/a4_contracts.py",
+            "mycelium_live/command_controller.py",
+            "mycelium_live/liveness.py",
+            "mycelium_request_gateway/service.py",
+            "ui/web/src/features/inference/useInferenceSession.ts",
         ),
     ),
     ContractSpec(

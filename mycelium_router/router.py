@@ -77,6 +77,13 @@ class Router:
          **kwargs,
       )
 
+   def start_locked_distributed_prefill(self, request, client_sink, **kwargs):
+      return self.entry.start_locked_distributed_prefill(
+         request,
+         client_sink,
+         **kwargs,
+      )
+
    def request_status(self, request_id):
       return self.entry.request_status(request_id)
 

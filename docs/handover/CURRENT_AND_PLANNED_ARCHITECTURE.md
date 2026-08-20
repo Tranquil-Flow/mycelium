@@ -488,8 +488,8 @@ and deterministic acceptance inputs now exist.
 | A6 | `design_only` | Gateway-committed full-context replay with request-scoped cutover, exact-once delivery, and explicit no-successor abort |
 | A7 | `design_only` | Byte-compatible acknowledged KV successor with generation fencing and mandatory A6/abort fallback |
 | A8 | `design_only` | Pinned public-HTTPS membership control plus EndpointID-authenticated Iroh direct/relay activation without Tailscale dependency |
-| A9 | `design_only` | Versioned platform-neutral membership/profile/capability/qualification with unknown-ineligible and no legacy eligibility carry-over |
-| A10 | `design_only` | Runtime-authoritative continuous batches, causal pipeline overlap, and transactional multi-position target verification |
+| A9 | `design_only` | Versioned platform-neutral membership/profile/capability/qualification with unknown-ineligible and no legacy eligibility carry-over; physically qualified accelerated Windows x86_64 backend; persistent int8 execution without warm decode-time whole-weight materialization; qualified reduced-precision activations; component/edge timing and component-aware placement; frozen single-request performance floor |
+| A10 | `design_only` | Depends directly on atomic A4 and A9 closure; runtime-authoritative continuous batches, causal pipeline overlap, and transactional multi-position target verification, measured without hiding backend/precision/placement changes inside the scheduling candidate |
 | A11 | `design_only` | Off-by-default target-authoritative speculation promoted only by same-route parity and confidence-bound material gain |
 | A12 | `design_only` | Generic native Android and Apple-mobile eligibility, separately qualified by role, lifecycle, thermal, power, memory, and network evidence |
 | A13 | `design_only` | Signed normal-user packages, target-owned identity, encrypted recipient-bound invitation handoff, consent, and managed lifecycle |

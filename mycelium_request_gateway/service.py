@@ -1,8 +1,11 @@
 """Production request-session service shared by HTTP API and CLI clients."""
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
+from dataclasses import replace
 import hashlib
+import hmac
 import threading
 import time
 from typing import Callable, Protocol
@@ -22,6 +25,7 @@ from .qualification import CapturedQualification, QualificationGate, Qualificati
 
 
 _MAX_BACKEND_TOKEN_TEXT_BYTES = 1 << 20
+_MAX_CANCELLATION_AND_CLEANUP_SECONDS = 2.0
 
 
 class InferenceBackend(Protocol):
@@ -41,7 +45,7 @@ class InferenceBackend(Protocol):
         is_cancelled: Callable[[], bool],
     ) -> str: ...
 
-    def cancel(self, request_id: str) -> None: ...
+    def cancel(self, request_id: str) -> bool | None: ...
 
 
 @dataclass(slots=True)
@@ -66,13 +70,23 @@ class _Session:
     maximum_buffered: int = 0
     active_subscription: bool = False
     cancellation_started: bool = False
+    cancellation_started_at: float | None = None
+    cancellation_deadline_at: float | None = None
+    cancellation_wall_deadline_at: float | None = None
+    cancellation_within_bound: bool | None = None
     backend_started: bool = False
     backend_cancelled: bool = False
+    backend_cancellation_complete: bool = False
+    backend_cancellation_failed: bool = False
+    backend_cancellation_accepted: bool | None = None
+    backend_released: bool = False
     worker_done: bool = False
-    thread: threading.Thread | None = None
+    future: Future[None] | None = None
     outcome: str | None = None
     event_protocol: str = REQUEST_EVENT_PROTOCOL
     emitted_phases: set[str] = field(default_factory=set)
+    owner_token_digest: bytes | None = None
+    publisher_generation: int = 0
 
 
 class EventSubscription:
@@ -83,10 +97,12 @@ class EventSubscription:
         service: "RequestGatewayService",
         session: _Session,
         cursor: int,
+        publisher_generation: int,
     ) -> None:
         self._service = service
         self._session = session
         self._cursor = cursor
+        self.publisher_generation = publisher_generation
         self._delivered = cursor
         self._closed = False
 
@@ -99,6 +115,7 @@ class EventSubscription:
             raise AdmissionError("stream_closed")
         event = self._service._next_event(self._session, self._cursor, timeout)
         if event is not None:
+            event = replace(event, publisher_generation=self.publisher_generation)
             self._delivered = event.sequence
         return event
 
@@ -131,6 +148,9 @@ class RequestGatewayService:
         request_id_source: Callable[[], str],
         max_buffered_events: int = 64,
         max_sessions: int = 1_024,
+        max_concurrent_requests: int = 4,
+        max_pending_requests: int = 64,
+        clock: Callable[[], float] = time.monotonic,
         metrics: GatewayMetrics | None = None,
     ) -> None:
         if (
@@ -145,11 +165,33 @@ class RequestGatewayService:
             or not 1 <= max_sessions <= 65_536
         ):
             raise ValueError("invalid_max_sessions")
+        if (
+            not isinstance(max_concurrent_requests, int)
+            or isinstance(max_concurrent_requests, bool)
+            or not 1 <= max_concurrent_requests <= 64
+        ):
+            raise ValueError("invalid_max_concurrent_requests")
+        if (
+            not isinstance(max_pending_requests, int)
+            or isinstance(max_pending_requests, bool)
+            or not max_concurrent_requests <= max_pending_requests <= 65_536
+        ):
+            raise ValueError("invalid_max_pending_requests")
         self._gate = QualificationGate(qualification_source)
         self._backend = backend
         self._request_id_source = request_id_source
         self._max_buffered_events = max_buffered_events
         self._max_sessions = max_sessions
+        self._max_concurrent_requests = max_concurrent_requests
+        self._max_pending_requests = max_pending_requests
+        if not callable(clock):
+            raise ValueError("invalid_gateway_clock")
+        self._clock = clock
+        self._admission_slots = threading.BoundedSemaphore(max_pending_requests)
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_concurrent_requests,
+            thread_name_prefix="mycelium-request-worker",
+        )
         self._metrics = metrics if metrics is not None else GatewayMetrics()
         self._sessions: dict[str, _Session] = {}
         self._lock = threading.RLock()
@@ -161,72 +203,105 @@ class RequestGatewayService:
     def current_qualification(self) -> dict[str, object]:
         return safe_qualification_projection(self._gate.current_projection_source())
 
-    def submit(self, submission: InferenceSubmission) -> str:
+    def submit(
+        self,
+        submission: InferenceSubmission,
+        *,
+        owner_token: str | None = None,
+    ) -> str:
         if not isinstance(submission, InferenceSubmission):
             raise AdmissionError("invalid_submission")
+        if owner_token is not None and (
+            not isinstance(owner_token, str)
+            or not 32 <= len(owner_token.encode("utf-8")) <= 256
+        ):
+            raise AdmissionError("invalid_session_token")
         try:
             captured = self._gate.capture(submission.qualification)
         except AdmissionError:
             self._metrics.increment("admission_rejected_total")
             raise
+        if not self._admission_slots.acquire(blocking=False):
+            self._metrics.increment("admission_rejected_total")
+            raise AdmissionError("gateway_capacity_exhausted")
+        slot_owned = True
         with self._lock:
-            if self._closed:
-                raise AdmissionError("gateway_closed")
-            self._make_session_room_locked()
-            request_id = self._request_id_source()
-            if not is_valid_request_id(request_id):
-                raise AdmissionError("invalid_request_id")
-            if request_id in self._sessions:
-                raise AdmissionError("duplicate_request_id")
-            session = _Session(
-                request_id=request_id,
-                submission=submission,
-                captured=captured,
-                max_new_tokens=submission.max_new_tokens,
-                capacity=self._max_buffered_events,
-                event_protocol=(
-                    REQUEST_EVENT_PROTOCOL_V2
-                    if submission.protocol == REQUEST_GATEWAY_PROTOCOL_V2
-                    else REQUEST_EVENT_PROTOCOL
-                ),
-            )
-            with session.condition:
-                self._append_event_locked(
-                    session,
-                    StreamEvent(
-                        request_id=request_id,
-                        sequence=0,
-                        kind="accepted",
-                        protocol=session.event_protocol,
+            try:
+                if self._closed:
+                    raise AdmissionError("gateway_closed")
+                self._make_session_room_locked()
+                request_id = self._request_id_source()
+                if not is_valid_request_id(request_id):
+                    raise AdmissionError("invalid_request_id")
+                if request_id in self._sessions:
+                    raise AdmissionError("duplicate_request_id")
+                session = _Session(
+                    request_id=request_id,
+                    submission=submission,
+                    captured=captured,
+                    max_new_tokens=submission.max_new_tokens,
+                    capacity=self._max_buffered_events,
+                    event_protocol=(
+                        REQUEST_EVENT_PROTOCOL_V2
+                        if submission.protocol == REQUEST_GATEWAY_PROTOCOL_V2
+                        else REQUEST_EVENT_PROTOCOL
+                    ),
+                    owner_token_digest=(
+                        None
+                        if owner_token is None
+                        else hashlib.sha256(owner_token.encode("utf-8")).digest()
                     ),
                 )
-            thread = threading.Thread(
-                target=self._run,
-                args=(session,),
-                name=f"mycelium-request-{request_id[:16]}",
-                daemon=True,
-            )
-            session.thread = thread
-            self._sessions[request_id] = session
-            thread.start()
-            self._metrics.increment("requests_admitted_total")
+                with session.condition:
+                    self._append_event_locked(
+                        session,
+                        StreamEvent(
+                            request_id=request_id,
+                            sequence=0,
+                            kind="accepted",
+                            protocol=session.event_protocol,
+                        ),
+                    )
+                self._sessions[request_id] = session
+                session.future = self._executor.submit(self._run, session)
+                slot_owned = False
+                self._metrics.increment("requests_admitted_total")
+            finally:
+                if slot_owned:
+                    self._admission_slots.release()
         return request_id
 
     def subscribe(
         self,
         request_id: str,
         *,
-        last_event_id: int | None,
+        last_event_id: int | tuple[int, int] | None,
+        owner_token: str | None = None,
     ) -> EventSubscription:
         session = self._get_session(request_id)
-        cursor = -1 if last_event_id is None else last_event_id
+        self._require_session_owner(session, owner_token)
+        if isinstance(last_event_id, tuple):
+            if len(last_event_id) != 2:
+                raise AdmissionError("invalid_last_event_id")
+            previous_publisher_generation, cursor = last_event_id
+        else:
+            previous_publisher_generation = session.publisher_generation
+            cursor = -1 if last_event_id is None else last_event_id
         if (
             not isinstance(cursor, int)
             or isinstance(cursor, bool)
             or cursor < -1
+            or not isinstance(previous_publisher_generation, int)
+            or isinstance(previous_publisher_generation, bool)
+            or previous_publisher_generation < 0
         ):
             raise AdmissionError("invalid_last_event_id")
         with session.condition:
+            if (
+                last_event_id is not None
+                and previous_publisher_generation != session.publisher_generation
+            ):
+                raise AdmissionError("stale_publisher_generation")
             if session.active_subscription:
                 raise AdmissionError("stream_already_attached")
             if cursor < session.discarded_through:
@@ -235,20 +310,76 @@ class RequestGatewayService:
                 raise AdmissionError("invalid_last_event_id")
             self._discard_through_locked(session, cursor)
             session.active_subscription = True
-            return EventSubscription(self, session, cursor)
+            expected_generation = session.publisher_generation
+            session.publisher_generation += 1
+            subscription = EventSubscription(
+                self,
+                session,
+                cursor,
+                session.publisher_generation,
+            )
+        update = getattr(self._backend, "update_publisher_generation", None)
+        if callable(update):
+            try:
+                synchronized = update(
+                    request_id,
+                    expected_generation=expected_generation,
+                    new_generation=subscription.publisher_generation,
+                )
+            except Exception as exc:
+                synchronized = False
+                sync_error = exc
+            else:
+                sync_error = None
+            if synchronized is not True:
+                with session.condition:
+                    session.active_subscription = False
+                    session.condition.notify_all()
+                self._cancel_session(session)
+                raise AdmissionError("publisher_generation_sync_failed") from sync_error
+        return subscription
 
-    def cancel(self, request_id: str) -> bool:
+    def cancel(self, request_id: str, *, owner_token: str | None = None) -> bool:
         session = self._get_session(request_id)
+        self._require_session_owner(session, owner_token)
+        return self._cancel_session(session)
+
+    def _cancel_session(self, session: _Session) -> bool:
         with session.condition:
             if session.terminal_event is not None or session.cancellation_started:
                 return False
             session.cancellation_started = True
+            session.cancellation_started_at = self._clock()
+            session.cancellation_deadline_at = (
+                session.cancellation_started_at
+                + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+            )
+            session.cancellation_wall_deadline_at = (
+                time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+            )
+            backend_started = session.backend_started
+        backend_accepted: bool | None = None
+        if backend_started:
+            # Install the owner-issued absolute deadline in the backend before
+            # exposing the stop latch to its worker.  Otherwise the worker can
+            # observe cancellation first and accidentally mint a later budget.
+            backend_accepted = self._cancel_backend_once(session)
+        if backend_accepted is False:
+            # The backend already committed another terminal state before the
+            # cancellation command reached its own linearization point. Undo
+            # the provisional gateway latch so that worker-owned terminal can
+            # publish truthfully, and report that cancellation did not win.
+            with session.condition:
+                if session.terminal_event is None:
+                    session.cancellation_started = False
+                    session.cancellation_started_at = None
+                    session.cancellation_deadline_at = None
+                    session.cancellation_wall_deadline_at = None
+                session.condition.notify_all()
+            return False
+        with session.condition:
             session.stop.set()
             session.condition.notify_all()
-            backend_started = session.backend_started
-        if backend_started:
-            self._cancel_backend_once(session)
-        self._append_terminal(session, "cancelled")
         return True
 
     def buffered_event_count(self, request_id: str) -> int:
@@ -279,11 +410,17 @@ class RequestGatewayService:
             with session.condition:
                 terminal = session.terminal_event is not None
             if not terminal:
-                self.cancel(session.request_id)
+                self._cancel_session(session)
+        deadline = time.monotonic() + 2.0
         for session in sessions:
-            thread = session.thread
-            if thread is not None and thread is not threading.current_thread():
-                thread.join(timeout=2)
+            future = session.future
+            if future is None:
+                continue
+            try:
+                future.result(timeout=max(0.0, deadline - time.monotonic()))
+            except (FutureTimeout, Exception):
+                continue
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _run(self, session: _Session) -> None:
         try:
@@ -303,6 +440,7 @@ class RequestGatewayService:
                     session.backend_started = True
                     cancellation_started = False
             if cancellation_started:
+                self._release_backend_once(session)
                 self._append_terminal(session, "cancelled")
                 return
             self._append_lifecycle(session, "queue")
@@ -317,47 +455,62 @@ class RequestGatewayService:
                 ),
                 session.stop.is_set,
             )
-            with session.condition:
-                cancellation_started = session.cancellation_started
-            if cancellation_started:
-                self._append_terminal(session, "cancelled")
-            elif outcome == "completed":
-                captured = session.captured
-                if captured is None:
-                    raise AdmissionError("request_state_released")
-                self._gate.revalidate(captured)
-                self._append_terminal(session, "completed")
+            self._release_backend_once(session)
+            if outcome == "completed":
+                cancellation_resolution = self._await_backend_cancellation(session)
+                if cancellation_resolution == "accepted":
+                    self._append_cancellation_terminal(session)
+                elif cancellation_resolution == "unproven":
+                    self._append_cancellation_failure(session)
+                else:
+                    captured = session.captured
+                    if captured is None:
+                        raise AdmissionError("request_state_released")
+                    self._gate.revalidate(captured)
+                    self._append_terminal(session, "completed")
             elif outcome == "cancelled":
-                self._append_terminal(session, "cancelled")
+                cancellation_resolution = self._await_backend_cancellation(session)
+                if cancellation_resolution == "unproven":
+                    self._append_cancellation_failure(session)
+                else:
+                    self._append_cancellation_terminal(session)
+            elif outcome == "terminal_blocked":
+                # The physical route could not prove owner-scoped cleanup and
+                # therefore did not commit its terminal CAS. Retain a
+                # deliberately nonterminal session: publishing even a failure
+                # here would contradict the authoritative command ledger.
+                pass
             else:
                 self._append_terminal(session, "failed", code="backend_failed")
             with session.condition:
-                session.outcome = "cancelled" if cancellation_started else outcome
+                session.outcome = outcome
         except AdmissionError as exc:
             if exc.code == "request_cancelled" and session.stop.is_set():
-                self._append_terminal(session, "cancelled")
+                self._release_backend_once(session)
+                self._append_cancellation_terminal(session)
             else:
                 session.stop.set()
                 self._cancel_backend_once(session)
+                self._release_backend_once(session)
                 self._append_terminal(session, "failed", code=exc.code)
             with session.condition:
                 session.outcome = exc.code
         except Exception:
             session.stop.set()
             self._cancel_backend_once(session)
+            self._release_backend_once(session)
             self._append_terminal(session, "failed", code="backend_failed")
             with session.condition:
                 session.outcome = "backend_failed"
         finally:
-            release = getattr(self._backend, "release", None)
-            if callable(release):
-                release(session.request_id)
+            self._release_backend_once(session)
             with session.condition:
                 session.submission = None
                 session.captured = None
                 session.token_digests.clear()
                 session.worker_done = True
                 session.condition.notify_all()
+            self._admission_slots.release()
 
     def _accept_token(self, session: _Session, token_index: int, token_text: str) -> None:
         if (
@@ -430,14 +583,12 @@ class RequestGatewayService:
         kind: str,
         *,
         code: str | None = None,
+        cancellation_failure: bool = False,
     ) -> None:
         self._append_lifecycle(session, "completion")
         with session.condition:
             if session.terminal_event is not None:
                 return
-            if session.cancellation_started and kind != "cancelled":
-                kind = "cancelled"
-                code = None
             self._trim_acknowledged_replay_locked(
                 session,
                 target_size=session.capacity - 1,
@@ -462,6 +613,55 @@ class RequestGatewayService:
                 }[kind]
             )
             session.condition.notify_all()
+
+    def _append_cancellation_terminal(self, session: _Session) -> None:
+        with session.condition:
+            started_at = session.cancellation_started_at
+        if started_at is None:
+            self._append_terminal(session, "cancelled")
+            return
+        within_bound = (
+            self._clock() - started_at
+            <= _MAX_CANCELLATION_AND_CLEANUP_SECONDS
+        )
+        with session.condition:
+            session.cancellation_within_bound = within_bound
+        if within_bound:
+            self._append_terminal(session, "cancelled")
+        else:
+            self._append_cancellation_failure(session)
+
+    def _append_cancellation_failure(self, session: _Session) -> None:
+        with session.condition:
+            session.cancellation_within_bound = False
+        self._append_terminal(
+            session,
+            "failed",
+            code="cancellation_cleanup_deadline_exceeded",
+            cancellation_failure=True,
+        )
+
+    def _await_backend_cancellation(self, session: _Session) -> str:
+        """Resolve the owner cancellation without minting a second deadline."""
+
+        with session.condition:
+            if not session.cancellation_started:
+                return "not_started"
+            if not session.backend_started:
+                return "accepted"
+            deadline = session.cancellation_wall_deadline_at
+            while not session.backend_cancellation_complete:
+                remaining = (
+                    0.0 if deadline is None else deadline - time.monotonic()
+                )
+                if remaining <= 0:
+                    return "unproven"
+                session.condition.wait(timeout=remaining)
+            if session.backend_cancellation_failed:
+                return "unproven"
+            if session.backend_cancellation_accepted is False:
+                return "rejected"
+            return "accepted"
 
     def _append_lifecycle(self, session: _Session, phase: str) -> None:
         if session.event_protocol != REQUEST_EVENT_PROTOCOL_V2:
@@ -523,6 +723,8 @@ class RequestGatewayService:
     def _ack(session: _Session, subscription: EventSubscription, sequence: int) -> None:
         with session.condition:
             if (
+                subscription.publisher_generation != session.publisher_generation
+                or
                 not isinstance(sequence, int)
                 or isinstance(sequence, bool)
                 or sequence <= subscription._cursor
@@ -561,15 +763,48 @@ class RequestGatewayService:
             session.active_subscription = False
             session.condition.notify_all()
 
-    def _cancel_backend_once(self, session: _Session) -> None:
+    def _cancel_backend_once(self, session: _Session) -> bool | None:
         with session.condition:
             if not session.backend_started or session.backend_cancelled:
-                return
+                return session.backend_cancellation_accepted
             session.backend_cancelled = True
+            deadline = session.cancellation_deadline_at
+        accepted: bool | None = None
+        failed = False
         try:
-            self._backend.cancel(session.request_id)
+            cancel_with_deadline = getattr(
+                self._backend,
+                "cancel_with_deadline",
+                None,
+            )
+            if deadline is not None and callable(cancel_with_deadline):
+                result = cancel_with_deadline(
+                    session.request_id,
+                    deadline_monotonic_s=deadline,
+                )
+            else:
+                result = self._backend.cancel(session.request_id)
+            accepted = result is not False
         except Exception:
-            pass
+            failed = True
+        finally:
+            with session.condition:
+                session.backend_cancellation_accepted = accepted
+                session.backend_cancellation_failed = failed
+                session.backend_cancellation_complete = True
+                session.condition.notify_all()
+        return accepted
+
+    def _release_backend_once(self, session: _Session) -> None:
+        with session.condition:
+            if session.backend_released:
+                return
+        release = getattr(self._backend, "release", None)
+        if callable(release):
+            release(session.request_id)
+        with session.condition:
+            session.backend_released = True
+            session.condition.notify_all()
 
     def _get_session(self, request_id: str) -> _Session:
         if not isinstance(request_id, str) or not request_id:
@@ -579,6 +814,17 @@ class RequestGatewayService:
         if session is None:
             raise AdmissionError("unknown_request")
         return session
+
+    @staticmethod
+    def _require_session_owner(session: _Session, owner_token: str | None) -> None:
+        expected = session.owner_token_digest
+        if expected is None:
+            return
+        if not isinstance(owner_token, str):
+            raise AdmissionError("session_owner_mismatch")
+        candidate = hashlib.sha256(owner_token.encode("utf-8")).digest()
+        if not hmac.compare_digest(candidate, expected):
+            raise AdmissionError("session_owner_mismatch")
 
     def _make_session_room_locked(self) -> None:
         while len(self._sessions) >= self._max_sessions:

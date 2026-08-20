@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import threading
 import time
 
@@ -59,8 +60,8 @@ def test_cancel_before_backend_start_has_no_runtime_capacity_or_kv_effects():
         assert source.blocked.wait(timeout=2)
 
         assert service.cancel(request_id) is True
-        events = drain(service, request_id)
         source.release.set()
+        events = drain(service, request_id)
         service.close()
 
         assert [event.kind for event in events] == ["accepted", "cancelled"]
@@ -137,7 +138,10 @@ def test_disconnect_reconnect_replays_unacknowledged_token_then_resumes_in_order
 
         resumed = service.subscribe(request_id, last_event_id=accepted.sequence)
         replayed = resumed.next_event(timeout=2)
-        assert replayed == delivered_not_applied
+        assert replayed == replace(
+            delivered_not_applied,
+            publisher_generation=resumed.publisher_generation,
+        )
         resumed.ack(replayed.sequence)
         backend.release.set()
 

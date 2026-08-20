@@ -194,6 +194,7 @@ function decodeSession(value: unknown): InferenceSessionState | null {
   const output = safeString(item.output, MAX_OUTPUT_CHARS);
   const tokenCount = safeInteger(item.token_count, 0, MAX_NEW_TOKENS);
   const sequence = safeInteger(item.last_applied_sequence, -1, Number.MAX_SAFE_INTEGER);
+  const publisherGeneration = safeInteger(item.publisher_generation, 0, Number.MAX_SAFE_INTEGER);
   const errorCode = item.error_code === null ? null : safeString(item.error_code, 64);
   const startedAt = item.started_at_unix_ms === null
     ? null
@@ -207,7 +208,7 @@ function decodeSession(value: unknown): InferenceSessionState | null {
     (item.accepted_request !== null && accepted === null) ||
     (item.captured_binding !== null && binding === null) ||
     requestedMax === null || submittedPrompt === null && item.submitted_prompt !== undefined && item.submitted_prompt !== null ||
-    output === null || tokenCount === null || sequence === null ||
+    output === null || tokenCount === null || sequence === null || publisherGeneration === null ||
     (errorCode !== null && !SAFE_ERROR_CODE.test(errorCode)) ||
     (item.started_at_unix_ms !== null && startedAt === null) || history === null ||
     tokenCount > requestedMax ||
@@ -228,6 +229,7 @@ function decodeSession(value: unknown): InferenceSessionState | null {
     output,
     token_count: tokenCount,
     last_applied_sequence: sequence,
+    publisher_generation: publisherGeneration,
     error_code: errorCode,
     form_error: null,
     cancellation_requested: false,
@@ -262,6 +264,7 @@ function serializedSnapshot(snapshot: InferenceTabSnapshot): string {
       output: snapshot.session.output,
       token_count: snapshot.session.token_count,
       last_applied_sequence: snapshot.session.last_applied_sequence,
+      publisher_generation: snapshot.session.publisher_generation,
       error_code: snapshot.session.error_code,
       started_at_unix_ms: snapshot.session.started_at_unix_ms,
       history: snapshot.session.history,

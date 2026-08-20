@@ -65,6 +65,14 @@ class LiveDeploymentRegistry:
     """QualificationSource, RouterPort, and codec for one selected deployment."""
 
     is_simulated = False
+    # The registry is the product-facing RouterPort and delegates these exact
+    # capabilities to the selected LiveRouterPort.  Advertising them here is
+    # required so the gateway supplies qualifier-owned command authority and
+    # reconnect generations instead of silently dropping either at the
+    # registry boundary.
+    requires_qualification_binding = True
+    supports_workload_profiles = True
+    supports_publisher_generation = True
 
     def __init__(
         self,

@@ -25,7 +25,7 @@ EXPECTED_DEPENDENCIES = {
     "A7": {"A6"},
     "A8": {"A3"},
     "A9": {"A8"},
-    "A10": {"A4"},
+    "A10": {"A4", "A9"},
     "A11": {"A10"},
     "A12": {"A4", "A9"},
     "A13": {"A12"},
@@ -70,7 +70,7 @@ LIVE_REQUIREMENTS = {
     "browser_second_session",
     "full_regressions_audits",
 }
-MODEL_BOUND_GATES = {"A3", "A5", "A6", "A7", "A10", "A11", "A15"}
+MODEL_BOUND_GATES = {"A3", "A5", "A6", "A7", "A9", "A10", "A11", "A15"}
 SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 WORKSPACES = {
     "inference",

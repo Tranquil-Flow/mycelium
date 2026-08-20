@@ -11,7 +11,8 @@ export function M16RuntimePanel({ runtime, view }: { readonly runtime: M16Runtim
       <dl className={styles.measurements}>
         <div><dt>Queue</dt><dd>{runtime.queue.depth} / {runtime.queue.maximum_items}</dd></div>
         <div><dt>Interactive / batch</dt><dd>{runtime.queue.interactive_depth} / {runtime.queue.batch_depth}</dd></div>
-        <div><dt>Active request</dt><dd>{runtime.queue.active_request_id ?? 'None'}</dd></div>
+        <div><dt>Active requests</dt><dd>{runtime.queue.active_request_ids.length}</dd></div>
+        <div><dt>Worker limit</dt><dd>{runtime.queue.maximum_active_requests}</dd></div>
         <div><dt>Topology pin</dt><dd>v{runtime.topology_version}</dd></div>
       </dl>
       <div className={styles.tableWrap}><table><thead><tr><th>Placement</th><th>Node</th><th>Memory free</th><th>KV free</th><th>Workspace free</th><th>Reservations</th></tr></thead><tbody>{runtime.placements.map((placement) => <tr key={placement.placement_id}><th scope="row">{placement.placement_id}</th><td>{placement.node_id}</td><td>{placement.free_memory_bytes.toLocaleString()}</td><td>{placement.free_kv_bytes.toLocaleString()}</td><td>{placement.free_workspace_bytes.toLocaleString()}</td><td>{placement.active_reservations} / {placement.maximum_reservations}</td></tr>)}</tbody></table></div>

@@ -58,6 +58,12 @@ PROCESS_LIFETIME_LIMITATION = (
 _SEEN_LIMIT = 4096
 _TRACE_ID_BYTES = 128
 _TRACE_ENTRY_BYTES = 512
+_NON_DELIVERED_SCOPED_ERRORS = frozenset(
+   {
+      "manifest_delta_queue_full",
+      "manifest_registration_rejected",
+   }
+)
 
 
 class IrohTransportError(RuntimeError):
@@ -413,6 +419,7 @@ class TransportEvidence:
    remote_frames_received: int
    router_frames_dispatched: int
    duplicate_frames: int
+   scoped_events: tuple[Mapping[str, Any], ...] = ()
    transport_path_observations: tuple[Mapping[str, Any], ...] = ()
    route_ready: bool = False
    delivery_semantics: str = DELIVERY_SEMANTICS
@@ -422,6 +429,9 @@ class TransportEvidence:
 @dataclass
 class _PendingSend:
    generation: int
+   request_id: str | None = None
+   path_id: str | None = None
+   path_attempt: int | None = None
    cancelled: bool = False
    reason: str = ""
    cancel_started: bool = False
@@ -433,6 +443,26 @@ class _AckRequest:
    message_id: bytes
    completed: threading.Event
    error: BaseException | None = None
+
+
+@dataclass(frozen=True)
+class _InboundFrame:
+   digest: bytes
+   request_id: str | None
+   path_id: str | None
+   path_attempt: int | None
+
+
+@dataclass(frozen=True)
+class _ScopedTransportEvent:
+   sequence: int
+   event: str
+   request_id: str
+   path_id: str
+   path_attempt: int
+   peer_node_id: str
+   peer_generation: int
+   code: str | None = None
 
 
 ClientFactory = Callable[..., Any]
@@ -514,27 +544,37 @@ class IrohTransport:
       self._dispatch_queue: Queue[
          tuple[bytes, str, int, bytes, bytes, DecodedFrame | None]
       ] = Queue(maxsize=queue_capacity)
-      self._forward_queue: Queue[tuple[str, bytes]] = Queue(
+      self._forward_queue: Queue[
+         tuple[str, bytes, str | None, str | None, int | None]
+      ] = Queue(
          maxsize=queue_capacity
       )
       self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
       self._cancellation_threads: dict[str, threading.Thread] = {}
       self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
       self._last_cancellation: PathCancellation | None = None
+      self._cancellation_history_capacity = queue_capacity
+      self._cancellations_by_subject: OrderedDict[
+         tuple[str, str, int], PathCancellation
+      ] = OrderedDict()
       self._stop = threading.Event()
       self._running = False
       self._closed = False
       self._fatal_error: IrohTransportError | None = None
       self._pending: dict[bytes, _PendingSend] = {}
       self._seen: OrderedDict[bytes, bytes] = OrderedDict()
-      self._inflight_received: dict[bytes, bytes] = {}
+      self._inflight_received: dict[bytes, _InboundFrame] = {}
+      self._forward_scopes: dict[tuple[str, str, int], int] = {}
       self._dispatcher_phase = "idle"
+      self._last_dispatch_error: dict[str, str] | None = None
       self._outbound_trace: deque[str] = deque(maxlen=256)
       self._inflight_receipt_trace_commits = 0
       self._remote_frames_sent = 0
       self._remote_frames_received = 0
       self._router_frames_dispatched = 0
       self._duplicate_frames = 0
+      self._scoped_event_sequence = 0
+      self._scoped_events: deque[_ScopedTransportEvent] = deque(maxlen=256)
       self._path_graphs: dict[str, Any] = {}
       self._participant_nodes_by_path: dict[str, frozenset[str]] = {}
       self._entry_nodes: dict[str, str] = {}
@@ -574,24 +614,99 @@ class IrohTransport:
       with self._state_lock:
          return len(self._pending)
 
-   def cancellation_cleanup_complete(self, request_id: str, path_id: str) -> bool:
-      """Return a lock-coherent local cleanup observation for one cancelled path."""
+   def cancellation_cleanup_complete(
+      self,
+      request_id: str,
+      path_id: str,
+      path_attempt: int | None = None,
+   ) -> bool:
+      """Observe cleanup for one request/path without waiting on unrelated traffic."""
+      state = self.cancellation_cleanup_state(request_id, path_id, path_attempt)
+      return all(
+         value in (0, False)
+         for key, value in state.items()
+         if key != "cancellation_observed"
+      )
+
+   def cancellation_cleanup_state(
+      self,
+      request_id: str,
+      path_id: str,
+      path_attempt: int | None = None,
+   ) -> dict[str, int | bool]:
+      """Return privacy-reduced exact-subject blockers for cleanup proof."""
+
       with self._state_lock:
-         state_clean = (
-            not self._pending
-            and not self._inflight_received
-            and path_id not in self._path_graphs
-            and path_id not in self._participant_nodes_by_path
-            and request_id not in self._entry_nodes
-            and path_id not in self._cancellation_threads
+         def matches(
+            candidate_request: str | None,
+            candidate_path: str | None,
+            candidate_attempt: int | None,
+         ) -> bool:
+            return (
+               candidate_request == request_id
+               and candidate_path == path_id
+               and (
+                  path_attempt is None
+                  or candidate_attempt is None
+                  or candidate_attempt == path_attempt
+               )
+            )
+
+         pending_count = sum(
+               1
+               for item in self._pending.values()
+               if matches(item.request_id, item.path_id, item.path_attempt)
          )
-      with self._dispatch_queue.all_tasks_done:
-         dispatch_clean = self._dispatch_queue.unfinished_tasks == 0
-      with self._forward_queue.all_tasks_done:
-         forward_clean = self._forward_queue.unfinished_tasks == 0
-      with self._ack_queue.all_tasks_done:
-         ack_clean = self._ack_queue.unfinished_tasks == 0
-      return state_clean and dispatch_clean and forward_clean and ack_clean
+         inflight_count = sum(
+               1
+               for item in self._inflight_received.values()
+               if matches(item.request_id, item.path_id, item.path_attempt)
+         )
+         forward_count = sum(
+               count
+               for scope, count in self._forward_scopes.items()
+               if count > 0
+               and scope[0] == request_id
+               and scope[1] == path_id
+               and (path_attempt is None or scope[2] == path_attempt)
+         )
+         return {
+            "pending_delivery_count": pending_count,
+            "inflight_received_count": inflight_count,
+            "forward_count": forward_count,
+            "path_graph_registered": path_id in self._path_graphs,
+            "participants_registered": path_id in self._participant_nodes_by_path,
+            "entry_registered": request_id in self._entry_nodes,
+            "cancellation_worker_active": path_id in self._cancellation_threads,
+            "cancellation_observed": (
+               False
+               if path_attempt is None
+               else (request_id, path_id, path_attempt)
+               in self._cancellations_by_subject
+            ),
+         }
+
+   @staticmethod
+   def _frame_scope(decoded: DecodedFrame) -> tuple[str | None, str | None, int | None]:
+      message = decoded.message
+      header = getattr(message, "header", None)
+      request = getattr(message, "request", None)
+      request_id = getattr(message, "request_id", None)
+      path_id = getattr(message, "path_id", None)
+      path_attempt = getattr(message, "path_attempt", None)
+      if request_id is None and header is not None:
+         request_id = getattr(header, "request_id", None)
+      if request_id is None and request is not None:
+         request_id = getattr(request, "request_id", None)
+      if path_id is None and header is not None:
+         path_id = getattr(header, "path_id", None)
+      if path_attempt is None and header is not None:
+         path_attempt = getattr(header, "path_attempt", None)
+      return (
+         request_id if isinstance(request_id, str) else None,
+         path_id if isinstance(path_id, str) else None,
+         path_attempt if type(path_attempt) is int else None,
+      )
 
    @property
    def last_cancellation(self) -> dict[str, object] | None:
@@ -605,10 +720,43 @@ class IrohTransport:
             "path_attempt": cancellation.path_attempt,
          }
 
+   def cancellation_observed(
+      self,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+   ) -> bool:
+      """Return exact bounded cancellation evidence, never node-global state."""
+
+      with self._state_lock:
+         return (request_id, path_id, path_attempt) in self._cancellations_by_subject
+
+   def _remember_cancellation_locked(self, cancellation: PathCancellation) -> None:
+      key = (
+         cancellation.request_id,
+         cancellation.path_id,
+         cancellation.path_attempt,
+      )
+      self._cancellations_by_subject.pop(key, None)
+      self._cancellations_by_subject[key] = cancellation
+      while len(self._cancellations_by_subject) > self._cancellation_history_capacity:
+         self._cancellations_by_subject.popitem(last=False)
+
    @property
    def dispatcher_phase(self) -> str:
       with self._state_lock:
          return self._dispatcher_phase
+
+   @property
+   def last_dispatch_error(self) -> Mapping[str, str] | None:
+      """Return one bounded internal diagnostic without frame payload material."""
+
+      with self._state_lock:
+         return (
+            None
+            if self._last_dispatch_error is None
+            else dict(self._last_dispatch_error)
+         )
 
    @property
    def outbound_trace(self) -> tuple[str, ...]:
@@ -828,13 +976,57 @@ class IrohTransport:
       destination_node_id: str,
       _trace_peer_binding: PeerBinding | None = None,
    ) -> DeliveryReceipt:
+      """Deliver one frame and retain bounded exact-subject receipt/failure evidence."""
+
+      try:
+         decoded = decode_frame(frame)
+      except WireError:
+         # An unauthenticated/malformed frame has no trustworthy request scope.
+         return self._send_router_frame(
+            frame,
+            destination_node_id=destination_node_id,
+            _trace_peer_binding=_trace_peer_binding,
+         )
+      request_id, path_id, path_attempt = self._frame_scope(decoded)
+      try:
+         receipt = self._send_router_frame(
+            frame,
+            destination_node_id=destination_node_id,
+            _trace_peer_binding=_trace_peer_binding,
+         )
+      except IrohTransportError as error:
+         self._record_scoped_event(
+            event="failure",
+            request_id=request_id,
+            path_id=path_id,
+            path_attempt=path_attempt,
+            peer_node_id=destination_node_id,
+            code=error.code,
+         )
+         raise
+      self._record_scoped_event(
+         event="receipt",
+         request_id=request_id,
+         path_id=path_id,
+         path_attempt=path_attempt,
+         peer_node_id=destination_node_id,
+      )
+      return receipt
+
+   def _send_router_frame(
+      self,
+      frame: bytes,
+      *,
+      destination_node_id: str,
+      _trace_peer_binding: PeerBinding | None = None,
+   ) -> DeliveryReceipt:
       with self._state_lock:
          self._require_running()
          peer = self._lookup_destination_peer(destination_node_id)
          if _trace_peer_binding is not None and peer != _trace_peer_binding:
             raise IrohTransportError("peer_rotated")
       try:
-         decode_frame(frame)
+         decoded = decode_frame(frame)
       except WireError as error:
          raise IrohTransportError(
             "malformed_router_frame",
@@ -845,7 +1037,8 @@ class IrohTransport:
 
       message_id = uuid.uuid4().bytes
       deadline = time.monotonic() + self.delivery_timeout_seconds
-      pending = _PendingSend(peer.generation)
+      request_id, path_id, path_attempt = self._frame_scope(decoded)
+      pending = _PendingSend(peer.generation, request_id, path_id, path_attempt)
       cancel_timer: threading.Timer | None = None
       try:
          with self._state_lock:
@@ -853,7 +1046,7 @@ class IrohTransport:
             peer = self._lookup_destination_peer(destination_node_id)
             if _trace_peer_binding is not None and peer != _trace_peer_binding:
                raise IrohTransportError("peer_rotated")
-            pending = _PendingSend(peer.generation)
+            pending = _PendingSend(peer.generation, request_id, path_id, path_attempt)
             client = self._send_client
             if client is None:
                raise IrohTransportError("transport_not_running")
@@ -954,6 +1147,43 @@ class IrohTransport:
          with self._state_lock:
             self._pending.pop(message_id, None)
          self._send_slots.release()
+
+   def _record_scoped_event(
+      self,
+      *,
+      event: str,
+      request_id: str | None,
+      path_id: str | None,
+      path_attempt: int | None,
+      peer_node_id: str,
+      code: str | None = None,
+   ) -> bool:
+      if (
+         event not in {"receipt", "failure"}
+         or not request_id
+         or not path_id
+         or type(path_attempt) is not int
+      ):
+         return False
+      with self._state_lock:
+         try:
+            peer = self._lookup_destination_peer(peer_node_id)
+         except IrohTransportError:
+            return False
+         self._scoped_event_sequence += 1
+         self._scoped_events.append(
+            _ScopedTransportEvent(
+               sequence=self._scoped_event_sequence,
+               event=event,
+               request_id=request_id,
+               path_id=path_id,
+               path_attempt=path_attempt,
+               peer_node_id=peer_node_id,
+               peer_generation=peer.generation,
+               code=code,
+            )
+         )
+      return True
 
    def _send_confirmed(
       self,
@@ -1202,17 +1432,20 @@ class IrohTransport:
                return
             previous = self._seen.get(message_id)
             inflight = self._inflight_received.get(message_id)
-            known_digest = previous if previous is not None else inflight
+            known_digest = previous if previous is not None else (
+               None if inflight is None else inflight.digest
+            )
             if known_digest is not None and known_digest != digest:
                self._set_fatal(IrohTransportError("replay_collision"))
                return
             duplicate = known_digest is not None
-            self._inflight_received[message_id] = digest
+            inbound_scope = (None, None, None)
          if duplicate:
             decoded = None
          else:
             try:
                decoded = decode_frame(frame)
+               inbound_scope = self._frame_scope(decoded)
             except WireError as error:
                with self._state_lock:
                   self._inflight_received.pop(message_id, None)
@@ -1220,6 +1453,13 @@ class IrohTransport:
                   IrohTransportError("malformed_router_frame", error.code)
                )
                return
+         with self._state_lock:
+            self._inflight_received[message_id] = _InboundFrame(
+               digest,
+               inbound_scope[0],
+               inbound_scope[1],
+               inbound_scope[2],
+            )
          try:
             self._dispatch_queue.put_nowait(
                (
@@ -1284,6 +1524,87 @@ class IrohTransport:
                self._router_frames_dispatched += 1
          except BaseException as error:
             with self._state_lock:
+               inbound = self._inflight_received.get(message_id)
+            if self._stop.is_set():
+               with self._state_lock:
+                  self._dispatcher_phase = "idle"
+                  self._inflight_received.pop(message_id, None)
+               return
+            error_code = (
+               error.code
+               if isinstance(error, IrohTransportError)
+               else "router_dispatch_failed"
+            )
+            with self._state_lock:
+               self._last_dispatch_error = {
+                  "code": error_code,
+                  "exception_type": type(error).__name__[:64],
+                  "detail": str(error)[:128],
+               }
+            scoped = (
+               inbound is not None
+               and inbound.request_id is not None
+               and inbound.path_id is not None
+               and inbound.path_attempt is not None
+               and error_code
+               not in {
+                  "peer_rotated_during_dispatch",
+                  "replay_collision",
+                  "malformed_router_frame",
+               }
+            )
+            if scoped:
+               self._record_scoped_event(
+                  event="failure",
+                  request_id=inbound.request_id,
+                  path_id=inbound.path_id,
+                  path_attempt=inbound.path_attempt,
+                  peer_node_id=source_node_id,
+                  code=error_code,
+               )
+               if isinstance(decoded, DecodedFrame) and isinstance(
+                  decoded.message,
+                  HopHeader,
+               ):
+                  failed_hop = decoded.message
+                  self._send_or_dispatch(
+                     source_node_id,
+                     encode_frame(
+                        FailureReport(
+                           request_id=failed_hop.request_id,
+                           path_id=failed_hop.path_id,
+                           path_attempt=failed_hop.path_attempt,
+                           token_index=failed_hop.token_index,
+                           scope="PLACEMENT",
+                           reason=error_code,
+                           placement_id=failed_hop.destination_placement_id,
+                           node_id=self.node_id,
+                        )
+                     ),
+                  )
+               if error_code in _NON_DELIVERED_SCOPED_ERRORS:
+                  # These local sinks explicitly rejected the frame. Preserve
+                  # its request-scoped incident without acknowledging delivery
+                  # or poisoning the replay table as though dispatch succeeded.
+                  with self._state_lock:
+                     self._dispatcher_phase = "idle"
+                     self._inflight_received.pop(message_id, None)
+                  continue
+               # The authenticated frame was dispatched to its exact local
+               # subject even though that request-local operation failed. ACK it
+               # so the sidecar can retire this delivery; the scoped incident is
+               # the durable failure signal and unrelated traffic remains live.
+               self._ack_after_dispatch(message_id)
+               with self._state_lock:
+                  self._dispatcher_phase = "idle"
+                  self._inflight_received.pop(message_id, None)
+                  self._seen[message_id] = inbound.digest
+                  self._seen.move_to_end(message_id)
+                  while len(self._seen) > _SEEN_LIMIT:
+                     self._seen.popitem(last=False)
+                  self._remote_frames_received += 1
+               continue
+            with self._state_lock:
                self._inflight_received.pop(message_id, None)
             self._set_fatal(
                error
@@ -1298,7 +1619,7 @@ class IrohTransport:
       current = threading.current_thread()
       while not self._stop.is_set():
          try:
-            destination, frame = self._forward_queue.get(
+            destination, frame, request_id, path_id, path_attempt = self._forward_queue.get(
                timeout=self.poll_interval_seconds
             )
          except Empty:
@@ -1312,13 +1633,30 @@ class IrohTransport:
             self._send_or_dispatch(destination, frame)
          except BaseException as error:
             if not self._stop.is_set():
-               self._set_fatal(
+               mapped = (
                   error
                   if isinstance(error, IrohTransportError)
                   else self._map_sidecar_error("forward_delivery_failed", error)
                )
-            return
+               if not self._record_scoped_event(
+                  event="failure",
+                  request_id=request_id,
+                  path_id=path_id,
+                  path_attempt=path_attempt,
+                  peer_node_id=destination,
+                  code=mapped.code,
+               ):
+                  self._set_fatal(mapped)
+                  return
          finally:
+            if request_id is not None and path_id is not None and path_attempt is not None:
+               with self._state_lock:
+                  scope = (request_id, path_id, path_attempt)
+                  remaining = self._forward_scopes.get(scope, 0) - 1
+                  if remaining > 0:
+                     self._forward_scopes[scope] = remaining
+                  else:
+                     self._forward_scopes.pop(scope, None)
             self._forward_queue.task_done()
       with self._state_lock:
          if self._forward_thread is current:
@@ -1454,15 +1792,16 @@ class IrohTransport:
          )
          if entry_node == self.node_id:
             accepted = router.receive_manifest_locked(
-               message,
-               source_node_id=source_node_id,
+                message,
+                source_node_id=source_node_id,
             )
          else:
+            owner_prelocked = source_node_id == entry_node
             accepted = router.register_path(
                message.build.request,
                message.manifest,
                message.build.graph,
-               source_node_id=source_node_id,
+               source_node_id=None if owner_prelocked else source_node_id,
                entry_node_id=entry_node,
             )
          if not accepted:
@@ -1485,6 +1824,7 @@ class IrohTransport:
       if isinstance(message, PathCancellation):
          with self._state_lock:
             self._last_cancellation = message
+            self._remember_cancellation_locked(message)
          accepted = router.receive_path_cancellation(
             message,
             source_node_id=source_node_id,
@@ -1586,6 +1926,7 @@ class IrohTransport:
       with self._state_lock:
          self._require_running()
          self._last_cancellation = cancellation
+         self._remember_cancellation_locked(cancellation)
          entry_node = self._entry_nodes.get(cancellation.request_id)
          participants = self._participant_nodes_by_path.get(cancellation.path_id)
          configured_nodes = frozenset(self._peers.snapshot())
@@ -1626,6 +1967,22 @@ class IrohTransport:
             self._cancellation_slots.release()
          raise
 
+   def send_path_cancellation_if_entry(
+      self,
+      cancellation: PathCancellation,
+   ) -> bool:
+      """Issue exact teardown when the entry runtime already retired its record."""
+
+      with self._state_lock:
+         is_owned_entry = (
+            self._entry_nodes.get(cancellation.request_id) == self.node_id
+            and cancellation.path_id in self._participant_nodes_by_path
+         )
+      if not is_owned_entry:
+         return False
+      self.send_path_cancellation(cancellation)
+      return True
+
    def _deliver_path_cancellation(
       self,
       cancellation: PathCancellation,
@@ -1639,9 +1996,18 @@ class IrohTransport:
          delivered = True
       except BaseException as error:
          if not self._stop.is_set():
-            self._set_fatal(
-               self._map_sidecar_error("path_cancellation_delivery_failed", error)
+            mapped = self._map_sidecar_error(
+               "path_cancellation_delivery_failed", error
             )
+            for peer_node in peer_nodes:
+               self._record_scoped_event(
+                  event="failure",
+                  request_id=cancellation.request_id,
+                  path_id=cancellation.path_id,
+                  path_attempt=cancellation.path_attempt,
+                  peer_node_id=peer_node,
+                  code=mapped.code,
+               )
       finally:
          if delivered:
             self._forget_path(cancellation.request_id, cancellation.path_id)
@@ -1692,15 +2058,18 @@ class IrohTransport:
          self._dispatch(decoded, source_node_id=self.node_id)
          return
 
-      # Router dispatch may synchronously forward a progressive build, publish its
-      # manifest, and then return a token. Waiting for the next peer's confirmed
-      # dispatch on this one dispatcher thread creates an acknowledgement cycle in
-      # a three-stage route. The manifest and its token must also share one ordered
-      # queue: otherwise the token can overtake the manifest and make the receiver
-      # wait for registration on the same dispatcher needed to process that lock.
-      # Acknowledge inbound dispatch after these downstream operations are scheduled.
+      # An inbound Router dispatch may synchronously produce a downstream hop or
+      # token. Waiting for that frame's remote dispatch ACK on this same dispatcher
+      # thread creates an acknowledgement cycle when the peer's response needs this
+      # dispatcher to finish the original delivery. Progressive path construction
+      # retains its existing synchronous lock handshake, while completed manifest
+      # publication, hops, and tokens move to one ordered forward worker. The worker
+      # preserves confirmed remote dispatch and exact-subject receipt evidence.
       message = decoded.message
-      defer_remote_forward = isinstance(message, ProgressivePrefillMessage)
+      defer_remote_forward = isinstance(
+         message,
+         (FailureReport, HopHeader, ProgressivePrefillMessage),
+      )
       if isinstance(message, ManifestLocked):
          entry_node = self._node_for_placement(
             message.build.graph,
@@ -1711,8 +2080,11 @@ class IrohTransport:
          with self._forward_queue.all_tasks_done:
             ordered_forward_pending = self._forward_queue.unfinished_tasks > 0
          with self._state_lock:
-            relaying_inbound_token = self._dispatcher_phase == "dispatching:TokenEvent"
-         defer_remote_forward = ordered_forward_pending or relaying_inbound_token
+            response_would_cycle = self._dispatcher_phase in {
+               "dispatching:HopHeader",
+               "dispatching:TokenEvent",
+            }
+         defer_remote_forward = ordered_forward_pending or response_would_cycle
       if (
          threading.current_thread() is self._dispatcher_thread
          and defer_remote_forward
@@ -1720,7 +2092,17 @@ class IrohTransport:
          with self._state_lock:
             self._require_running()
             try:
-               self._forward_queue.put_nowait((destination, frame))
+               request_id, path_id, path_attempt = self._frame_scope(decoded)
+               self._forward_queue.put_nowait(
+                  (destination, frame, request_id, path_id, path_attempt)
+               )
+               if (
+                  request_id is not None
+                  and path_id is not None
+                  and path_attempt is not None
+               ):
+                  scope = (request_id, path_id, path_attempt)
+                  self._forward_scopes[scope] = self._forward_scopes.get(scope, 0) + 1
             except Full as error:
                raise IrohTransportError("forward_queue_full") from error
             thread = self._forward_thread
@@ -1830,6 +2212,20 @@ class IrohTransport:
             self._router_frames_dispatched,
             self._duplicate_frames,
          )
+         scoped_events = tuple(
+            {
+               "protocol": "mycelium.iroh_scoped_transport_event.v1",
+               "sequence": item.sequence,
+               "event": item.event,
+               "request_id": item.request_id,
+               "path_id": item.path_id,
+               "path_attempt": item.path_attempt,
+               "peer_node_id": item.peer_node_id,
+               "peer_generation": item.peer_generation,
+               "code": item.code,
+            }
+            for item in self._scoped_events
+         )
       observations: tuple[Mapping[str, Any], ...] = ()
       if control_client is not None:
          query = getattr(control_client, "transport_observations", None)
@@ -1890,6 +2286,7 @@ class IrohTransport:
          remote_frames_received=counters[1],
          router_frames_dispatched=counters[2],
          duplicate_frames=counters[3],
+         scoped_events=scoped_events,
          transport_path_observations=observations,
       )
 

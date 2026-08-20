@@ -1,5 +1,5 @@
 export const M16_RUNTIME_PATH = '/__mycelium/runtime/admission-status';
-export const M16_RUNTIME_PROTOCOL = 'mycelium.m16_runtime_status.v1' as const;
+export const M16_RUNTIME_PROTOCOL = 'mycelium.concurrent_request_runtime.v1' as const;
 
 export interface M16QueueStatus {
   readonly depth: number;
@@ -8,7 +8,8 @@ export interface M16QueueStatus {
   readonly maximum_bytes: number;
   readonly interactive_depth: number;
   readonly batch_depth: number;
-  readonly active_request_id: string | null;
+  readonly active_request_ids: readonly string[];
+  readonly maximum_active_requests: number;
 }
 
 export interface M16PlacementStatus {
@@ -120,7 +121,7 @@ function array(value: unknown, path: string, maximum = 1_024): unknown[] {
   return value;
 }
 
-const QUEUE_FIELDS = ['depth', 'maximum_items', 'queued_bytes', 'maximum_bytes', 'interactive_depth', 'batch_depth', 'active_request_id'] as const;
+const QUEUE_FIELDS = ['depth', 'maximum_items', 'queued_bytes', 'maximum_bytes', 'interactive_depth', 'batch_depth', 'active_request_ids', 'maximum_active_requests'] as const;
 const PLACEMENT_FIELDS = ['placement_id', 'node_id', 'memory_capacity_bytes', 'reserved_memory_bytes', 'free_memory_bytes', 'kv_capacity_bytes', 'reserved_kv_bytes', 'free_kv_bytes', 'workspace_capacity_bytes', 'reserved_workspace_bytes', 'free_workspace_bytes', 'active_reservations', 'maximum_reservations'] as const;
 const REQUEST_FIELDS = ['request_id', 'workload_profile_id', 'qos_class', 'phase', 'path_id', 'path_attempt', 'path_manifest_digest', 'topology_version', 'path_state', 'candidate_placement_ids', 'placement_ids', 'reservation_count', 'admitted_at_monotonic_s', 'queued_at_monotonic_s', 'dispatch_at_monotonic_s', 'terminal_at_monotonic_s', 'queue_wait_ms', 'terminal_state'] as const;
 const INCIDENT_FIELDS = ['incident_id', 'kind', 'request_id', 'scope', 'state', 'observed_at_monotonic_s', 'retry_after_seconds'] as const;
@@ -134,7 +135,8 @@ export function decodeM16RuntimeStatus(value: unknown): M16RuntimeStatus {
     depth: integer(queue.depth, 'queue.depth'), maximum_items: integer(queue.maximum_items, 'queue.maximum_items'),
     queued_bytes: integer(queue.queued_bytes, 'queue.queued_bytes'), maximum_bytes: integer(queue.maximum_bytes, 'queue.maximum_bytes'),
     interactive_depth: integer(queue.interactive_depth, 'queue.interactive_depth'), batch_depth: integer(queue.batch_depth, 'queue.batch_depth'),
-    active_request_id: queue.active_request_id === null ? null : text(queue.active_request_id, 'queue.active_request_id'),
+    active_request_ids: Object.freeze(array(queue.active_request_ids, 'queue.active_request_ids').map((value, index) => text(value, `queue.active_request_ids[${index}]`))),
+    maximum_active_requests: integer(queue.maximum_active_requests, 'queue.maximum_active_requests'),
   };
   const placements = array(source.placements, 'm16_runtime.placements').map((value, index): M16PlacementStatus => {
     const item = object(value, PLACEMENT_FIELDS, `placements[${index}]`);
