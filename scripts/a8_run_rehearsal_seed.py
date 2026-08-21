@@ -60,6 +60,42 @@ def _ids(prefix: str):
     return lambda: f"{prefix}-{next(values)}"
 
 
+def _max_emitted_message_counter(state_root: Path) -> int:
+    """Highest numeric suffix among the seed's emitted message ids.
+
+    ``seed_emitted_messages`` persists in the state database, so a restart
+    that began again at 1 would reuse ids and fail joins with
+    ``seed_message_id_reused``.
+    """
+
+    import sqlite3
+
+    db = state_root / "state.sqlite3"
+    if not db.exists():
+        return 0
+    maximum = 0
+    try:
+        connection = sqlite3.connect(db)
+        try:
+            rows = connection.execute(
+                "SELECT message_id FROM seed_emitted_messages"
+            ).fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return 0
+    for (message_id,) in rows:
+        suffix = str(message_id).rsplit("-", 1)[-1]
+        if suffix.isdigit():
+            maximum = max(maximum, int(suffix))
+    return maximum
+
+
+def _durable_seed_id_source(state_root: Path):
+    counter = count(_max_emitted_message_counter(state_root) + 1)
+    return lambda: f"{SEED_NODE_ID}-{next(counter)}"
+
+
 def build_rehearsal_seed(
     *,
     origin: str,
@@ -85,7 +121,7 @@ def build_rehearsal_seed(
         signer=signer,
         invite_registry=invite_registry,
         incarnation=INCARNATION,
-        id_source=_ids("a8-rehearsal-seed"),
+        id_source=_durable_seed_id_source(state_root),
     )
     server = SeedHTTPServer(
         coordinator,

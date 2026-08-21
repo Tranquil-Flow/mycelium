@@ -12,12 +12,42 @@ import pytest
 from scripts.a8_run_rehearsal_seed import (
     DEFAULT_LOOPBACK_PORT,
     REHEARSAL_LABEL,
+    SEED_NODE_ID,
+    _durable_seed_id_source,
     build_rehearsal_seed,
     load_rehearsal_signer,
     mint_rehearsal_invite,
 )
 
 ORIGIN = "https://seed.example.test"
+
+
+def test_seed_id_source_continues_across_restarts(tmp_path: Path) -> None:
+    """A restart must never reuse a persisted message id.
+
+    ``seed_emitted_messages`` survives restarts while an in-process counter
+    does not; a naive ``count(1)`` id source fails the next join with
+    ``seed_message_id_reused`` (observed live against the public origin).
+    """
+
+    import sqlite3
+
+    state_root = tmp_path / "rehearsal-seed"
+    state_root.mkdir(mode=0o700)
+    connection = sqlite3.connect(state_root / "state.sqlite3")
+    connection.execute(
+        "CREATE TABLE seed_emitted_messages (message_id TEXT NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO seed_emitted_messages (message_id) VALUES (?)",
+        (f"{SEED_NODE_ID}-41",),
+    )
+    connection.commit()
+    connection.close()
+
+    id_source = _durable_seed_id_source(state_root)
+    assert id_source() == f"{SEED_NODE_ID}-42"
+    assert id_source() == f"{SEED_NODE_ID}-43"
 
 
 def test_rehearsal_label_never_claims_qualification() -> None:
