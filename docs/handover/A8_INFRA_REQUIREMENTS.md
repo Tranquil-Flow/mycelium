@@ -33,6 +33,33 @@ infrastructure, A8 remains `design_only` (spec §12).
 | 7 | Revocation + evidence roots | Operator-private revocation access (offline CLI or loopback administration) and owner-private evidence/output roots |
 | 8 | Test window | A window that does not share peers with destructive A3/A4 physical gates |
 
+## 0.1 Public origin topology (chosen route: Cloudflare Tunnel)
+
+The A8 public origin is provisioned through Cloudflare Tunnel: the client's
+TLS terminates at Cloudflare's publicly trusted edge, the tunnel forwards
+the single canonical hostname to the loopback seed listener, and no inbound
+ports are opened. No tailnet participates; the seed's
+`PublicBootstrapPolicy` remains the sole path-level authority. This
+satisfies inputs 1-4 above; firewall/NAT (input 3) is not needed.
+
+- Template: `release/a8-tls-bootstrap/cloudflared-config.yml.template`
+- Provisioner: `scripts/a8_provision_public_origin.sh <hostname> [--dry-run|--check]`
+- Runtime credentials: `~/.mycelium/a8-tls` (mode 700, never in repo)
+- Operator inputs still required: a Cloudflare-hosted public hostname and
+  one interactive `cloudflared tunnel login`.
+
+An alternative nginx/ACME topology is documented in
+`release/a8-tls-bootstrap/README.md` for a port-forwardable host with a
+domain.
+
+## 0.2 Rehearsal boundary (same-LAN)
+
+Until the external peer sits on a genuinely unrelated network, every gate
+procedure may be REHEARSED against the live public origin from a same-LAN
+device with Tailscale stopped. Rehearsal output is labelled and can never
+be sealed. Spec §12 voids same-LAN Iroh observations and tailnet paths as
+gate evidence.
+
 ---
 
 ## 1. Physical positive gates

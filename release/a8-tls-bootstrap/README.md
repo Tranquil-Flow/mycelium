@@ -35,6 +35,35 @@ redirects and the boundary never offers one.
   are excluded from this template and live only in the deployment host's
   protected configuration.
 
+## Cloudflare Tunnel variant (no inbound ports)
+
+`cloudflared-config.yml.template` + `scripts/a8_provision_public_origin.sh`
+provide the alternative origin topology: the publicly trusted certificate is
+Cloudflare's edge certificate, the client's TLS terminates at Cloudflare's
+public edge, and the tunnel forwards the single canonical hostname to the
+loopback seed listener. No tailnet participates; no inbound ports are
+opened. Path-level enforcement (the closed five-route allowlist) remains
+with the seed's `PublicBootstrapPolicy` — the tunnel is transport, never
+authorization. Runtime credentials live in `~/.mycelium/a8-tls` (mode 700).
+
+Provisioning steps:
+
+1. `brew install cloudflared`
+2. `cloudflared tunnel login` (one interactive browser step)
+3. `scripts/a8_provision_public_origin.sh <public-hostname> --dry-run`
+4. `scripts/a8_provision_public_origin.sh <public-hostname>`
+5. `scripts/a8_provision_public_origin.sh <public-hostname> --check`
+
+## Same-LAN rehearsal (labelled, not evidence)
+
+Until the external peer sits on a genuinely unrelated network, every gate
+procedure may be REHEARSED against the live public origin from a same-LAN
+device with Tailscale stopped. Rehearsal output must be labelled
+`rehearsal, not evidence` and can never be sealed: spec §12 voids same-LAN
+Iroh observations as direct-path results and no physical gate may be
+claimed from them. Rehearsals exist to de-risk the procedures, not to
+qualify.
+
 ## Wire-up
 
 1. Substitute `__A8_PUBLIC_HOSTNAME__` and `__A8_SEED_LOOPBACK_PORT__`

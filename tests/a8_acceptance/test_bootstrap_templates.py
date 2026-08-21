@@ -12,6 +12,8 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = ROOT / "release" / "a8-tls-bootstrap"
 NGINX_TEMPLATE = TEMPLATE_DIR / "nginx-a8-bootstrap.conf.template"
+CLOUDFLARED_TEMPLATE = TEMPLATE_DIR / "cloudflared-config.yml.template"
+PROVISION_SCRIPT = ROOT / "scripts" / "a8_provision_public_origin.sh"
 README = TEMPLATE_DIR / "README.md"
 
 ALLOWLIST_ROUTES = {
@@ -91,3 +93,35 @@ def test_readme_documents_certificate_rotation_without_seed_authority() -> None:
     assert "renewal" in source.lower()
     assert "no seed authority" in source.lower()
     assert "design_only" in source
+
+
+def test_cloudflared_template_forwards_the_origin_to_loopback_only() -> None:
+    source = CLOUDFLARED_TEMPLATE.read_text("utf-8")
+    assert "__A8_PUBLIC_HOSTNAME__" in source
+    assert "__A8_TUNNEL_ID__" in source
+    assert "__A8_SEED_LOOPBACK_PORT__" in source
+    for service in re.findall(r"service:\s*(\S+)", source):
+        assert service.startswith("http://127.0.0.1:") or service == "http_status:404", service
+    assert "http_status:404" in source
+    assert "https://" not in source.split("service:")[0]
+
+
+def test_cloudflared_template_carries_no_credentials() -> None:
+    source = CLOUDFLARED_TEMPLATE.read_text("utf-8")
+    assert "eyJ" not in source  # no base64 json credential blobs
+    assert "password" not in source.lower()
+    assert "__A8_CREDENTIALS_FILE__" in source
+    assert "cred.json" not in source
+
+
+def test_provisioning_script_is_owner_private_and_login_gated() -> None:
+    source = PROVISION_SCRIPT.read_text("utf-8")
+    assert source.startswith("#!/usr/bin/env bash")
+    assert "set -euo pipefail" in source
+    assert "cloudflared tunnel route dns" in source
+    assert "cloudflared tunnel login" in source
+    assert ".mycelium/a8-tls" in source
+    assert "--dry-run" in source
+    assert "chmod 700" in source
+    assert "eyJ" not in source
+    assert "password" not in source.lower()
