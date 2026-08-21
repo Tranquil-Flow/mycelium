@@ -47,11 +47,24 @@ from physical_inference_qualification import (
     _peer_process_argv,
 )
 from mycelium_live.liveness import (
+    LivenessState,
     LivenessSubject,
     ObservationSource,
     SubjectKind,
     TrafficAwareLivenessDetector,
 )
+
+
+_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = 0.5
+
+
+class AffectedPeerQuarantined(RuntimeError):
+    """Admission refused: a participating peer is liveness-quarantined.
+
+    Raised before any node command is issued, so no command-ledger terminal
+    CAS is owed — the router port publishes a bounded failed terminal
+    directly instead of the cleanup-unproven nonterminal shape.
+    """
 
 
 class _ConcurrentNodeSession:
@@ -1745,10 +1758,106 @@ class PhysicalLiveRoute:
         while not self._liveness_monitor_stop.wait(0.05):
             try:
                 self._monitor_active_liveness_once()
+                self._monitor_idle_keepalives_once()
             except BaseException:
                 if self._liveness_monitor_stop.is_set():
                     return
                 self._handle_lost_peer_processes()
+
+    def _monotonic_ms(self) -> int:
+        """Injectable monotonic clock (milliseconds) for liveness observation."""
+
+        return int(time.monotonic() * 1_000)
+
+    def _monitor_idle_keepalives_once(self) -> None:
+        """Probe each peer whose keepalive is due; a silent peer accrues misses.
+
+        The detector's traffic-aware design expects an explicit idle probe:
+        a verified response is a fresh application receipt (it extends the
+        keepalive due horizon), while a probe that times out or fails is one
+        recorded keepalive miss.  Suspect after the first miss, quarantine
+        after QUARANTINE_MISSES with QUARANTINE_STALE_MS elapsed.  This runs
+        even when no requests are active, which is what makes an idle-stalled
+        participating peer observable at all.
+        """
+
+        observed_at_ms = self._monotonic_ms()
+        with self._lock:
+            if not self._open or self._closed:
+                return
+            subjects = tuple(sorted(self._liveness_subjects.items()))
+        for node_id, subject in subjects:
+            decision = self._liveness.keepalive_due(
+                subject,
+                observed_at_ms=observed_at_ms,
+            )
+            if not decision.accepted or not decision.due:
+                continue
+            if self._idle_probe_peer(node_id):
+                continue
+            self._liveness.record_keepalive_miss(
+                subject,
+                observed_at_ms=self._monotonic_ms(),
+            )
+
+    def _idle_probe_peer(self, node_id: str) -> bool:
+        """Send one bounded health probe; True when the peer answered fresh.
+
+        A verified response refreshes the subject via the ordinary receipt
+        path in _verify_observation.  Any failure (deadline, rejection, lost
+        process) counts as a silent peer for this keepalive window.
+        """
+
+        try:
+            response = self._send_before(
+                node_id,
+                command_id=self._command_id(node_id, "keepalive"),
+                command="health",
+                payload={},
+                deadline_monotonic_s=(
+                    time.monotonic() + _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
+                ),
+            )
+            observation = self._verify_observation(
+                node_id,
+                response,
+                event="health",
+            )
+            with self._lock:
+                self._last_health[node_id] = observation
+            return True
+        except BaseException:
+            return False
+
+    def _peer_subject_is_quarantined(self, node_id: str) -> bool:
+        subjects = getattr(self, "_liveness_subjects", None)
+        subject = subjects.get(node_id) if isinstance(subjects, dict) else None
+        if subject is None:
+            return False
+        snapshot = self._liveness.subject_snapshot(subject)
+        return snapshot is not None and snapshot.state is LivenessState.QUARANTINED
+
+    def _reject_if_affected_peer_quarantined(
+        self,
+        participating_node_ids: frozenset[str],
+    ) -> None:
+        """Fail closed: admission touching a quarantined peer is refused.
+
+        The detector's quarantine incident carries the
+        ``remove_from_affected_admission`` action; this is its enforcement
+        point for new requests whose participating nodes include the
+        quarantined peer.
+        """
+
+        quarantined = tuple(
+            sorted(
+                node_id
+                for node_id in participating_node_ids
+                if self._peer_subject_is_quarantined(node_id)
+            )
+        )
+        if quarantined:
+            raise AffectedPeerQuarantined("affected_peer_quarantined")
 
     def _ingest_transport_scoped_events(
         self,
@@ -2335,6 +2444,7 @@ class PhysicalLiveRoute:
                 for node_id in participating_node_ids
             ):
                 raise RuntimeError("selected_route_not_open")
+            self._reject_if_affected_peer_quarantined(participating_node_ids)
             before_peers = self._peer_counters()
             started_at = time.monotonic()
             prefill_completed_at: float | None = None

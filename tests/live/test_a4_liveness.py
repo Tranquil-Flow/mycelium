@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import deque
 import threading
 
+import pytest
+
 from mycelium_live.command_controller import (
     CleanupResult,
     CleanupStatus,
@@ -22,7 +24,7 @@ from mycelium_live.liveness import (
     SubjectKind,
     TrafficAwareLivenessDetector,
 )
-from mycelium_live.route import PhysicalLiveRoute
+from mycelium_live.route import AffectedPeerQuarantined, PhysicalLiveRoute
 
 
 DIGEST_A = "sha256:" + "a" * 64
@@ -462,3 +464,171 @@ def test_subject_and_incident_collections_are_bounded() -> None:
     assert len(detector.snapshots()) == 1
     assert len(detector.incidents()) == 1
     assert detector.incidents()[0].source is IncidentSource.WORKER_EXCEPTION
+
+
+# --- Live-route idle-keepalive monitor wiring (PhysicalLiveRoute) -----------
+
+
+class _FakeProbeSession:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls = 0
+
+    def send_before(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: dict,
+        deadline_monotonic_s: float,
+    ) -> dict:
+        self.calls += 1
+        if self.fail:
+            raise TimeoutError("command_deadline_exceeded")
+        return {"protocol": "mycelium.node_observation.v1", "details": {}}
+
+
+def _monitor_route(
+    detector: TrafficAwareLivenessDetector,
+    subject: LivenessSubject,
+    *,
+    clock: dict,
+    session: _FakeProbeSession,
+    refresh_on_probe: bool,
+) -> PhysicalLiveRoute:
+    route = PhysicalLiveRoute.__new__(PhysicalLiveRoute)
+    route._liveness = detector
+    route._liveness_subjects = {"node-2": subject}
+    route._open = True
+    route._closed = False
+    route._lock = threading.RLock()
+    route._sessions = {"node-2": session}
+    route._last_health = {}
+    route._command_id = lambda node_id, operation: f"{node_id}:{operation}"
+    route._monotonic_ms = lambda: clock["t"]
+
+    def _fake_verify_observation(node_id, response, *, event, require_known_key=True):
+        if refresh_on_probe:
+            detector.observe_receipt(
+                subject,
+                observed_at_ms=clock["t"],
+                source=ObservationSource.APPLICATION_RECEIPT,
+                signed=True,
+            )
+        return {"verified": True, "details": {"transport": {}}}
+
+    route._verify_observation = _fake_verify_observation
+    return route
+
+
+def test_idle_keepalive_probe_keeps_fresh_peer_fresh() -> None:
+    detector = TrafficAwareLivenessDetector()
+    subject = _subject("node-2", kind=SubjectKind.PEER)
+    _register(detector, subject, observed_at_ms=1_000)
+    clock = {"t": 6_000}
+    session = _FakeProbeSession()
+    route = _monitor_route(
+        detector,
+        subject,
+        clock=clock,
+        session=session,
+        refresh_on_probe=True,
+    )
+
+    route._monitor_idle_keepalives_once()
+
+    assert session.calls == 1
+    snapshot = detector.subject_snapshot(subject)
+    assert snapshot is not None
+    assert snapshot.state is LivenessState.FRESH
+    assert snapshot.consecutive_misses == 0
+    assert snapshot.next_keepalive_due_ms == 11_000
+    # Not due yet: no probe is sent, and no miss is recorded.
+    clock["t"] = 10_999
+    route._monitor_idle_keepalives_once()
+    assert session.calls == 1
+    after = detector.subject_snapshot(subject)
+    assert after is not None and after.consecutive_misses == 0
+
+
+def test_idle_keepalive_probe_miss_suspects_then_quarantines() -> None:
+    detector = TrafficAwareLivenessDetector()
+    subject = _subject("node-2", kind=SubjectKind.PEER)
+    _register(detector, subject, observed_at_ms=1_000)
+    clock = {"t": 6_000}
+    route = _monitor_route(
+        detector,
+        subject,
+        clock=clock,
+        session=_FakeProbeSession(fail=True),
+        refresh_on_probe=False,
+    )
+
+    route._monitor_idle_keepalives_once()
+    first = detector.subject_snapshot(subject)
+    assert first is not None
+    assert first.state is LivenessState.SUSPECT
+    assert first.consecutive_misses == 1
+
+    clock["t"] = 11_000
+    route._monitor_idle_keepalives_once()
+    second = detector.subject_snapshot(subject)
+    assert second is not None
+    assert second.state is LivenessState.SUSPECT
+    assert second.consecutive_misses == 2
+
+    clock["t"] = 16_000
+    route._monitor_idle_keepalives_once()
+    third = detector.subject_snapshot(subject)
+    assert third is not None
+    assert third.state is LivenessState.QUARANTINED
+    assert third.consecutive_misses == 3
+
+    incidents = detector.incidents()
+    assert any(
+        incident.source is IncidentSource.IDLE_KEEPALIVE
+        and incident.action == "remove_from_affected_admission"
+        for incident in incidents
+    )
+
+
+def test_quarantined_peer_admission_fails_closed() -> None:
+    detector = TrafficAwareLivenessDetector()
+    subject = _subject("node-2", kind=SubjectKind.PEER)
+    _register(detector, subject, observed_at_ms=1_000)
+    clock = {"t": 6_000}
+    route = _monitor_route(
+        detector,
+        subject,
+        clock=clock,
+        session=_FakeProbeSession(fail=True),
+        refresh_on_probe=False,
+    )
+    for t in (6_000, 11_000, 16_000):
+        clock["t"] = t
+        route._monitor_idle_keepalives_once()
+    quarantined_snapshot = detector.subject_snapshot(subject)
+    assert quarantined_snapshot is not None
+    assert quarantined_snapshot.state is LivenessState.QUARANTINED
+
+    with pytest.raises(AffectedPeerQuarantined, match="affected_peer_quarantined"):
+        route._reject_if_affected_peer_quarantined(frozenset({"node-2"}))
+    # Unaffected participation is untouched.
+    route._reject_if_affected_peer_quarantined(frozenset({"node-0"}))
+    # Unknown nodes have no subject and admit normally.
+    assert route._peer_subject_is_quarantined("node-3-r2") is False
+
+
+def test_fresh_peer_admission_is_not_rejected() -> None:
+    detector = TrafficAwareLivenessDetector()
+    subject = _subject("node-2", kind=SubjectKind.PEER)
+    _register(detector, subject, observed_at_ms=1_000)
+    route = _monitor_route(
+        detector,
+        subject,
+        clock={"t": 6_000},
+        session=_FakeProbeSession(),
+        refresh_on_probe=True,
+    )
+
+    route._reject_if_affected_peer_quarantined(frozenset({"node-0", "node-2"}))

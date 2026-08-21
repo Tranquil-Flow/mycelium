@@ -87,6 +87,10 @@ class _Session:
     emitted_phases: set[str] = field(default_factory=set)
     owner_token_digest: bytes | None = None
     publisher_generation: int = 0
+    created_at: float = field(default_factory=time.monotonic)
+    last_event_at: float | None = None
+    ever_subscribed: bool = False
+    last_ack_at: float | None = None
 
 
 class EventSubscription:
@@ -123,6 +127,8 @@ class EventSubscription:
         if self._closed:
             raise AdmissionError("stream_closed")
         self._service._ack(self._session, self, sequence)
+        with self._session.condition:
+            self._session.last_ack_at = self._service._clock()
 
     def close(self) -> None:
         if self._closed:
@@ -139,6 +145,25 @@ class EventSubscription:
 
 class RequestGatewayService:
     """Own exact admission, bounded replay, and one backend lifecycle per request."""
+
+    # Bounded grace period before a stuck non-terminal session is eligible
+    # for eviction by a fresh admission. The grace covers the submit→
+    # subscribe window during which a legitimate fresh request has no
+    # subscription yet; before the grace, a new submission is rejected
+    # with gateway_capacity_exhausted rather than cancelling an in-flight
+    # request that is still expected to subscribe. After the grace, a
+    # genuinely stuck session is evicted normally. See spec A4 §5 and
+    # the `test_fresh_request_is_protected_from_immediate_eviction` gate.
+    SESSION_EVICTION_GRACE_SECONDS = 0.05
+
+    # Bounded budget a buffer-blocked producer grants an attached but
+    # non-acknowledging consumer before the slot is reclaimed (spec A4 §5).
+    # The consumer is observably stalled only when the event buffer is FULL
+    # and no acknowledgement has arrived for longer than this budget; a
+    # healthy consumer acks continuously while draining, so the budget is
+    # never consulted on the ordinary path. It is a backstop, not a timer:
+    # the decision point is the full-buffer block in _accept_token.
+    SESSION_SILENT_SUBSCRIBER_STALL_SECONDS = 0.25
 
     def __init__(
         self,
@@ -310,6 +335,8 @@ class RequestGatewayService:
                 raise AdmissionError("invalid_last_event_id")
             self._discard_through_locked(session, cursor)
             session.active_subscription = True
+            session.ever_subscribed = True
+            session.last_ack_at = self._clock()
             expected_generation = session.publisher_generation
             session.publisher_generation += 1
             subscription = EventSubscription(
@@ -575,6 +602,31 @@ class RequestGatewayService:
                     session.expected_token_index += 1
                     self._metrics.increment("token_events_total")
                     return
+                if not session.active_subscription:
+                    # The consumer vanished: no further acknowledgements can
+                    # ever arrive. Drop the oldest unacknowledged event so a
+                    # slow, vanished, or dead consumer cannot pin this worker
+                    # (spec A4 §5). acknowledged_through — the committed
+                    # delivery watermark — is never advanced here; a later
+                    # reconnect replay of the dropped prefix fails closed via
+                    # the existing resume_cursor_expired rejection.
+                    self._drop_oldest_unacknowledged_locked(session)
+                    continue
+                if (
+                    session.last_ack_at is not None
+                    and self._clock() - session.last_ack_at
+                    > RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS
+                ):
+                    # The consumer is observably stalled: it attached, the
+                    # buffer is full, and no acknowledgement has arrived for
+                    # longer than the bounded stall budget (a parked SSE
+                    # send or a dead-but-attached tab). Reclaim the slot and
+                    # keep the producer moving; the request itself is never
+                    # cancelled and the dropped prefix fails closed on
+                    # reconnect via resume_cursor_expired (spec A4 §5).
+                    self._close_subscription(session)
+                    self._drop_oldest_unacknowledged_locked(session)
+                    continue
                 session.condition.wait(timeout=0.05)
 
     def _append_terminal(
@@ -758,6 +810,22 @@ class RequestGatewayService:
             session.discarded_through = max(session.discarded_through, removed.sequence)
 
     @staticmethod
+    def _drop_oldest_unacknowledged_locked(session: _Session) -> None:
+        """Drop the oldest buffered event whose consumer has vanished.
+
+        Only the replay boundary (discarded_through) advances. The committed
+        delivery watermark (acknowledged_through) is untouched: a dropped
+        event was never delivered to any consumer, so it must never count as
+        a committed delivery for replay (A6 seam 8). A reconnect attempting
+        to resume inside the dropped prefix fails closed via the existing
+        resume_cursor_expired rejection.
+        """
+        if not session.events:
+            return
+        removed = session.events.pop(0)
+        session.discarded_through = max(session.discarded_through, removed.sequence)
+
+    @staticmethod
     def _close_subscription(session: _Session) -> None:
         with session.condition:
             session.active_subscription = False
@@ -841,6 +909,45 @@ class RequestGatewayService:
                     del self._sessions[request_id]
                     evicted = True
                     break
+            if not evicted:
+                # No terminal session is eligible. Consider evicting the
+                # oldest stuck non-terminal session without a consumer
+                # (spec A4 §5). The decision is driven by an observable
+                # fact, not a timer: a session whose subscriber attached
+                # and then vanished is a confirmed abandoned slot; a
+                # session that has never subscribed is a fresh in-flight
+                # request inside its own submit→subscribe window and
+                # must not be cancelled by its own kind. A small grace
+                # backstop remains for the never-subscribed case so a
+                # request that never subscribes (truly stuck from the
+                # first emission) cannot pin capacity forever; the
+                # backstop value is the same order of magnitude as the
+                # ordinary browser round-trip time to the gateway
+                # (per the prior session's wall-clock observations on
+                # the ordinary product path: 1-50 ms) and is exposed
+                # as a product constant for tests to assert.
+                grace = RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS
+                now = time.monotonic()
+                for request_id, session in tuple(self._sessions.items()):
+                    with session.condition:
+                        if session.terminal_event is not None:
+                            continue
+                        if session.active_subscription:
+                            continue
+                        # Fast path: an attached-then-vanished consumer
+                        # is observably abandoned. Evict without grace.
+                        if session.ever_subscribed:
+                            abandoned = True
+                        else:
+                            # Backstop path: never subscribed; only
+                            # evict past the bounded grace to protect
+                            # the submit→subscribe window.
+                            abandoned = (now - session.created_at) >= grace
+                    if abandoned:
+                        self._cancel_session(session)
+                        del self._sessions[request_id]
+                        evicted = True
+                        break
             if not evicted:
                 self._metrics.increment("admission_rejected_total")
                 raise AdmissionError("gateway_capacity_exhausted")

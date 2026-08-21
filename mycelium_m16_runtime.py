@@ -525,6 +525,20 @@ class M16RuntimeCoordinator:
         self._active_request_ids.discard(request_id)
 
     @_synchronized
+    def retire_dispatch_slot(self, request_id: str) -> None:
+        """Release a terminal-blocked request's dispatch slot only.
+
+        A route run that ends cleanup-unproven (no scoped incident) keeps
+        its fail-closed shape — no published terminal, phase stays
+        `cleanup`, the stream closes without one — but its runtime slot
+        must retire so it can never pin concurrent dispatch capacity
+        (spec A4 §5). This deliberately does NOT touch the request
+        record's phase/terminal_state or the ledger reservation; it only
+        frees the dispatch cap.
+        """
+        self._active_request_ids.discard(request_id)
+
+    @_synchronized
     def cancel(self, request_id: str) -> bool:
         record = self._requests.get(request_id)
         if record is None or record["terminal_state"] is not None:

@@ -75,7 +75,7 @@ from .registry import (
 )
 from .route import LiveRoute, PhysicalLiveRoute, RouteCounters, RouteIdentity
 from .router_port import LiveRouterPort
-from .a4_install import A4EvidenceError, build_a4_qualification, load_a4_evidence_files
+from .a4_install import build_a4_qualification, load_a4_evidence_files
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1870,6 +1870,58 @@ def _startup_reason(exc: Exception) -> str:
     return code
 
 
+_SERVE_DIAGNOSTIC_PROTOCOL = "mycelium.live_serve_diagnostic.v1"
+_SERVE_DIAGNOSTIC_MAX_CAUSES = 8
+_SERVE_DIAGNOSTIC_TAIL_CHARS = 16_000
+
+
+def _exception_chain_document(exc: BaseException) -> list[dict[str, Any]]:
+    """Bounded walk of an exception cause chain with node stderr evidence.
+
+    A rejected node command carries the node's own stderr as a diagnostic
+    (ControllerError.diagnostic) or detail (NodeProcessError.detail) on
+    the exception; cleanup in finally blocks can later replace the
+    original error (physical_cleanup_failed masking), so the serve log
+    must walk the chain to reach the real reason.
+    """
+    chain: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and len(chain) < _SERVE_DIAGNOSTIC_MAX_CAUSES:
+        identity = id(current)
+        if identity in seen:
+            break
+        seen.add(identity)
+        entry: dict[str, Any] = {"type": type(current).__name__}
+        code = getattr(current, "remote_code", None) or getattr(current, "code", None)
+        if isinstance(code, str) and code:
+            entry["code"] = code
+        diagnostic = getattr(current, "diagnostic", None)
+        if not isinstance(diagnostic, str) or not diagnostic:
+            diagnostic = getattr(current, "detail", None)
+        if isinstance(diagnostic, str) and diagnostic:
+            entry["node_stderr_tail"] = diagnostic[: _SERVE_DIAGNOSTIC_TAIL_CHARS]
+        chain.append(entry)
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return chain
+
+
+def _emit_serve_diagnostic(exc: BaseException, *, stage: str) -> None:
+    """Surface the node-side reason a physical route open was rejected.
+
+    Printed BEFORE any failure-path cleanup can replace the exception,
+    so the serve log keeps the real rejection (and the rejecting node's
+    stderr tail) even when cleanup afterwards reports its own error.
+    """
+    document = {
+        "protocol": _SERVE_DIAGNOSTIC_PROTOCOL,
+        "stage": stage,
+        "cause_chain": _exception_chain_document(exc),
+        "emitted_at_unix_ms": int(time.time() * 1_000),
+    }
+    print(_json_bytes(document).decode("utf-8"), flush=True)
+
+
 def run_registry_server(
     *,
     operator_plans: Sequence[Path],
@@ -2137,7 +2189,16 @@ def run_physical_server(
             identity = route.open()
         except ControllerError as exc:
             safe_code = exc.remote_code or exc.code
+            _emit_serve_diagnostic(exc, stage="route_open")
             raise RuntimeError(f"startup_route_open_rejected:{safe_code}") from exc
+        except Exception as exc:
+            # A node-process rejection (NodeProcessError) is NOT a
+            # ControllerError: surface its node stderr before re-raising
+            # with the same public shape as the controller path.
+            _emit_serve_diagnostic(exc, stage="route_open")
+            raise RuntimeError(
+                f"startup_route_open_rejected:{_startup_reason(exc)}"
+            ) from exc
         _validate_route_identity(identity, route.execution_graph)
 
         qualification = _qualify_open_route(route)
@@ -2257,7 +2318,14 @@ def run_physical_server(
             server.server_close()
         route.close()
         if not startup_complete:
-            route.cleanup()
+            try:
+                route.cleanup()
+            except Exception as cleanup_exc:
+                # The failure-path cleanup must never mask the real
+                # startup rejection: keep the original exception in
+                # flight and record the cleanup failure in the serve
+                # log instead.
+                _emit_serve_diagnostic(cleanup_exc, stage="route_cleanup")
 
 
 class _DiscardSink:

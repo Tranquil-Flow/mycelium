@@ -8,6 +8,7 @@ import importlib.util
 from io import StringIO
 import json
 import sys
+import threading
 
 import pytest
 
@@ -66,11 +67,11 @@ def _synthetic_execution_graph():
     )
 
 
-def _runtime_stack(*, graph=None, router_type=Router):
+def _runtime_stack(*, graph=None, router_type=Router, runtime=None):
     graph = graph or graph_fixture()
     clock = ManualClock()
     capacity = FakeCapacityPort(clock=clock)
-    runtime = FakeRuntimePort(token_base=100)
+    runtime = runtime or FakeRuntimePort(token_base=100)
     router = router_type(
         node_id="entry-node",
         topology=FakeTopologyProvider(graph),
@@ -123,10 +124,30 @@ def test_cli_streams_through_production_service_and_router_session_interface():
         service.close()
 
 
+class GatedRuntimePort(FakeRuntimePort):
+    """Block the second decode until cancellation reaches the runtime."""
+
+    def __init__(self, *, token_base: int = 100):
+        super().__init__(token_base=token_base)
+        self.second_decode_started = threading.Event()
+        self.allow_decode = threading.Event()
+
+    def execute(self, item):
+        if item.phase == "DECODE" and item.token_index >= 1:
+            self.second_decode_started.set()
+            self.allow_decode.wait(timeout=2)
+        return super().execute(item)
+
+    def cancel(self, path_id):
+        super().cancel(path_id)
+        self.allow_decode.set()
+
+
 def test_router_adapter_cancellation_releases_capacity_and_kv_once():
     qualification = _synthetic_qualification()
+    gated_runtime = GatedRuntimePort()
     router, clock, capacity, runtime = _runtime_stack(
-        graph=_synthetic_execution_graph()
+        graph=_synthetic_execution_graph(), runtime=gated_runtime
     )
     codec = RecordingCodec()
 
@@ -143,7 +164,6 @@ def test_router_adapter_cancellation_releases_capacity_and_kv_once():
         qualification_source=MutableQualificationSource(qualification),
         backend=backend,
         request_id_source=lambda: "cli-router-cancel",
-        max_buffered_events=2,
     )
     try:
         from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
@@ -161,6 +181,7 @@ def test_router_adapter_cancellation_releases_capacity_and_kv_once():
         subscription.ack(accepted.sequence)
         first = subscription.next_event(timeout=1)
         assert first is not None and first.kind == "token"
+        assert gated_runtime.second_decode_started.wait(timeout=1)
 
         assert service.cancel(request_id) is True
         subscription.ack(first.sequence)

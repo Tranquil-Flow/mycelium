@@ -10,8 +10,12 @@ import {
   type ProductQualification,
 } from '../../app/contracts';
 import { InferenceClientError, type InferenceClient } from './requestClient';
-import type { InferenceSessionState } from './types';
-import { useInferenceSession } from './useInferenceSession';
+import { isTerminalInferencePhase, type InferenceSessionState } from './types';
+import {
+  RESTORED_STREAM_RETRY_DELAYS_MS,
+  inferenceSessionReducer,
+  useInferenceSession,
+} from './useInferenceSession';
 
 const NOW = 1_800_000_000_000;
 const DIGEST_A = `sha256:${'a'.repeat(64)}`;
@@ -49,6 +53,28 @@ const accepted: InferenceAcceptedResponse = {
   event_path: '/api/v1/inference/request-a/events',
   cancel_path: '/api/v1/inference/request-a/cancel',
 };
+
+function stateFor(phase: InferenceSessionState['phase']): InferenceSessionState {
+  return {
+    qualification_status: 'ready',
+    qualification: qualification(),
+    qualification_changed: false,
+    phase,
+    accepted_request: accepted,
+    captured_binding: qualification().binding,
+    requested_max_new_tokens: 8,
+    submitted_prompt: 'synthetic prompt',
+    output: '',
+    token_count: 0,
+    last_applied_sequence: 0,
+    publisher_generation: 1,
+    error_code: null,
+    form_error: null,
+    cancellation_requested: false,
+    started_at_unix_ms: NOW,
+    history: [],
+  };
+}
 
 function event(
   sequence: number,
@@ -347,10 +373,10 @@ describe('useInferenceSession', () => {
       useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
     );
 
-    await waitFor(() => expect(hook.result.current.phase).toBe('completed'), { timeout: 4_000 });
+    await waitFor(() => expect(hook.result.current.phase).toBe('completed'), { timeout: 10_000 });
     expect(client.streamCursors).toEqual([1, 1, 1]);
     expect(hook.result.current.output).toBe('AB');
-  });
+  }, 15_000);
 
   it('fails with the stable client code when the stream fails before its accepted event', async () => {
     const client = new FakeClient();
@@ -410,14 +436,20 @@ describe('useInferenceSession', () => {
       ]);
     });
     expect(client.cancelCalls).toBe(1);
-
-    client.streamBatches.push([
-      event(1, { type: 'cancelled' }),
-      event(2, { type: 'token', token_index: 0, text: 'must not apply' }),
-    ]);
-    await act(() => hook.result.current.resume());
-    expect(hook.result.current.phase).toBe('cancelled');
+    // Ack path: non-terminal, no server frame authored.
+    expect(hook.result.current.phase).toBe('cancel_unconfirmed');
     expect(hook.result.current.output).toBe('');
+
+    // A server terminal frame delivered before the acknowledgement wins and
+    // is never overridden by the unconfirmed transition.
+    const serverCancelled = inferenceSessionReducer(
+      stateFor('cancelling'),
+      { type: 'event', event: event(1, { type: 'cancelled' }), now: NOW },
+    );
+    expect(serverCancelled.phase).toBe('cancelled');
+    expect(
+      inferenceSessionReducer(serverCancelled, { type: 'cancel_unconfirmed' }),
+    ).toBe(serverCancelled);
   });
 
   it('allows cancellation retry after a public cancellation failure', async () => {
@@ -435,7 +467,7 @@ describe('useInferenceSession', () => {
 
     await act(() => hook.result.current.cancel());
     expect(client.cancelCalls).toBe(2);
-    expect(hook.result.current.phase).toBe('cancelling');
+    expect(hook.result.current.phase).toBe('cancel_unconfirmed');
   });
 
   it('fails prompt/token bounds before network submission', async () => {
@@ -446,5 +478,82 @@ describe('useInferenceSession', () => {
 
     expect(client.submissions).toHaveLength(0);
     expect(hook.result.current.form_error).toBe('Prompt is required');
+  });
+
+  it('surfaces cancel_unconfirmed without authoring a terminal state and clears the submit gate', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification()];
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1 }),
+    );
+    await waitFor(() => expect(hook.result.current.qualification_status).toBe('ready'));
+    await act(() => hook.result.current.start('private synthetic input', 8));
+    expect(hook.result.current.phase).toBe('interrupted');
+
+    await act(() => hook.result.current.cancel());
+    expect(client.cancelCalls).toBe(1);
+    // The ack is not terminal evidence: a distinct NON-terminal phase.
+    expect(hook.result.current.phase).toBe('cancel_unconfirmed');
+    expect(isTerminalInferencePhase(hook.result.current.phase)).toBe(false);
+    expect(hook.result.current.error_code).toBeNull();
+    // No history entry is authored without a server terminal frame.
+    expect(hook.result.current.history).toHaveLength(0);
+    // The per-tab submit gate is cleared — the actual UX defect.
+    expect(hook.result.current.can_submit).toBe(true);
+    expect(hook.result.current.submit_block_reason).toBeNull();
+
+    client.qualifications.push(qualification());
+    client.streamBatches.push([event(0, { type: 'accepted' })]);
+    await act(() => hook.result.current.start('second private input', 8));
+    expect(client.submissions).toHaveLength(2);
+  });
+
+  it('cancel_unconfirmed is only reachable from cancelling and never beats a server terminal frame', () => {
+    const cancelled = stateFor('cancelling');
+    const next = inferenceSessionReducer(cancelled, { type: 'cancel_unconfirmed' });
+    expect(next.phase).toBe('cancel_unconfirmed');
+    expect(isTerminalInferencePhase(next.phase)).toBe(false);
+    expect(next.history).toHaveLength(0);
+
+    // Server delivered the terminal frame first: the action must not override it.
+    const serverCancelled = inferenceSessionReducer(
+      stateFor('cancelling'),
+      { type: 'event', event: event(1, { type: 'cancelled' }), now: NOW },
+    );
+    expect(serverCancelled.phase).toBe('cancelled');
+    const after = inferenceSessionReducer(serverCancelled, { type: 'cancel_unconfirmed' });
+    expect(after).toBe(serverCancelled);
+
+    // Unreachable from non-cancelling non-terminal phases: no-op.
+    const interrupted = stateFor('interrupted');
+    expect(
+      inferenceSessionReducer(interrupted, { type: 'cancel_unconfirmed' }),
+    ).toBe(interrupted);
+  });
+
+  it('treats a retryable resume_cursor_expired as a defined non-looping restore outcome', async () => {
+    const client = new FakeClient();
+    client.streamFailures.push(new InferenceClientError('resume_cursor_expired', true));
+    const restored = stateFor('streaming');
+    const hook = renderHook(() =>
+      useInferenceSession({ client, now: () => NOW + 1, restored_state: restored }),
+    );
+    await waitFor(
+      () => expect(hook.result.current.error_code).toBe('resume_cursor_expired'),
+      { timeout: 4_000 },
+    );
+    expect(hook.result.current.phase).toBe('interrupted');
+    // The auto-restore loop must stop after the first attempt for any code
+    // other than stream_already_attached — no retry storm against a server
+    // that has discarded the cursor.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(client.streamCursors.length).toBe(1);
+  });
+
+  it('carries the provisional extended restore retry schedule (A4 coordination pending)', () => {
+    expect(RESTORED_STREAM_RETRY_DELAYS_MS).toEqual([
+      500, 1_500, 3_000, 6_000, 12_000, 30_000, 60_000,
+    ]);
   });
 });

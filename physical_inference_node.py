@@ -22,6 +22,7 @@ import resource
 import select
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -580,8 +581,7 @@ class NativeSidecarProcess:
             self.binary.is_file() and os.access(self.binary, os.X_OK),
             "sidecar_binary_unavailable",
         )
-        self.socket_root.mkdir(parents=True, exist_ok=False)
-        self._socket_root_created = True
+        self._prepare_socket_root()
         _require(
             len(os.fsencode(self.socket_path)) < 100, "sidecar_socket_path_too_long"
         )
@@ -711,6 +711,42 @@ class NativeSidecarProcess:
             except OSError:
                 return
             self._socket_root_created = False
+
+    def _prepare_socket_root(self) -> None:
+        """Create the sidecar socket root, clearing crashed-cycle residue.
+
+        A socket root left behind by a crashed cycle (orphaned sidecar)
+        must not wedge a fresh configure. A LIVE sidecar — an accepting
+        socket — still fails closed: the create-exclusive mkdir that
+        follows the cleanup preserves the original mutual exclusion
+        between two node instances.
+        """
+        try:
+            self.socket_root.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            if self.socket_path.exists():
+                _require(not self._socket_is_live(), "sidecar_socket_conflict")
+                try:
+                    self.socket_path.unlink()
+                except OSError:
+                    _require(False, "sidecar_socket_conflict")
+            try:
+                self.socket_root.rmdir()
+            except OSError:
+                _require(False, "sidecar_socket_conflict")
+            self.socket_root.mkdir(parents=True, exist_ok=False)
+        self._socket_root_created = True
+
+    def _socket_is_live(self) -> bool:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(0.25)
+        try:
+            client.connect(str(self.socket_path))
+        except OSError:
+            return False
+        else:
+            client.close()
+            return True
 
 
 class PhysicalNodeService:

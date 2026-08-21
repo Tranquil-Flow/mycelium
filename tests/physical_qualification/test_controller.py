@@ -680,6 +680,87 @@ def test_rejected_node_observation_preserves_remote_error_code(tmp_path: Path) -
     assert caught.value.remote_code == "prefill_completion_timeout"
 
 
+def test_failed_physical_run_attaches_rejecting_node_stderr_tail(tmp_path: Path) -> None:
+    peers = _peers(2, tmp_path)
+    source_root, transfers = _transfers(tmp_path)
+    runner = StagingRunner(_physical_cleanup_captures(peers))
+
+    class RejectingSession(FakeNodeSession):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.stderr = (
+                b"Traceback (most recent call last):\n"
+                b'  File "physical_inference_node.py", line 12, in configure\n'
+                b"ValueError: stage pack digest mismatch\n"
+            )
+
+        def send(
+            self,
+            *,
+            command_id: str,
+            command: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            if command == "configure":
+                return {
+                    "protocol": "mycelium.physical_node_control.v1",
+                    "command_id": command_id,
+                    "node_id": self.node_id,
+                    "ok": False,
+                    "route_ready": False,
+                    "error": {"code": "node_command_failed"},
+                }
+            return super().send(command_id=command_id, command=command, payload=payload)
+
+    sessions: dict[str, FakeNodeSession] = {}
+
+    def session_factory(**kwargs: Any) -> RejectingSession:
+        session = RejectingSession(**kwargs)
+        sessions[session.node_id] = session
+        return session
+
+    controller = QualificationController(
+        mode="physical",
+        peers=peers,
+        source_root=source_root,
+        transfer_manifest=transfers,
+        membership_snapshot=_snapshot(peers),
+        now=NOW + 1.0,
+        runner=runner,
+        run_plan=_physical_run_plan(peers),
+        session_factory=session_factory,
+    )
+
+    with pytest.raises(ControllerError, match="node_command_rejected") as caught:
+        controller.execute("run")
+
+    assert caught.value.diagnostic is not None
+    assert "node node-0 stderr" in caught.value.diagnostic
+    assert "stage pack digest mismatch" in caught.value.diagnostic
+
+
+def test_session_stderr_tail_is_bounded_and_skips_empty_sessions() -> None:
+    class _Empty:
+        pass
+
+    class _Loud:
+        def __init__(self, tail: bytes) -> None:
+            self.stderr = tail
+
+    sessions = {
+        "node-0": _Empty(),
+        "node-2": _Loud(b"real reason: evidence mismatch\n"),
+    }
+    tail = controller_module._session_stderr_tail(sessions)
+    assert tail == "node node-2 stderr (tail):\nreal reason: evidence mismatch"
+    assert controller_module._session_stderr_tail({"node-0": _Empty()}) is None
+
+    noisy = "z" * (controller_module._NODE_STDERR_TAIL_CHARS + 500)
+    bounded = controller_module._session_stderr_tail({"node-0": _Loud(noisy.encode())})
+    assert bounded is not None
+    assert len(bounded) <= controller_module._NODE_DIAGNOSTIC_MAX_CHARS
+
+
 def test_physical_prepare_timeout_scales_with_archive_size_and_stays_bounded() -> None:
     assert controller_module._stage_timeout_seconds(0) == 120.0
     assert controller_module._stage_timeout_seconds(30 * 1024 * 1024) == 120.0

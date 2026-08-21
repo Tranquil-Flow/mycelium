@@ -24,6 +24,7 @@ const PHASES = new Set<InferencePhase>([
   'streaming',
   'interrupted',
   'cancelling',
+  'cancel_unconfirmed',
   'completed',
   'cancelled',
   'failed',
@@ -176,7 +177,7 @@ function decodeHistory(value: unknown): readonly InferenceHistoryEntry[] | null 
 function decodeSession(value: unknown): InferenceSessionState | null {
   const item = record(value);
   if (item === null) return null;
-  const phase = safeString(item.phase, 16) as InferencePhase | null;
+  const phase = safeString(item.phase, 32) as InferencePhase | null;
   const accepted = item.accepted_request === null
     ? null
     : (() => {

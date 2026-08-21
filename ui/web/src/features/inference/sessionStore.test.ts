@@ -97,6 +97,28 @@ describe('InferenceTabSessionStore', () => {
     expect(restored?.session.qualification).toBeNull();
   });
 
+  it('round-trips cancel_unconfirmed without deleting private prompt state', () => {
+    const storage = new MemoryStorage();
+    const store = createInferenceTabSessionStore(storage);
+    const cancelUnconfirmed: InferenceSessionState = {
+      ...session,
+      phase: 'cancel_unconfirmed',
+      history: [],
+    };
+
+    store.save({
+      prompt: 'A4-BROWSER-PRIVATE-RELOAD-PROBE Explain request scoped cleanup.',
+      max_new_tokens: 64,
+      session: cancelUnconfirmed,
+    });
+
+    const restored = store.load();
+    expect(restored?.prompt).toContain('A4-BROWSER-PRIVATE-RELOAD-PROBE');
+    expect(restored?.session.phase).toBe('cancel_unconfirmed');
+    expect(restored?.session.accepted_request?.request_id).toBe(accepted.request_id);
+    expect(storage.getItem(INFERENCE_TAB_SESSION_STORAGE_KEY)).not.toBeNull();
+  });
+
   it('rejects and removes malformed or over-bound tab state', () => {
     const storage = new MemoryStorage();
     const store = createInferenceTabSessionStore(storage);

@@ -147,6 +147,9 @@ class _RemoteNodeError(NodeProcessError):
     pass
 
 
+_STDERR_TAIL_CHARS = 4_000
+
+
 @dataclass(frozen=True)
 class _ReaderError:
     code: str
@@ -1522,6 +1525,23 @@ class PhysicalNodeProcess:
         with self._stderr_lock:
             return b"".join(self._stderr_chunks).decode("utf-8", errors="replace")
 
+    def _bounded_stderr_tail(self, chars: int = _STDERR_TAIL_CHARS) -> str | None:
+        """Bounded operator-facing tail of this node's stderr, or None.
+
+        The rejection envelope only carries an error code; the node's
+        own stderr carries the real reason (traceback, verification
+        failure). Attach a bounded tail so callers can surface the
+        evidence without leaking unbounded process output.
+        """
+        with self._stderr_lock:
+            payload = b"".join(self._stderr_chunks)
+        if not payload:
+            return None
+        tail = payload[-chars:].decode("utf-8", errors="replace").rstrip()
+        if not tail:
+            return None
+        return f"node {self.node_id} stderr (tail):\n{tail}"
+
     def _fail_waiters(self, item: object | _ReaderError) -> None:
         with self._waiters_lock:
             waiters = tuple(self._waiters.values())
@@ -1909,7 +1929,10 @@ class PhysicalNodeProcess:
             or not _OPERATION_RE.fullmatch(error["code"])
         ):
             raise NodeProcessError("invalid_node_response")
-        raise _RemoteNodeError(error["code"])
+        raise _RemoteNodeError(
+            error["code"],
+            detail=self._bounded_stderr_tail() or "",
+        )
 
     def _exchange_frame(
         self,

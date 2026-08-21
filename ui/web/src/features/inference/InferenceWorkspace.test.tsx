@@ -12,6 +12,8 @@ import {
 import type { InferenceClient } from './requestClient';
 import { InferenceWorkspace } from './InferenceWorkspace';
 import workspaceCss from './InferenceWorkspace.module.css?raw';
+import { createInferenceTabSessionStore } from './sessionStore';
+import type { InferenceSessionState } from './types';
 import type {
   DeploymentRegistryClient,
   DeploymentRegistryStatus,
@@ -426,6 +428,43 @@ describe('InferenceWorkspace', () => {
     expect(screen.getByRole('cell', { name: 'completed' })).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Clear session history' }));
     expect(screen.queryByRole('heading', { name: 'Request history' })).not.toBeInTheDocument();
+  });
+
+  it('restores cancel_unconfirmed tab state without treating it as an active request', async () => {
+    const store = createInferenceTabSessionStore(window.sessionStorage);
+    const restoredSession: InferenceSessionState = {
+      qualification_status: 'ready',
+      qualification: null,
+      qualification_changed: false,
+      phase: 'cancel_unconfirmed',
+      accepted_request: accepted,
+      captured_binding: qualification(true).binding,
+      requested_max_new_tokens: 64,
+      submitted_prompt: 'restored cancel prompt',
+      output: 'partial output',
+      token_count: 5,
+      last_applied_sequence: 5,
+      publisher_generation: 1,
+      error_code: null,
+      form_error: null,
+      cancellation_requested: false,
+      started_at_unix_ms: NOW,
+      history: [],
+      captured_workload_attribution: null,
+    };
+    store.save({
+      prompt: 'restored cancel prompt',
+      max_new_tokens: 64,
+      session: restoredSession,
+    });
+
+    render(<InferenceWorkspace client={new WorkspaceClient(qualification(true))} now={() => NOW + 1} />);
+
+    const prompt = await screen.findByLabelText('Prompt');
+    expect(prompt).toHaveValue('restored cancel prompt');
+    await waitFor(() => expect(prompt).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start inference' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Cancel request' })).toBeDisabled();
   });
 
   it('exposes stream resume and cancellation as keyboard-operable buttons', async () => {

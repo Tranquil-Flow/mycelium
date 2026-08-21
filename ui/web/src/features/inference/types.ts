@@ -12,6 +12,7 @@ export type InferencePhase =
   | 'streaming'
   | 'interrupted'
   | 'cancelling'
+  | 'cancel_unconfirmed'
   | 'completed'
   | 'cancelled'
   | 'failed';
