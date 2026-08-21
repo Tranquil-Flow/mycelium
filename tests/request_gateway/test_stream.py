@@ -13,12 +13,14 @@ from typing import Any
 import pytest
 
 from mycelium_request_gateway.contracts import (
+    AdmissionError,
     InferenceSubmission,
     REQUEST_EVENT_PROTOCOL_V2,
     REQUEST_GATEWAY_PROTOCOL_V2,
     qualification_binding,
 )
 from mycelium_request_gateway.service import RequestGatewayService
+from test_a4_abandoned_subscriber import _EmitterBackend
 from test_core import MutableQualificationSource, _synthetic_qualification
 
 
@@ -321,7 +323,7 @@ def test_reconnect_replays_multiple_acknowledged_events_until_buffer_pressure():
         service.close()
 
 
-def test_bounded_backpressure_pauses_backend_until_consumer_acks():
+def test_no_consumer_overflow_drops_oldest_and_fails_closed_on_late_replay():
     qualification = _synthetic_qualification()
     backend = BurstBackend(5)
     service = RequestGatewayService(
@@ -333,14 +335,46 @@ def test_bounded_backpressure_pauses_backend_until_consumer_acks():
     try:
         request_id = service.submit(_submission(qualification, max_new_tokens=5))
         deadline = time.monotonic() + 1
-        while backend.emitted < 1 and time.monotonic() < deadline:
+        while backend.emitted < 5 and time.monotonic() < deadline:
             time.sleep(0.005)
 
-        assert backend.emitted == 1
-        assert service.buffered_event_count(request_id) == 2
-        subscription = service.subscribe(request_id, last_event_id=None)
-        events = _drain(subscription)
+        # A vanished consumer must not pause the producer: the burst
+        # completes with the oldest unacknowledged events dropped.
+        assert backend.emitted == 5
+        deadline = time.monotonic() + 1
+        while service.terminal_event_count(request_id) < 1 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert service.terminal_event_count(request_id) == 1
+        assert service.maximum_observed_buffered_events(request_id) <= 3
+        # The dropped prefix fails closed: a late replay cursor is expired.
+        with pytest.raises(AdmissionError) as expired:
+            service.subscribe(request_id, last_event_id=None)
+        assert expired.value.code == "resume_cursor_expired"
+    finally:
+        service.close()
 
+
+def test_live_consumer_backpressure_pauses_and_resumes_without_dropping():
+    qualification = _synthetic_qualification()
+    backend = _EmitterBackend(token_count=5)
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=backend,
+        request_id_source=lambda: "pressure-live",
+        max_buffered_events=3,
+    )
+    try:
+        request_id = service.submit(_submission(qualification, max_new_tokens=5))
+        subscription = service.subscribe(request_id, last_event_id=None)
+        backend.start.set()
+        deadline = time.monotonic() + 1
+        while backend.emit_count < 1 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        time.sleep(0.2)  # let the producer reach the bounded ceiling
+        assert backend.emit_count < 5, "producer must pause for a live consumer"
+        # Acknowledgements resume the producer; a live consumer never loses
+        # an event to the vanished-consumer drop path.
+        events = _drain(subscription)
         assert [event.kind for event in events].count("token") == 5
         assert events[-1].kind == "completed"
         assert service.maximum_observed_buffered_events(request_id) <= 3
@@ -510,7 +544,7 @@ def test_session_table_is_bounded_by_evicting_oldest_terminal_session():
         service.close()
 
 
-def test_active_session_capacity_rejects_without_starting_another_worker():
+def test_active_session_capacity_evicts_stuck_session_under_pressure():
     qualification = _synthetic_qualification()
     backend = ControlledBackend()
     identifiers = iter(("active-001", "active-002"))
@@ -523,9 +557,21 @@ def test_active_session_capacity_rejects_without_starting_another_worker():
     try:
         service.submit(_submission(qualification))
         assert backend.first_emitted.wait(timeout=1)
-        with pytest.raises(Exception) as full:
+        # The resident session is stuck non-terminal with no consumer; a
+        # second submission arriving inside the minimum-age grace is
+        # rejected with ``gateway_capacity_exhausted`` so a fresh
+        # request inside its own submit→subscribe window cannot be
+        # cancelled by its own kind. After the grace elapses, the
+        # genuinely stuck session is evicted normally.
+        with pytest.raises(AdmissionError) as within_grace:
             service.submit(_submission(qualification))
-        assert getattr(full.value, "code", None) == "gateway_capacity_exhausted"
+        assert within_grace.value.code == "gateway_capacity_exhausted"
+        time.sleep(
+            RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS + 0.1
+        )
+        second_id = service.submit(_submission(qualification))
+        assert second_id == "active-002"
+        assert "active-001" in backend.cancelled
     finally:
         backend.release.set()
         service.close()

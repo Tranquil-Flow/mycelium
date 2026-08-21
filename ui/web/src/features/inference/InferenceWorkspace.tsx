@@ -8,7 +8,6 @@ import {
   createBrowserInferenceTabSessionStore,
   type InferenceTabSessionStore,
 } from './sessionStore';
-import { isTerminalInferencePhase } from './types';
 import { useInferenceSession } from './useInferenceSession';
 import styles from './InferenceWorkspace.module.css';
 import {
@@ -57,6 +56,8 @@ function phaseLabel(phase: ReturnType<typeof useInferenceSession>['phase']): str
       return 'Stream interrupted';
     case 'cancelling':
       return 'Cancellation pending';
+    case 'cancel_unconfirmed':
+      return 'Cancellation unconfirmed';
     case 'completed':
       return 'Completed';
     case 'cancelled':
@@ -109,6 +110,14 @@ function activityCopy(
     return {
       title: 'Stopping generation',
       detail: 'Cancellation is propagating across the qualified route.',
+    };
+  }
+  if (phase === 'cancel_unconfirmed') {
+    return {
+      title: 'Cancellation unconfirmed',
+      detail:
+        'The route acknowledged the cancellation, but the terminal frame has not arrived. ' +
+        'The request’s final state belongs to the server; a new request can be submitted.',
     };
   }
   return null;
@@ -183,7 +192,12 @@ export function InferenceWorkspace({
     ? `Maximum new tokens must be between 1 and ${MAX_NEW_TOKENS}`
     : null;
   const formBlockReason = externalBlockReason ?? session.submit_block_reason ?? promptReason ?? tokenReason;
-  const active = session.accepted_request !== null && !isTerminalInferencePhase(session.phase);
+  const active = session.accepted_request !== null && (
+    session.phase === 'submitting' ||
+    session.phase === 'streaming' ||
+    session.phase === 'interrupted' ||
+    session.phase === 'cancelling'
+  );
   const canResume = session.accepted_request !== null &&
     (session.phase === 'interrupted' || session.phase === 'cancelling');
   const qualification = session.qualification;
@@ -477,7 +491,10 @@ export function InferenceWorkspace({
               className={styles.danger}
               type="button"
               onClick={() => void session.cancel()}
-              disabled={!active || session.cancellation_requested}
+              disabled={
+                !active ||
+                session.cancellation_requested
+              }
             >
               Cancel request
             </button>

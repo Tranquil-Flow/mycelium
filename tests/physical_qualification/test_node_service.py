@@ -622,7 +622,7 @@ def test_node_service_uses_run_scoped_physical_host_identity(
         node_id="node-0",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
-        sidecar_binary=Path("/bin/false"),
+        sidecar_binary=Path("/usr/bin/false"),
         sidecar_local_only=True,
         command_timeout=1.0,
     )
@@ -645,7 +645,7 @@ def test_infer_decode_accepts_eos_completion_without_visible_token(
         node_id="node-0",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
-        sidecar_binary=Path("/bin/false"),
+        sidecar_binary=Path("/usr/bin/false"),
         sidecar_local_only=True,
         command_timeout=1.0,
     )
@@ -691,7 +691,7 @@ def test_a4_decode_and_cleanup_require_bound_canonical_identity(
         node_id="node-0",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
-        sidecar_binary=Path("/bin/false"),
+        sidecar_binary=Path("/usr/bin/false"),
         sidecar_local_only=True,
         command_timeout=1.0,
     )
@@ -830,7 +830,7 @@ def test_stage_local_infer_start_waits_for_prefill_token_event(
         node_id="node-0",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
-        sidecar_binary=Path("/bin/false"),
+        sidecar_binary=Path("/usr/bin/false"),
         sidecar_local_only=True,
         command_timeout=1.0,
     )
@@ -959,7 +959,7 @@ def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:
             return 0
 
     sidecar = NativeSidecarProcess(
-        binary=Path("/bin/false"),
+        binary=Path("/usr/bin/false"),
         socket_root=socket_root,
         local_only=True,
         queue_capacity=1,
@@ -973,6 +973,99 @@ def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:
 
     assert sidecar.process is None
     assert not socket_root.exists()
+
+
+def _short_socket_root() -> Path:
+    """UDS paths are capped at <100 fs-encoded bytes; tmp_path is too long."""
+    import secrets
+
+    root = Path(f"/private/tmp/mns-{secrets.token_hex(4)}")
+    root.mkdir(mode=0o700)
+    return root
+
+
+def test_native_sidecar_start_clears_stale_socket_residue() -> None:
+    import socket as socket_module
+
+    root = _short_socket_root()
+    try:
+        socket_root = root / "socket"
+        socket_root.mkdir()
+        socket_path = socket_root / "i.sock"
+        stale = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        stale.bind(str(socket_path))
+        stale.close()  # dead socket file, no listener: crashed-cycle residue
+
+        sidecar = NativeSidecarProcess(
+            binary=Path("/usr/bin/false"),
+            socket_root=socket_root,
+            local_only=True,
+            queue_capacity=1,
+            startup_timeout=1.0,
+        )
+
+        # Reaching the spawn step (binary exits without a ready line) proves
+        # the stale residue was cleared; the old shape raised FileExistsError.
+        with pytest.raises(NodeCommandError, match="sidecar_exited_before_ready"):
+            sidecar.start()
+
+        assert sidecar.process is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_native_sidecar_start_clears_empty_stale_socket_root() -> None:
+    root = _short_socket_root()
+    try:
+        socket_root = root / "socket"
+        socket_root.mkdir()  # empty residue from an interrupted cycle
+
+        sidecar = NativeSidecarProcess(
+            binary=Path("/usr/bin/false"),
+            socket_root=socket_root,
+            local_only=True,
+            queue_capacity=1,
+            startup_timeout=1.0,
+        )
+
+        with pytest.raises(NodeCommandError, match="sidecar_exited_before_ready"):
+            sidecar.start()
+
+        assert sidecar.process is None
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_native_sidecar_start_rejects_live_socket() -> None:
+    import socket as socket_module
+
+    root = _short_socket_root()
+    try:
+        socket_root = root / "socket"
+        socket_root.mkdir()
+        socket_path = socket_root / "i.sock"
+        listener = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        listener.bind(str(socket_path))
+        listener.listen(1)
+        try:
+            sidecar = NativeSidecarProcess(
+                binary=Path("/usr/bin/false"),
+                socket_root=socket_root,
+                local_only=True,
+                queue_capacity=1,
+                startup_timeout=1.0,
+            )
+
+            with pytest.raises(NodeCommandError, match="sidecar_socket_conflict"):
+                sidecar.start()
+
+            assert sidecar.process is None
+            # A live sidecar's socket must never be touched.
+            assert socket_path.exists()
+        finally:
+            listener.close()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_process_group_inventory_uses_exact_process_group_query(
@@ -1528,7 +1621,7 @@ def test_node_start_configures_successor_and_additional_authenticated_peers(
         node_id="node-a",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
-        sidecar_binary=Path("/bin/false"),
+        sidecar_binary=Path("/usr/bin/false"),
         sidecar_local_only=True,
         command_timeout=270.0,
     )
@@ -1577,7 +1670,7 @@ def test_safe_document_rejects_nested_symlinks_and_hardlinks(tmp_path: Path) -> 
         node_id="node-a",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
-        sidecar_binary=Path("/bin/false"),
+        sidecar_binary=Path("/usr/bin/false"),
         sidecar_local_only=True,
         command_timeout=1.0,
     )

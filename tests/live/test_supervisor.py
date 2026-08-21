@@ -364,6 +364,147 @@ def test_physical_server_surfaces_safe_open_remote_code(monkeypatch) -> None:
     assert route.cleaned is True
 
 
+def test_physical_server_logs_node_stderr_diagnostic_before_cleanup_mask(
+    monkeypatch, capsys
+) -> None:
+    class RejectingRoute:
+        execution_graph = _graph(("node-a", "node-b"))
+
+        def __init__(self) -> None:
+            self.closed = False
+            self.cleaned = False
+
+        def open(self):
+            raise ControllerError("physical_run_cleanup_failed") from ControllerError(
+                "node_command_rejected",
+                remote_code="node_command_failed",
+                diagnostic=(
+                    "node node-b stderr (tail):\n"
+                    "Traceback (most recent call last):\n"
+                    "ValueError: stage pack digest mismatch\n"
+                ),
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+        def cleanup(self) -> None:
+            self.cleaned = True
+
+    route = RejectingRoute()
+    monkeypatch.setattr(
+        "mycelium_live.supervisor.PhysicalLiveRoute.from_operator_plan",
+        lambda _plan, **_kwargs: route,
+    )
+
+    with pytest.raises(RuntimeError, match="startup_route_open_rejected"):
+        run_physical_server(
+            operator_plan=SimpleNamespace(),
+            host="127.0.0.1",
+            port=8788,
+            seed_state_root=Path("/private/test-seed"),
+        )
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert lines, "serve log must carry the open diagnostic before the cleanup mask"
+    document = json.loads(lines[0])
+    assert document["protocol"] == "mycelium.live_serve_diagnostic.v1"
+    assert document["stage"] == "route_open"
+    assert isinstance(document["emitted_at_unix_ms"], int)
+    chain = document["cause_chain"]
+    assert [entry["code"] for entry in chain] == [
+        "physical_run_cleanup_failed",
+        "node_command_failed",
+    ]
+    assert chain[0]["type"] == "ControllerError"
+    assert "node_stderr_tail" not in chain[0]
+    assert "stage pack digest mismatch" in chain[1]["node_stderr_tail"]
+
+    assert route.closed is True
+    assert route.cleaned is True
+
+
+def test_physical_server_unmasks_cleanup_failure_and_logs_node_stderr(
+    monkeypatch, capsys
+) -> None:
+    from mycelium_node.process import NodeProcessError
+
+    class RejectingRoute:
+        execution_graph = _graph(("node-a", "node-b"))
+
+        def __init__(self) -> None:
+            self.closed = False
+            self.cleaned = False
+
+        def open(self):
+            raise NodeProcessError(
+                "node_command_failed",
+                detail=(
+                    "node node-2 stderr (tail):\n"
+                    "ValueError: stage pack digest mismatch\n"
+                ),
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+        def cleanup(self) -> None:
+            raise ControllerError("physical_cleanup_failed")
+
+    route = RejectingRoute()
+    monkeypatch.setattr(
+        "mycelium_live.supervisor.PhysicalLiveRoute.from_operator_plan",
+        lambda _plan, **_kwargs: route,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="startup_route_open_rejected:node_command_failed",
+    ):
+        run_physical_server(
+            operator_plan=SimpleNamespace(),
+            host="127.0.0.1",
+            port=8788,
+            seed_state_root=Path("/private/test-seed"),
+        )
+
+    documents = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+    assert len(documents) == 2
+    open_document = documents[0]
+    assert open_document["stage"] == "route_open"
+    assert open_document["cause_chain"][0]["code"] == "node_command_failed"
+    assert "stage pack digest mismatch" in open_document["cause_chain"][0][
+        "node_stderr_tail"
+    ]
+    # The cleanup failure is logged, not raised over the open rejection:
+    # the public error stays the real startup reason.
+    cleanup_document = documents[1]
+    assert cleanup_document["stage"] == "route_cleanup"
+    assert cleanup_document["cause_chain"][0]["code"] == "physical_cleanup_failed"
+    assert route.closed is True
+
+
+def test_exception_chain_document_is_bounded_and_cycle_safe() -> None:
+    from mycelium_live.supervisor import _exception_chain_document
+
+    inner = ValueError("inner")
+    outer = ControllerError(
+        "node_command_rejected",
+        remote_code="node_command_failed",
+        diagnostic="tail-" + "x" * 40_000,
+    )
+    outer.__cause__ = inner  # plain chain: controller -> value error
+    inner.__context__ = outer  # artificially cyclic; walk must terminate
+
+    chain = _exception_chain_document(outer)
+    assert [entry["type"] for entry in chain] == ["ControllerError", "ValueError"]
+    assert len(chain[0]["node_stderr_tail"]) <= 16_000
+
+
 def test_route_identity_accepts_one_distinct_endpoint_per_three_host_graph() -> None:
     _validate_route_identity(
         _identity(("endpoint-0", "endpoint-1", "endpoint-2")),

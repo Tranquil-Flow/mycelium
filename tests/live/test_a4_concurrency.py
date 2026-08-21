@@ -5,7 +5,12 @@ import time
 
 import pytest
 
-from mycelium_live.route import FakeLiveRoute, InferenceCancelled, InferenceResult
+from mycelium_live.route import (
+    AffectedPeerQuarantined,
+    FakeLiveRoute,
+    InferenceCancelled,
+    InferenceResult,
+)
 from mycelium_live.lock_order import LockOrderDetector
 from mycelium_live.router_port import LiveRouterPort
 from mycelium_m16_runtime import build_live_m16_runtime
@@ -18,6 +23,38 @@ def _wait(predicate, *, timeout: float = 2.0) -> None:
         if time.monotonic() >= deadline:
             raise AssertionError("timed out waiting for concurrent progress")
         time.sleep(0.005)
+
+
+def test_quarantined_admission_refusal_publishes_bounded_failed_terminal(
+    live_graph, request_factory
+) -> None:
+    class RefusingRoute(FakeLiveRoute):
+        def infer(
+            self,
+            token_ids,
+            *,
+            max_new_tokens,
+            request_id,
+            sink,
+            cancel_requested=None,
+            **_kwargs,
+        ):
+            raise AffectedPeerQuarantined("affected_peer_quarantined")
+
+    route = RefusingRoute(scripted_tokens=())
+    route.open()
+    port = LiveRouterPort(route=route, execution_graph=live_graph)
+
+    class Sink:
+        def emit(self, _index: int, _token: int) -> None:
+            return None
+
+    admitted = port.admit(request_factory("quarantined-refusal"), Sink())
+    # The bounded failed terminal is published without a command-ledger CAS.
+    _wait(lambda: port.request_status(admitted) == "FAILED")
+    port.release_request(admitted)
+    _wait(lambda: port.is_idle())
+    port.close()
 
 
 def test_overlapping_requests_advance_independently(
@@ -358,6 +395,104 @@ def test_missing_cleanup_receipt_blocks_terminal_and_m16_completion(
     assert not port.is_idle()
     with pytest.raises(RuntimeError, match="router_port_shutdown_cleanup_unproven"):
         port.close()
+
+
+def test_terminal_blocked_request_retires_dispatch_slot(
+    live_graph, request_factory
+) -> None:
+    """A cleanup-unproven request must not pin concurrent dispatch forever.
+
+    The physical saturation storm leaves requests whose route run raised
+    without a scoped incident: their stream terminal stays unpublished
+    (fail-closed) and their coordinator phase stays `cleanup`, but their
+    dispatch slot MUST retire — otherwise `next_dispatch` counts them
+    against `max_concurrent_requests` forever and every later request
+    blocks in decode_one (the 2026-08-20 physical wedge).
+    """
+    class Qualification:
+        qualification_digest = "sha256:" + "d" * 64
+
+    class CleanupUnprovenRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.second_started = threading.Event()
+            self.receipts = {}
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            sink,
+            command_identity,
+            **_kwargs,
+        ):
+            if request_id == "second-request":
+                self.second_started.set()
+                sink.emit(0, 19)
+                self.receipts[request_id] = {
+                    "deployment_id": command_identity["deployment_id"],
+                    "deployment_epoch": command_identity["deployment_epoch"],
+                    "qualification_digest": command_identity["qualification_digest"],
+                    "request_id": request_id,
+                    "request_attempt": command_identity["request_attempt"],
+                    "path_id": command_identity["path_id"],
+                    "path_attempt": command_identity["path_attempt"],
+                    "path_digest": command_identity["path_digest"],
+                    "topology_generation": command_identity["topology_generation"],
+                    "command_id": command_identity["command_id"],
+                    "cancellation_generation": command_identity[
+                        "cancellation_generation"
+                    ],
+                    "publisher_generation": command_identity["publisher_generation"],
+                    "cleanup_owner_id": f"physical-live-route:{live_graph.deployment_id}",
+                    "node_ids": ["node-a", "node-b"],
+                }
+                return InferenceResult(request_id=request_id, token_ids=(19,))
+            raise RuntimeError("simulated_cleanup_unproven")
+
+        def request_cleanup_receipt(self, request_id):
+            return self.receipts.get(request_id)
+
+        def release_request(self, request_id):
+            self.receipts.pop(request_id, None)
+
+    route = CleanupUnprovenRoute()
+    coordinator = build_live_m16_runtime(live_graph)  # max_concurrent_requests=1
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    first = port.admit(
+        request_factory("cleanup-unproven-first"), Sink(),
+        qualification_binding=Qualification(),
+    )
+    _wait(lambda: port.request_status(first) == "TERMINAL_BLOCKED")
+
+    second = port.admit(
+        request_factory("second-request"), Sink(),
+        qualification_binding=Qualification(),
+    )
+    assert route.second_started.wait(
+        timeout=2.0
+    ), "second request never dispatched: blocked request pinned the slot"
+    _wait(lambda: port.decode_one(second))
+    assert port.request_status(second) == "COMPLETED"
+    # The blocked request's fail-closed shape is untouched.
+    assert port.request_status(first) == "TERMINAL_BLOCKED"
+    assert coordinator.phase(first) == "cleanup"
+    # close() still refuses while the blocked request is pending — pinned
+    # by test_missing_cleanup_receipt_blocks_terminal_and_m16_completion.
 
 
 def test_normal_completion_authorizes_generation_before_cleanup_and_terminal(

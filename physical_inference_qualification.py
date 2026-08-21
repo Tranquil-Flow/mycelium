@@ -228,10 +228,57 @@ except BaseException:
 class ControllerError(ValueError):
     """Stable fail-closed controller error."""
 
-    def __init__(self, code: str, *, remote_code: str | None = None) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        remote_code: str | None = None,
+        diagnostic: str | None = None,
+    ) -> None:
         self.code = code
         self.remote_code = remote_code
+        # Operator-facing node evidence attached when a command was
+        # rejected by a live node process: the node's own stderr tail.
+        # Bounded at construction (see _session_stderr_tail); the public
+        # reason code and str(exc) stay exactly the code, so nothing
+        # downstream changes shape.
+        self.diagnostic = diagnostic
         super().__init__(code)
+
+
+_NODE_STDERR_TAIL_CHARS = 4_000
+_NODE_DIAGNOSTIC_MAX_CHARS = 12_000
+
+
+def _session_stderr_tail(sessions: Mapping[str, Any]) -> str | None:
+    """Bounded stderr tails from live node sessions, for operator diagnosis.
+
+    The rejection envelope only carries an error code; the node's own
+    stderr carries the real reason (traceback, verification failure,
+    sidecar error). Collect bounded tails so a rejection can be raised
+    with its evidence without leaking unbounded process output.
+    """
+    parts: list[str] = []
+    budget = _NODE_DIAGNOSTIC_MAX_CHARS
+    for node_id in sorted(sessions):
+        stderr = getattr(sessions[node_id], "stderr", None)
+        if not isinstance(stderr, bytes) or not stderr:
+            continue
+        tail = (
+            stderr[-_NODE_STDERR_TAIL_CHARS:]
+            .decode("utf-8", errors="replace")
+            .rstrip()
+        )
+        if not tail:
+            continue
+        entry = f"node {node_id} stderr (tail):\n{tail}"
+        budget -= len(entry) + 2
+        if budget <= 0 and parts:
+            break
+        parts.append(entry)
+    if not parts:
+        return None
+    return "\n\n".join(parts)
 
 
 def _reject(code: str) -> NoReturn:
@@ -2130,6 +2177,11 @@ class QualificationController:
                 stopped.add(id(sessions[node_id]))
         except BaseException as exc:
             primary_error = exc
+            if isinstance(exc, ControllerError) and exc.diagnostic is None:
+                # Attach the rejecting node's own stderr while every
+                # session is still alive, so the reason for the
+                # rejection survives the cleanup path that follows.
+                exc.diagnostic = _session_stderr_tail(sessions)
 
         cleanup_failed = False
         for node_id, session in created_sessions:

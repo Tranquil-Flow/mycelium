@@ -25,7 +25,7 @@ from .command_controller import (
 from .a4_contracts import validate_interruptible_stage_command
 from .lock_order import LockOrderDetector, LockOrderViolation
 
-from .route import InferenceCancelled, LiveRoute
+from .route import AffectedPeerQuarantined, InferenceCancelled, LiveRoute
 
 
 @dataclass
@@ -385,34 +385,56 @@ class LiveRouterPort:
             )
         except InferenceCancelled:
             terminal = "CANCELLED"
+            admission_refused = False
+        except AffectedPeerQuarantined:
+            terminal = "FAILED"
+            admission_refused = True
         except BaseException:
             terminal = "FAILED"
+            admission_refused = False
         else:
             terminal = "COMPLETED"
+            admission_refused = False
         if coordinator is not None:
             coordinator.mark_phase(request_id, "cleanup")
-        try:
-            self._record_command_terminal(pending, terminal)
-        except RuntimeError as error:
-            terminal_blocked_reason = str(error)
-            # If a scoped liveness incident already projected the affected
-            # track's terminal status (e.g. a participating peer's transport
-            # is fatally failed), the scoped incident is the authoritative
-            # cleanup projection. Retire the runtime reservation so the
-            # request leaves the cleanup phase; the SSE stream will close
-            # without a terminal event, which the gateway's scoped-liveness
-            # surfaces as the authoritative outcome. Without a scoped
-            # incident we keep the fail-closed "cleanup" phase so the
-            # operator can see the unproven cleanup.
-            if (
-                coordinator is not None
-                and self._route_has_scoped_incident_for(pending.request)
-            ):
-                coordinator.complete(request_id, state="failed")
-        else:
+        if admission_refused:
+            # The route refused admission before any node command was
+            # issued, so no command-ledger terminal CAS is owed. Publish
+            # the bounded failed terminal directly so the gateway closes
+            # the stream with a definitive outcome instead of retaining a
+            # nonterminal session (the cleanup-unproven shape).
             terminal_blocked_reason = None
             if coordinator is not None:
-                coordinator.complete(request_id, state=terminal.lower())
+                coordinator.complete(request_id, state="failed")
+        else:
+            try:
+                self._record_command_terminal(pending, terminal)
+            except RuntimeError as error:
+                terminal_blocked_reason = str(error)
+                # If a scoped liveness incident already projected the affected
+                # track's terminal status (e.g. a participating peer's transport
+                # is fatally failed), the scoped incident is the authoritative
+                # cleanup projection. Retire the runtime reservation so the
+                # request leaves the cleanup phase; the SSE stream will close
+                # without a terminal event, which the gateway's scoped-liveness
+                # surfaces as the authoritative outcome. Without a scoped
+                # incident we keep the fail-closed "cleanup" phase so the
+                # operator can see the unproven cleanup.
+                if (
+                    coordinator is not None
+                    and self._route_has_scoped_incident_for(pending.request)
+                ):
+                    coordinator.complete(request_id, state="failed")
+                elif coordinator is not None:
+                    # Cleanup-unproven with no scoped incident: the stream
+                    # terminal stays unpublished (fail-closed), but the
+                    # dispatch slot must retire so this request cannot pin
+                    # concurrent dispatch capacity forever (spec A4 §5).
+                    coordinator.retire_dispatch_slot(request_id)
+            else:
+                terminal_blocked_reason = None
+                if coordinator is not None:
+                    coordinator.complete(request_id, state=terminal.lower())
         should_release = False
         with self._changed:
             if terminal_blocked_reason is None:

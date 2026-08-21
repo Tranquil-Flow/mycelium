@@ -23,7 +23,14 @@ import {
 const QUALIFICATION_CHANGED_REASON =
   'Qualification changed; review and accept the current binding';
 const ACTIVE_REQUEST_REASON = 'A request is already active';
-const RESTORED_STREAM_RETRY_DELAYS_MS = Object.freeze([250, 750, 1_500, 3_000]);
+// PROVISIONAL schedule: coordination with the A4 lane is pending. The A4 fix
+// in flight may discard unacknowledged events when no subscriber is attached
+// and advance discarded_through, so long reconnect tails risk
+// resume_cursor_expired. Do not treat this schedule as frozen until the A4
+// lane confirms the discard semantics.
+export const RESTORED_STREAM_RETRY_DELAYS_MS = Object.freeze([
+  500, 1_500, 3_000, 6_000, 12_000, 30_000, 60_000,
+]);
 const MAX_HISTORY_PROMPT_CHARS = 8_192;
 const MAX_HISTORY_RESPONSE_CHARS = 65_536;
 
@@ -50,6 +57,7 @@ type SessionAction =
   | { readonly type: 'interrupted'; readonly code: string | null }
   | { readonly type: 'stream_reopened' }
   | { readonly type: 'cancelling' }
+  | { readonly type: 'cancel_unconfirmed' }
   | { readonly type: 'cancel_failed'; readonly code: string }
   | { readonly type: 'stream_failed'; readonly code: string; readonly now: number }
   | { readonly type: 'submission_failed'; readonly code: string }
@@ -335,6 +343,19 @@ export function inferenceSessionReducer(
       return isTerminalInferencePhase(state.phase)
         ? state
         : Object.freeze({ ...state, phase: 'cancelling', cancellation_requested: true });
+    case 'cancel_unconfirmed':
+      // Non-terminal: the server acknowledged the cancellation, but the
+      // terminal frame is the server's to author. Only reachable from
+      // 'cancelling'; any terminal phase (including a server-delivered
+      // 'cancelled') wins and is preserved.
+      return isTerminalInferencePhase(state.phase) || state.phase !== 'cancelling'
+        ? state
+        : Object.freeze({
+            ...state,
+            phase: 'cancel_unconfirmed',
+            error_code: null,
+            cancellation_requested: false,
+          });
     case 'cancel_failed':
       return isTerminalInferencePhase(state.phase)
         ? state
@@ -607,6 +628,15 @@ export function useInferenceSession({
     const operation = (async () => {
       try {
         await client.cancel(current.accepted_request!);
+        // The acknowledgement is server evidence that the cancellation was
+        // accepted — it is NOT evidence of a terminal state. The terminal
+        // frame remains the server's to author. We surface the truth as a
+        // distinct NON-terminal phase and close our own stream connection so
+        // the per-tab stream slot is released for the next request. No client
+        // timer synthesizes a terminal result, and no wait is derived from a
+        // hardcoded budget.
+        streamAbortRef.current?.abort();
+        dispatch({ type: 'cancel_unconfirmed' });
       } catch (error) {
         const failure = publicFailure(error, 'cancellation_failed');
         dispatch({ type: 'cancel_failed', code: failure.code });
