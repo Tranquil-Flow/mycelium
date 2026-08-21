@@ -173,3 +173,6 @@ if __name__ == "__main__":
     except EnrollmentError as exc:
         print(f"{REHEARSAL_LABEL}: rejected: {exc.code}", file=sys.stderr)
         raise SystemExit(2)
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"{REHEARSAL_LABEL}: invalid input: {exc}", file=sys.stderr)
+        raise SystemExit(2)
