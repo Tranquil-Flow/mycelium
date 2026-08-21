@@ -144,21 +144,21 @@ def test_current_mycelium_completion_checklist_is_closed_and_truthful() -> None:
         "checked_gates": 13,
         "findings": [],
         "ok": True,
-        "primary_gate": "A4",
+        "primary_gate": "A5",
         "protocol": "mycelium.completion_checklist.v1",
     }
 
 
 def test_audit_rejects_a_second_gate_in_progress(tmp_path: Path) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
-    checklist["gates"][2]["state"] = "implemented_unintegrated"
+    checklist["gates"][3]["state"] = "implemented_unintegrated"
     relative = "second-in-progress.json"
     (tmp_path / relative).write_text(json.dumps(checklist), "utf-8")
 
     result = audit(tmp_path, relative)
 
     assert result["ok"] is False
-    assert "non_primary_gate_in_progress:A5" in result["findings"]
+    assert "non_primary_gate_in_progress:A6" in result["findings"]
 
 
 def test_audit_rejects_missing_and_extra_direct_dependencies(tmp_path: Path) -> None:
@@ -179,7 +179,8 @@ def test_audit_rejects_missing_and_extra_direct_dependencies(tmp_path: Path) -> 
 
 def test_completed_requirement_without_evidence_is_rejected(tmp_path: Path) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
-    gate = checklist["gates"][1]
+    gate = checklist["gates"][2]
+    gate["state"] = "implemented_unintegrated"
     gate["completed_requirements"].append("deterministic_positive")
     source = (
         gate["partial_requirements"]
@@ -193,7 +194,7 @@ def test_completed_requirement_without_evidence_is_rejected(tmp_path: Path) -> N
     result = audit(tmp_path, relative)
 
     assert result["ok"] is False
-    assert "gate:A4:completed_evidence_missing:deterministic_positive" in result[
+    assert "gate:A5:completed_evidence_missing:deterministic_positive" in result[
         "findings"
     ]
 
@@ -202,7 +203,7 @@ def test_complete_gate_state_without_executed_evidence_is_rejected(
     tmp_path: Path,
 ) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
-    gate = checklist["gates"][1]
+    gate = checklist["gates"][2]
     gate.update(
         {
             "state": "complete",
@@ -217,8 +218,8 @@ def test_complete_gate_state_without_executed_evidence_is_rejected(
     result = audit(tmp_path, relative)
 
     assert result["ok"] is False
-    assert "gate:A4:completed_evidence_missing:physical_positive" in result["findings"]
-    assert "gate:A4:completed_evidence_missing:atomic_feature_commit" in result[
+    assert "gate:A5:completed_evidence_missing:physical_positive" in result["findings"]
+    assert "gate:A5:completed_evidence_missing:atomic_feature_commit" in result[
         "findings"
     ]
 
@@ -267,25 +268,25 @@ def test_completed_evidence_validates_all_required_bindings(
 
 def test_audit_accepts_atomic_advance_to_the_next_primary_gate(tmp_path: Path) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
-    checklist["primary_gate"] = "A4"
+    checklist["primary_gate"] = "A5"
     _minimal_repo(tmp_path, checklist)
-    _complete_gate(tmp_path, checklist, "A3")
+    _complete_gate(tmp_path, checklist, "A4")
     _write_checklist(tmp_path, checklist)
 
     result = audit(tmp_path)
 
     assert result["ok"] is True
-    assert result["primary_gate"] == "A4"
+    assert result["primary_gate"] == "A5"
 
 
 def test_completed_gate_retains_expired_live_evidence_as_historical_proof(
     tmp_path: Path,
 ) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
-    checklist["primary_gate"] = "A4"
+    checklist["primary_gate"] = "A5"
     _minimal_repo(tmp_path, checklist)
-    _complete_gate(tmp_path, checklist, "A3")
-    gate = checklist["gates"][0]
+    _complete_gate(tmp_path, checklist, "A4")
+    gate = checklist["gates"][1]
     for evidence in gate["evidence_bindings"]:
         if evidence["binding_scope"] != "source":
             evidence["fresh_until"] = "2026-08-18T00:00:01Z"
@@ -294,24 +295,12 @@ def test_completed_gate_retains_expired_live_evidence_as_historical_proof(
     result = audit(tmp_path)
 
     assert result["ok"] is True
-    assert result["primary_gate"] == "A4"
+    assert result["primary_gate"] == "A5"
 
 
 def test_audit_accepts_dependency_ready_parallel_primary_gate(tmp_path: Path) -> None:
     checklist = json.loads((ROOT / DEFAULT_CHECKLIST).read_text("utf-8"))
     checklist["primary_gate"] = "A8"
-    checklist["gates"][1].update(
-        {
-            "state": "design_only",
-            "completed_requirements": ["specification"],
-            "partial_requirements": [],
-            "pending_requirements": [
-                requirement
-                for requirement in checklist["closure_requirements"]
-                if requirement != "specification"
-            ],
-        }
-    )
     _minimal_repo(tmp_path, checklist)
     _complete_gate(tmp_path, checklist, "A3")
     checklist["gates"][5].update(
