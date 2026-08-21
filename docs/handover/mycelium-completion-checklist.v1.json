@@ -1,7 +1,7 @@
 {
   "protocol": "mycelium.completion_checklist.v1",
   "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
-  "updated_on": "2026-08-18",
+  "updated_on": "2026-08-21",
   "primary_gate": "A4",
   "workspace_ids": [
     "inference",
@@ -181,7 +181,7 @@
       "dependencies": ["A3"],
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
       "state": "design_only",
-      "blockers": ["dependency A3 atomic completion", "public HTTPS and off-tailnet test peer"],
+      "blockers": ["public HTTPS and off-tailnet test peer"],
       "completed_requirements": ["specification"],
       "evidence_bindings": [
         {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md", "artifact_digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9", "provenance": "source", "subject": "A8:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}

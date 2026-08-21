@@ -20,6 +20,11 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from mycelium_invite import InviteError, verify_invite_bundle
+from mycelium_internet.bootstrap import (
+    BoundaryError,
+    PublicBootstrapPolicy,
+    canonical_https_origin,
+)
 from mycelium_membership import (
     HEARTBEAT_PROTOCOL,
     LEASE_RENEWAL_PROTOCOL,
@@ -333,6 +338,33 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
     def rotation_envelope(self) -> Mapping[str, Any] | None:
         return self.server.rotation_envelope  # type: ignore[attr-defined, no-any-return]
 
+    @property
+    def boundary_policy(self) -> PublicBootstrapPolicy | None:
+        return getattr(self.server, "boundary_policy", None)
+
+    def _boundary_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        for name in ("Transfer-Encoding", "Upgrade", "Cookie", "Authorization"):
+            value = self.headers.get(name)
+            if value is not None:
+                headers[name] = value
+        return headers
+
+    def _enforce_boundary(self, *, body_length: int, invite_token: str | None = None) -> None:
+        policy = self.boundary_policy
+        if policy is None:
+            return
+        policy.validate_request(
+            method=self.command,
+            target=self.path,
+            content_type=self.headers.get_content_type(),
+            body_length=body_length,
+            headers=self._boundary_headers(),
+            invite_token=invite_token,
+        )
+        policy.check_rate()
+        policy.acquire()
+
     def _send(self, status: int, value: Mapping[str, Any]) -> None:
         body = canonical_json_bytes(dict(value))
         if getattr(self, "_response_started", False):
@@ -383,29 +415,75 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         self._response_started = False
-        if self.path == "/seed/rotation":
-            if self.rotation_envelope is None:
-                self._fail("seed_rotation_absent", status=HTTPStatus.NOT_FOUND)
-            else:
-                self._send(HTTPStatus.OK, self.rotation_envelope)
-            return
-        if self.path != "/seed/identity":
-            self._fail("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
-            return
+        acquired = False
         try:
-            self._send(HTTPStatus.OK, self.coordinator.identity_envelope())
-        except (SeedCoordinatorError, ValueError) as exc:
-            code = getattr(exc, "code", "seed_http_request_invalid")
-            self._fail(code)
-        except Exception:
-            self._fail(
-                "seed_http_internal_error", status=HTTPStatus.INTERNAL_SERVER_ERROR
-            )
+            if self.boundary_policy is not None:
+                content_length = self.headers.get("Content-Length")
+                try:
+                    body_length = (
+                        int(content_length) if content_length is not None else 0
+                    )
+                except ValueError:
+                    self._fail(
+                        "seed_http_content_length_invalid",
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self._enforce_boundary(body_length=body_length)
+                acquired = True
+            if self.path == "/seed/rotation":
+                if self.rotation_envelope is None:
+                    self._fail("seed_rotation_absent", status=HTTPStatus.NOT_FOUND)
+                else:
+                    self._send(HTTPStatus.OK, self.rotation_envelope)
+                return
+            if self.path != "/seed/identity":
+                self._fail("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
+                return
+            try:
+                self._send(HTTPStatus.OK, self.coordinator.identity_envelope())
+            except (SeedCoordinatorError, ValueError) as exc:
+                code = getattr(exc, "code", "seed_http_request_invalid")
+                self._fail(code)
+            except Exception:
+                self._fail(
+                    "seed_http_internal_error", status=HTTPStatus.INTERNAL_SERVER_ERROR
+                )
+        except BoundaryError as exc:
+            self._fail(exc.code, status=HTTPStatus.BAD_REQUEST)
+        finally:
+            if acquired:
+                self.boundary_policy.release()  # type: ignore[union-attr]
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         self._response_started = False
+        acquired = False
         try:
+            if self.boundary_policy is not None:
+                content_length = self.headers.get("Content-Length")
+                try:
+                    body_length = (
+                        int(content_length) if content_length is not None else 0
+                    )
+                except ValueError:
+                    self._fail(
+                        "seed_http_content_length_invalid",
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                self._enforce_boundary(body_length=body_length)
+                acquired = True
             body = self._read_body()
+            if self.boundary_policy is not None and self.path == "/seed/join":
+                invite_token = body.get("invite_token")
+                if isinstance(invite_token, str) and invite_token:
+                    self.boundary_policy.validate_request(
+                        method="POST",
+                        target=self.path,
+                        content_type="application/json",
+                        body_length=len(canonical_json_bytes(dict(body))),
+                        invite_token=invite_token,
+                    )
             if self.path == "/seed/join":
                 if set(body) != {"protocol", "invite_token", "join_envelope"}:
                     raise SeedHTTPError("seed_http_body_invalid")
@@ -473,6 +551,8 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
                 self._send(HTTPStatus.OK, response)
                 return
             raise SeedHTTPError("seed_http_route_unknown", status=HTTPStatus.NOT_FOUND)
+        except BoundaryError as exc:
+            self._fail(exc.code, status=HTTPStatus.BAD_REQUEST)
         except (
             SeedHTTPError,
             InviteError,
@@ -487,6 +567,9 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
             self._fail(
                 "seed_http_internal_error", status=HTTPStatus.INTERNAL_SERVER_ERROR
             )
+        finally:
+            if acquired:
+                self.boundary_policy.release()  # type: ignore[union-attr]
 
 
 class SeedHTTPServer:
@@ -500,8 +583,14 @@ class SeedHTTPServer:
         port: int,
         advertised_url: str | None = None,
         rotation_envelope: Mapping[str, Any] | None = None,
+        public_seed_url: str | None = None,
+        policy: PublicBootstrapPolicy | None = None,
     ) -> None:
         host, requested_port = _validate_bind_address(host, port)
+        if public_seed_url is not None:
+            canonical_https_origin(public_seed_url)
+        if policy is not None and not isinstance(policy, PublicBootstrapPolicy):
+            raise ValueError("policy is invalid")
         if host in {"0.0.0.0", "::"} and advertised_url is None:
             raise ValueError("advertised_url is required for wildcard binds")
         if advertised_url is not None:
@@ -527,6 +616,7 @@ class SeedHTTPServer:
         self._server.rotation_envelope = (  # type: ignore[attr-defined]
             None if rotation_envelope is None else dict(rotation_envelope)
         )
+        self._server.boundary_policy = policy  # type: ignore[attr-defined]
         self._server.handle_error = lambda *_args: None
         bound_host, bound_port = self._server.server_address[:2]
         published_host = {
@@ -552,7 +642,9 @@ class SeedHTTPServer:
                     ),
                 )
             )
-            coordinator.bind_seed_url(bound_url)
+            coordinator.bind_seed_url(
+                public_seed_url if public_seed_url is not None else bound_url
+            )
         except Exception:
             self._server.server_close()
             raise
@@ -884,6 +976,21 @@ class SeedHTTPClient:
         ):
             raise SeedHTTPError("seed_http_seed_pin_mismatch")
         return digest
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any]:
+        """Bounded canonical-JSON transport without seed-envelope verification.
+
+        The public HTTPS adapter owns pin, origin, and signature
+        verification; this exposes the no-redirect, frame-bounded,
+        content-typed transport underneath it for that composition.
+        """
+
+        return self._request(method, path, body)
 
     def identity(self, *, now: float) -> dict[str, Any]:
         envelope = self._request("GET", "/seed/identity")

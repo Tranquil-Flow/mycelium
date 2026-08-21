@@ -438,6 +438,51 @@
     },
     {
       "fixture": {
+        "path": "contracts/compatibility-fixtures/internet-activation-observation-v1.json",
+        "sha256": "bcf703ead3a422125a79b4f8de1d8cfc0cde6f10dc57b1e147023dc0248e7d3b",
+        "size_bytes": 641
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_internet/contracts.py",
+          "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc",
+          "size_bytes": 20600
+        }
+      ],
+      "protocol": "mycelium.internet_activation_observation.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/internet-bootstrap-status-v1.json",
+        "sha256": "36700b1c145f0e53c8ad898f71e7d70f2b53e42115cfa5ba36f42bf146f15a4a",
+        "size_bytes": 399
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_internet/contracts.py",
+          "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc",
+          "size_bytes": 20600
+        }
+      ],
+      "protocol": "mycelium.internet_bootstrap_status.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/internet-native-qualification-v1.json",
+        "sha256": "91c626f44b1067ef516c37b8993ec283c92c56eb9ecbc42ee3e3d5c4fb2dd72d",
+        "size_bytes": 799
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_internet/contracts.py",
+          "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc",
+          "size_bytes": 20600
+        }
+      ],
+      "protocol": "mycelium.internet_native_qualification.v1"
+    },
+    {
+      "fixture": {
         "path": "contracts/compatibility-fixtures/interruptible-stage-command-v1.json",
         "sha256": "f3b24baf289b21874903af48c1fa52d4719453d954b759b87409650914eea1a8",
         "size_bytes": 1032
@@ -945,8 +990,8 @@
         },
         {
           "path": "mycelium_seed/http.py",
-          "sha256": "ee7b9972da7740cf2db66dd08522ef793fbba153f556b60d9884abbb6e326bfc",
-          "size_bytes": 36969
+          "sha256": "f1491676ea84152a2dd21a0295d9537e11531e1bfdeb7b7beaf69bfa757fa9ab",
+          "size_bytes": 41347
         }
       ],
       "protocol": "mycelium.membership.resume_request.v1"
@@ -1275,6 +1320,21 @@
         }
       ],
       "protocol": "mycelium.provisioning_audit.v1"
+    },
+    {
+      "fixture": {
+        "path": "contracts/compatibility-fixtures/relay-projection-v1.json",
+        "sha256": "eb2c378acaadfbcfdbfe6cbcffd05ea824c9da52fd6d8b77d37cc86783336081",
+        "size_bytes": 261
+      },
+      "owner_sources": [
+        {
+          "path": "mycelium_internet/contracts.py",
+          "sha256": "7dd483dcdbc4da852a5934ff39100830980b6aae00ac76427ec57d35706553cc",
+          "size_bytes": 20600
+        }
+      ],
+      "protocol": "mycelium.relay_projection.v1"
     },
     {
       "fixture": {

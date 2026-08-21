@@ -53,6 +53,61 @@ WORKSPACES = {
     "incidents",
     "settings",
 }
+DETERMINISTIC_GATE_KINDS = {
+    "deterministic_positive",
+    "deterministic_negative",
+}
+DETERMINISTIC_GATE_FIELDS = {
+    "gate_id",
+    "gate_kind",
+    "spec_section",
+    "covered_by",
+    "test_ids",
+    "decision_ids",
+}
+_REQUIRED_DETERMINISTIC_GATES = {
+    # §3 public HTTPS bootstrap boundary
+    "bootstrap_canonical_origin",
+    "bootstrap_downgrade_redirect_refusal",
+    "bootstrap_content_type_method_path_allowlist",
+    "bootstrap_frame_concurrency_rate_bounds",
+    "bootstrap_timeout_and_no_store",
+    # §10.1 seed key pinning
+    "pin_success",
+    "wrong_pin_rejected",
+    "rotated_overlap_accepted",
+    "expired_rotation_rejected",
+    "certificate_valid_unsigned_seed_rejected",
+    "tls_valid_no_invitation_authority_rejected",
+    # §4 invitation and join
+    "invite_expiry_rejected",
+    "invite_exact_idempotent_retry",
+    "invite_changed_retry_rejected",
+    "wrong_swarm_or_seed_rejected",
+    "duplicate_key_or_endpoint_rejected",
+    "unsupported_class_rejected",
+    "atomic_no_partial_member",
+    # §5 post-join control and revocation
+    "resume_through_public_adapter",
+    "heartbeat_lease_renewal",
+    "lease_expiry_rejected",
+    "stale_generation_rejected",
+    "revoked_generation_rejected",
+    "changed_incarnation_rejected",
+    "bounded_reconnect_same_origin",
+    # §6 activation and observations
+    "direct_observation",
+    "relay_observation",
+    "unknown_path_observation",
+    "path_transition_history",
+    "persistent_connection_reuse",
+    "nullable_measurements_unknown",
+    "explicit_measured_zero_loss",
+    "relay_redaction",
+    # §8 closed contracts + §11 privacy scans
+    "closed_contracts_fixtures_validate",
+    "projection_privacy_scans",
+}
 DECISION_FIELDS = {
     "decision_id",
     "decision",
@@ -114,6 +169,7 @@ def test_a8_inventory_is_closed_bounded_design_only_and_specification_bound() ->
         "source_specification",
         "decisions",
         "workspace_projections",
+        "deterministic_gates",
         "physical_positive_cases",
         "physical_negative_cases",
     }
@@ -178,6 +234,32 @@ def test_a8_decision_inventory_has_exact_coverage_and_fail_closed_choices() -> N
         "tailnet_fallback",
         "ssh_serving",
     } <= forbidden
+
+
+def test_a8_deterministic_gate_matrix_is_exact_and_machine_checked() -> None:
+    import re as _re
+
+    gates = _inventory()["deterministic_gates"]
+    assert isinstance(gates, list) and 1 <= len(gates) <= 64
+    assert {gate["gate_id"] for gate in gates} == _REQUIRED_DETERMINISTIC_GATES
+    for gate in gates:
+        assert isinstance(gate, dict) and set(gate) == DETERMINISTIC_GATE_FIELDS
+        assert gate["gate_kind"] in DETERMINISTIC_GATE_KINDS
+        assert isinstance(gate["spec_section"], str)
+        assert _re.fullmatch(r"\d{1,2}(\.\d+)?", gate["spec_section"])
+        covered_by = gate["covered_by"]
+        assert isinstance(covered_by, str) and covered_by.endswith(".py")
+        path = ROOT / covered_by
+        assert path.is_file(), f"deterministic gate coverage file missing: {covered_by}"
+        test_ids = _bounded_unique_names(gate["test_ids"], maximum=64)
+        source = path.read_text("utf-8")
+        for test_id in test_ids:
+            assert f"def {test_id}(" in source, (
+                f"deterministic gate {gate['gate_id']} names missing test "
+                f"{test_id} in {covered_by}"
+            )
+        decision_ids = _bounded_unique_names(gate["decision_ids"])
+        assert decision_ids <= REQUIRED_DECISIONS
 
 
 def test_a8_physical_negative_inventory_is_exact_and_side_effect_bounded() -> None:

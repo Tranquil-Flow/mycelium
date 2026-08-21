@@ -65,6 +65,288 @@
     "incidents": ["bootstrap_pin_invite_or_lease_failure", "path_transition_and_reconnect", "bounded_outcome"],
     "settings": ["public_origin_and_certificate", "bootstrap_relay_policy", "invite_revocation_and_private_diagnostics"]
   },
+  "deterministic_gates": [
+    {
+      "gate_id": "bootstrap_canonical_origin",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "3",
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "test_ids": ["test_canonical_origin_rejects_userinfo_path_query_and_fragment", "test_canonical_origin_requires_exact_form"],
+      "decision_ids": ["public_https_bootstrap_authentication"]
+    },
+    {
+      "gate_id": "bootstrap_downgrade_redirect_refusal",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "3",
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "test_ids": ["test_cleartext_http_origin_is_a_downgrade_refusal", "test_every_redirect_is_refused"],
+      "decision_ids": ["public_https_bootstrap_authentication"]
+    },
+    {
+      "gate_id": "bootstrap_content_type_method_path_allowlist",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "3",
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "test_ids": ["test_allowlist_is_exactly_the_five_closed_routes", "test_non_allowlisted_routes_rejected", "test_post_requires_exact_json_content_type", "test_get_with_body_rejected", "test_transfer_encoding_websocket_cookie_and_authorization_rejected"],
+      "decision_ids": ["public_https_bootstrap_authentication"]
+    },
+    {
+      "gate_id": "bootstrap_frame_concurrency_rate_bounds",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "3",
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "test_ids": ["test_frame_bound_rejects_oversized_bodies", "test_concurrency_bound_is_exhaustible_and_releasable", "test_rate_limit_allows_burst_then_exhausts_until_refill", "test_invite_attempt_bound_is_per_invite_and_privacy_safe", "test_join_attempt_limit_is_checked_only_on_the_join_route"],
+      "decision_ids": ["public_https_bootstrap_authentication"]
+    },
+    {
+      "gate_id": "bootstrap_timeout_and_no_store",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "3",
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "test_ids": ["test_read_timeout_is_bounded", "test_response_headers_are_json_and_no_store"],
+      "decision_ids": ["public_https_bootstrap_authentication"]
+    },
+    {
+      "gate_id": "pin_success",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "10.1",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_pin_success_before_any_secret_transmission"],
+      "decision_ids": ["seed_key_pinning"]
+    },
+    {
+      "gate_id": "wrong_pin_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "10.1",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_wrong_pin_rejected_and_secret_never_transmitted"],
+      "decision_ids": ["seed_key_pinning"]
+    },
+    {
+      "gate_id": "rotated_overlap_accepted",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "10.1",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_rotated_overlap_accepts_both_digests"],
+      "decision_ids": ["seed_key_pinning"]
+    },
+    {
+      "gate_id": "expired_rotation_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "10.1",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_expired_rotation_rejected"],
+      "decision_ids": ["seed_key_pinning"]
+    },
+    {
+      "gate_id": "certificate_valid_unsigned_seed_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "10.1",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_wrong_pin_rejected_and_secret_never_transmitted"],
+      "decision_ids": ["seed_key_pinning", "public_https_bootstrap_authentication"]
+    },
+    {
+      "gate_id": "tls_valid_no_invitation_authority_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "10.1",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_tls_success_without_invitation_authority_refuses_join", "test_unverified_tls_refuses_everything"],
+      "decision_ids": ["seed_key_pinning", "invitation_and_revocation"]
+    },
+    {
+      "gate_id": "invite_expiry_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_expired_invite_rejected_atomically"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "invite_exact_idempotent_retry",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_exact_join_retry_returns_same_acceptance_without_retransmit"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "invite_changed_retry_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_changed_retry_under_same_nonce_fails_closed"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "wrong_swarm_or_seed_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_wrong_swarm_join_rejected_without_partial_member"],
+      "decision_ids": ["invitation_and_revocation", "seed_key_pinning"]
+    },
+    {
+      "gate_id": "duplicate_key_or_endpoint_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_duplicate_key_and_endpoint_id_rejected"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "unsupported_class_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_unsupported_peer_class_rejected"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "atomic_no_partial_member",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "4",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_expired_invite_rejected_atomically", "test_wrong_swarm_join_rejected_without_partial_member", "test_unsupported_peer_class_rejected"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "resume_through_public_adapter",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_resume_advances_generation_through_the_adapter"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "heartbeat_lease_renewal",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_heartbeat_renews_lease_through_the_adapter"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "lease_expiry_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_lease_expiry_blocks_control_locally"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "stale_generation_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_stale_generation_rejected"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "revoked_generation_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_revocation_rejects_control_and_sticks", "test_revoked_member_is_rejected_by_activation_admission_guard"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "changed_incarnation_rejected",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_changed_incarnation_rejected"],
+      "decision_ids": ["invitation_and_revocation"]
+    },
+    {
+      "gate_id": "bounded_reconnect_same_origin",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "5",
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "test_ids": ["test_bounded_reconnect_same_origin_no_fallback", "test_reconnect_exhaustion_is_bounded_and_honest"],
+      "decision_ids": ["public_https_bootstrap_authentication", "ssh_tailscale_independence"]
+    },
+    {
+      "gate_id": "direct_observation",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_direct_observation_is_recorded_from_bound_connection"],
+      "decision_ids": ["iroh_direct_relay_activation"]
+    },
+    {
+      "gate_id": "relay_observation",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_relay_observation_is_recorded"],
+      "decision_ids": ["iroh_direct_relay_activation", "privacy_safe_relay_projection"]
+    },
+    {
+      "gate_id": "unknown_path_observation",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_unknown_path_is_recorded_without_metrics", "test_missing_evidence_projects_unknown_not_zero"],
+      "decision_ids": ["iroh_direct_relay_activation", "unknown_not_zero_measurements"]
+    },
+    {
+      "gate_id": "path_transition_history",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_transition_history_is_retained_and_never_rewritten"],
+      "decision_ids": ["iroh_direct_relay_activation"]
+    },
+    {
+      "gate_id": "persistent_connection_reuse",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_persistent_reuse_is_counted_per_generation"],
+      "decision_ids": ["iroh_direct_relay_activation"]
+    },
+    {
+      "gate_id": "nullable_measurements_unknown",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_nullable_measurements_are_unknown_not_zero", "test_stale_evidence_projects_unknown_and_nullable_metrics", "test_missing_evidence_projects_unknown_not_zero"],
+      "decision_ids": ["unknown_not_zero_measurements"]
+    },
+    {
+      "gate_id": "explicit_measured_zero_loss",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_explicit_measured_zero_loss_requires_current_samples"],
+      "decision_ids": ["unknown_not_zero_measurements"]
+    },
+    {
+      "gate_id": "relay_redaction",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "6",
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "test_ids": ["test_relay_redaction_removes_raw_identity_before_projection", "test_relay_projection_rejects_non_canonical_identity_inputs"],
+      "decision_ids": ["privacy_safe_relay_projection"]
+    },
+    {
+      "gate_id": "closed_contracts_fixtures_validate",
+      "gate_kind": "deterministic_positive",
+      "spec_section": "8",
+      "covered_by": "tests/a8_acceptance/test_internet_contracts.py",
+      "test_ids": ["test_every_a8_fixture_validates", "test_fixture_names_and_protocols_are_exactly_the_four_a8_shapes"],
+      "decision_ids": ["public_https_bootstrap_authentication", "seed_key_pinning", "invitation_and_revocation", "iroh_direct_relay_activation", "unknown_not_zero_measurements", "privacy_safe_relay_projection", "ssh_tailscale_independence"]
+    },
+    {
+      "gate_id": "projection_privacy_scans",
+      "gate_kind": "deterministic_negative",
+      "spec_section": "11",
+      "covered_by": "tests/a8_acceptance/test_privacy.py",
+      "test_ids": ["test_every_contract_fixture_is_privacy_clean", "test_activation_projection_is_privacy_clean", "test_forbidden_keys_are_flagged", "test_raw_url_and_hostname_values_are_flagged", "test_private_paths_are_flagged", "test_bearer_tokens_and_credentials_are_flagged", "test_ip_address_and_tailscale_references_are_flagged", "test_forbidden_needles_are_flagged_wherever_they_appear", "test_ensure_privacy_clean_raises_bounded_violation"],
+      "decision_ids": ["public_https_bootstrap_authentication", "seed_key_pinning", "invitation_and_revocation", "iroh_direct_relay_activation", "unknown_not_zero_measurements", "privacy_safe_relay_projection", "ssh_tailscale_independence"]
+    }
+  ],
   "physical_positive_cases": [
     {
       "case_id": "unrelated_https_invite_without_tailscale",

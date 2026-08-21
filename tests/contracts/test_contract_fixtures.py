@@ -120,6 +120,14 @@ EXPECTED_PROTOCOLS = {
     "product-concurrency-liveness-qualification-v1.json": (
         "mycelium.product_concurrency_liveness_qualification.v1"
     ),
+    "internet-bootstrap-status-v1.json": "mycelium.internet_bootstrap_status.v1",
+    "internet-activation-observation-v1.json": (
+        "mycelium.internet_activation_observation.v1"
+    ),
+    "relay-projection-v1.json": "mycelium.relay_projection.v1",
+    "internet-native-qualification-v1.json": (
+        "mycelium.internet_native_qualification.v1"
+    ),
     "m23-kv-gate-v1.json": "mycelium.m23_heterogeneous_kv_gate.v1",
     "product-snapshot-v1.json": "mycelium.product_snapshot.v1",
     "product-event-v1.json": "mycelium.product_event.v1",
