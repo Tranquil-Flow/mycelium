@@ -1,5 +1,5 @@
 {
-  "atomic_commit": null,
+  "atomic_commit": "599e3936db48d8b167a65e53dcdc94db2b4bc20c",
   "bindings": {
     "authority_generation": 1787317421072,
     "contract_digest": "sha256:adfed0971cabb10b1dd10d37c2444684e69ea7f9e3dc623f06a6aff11d286e6d",
