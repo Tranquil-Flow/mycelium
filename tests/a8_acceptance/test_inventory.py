@@ -172,6 +172,7 @@ def test_a8_inventory_is_closed_bounded_design_only_and_specification_bound() ->
         "deterministic_gates",
         "physical_positive_cases",
         "physical_negative_cases",
+        "physical_execution",
     }
     assert inventory["protocol"] == PROTOCOL
     assert inventory["gate"] == "A8"
@@ -322,3 +323,36 @@ def test_a8_physical_positive_inventory_is_exact_and_ordinary_path_bound() -> No
         "raw_relay_identity_emitted",
         "prior_observation_rewritten",
     } <= side_effects
+
+
+def test_a8_physical_execution_pointers_are_repo_local_and_claim_free() -> None:
+    """The physical cases execute through the gate runner; the section only
+    points at the runner and deterministic pre-verification - it carries NO
+    executed/result/sealed claim (the inventory claim boundary forbids
+    execution records)."""
+
+    from pathlib import Path
+
+    section = _inventory()["physical_execution"]
+    assert isinstance(section, dict) and set(section) == {
+        "runner",
+        "preverified_by",
+    }
+    runner = Path(section["runner"])
+    assert runner.is_file() and runner.suffix == ".py"
+    assert "scripts/" in str(runner)
+    preverified = section["preverified_by"]
+    assert isinstance(preverified, dict) and 1 <= len(preverified) <= 32
+    physical_ids = {
+        case["case_id"]
+        for key in ("physical_positive_cases", "physical_negative_cases")
+        for case in _inventory()[key]
+    }
+    for case_id, module_path in preverified.items():
+        assert case_id in physical_ids
+        module = Path(module_path)
+        assert module.is_file() and module.suffix == ".py"
+        assert "tests/" in str(module)
+    serialized = json.dumps(section, sort_keys=True)
+    for forbidden in ("executed", "sealed", "result", "passed", "failed"):
+        assert forbidden not in serialized

@@ -347,6 +347,16 @@
       "decision_ids": ["public_https_bootstrap_authentication", "seed_key_pinning", "invitation_and_revocation", "iroh_direct_relay_activation", "unknown_not_zero_measurements", "privacy_safe_relay_projection", "ssh_tailscale_independence"]
     }
   ],
+  "physical_execution": {
+    "runner": "scripts/a8_run_physical_gate.py",
+    "preverified_by": {
+      "cleartext_or_redirect_bootstrap": "tests/a8_acceptance/test_physical_seed_side_cases.py",
+      "certificate_without_seed_authority": "tests/a8_acceptance/test_physical_seed_side_cases.py",
+      "invalid_or_replayed_invitation": "tests/a8_acceptance/test_physical_seed_side_cases.py",
+      "missing_or_stale_path_measurements": "tests/a8_acceptance/test_physical_gate_runner.py",
+      "raw_relay_identity_injection": "tests/a8_acceptance/test_physical_gate_runner.py"
+    }
+  },
   "physical_positive_cases": [
     {
       "case_id": "unrelated_https_invite_without_tailscale",

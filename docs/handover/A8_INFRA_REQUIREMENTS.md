@@ -60,6 +60,37 @@ device with Tailscale stopped. Rehearsal output is labelled and can never
 be sealed. Spec §12 voids same-LAN Iroh observations and tailnet paths as
 gate evidence.
 
+## 0.3 Executable runner (physical-era entry point)
+
+Every physical case executes through
+`scripts/a8_run_physical_gate.py`; the case registry is machine-checked
+against this inventory (`tests/a8_acceptance/test_physical_gate_runner.py`).
+The three seed-side negative cases are fully executable once the origin
+and an owner-delivered invite exist:
+
+    scripts/a8_run_physical_gate.py run cleartext_or_redirect_bootstrap \
+        --origin https://<canonical-origin> \
+        --bundle-file <owner-private invite bundle> \
+        --evidence-root <owner-private root> [--seal]
+
+    scripts/a8_run_physical_gate.py run certificate_without_seed_authority \
+        --origin ... --bundle-file ... --evidence-root ... [--seal]
+
+    scripts/a8_run_physical_gate.py run invalid_or_replayed_invitation \
+        --origin ... --bundle-file ... --node-root <owner-private node root> \
+        --evidence-root ... [--seal]
+
+The two projection-side negatives run without any adapter input. The nine
+peer-required cases fail closed with `peer_required` until the external
+peer and its invite inputs are supplied; the CLI takes them through the
+same runner path when they are. Every executed case requires a live
+boundary first: the pin is verified over the canonical origin before any
+observation is recorded, so an absent boundary can never produce a pass.
+
+The rehearsal harness (`scripts/a8_run_rehearsal_seed.py`,
+`scripts/a8_run_rehearsal_peer.py`) runs the full pin-first flow over a
+live origin without sealing anything; it is labelled rehearsal throughout.
+
 ---
 
 ## 1. Physical positive gates
