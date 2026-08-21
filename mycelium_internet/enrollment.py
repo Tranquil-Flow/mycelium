@@ -85,6 +85,7 @@ _REVOKED_CODES = frozenset(
     }
 )
 _EVIDENCE_FRESHNESS_SECONDS = 90.0
+SEED_TIME_SKEW_TOLERANCE_SECONDS = 30.0
 
 
 class EnrollmentError(RuntimeError):
@@ -337,7 +338,15 @@ class PublicBootstrapClient:
         return digest
 
     def preflight(self, *, now: float) -> dict[str, Any]:
-        """Fetch and verify the signed seed identity under the pinned key."""
+        """Fetch and verify the signed seed identity under the pinned key.
+
+        Statement timing is checked with a bounded clock-skew tolerance
+        (SEED_TIME_SKEW_TOLERANCE_SECONDS): the seed signs the statement at
+        fetch time, so a strict `now >= issued_at` check false-rejects
+        under millisecond-order skew or when the caller samples `now`
+        before the round trip. The tolerance is bounded and fail-closed -
+        statements issued or expired beyond it are still rejected.
+        """
 
         self._require_tls()
         envelope = self._request("GET", "/seed/identity", None)
@@ -402,8 +411,8 @@ class PublicBootstrapClient:
             or isinstance(issued, bool)
             or not isinstance(expires, (int, float))
             or isinstance(expires, bool)
-            or now < float(issued)
-            or now > float(expires)
+            or now < float(issued) - SEED_TIME_SKEW_TOLERANCE_SECONDS
+            or now > float(expires) + SEED_TIME_SKEW_TOLERANCE_SECONDS
         ):
             raise EnrollmentError("seed_time_invalid")
         return dict(statement)
