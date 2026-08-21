@@ -80,12 +80,28 @@ and an owner-delivered invite exist:
         --origin ... --bundle-file ... --node-root <owner-private node root> \
         --evidence-root ... [--seal]
 
-The two projection-side negatives run without any adapter input. The nine
-peer-required cases fail closed with `peer_required` until the external
-peer and its invite inputs are supplied; the CLI takes them through the
-same runner path when they are. Every executed case requires a live
-boundary first: the pin is verified over the canonical origin before any
-observation is recorded, so an absent boundary can never produce a pass.
+The two projection-side negatives run without any adapter input.
+
+Of the nine peer-required cases, five have an execution path and CLI
+support: `unrelated_https_invite_without_tailscale`, `revoked_active_member`,
+`endpoint_identity_mismatch`, `tailscale_unavailable`, and `ssh_unavailable`.
+They fail closed with `peer_required` until the external peer, its node root,
+and the invite inputs are supplied, and execute through the same runner when
+they are. Invoke them with `--node-root <owner-private root>`;
+`revoked_active_member` additionally needs `--revoke-command`, the owner's own
+administration command, which the runner executes between enrollment and the
+refusal check rather than minting any revocation authority of its own. The
+peer's tailnet exposure and SSH usage are observed by the runner on the host
+it runs on, not asserted by the operator.
+
+The remaining four - the three browser cases and `unqualified_external_member`
+- stay `peer_required` unconditionally. They additionally need the A8 product
+surface mounted in the shared spine, which is owned by the A4 lane; there is
+deliberately no execution path for them yet.
+
+Every executed case requires a live boundary first: the pin is verified over
+the canonical origin before any observation is recorded, so an absent boundary
+can never produce a pass.
 
 The rehearsal harness (`scripts/a8_run_rehearsal_seed.py`,
 `scripts/a8_run_rehearsal_peer.py`) runs the full pin-first flow over a

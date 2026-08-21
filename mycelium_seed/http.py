@@ -344,7 +344,14 @@ class _SeedRequestHandler(BaseHTTPRequestHandler):
 
     def _boundary_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
-        for name in ("Transfer-Encoding", "Upgrade", "Cookie", "Authorization"):
+        for name in (
+            "Transfer-Encoding",
+            "Upgrade",
+            "Cookie",
+            "Authorization",
+            "X-Forwarded-Proto",
+            "Cf-Visitor",
+        ):
             value = self.headers.get(name)
             if value is not None:
                 headers[name] = value

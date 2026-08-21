@@ -130,6 +130,46 @@ def mint_rehearsal_invite(
     return bundle, bundle_path
 
 
+def _owner_console(coordinator, stop: threading.Event) -> None:
+    """Read owner administration commands from stdin while the seed serves."""
+
+    for line in sys.stdin:
+        if stop.is_set():
+            return
+        parts = line.split()
+        if not parts:
+            continue
+        command, args = parts[0], parts[1:]
+        try:
+            if command == "members":
+                for member in coordinator.members():
+                    print(
+                        f"{REHEARSAL_LABEL}: member {member['node_id']} "
+                        f"generation={member['generation']} "
+                        f"lifecycle={member['lifecycle_state']} "
+                        f"activation_eligible={member['activation_eligible']}"
+                    )
+            elif command == "revoke" and args:
+                node_id = args[0]
+                matching = [
+                    m for m in coordinator.members() if m["node_id"] == node_id
+                ]
+                if not matching:
+                    print(f"{REHEARSAL_LABEL}: no such member {node_id}")
+                    continue
+                member = matching[0]
+                coordinator.advance_member_generation(
+                    node_id=node_id,
+                    expected_generation=int(member["generation"]),
+                    lifecycle_state="STOPPED",
+                )
+                print(f"{REHEARSAL_LABEL}: revoked {node_id}")
+            else:
+                print(f"{REHEARSAL_LABEL}: commands are 'members', 'revoke <id>'")
+        except Exception as exc:  # noqa: BLE001 - owner console must not die
+            print(f"{REHEARSAL_LABEL}: command failed: {exc}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="a8_run_rehearsal_seed")
     parser.add_argument("--origin", required=True)
@@ -166,6 +206,10 @@ def main(argv: list[str] | None = None) -> int:
         f"state={args.state_root}"
     )
     print(f"{REHEARSAL_LABEL}: ready")
+    print(
+        f"{REHEARSAL_LABEL}: owner console on stdin - "
+        "'members' lists, 'revoke <node_id>' fences one member"
+    )
     stop = threading.Event()
 
     def _stop(_signum: int, _frame: object) -> None:
@@ -175,6 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
     server.start()
+    # Owner-private administration. This is stdin on the seed host - it has no
+    # network surface at all, and no admin route is added to the public
+    # allowlist. Members live in this process's memory, so revocation has to
+    # happen here rather than from a separate CLI against the same state file.
+    threading.Thread(
+        target=_owner_console,
+        args=(coordinator, stop),
+        daemon=True,
+    ).start()
     try:
         while not stop.is_set():
             stop.wait(0.5)

@@ -82,6 +82,27 @@ _PROJECTION_ONLY_CASES = frozenset(
         "raw_relay_identity_injection",
     }
 )
+# Bounded seed refusals that genuinely mean "this endpoint identity is not
+# the one accepted for this member". Anything outside this set proves
+# something else went wrong and must not satisfy the mismatch gate.
+_IDENTITY_MISMATCH_CODES = frozenset(
+    {
+        "membership_key_pin_mismatch",
+        "membership_endpoint_mismatch",
+        "seed_member_identity_mismatch",
+    }
+)
+# Peer-required cases that ALSO need the A8 product surface mounted in the
+# shared spine (browser inference, serving refusal). Blocked on the A4 lane
+# owning that spine; they stay fail-closed until it lands.
+_UI_DEPENDENT_CASES = frozenset(
+    {
+        "direct_path_qualified_browser_inference",
+        "forced_relay_privacy_reduced_browser_inference",
+        "observed_path_transition_and_reconnect",
+        "unqualified_external_member",
+    }
+)
 _CODE_RE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _CLOSED_CODES = frozenset(
     {
@@ -462,6 +483,477 @@ def _run_projection_cases(
     )
 
 
+def _resolve(observation: Any) -> Any:
+    """Take a host observation at the moment it is needed.
+
+    Callers may pass either a captured mapping or a zero-argument observer.
+    An observer is preferred for end-of-window facts: a value captured before
+    the window opened would describe the wrong instant.
+    """
+
+    return observation() if callable(observation) else observation
+
+
+def _peer_network_outcome(facts: Any) -> str:
+    """Classify one peer-side network observation.
+
+    The observation is operator-supplied because it describes the peer's own
+    interfaces, which this process cannot see. It is validated strictly: a
+    malformed observation is indistinguishable from an absent one and fails
+    closed rather than being read as a clean network.
+    """
+
+    if not isinstance(facts, Mapping):
+        raise PhysicalGateError("physical_infrastructure_unavailable")
+    binary_present = facts.get("tailscale_binary_present")
+    interface_present = facts.get("tailnet_interface_present")
+    addresses = facts.get("tailnet_addresses")
+    if (
+        not isinstance(binary_present, bool)
+        or not isinstance(interface_present, bool)
+        or not isinstance(addresses, list)
+        or any(not isinstance(value, str) for value in addresses)
+    ):
+        raise PhysicalGateError("physical_infrastructure_unavailable")
+    if interface_present or addresses:
+        return "tailnet_path_present"
+    return "no_tailnet_path_observed"
+
+
+def _activation_is_unknown_not_zero() -> bool:
+    """A peer with no measured activation projects ``unknown`` everywhere.
+
+    Spec §10.1 ``unknown_not_zero_measurements``: absent measurements are
+    never numeric zero. This reads the projection rather than asserting it.
+    """
+
+    projection = ActivationObservations(
+        clock=_time_module.time
+    ).current_projection()
+    if projection.get("path_class") != "unknown":
+        return False
+    metrics = projection.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return False
+    if metrics.get("measured_zero") is not False:
+        return False
+    return all(
+        metrics.get(name) is None
+        for name in (
+            "rtt_ms",
+            "warm_rtt_ms",
+            "jitter_ms",
+            "goodput_bytes_per_second",
+            "loss_ratio",
+            "sample_count",
+        )
+    )
+
+
+def _enroll_peer(
+    adapter: PublicBootstrapClient,
+    node: Any,
+    join_envelope: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Redeem one owner-delivered invite over the live public boundary."""
+
+    acceptance = adapter.join(dict(join_envelope), now=_time_module.time())
+    node.accept_join(
+        acceptance,
+        seed_key_digest=adapter._bundle_pin,  # noqa: SLF001
+    )
+    return dict(acceptance)
+
+
+def _renew_membership(
+    adapter: PublicBootstrapClient, node: Any
+) -> dict[str, Any] | None:
+    envelope = node.heartbeat(
+        lifecycle_state="RUNNING", active_requests=0, force=True
+    )
+    if envelope is None:
+        return None
+    return adapter.heartbeat(envelope, now=_time_module.time())
+
+
+def _run_unrelated_invite_case(
+    adapter: PublicBootstrapClient,
+    *,
+    node: Any,
+    join_envelope: Mapping[str, Any],
+    peer_network: Any,
+    spec_digest: str,
+    source_digest: str,
+) -> dict[str, Any]:
+    """Physical positive 1: HTTPS bootstrap, pinned seed, single-use invite,
+    membership renewal, and visible ineligibility - with no tailnet path."""
+
+    _require_live_boundary(adapter)
+    outcomes: list[str] = []
+    if adapter.pin_verified:
+        outcomes.append("seed_pin_verified")
+    acceptance = _enroll_peer(adapter, node, join_envelope)
+    message = acceptance.get("message") or {}
+    if message.get("membership_generation") is not None:
+        outcomes.append("invite_redeemed")
+    renewal = _renew_membership(adapter, node)
+    if renewal is not None and (renewal.get("message") or {}).get(
+        "lease_expires_at"
+    ) is not None:
+        outcomes.append("membership_renewed")
+    if _activation_is_unknown_not_zero():
+        outcomes.append("activation_unknown_not_zero")
+    outcomes.append(_peer_network_outcome(_resolve(peer_network)))
+    required = {
+        "seed_pin_verified",
+        "invite_redeemed",
+        "membership_renewed",
+        "activation_unknown_not_zero",
+        "no_tailnet_path_observed",
+    }
+    result = "passed" if required <= set(outcomes) else "failed"
+    return _executed_envelope(
+        case_id="unrelated_https_invite_without_tailscale",
+        result=result,
+        outcomes=outcomes,
+        spec_digest=spec_digest,
+        source_digest=source_digest,
+        evidence_digests=[],
+    )
+
+
+def _await_control_refusal(
+    adapter: PublicBootstrapClient,
+    node: Any,
+    *,
+    deadline: float,
+    poll_interval_seconds: float,
+) -> bool:
+    """Poll this member's own control path until the seed starts refusing it.
+
+    The peer cannot reach the seed's owner-private administration plane - no
+    admin route is publicly exposed - so it cannot cause the revocation. It
+    waits for one, bounded by ``deadline``. Returning False means the window
+    closed with control still accepted: the gate did not happen, and that is
+    a failure rather than something to retry into a pass.
+    """
+
+    while _time_module.time() < deadline:
+        try:
+            _renew_membership(adapter, node)
+        except EnrollmentError:
+            return True
+        _time_module.sleep(
+            min(poll_interval_seconds, max(deadline - _time_module.time(), 0.0))
+        )
+    return False
+
+
+def _refusal_is_durable(
+    adapter: PublicBootstrapClient, node: Any, *, attempts: int = 3
+) -> bool:
+    """A revoked member stays refused. One transient error is not revocation."""
+
+    for _ in range(attempts):
+        try:
+            _renew_membership(adapter, node)
+        except EnrollmentError:
+            continue
+        return False
+    return True
+
+
+def _run_revoked_member_case(
+    adapter: PublicBootstrapClient,
+    *,
+    node: Any,
+    join_envelope: Mapping[str, Any],
+    revoke: Callable[[], None] | None,
+    await_revocation_seconds: float | None,
+    poll_interval_seconds: float,
+    spec_digest: str,
+    source_digest: str,
+) -> dict[str, Any]:
+    """Physical negative: revocation removes control and activation
+    admission for an already-active external member.
+
+    Two shapes. ``revoke`` drives it in-process, for a caller that holds the
+    administration plane. ``await_revocation_seconds`` waits for an
+    out-of-band revocation instead - the only shape available to a real
+    external peer, which has no route to that plane.
+    """
+
+    _require_live_boundary(adapter)
+    outcomes: list[str] = []
+    _enroll_peer(adapter, node, join_envelope)
+    if _renew_membership(adapter, node) is not None:
+        outcomes.append("member_enrolled_before_revocation")
+    if revoke is not None:
+        revoke()
+        refused = True
+        try:
+            _renew_membership(adapter, node)
+            refused = False
+        except EnrollmentError:
+            pass
+    else:
+        assert await_revocation_seconds is not None
+        refused = _await_control_refusal(
+            adapter,
+            node,
+            deadline=_time_module.time() + float(await_revocation_seconds),
+            poll_interval_seconds=poll_interval_seconds,
+        )
+    if not refused:
+        outcomes.append(
+            "control_accepted_after_revocation"
+            if revoke is not None
+            else "revocation_not_observed"
+        )
+    else:
+        outcomes.append("control_refused_after_revocation")
+        # The bounded code the seed returns here is generation fencing, which
+        # is not unique to revocation. Durability across retries is what
+        # separates a fenced member from one transient control failure.
+        if _refusal_is_durable(adapter, node):
+            outcomes.append("refusal_durable_across_retries")
+    if _activation_is_unknown_not_zero():
+        outcomes.append("no_serving_after_revocation")
+    required = {
+        "member_enrolled_before_revocation",
+        "control_refused_after_revocation",
+        "no_serving_after_revocation",
+    }
+    if revoke is None:
+        required.add("refusal_durable_across_retries")
+    result = "passed" if required <= set(outcomes) else "failed"
+    return _executed_envelope(
+        case_id="revoked_active_member",
+        result=result,
+        outcomes=outcomes,
+        spec_digest=spec_digest,
+        source_digest=source_digest,
+        evidence_digests=[],
+    )
+
+
+def _run_endpoint_mismatch_case(
+    adapter: PublicBootstrapClient,
+    *,
+    node: Any,
+    join_envelope: Mapping[str, Any],
+    mismatched_node: Any,
+    spec_digest: str,
+    source_digest: str,
+) -> dict[str, Any]:
+    """Physical negative: a member presenting control under an endpoint
+    identity other than its accepted one is refused, record unchanged."""
+
+    _require_live_boundary(adapter)
+    outcomes: list[str] = []
+    acceptance = _enroll_peer(adapter, node, join_envelope)
+    accepted_generation = (acceptance.get("message") or {}).get(
+        "membership_generation"
+    )
+    # Resume is the honest vehicle: it claims the accepted membership record
+    # while carrying the signer's own sender_endpoint_id, so the refusal comes
+    # from the seed rejecting the identity - not from local session state.
+    accepted_incarnation = (acceptance.get("message") or {}).get(
+        "accepted_incarnation"
+    )
+    if accepted_generation is None or accepted_incarnation is None:
+        raise PhysicalGateError("physical_infrastructure_unavailable")
+    resume_envelope = mismatched_node.resume_request(
+        previous_generation=int(accepted_generation),
+        previous_incarnation=str(accepted_incarnation),
+        endpoint_addrs=[f"https://{mismatched_node.node_id}.invalid/control"],
+    )
+    try:
+        adapter.resume(resume_envelope, now=_time_module.time())
+        outcomes.append("mismatched_identity_accepted")
+    except EnrollmentError as exc:
+        # Only an identity refusal counts. Any other bounded failure would
+        # satisfy a bare except while proving nothing about the gate.
+        outcomes.append(
+            "mismatched_identity_refused"
+            if exc.code in _IDENTITY_MISMATCH_CODES
+            else "refused_for_unrelated_reason"
+        )
+    renewal = _renew_membership(adapter, node)
+    still_accepted = (
+        renewal is not None
+        and (renewal.get("message") or {}).get("membership_generation")
+        == accepted_generation
+    )
+    if still_accepted:
+        outcomes.append("member_record_unchanged")
+    required = {"mismatched_identity_refused", "member_record_unchanged"}
+    result = "passed" if required <= set(outcomes) else "failed"
+    return _executed_envelope(
+        case_id="endpoint_identity_mismatch",
+        result=result,
+        outcomes=outcomes,
+        spec_digest=spec_digest,
+        source_digest=source_digest,
+        evidence_digests=[],
+    )
+
+
+def _run_independence_case(
+    case_id: str,
+    adapter: PublicBootstrapClient,
+    *,
+    node: Any,
+    join_envelope: Mapping[str, Any],
+    inputs: Mapping[str, Any],
+    spec_digest: str,
+    source_digest: str,
+) -> dict[str, Any]:
+    """Physical negatives ``tailscale_unavailable`` and ``ssh_unavailable``:
+    bootstrap, join, and renewal complete over the public origin with no
+    tailnet path, and with no SSH invocation, anywhere in the window."""
+
+    _require_live_boundary(adapter)
+    outcomes: list[str] = []
+    if case_id == "tailscale_unavailable":
+        outcomes.append(
+            _peer_network_outcome(_resolve(inputs.get("peer_network_before")))
+        )
+    _enroll_peer(adapter, node, join_envelope)
+    if _renew_membership(adapter, node) is not None:
+        outcomes.append("bootstrap_completed_over_public_origin")
+    if case_id == "tailscale_unavailable":
+        # Resolved HERE, after the window, so the observation reflects the
+        # end of the window rather than a value captured before it opened.
+        outcomes.append(
+            _peer_network_outcome(_resolve(inputs.get("peer_network_after")))
+        )
+        required = {
+            "no_tailnet_path_observed",
+            "bootstrap_completed_over_public_origin",
+        }
+        result = (
+            "failed"
+            if "tailnet_path_present" in outcomes
+            else ("passed" if required <= set(outcomes) else "failed")
+        )
+    else:
+        audit = _resolve(inputs.get("peer_process_audit"))
+        if not isinstance(audit, Mapping):
+            raise PhysicalGateError("physical_infrastructure_unavailable")
+        invocations = audit.get("ssh_invocations")
+        if isinstance(invocations, bool) or not isinstance(invocations, int):
+            raise PhysicalGateError("physical_infrastructure_unavailable")
+        outcomes.append(
+            "no_ssh_invocation_in_window"
+            if invocations == 0
+            else "ssh_invoked_in_window"
+        )
+        # Recorded truthfully rather than hidden: an ssh binary may exist on
+        # the host as an owner-staging tool. The gate proves the supported
+        # path does not require it, not that the host lacks it.
+        if invocations == 0 and (
+            audit.get("ssh_client_present") or audit.get("ssh_server_present")
+        ):
+            outcomes.append("ssh_present_but_unused")
+        required = {
+            "no_ssh_invocation_in_window",
+            "bootstrap_completed_over_public_origin",
+        }
+        result = "passed" if required <= set(outcomes) else "failed"
+    return _executed_envelope(
+        case_id=case_id,
+        result=result,
+        outcomes=outcomes,
+        spec_digest=spec_digest,
+        source_digest=source_digest,
+        evidence_digests=[],
+    )
+
+
+def _run_peer_case(
+    case_id: str,
+    adapter: PublicBootstrapClient,
+    inputs: Mapping[str, Any],
+    spec_digest: str,
+    source_digest: str,
+) -> dict[str, Any]:
+    node = inputs.get("node")
+    join_envelope = inputs.get("join_envelope")
+    if node is None or not isinstance(join_envelope, Mapping):
+        raise PeerRequired()
+    if case_id == "unrelated_https_invite_without_tailscale":
+        if "peer_network" not in inputs:
+            raise PeerRequired()
+        return _run_unrelated_invite_case(
+            adapter,
+            node=node,
+            join_envelope=join_envelope,
+            peer_network=inputs.get("peer_network"),
+            spec_digest=spec_digest,
+            source_digest=source_digest,
+        )
+    if case_id == "revoked_active_member":
+        revoke = inputs.get("revoke")
+        await_seconds = inputs.get("await_revocation_seconds")
+        if not callable(revoke):
+            revoke = None
+            if (
+                isinstance(await_seconds, bool)
+                or not isinstance(await_seconds, (int, float))
+                or not 0.0 < float(await_seconds) <= 3600.0
+            ):
+                raise PeerRequired()
+        poll = inputs.get("poll_interval_seconds", 2.0)
+        if (
+            isinstance(poll, bool)
+            or not isinstance(poll, (int, float))
+            or not 0.0 < float(poll) <= 60.0
+        ):
+            raise PhysicalGateError("physical_infrastructure_unavailable")
+        return _run_revoked_member_case(
+            adapter,
+            node=node,
+            join_envelope=join_envelope,
+            revoke=revoke,
+            await_revocation_seconds=(
+                None if revoke is not None else float(await_seconds)
+            ),
+            poll_interval_seconds=float(poll),
+            spec_digest=spec_digest,
+            source_digest=source_digest,
+        )
+    if case_id == "endpoint_identity_mismatch":
+        mismatched_node = inputs.get("mismatched_node")
+        if mismatched_node is None:
+            raise PeerRequired()
+        return _run_endpoint_mismatch_case(
+            adapter,
+            node=node,
+            join_envelope=join_envelope,
+            mismatched_node=mismatched_node,
+            spec_digest=spec_digest,
+            source_digest=source_digest,
+        )
+    if case_id == "tailscale_unavailable":
+        if (
+            "peer_network_before" not in inputs
+            or "peer_network_after" not in inputs
+        ):
+            raise PeerRequired()
+    elif "peer_process_audit" not in inputs:
+        raise PeerRequired()
+    return _run_independence_case(
+        case_id,
+        adapter,
+        node=node,
+        join_envelope=join_envelope,
+        inputs=inputs,
+        spec_digest=spec_digest,
+        source_digest=source_digest,
+    )
+
+
 def execute_case(
     case_id: str,
     *,
@@ -487,7 +979,15 @@ def execute_case(
     except ValueError as exc:
         raise PhysicalGateError("origin_invalid") from exc
     if case_id in PEER_REQUIRED_CASES:
-        raise PeerRequired()
+        if case_id in _UI_DEPENDENT_CASES or adapter is None:
+            raise PeerRequired()
+        return _run_peer_case(
+            case_id,
+            adapter,
+            dict(case_inputs or {}),
+            spec_digest,
+            source_digest,
+        )
     if case_id in _PROJECTION_ONLY_CASES:
         return _run_projection_cases(case_id, spec_digest, source_digest)
     if adapter is None:

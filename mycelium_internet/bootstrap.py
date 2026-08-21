@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import ipaddress
+import json
 import re
 import threading
 from types import MappingProxyType
@@ -139,6 +140,31 @@ def redirect_verdict(source: str, target: str) -> str:
     if downgrade_verdict(target) is not None:
         return "downgrade_refused"
     return "redirect_refused"
+
+
+def forwarded_scheme_is_cleartext(headers: Mapping[str, str]) -> bool:
+    """True when a trusted forwarder marks the request as plain HTTP.
+
+    The seed listens on loopback behind a forwarder (Cloudflare tunnel or
+    nginx). Cloudflare's edge sets ``X-Forwarded-Proto`` and ``Cf-Visitor``
+    to the real connection scheme, so a cleartext mark means the identity
+    must not be served (spec §3 downgrade refusal). Absent markers mean the
+    request arrived through a trusted local path that already refused
+    cleartext (e.g. nginx 444-on-80), so it is served.
+    """
+
+    xfp = headers.get("x-forwarded-proto")
+    if isinstance(xfp, str) and xfp.strip().lower() == "http":
+        return True
+    cf_visitor = headers.get("cf-visitor")
+    if isinstance(cf_visitor, str):
+        try:
+            parsed = json.loads(cf_visitor)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, Mapping) and parsed.get("scheme") == "http":
+            return True
+    return False
 
 
 class RateLimiter:
@@ -346,6 +372,8 @@ class PublicBootstrapPolicy:
                 raise BoundaryError("cookie_rejected")
             if "authorization" in lowered:
                 raise BoundaryError("authorization_rejected")
+            if forwarded_scheme_is_cleartext(lowered):
+                raise BoundaryError("downgrade_refused")
         if target == "/seed/join" and invite_token is not None:
             if not self._invite_attempts.allow(invite_token):
                 raise BoundaryError("invite_attempts_exhausted")

@@ -354,7 +354,12 @@
       "certificate_without_seed_authority": "tests/a8_acceptance/test_physical_seed_side_cases.py",
       "invalid_or_replayed_invitation": "tests/a8_acceptance/test_physical_seed_side_cases.py",
       "missing_or_stale_path_measurements": "tests/a8_acceptance/test_physical_gate_runner.py",
-      "raw_relay_identity_injection": "tests/a8_acceptance/test_physical_gate_runner.py"
+      "raw_relay_identity_injection": "tests/a8_acceptance/test_physical_gate_runner.py",
+      "unrelated_https_invite_without_tailscale": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "revoked_active_member": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "endpoint_identity_mismatch": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "tailscale_unavailable": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "ssh_unavailable": "tests/a8_acceptance/test_physical_peer_cases.py"
     }
   },
   "physical_positive_cases": [

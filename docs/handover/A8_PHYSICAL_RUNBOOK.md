@@ -140,7 +140,11 @@ admission for an active external member.
    bounded codes.
 4. Capture: the bounded rejection codes; the member's generation in the
    seed record; no serving occurred after revocation.
-5. Seal: `a8_run_physical_gate.py run revoked_active_member ... --seal`
+5. Seal: `a8_run_physical_gate.py run revoked_active_member --origin <canonical>
+   --bundle-file <bundle> --node-root <peer-node-root>
+   --revoke-command <owner administration argv> --evidence-root <root> --seal`.
+   The runner executes the owner's own revocation command between enrollment
+   and the refusal check; it never mints revocation authority itself
    (peer-required; fails closed without the external peer).
 
 Not executed. Requires the external peer.
@@ -153,7 +157,10 @@ its accepted identity is refused.
 1. PEER_HOST: after enrollment, present control envelopes under a
    different endpoint identity.
 2. Capture: bounded rejection; member record unchanged.
-3. Seal: `a8_run_physical_gate.py run endpoint_identity_mismatch ... --seal`.
+3. Seal: `a8_run_physical_gate.py run endpoint_identity_mismatch --origin <canonical>
+   --bundle-file <bundle> --node-root <peer-node-root> --evidence-root <root> --seal`.
+   The impostor identity is derived from the same node root under a separate
+   durable key, and the refusal must carry a bounded identity code.
 
 Not executed. Requires the external peer.
 
@@ -205,7 +212,10 @@ with no tailnet path present anywhere in the window.
 2. Enroll and measure over the public origin only.
 3. Capture: interface absence during the whole window; the origin
    resolved via public DNS only.
-4. Seal: `a8_run_physical_gate.py run tailscale_unavailable ... --seal`.
+4. Seal: `a8_run_physical_gate.py run tailscale_unavailable --origin <canonical>
+   --bundle-file <bundle> --node-root <peer-node-root> --evidence-root <root> --seal`.
+   The runner observes this host's own interfaces before and after the window;
+   the observation is not operator-asserted.
 
 Not executed. Requires the external peer.
 
@@ -220,6 +230,9 @@ point of bootstrap, join, or measurement.
    gate window.
 3. Capture: the full enrollment window with zero ssh invocations; no
    ssh-dependent step anywhere in the procedure.
-4. Seal: `a8_run_physical_gate.py run ssh_unavailable ... --seal`.
+4. Seal: `a8_run_physical_gate.py run ssh_unavailable --origin <canonical>
+   --bundle-file <bundle> --node-root <peer-node-root> --evidence-root <root> --seal`.
+   The runner records its own zero ssh invocations; an ssh binary present on
+   the host is recorded truthfully and does not by itself fail the gate.
 
 Not executed. Requires the external peer.

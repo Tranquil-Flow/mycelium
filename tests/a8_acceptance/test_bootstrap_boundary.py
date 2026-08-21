@@ -267,6 +267,65 @@ def test_transfer_encoding_websocket_cookie_and_authorization_rejected() -> None
     assert exc_info.value.code == "authorization_rejected"
 
 
+def test_forwarded_cleartext_scheme_is_downgrade_refused() -> None:
+    policy = _policy()
+    with pytest.raises(BoundaryError) as exc_info:
+        policy.validate_request(
+            method="GET",
+            target="/seed/identity",
+            content_type=None,
+            body_length=0,
+            headers={"X-Forwarded-Proto": "http"},
+        )
+    assert exc_info.value.code == "downgrade_refused"
+
+
+def test_forwarded_https_scheme_is_allowed() -> None:
+    _policy().validate_request(
+        method="GET",
+        target="/seed/identity",
+        content_type=None,
+        body_length=0,
+        headers={"X-Forwarded-Proto": "https"},
+    )
+
+
+def test_cf_visitor_cleartext_scheme_is_downgrade_refused() -> None:
+    policy = _policy()
+    with pytest.raises(BoundaryError) as exc_info:
+        policy.validate_request(
+            method="GET",
+            target="/seed/identity",
+            content_type=None,
+            body_length=0,
+            headers={"Cf-Visitor": '{"scheme":"http"}'},
+        )
+    assert exc_info.value.code == "downgrade_refused"
+
+
+def test_cf_visitor_https_scheme_is_allowed() -> None:
+    _policy().validate_request(
+        method="GET",
+        target="/seed/identity",
+        content_type=None,
+        body_length=0,
+        headers={"Cf-Visitor": '{"scheme":"https"}'},
+    )
+
+
+def test_absent_scheme_marker_is_allowed() -> None:
+    # The loopback listener is trusted; when no forwarder marks the scheme
+    # (nginx 444-on-80 topology, or direct local access) the request is
+    # served. Only an explicit cleartext marker is refused.
+    _policy().validate_request(
+        method="GET",
+        target="/seed/identity",
+        content_type=None,
+        body_length=0,
+        headers=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Frame, concurrency, rate, and per-invite attempt bounds
 # ---------------------------------------------------------------------------

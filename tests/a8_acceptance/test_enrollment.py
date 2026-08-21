@@ -130,6 +130,31 @@ def env(tmp_path: Path):
     environment.close()
 
 
+def test_cleartext_marked_request_is_refused_at_the_server(env: Env) -> None:
+    """End-to-end: the handler forwards the scheme markers into the boundary
+    and a cleartext-marked request is refused (400), never served."""
+
+    import urllib.error
+    import urllib.request
+
+    base = env.server.base_url
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            base + "/seed/identity", headers={"X-Forwarded-Proto": "https"}
+        ),
+        timeout=5,
+    ) as response:
+        assert response.status == 200
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(
+            urllib.request.Request(
+                base + "/seed/identity", headers={"X-Forwarded-Proto": "http"}
+            ),
+            timeout=5,
+        )
+    assert exc_info.value.code == 400
+
+
 # ---------------------------------------------------------------------------
 # Seed key pinning (spec §10.1)
 # ---------------------------------------------------------------------------
