@@ -17,16 +17,26 @@ import os
 from pathlib import Path
 import re
 import stat
-from typing import Any, Mapping
+import time as _time_module
+import urllib.error
+import urllib.request
+from typing import Any, Callable, Mapping
 
 from .activation import ActivationObservations
-from .bootstrap import BoundaryError, canonical_https_origin, downgrade_verdict, redirect_verdict
+from .bootstrap import (
+    BoundaryError,
+    PublicBootstrapPolicy,
+    canonical_https_origin,
+)
 from .contracts import (
     INTERNET_NATIVE_QUALIFICATION_PROTOCOL,
     validate_internet_native_qualification,
 )
 from .enrollment import EnrollmentError, PublicBootstrapClient
 from .privacy import ensure_privacy_clean
+from mycelium_invite import verify_invite_bundle
+from mycelium_seed.coordinator import SEED_SIGNED_ENVELOPE_PROTOCOL
+from mycelium_seed.http import SeedHTTPClient
 
 A8_PHYSICAL_CASES = frozenset(
     {
@@ -196,18 +206,107 @@ def _executed_envelope(
     return document
 
 
+def build_adapter_from_bundle(
+    *,
+    origin: str,
+    bundle: Mapping[str, Any],
+    invite_token: str,
+    clock: Callable[[], float] = _time_module.time,
+) -> PublicBootstrapClient:
+    """Construct the pin-first adapter for one canonical public origin from
+    an owner-delivered invite bundle (the same wiring the rehearsal peer
+    uses, shared for the physical-era CLI)."""
+
+    canonical_origin = canonical_https_origin(origin)
+    now = clock()
+    verified = verify_invite_bundle(dict(bundle), now=now)
+    client = SeedHTTPClient(
+        seed_url=canonical_origin,
+        swarm_id=verified["payload"]["swarm_id"],
+        seed_key_digest=verified["seed_key_digest"],
+        seed_key_records=list(verified["seed_key_records"]),
+        timeout=15.0,
+    )
+    return PublicBootstrapClient.from_seed_client(
+        client,
+        policy=PublicBootstrapPolicy(canonical_origin=canonical_origin),
+        tls_state="publicly_trusted",
+        bundle=dict(bundle),
+        invite_token=invite_token,
+        clock=clock,
+        backoff_seconds=1.0,
+    )
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+def probe_bootstrap_over_cleartext(
+    origin: str,
+    *,
+    timeout: float = 10.0,
+) -> str:
+    """Attempt ``GET /seed/identity`` over the cleartext form of a
+    canonical HTTPS origin with redirects disabled. Returns one bounded
+    outcome: ``cleartext_refused`` (transport refused the attempt),
+    ``cleartext_redirect_observed`` (a redirect answered, never followed),
+    ``cleartext_no_identity`` (a non-envelope response), or
+    ``cleartext_identity_exposed`` (a signed seed identity envelope was
+    served over plaintext - the boundary FAILS this gate)."""
+
+    cleartext = "http" + origin[len("https") :]
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    request = urllib.request.Request(
+        cleartext + "/seed/identity",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            body = response.read(200_000)
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        body = exc.read(200_000)
+        status = exc.code
+    except Exception:
+        return "cleartext_refused"
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except Exception:
+        data = None
+    if (
+        isinstance(data, Mapping)
+        and data.get("protocol") == SEED_SIGNED_ENVELOPE_PROTOCOL
+        and isinstance(data.get("statement"), Mapping)
+    ):
+        return "cleartext_identity_exposed"
+    if status in (301, 302, 303, 307, 308):
+        return "cleartext_redirect_observed"
+    return "cleartext_no_identity"
+
+
+def _require_live_boundary(adapter: PublicBootstrapClient) -> None:
+    """The boundary must demonstrably exist before any negative case can
+    observe it: pin verification over the live origin. Anything else is
+    indistinguishable from an absent boundary and must fail closed."""
+
+    try:
+        adapter.preflight(now=_time_module.time())
+    except EnrollmentError as exc:
+        raise PhysicalGateError("physical_infrastructure_unavailable") from exc
+
+
 def _run_cleartext_case(
     adapter: PublicBootstrapClient,
     origin: str,
     spec_digest: str,
     source_digest: str,
+    *,
+    probe: Callable[[str], str] = probe_bootstrap_over_cleartext,
 ) -> dict[str, Any]:
-    outcomes: list[str] = []
-    cleartext = "http" + origin[len("https") :]
-    if downgrade_verdict(cleartext) == "downgrade_refused":
-        outcomes.append("no_cleartext_fallback")
-    if redirect_verdict(origin, cleartext) == "downgrade_refused":
-        outcomes.append("no_cleartext_fallback")
+    _require_live_boundary(adapter)
+    outcomes: list[str] = [probe(origin)]
     for path in ("/", "/seed/admin", "/seed/invite", "/seed/members"):
         try:
             adapter.policy.validate_request(
@@ -221,9 +320,67 @@ def _run_cleartext_case(
     outcomes.append("request_rejected")
     if adapter._join_transmissions == 0:  # noqa: SLF001
         outcomes.append("invite_secret_never_transmitted")
+    result = (
+        "failed" if outcomes[0] == "cleartext_identity_exposed" else "passed"
+    )
     return _executed_envelope(
         case_id="cleartext_or_redirect_bootstrap",
-        result="passed",
+        result=result,
+        outcomes=outcomes,
+        spec_digest=spec_digest,
+        source_digest=source_digest,
+        evidence_digests=[],
+    )
+
+
+def _run_replay_case(
+    adapter: PublicBootstrapClient,
+    *,
+    first_join_envelope: Mapping[str, Any],
+    second_join_envelope: Mapping[str, Any],
+    second_adapter: PublicBootstrapClient,
+    spec_digest: str,
+    source_digest: str,
+) -> dict[str, Any]:
+    """Invalid/replayed invitation: the exact retry stays idempotent (no
+    second member) and a changed retry under the same invite is rejected."""
+
+    _require_live_boundary(adapter)
+    _require_live_boundary(second_adapter)
+    first = adapter.join(dict(first_join_envelope), now=_time_module.time())
+    outcomes: list[str] = []
+    try:
+        exact = second_adapter.join(
+            dict(first_join_envelope), now=_time_module.time()
+        )
+        first_generation = first.get("message", {}).get("membership_generation")
+        exact_generation = exact.get("message", {}).get("membership_generation")
+        if first_generation is not None and exact_generation == first_generation:
+            outcomes.append("exact_retry_idempotent")
+        else:
+            outcomes.append("exact_retry_diverged")
+    except EnrollmentError:
+        outcomes.append("exact_retry_rejected")
+    try:
+        second_adapter.join(dict(second_join_envelope), now=_time_module.time())
+        outcomes.append("changed_retry_accepted")
+    except EnrollmentError as exc:
+        if exc.code in {
+            "seed_join_retry_mismatch",
+            "invite_replayed",
+            "changed_retry_rejected",
+        }:
+            outcomes.append("changed_retry_rejected")
+        else:
+            raise
+    result = (
+        "passed"
+        if {"exact_retry_idempotent", "changed_retry_rejected"} <= set(outcomes)
+        else "failed"
+    )
+    return _executed_envelope(
+        case_id="invalid_or_replayed_invitation",
+        result=result,
         outcomes=outcomes,
         spec_digest=spec_digest,
         source_digest=source_digest,
@@ -250,18 +407,15 @@ def _run_certificate_case(
             raise
     if adapter._join_transmissions == 0:  # noqa: SLF001
         outcomes.append("invite_secret_never_transmitted")
-    if not outcomes:
-        return _executed_envelope(
-            case_id="certificate_without_seed_authority",
-            result="failed",
-            outcomes=["bounded_incident_only"],
-            spec_digest=spec_digest,
-            source_digest=source_digest,
-            evidence_digests=[],
-        )
+    result = (
+        "passed"
+        if {"seed_pin_mismatch_before_invite_transmission", "join_not_attempted"}
+        <= set(outcomes)
+        else "failed"
+    )
     return _executed_envelope(
         case_id="certificate_without_seed_authority",
-        result="passed",
+        result=result,
         outcomes=outcomes,
         spec_digest=spec_digest,
         source_digest=source_digest,
@@ -314,10 +468,17 @@ def execute_case(
     origin: str,
     evidence_root: Path | None,
     adapter: PublicBootstrapClient | None = None,
+    case_inputs: Mapping[str, Any] | None = None,
     spec_digest: str = "sha256:" + "0" * 64,
     source_digest: str = "sha256:" + "0" * 64,
 ) -> dict[str, Any]:
-    """Execute one physical case if, and only if, its inputs exist."""
+    """Execute one physical case if, and only if, its inputs exist.
+
+    ``case_inputs`` carries per-case procedure inputs:
+    ``probe`` for the cleartext case (network observation, injectable for
+    deterministic tests), and ``first_join_envelope``/
+    ``second_join_envelope``/``second_adapter`` for the replay case.
+    """
 
     if case_id not in A8_PHYSICAL_CASES:
         raise PhysicalGateError("case_unknown")
@@ -331,10 +492,36 @@ def execute_case(
         return _run_projection_cases(case_id, spec_digest, source_digest)
     if adapter is None:
         raise PhysicalGateError("physical_infrastructure_unavailable")
+    inputs = dict(case_inputs or {})
     if case_id == "cleartext_or_redirect_bootstrap":
-        return _run_cleartext_case(adapter, origin, spec_digest, source_digest)
+        probe: Callable[[str], str] = inputs.get(  # type: ignore[assignment]
+            "probe", probe_bootstrap_over_cleartext
+        )
+        if not callable(probe):
+            raise PhysicalGateError("case_unknown")
+        return _run_cleartext_case(
+            adapter, origin, spec_digest, source_digest, probe=probe
+        )
     if case_id == "certificate_without_seed_authority":
         return _run_certificate_case(adapter, spec_digest, source_digest)
+    if case_id == "invalid_or_replayed_invitation":
+        first = inputs.get("first_join_envelope")
+        second = inputs.get("second_join_envelope")
+        second_adapter = inputs.get("second_adapter")
+        if (
+            not isinstance(first, Mapping)
+            or not isinstance(second, Mapping)
+            or not isinstance(second_adapter, PublicBootstrapClient)
+        ):
+            raise PhysicalGateError("physical_infrastructure_unavailable")
+        return _run_replay_case(
+            adapter,
+            first_join_envelope=first,
+            second_join_envelope=second,
+            second_adapter=second_adapter,
+            spec_digest=spec_digest,
+            source_digest=source_digest,
+        )
     raise PhysicalGateError("physical_infrastructure_unavailable")
 
 
@@ -399,7 +586,9 @@ __all__ = [
     "PEER_REQUIRED_CASES",
     "PeerRequired",
     "PhysicalGateError",
+    "build_adapter_from_bundle",
     "execute_case",
     "preflight_document",
+    "probe_bootstrap_over_cleartext",
     "seal_qualification",
 ]
