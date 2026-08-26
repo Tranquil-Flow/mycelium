@@ -2165,3 +2165,91 @@ def test_two_node_subprocesses_run_distributed_inference_over_native_iroh(
         shutil.rmtree(socket_base, ignore_errors=True)
     assert first.process.returncode == 0
     assert second.process.returncode == 0
+
+
+def test_inbound_admission_snapshot_signs_candidate_bound_native_counters(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    class Transport:
+        def inbound_admission_snapshot(self, candidate_endpoint_id: str):
+            assert candidate_endpoint_id == "b" * 64
+            return {
+                "protocol": "mycelium.iroh_sidecar.inbound_admission.v1",
+                "inbound_identity_rejections": 4,
+                "inbound_frames_admitted": 7,
+                "candidate_identity_rejections": 1,
+                "measured_at_unix_ms": 1234,
+            }
+
+        def evidence(self):
+            return SimpleNamespace(
+                transport_path_observations=(
+                    {"remote_endpoint_id": "a" * 64, "path_class": "unknown"},
+                )
+            )
+
+    service = PhysicalNodeService.__new__(PhysicalNodeService)
+    service.state = "RUNNING"
+    service.transport = Transport()
+    service.sidecar_binary = tmp_path / "sidecar"
+    service.sidecar_binary.write_bytes(b"exact-sidecar-bytes")
+    service._signed_result = lambda event, details=None: {
+        "event": event,
+        "details": details,
+    }
+    digest = "sha256:" + "c" * 64
+    result = service._inbound_admission_snapshot({
+        "case_id": "endpoint_identity_mismatch",
+        "member_id": "member-a",
+        "spec_digest": digest,
+        "source_digest": digest,
+        "challenge": "challenge-endpoint-mismatch-001",
+        "expected_endpoint_id": "a" * 64,
+        "dialed_endpoint_id": "b" * 64,
+    })
+
+    assert result["event"] == "inbound_admission_snapshot"
+    assert result["details"]["dialed_endpoint_id"] == "b" * 64
+    assert result["details"]["sidecar_binary_digest"] == (
+        "sha256:653cb1af2b16de0c6c9a799d95a3d0c88ec286254e3eb312f388ca0be6c6675d"
+    )
+    assert result["details"]["admission"]["candidate_identity_rejections"] == 1
+
+
+def test_inbound_admission_snapshot_rejects_resolved_expected_path() -> None:
+    from types import SimpleNamespace
+
+    class Transport:
+        def inbound_admission_snapshot(self, candidate_endpoint_id: str):
+            return {
+                "protocol": "mycelium.iroh_sidecar.inbound_admission.v1",
+                "inbound_identity_rejections": 1,
+                "inbound_frames_admitted": 0,
+                "candidate_identity_rejections": 1,
+                "measured_at_unix_ms": 1234,
+            }
+
+        def evidence(self):
+            return SimpleNamespace(
+                transport_path_observations=(
+                    {"remote_endpoint_id": "a" * 64, "path_class": "direct"},
+                )
+            )
+
+    service = PhysicalNodeService.__new__(PhysicalNodeService)
+    service.state = "RUNNING"
+    service.transport = Transport()
+    digest = "sha256:" + "c" * 64
+
+    with pytest.raises(NodeCommandError, match="inbound_admission_path_resolved"):
+        service._inbound_admission_snapshot({
+            "case_id": "endpoint_identity_mismatch",
+            "member_id": "member-a",
+            "spec_digest": digest,
+            "source_digest": digest,
+            "challenge": "challenge-endpoint-mismatch-001",
+            "expected_endpoint_id": "a" * 64,
+            "dialed_endpoint_id": "b" * 64,
+        })

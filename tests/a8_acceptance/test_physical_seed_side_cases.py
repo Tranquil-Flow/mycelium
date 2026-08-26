@@ -12,8 +12,10 @@ because the procedures genuinely ran here.
 from __future__ import annotations
 
 from itertools import count
+import json
 from pathlib import Path
 import time
+from typing import Any
 
 import pytest
 
@@ -29,11 +31,24 @@ from mycelium_internet.contracts import validate_internet_native_qualification
 from mycelium_internet.enrollment import PublicBootstrapClient
 from mycelium_internet.physical import (
     PhysicalGateError,
-    execute_case,
+    build_adapter_from_bundle,
+    execute_case as _execute_case,
     probe_bootstrap_over_cleartext,
 )
 
 ORIGIN = "https://seed.example.com"
+TEST_SOURCE_BINDING = json.loads(
+    (Path(__file__).with_name("inventory.v1.json")).read_text("utf-8")
+)["physical_execution"]["source_digest"]
+
+
+def execute_case(case_id: str, **kwargs: Any) -> dict[str, Any]:
+    return _execute_case(
+        case_id,
+        spec_digest=TEST_SOURCE_BINDING,
+        source_digest=TEST_SOURCE_BINDING,
+        **kwargs,
+    )
 
 
 def _ids(prefix: str):
@@ -198,6 +213,35 @@ def test_cleartext_case_requires_a_live_boundary(env: SeedEnv) -> None:
     assert exc_info.value.code == "physical_infrastructure_unavailable"
 
 
+def test_bundle_adapter_separates_canonical_origin_from_probe_transport(
+    env: SeedEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    class RecordingSeedClient:
+        def __init__(self, *, seed_url: str, **_kwargs: object) -> None:
+            captured["seed_url"] = seed_url
+
+        def request(self, *_args: object) -> dict[str, object]:
+            raise AssertionError("construction must not transmit")
+
+    monkeypatch.setattr(
+        "mycelium_internet.physical.SeedHTTPClient",
+        RecordingSeedClient,
+    )
+    adapter = build_adapter_from_bundle(
+        origin=ORIGIN,
+        transport_origin="https://rogue-seed.example.test",
+        bundle=env.bundle,
+        invite_token=str(env.bundle["token"]),
+    )
+
+    assert adapter.canonical_origin == ORIGIN
+    assert captured["seed_url"] == "https://rogue-seed.example.test"
+    assert adapter._join_transmissions == 0  # noqa: SLF001
+
+
 def test_certificate_case_passes_on_pin_mismatch(env: SeedEnv) -> None:
     rogue_adapter = env.adapter(rogue=True)
     document = execute_case(
@@ -243,6 +287,22 @@ def test_replay_case_rejects_changed_retry_and_stays_idempotent(env: SeedEnv) ->
         invite_nonce="a8-invite",
         endpoint_addrs=["https://replay-node-b/control"],
     )
+    def replay_state_probe() -> dict[str, object]:
+        members = env.coordinator.members()
+        generation = int(members[0]["generation"]) if len(members) == 1 else -1
+        return {
+            "protocol": "mycelium.a8_replay_state_probe.v1",
+            "case_id": "invalid_or_replayed_invitation",
+            "member_id": "replay-node",
+            "observed_at_unix_ms": int(time.time() * 1_000),
+            "matching_member_count": len(members),
+            "membership_generation": generation,
+            "artifact_grant_count": 0,
+            "route_mutation_count": 0,
+            "invitation_state": "redeemed",
+            "changed_retry_members_created": 0,
+        }
+
     document = execute_case(
         "invalid_or_replayed_invitation",
         origin=ORIGIN,
@@ -252,6 +312,7 @@ def test_replay_case_rejects_changed_retry_and_stays_idempotent(env: SeedEnv) ->
             "first_join_envelope": first_envelope,
             "second_join_envelope": second_envelope,
             "second_adapter": second_adapter,
+            "case_probe": replay_state_probe,
         },
     )
     validate_internet_native_qualification(document)
@@ -260,8 +321,42 @@ def test_replay_case_rejects_changed_retry_and_stays_idempotent(env: SeedEnv) ->
     outcomes = document["public_projection"]["outcomes"]
     assert "exact_retry_idempotent" in outcomes
     assert "changed_retry_rejected" in outcomes
+    assert "join_rejected" in outcomes
+    assert "no_partial_member" in outcomes
+    assert "single_use_state_not_corrupted" in outcomes
+    assert len(document["evidence_digests"]) == 1
     members = env.coordinator.members()
     assert len(members) == 1
+
+
+def test_replay_case_requires_live_state_probe(env: SeedEnv) -> None:
+    first_adapter = env.adapter()
+    second_adapter = env.adapter()
+    node_a = env.node("replay-node-no-probe")
+    first_envelope = node_a.join_request(
+        invite_nonce="a8-invite",
+        endpoint_addrs=["https://replay-node-no-probe-a/control"],
+    )
+    first_adapter.preflight(now=time.time())
+    node_b = env.node("replay-node-no-probe")
+    second_envelope = node_b.join_request(
+        invite_nonce="a8-invite",
+        endpoint_addrs=["https://replay-node-no-probe-b/control"],
+    )
+
+    with pytest.raises(PhysicalGateError) as exc_info:
+        execute_case(
+            "invalid_or_replayed_invitation",
+            origin=ORIGIN,
+            evidence_root=None,
+            adapter=first_adapter,
+            case_inputs={
+                "first_join_envelope": first_envelope,
+                "second_join_envelope": second_envelope,
+                "second_adapter": second_adapter,
+            },
+        )
+    assert exc_info.value.code == "physical_infrastructure_unavailable"
 
 
 def test_probe_returns_refused_for_unreachable_origin() -> None:

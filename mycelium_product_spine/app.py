@@ -26,6 +26,7 @@ class ProductEvidenceApplication:
         assignment_source: Callable[[], Sequence[Mapping[str, Any]]] | None = None,
         route_source: Callable[[], Mapping[str, Any] | None],
         qualification_source: Callable[[], Mapping[str, Any] | None],
+        internet_native_source: Callable[[], Mapping[str, Any]] | None = None,
         clock_unix_ms: Callable[[], int] | None = None,
         replay_limit: int = 128,
         state_root: str | Path | None = None,
@@ -36,6 +37,8 @@ class ProductEvidenceApplication:
             callable(source)
             for source in (membership_source, route_source, qualification_source)
         ):
+            raise ValueError("product_source_invalid")
+        if internet_native_source is not None and not callable(internet_native_source):
             raise ValueError("product_source_invalid")
         if (
             not isinstance(replay_limit, int)
@@ -48,6 +51,7 @@ class ProductEvidenceApplication:
         self._assignment_source = assignment_source
         self._route_source = route_source
         self._qualification_source = qualification_source
+        self._internet_native_source = internet_native_source
         self._clock_unix_ms = clock_unix_ms or (lambda: int(time.time() * 1_000))
         self._store = (
             None
@@ -157,11 +161,17 @@ class ProductEvidenceApplication:
             except Exception:
                 qualification = None
                 source_errors["qualification-source"] = "qualification_source_failed"
+            internet_native = (
+                None
+                if self._internet_native_source is None
+                else self._internet_native_source()
+            )
             snapshot = self._projector.project(
                 members=members,
                 assignments=assignments,
                 route_status=route_status,
                 qualification=qualification,
+                internet_native=internet_native,
                 now_unix_ms=self._clock_unix_ms(),
                 source_errors=source_errors,
             )

@@ -52,6 +52,7 @@ class GatewayConfig:
     bind_host: str = "127.0.0.1"
     tls_enabled: bool = False
     public_origin: str | None = None
+    trusted_https_proxy: bool = False
     source_mode: str = "live"
     session_ttl_seconds: int = 3_600
     max_sessions: int = 32
@@ -68,6 +69,8 @@ class GatewayConfig:
             raise ValueError("invalid_bind_host")
         if type(self.tls_enabled) is not bool:
             raise ValueError("invalid_tls_enabled")
+        if type(self.trusted_https_proxy) is not bool:
+            raise ValueError("invalid_trusted_https_proxy")
         if self.source_mode not in {"fixture", "live", "replay"}:
             raise ValueError("invalid_source_mode")
         _positive_integer("session_ttl_seconds", self.session_ttl_seconds, maximum=86_400)
@@ -91,7 +94,14 @@ class GatewayConfig:
         origin = None if self.public_origin is None else _validated_origin(self.public_origin)
         if origin is not None:
             object.__setattr__(self, "public_origin", origin)
-        if not self.is_loopback:
+        if self.trusted_https_proxy:
+            if not self.is_loopback:
+                raise ValueError("trusted_https_proxy_requires_loopback")
+            if not self.tls_enabled:
+                raise ValueError("trusted_https_proxy_requires_tls")
+            if origin is None or urlsplit(origin).scheme != "https":
+                raise ValueError("trusted_https_proxy_requires_https_origin")
+        elif not self.is_loopback:
             if not self.tls_enabled:
                 raise ValueError("non_loopback_requires_tls")
             if origin is None or urlsplit(origin).scheme != "https":

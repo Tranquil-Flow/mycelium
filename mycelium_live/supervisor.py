@@ -12,6 +12,7 @@ import mimetypes
 from pathlib import Path
 import secrets
 import signal
+import stat
 import threading
 import time
 from typing import Any, Callable, Mapping, Sequence
@@ -316,6 +317,84 @@ class LiveStack:
     route: LiveRoute
 
 
+def _load_trusted_proxy_capability(path: Path) -> bytes:
+    """Load one exact owner-private capability through anchored descriptors."""
+
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        raise ValueError("invalid_trusted_proxy_capability")
+    components = candidate.parts
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    file_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    descriptors: list[int] = []
+    try:
+        current = os.open("/", directory_flags)
+        descriptors.append(current)
+        for component in components[1:-1]:
+            current = os.open(component, directory_flags, dir_fd=current)
+            descriptors.append(current)
+            if not stat.S_ISDIR(os.fstat(current).st_mode):
+                raise ValueError("invalid_trusted_proxy_capability")
+        parent = os.fstat(current)
+        if (
+            parent.st_uid != os.geteuid()
+            or stat.S_IMODE(parent.st_mode) != 0o700
+        ):
+            raise ValueError("invalid_trusted_proxy_capability")
+        descriptor = os.open(components[-1], file_flags, dir_fd=current)
+        descriptors.append(descriptor)
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_nlink != 1
+            or before.st_size != 64
+        ):
+            raise ValueError("invalid_trusted_proxy_capability")
+        capability = os.read(descriptor, 65)
+        after = os.fstat(descriptor)
+        named = os.stat(
+            components[-1],
+            dir_fd=current,
+            follow_symlinks=False,
+        )
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ) or (named.st_dev, named.st_ino) != (after.st_dev, after.st_ino):
+            raise ValueError("invalid_trusted_proxy_capability")
+        if len(capability) != 64 or any(
+            value not in b"0123456789abcdef" for value in capability
+        ):
+            raise ValueError("invalid_trusted_proxy_capability")
+        return capability
+    except (OSError, ValueError) as exc:
+        raise ValueError("invalid_trusted_proxy_capability") from exc
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
 def build_live_stack(
     *,
     route: LiveRoute,
@@ -324,6 +403,9 @@ def build_live_stack(
     bearer_token: str,
     product_state_root: Path | None = None,
     seed_url: str | None = None,
+    public_origin: str | None = None,
+    trusted_https_proxy: bool = False,
+    trusted_proxy_capability: bytes | None = None,
 ) -> LiveStack:
     """Compose the production browser and request gateways around a live route."""
     codec = prompt_codec_from_deployment(deployment_dir)
@@ -367,6 +449,9 @@ def build_live_stack(
         product_app=product_app,
         swarm_coordinator=LiveSwarmCoordinator(route, health, seed_url=seed_url),
         request_bearer_token=bearer_token,
+        public_origin=public_origin,
+        trusted_https_proxy=trusted_https_proxy,
+        trusted_proxy_capability=trusted_proxy_capability,
     )
     return LiveStack(app=app, health=health, route=route)
 
@@ -377,6 +462,9 @@ def build_registry_stack(
     bearer_token: str,
     product_state_root: Path | None = None,
     seed_url: str | None = None,
+    public_origin: str | None = None,
+    trusted_https_proxy: bool = False,
+    trusted_proxy_capability: bytes | None = None,
 ) -> LiveStack:
     """Compose the product stack around multiple already-qualified routes."""
 
@@ -392,6 +480,9 @@ def build_registry_stack(
         ),
         swarm_coordinator=LiveSwarmCoordinator(registry, registry, seed_url=seed_url),
         request_bearer_token=bearer_token,
+        public_origin=public_origin,
+        trusted_https_proxy=trusted_https_proxy,
+        trusted_proxy_capability=trusted_proxy_capability,
     )
     return LiveStack(app=app, health=registry, route=registry)
 
@@ -406,6 +497,7 @@ def _product_application(
     salt = getattr(route, "product_pseudonym_salt", None)
     public_status = getattr(route, "public_status", None)
     assignments = getattr(route, "product_assignment_records", None)
+    internet_native = getattr(route, "product_internet_native_snapshot", None)
     if not all(callable(value) for value in (membership, salt, public_status)):
         raise ValueError("product_evidence_source_unavailable")
 
@@ -413,12 +505,23 @@ def _product_application(
         record = qualification_source.current()
         return None if record is None else route_qualification_to_dict(record)
 
+    def internet_native_document() -> Mapping[str, Any]:
+        if not callable(internet_native):
+            raise ValueError("product_internet_native_source_unavailable")
+        document = internet_native()
+        if not isinstance(document, Mapping):
+            raise ValueError("product_internet_native_source_invalid")
+        return document
+
     return ProductEvidenceApplication(
         projector=ProductProjector(pseudonym_salt=salt()),
         membership_source=membership,
         assignment_source=assignments if callable(assignments) else None,
         route_source=public_status,
         qualification_source=qualification_document,
+        internet_native_source=(
+            internet_native_document if callable(internet_native) else None
+        ),
         state_root=state_root,
     )
 
@@ -450,6 +553,7 @@ class LiveHTTPServer(ThreadingHTTPServer):
     governance_projection: Mapping[str, Any] | None
     evidence_registry: EvidenceProjectionRegistry | None
     artifact_acquisition_store: ArtifactAcquisitionStore | None
+    trusted_https_proxy: bool
 
 
 def _handler() -> type[BaseHTTPRequestHandler]:
@@ -529,6 +633,7 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             )
             body = _json_bytes(document)
             self._send_bytes(200, body, "application/json; charset=utf-8")
+
 
         def _deployment_registry(self) -> None:
             registry_status = getattr(self.server.route, "registry_status", None)
@@ -1234,12 +1339,23 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                     if not message.get("more_body", False):
                         self.close_connection = True
 
+            forwarded_proto = [
+                value
+                for name, value in headers
+                if name == b"x-forwarded-proto"
+            ]
+            scheme = (
+                "https"
+                if getattr(self.server, "trusted_https_proxy", False)
+                and forwarded_proto == [b"https"]
+                else "http"
+            )
             scope = {
                 "type": "http",
                 "asgi": {"version": "3.0"},
                 "http_version": self.request_version.removeprefix("HTTP/"),
                 "method": self.command,
-                "scheme": "http",
+                "scheme": scheme,
                 "path": parsed.path,
                 "raw_path": parsed.path.encode("utf-8"),
                 "query_string": parsed.query.encode("ascii"),
@@ -1363,6 +1479,7 @@ def create_server(
     governance_projection: Mapping[str, Any] | None = None,
     evidence_registry: EvidenceProjectionRegistry | None = None,
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None,
+    trusted_https_proxy: bool = False,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
@@ -1379,6 +1496,7 @@ def create_server(
     server.governance_projection = governance_projection
     server.evidence_registry = evidence_registry
     server.artifact_acquisition_store = artifact_acquisition_store
+    server.trusted_https_proxy = trusted_https_proxy
     return server
 
 
@@ -1778,12 +1896,14 @@ def _qualified_runtime(
     deployment_dir: Path | None = None,
     model_operation_file: Path | None = None,
     progress: Callable[[str], None] | None = None,
+    force_relay: bool = False,
 ) -> QualifiedDeploymentRuntime:
     if progress is not None:
         progress("validating_plan")
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
         seed_state_root=seed_state_root,
+        force_relay=force_relay,
     )
     try:
         if progress is not None:
@@ -1946,6 +2066,10 @@ def run_registry_server(
     representation_authorization_file: Path | None = None,
     model_capacity_live_observations_file: Path | None = None,
     historical_evidence_files: Sequence[Path] = (),
+    public_origin: str | None = None,
+    trusted_https_proxy: bool = False,
+    trusted_proxy_capability: bytes | None = None,
+    force_relay: bool = False,
 ) -> int:
     """Open, qualify, and serve one or more immutable deployments."""
 
@@ -1974,6 +2098,7 @@ def run_registry_server(
                         plan,
                         seed_state_root=seed_state_root,
                         model_operation_file=model_operation_file,
+                        force_relay=force_relay,
                     )
                 )
             except Exception as exc:
@@ -2017,6 +2142,7 @@ def run_registry_server(
                     seed_state_root=seed_state_root,
                     model_operation_file=model_operation_file,
                     progress=report,
+                    force_relay=force_relay,
                 ),
             )
         if model_cache_root is not None:
@@ -2078,6 +2204,9 @@ def run_registry_server(
             bearer_token=secrets.token_urlsafe(32),
             product_state_root=seed_state_root,
             seed_url=seed_url,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+            trusted_proxy_capability=trusted_proxy_capability,
         )
         evidence_registry = EvidenceProjectionRegistry(
             runtime_source=registry.public_status,
@@ -2098,6 +2227,7 @@ def run_registry_server(
             governance_projection=governance_readiness(ROOT),
             evidence_registry=evidence_registry,
             artifact_acquisition_store=artifact_acquisition_store,
+            trusted_https_proxy=trusted_https_proxy,
         )
         startup_complete = True
         stop = threading.Event()
@@ -2171,10 +2301,15 @@ def run_physical_server(
     historical_evidence_files: Sequence[Path] = (),
     a4_evidence: Mapping[str, Any] | None = None,
     save_live_qualification: Path | None = None,
+    public_origin: str | None = None,
+    trusted_https_proxy: bool = False,
+    trusted_proxy_capability: bytes | None = None,
+    force_relay: bool = False,
 ) -> int:
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
         seed_state_root=seed_state_root,
+        force_relay=force_relay,
     )
     stack: LiveStack | None = None
     server: LiveHTTPServer | None = None
@@ -2234,6 +2369,9 @@ def run_physical_server(
             bearer_token=secrets.token_urlsafe(32),
             product_state_root=seed_state_root,
             seed_url=seed_url,
+            public_origin=public_origin,
+            trusted_https_proxy=trusted_https_proxy,
+            trusted_proxy_capability=trusted_proxy_capability,
         )
         stack.health.publish(qualification)
         artifact_acquisition_store = ArtifactAcquisitionStore(
@@ -2269,6 +2407,7 @@ def run_physical_server(
             port=port,
             capacity_refresh=capacity_refresh,
             artifact_acquisition_store=artifact_acquisition_store,
+            trusted_https_proxy=trusted_https_proxy,
             evidence_registry=EvidenceProjectionRegistry(
                 runtime_source=route.public_status,
                 historical_records=_historical_evidence(
@@ -2471,6 +2610,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="if set, persist the freshly issued live-route qualification to this path",
     )
+    parser.add_argument(
+        "--public-origin",
+        help="exact external HTTPS origin when the loopback listener is behind a trusted proxy",
+    )
+    parser.add_argument(
+        "--trusted-https-proxy",
+        action="store_true",
+        help="trust an authenticated HTTPS loopback proxy capability",
+    )
+    parser.add_argument("--trusted-proxy-capability-file", type=Path)
+    parser.add_argument(
+        "--a8-force-relay",
+        action="store_true",
+        help="operator-only physical qualification control; path evidence stays observed",
+    )
     return parser
 
 
@@ -2478,6 +2632,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if not 1 <= args.port <= 65_535:
         raise SystemExit("port must be from 1 through 65535")
+    if not (
+        args.trusted_https_proxy
+        == (args.public_origin is not None)
+        == (args.trusted_proxy_capability_file is not None)
+    ):
+        raise SystemExit(
+            "--trusted-https-proxy, --public-origin, and "
+            "--trusted-proxy-capability-file require each other"
+        )
+    trusted_proxy_capability = None
+    if args.trusted_proxy_capability_file is not None:
+        try:
+            trusted_proxy_capability = _load_trusted_proxy_capability(
+                args.trusted_proxy_capability_file
+            )
+        except ValueError as exc:
+            raise SystemExit("invalid trusted proxy capability file") from exc
     if len(args.operator_plan) == 1 and args.candidate_plan_root is None:
         if args.registry_state is not None:
             raise SystemExit(
@@ -2505,6 +2676,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             historical_evidence_files=tuple(args.historical_evidence_file or ()),
             save_live_qualification=args.save_live_qualification,
             a4_evidence=_a4_evidence_from_args(args),
+            public_origin=args.public_origin,
+            trusted_https_proxy=args.trusted_https_proxy,
+            trusted_proxy_capability=trusted_proxy_capability,
+            force_relay=args.a8_force_relay,
         )
     if args.deployment_dir is not None:
         raise SystemExit("--deployment-dir is valid only with one --operator-plan")
@@ -2539,6 +2714,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.model_capacity_live_observations_file
         ),
         historical_evidence_files=tuple(args.historical_evidence_file or ()),
+        public_origin=args.public_origin,
+        trusted_https_proxy=args.trusted_https_proxy,
+        trusted_proxy_capability=trusted_proxy_capability,
+        force_relay=args.a8_force_relay,
     )
 
 

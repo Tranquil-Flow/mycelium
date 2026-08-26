@@ -2196,6 +2196,23 @@ class IrohTransport:
                return placement.node_id
       raise IrohTransportError("unknown_placement", placement_id)
 
+   def inbound_admission_snapshot(
+      self, candidate_endpoint_id: str
+   ) -> Mapping[str, Any]:
+      """Read native admission counters for one candidate remote identity."""
+
+      with self._state_lock:
+         control_client = self._control_client
+      if control_client is None:
+         raise IrohTransportError("transport_not_started")
+      query = getattr(control_client, "inbound_admission_snapshot", None)
+      if not callable(query):
+         raise IrohTransportError("admission_snapshot_unavailable")
+      try:
+         return query(candidate_endpoint_id)
+      except BaseException as error:
+         raise self._map_sidecar_error("admission_snapshot_failed", error) from error
+
    def evidence(self) -> TransportEvidence:
       with self._state_lock:
          peer = self._peer

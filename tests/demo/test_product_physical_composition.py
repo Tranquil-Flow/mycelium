@@ -14,6 +14,8 @@ from pathlib import Path
 import sys
 from typing import Any
 
+import pytest
+
 import model_manifest as model_manifest_contract
 from mycelium_demo.product_stack import build_loopback_product_stack
 from mycelium_qualification import QualificationAuthority
@@ -49,6 +51,8 @@ async def _asgi_request(
     method: str = "GET",
     body: bytes = b"",
     headers: tuple[tuple[bytes, bytes], ...] = (),
+    scheme: str = "http",
+    host: bytes = b"127.0.0.1:8080",
 ) -> ASGIResponse:
     incoming: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     await incoming.put({"type": "http.request", "body": body, "more_body": False})
@@ -69,11 +73,11 @@ async def _asgi_request(
             "type": "http",
             "http_version": "1.1",
             "method": method,
-            "scheme": "http",
+            "scheme": scheme,
             "path": path,
             "raw_path": path.encode("ascii"),
             "query_string": b"",
-            "headers": [(b"host", b"127.0.0.1:8080"), *headers],
+            "headers": [(b"host", host), *headers],
             "client": ("127.0.0.1", 49152),
             "server": ("127.0.0.1", 8080),
         },
@@ -291,3 +295,128 @@ def test_host_level_product_composition_reaches_browser_token_boundary_only() ->
     assert dropped.json()["code"] == "route_dropped"
     assert router.admit_calls == 1
     assert codec.encoded == [prompt]
+
+
+def test_trusted_proxy_composition_requires_authenticated_proxy_capability() -> None:
+    authority, _record, graph = _published_qualification()
+    proxy_capability = b"a" * 64
+    app = build_loopback_product_stack(
+        qualification_source=authority,
+        router=DeterministicRouter(graph),
+        codec=DeterministicCodec(),
+        observatory_app=_unused_observatory,
+        swarm_coordinator=object(),
+        request_bearer_token=REQUEST_BEARER_TOKEN,
+        public_origin="https://a8.example.test",
+        trusted_https_proxy=True,
+        trusted_proxy_capability=proxy_capability,
+    )
+
+    denied = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+    )
+    forged_identity = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+        headers=((b"x-mycelium-authenticated-user", b"owner"),),
+    )
+    wrong_capability = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+        headers=(
+            (b"x-mycelium-authenticated-user", b"owner"),
+            (b"x-mycelium-proxy-capability", b"b" * 64),
+        ),
+    )
+    wrong_identity = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+        headers=(
+            (b"x-mycelium-authenticated-user", b"administrator"),
+            (b"x-mycelium-proxy-capability", proxy_capability),
+        ),
+    )
+    duplicate_identity = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+        headers=(
+            (b"x-mycelium-authenticated-user", b"owner"),
+            (b"x-mycelium-authenticated-user", b"owner"),
+            (b"x-mycelium-proxy-capability", proxy_capability),
+        ),
+    )
+    duplicate_capability = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+        headers=(
+            (b"x-mycelium-authenticated-user", b"owner"),
+            (b"x-mycelium-proxy-capability", proxy_capability),
+            (b"x-mycelium-proxy-capability", b"b" * 64),
+        ),
+    )
+    accepted = _request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        host=b"a8.example.test",
+        headers=(
+            (b"x-mycelium-authenticated-user", b"owner"),
+            (b"x-mycelium-proxy-capability", proxy_capability),
+        ),
+    )
+
+    for response in (
+        denied,
+        forged_identity,
+        wrong_capability,
+        wrong_identity,
+        duplicate_identity,
+        duplicate_capability,
+    ):
+        assert response.status == 403
+        assert response.json()["code"] == "access_denied"
+    assert accepted.status == 200
+
+
+def test_trusted_proxy_composition_requires_proxy_capability_configuration() -> None:
+    authority, _record, graph = _published_qualification()
+    for capability in (None, b"a" * 63, b"a" * 65, b"A" * 64, b"g" * 64):
+        with pytest.raises(ValueError, match="invalid_trusted_proxy_capability"):
+            build_loopback_product_stack(
+                qualification_source=authority,
+                router=DeterministicRouter(graph),
+                codec=DeterministicCodec(),
+                observatory_app=_unused_observatory,
+                swarm_coordinator=object(),
+                request_bearer_token=REQUEST_BEARER_TOKEN,
+                public_origin="https://a8.example.test",
+                trusted_https_proxy=True,
+                trusted_proxy_capability=capability,
+            )
+
+    with pytest.raises(
+        ValueError,
+        match="trusted_proxy_capability_requires_trusted_https_proxy",
+    ):
+        build_loopback_product_stack(
+            qualification_source=authority,
+            router=DeterministicRouter(graph),
+            codec=DeterministicCodec(),
+            observatory_app=_unused_observatory,
+            swarm_coordinator=object(),
+            request_bearer_token=REQUEST_BEARER_TOKEN,
+            trusted_proxy_capability=b"a" * 64,
+        )

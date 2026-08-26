@@ -77,6 +77,39 @@ def _prepare_private_parent(key_path: Path) -> None:
         raise NodeIdentityError("node_identity_path_invalid") from exc
 
 
+def _open_private_parent(key_path: Path) -> list[int]:
+    components = key_path.parts
+    if len(components) < 2 or components[0] != "/":
+        raise NodeIdentityError("node_identity_path_invalid")
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptors: list[int] = []
+    try:
+        current = os.open("/", flags)
+        descriptors.append(current)
+        for component in components[1:-1]:
+            current = os.open(component, flags, dir_fd=current)
+            descriptors.append(current)
+            if not stat.S_ISDIR(os.fstat(current).st_mode):
+                raise NodeIdentityError("node_identity_path_invalid")
+        parent = os.fstat(current)
+        if parent.st_uid != os.getuid() or stat.S_IMODE(parent.st_mode) != 0o700:
+            raise NodeIdentityError("node_identity_permissions_invalid")
+        return descriptors
+    except NodeIdentityError:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+        raise
+    except OSError as exc:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+        raise NodeIdentityError("node_identity_path_invalid") from exc
+
+
 def _signer(
     private_bytes: bytes,
     *,
@@ -107,8 +140,15 @@ def _load_existing(
     allow_incomplete: bool = False,
     endpoint_id: str | None = None,
 ) -> Ed25519EvidenceSigner | None:
+    descriptors: list[int] = []
     try:
-        metadata = key_path.lstat()
+        descriptors = _open_private_parent(key_path)
+        parent_descriptor = descriptors[-1]
+        metadata = os.stat(
+            key_path.name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
         mode = stat.S_IMODE(metadata.st_mode)
         if (
             not stat.S_ISREG(metadata.st_mode)
@@ -120,18 +160,38 @@ def _load_existing(
         if mode != 0o600:
             raise NodeIdentityError("node_identity_permissions_invalid")
         flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(key_path, flags)
-        try:
-            opened = os.fstat(descriptor)
-            if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
-                raise NodeIdentityError("node_identity_path_invalid")
-            private_bytes = os.read(descriptor, _KEY_BYTES + 1)
-        finally:
-            os.close(descriptor)
+        descriptor = os.open(key_path.name, flags, dir_fd=parent_descriptor)
+        descriptors.append(descriptor)
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise NodeIdentityError("node_identity_path_invalid")
+        private_bytes = os.read(descriptor, _KEY_BYTES + 1)
+        after = os.fstat(descriptor)
+        if (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+            opened.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise NodeIdentityError("node_identity_path_invalid")
     except NodeIdentityError:
         raise
+    except FileNotFoundError:
+        if allow_incomplete:
+            return None
+        raise NodeIdentityError("node_identity_missing") from None
     except OSError as exc:
         raise NodeIdentityError("node_identity_path_invalid") from exc
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
     if len(private_bytes) < _KEY_BYTES and allow_incomplete:
         return None
     if len(private_bytes) != _KEY_BYTES:
@@ -153,11 +213,18 @@ def _write_new(
         | getattr(os, "O_CLOEXEC", 0)
         | getattr(os, "O_NOFOLLOW", 0)
     )
+    descriptors = _open_private_parent(key_path)
+    parent_descriptor = descriptors[-1]
     try:
-        descriptor = os.open(key_path, flags, 0o600)
+        descriptor = os.open(key_path.name, flags, 0o600, dir_fd=parent_descriptor)
+        descriptors.append(descriptor)
     except FileExistsError:
+        for open_descriptor in reversed(descriptors):
+            os.close(open_descriptor)
         return None
     except OSError as exc:
+        for open_descriptor in reversed(descriptors):
+            os.close(open_descriptor)
         raise NodeIdentityError("node_identity_path_invalid") from exc
     try:
         os.fchmod(descriptor, 0o600)
@@ -168,25 +235,16 @@ def _write_new(
                 raise OSError("short node identity write")
             written += count
         os.fsync(descriptor)
+        os.fsync(parent_descriptor)
     except OSError as exc:
         try:
-            key_path.unlink()
+            os.unlink(key_path.name, dir_fd=parent_descriptor)
         except OSError:
             pass
         raise NodeIdentityError("node_identity_write_failed") from exc
     finally:
-        os.close(descriptor)
-    try:
-        parent_descriptor = os.open(
-            key_path.parent,
-            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
-        )
-        try:
-            os.fsync(parent_descriptor)
-        finally:
-            os.close(parent_descriptor)
-    except OSError as exc:
-        raise NodeIdentityError("node_identity_write_failed") from exc
+        for open_descriptor in reversed(descriptors):
+            os.close(open_descriptor)
     return _signer(private_bytes, endpoint_id=endpoint_id)
 
 
@@ -230,25 +288,7 @@ def load_node_signer(
 ) -> Ed25519EvidenceSigner:
     """Load an existing owner-only signer without creating any path or key."""
 
-    key_path = _absolute_path(key_file)
-    try:
-        parent = key_path.parent.lstat()
-        if (
-            not stat.S_ISDIR(parent.st_mode)
-            or stat.S_ISLNK(parent.st_mode)
-            or parent.st_uid != os.getuid()
-        ):
-            raise NodeIdentityError("node_identity_path_invalid")
-        if stat.S_IMODE(parent.st_mode) != 0o700:
-            raise NodeIdentityError("node_identity_permissions_invalid")
-        key_path.lstat()
-    except FileNotFoundError as exc:
-        raise NodeIdentityError("node_identity_missing") from exc
-    except NodeIdentityError:
-        raise
-    except OSError as exc:
-        raise NodeIdentityError("node_identity_path_invalid") from exc
-    signer = _load_existing(key_path, endpoint_id=endpoint_id)
+    signer = _load_existing(_absolute_path(key_file), endpoint_id=endpoint_id)
     if signer is None:  # pragma: no cover - load-only never permits incomplete keys
         raise NodeIdentityError("node_identity_invalid")
     return signer

@@ -370,7 +370,10 @@ def _make_frozen_cancellation_case(case: Any) -> Any:
     challenge.update(
         {
             "qualification_scope": "cancellation",
-            "request": {"request_id": "frozen-cancel-request", "prompt_token_ids": [1, 2, 3]},
+            "request": {
+                "request_id": "frozen-cancel-request",
+                "prompt_token_ids": [1, 2, 3],
+            },
             "expected_token_ids": [],
             "output_token_ids": [],
             "signed_observations": signed_observations,
@@ -516,9 +519,9 @@ def _authority_builder_inputs(
         "now": case.now_unix_ms / 1000,
         "source_root": str(source_root),
         "peers": peers,
-        "transfer_manifest": case.documents[
-            "qualification/source-provenance.json"
-        ]["transfer_manifest"],
+        "transfer_manifest": case.documents["qualification/source-provenance.json"][
+            "transfer_manifest"
+        ],
         "membership_snapshot": case.documents["control/gossip-signature.json"][
             "snapshot"
         ],
@@ -626,9 +629,9 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
         "now": case.now_unix_ms / 1000,
         "source_root": str(source_root),
         "peers": peers,
-        "transfer_manifest": case.documents[
-            "qualification/source-provenance.json"
-        ]["transfer_manifest"],
+        "transfer_manifest": case.documents["qualification/source-provenance.json"][
+            "transfer_manifest"
+        ],
         "membership_snapshot": case.documents["control/gossip-signature.json"][
             "snapshot"
         ],
@@ -671,9 +674,7 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
         2506,
         5145,
     ]
-    assert documents["run/negative-runs.json"]["qualified_operations"] == [
-        "inference"
-    ]
+    assert documents["run/negative-runs.json"]["qualified_operations"] == ["inference"]
     assert documents["run/negative-runs.json"]["unqualified_operations"] == [
         "cancellation",
         "recovery",
@@ -704,6 +705,45 @@ def test_frozen_authority_document_builder_binds_dynamic_controller_result(
     )
     assert authority_record.route_ready is True
     assert authority_record.evidence_manifest_digest == sealed.manifest_digest
+
+
+def test_frozen_authority_document_builder_uses_configured_control_files(
+    qualification_case: Any,
+    tmp_path: Path,
+) -> None:
+    case = _frozen_route_case(qualification_case)
+    controller_config, evidence = _authority_builder_inputs(
+        case, tmp_path, command="run"
+    )
+    source_root = Path(controller_config["source_root"])
+    nodes = []
+    for index, peer in enumerate(controller_config["peers"]):
+        node_id = peer["node_id"]
+        source_prefix = source_root / "control" / node_id
+        configured_prefix = source_root / "control" / f"fixture-{index}"
+        for suffix in ("assignment", "artifact-report", "load-proof"):
+            configured_prefix.with_name(f"fixture-{index}-{suffix}.json").write_bytes(
+                source_prefix.with_name(f"{node_id}-{suffix}.json").read_bytes()
+            )
+        nodes.append(
+            {
+                "node_id": node_id,
+                "configure": {
+                    "assignment_file": f"control/fixture-{index}-assignment.json"
+                },
+            }
+        )
+    controller_config["run_plan"]["nodes"] = nodes
+
+    documents = build_frozen_route_authority_documents(
+        controller_config=controller_config,
+        evidence=evidence,
+    )
+
+    assert [
+        item["node_id"]
+        for item in documents["control/control-plane-tranche.json"]["assignments"]
+    ] == [peer["node_id"] for peer in controller_config["peers"]]
 
 
 def test_frozen_authority_document_builder_binds_dynamic_cancellation_result(
@@ -759,9 +799,7 @@ def test_frozen_physical_inference_profile_rejects_unbound_stage_assignment(
     case = _frozen_route_case(qualification_case)
     signed = case.documents["runtime/load-proof-signatures.json"]["observations"][0]
     signed["observation"]["details"]["assignment_id"] = "wrong-assignment"
-    signer = generate_ed25519_signer(
-        endpoint_id=signed["observation"]["endpoint_id"]
-    )
+    signer = generate_ed25519_signer(endpoint_id=signed["observation"]["endpoint_id"])
     signed["signature"] = signer.sign(signed["observation"])
     signed["verification_key"] = signer.public_key_record()
 
@@ -792,9 +830,7 @@ def test_frozen_physical_inference_profile_rejects_post_mvp_scope_claim(
     qualification_case: Any,
 ) -> None:
     case = _frozen_route_case(qualification_case)
-    case.documents["run/negative-runs.json"]["qualified_operations"].append(
-        "recovery"
-    )
+    case.documents["run/negative-runs.json"]["qualified_operations"].append("recovery")
 
     _assert_rejected(case, "qualification_scope_invalid")
 
@@ -810,7 +846,9 @@ def test_frozen_physical_inference_profile_rejects_source_pin_mismatch(
     _assert_rejected(case, "source_provenance_digest_mismatch")
 
 
-def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case: Any) -> None:
+def test_hypothetical_physical_shape_qualifies_in_memory_only(
+    qualification_case: Any,
+) -> None:
     qualification_case.documents["run/route-challenge.json"]["placement_provenance"] = (
         "frozen_fixture"
     )
@@ -823,7 +861,10 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
     assert document["reason_codes"] == []
     assert document["evidence_class"] == "physical_qualification"
     assert document["placement_provenance"] == "frozen_fixture"
-    assert document["qualified_by"] == "mycelium_qualification.qualifier:RouteQualificationV1"
+    assert (
+        document["qualified_by"]
+        == "mycelium_qualification.qualifier:RouteQualificationV1"
+    )
     assert document["evidence_manifest_digest"] == evidence_manifest_digest(manifest)
     assert document["source_provenance_digest"] == sha256_document(
         qualification_case.documents["qualification/source-provenance.json"]
@@ -860,7 +901,9 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
         binding["load_proof_digest"].startswith("sha256:")
         for binding in document["stage_bindings"]
     )
-    assert all(set(binding) == EXPECTED_STAGE_FIELDS for binding in document["stage_bindings"])
+    assert all(
+        set(binding) == EXPECTED_STAGE_FIELDS for binding in document["stage_bindings"]
+    )
     assert all(
         binding["stage_probe_result_digest"].startswith("sha256:")
         for binding in document["stage_bindings"]
@@ -871,9 +914,7 @@ def test_hypothetical_physical_shape_qualifies_in_memory_only(qualification_case
 def test_qualification_rejects_missing_placement_provenance(
     qualification_case: Any,
 ) -> None:
-    qualification_case.documents["run/route-challenge.json"].pop(
-        "placement_provenance"
-    )
+    qualification_case.documents["run/route-challenge.json"].pop("placement_provenance")
     _assert_rejected(qualification_case, "placement_provenance_missing")
 
 
@@ -885,7 +926,9 @@ def test_qualification_rejects_invalid_placement_provenance(
     qualification_case: Any,
     value: object,
 ) -> None:
-    qualification_case.documents["run/route-challenge.json"]["placement_provenance"] = value
+    qualification_case.documents["run/route-challenge.json"]["placement_provenance"] = (
+        value
+    )
     _assert_rejected(qualification_case, "placement_provenance_invalid")
 
 
@@ -939,7 +982,9 @@ def test_verifier_callbacks_cannot_mutate_bound_signature_evidence(
     assert record.load_proof_signatures_digest == expected_load_digest
 
 
-def test_evidence_manifest_binding_rejects_mutated_or_missing_files(qualification_case: Any) -> None:
+def test_evidence_manifest_binding_rejects_mutated_or_missing_files(
+    qualification_case: Any,
+) -> None:
     files, manifest = qualification_case.render()
     content = files["run/route-challenge.json"]
     files["run/route-challenge.json"] = b"X" + content[1:]
@@ -986,7 +1031,9 @@ def test_post_seal_placement_provenance_mutation_breaks_manifest_binding(
     assert captured.value.code == "evidence_file_digest_mismatch"
 
 
-def test_missing_required_evidence_document_is_rejected(qualification_case: Any) -> None:
+def test_missing_required_evidence_document_is_rejected(
+    qualification_case: Any,
+) -> None:
     qualification_case.documents.pop("runtime/load-proofs.json")
     _assert_rejected(qualification_case, "missing_evidence_file")
 
@@ -997,7 +1044,9 @@ def test_source_manifest_digest_is_bound(qualification_case: Any) -> None:
 
 
 def test_contract_manifest_digest_is_bound(qualification_case: Any) -> None:
-    qualification_case.extra_files["provenance/contract-manifest.v1.json"] += b"mutation"
+    qualification_case.extra_files["provenance/contract-manifest.v1.json"] += (
+        b"mutation"
+    )
     _assert_rejected(qualification_case, "contract_manifest_digest_mismatch")
 
 
@@ -1011,7 +1060,9 @@ def test_every_dependency_lock_digest_is_bound(qualification_case: Any) -> None:
     _assert_rejected(qualification_case, "dependency_lock_digest_mismatch")
 
 
-def test_signed_load_proof_set_is_complete_bound_and_verified(qualification_case: Any) -> None:
+def test_signed_load_proof_set_is_complete_bound_and_verified(
+    qualification_case: Any,
+) -> None:
     pristine = qualification_case.clone()
     signed_set = qualification_case.documents["runtime/load-proof-signatures.json"]
     signed_set["signatures"].pop()
@@ -1072,7 +1123,9 @@ def test_gossip_verifier_exception_fails_closed(qualification_case: Any) -> None
     assert captured.value.code == "gossip_signature_invalid"
 
 
-def test_signed_gossip_snapshot_identity_and_peer_liveness_are_bound(qualification_case: Any) -> None:
+def test_signed_gossip_snapshot_identity_and_peer_liveness_are_bound(
+    qualification_case: Any,
+) -> None:
     pristine = qualification_case.clone()
     signed = qualification_case.documents["control/gossip-signature.json"]
     signed["statement"]["evidence_bundle_digest"] = "sha256:" + "f" * 64
@@ -1087,23 +1140,31 @@ def test_signed_gossip_snapshot_identity_and_peer_liveness_are_bound(qualificati
 
 
 def test_planner_assignment_chain_must_be_coherent(qualification_case: Any) -> None:
-    qualification_case.documents["control/control-plane-tranche.json"]["assignments"][0][
-        "deployment_epoch"
-    ] += 1
+    qualification_case.documents["control/control-plane-tranche.json"]["assignments"][
+        0
+    ]["deployment_epoch"] += 1
     _assert_rejected(qualification_case, "control_plane_chain_invalid")
 
 
-def test_provisioning_reports_are_exactly_assignment_bound(qualification_case: Any) -> None:
-    qualification_case.documents["runtime/provisioning-reports.json"][0]["route_ready"] = True
+def test_provisioning_reports_are_exactly_assignment_bound(
+    qualification_case: Any,
+) -> None:
+    qualification_case.documents["runtime/provisioning-reports.json"][0][
+        "route_ready"
+    ] = True
     _assert_rejected(qualification_case, "provisioning_report_invalid")
 
 
-def test_load_proof_chain_remains_unqualified_and_exact(qualification_case: Any) -> None:
+def test_load_proof_chain_remains_unqualified_and_exact(
+    qualification_case: Any,
+) -> None:
     qualification_case.documents["runtime/load-proofs.json"][0]["route_ready"] = True
     _assert_rejected(qualification_case, "load_proof_chain_invalid")
 
 
-def test_execution_graph_must_equal_the_bound_builder_output(qualification_case: Any) -> None:
+def test_execution_graph_must_equal_the_bound_builder_output(
+    qualification_case: Any,
+) -> None:
     graph = qualification_case.documents["router/execution-graph.json"]
     graph["stages"][0]["placements"][0]["stage_signature"] = "sha256:" + "e" * 64
     _assert_rejected(qualification_case, "execution_graph_chain_invalid")
@@ -1126,7 +1187,9 @@ def test_deployment_topology_and_model_identity_are_exact(
     _assert_rejected(qualification_case, code)
 
 
-def test_stage_signature_and_load_proof_digest_are_exact(qualification_case: Any) -> None:
+def test_stage_signature_and_load_proof_digest_are_exact(
+    qualification_case: Any,
+) -> None:
     pristine = qualification_case.clone()
     challenge = qualification_case.documents["run/route-challenge.json"]
     challenge["stage_evidence"][0]["stage_signature"] = "sha256:" + "b" * 64
@@ -1158,9 +1221,9 @@ def test_reservation_identity_and_expiry_fail_closed(qualification_case: Any) ->
 
     case = pristine
     challenge = case.documents["run/route-challenge.json"]
-    challenge["path_manifest"]["ordered_hops"][0][
-        "reservation_expires_at_unix_ms"
-    ] = case.now_unix_ms
+    challenge["path_manifest"]["ordered_hops"][0]["reservation_expires_at_unix_ms"] = (
+        case.now_unix_ms
+    )
     _assert_rejected(case, "expired_reservation")
 
 
@@ -1275,7 +1338,9 @@ def test_token_parity_requires_eight_exact_decode_steps_and_no_fallback(
     _assert_rejected(case, "full_model_fallback")
 
 
-def test_numeric_parity_is_stage_bound_and_within_tolerance(qualification_case: Any) -> None:
+def test_numeric_parity_is_stage_bound_and_within_tolerance(
+    qualification_case: Any,
+) -> None:
     numeric = qualification_case.documents["run/route-challenge.json"]["numeric_parity"]
     numeric["stage_reports"][0]["max_abs_diff"] = numeric["absolute_tolerance"] * 2
     _assert_rejected(qualification_case, "numeric_parity_failed")
@@ -1301,7 +1366,9 @@ def test_prefill_decode_trace_and_final_output_parity_are_strictly_bound(
 
     case = pristine
     trace = case.documents["run/route-challenge.json"]["execution_trace"]
-    trace["final_logits"]["max_abs_diff"] = trace["final_logits"]["absolute_tolerance"] * 2
+    trace["final_logits"]["max_abs_diff"] = (
+        trace["final_logits"]["absolute_tolerance"] * 2
+    )
     case.documents["run/route-challenge.json"]["numeric_parity"][
         "final_logits_report"
     ] = dict(trace["final_logits"])

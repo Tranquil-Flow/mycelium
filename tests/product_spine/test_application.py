@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from mycelium_internet.contracts import compatibility_fixtures as internet_fixtures
+
 from mycelium_product_spine import (
     ProductEvidenceApplication,
     ProductEvidenceStateError,
@@ -114,6 +116,37 @@ def test_unknown_path_does_not_advance_publication_cursor() -> None:
     assert json.loads(body)["publication"]["cursor"] == 1
 
 
+def test_application_publishes_live_internet_native_source_in_snapshot_and_event() -> None:
+    members, route, qualification = _sources()
+    fixtures = internet_fixtures()
+    activation = fixtures["internet-activation-observation-v1.json"]
+    internet_native = {
+        "bootstrap_status": fixtures["internet-bootstrap-status-v1.json"],
+        "activation_observation": activation,
+        "activation_history": [activation],
+        "relay_projection": fixtures["relay-projection-v1.json"],
+        "qualification": fixtures["internet-native-qualification-v1.json"],
+    }
+    app = ProductEvidenceApplication(
+        projector=ProductProjector(pseudonym_salt=b"n" * 32),
+        membership_source=lambda: members,
+        route_source=lambda: route,
+        qualification_source=lambda: qualification,
+        internet_native_source=lambda: internet_native,
+        clock_unix_ms=lambda: 1_500_000,
+    )
+
+    snapshot_status, snapshot_body = asyncio.run(
+        _request(app, "/v1/product/snapshot")
+    )
+    event_status, event_body = asyncio.run(_request(app, "/v1/product/events"))
+
+    assert snapshot_status == 200
+    assert json.loads(snapshot_body)["internet_native"] == internet_native
+    assert event_status == 200
+    assert b'"internet_native"' in event_body
+
+
 def test_restart_restores_cursor_and_replay_window(tmp_path: Path) -> None:
     state_root = tmp_path / "private-product-state"
     state_root.mkdir(mode=0o700)
@@ -161,6 +194,52 @@ def test_restart_upgrades_exact_generation_one_device_state(tmp_path: Path) -> N
         for entity in snapshot["entities"]
         if entity["kind"] == "device"
     } == {1}
+
+
+def test_restart_upgrades_exact_pre_a8_internet_native_state(tmp_path: Path) -> None:
+    state_root = tmp_path / "private-product-state"
+    state_root.mkdir(mode=0o700)
+    first = _application(state_root)
+    status, _body = asyncio.run(_request(first, "/v1/product/snapshot"))
+    assert status == 200
+    state_file = state_root / "product-evidence-state.v1.json"
+    persisted = json.loads(state_file.read_text())
+    published_at = persisted["events"][0]["snapshot"]["publication"][
+        "published_at_unix_ms"
+    ]
+    for event in persisted["events"]:
+        event["snapshot"].pop("internet_native")
+    state_file.write_text(json.dumps(persisted, sort_keys=True, separators=(",", ":")))
+    state_file.chmod(0o600)
+
+    restarted = _application(state_root)
+    event_status, event_body = asyncio.run(
+        _request(restarted, "/v1/product/events", last_event_id=0)
+    )
+    restored_event = json.loads(
+        next(
+            line.removeprefix("data: ")
+            for line in event_body.decode().splitlines()
+            if line.startswith("data: ")
+        )
+    )
+    projection = restored_event["snapshot"]["internet_native"]
+
+    assert event_status == 200
+    assert projection["activation_observation"]["path_class"] == "unknown"
+    assert projection["activation_observation"]["path_source"] == "unknown"
+    assert projection["activation_observation"]["metrics"] == {
+        "rtt_ms": None,
+        "warm_rtt_ms": None,
+        "jitter_ms": None,
+        "goodput_bytes_per_second": None,
+        "loss_ratio": None,
+        "sample_count": None,
+        "measured_zero": False,
+    }
+    assert projection["activation_observation"]["observed_at_unix_ms"] == published_at
+    assert projection["relay_projection"] is None
+    assert projection["qualification"] is None
 
 
 def test_state_store_rejects_non_private_or_corrupt_state(tmp_path: Path) -> None:

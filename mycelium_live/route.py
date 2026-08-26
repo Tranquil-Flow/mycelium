@@ -16,6 +16,13 @@ import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import quote
 
+from mycelium_internet.activation import (
+    ConnectionEvidence,
+    PathClass,
+    RelayProjector,
+    build_activation_observation,
+)
+
 from mycelium_membership.contracts import (
     peer_runtime_is_activation_eligible,
     sign_membership_message,
@@ -38,6 +45,7 @@ from mycelium_seed.operator import SeedOperatorError, revoke_seed_member
 from mycelium_qualification.signing import Ed25519EvidenceSigner
 from mycelium_router.contracts import ExecutionGraph
 from mycelium_router.serialization import execution_graph_to_dict
+from mycelium_topology_evidence import validate_transport_path_observation
 from physical_inference_node import execution_graph_from_document
 from physical_inference_qualification import (
     NODE_COMMAND_TIMEOUT_SECONDS,
@@ -56,6 +64,201 @@ from mycelium_live.liveness import (
 
 
 _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = 0.5
+
+
+def _unknown_activation_projection(now_unix_ms: int) -> dict[str, Any]:
+    return {
+        "protocol": "mycelium.internet_activation_observation.v1",
+        "observation_id": "projection-unknown",
+        "connection_generation": 0,
+        "connection_reuse": 0,
+        "path_class": "unknown",
+        "path_source": "unknown",
+        "endpoint_pseudonym": None,
+        "observed_at_unix_ms": now_unix_ms,
+        "freshness": "unknown",
+        "evidence_lifetime_until_unix_ms": now_unix_ms + 90_000,
+        "metrics": {
+            "rtt_ms": None,
+            "warm_rtt_ms": None,
+            "jitter_ms": None,
+            "goodput_bytes_per_second": None,
+            "loss_ratio": None,
+            "sample_count": None,
+            "measured_zero": False,
+        },
+    }
+
+
+def _rounded_nonnegative(value: Any) -> int:
+    return max(0, int(round(float(value))))
+
+
+def _product_internet_native_projection(
+    *,
+    snapshots: Mapping[str, Mapping[str, Any]],
+    projection_key: bytes,
+    now_unix_ms: int,
+    route_available: bool,
+    qualification: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project verified sidecar path evidence into the closed public A8 shape."""
+
+    observations: list[dict[str, Any]] = []
+    for snapshot_node_id, snapshot in snapshots.items():
+        details = snapshot.get("details")
+        transport = details.get("transport") if isinstance(details, Mapping) else None
+        raw = (
+            transport.get("transport_path_observations")
+            if isinstance(transport, Mapping)
+            else None
+        )
+        if not isinstance(raw, list):
+            continue
+        for candidate in raw:
+            try:
+                item = validate_transport_path_observation(
+                    candidate,
+                    now_unix_ms=now_unix_ms,
+                    require_resolved=True,
+                )
+            except (TypeError, ValueError):
+                continue
+            if item["local_node_id"] != snapshot_node_id:
+                continue
+            observations.append(item)
+
+    history: list[dict[str, Any]] = []
+    selected: list[dict[str, Any]] = []
+    if observations:
+        lane = min(
+            (item["local_node_id"], item["remote_node_id"])
+            for item in observations
+        )
+        deduplicated: dict[tuple[int, int, str], dict[str, Any]] = {}
+        for item in observations:
+            if (item["local_node_id"], item["remote_node_id"]) != lane:
+                continue
+            fingerprint = (
+                item["connection_generation"],
+                item["measured_at_unix_ms"],
+                item["path_class"],
+            )
+            deduplicated[fingerprint] = item
+        selected = sorted(
+            deduplicated.values(),
+            key=lambda item: (
+                item["measured_at_unix_ms"],
+                item["connection_generation"],
+                item["path_class"],
+            ),
+        )[-64:]
+
+    for item in selected:
+        metrics = {
+            "rtt_ms": _rounded_nonnegative(item["cold_rtt_ms"]),
+            "warm_rtt_ms": _rounded_nonnegative(item["warm_rtt_ms"]),
+            "jitter_ms": _rounded_nonnegative(item["jitter_ms"]),
+            "goodput_bytes_per_second": _rounded_nonnegative(
+                item["observed_goodput_Bps"]
+            ),
+            "loss_ratio": float(item["loss_ratio"]),
+            "sample_count": item["sample_count"],
+            "measured_zero": float(item["loss_ratio"]) == 0.0,
+        }
+        evidence = ConnectionEvidence(
+            connection_generation=item["connection_generation"],
+            connection_reuse=max(
+                0, item["frames_sent"] - item["connections_opened"]
+            ),
+            path_class=PathClass(item["path_class"]),
+            endpoint_id=item["remote_endpoint_id"],
+            metrics=metrics,
+            observed_at_unix_ms=item["measured_at_unix_ms"],
+            relay_identity=item["relay_identity"],
+            relay_region=item["relay_region"],
+        )
+        history.append(
+            build_activation_observation(
+                evidence=evidence,
+                endpoint_pseudonym=(
+                    "sha256:"
+                    + hashlib.sha256(
+                        item["remote_endpoint_id"].encode("utf-8")
+                    ).hexdigest()
+                ),
+                observation_id=(
+                    f"transport-{item['connection_generation']}-"
+                    f"{item['measured_at_unix_ms']}"
+                ),
+            )
+        )
+
+    current = history[-1] if history else _unknown_activation_projection(now_unix_ms)
+    if not history:
+        history = [current]
+    relay_projection = None
+    if selected and current["path_class"] == "relay":
+        raw_relay = selected[-1]["relay_identity"]
+        if isinstance(raw_relay, str) and raw_relay:
+            relay_projection = {
+                "protocol": "mycelium.relay_projection.v1",
+                "relay_reference": RelayProjector(
+                    projection_key=projection_key
+                ).reference(raw_relay),
+                "region": RelayProjector(projection_key=projection_key).region(
+                    selected[-1]["relay_region"], reviewed=False
+                ),
+                "projection_generation": current["connection_generation"],
+                "stable": True,
+                "observed_at_unix_ms": current["observed_at_unix_ms"],
+            }
+    return {
+        "bootstrap_status": {
+            "protocol": "mycelium.internet_bootstrap_status.v1",
+            "generation": 1,
+            "observed_at_unix_ms": now_unix_ms,
+            "freshness": "current" if route_available else "unknown",
+            "tls_state": "unknown",
+            "canonical_origin_verified": False,
+            "seed_pin_state": "unknown",
+            "route_state": "available" if route_available else "unavailable",
+            "invitation_state": "unknown",
+            "counters": {
+                "requests": 0,
+                "joins_accepted": 0,
+                "joins_rejected": 0,
+            },
+        },
+        "activation_observation": current,
+        "activation_history": history,
+        "relay_projection": relay_projection,
+        "qualification": None if qualification is None else dict(qualification),
+    }
+
+
+def _merge_product_activation_history(
+    prior_history: Sequence[Mapping[str, Any]],
+    projection: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Retain bounded public transition history across sidecar snapshots."""
+
+    detached = json.loads(json.dumps(dict(projection)))
+    projected_history = detached["activation_history"]
+    by_id: dict[str, dict[str, Any]] = {}
+    for document in [*prior_history, *projected_history]:
+        item = json.loads(json.dumps(dict(document)))
+        observation_id = item["observation_id"]
+        by_id.pop(observation_id, None)
+        by_id[observation_id] = item
+    history = list(by_id.values())[-64:]
+    current = detached["activation_observation"]
+    if not history or history[-1] != current:
+        history.append(current)
+        history = history[-64:]
+    detached["activation_history"] = history
+    detached["activation_observation"] = history[-1]
+    return detached
 
 
 class AffectedPeerQuarantined(RuntimeError):
@@ -748,7 +951,10 @@ class PhysicalLiveRoute:
         session_factory=_ConcurrentNodeSession,
         seed_authority: LiveSeedAuthority | None = None,
         membership_snapshot: Mapping[str, Any] | None = None,
+        force_relay: bool = False,
     ) -> None:
+        if not isinstance(force_relay, bool):
+            raise ValueError("force_relay must be a boolean")
         self._controller = controller
         self._peers = {peer.node_id: peer for peer in controller.peers}
         self._endpoints = {
@@ -768,6 +974,7 @@ class PhysicalLiveRoute:
             if membership_snapshot is None
             else json.loads(json.dumps(dict(membership_snapshot)))
         )
+        self._force_relay = force_relay
         self._sessions: dict[str, Any] = {}
         self._identities: dict[str, dict[str, Any]] = {}
         self._verification_keys: dict[str, dict[str, Any]] = {}
@@ -780,6 +987,7 @@ class PhysicalLiveRoute:
         self._request_limits: dict[str, int] = {}
         self._request_entry_nodes: dict[str, str] = {}
         self._recent_inferences: deque[dict[str, Any]] = deque(maxlen=64)
+        self._product_activation_history: deque[dict[str, Any]] = deque(maxlen=64)
         self._incidents: deque[dict[str, Any]] = deque(maxlen=64)
         self._incident_sequence = 0
         self._stop_token_ids: frozenset[int] = frozenset()
@@ -951,6 +1159,7 @@ class PhysicalLiveRoute:
         plan_path: Path,
         *,
         seed_state_root: Path,
+        force_relay: bool = False,
     ) -> "PhysicalLiveRoute":
         document = json.loads(Path(plan_path).read_text(encoding="utf-8"))
         controller_document = document["controller"]
@@ -976,6 +1185,9 @@ class PhysicalLiveRoute:
                 node_transfer_manifests=controller_document.get(
                     "node_transfer_manifests"
                 ),
+                prepositioned_artifacts=controller_document.get(
+                    "prepositioned_artifacts"
+                ),
                 membership_snapshot=membership_snapshot,
                 now=now,
                 run_plan=controller_document["run_plan"],
@@ -989,6 +1201,7 @@ class PhysicalLiveRoute:
                 run_plan=run_plan,
                 seed_authority=authority,
                 membership_snapshot=membership_snapshot,
+                force_relay=force_relay,
             )
         except BaseException:
             authority.close()
@@ -1402,6 +1615,8 @@ class PhysicalLiveRoute:
         decode_mode = self._plan.get("decode_mode")
         if decode_mode is not None:
             command += ("--decode-mode", decode_mode)
+        if getattr(self, "_force_relay", False):
+            command += ("--sidecar-force-relay",)
         return _peer_process_argv(peer, command)
 
     def _verify_observation(
@@ -3975,7 +4190,7 @@ class PhysicalLiveRoute:
         )
 
     def revoke_native_member(self, member_id: str) -> Mapping[str, Any]:
-        """Fence a standby member without silently invalidating an active route."""
+        """Fence a member and fail closed when it participates in the active route."""
 
         authority = self._seed_authority
         if authority is None:
@@ -3985,8 +4200,7 @@ class PhysicalLiveRoute:
             for stage in self._graph.stages
             for placement in stage.placements
         }
-        if member_id in placed and self.is_alive():
-            raise LiveSeedStateError("member_in_active_route")
+        active_placement = member_id in placed and self.is_alive()
         member = next(
             (
                 item
@@ -3998,7 +4212,7 @@ class PhysicalLiveRoute:
         if member is None:
             raise LiveSeedStateError("member_unknown")
         try:
-            return revoke_seed_member(
+            result = revoke_seed_member(
                 authority.state_root.path,
                 node_id=member_id,
                 expected_generation=int(member["generation"]),
@@ -4006,6 +4220,15 @@ class PhysicalLiveRoute:
             )
         except SeedOperatorError as exc:
             raise LiveSeedStateError(exc.code) from exc
+        if active_placement:
+            self._fatal = "active_member_revoked"
+            self._record_incident(
+                state="fatal",
+                reason="active_member_revoked",
+                request_id=None,
+            )
+            self.close()
+        return result
 
     def product_membership_records(self) -> tuple[dict[str, Any], ...]:
         authority = self._seed_authority
@@ -4059,6 +4282,31 @@ class PhysicalLiveRoute:
         if authority is None:
             raise LiveSeedStateError("live_seed_authority_unavailable")
         return authority.product_pseudonym_salt()
+
+    def product_internet_native_snapshot(self) -> dict[str, Any]:
+        """Expose only verified, privacy-reduced A8 evidence to the product spine."""
+
+        with self._lock:
+            snapshots = json.loads(json.dumps(self._last_snapshots))
+            route_available = (
+                self._open
+                and not self._closed
+                and self._fatal is None
+                and bool(self._sessions)
+            )
+        projection = _product_internet_native_projection(
+            snapshots=snapshots,
+            projection_key=self.product_pseudonym_salt(),
+            now_unix_ms=int(time.time() * 1_000),
+            route_available=route_available,
+        )
+        with self._lock:
+            merged = _merge_product_activation_history(
+                tuple(self._product_activation_history), projection
+            )
+            self._product_activation_history.clear()
+            self._product_activation_history.extend(merged["activation_history"])
+            return merged
 
     def live_attestation(self, *, request_id: str) -> dict[str, Any]:
         if request_id not in self._request_outputs or not self.is_alive():

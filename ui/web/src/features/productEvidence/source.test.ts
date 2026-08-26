@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import fixture from '../../../../../contracts/compatibility-fixtures/product-snapshot-v1.json';
+import { productSnapshotWithInternetNative } from '../internetNative/testFixtures';
 import { LiveProductEvidenceSource } from './source';
+
+type MutableSnapshot = Record<string, unknown> & {
+  publication: {
+    cursor: number;
+    generation: number;
+    snapshot_id: string;
+    published_at_unix_ms: number;
+  };
+  internet_native: {
+    activation_observation: Record<string, unknown>;
+    activation_history: Array<Record<string, unknown>>;
+  };
+};
+
+const fixture = productSnapshotWithInternetNative() as MutableSnapshot;
 
 function response(document: unknown, contentType = 'application/json', status = 200) {
   const bytes = new TextEncoder().encode(
@@ -27,6 +42,18 @@ function nextEvent(cursor: number) {
   snapshot.publication.cursor = cursor;
   snapshot.publication.generation = cursor;
   snapshot.publication.snapshot_id = `snapshot-${cursor}`;
+  if (cursor === 2) {
+    snapshot.internet_native.activation_observation = {
+      ...snapshot.internet_native.activation_observation,
+      observation_id: 'live-observation-2',
+      connection_generation: 4,
+      path_class: 'relay',
+    };
+    snapshot.internet_native.activation_history = [
+      ...snapshot.internet_native.activation_history,
+      snapshot.internet_native.activation_observation,
+    ];
+  }
   return {
     protocol: 'mycelium.product_event.v1',
     cursor,
@@ -63,6 +90,10 @@ describe('live product evidence source', () => {
 
     expect(source.getState()?.cursor).toBe(2);
     expect(source.getState()?.status).toBe('connected');
+    expect(
+      source.getState()?.snapshot.internet_native.activation_observation.observation_id,
+    ).toBe('live-observation-2');
+    expect(source.getState()?.snapshot.internet_native.activation_history).toHaveLength(2);
     expect(requests[1].headers['Last-Event-ID']).toBe('1');
   });
 

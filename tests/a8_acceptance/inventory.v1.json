@@ -1,481 +1,930 @@
 {
-  "protocol": "mycelium.a8_acceptance_inventory.v1",
-  "gate": "A8",
-  "state": "design_only",
-  "claim_boundary": "frozen infrastructure decisions and future acceptance inputs only; no implementation, network contact, physical evidence, readiness, or completion claim",
-  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+  "claim_boundary": "frozen A8 acceptance decisions plus privacy-reduced retained proof of 14 source/spec-bound executed physical and ordinary-browser cases; final completion additionally requires post-document regressions, audits, handover closure, and the atomic feature commit",
   "decisions": [
     {
-      "decision_id": "public_https_bootstrap_authentication",
+      "authorities": [
+        "public_tls_hostname",
+        "pinned_seed_verification_key",
+        "single_use_invitation",
+        "signed_member_envelope"
+      ],
       "decision": "publicly trusted TLS authenticates the canonical host while signed seed identity, an invitation-bound seed-key pin, single-use join secret, and signed post-join member envelopes own Mycelium authority",
-      "authorities": ["public_tls_hostname", "pinned_seed_verification_key", "single_use_invitation", "signed_member_envelope"],
-      "required_acceptance": ["closed_public_route_allowlist", "seed_signature_required_after_tls", "invite_secret_body_only", "post_join_control_requires_member_signature"],
-      "forbidden_fallbacks": ["cleartext_http", "redirect_following", "tls_only_membership_authority", "public_operator_administration", "cookie_or_bearer_membership"]
+      "decision_id": "public_https_bootstrap_authentication",
+      "forbidden_fallbacks": [
+        "cleartext_http",
+        "redirect_following",
+        "tls_only_membership_authority",
+        "public_operator_administration",
+        "cookie_or_bearer_membership"
+      ],
+      "required_acceptance": [
+        "closed_public_route_allowlist",
+        "seed_signature_required_after_tls",
+        "invite_secret_body_only",
+        "post_join_control_requires_member_signature"
+      ]
     },
     {
-      "decision_id": "seed_key_pinning",
+      "authorities": [
+        "invitation_seed_key_digest",
+        "signed_seed_identity",
+        "dual_signed_seed_transition",
+        "monotonic_seed_generation"
+      ],
       "decision": "the invitation pins the sha256 digest of canonical ed25519 seed verification-key bytes before secret transmission and rotation requires a dual-signed monotonic transition with bounded overlap",
-      "authorities": ["invitation_seed_key_digest", "signed_seed_identity", "dual_signed_seed_transition", "monotonic_seed_generation"],
-      "required_acceptance": ["pin_checked_before_secret_transmission", "wrong_pin_rejected", "valid_overlap_rotation_accepted", "expired_or_rollback_rotation_rejected"],
-      "forbidden_fallbacks": ["trust_on_first_use", "certificate_key_as_seed_key", "hostname_only_seed_trust", "silent_repin"]
+      "decision_id": "seed_key_pinning",
+      "forbidden_fallbacks": [
+        "trust_on_first_use",
+        "certificate_key_as_seed_key",
+        "hostname_only_seed_trust",
+        "silent_repin"
+      ],
+      "required_acceptance": [
+        "pin_checked_before_secret_transmission",
+        "wrong_pin_rejected",
+        "valid_overlap_rotation_accepted",
+        "expired_or_rollback_rotation_rejected"
+      ]
     },
     {
-      "decision_id": "invitation_and_revocation",
+      "authorities": [
+        "owner_private_invite_authority",
+        "atomic_invitation_consumption",
+        "signed_membership_generation",
+        "activation_admission_revocation"
+      ],
       "decision": "owner-private administration mints bounded class-scoped expiring single-use invitations and revocation advances signed authority for both control and activation admission",
-      "authorities": ["owner_private_invite_authority", "atomic_invitation_consumption", "signed_membership_generation", "activation_admission_revocation"],
-      "required_acceptance": ["one_exact_join_or_idempotent_retry", "no_partial_member_on_rejection", "revoked_control_rejected", "revoked_open_activation_removed"],
-      "forbidden_fallbacks": ["public_invite_minting", "reusable_invitation", "partial_member_creation", "lease_extension_after_revocation", "revoked_connection_survival"]
+      "decision_id": "invitation_and_revocation",
+      "forbidden_fallbacks": [
+        "public_invite_minting",
+        "reusable_invitation",
+        "partial_member_creation",
+        "lease_extension_after_revocation",
+        "revoked_connection_survival"
+      ],
+      "required_acceptance": [
+        "one_exact_join_or_idempotent_retry",
+        "no_partial_member_on_rejection",
+        "revoked_control_rejected",
+        "revoked_open_activation_removed"
+      ]
     },
     {
-      "decision_id": "iroh_direct_relay_activation",
+      "authorities": [
+        "signed_endpoint_membership",
+        "authenticated_iroh_connection",
+        "connection_generation",
+        "live_path_observation"
+      ],
       "decision": "activation uses current membership-authorized endpoint ids and reports direct relay unknown and transitions only from the bound live iroh connection",
-      "authorities": ["signed_endpoint_membership", "authenticated_iroh_connection", "connection_generation", "live_path_observation"],
-      "required_acceptance": ["endpoint_id_exact_match", "direct_observed_not_inferred", "forced_relay_observed_not_configured", "transition_and_reuse_generation_bound"],
-      "forbidden_fallbacks": ["address_only_trust", "operator_typed_endpoint_id", "os_or_network_path_inference", "http_or_websocket_inference"]
+      "decision_id": "iroh_direct_relay_activation",
+      "forbidden_fallbacks": [
+        "address_only_trust",
+        "operator_typed_endpoint_id",
+        "os_or_network_path_inference",
+        "http_or_websocket_inference"
+      ],
+      "required_acceptance": [
+        "endpoint_id_exact_match",
+        "direct_observed_not_inferred",
+        "forced_relay_observed_not_configured",
+        "transition_and_reuse_generation_bound"
+      ]
     },
     {
-      "decision_id": "unknown_not_zero_measurements",
+      "authorities": [
+        "bound_activation_observation",
+        "measurement_sample_count",
+        "measurement_generation",
+        "measurement_freshness"
+      ],
       "decision": "path class and all path metrics are nullable and missing stale rejected or unmeasured values remain unknown while numeric zero requires a current explicit measured sample",
-      "authorities": ["bound_activation_observation", "measurement_sample_count", "measurement_generation", "measurement_freshness"],
-      "required_acceptance": ["missing_metrics_remain_unknown", "stale_metrics_remain_unknown", "zero_loss_requires_current_samples", "unknown_cannot_satisfy_required_objective"],
-      "forbidden_fallbacks": ["default_zero_coercion", "participation_derived_connectivity", "same_lan_direct_inference", "different_network_relay_inference"]
+      "decision_id": "unknown_not_zero_measurements",
+      "forbidden_fallbacks": [
+        "default_zero_coercion",
+        "participation_derived_connectivity",
+        "same_lan_direct_inference",
+        "different_network_relay_inference"
+      ],
+      "required_acceptance": [
+        "missing_metrics_remain_unknown",
+        "stale_metrics_remain_unknown",
+        "zero_loss_requires_current_samples",
+        "unknown_cannot_satisfy_required_objective"
+      ]
     },
     {
-      "decision_id": "privacy_safe_relay_projection",
+      "authorities": [
+        "owner_private_projection_key",
+        "canonical_relay_identity",
+        "versioned_domain_separator",
+        "reviewed_coarse_region"
+      ],
       "decision": "relay projection exposes only a versioned domain-separated hmac-sha256 stable reference and reviewed coarse region or unknown using an owner-private persistent projection key",
-      "authorities": ["owner_private_projection_key", "canonical_relay_identity", "versioned_domain_separator", "reviewed_coarse_region"],
-      "required_acceptance": ["stable_reference_for_same_relay", "different_relay_reference_separation", "unknown_region_preserved", "raw_relay_identity_rejected"],
-      "forbidden_fallbacks": ["raw_relay_url", "relay_dns_or_ip", "relay_port_or_credentials", "reversible_hash", "exact_location_projection"]
+      "decision_id": "privacy_safe_relay_projection",
+      "forbidden_fallbacks": [
+        "raw_relay_url",
+        "relay_dns_or_ip",
+        "relay_port_or_credentials",
+        "reversible_hash",
+        "exact_location_projection"
+      ],
+      "required_acceptance": [
+        "stable_reference_for_same_relay",
+        "different_relay_reference_separation",
+        "unknown_region_preserved",
+        "raw_relay_identity_rejected"
+      ]
     },
     {
-      "decision_id": "ssh_tailscale_independence",
+      "authorities": [
+        "public_https_origin",
+        "authenticated_iroh_transport",
+        "signed_artifact_grant",
+        "ordinary_internet_reachability"
+      ],
       "decision": "supported bootstrap activation measurement qualification and serving require neither tailscale nor ssh and ssh remains only an optional owner-labelled staging tool",
-      "authorities": ["public_https_origin", "authenticated_iroh_transport", "signed_artifact_grant", "ordinary_internet_reachability"],
-      "required_acceptance": ["tailscale_disabled_before_join", "no_tailnet_address_or_evidence", "ssh_absent_on_external_peer", "no_remote_shell_or_hidden_copy_dependency"],
-      "forbidden_fallbacks": ["tailnet_fallback", "tailscale_measurement_authority", "ssh_enrollment", "ssh_serving", "full_model_copy_fallback"]
+      "decision_id": "ssh_tailscale_independence",
+      "forbidden_fallbacks": [
+        "tailnet_fallback",
+        "tailscale_measurement_authority",
+        "ssh_enrollment",
+        "ssh_serving",
+        "full_model_copy_fallback"
+      ],
+      "required_acceptance": [
+        "tailscale_disabled_before_join",
+        "no_tailnet_address_or_evidence",
+        "ssh_absent_on_external_peer",
+        "no_remote_shell_or_hidden_copy_dependency"
+      ]
     }
   ],
-  "workspace_projections": {
-    "inference": ["selected_deployment", "observed_path_class", "membership_not_serving_authority"],
-    "device_lab": ["https_and_seed_pin_state", "membership_activation_eligibility", "external_device_preflight"],
-    "network": ["direct_relay_unknown_path", "nullable_measurements", "privacy_safe_relay_projection"],
-    "nodes": ["member_incarnation_generation", "pseudonymous_endpoint", "lease_and_qualification_state"],
-    "plans": ["current_measured_path_costs", "unknown_inputs_preserved", "blocked_required_objective"],
-    "readiness": ["https_seed_pin_membership", "activation_artifact_load_topology", "qualification_and_selection"],
-    "incidents": ["bootstrap_pin_invite_or_lease_failure", "path_transition_and_reconnect", "bounded_outcome"],
-    "settings": ["public_origin_and_certificate", "bootstrap_relay_policy", "invite_revocation_and_private_diagnostics"]
-  },
   "deterministic_gates": [
     {
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication"
+      ],
       "gate_id": "bootstrap_canonical_origin",
       "gate_kind": "deterministic_negative",
       "spec_section": "3",
-      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
-      "test_ids": ["test_canonical_origin_rejects_userinfo_path_query_and_fragment", "test_canonical_origin_requires_exact_form"],
-      "decision_ids": ["public_https_bootstrap_authentication"]
+      "test_ids": [
+        "test_canonical_origin_rejects_userinfo_path_query_and_fragment",
+        "test_canonical_origin_requires_exact_form"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication"
+      ],
       "gate_id": "bootstrap_downgrade_redirect_refusal",
       "gate_kind": "deterministic_negative",
       "spec_section": "3",
-      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
-      "test_ids": ["test_cleartext_http_origin_is_a_downgrade_refusal", "test_every_redirect_is_refused"],
-      "decision_ids": ["public_https_bootstrap_authentication"]
+      "test_ids": [
+        "test_cleartext_http_origin_is_a_downgrade_refusal",
+        "test_every_redirect_is_refused"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication"
+      ],
       "gate_id": "bootstrap_content_type_method_path_allowlist",
       "gate_kind": "deterministic_negative",
       "spec_section": "3",
-      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
-      "test_ids": ["test_allowlist_is_exactly_the_five_closed_routes", "test_non_allowlisted_routes_rejected", "test_post_requires_exact_json_content_type", "test_get_with_body_rejected", "test_transfer_encoding_websocket_cookie_and_authorization_rejected"],
-      "decision_ids": ["public_https_bootstrap_authentication"]
+      "test_ids": [
+        "test_allowlist_is_exactly_the_five_closed_routes",
+        "test_non_allowlisted_routes_rejected",
+        "test_post_requires_exact_json_content_type",
+        "test_get_with_body_rejected",
+        "test_transfer_encoding_websocket_cookie_and_authorization_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication"
+      ],
       "gate_id": "bootstrap_frame_concurrency_rate_bounds",
       "gate_kind": "deterministic_negative",
       "spec_section": "3",
-      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
-      "test_ids": ["test_frame_bound_rejects_oversized_bodies", "test_concurrency_bound_is_exhaustible_and_releasable", "test_rate_limit_allows_burst_then_exhausts_until_refill", "test_invite_attempt_bound_is_per_invite_and_privacy_safe", "test_join_attempt_limit_is_checked_only_on_the_join_route"],
-      "decision_ids": ["public_https_bootstrap_authentication"]
+      "test_ids": [
+        "test_frame_bound_rejects_oversized_bodies",
+        "test_concurrency_bound_is_exhaustible_and_releasable",
+        "test_rate_limit_allows_burst_then_exhausts_until_refill",
+        "test_invite_attempt_bound_is_per_invite_and_privacy_safe",
+        "test_join_attempt_limit_is_checked_only_on_the_join_route"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication"
+      ],
       "gate_id": "bootstrap_timeout_and_no_store",
       "gate_kind": "deterministic_positive",
       "spec_section": "3",
-      "covered_by": "tests/a8_acceptance/test_bootstrap_boundary.py",
-      "test_ids": ["test_read_timeout_is_bounded", "test_response_headers_are_json_and_no_store"],
-      "decision_ids": ["public_https_bootstrap_authentication"]
+      "test_ids": [
+        "test_read_timeout_is_bounded",
+        "test_response_headers_are_json_and_no_store"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "seed_key_pinning"
+      ],
       "gate_id": "pin_success",
       "gate_kind": "deterministic_positive",
       "spec_section": "10.1",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_pin_success_before_any_secret_transmission"],
-      "decision_ids": ["seed_key_pinning"]
+      "test_ids": [
+        "test_pin_success_before_any_secret_transmission"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "seed_key_pinning"
+      ],
       "gate_id": "wrong_pin_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "10.1",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_wrong_pin_rejected_and_secret_never_transmitted"],
-      "decision_ids": ["seed_key_pinning"]
+      "test_ids": [
+        "test_wrong_pin_rejected_and_secret_never_transmitted"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "seed_key_pinning"
+      ],
       "gate_id": "rotated_overlap_accepted",
       "gate_kind": "deterministic_positive",
       "spec_section": "10.1",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_rotated_overlap_accepts_both_digests"],
-      "decision_ids": ["seed_key_pinning"]
+      "test_ids": [
+        "test_rotated_overlap_accepts_both_digests"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "seed_key_pinning"
+      ],
       "gate_id": "expired_rotation_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "10.1",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_expired_rotation_rejected"],
-      "decision_ids": ["seed_key_pinning"]
+      "test_ids": [
+        "test_expired_rotation_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "seed_key_pinning",
+        "public_https_bootstrap_authentication"
+      ],
       "gate_id": "certificate_valid_unsigned_seed_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "10.1",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_wrong_pin_rejected_and_secret_never_transmitted"],
-      "decision_ids": ["seed_key_pinning", "public_https_bootstrap_authentication"]
+      "test_ids": [
+        "test_wrong_pin_rejected_and_secret_never_transmitted"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "seed_key_pinning",
+        "invitation_and_revocation"
+      ],
       "gate_id": "tls_valid_no_invitation_authority_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "10.1",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_tls_success_without_invitation_authority_refuses_join", "test_unverified_tls_refuses_everything"],
-      "decision_ids": ["seed_key_pinning", "invitation_and_revocation"]
+      "test_ids": [
+        "test_tls_success_without_invitation_authority_refuses_join",
+        "test_unverified_tls_refuses_everything"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "invite_expiry_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_expired_invite_rejected_atomically"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_expired_invite_rejected_atomically"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "invite_exact_idempotent_retry",
       "gate_kind": "deterministic_positive",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_exact_join_retry_returns_same_acceptance_without_retransmit"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_exact_join_retry_returns_same_acceptance_without_retransmit"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "invite_changed_retry_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_changed_retry_under_same_nonce_fails_closed"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_changed_retry_under_same_nonce_fails_closed"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation",
+        "seed_key_pinning"
+      ],
       "gate_id": "wrong_swarm_or_seed_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_wrong_swarm_join_rejected_without_partial_member"],
-      "decision_ids": ["invitation_and_revocation", "seed_key_pinning"]
+      "test_ids": [
+        "test_wrong_swarm_join_rejected_without_partial_member"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "duplicate_key_or_endpoint_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_duplicate_key_and_endpoint_id_rejected"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_duplicate_key_and_endpoint_id_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "unsupported_class_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_unsupported_peer_class_rejected"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_unsupported_peer_class_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "atomic_no_partial_member",
       "gate_kind": "deterministic_negative",
       "spec_section": "4",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_expired_invite_rejected_atomically", "test_wrong_swarm_join_rejected_without_partial_member", "test_unsupported_peer_class_rejected"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_expired_invite_rejected_atomically",
+        "test_wrong_swarm_join_rejected_without_partial_member",
+        "test_unsupported_peer_class_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "resume_through_public_adapter",
       "gate_kind": "deterministic_positive",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_resume_advances_generation_through_the_adapter"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_resume_advances_generation_through_the_adapter"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "heartbeat_lease_renewal",
       "gate_kind": "deterministic_positive",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_heartbeat_renews_lease_through_the_adapter"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_heartbeat_renews_lease_through_the_adapter"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "lease_expiry_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_lease_expiry_blocks_control_locally"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_lease_expiry_blocks_control_locally"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "stale_generation_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_stale_generation_rejected"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_stale_generation_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "revoked_generation_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_revocation_rejects_control_and_sticks", "test_revoked_member_is_rejected_by_activation_admission_guard"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_revocation_rejects_control_and_sticks",
+        "test_revoked_member_is_rejected_by_activation_admission_guard"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "invitation_and_revocation"
+      ],
       "gate_id": "changed_incarnation_rejected",
       "gate_kind": "deterministic_negative",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_changed_incarnation_rejected"],
-      "decision_ids": ["invitation_and_revocation"]
+      "test_ids": [
+        "test_changed_incarnation_rejected"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_enrollment.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication",
+        "ssh_tailscale_independence"
+      ],
       "gate_id": "bounded_reconnect_same_origin",
       "gate_kind": "deterministic_positive",
       "spec_section": "5",
-      "covered_by": "tests/a8_acceptance/test_enrollment.py",
-      "test_ids": ["test_bounded_reconnect_same_origin_no_fallback", "test_reconnect_exhaustion_is_bounded_and_honest"],
-      "decision_ids": ["public_https_bootstrap_authentication", "ssh_tailscale_independence"]
+      "test_ids": [
+        "test_bounded_reconnect_same_origin_no_fallback",
+        "test_reconnect_exhaustion_is_bounded_and_honest"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "iroh_direct_relay_activation"
+      ],
       "gate_id": "direct_observation",
       "gate_kind": "deterministic_positive",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_direct_observation_is_recorded_from_bound_connection"],
-      "decision_ids": ["iroh_direct_relay_activation"]
+      "test_ids": [
+        "test_direct_observation_is_recorded_from_bound_connection"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "iroh_direct_relay_activation",
+        "privacy_safe_relay_projection"
+      ],
       "gate_id": "relay_observation",
       "gate_kind": "deterministic_positive",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_relay_observation_is_recorded"],
-      "decision_ids": ["iroh_direct_relay_activation", "privacy_safe_relay_projection"]
+      "test_ids": [
+        "test_relay_observation_is_recorded"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "iroh_direct_relay_activation",
+        "unknown_not_zero_measurements"
+      ],
       "gate_id": "unknown_path_observation",
       "gate_kind": "deterministic_positive",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_unknown_path_is_recorded_without_metrics", "test_missing_evidence_projects_unknown_not_zero"],
-      "decision_ids": ["iroh_direct_relay_activation", "unknown_not_zero_measurements"]
+      "test_ids": [
+        "test_unknown_path_is_recorded_without_metrics",
+        "test_missing_evidence_projects_unknown_not_zero"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "iroh_direct_relay_activation"
+      ],
       "gate_id": "path_transition_history",
       "gate_kind": "deterministic_positive",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_transition_history_is_retained_and_never_rewritten"],
-      "decision_ids": ["iroh_direct_relay_activation"]
+      "test_ids": [
+        "test_transition_history_is_retained_and_never_rewritten"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "iroh_direct_relay_activation"
+      ],
       "gate_id": "persistent_connection_reuse",
       "gate_kind": "deterministic_positive",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_persistent_reuse_is_counted_per_generation"],
-      "decision_ids": ["iroh_direct_relay_activation"]
+      "test_ids": [
+        "test_persistent_reuse_is_counted_per_generation"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "unknown_not_zero_measurements"
+      ],
       "gate_id": "nullable_measurements_unknown",
       "gate_kind": "deterministic_negative",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_nullable_measurements_are_unknown_not_zero", "test_stale_evidence_projects_unknown_and_nullable_metrics", "test_missing_evidence_projects_unknown_not_zero"],
-      "decision_ids": ["unknown_not_zero_measurements"]
+      "test_ids": [
+        "test_nullable_measurements_are_unknown_not_zero",
+        "test_stale_evidence_projects_unknown_and_nullable_metrics",
+        "test_missing_evidence_projects_unknown_not_zero"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "unknown_not_zero_measurements"
+      ],
       "gate_id": "explicit_measured_zero_loss",
       "gate_kind": "deterministic_positive",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_explicit_measured_zero_loss_requires_current_samples"],
-      "decision_ids": ["unknown_not_zero_measurements"]
+      "test_ids": [
+        "test_explicit_measured_zero_loss_requires_current_samples"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_activation.py",
+      "decision_ids": [
+        "privacy_safe_relay_projection"
+      ],
       "gate_id": "relay_redaction",
       "gate_kind": "deterministic_negative",
       "spec_section": "6",
-      "covered_by": "tests/a8_acceptance/test_activation.py",
-      "test_ids": ["test_relay_redaction_removes_raw_identity_before_projection", "test_relay_projection_rejects_non_canonical_identity_inputs"],
-      "decision_ids": ["privacy_safe_relay_projection"]
+      "test_ids": [
+        "test_relay_redaction_removes_raw_identity_before_projection",
+        "test_relay_projection_rejects_non_canonical_identity_inputs"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_internet_contracts.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication",
+        "seed_key_pinning",
+        "invitation_and_revocation",
+        "iroh_direct_relay_activation",
+        "unknown_not_zero_measurements",
+        "privacy_safe_relay_projection",
+        "ssh_tailscale_independence"
+      ],
       "gate_id": "closed_contracts_fixtures_validate",
       "gate_kind": "deterministic_positive",
       "spec_section": "8",
-      "covered_by": "tests/a8_acceptance/test_internet_contracts.py",
-      "test_ids": ["test_every_a8_fixture_validates", "test_fixture_names_and_protocols_are_exactly_the_four_a8_shapes"],
-      "decision_ids": ["public_https_bootstrap_authentication", "seed_key_pinning", "invitation_and_revocation", "iroh_direct_relay_activation", "unknown_not_zero_measurements", "privacy_safe_relay_projection", "ssh_tailscale_independence"]
+      "test_ids": [
+        "test_every_a8_fixture_validates",
+        "test_fixture_names_and_protocols_are_exactly_the_four_a8_shapes"
+      ]
     },
     {
+      "covered_by": "tests/a8_acceptance/test_privacy.py",
+      "decision_ids": [
+        "public_https_bootstrap_authentication",
+        "seed_key_pinning",
+        "invitation_and_revocation",
+        "iroh_direct_relay_activation",
+        "unknown_not_zero_measurements",
+        "privacy_safe_relay_projection",
+        "ssh_tailscale_independence"
+      ],
       "gate_id": "projection_privacy_scans",
       "gate_kind": "deterministic_negative",
       "spec_section": "11",
-      "covered_by": "tests/a8_acceptance/test_privacy.py",
-      "test_ids": ["test_every_contract_fixture_is_privacy_clean", "test_activation_projection_is_privacy_clean", "test_forbidden_keys_are_flagged", "test_raw_url_and_hostname_values_are_flagged", "test_private_paths_are_flagged", "test_bearer_tokens_and_credentials_are_flagged", "test_ip_address_and_tailscale_references_are_flagged", "test_forbidden_needles_are_flagged_wherever_they_appear", "test_ensure_privacy_clean_raises_bounded_violation"],
-      "decision_ids": ["public_https_bootstrap_authentication", "seed_key_pinning", "invitation_and_revocation", "iroh_direct_relay_activation", "unknown_not_zero_measurements", "privacy_safe_relay_projection", "ssh_tailscale_independence"]
+      "test_ids": [
+        "test_every_contract_fixture_is_privacy_clean",
+        "test_activation_projection_is_privacy_clean",
+        "test_forbidden_keys_are_flagged",
+        "test_raw_url_and_hostname_values_are_flagged",
+        "test_private_paths_are_flagged",
+        "test_bearer_tokens_and_credentials_are_flagged",
+        "test_ip_address_and_tailscale_references_are_flagged",
+        "test_forbidden_needles_are_flagged_wherever_they_appear",
+        "test_ensure_privacy_clean_raises_bounded_violation"
+      ]
     }
   ],
+  "gate": "A8",
   "physical_execution": {
-    "runner": "scripts/a8_run_physical_gate.py",
+    "executed_summary": "docs/handover/a8-physical-qualification-summary.v1.json",
+    "passing_case_count": 14,
     "preverified_by": {
-      "cleartext_or_redirect_bootstrap": "tests/a8_acceptance/test_physical_seed_side_cases.py",
       "certificate_without_seed_authority": "tests/a8_acceptance/test_physical_seed_side_cases.py",
+      "cleartext_or_redirect_bootstrap": "tests/a8_acceptance/test_physical_seed_side_cases.py",
+      "direct_path_qualified_browser_inference": "tests/a8_acceptance/test_physical_gate_runner.py",
+      "endpoint_identity_mismatch": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "forced_relay_privacy_reduced_browser_inference": "tests/a8_acceptance/test_physical_gate_runner.py",
       "invalid_or_replayed_invitation": "tests/a8_acceptance/test_physical_seed_side_cases.py",
       "missing_or_stale_path_measurements": "tests/a8_acceptance/test_physical_gate_runner.py",
+      "observed_path_transition_and_reconnect": "tests/a8_acceptance/test_physical_gate_runner.py",
       "raw_relay_identity_injection": "tests/a8_acceptance/test_physical_gate_runner.py",
-      "unrelated_https_invite_without_tailscale": "tests/a8_acceptance/test_physical_peer_cases.py",
       "revoked_active_member": "tests/a8_acceptance/test_physical_peer_cases.py",
-      "endpoint_identity_mismatch": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "ssh_unavailable": "tests/a8_acceptance/test_physical_peer_cases.py",
       "tailscale_unavailable": "tests/a8_acceptance/test_physical_peer_cases.py",
-      "ssh_unavailable": "tests/a8_acceptance/test_physical_peer_cases.py"
-    }
+      "unqualified_external_member": "tests/a8_acceptance/test_physical_peer_cases.py",
+      "unrelated_https_invite_without_tailscale": "tests/a8_acceptance/test_physical_peer_cases.py"
+    },
+    "runner": "scripts/a8_run_physical_gate.py",
+    "source_digest": "sha256:29a5a0dc9e2faf4e1dc53738ed283b2a0f6cd7a1644185d3393b03ca40adff97",
+    "source_manifest": "docs/handover/a8-source-manifest.v1.json",
+    "spec_digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9"
   },
-  "physical_positive_cases": [
-    {
-      "case_id": "unrelated_https_invite_without_tailscale",
-      "gate_kind": "physical_positive",
-      "setup": "external native peer is on an unrelated network with tailscale disabled and a current owner-delivered invite",
-      "stimulus": "verify public https seed pin redeem invite renew membership and project ineligibility",
-      "required_outcomes": ["https_bootstrap_succeeds", "seed_pin_verified", "signed_member_visible_but_ineligible"],
-      "forbidden_side_effects": ["tailnet_fallback", "tls_only_membership_authority", "serving_eligibility_created"]
-    },
-    {
-      "case_id": "direct_path_qualified_browser_inference",
-      "gate_kind": "physical_positive",
-      "setup": "current signed capabilities assigned artifacts and direct iroh observation qualify one exact external role",
-      "stimulus": "submit an ordinary browser request through the selected qualified route",
-      "required_outcomes": ["direct_path_observed", "browser_inference_completes", "positive_physical_counters"],
-      "forbidden_side_effects": ["configured_path_claimed_observed", "direct_path_inferred", "unqualified_member_serves"]
-    },
-    {
-      "case_id": "forced_relay_privacy_reduced_browser_inference",
-      "gate_kind": "physical_positive",
-      "setup": "reviewed transport control forces relay while exact role qualification and browser gateway authority remain current",
-      "stimulus": "complete another ordinary browser inference and inspect the public relay projection",
-      "required_outcomes": ["relay_path_observed", "browser_inference_completes", "privacy_safe_relay_reference_only"],
-      "forbidden_side_effects": ["raw_relay_identity_emitted", "forced_setting_claimed_as_observation", "http_inference_fallback"]
-    },
-    {
-      "case_id": "observed_path_transition_and_reconnect",
-      "gate_kind": "physical_positive",
-      "setup": "one current qualified path changes between direct and relay across bound connection generations",
-      "stimulus": "observe transition persistent reuse bounded reconnect and a subsequent browser request",
-      "required_outcomes": ["transition_generations_retained", "connection_reuse_observed", "subsequent_request_completes"],
-      "forbidden_side_effects": ["prior_observation_rewritten", "stale_connection_reused", "route_state_fabricated"]
-    }
-  ],
   "physical_negative_cases": [
     {
       "case_id": "cleartext_or_redirect_bootstrap",
+      "forbidden_side_effects": [
+        "invite_secret_transmitted",
+        "member_created",
+        "route_mutated"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "request_rejected",
+        "no_cleartext_fallback",
+        "bounded_public_error"
+      ],
       "setup": "external peer has no tailscale path and receives only the canonical https origin",
-      "stimulus": "attempt cleartext http downgrade redirect or a non-allowlisted bootstrap route",
-      "required_outcomes": ["request_rejected", "no_cleartext_fallback", "bounded_public_error"],
-      "forbidden_side_effects": ["invite_secret_transmitted", "member_created", "route_mutated"]
+      "stimulus": "attempt cleartext http downgrade redirect or a non-allowlisted bootstrap route"
     },
     {
       "case_id": "certificate_without_seed_authority",
+      "forbidden_side_effects": [
+        "invite_secret_transmitted",
+        "silent_repin",
+        "member_created"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "seed_pin_mismatch_before_invite_transmission",
+        "join_not_attempted",
+        "bounded_incident_only"
+      ],
       "setup": "tls hostname validation succeeds but seed signature or invitation seed-key pin is wrong",
-      "stimulus": "fetch seed identity before join",
-      "required_outcomes": ["seed_pin_mismatch_before_invite_transmission", "join_not_attempted", "bounded_incident_only"],
-      "forbidden_side_effects": ["invite_secret_transmitted", "silent_repin", "member_created"]
+      "stimulus": "fetch seed identity before join"
     },
     {
       "case_id": "invalid_or_replayed_invitation",
+      "forbidden_side_effects": [
+        "membership_generation_advanced",
+        "artifact_grant_created",
+        "route_mutated"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "join_rejected",
+        "no_partial_member",
+        "single_use_state_not_corrupted"
+      ],
       "setup": "invite is expired reused forged wrong-swarm wrong-seed or changed under the same retry identity",
-      "stimulus": "submit canonical join request",
-      "required_outcomes": ["join_rejected", "no_partial_member", "single_use_state_not_corrupted"],
-      "forbidden_side_effects": ["membership_generation_advanced", "artifact_grant_created", "route_mutated"]
+      "stimulus": "submit canonical join request"
     },
     {
       "case_id": "revoked_active_member",
+      "forbidden_side_effects": [
+        "lease_extended",
+        "new_request_admitted",
+        "revoked_generation_reactivated"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "revoked_control_rejected",
+        "revoked_connection_removed_from_activation_admission",
+        "revocation_incident_bounded"
+      ],
       "setup": "member has an open authenticated iroh connection at a generation that is then revoked",
-      "stimulus": "send the next control message and attempt further activation traffic",
-      "required_outcomes": ["revoked_control_rejected", "revoked_connection_removed_from_activation_admission", "revocation_incident_bounded"],
-      "forbidden_side_effects": ["lease_extended", "new_request_admitted", "revoked_generation_reactivated"]
+      "stimulus": "send the next control message and attempt further activation traffic"
     },
     {
       "case_id": "endpoint_identity_mismatch",
+      "forbidden_side_effects": [
+        "address_only_fallback",
+        "configured_path_claimed",
+        "route_ready_promoted"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "endpoint_mismatch_rejected",
+        "path_class_remains_unknown",
+        "no_activation_frame_accepted"
+      ],
       "setup": "dialed iroh endpoint differs from the current signed membership endpoint id",
-      "stimulus": "attempt activation connection and path classification",
-      "required_outcomes": ["endpoint_mismatch_rejected", "path_class_remains_unknown", "no_activation_frame_accepted"],
-      "forbidden_side_effects": ["address_only_fallback", "configured_path_claimed", "route_ready_promoted"]
+      "stimulus": "attempt activation connection and path classification"
     },
     {
       "case_id": "missing_or_stale_path_measurements",
+      "forbidden_side_effects": [
+        "zero_metrics_fabricated",
+        "direct_or_relay_inferred",
+        "readiness_promoted"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "missing_metrics_remain_unknown",
+        "path_class_remains_unknown",
+        "required_objective_blocked"
+      ],
       "setup": "direct relay and metric observations are absent expired or rejected",
-      "stimulus": "project network state and evaluate planning and readiness",
-      "required_outcomes": ["missing_metrics_remain_unknown", "path_class_remains_unknown", "required_objective_blocked"],
-      "forbidden_side_effects": ["zero_metrics_fabricated", "direct_or_relay_inferred", "readiness_promoted"]
+      "stimulus": "project network state and evaluate planning and readiness"
     },
     {
       "case_id": "raw_relay_identity_injection",
+      "forbidden_side_effects": [
+        "raw_value_logged",
+        "reversible_reference_emitted",
+        "exact_location_inferred"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "raw_relay_identity_rejected",
+        "no_public_projection_emitted",
+        "privacy_incident_bounded"
+      ],
       "setup": "candidate projection contains relay url dns ip port credentials or exact location",
-      "stimulus": "validate privacy-reduced relay projection",
-      "required_outcomes": ["raw_relay_identity_rejected", "no_public_projection_emitted", "privacy_incident_bounded"],
-      "forbidden_side_effects": ["raw_value_logged", "reversible_reference_emitted", "exact_location_inferred"]
+      "stimulus": "validate privacy-reduced relay projection"
     },
     {
       "case_id": "unqualified_external_member",
+      "forbidden_side_effects": [
+        "artifact_disclosed",
+        "placement_created",
+        "deployment_selected"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "member_visible_but_ineligible",
+        "all_serve_authorities_rejected",
+        "no_prompt_delivery"
+      ],
       "setup": "external member is enrolled but lacks current artifact load topology activation and qualification authority",
-      "stimulus": "attempt artifact placement activation selection and inference",
-      "required_outcomes": ["member_visible_but_ineligible", "all_serve_authorities_rejected", "no_prompt_delivery"],
-      "forbidden_side_effects": ["artifact_disclosed", "placement_created", "deployment_selected"]
+      "stimulus": "attempt artifact placement activation selection and inference"
     },
     {
       "case_id": "tailscale_unavailable",
+      "forbidden_side_effects": [
+        "tailnet_fallback",
+        "tailscale_probe_used",
+        "peer_failure_fabricated"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "supported_path_works_without_tailscale",
+        "no_tailnet_address_or_evidence",
+        "ordinary_internet_path_observed"
+      ],
       "setup": "tailscale is disabled before external join measurement qualification and serving checks",
-      "stimulus": "execute the supported public https and iroh path",
-      "required_outcomes": ["supported_path_works_without_tailscale", "no_tailnet_address_or_evidence", "ordinary_internet_path_observed"],
-      "forbidden_side_effects": ["tailnet_fallback", "tailscale_probe_used", "peer_failure_fabricated"]
+      "stimulus": "execute the supported public https and iroh path"
     },
     {
       "case_id": "ssh_unavailable",
+      "forbidden_side_effects": [
+        "ssh_fallback",
+        "hidden_file_copy",
+        "peer_failure_fabricated"
+      ],
       "gate_kind": "physical_negative",
+      "required_outcomes": [
+        "supported_path_works_without_ssh",
+        "signed_artifact_path_only",
+        "no_remote_shell_attempted"
+      ],
       "setup": "external peer has no ssh server client key or remote-shell credential",
-      "stimulus": "execute supported enrollment artifact activation and serving checks",
-      "required_outcomes": ["supported_path_works_without_ssh", "signed_artifact_path_only", "no_remote_shell_attempted"],
-      "forbidden_side_effects": ["ssh_fallback", "hidden_file_copy", "peer_failure_fabricated"]
+      "stimulus": "execute supported enrollment artifact activation and serving checks"
     }
-  ]
+  ],
+  "physical_positive_cases": [
+    {
+      "case_id": "unrelated_https_invite_without_tailscale",
+      "forbidden_side_effects": [
+        "tailnet_fallback",
+        "tls_only_membership_authority",
+        "serving_eligibility_created"
+      ],
+      "gate_kind": "physical_positive",
+      "required_outcomes": [
+        "https_bootstrap_succeeds",
+        "seed_pin_verified",
+        "signed_member_visible_but_ineligible"
+      ],
+      "setup": "external native peer is on an unrelated network with tailscale disabled and a current owner-delivered invite",
+      "stimulus": "verify public https seed pin redeem invite renew membership and project ineligibility"
+    },
+    {
+      "case_id": "direct_path_qualified_browser_inference",
+      "forbidden_side_effects": [
+        "configured_path_claimed_observed",
+        "direct_path_inferred",
+        "unqualified_member_serves"
+      ],
+      "gate_kind": "physical_positive",
+      "required_outcomes": [
+        "direct_path_observed",
+        "browser_inference_completes",
+        "positive_physical_counters"
+      ],
+      "setup": "current signed capabilities assigned artifacts and direct iroh observation qualify one exact external role",
+      "stimulus": "submit an ordinary browser request through the selected qualified route"
+    },
+    {
+      "case_id": "forced_relay_privacy_reduced_browser_inference",
+      "forbidden_side_effects": [
+        "raw_relay_identity_emitted",
+        "forced_setting_claimed_as_observation",
+        "http_inference_fallback"
+      ],
+      "gate_kind": "physical_positive",
+      "required_outcomes": [
+        "relay_path_observed",
+        "browser_inference_completes",
+        "privacy_safe_relay_reference_only"
+      ],
+      "setup": "reviewed transport control forces relay while exact role qualification and browser gateway authority remain current",
+      "stimulus": "complete another ordinary browser inference and inspect the public relay projection"
+    },
+    {
+      "case_id": "observed_path_transition_and_reconnect",
+      "forbidden_side_effects": [
+        "prior_observation_rewritten",
+        "stale_connection_reused",
+        "route_state_fabricated"
+      ],
+      "gate_kind": "physical_positive",
+      "required_outcomes": [
+        "transition_generations_retained",
+        "connection_reuse_observed",
+        "subsequent_request_completes"
+      ],
+      "setup": "one current qualified path changes between direct and relay across bound connection generations",
+      "stimulus": "observe transition persistent reuse bounded reconnect and a subsequent browser request"
+    }
+  ],
+  "protocol": "mycelium.a8_acceptance_inventory.v1",
+  "source_specification": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+  "state": "physically_qualified",
+  "workspace_projections": {
+    "device_lab": [
+      "https_and_seed_pin_state",
+      "membership_activation_eligibility",
+      "external_device_preflight"
+    ],
+    "incidents": [
+      "bootstrap_pin_invite_or_lease_failure",
+      "path_transition_and_reconnect",
+      "bounded_outcome"
+    ],
+    "inference": [
+      "selected_deployment",
+      "observed_path_class",
+      "membership_not_serving_authority"
+    ],
+    "network": [
+      "direct_relay_unknown_path",
+      "nullable_measurements",
+      "privacy_safe_relay_projection"
+    ],
+    "nodes": [
+      "member_incarnation_generation",
+      "pseudonymous_endpoint",
+      "lease_and_qualification_state"
+    ],
+    "plans": [
+      "current_measured_path_costs",
+      "unknown_inputs_preserved",
+      "blocked_required_objective"
+    ],
+    "readiness": [
+      "https_seed_pin_membership",
+      "activation_artifact_load_topology",
+      "qualification_and_selection"
+    ],
+    "settings": [
+      "public_origin_and_certificate",
+      "bootstrap_relay_policy",
+      "invite_revocation_and_private_diagnostics"
+    ]
+  }
 }

@@ -1,4 +1,11 @@
 import { deepFreeze } from '../../model/runtime';
+import type {
+  InternetActivationObservation,
+  InternetBootstrapStatus,
+  InternetNativeQualification,
+  InternetNativeSnapshot,
+  RelayProjection,
+} from '../internetNative/types';
 
 export const PRODUCT_SNAPSHOT_PROTOCOL = 'mycelium.product_snapshot.v1' as const;
 export const PRODUCT_EVENT_PROTOCOL = 'mycelium.product_event.v1' as const;
@@ -111,6 +118,7 @@ export interface ProductSnapshot {
   readonly relations: readonly ProductRelation[];
   readonly readiness: readonly ProductReadinessRecord[];
   readonly notices: readonly ProductNotice[];
+  readonly internet_native: InternetNativeSnapshot;
   readonly provenance: {
     readonly projector: string;
     readonly projector_version: string;
@@ -136,6 +144,8 @@ export class ProductEvidenceContractError extends TypeError {
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:~-]{0,127}$/;
 const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
+const RELAY_REFERENCE = /^hmac-sha256:[0-9a-f]{64}$/;
+const INTERNET_NAME = /^[a-z][a-z0-9_]{0,95}$/;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}(?:\/[A-Za-z0-9][A-Za-z0-9._-]{0,127})?$/;
 const MAX_ITEMS = 4_096;
 
@@ -227,6 +237,397 @@ function uniqueStrings(
   const decoded = array(value, field).map((item, index) => decoder(item, `${field}[${index}]`));
   if (new Set(decoded).size !== decoded.length) return fail(field, 'duplicate value');
   return decoded;
+}
+
+function nullableFiniteNumber(value: unknown, field: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fail(field, 'invalid finite number');
+  }
+  return value;
+}
+
+function decodeInternetBootstrapStatus(value: unknown, field: string): InternetBootstrapStatus {
+  const candidate = exact(value, [
+    'protocol',
+    'generation',
+    'observed_at_unix_ms',
+    'freshness',
+    'tls_state',
+    'canonical_origin_verified',
+    'seed_pin_state',
+    'route_state',
+    'invitation_state',
+    'counters',
+  ], field);
+  if (own(candidate, 'protocol', field) !== 'mycelium.internet_bootstrap_status.v1') {
+    return fail(`${field}.protocol`, 'unsupported protocol');
+  }
+  const counters = exact(
+    own(candidate, 'counters', field),
+    ['requests', 'joins_accepted', 'joins_rejected'],
+    `${field}.counters`,
+  );
+  return {
+    protocol: 'mycelium.internet_bootstrap_status.v1',
+    generation: integer(own(candidate, 'generation', field), `${field}.generation`, 1),
+    observed_at_unix_ms: integer(
+      own(candidate, 'observed_at_unix_ms', field),
+      `${field}.observed_at_unix_ms`,
+    ),
+    freshness: enumeration(
+      own(candidate, 'freshness', field),
+      ['current', 'stale', 'unknown'] as const,
+      `${field}.freshness`,
+    ),
+    tls_state: enumeration(
+      own(candidate, 'tls_state', field),
+      ['publicly_trusted', 'unverified', 'unknown'] as const,
+      `${field}.tls_state`,
+    ),
+    canonical_origin_verified: literalBoolean(
+      own(candidate, 'canonical_origin_verified', field),
+      `${field}.canonical_origin_verified`,
+    ),
+    seed_pin_state: enumeration(
+      own(candidate, 'seed_pin_state', field),
+      ['verified', 'mismatch', 'unknown'] as const,
+      `${field}.seed_pin_state`,
+    ),
+    route_state: enumeration(
+      own(candidate, 'route_state', field),
+      ['available', 'unavailable', 'unknown'] as const,
+      `${field}.route_state`,
+    ),
+    invitation_state: enumeration(
+      own(candidate, 'invitation_state', field),
+      ['pending', 'accepted', 'rejected', 'unknown'] as const,
+      `${field}.invitation_state`,
+    ),
+    counters: {
+      requests: integer(own(counters, 'requests', `${field}.counters`), `${field}.counters.requests`),
+      joins_accepted: integer(
+        own(counters, 'joins_accepted', `${field}.counters`),
+        `${field}.counters.joins_accepted`,
+      ),
+      joins_rejected: integer(
+        own(counters, 'joins_rejected', `${field}.counters`),
+        `${field}.counters.joins_rejected`,
+      ),
+    },
+  };
+}
+
+function decodeInternetActivationObservation(
+  value: unknown,
+  field: string,
+): InternetActivationObservation {
+  const candidate = exact(value, [
+    'protocol',
+    'observation_id',
+    'connection_generation',
+    'connection_reuse',
+    'path_class',
+    'path_source',
+    'endpoint_pseudonym',
+    'observed_at_unix_ms',
+    'freshness',
+    'evidence_lifetime_until_unix_ms',
+    'metrics',
+  ], field);
+  if (own(candidate, 'protocol', field) !== 'mycelium.internet_activation_observation.v1') {
+    return fail(`${field}.protocol`, 'unsupported protocol');
+  }
+  const metrics = exact(own(candidate, 'metrics', field), [
+    'rtt_ms',
+    'warm_rtt_ms',
+    'jitter_ms',
+    'goodput_bytes_per_second',
+    'loss_ratio',
+    'sample_count',
+    'measured_zero',
+  ], `${field}.metrics`);
+  const decodeNullableMetric = (key: string): number | null => {
+    const raw = own(metrics, key, `${field}.metrics`);
+    return raw === null ? null : integer(raw, `${field}.metrics.${key}`);
+  };
+  const rtt = decodeNullableMetric('rtt_ms');
+  const warmRtt = decodeNullableMetric('warm_rtt_ms');
+  const jitter = decodeNullableMetric('jitter_ms');
+  const goodput = decodeNullableMetric('goodput_bytes_per_second');
+  const sampleCount = decodeNullableMetric('sample_count');
+  const loss = nullableFiniteNumber(
+    own(metrics, 'loss_ratio', `${field}.metrics`),
+    `${field}.metrics.loss_ratio`,
+  );
+  const measuredZero = literalBoolean(
+    own(metrics, 'measured_zero', `${field}.metrics`),
+    `${field}.metrics.measured_zero`,
+  );
+  if (loss !== null && (loss < 0 || loss > 1 || sampleCount === null || sampleCount < 1)) {
+    return fail(`${field}.metrics.loss_ratio`, 'invalid measured ratio');
+  }
+  if (loss === 0 && !measuredZero) {
+    return fail(`${field}.metrics.measured_zero`, 'zero not declared measured');
+  }
+  if (loss !== null && loss !== 0 && measuredZero) {
+    return fail(`${field}.metrics.measured_zero`, 'non-zero declared measured zero');
+  }
+  if (loss === null && sampleCount !== null) {
+    return fail(`${field}.metrics.sample_count`, 'sample count without loss ratio');
+  }
+  if (sampleCount === null && [rtt, warmRtt, jitter, goodput].some((metric) => metric !== null)) {
+    return fail(`${field}.metrics.sample_count`, 'metrics without sample count');
+  }
+  const pathClass = enumeration(
+    own(candidate, 'path_class', field),
+    ['direct', 'relay', 'unknown'] as const,
+    `${field}.path_class`,
+  );
+  const pathSource = enumeration(
+    own(candidate, 'path_source', field),
+    ['bound_live_connection', 'unknown'] as const,
+    `${field}.path_source`,
+  );
+  const freshnessState = enumeration(
+    own(candidate, 'freshness', field),
+    ['current', 'stale', 'unknown'] as const,
+    `${field}.freshness`,
+  );
+  const pseudonymValue = own(candidate, 'endpoint_pseudonym', field);
+  const pseudonym = pseudonymValue === null
+    ? null
+    : text(pseudonymValue, `${field}.endpoint_pseudonym`, DIGEST);
+  const metricsUnknown = [rtt, warmRtt, jitter, goodput, loss, sampleCount]
+    .every((metric) => metric === null) && !measuredZero;
+  if (pathClass === 'unknown') {
+    if (pathSource !== 'unknown' || !metricsUnknown) {
+      return fail(field, 'unknown path carries measured claims');
+    }
+  } else if (
+    pathSource !== 'bound_live_connection'
+    || freshnessState !== 'current'
+    || pseudonym === null
+  ) {
+    return fail(field, 'unbound path claim');
+  }
+  if (freshnessState !== 'current' && (pathClass !== 'unknown' || pathSource !== 'unknown' || !metricsUnknown)) {
+    return fail(field, 'stale observation carries path claims');
+  }
+  return {
+    protocol: 'mycelium.internet_activation_observation.v1',
+    observation_id: text(own(candidate, 'observation_id', field), `${field}.observation_id`),
+    connection_generation: integer(
+      own(candidate, 'connection_generation', field),
+      `${field}.connection_generation`,
+    ),
+    connection_reuse: integer(
+      own(candidate, 'connection_reuse', field),
+      `${field}.connection_reuse`,
+    ),
+    path_class: pathClass,
+    path_source: pathSource,
+    endpoint_pseudonym: pseudonym,
+    observed_at_unix_ms: integer(
+      own(candidate, 'observed_at_unix_ms', field),
+      `${field}.observed_at_unix_ms`,
+    ),
+    freshness: freshnessState,
+    evidence_lifetime_until_unix_ms: integer(
+      own(candidate, 'evidence_lifetime_until_unix_ms', field),
+      `${field}.evidence_lifetime_until_unix_ms`,
+    ),
+    metrics: {
+      rtt_ms: rtt,
+      warm_rtt_ms: warmRtt,
+      jitter_ms: jitter,
+      goodput_bytes_per_second: goodput,
+      loss_ratio: loss,
+      sample_count: sampleCount,
+      measured_zero: measuredZero,
+    },
+  };
+}
+
+function decodeRelayProjection(value: unknown, field: string): RelayProjection {
+  const candidate = exact(value, [
+    'protocol',
+    'relay_reference',
+    'region',
+    'projection_generation',
+    'stable',
+    'observed_at_unix_ms',
+  ], field);
+  if (own(candidate, 'protocol', field) !== 'mycelium.relay_projection.v1') {
+    return fail(`${field}.protocol`, 'unsupported protocol');
+  }
+  const region = label(own(candidate, 'region', field), `${field}.region`);
+  if (region !== region.trim() || region.length > 64) return fail(`${field}.region`, 'invalid region');
+  return {
+    protocol: 'mycelium.relay_projection.v1',
+    relay_reference: text(
+      own(candidate, 'relay_reference', field),
+      `${field}.relay_reference`,
+      RELAY_REFERENCE,
+    ),
+    region,
+    projection_generation: integer(
+      own(candidate, 'projection_generation', field),
+      `${field}.projection_generation`,
+      1,
+    ),
+    stable: literalBoolean(own(candidate, 'stable', field), `${field}.stable`),
+    observed_at_unix_ms: integer(
+      own(candidate, 'observed_at_unix_ms', field),
+      `${field}.observed_at_unix_ms`,
+    ),
+  };
+}
+
+function internetNames(value: unknown, field: string, allowEmpty = false): readonly string[] {
+  const names = uniqueStrings(value, field, (item, itemField) => text(item, itemField, INTERNET_NAME));
+  if ((!allowEmpty && names.length < 1) || names.length > 32) {
+    return fail(field, 'invalid bounded name list');
+  }
+  return names;
+}
+
+function decodeInternetQualification(value: unknown, field: string): InternetNativeQualification {
+  const candidate = exact(value, [
+    'protocol',
+    'qualification_id',
+    'gate_kind',
+    'case_ids',
+    'observed_at_unix_ms',
+    'executed',
+    'result',
+    'spec_digest',
+    'source_digest',
+    'evidence_digests',
+    'fresh_until_unix_ms',
+    'projection_digest',
+    'public_projection',
+  ], field);
+  if (own(candidate, 'protocol', field) !== 'mycelium.internet_native_qualification.v1') {
+    return fail(`${field}.protocol`, 'unsupported protocol');
+  }
+  const caseIds = internetNames(own(candidate, 'case_ids', field), `${field}.case_ids`);
+  const evidenceDigests = uniqueStrings(
+    own(candidate, 'evidence_digests', field),
+    `${field}.evidence_digests`,
+    (item, itemField) => text(item, itemField, DIGEST),
+  );
+  if (evidenceDigests.length > 32) return fail(`${field}.evidence_digests`, 'too many digests');
+  const projection = exact(
+    own(candidate, 'public_projection', field),
+    ['gate_case_ids', 'outcomes', 'relay_reference', 'observed_at_unix_ms'],
+    `${field}.public_projection`,
+  );
+  const gateCaseIds = internetNames(
+    own(projection, 'gate_case_ids', `${field}.public_projection`),
+    `${field}.public_projection.gate_case_ids`,
+  );
+  if (gateCaseIds.some((caseId) => !caseIds.includes(caseId))) {
+    return fail(`${field}.public_projection.gate_case_ids`, 'unbound case');
+  }
+  const outcomes = internetNames(
+    own(projection, 'outcomes', `${field}.public_projection`),
+    `${field}.public_projection.outcomes`,
+  );
+  if (outcomes.some((outcome, index) => index > 0 && outcomes[index - 1] > outcome)) {
+    return fail(`${field}.public_projection.outcomes`, 'outcomes not sorted');
+  }
+  const executed = literalBoolean(own(candidate, 'executed', field), `${field}.executed`);
+  const result = enumeration(
+    own(candidate, 'result', field),
+    ['passed', 'failed', 'not_executed'] as const,
+    `${field}.result`,
+  );
+  const projectionDigestValue = own(candidate, 'projection_digest', field);
+  const projectionDigest = projectionDigestValue === null
+    ? null
+    : text(projectionDigestValue, `${field}.projection_digest`, DIGEST);
+  if ((!executed && (result !== 'not_executed' || evidenceDigests.length > 0 || projectionDigest !== null))
+    || (executed && result === 'not_executed')) {
+    return fail(field, 'inconsistent execution result');
+  }
+  const relayReferenceValue = own(projection, 'relay_reference', `${field}.public_projection`);
+  return {
+    protocol: 'mycelium.internet_native_qualification.v1',
+    qualification_id: text(
+      own(candidate, 'qualification_id', field),
+      `${field}.qualification_id`,
+    ),
+    gate_kind: enumeration(
+      own(candidate, 'gate_kind', field),
+      ['physical_positive', 'physical_negative'] as const,
+      `${field}.gate_kind`,
+    ),
+    case_ids: caseIds,
+    observed_at_unix_ms: integer(
+      own(candidate, 'observed_at_unix_ms', field),
+      `${field}.observed_at_unix_ms`,
+    ),
+    executed,
+    result,
+    spec_digest: text(own(candidate, 'spec_digest', field), `${field}.spec_digest`, DIGEST),
+    source_digest: text(own(candidate, 'source_digest', field), `${field}.source_digest`, DIGEST),
+    evidence_digests: evidenceDigests,
+    fresh_until_unix_ms: nullableInteger(
+      own(candidate, 'fresh_until_unix_ms', field),
+      `${field}.fresh_until_unix_ms`,
+    ),
+    projection_digest: projectionDigest,
+    public_projection: {
+      gate_case_ids: gateCaseIds,
+      outcomes,
+      relay_reference: relayReferenceValue === null
+        ? null
+        : text(
+          relayReferenceValue,
+          `${field}.public_projection.relay_reference`,
+          RELAY_REFERENCE,
+        ),
+      observed_at_unix_ms: integer(
+        own(projection, 'observed_at_unix_ms', `${field}.public_projection`),
+        `${field}.public_projection.observed_at_unix_ms`,
+      ),
+    },
+  };
+}
+
+function decodeInternetNative(value: unknown): InternetNativeSnapshot {
+  const field = 'snapshot.internet_native';
+  const candidate = exact(value, [
+    'bootstrap_status',
+    'activation_observation',
+    'activation_history',
+    'relay_projection',
+    'qualification',
+  ], field);
+  const relay = own(candidate, 'relay_projection', field);
+  const qualification = own(candidate, 'qualification', field);
+  return {
+    bootstrap_status: decodeInternetBootstrapStatus(
+      own(candidate, 'bootstrap_status', field),
+      `${field}.bootstrap_status`,
+    ),
+    activation_observation: decodeInternetActivationObservation(
+      own(candidate, 'activation_observation', field),
+      `${field}.activation_observation`,
+    ),
+    activation_history: array(
+      own(candidate, 'activation_history', field),
+      `${field}.activation_history`,
+    ).map((observation, index) => decodeInternetActivationObservation(
+      observation,
+      `${field}.activation_history[${index}]`,
+    )),
+    relay_projection: relay === null ? null : decodeRelayProjection(relay, `${field}.relay_projection`),
+    qualification: qualification === null
+      ? null
+      : decodeInternetQualification(qualification, `${field}.qualification`),
+  };
 }
 
 function binding(value: unknown, field: string): ProductBinding {
@@ -427,7 +828,7 @@ function decodeEntity(value: unknown, index: number): ProductEntity {
 export function decodeProductSnapshot(value: unknown): ProductSnapshot {
   const candidate = exact(
     value,
-    ['protocol', 'publication', 'supported_entity_kinds', 'source_states', 'entities', 'relations', 'readiness', 'notices', 'provenance'],
+    ['protocol', 'publication', 'supported_entity_kinds', 'source_states', 'entities', 'relations', 'readiness', 'notices', 'internet_native', 'provenance'],
     'snapshot',
   );
   if (own(candidate, 'protocol', 'snapshot.protocol') !== PRODUCT_SNAPSHOT_PROTOCOL) {
@@ -510,6 +911,9 @@ export function decodeProductSnapshot(value: unknown): ProductSnapshot {
     new Set(notices.map((notice) => notice.notice_id)).size !== notices.length
     || notices.some((notice) => !sourceIds.has(notice.source_id))
   ) return fail('snapshot.notices', 'invalid notice binding');
+  const internetNative = decodeInternetNative(
+    own(candidate, 'internet_native', 'snapshot.internet_native'),
+  );
   const provenance = exact(
     own(candidate, 'provenance', 'snapshot.provenance'),
     ['projector', 'projector_version', 'source_mode'],
@@ -536,6 +940,7 @@ export function decodeProductSnapshot(value: unknown): ProductSnapshot {
     relations,
     readiness,
     notices,
+    internet_native: internetNative,
     provenance: {
       projector: label(own(provenance, 'projector', 'snapshot.provenance'), 'snapshot.provenance.projector'),
       projector_version: text(own(provenance, 'projector_version', 'snapshot.provenance'), 'snapshot.provenance.projector_version'),

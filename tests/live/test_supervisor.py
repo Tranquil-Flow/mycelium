@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from http.client import HTTPConnection
 import json
+import os
 from pathlib import Path
 import threading
 from types import SimpleNamespace
 
 import pytest
 
+import mycelium_live.supervisor as supervisor_module
 from mycelium_live.artifact_provisioner import ArtifactAcquisitionStore
 from mycelium_live.route import FakeLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
@@ -28,6 +30,123 @@ from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from mycelium_ui_gateway.validation import validate_observatory_envelope
 from physical_inference_qualification import ControllerError
+
+
+def test_supervisor_main_propagates_force_relay_to_single_and_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        supervisor_module,
+        "run_physical_server",
+        lambda **kwargs: calls.append(("single", kwargs["force_relay"])) or 0,
+    )
+    base = [
+        "--operator-plan",
+        str(tmp_path / "one.json"),
+        "--seed-state-root",
+        str(tmp_path / "seed"),
+        "--a8-force-relay",
+    ]
+    assert supervisor_module.main(base) == 0
+    assert calls == [("single", True)]
+
+    calls.clear()
+    monkeypatch.setattr(
+        supervisor_module,
+        "run_registry_server",
+        lambda **kwargs: calls.append(("registry", kwargs["force_relay"])) or 0,
+    )
+    assert (
+        supervisor_module.main(
+            [
+                *base,
+                "--operator-plan",
+                str(tmp_path / "two.json"),
+            ]
+        )
+        == 0
+    )
+    assert calls == [("registry", True)]
+
+
+def test_trusted_proxy_capability_loader_is_owner_private_and_exact(
+    tmp_path: Path,
+) -> None:
+    capability = tmp_path / "proxy-capability"
+    capability.write_bytes(b"a" * 64)
+    capability.chmod(0o600)
+    assert supervisor_module._load_trusted_proxy_capability(capability) == b"a" * 64
+
+    capability.chmod(0o644)
+    with pytest.raises(ValueError, match="invalid_trusted_proxy_capability"):
+        supervisor_module._load_trusted_proxy_capability(capability)
+    capability.chmod(0o600)
+
+    for index, value in enumerate(
+        (b"short", b"a" * 63, b"a" * 65, b"A" * 64, b"g" * 64, b"a" * 64 + b"\n")
+    ):
+        malformed = tmp_path / f"malformed-{index}"
+        malformed.write_bytes(value)
+        malformed.chmod(0o600)
+        with pytest.raises(ValueError, match="invalid_trusted_proxy_capability"):
+            supervisor_module._load_trusted_proxy_capability(malformed)
+
+    link = tmp_path / "link"
+    link.symlink_to(capability)
+    with pytest.raises(ValueError, match="invalid_trusted_proxy_capability"):
+        supervisor_module._load_trusted_proxy_capability(link)
+
+    hardlink = tmp_path / "hardlink"
+    os.link(capability, hardlink)
+    with pytest.raises(ValueError, match="invalid_trusted_proxy_capability"):
+        supervisor_module._load_trusted_proxy_capability(hardlink)
+
+    real_root = tmp_path / "real-root"
+    private = real_root / "private"
+    private.mkdir(parents=True, mode=0o700)
+    nested = private / "capability"
+    nested.write_bytes(b"b" * 64)
+    nested.chmod(0o600)
+    linked_root = tmp_path / "linked-root"
+    linked_root.symlink_to(real_root, target_is_directory=True)
+    with pytest.raises(ValueError, match="invalid_trusted_proxy_capability"):
+        supervisor_module._load_trusted_proxy_capability(
+            linked_root / "private" / "capability"
+        )
+
+
+def test_force_relay_reaches_route_factory_in_single_and_registry_loaders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def reject(_plan: Path, **kwargs: object) -> object:
+        calls.append(kwargs["force_relay"] is True)
+        raise RuntimeError("stop_after_factory")
+
+    monkeypatch.setattr(
+        supervisor_module.PhysicalLiveRoute,
+        "from_operator_plan",
+        reject,
+    )
+    with pytest.raises(RuntimeError, match="stop_after_factory"):
+        supervisor_module.run_physical_server(
+            operator_plan=tmp_path / "plan.json",
+            host="127.0.0.1",
+            port=8787,
+            seed_state_root=tmp_path / "seed",
+            force_relay=True,
+        )
+    with pytest.raises(RuntimeError, match="stop_after_factory"):
+        supervisor_module._qualified_runtime(
+            tmp_path / "plan.json",
+            seed_state_root=tmp_path / "seed",
+            force_relay=True,
+        )
+    assert calls == [True, True]
 
 
 def test_build_live_stack_returns_app_and_health_source(
@@ -528,6 +647,54 @@ def test_route_identity_rejects_missing_duplicate_or_extra_endpoints(
             _identity(endpoint_ids),
             _graph(("node-0", "node-1", "node-2")),
         )
+
+
+def test_loopback_wrapper_trusts_only_exact_https_forwarding_mark_when_enabled(
+    tmp_path: Path,
+) -> None:
+    static_root = tmp_path / "dist"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+    scopes: list[dict] = []
+
+    async def app(scope, _receive, send):
+        scopes.append(dict(scope))
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 204,
+                "headers": [(b"content-length", b"0")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    server = create_server(
+        app=app,
+        route=SimpleNamespace(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        trusted_https_proxy=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for marker in ("https", "https,http", None):
+            connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+            headers = {"Host": "a8.example.test"}
+            if marker is not None:
+                headers["X-Forwarded-Proto"] = marker
+            connection.request("GET", "/api/v1/bootstrap", headers=headers)
+            response = connection.getresponse()
+            assert response.status == 204
+            response.read()
+            connection.close()
+
+        assert [scope["scheme"] for scope in scopes] == ["https", "http", "http"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_loopback_wrapper_rejects_oversized_body_before_asgi(

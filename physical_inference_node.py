@@ -33,6 +33,7 @@ from typing import Any, Callable, Mapping
 import uuid
 
 from mycelium_iroh_sidecar import SidecarClient
+from mycelium_node.identity import load_node_signer
 from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
 from mycelium_qualification.evidence import canonical_json_bytes, canonical_json_loads
 from mycelium_qualification.signing import generate_ed25519_signer
@@ -528,10 +529,18 @@ class NativeSidecarProcess:
         queue_capacity: int,
         startup_timeout: float,
         endpoint_secret_file: Path | None = None,
+        force_relay: bool = False,
     ) -> None:
+        _require(
+            isinstance(local_only, bool)
+            and isinstance(force_relay, bool)
+            and not (local_only and force_relay),
+            "invalid_sidecar_network_mode",
+        )
         self.binary = binary
         self.socket_root = socket_root
         self.local_only = local_only
+        self.force_relay = force_relay
         self.queue_capacity = queue_capacity
         self.startup_timeout = startup_timeout
         self.endpoint_secret_file = _validated_endpoint_secret_file(
@@ -571,6 +580,8 @@ class NativeSidecarProcess:
         ]
         if self.local_only:
             command.append("--local-only")
+        if self.force_relay:
+            command.append("--force-relay")
         if self.endpoint_secret_file is not None:
             command.extend(["--endpoint-secret-file", str(self.endpoint_secret_file)])
         return command
@@ -763,6 +774,7 @@ class PhysicalNodeService:
         command_timeout: float,
         endpoint_secret_file: Path | None = None,
         requested_decode_mode: str | None = None,
+        sidecar_force_relay: bool = False,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -774,6 +786,12 @@ class PhysicalNodeService:
             )
         _require(command_timeout > 0, "invalid_command_timeout")
         _require(
+            isinstance(sidecar_local_only, bool)
+            and isinstance(sidecar_force_relay, bool)
+            and not (sidecar_local_only and sidecar_force_relay),
+            "invalid_sidecar_network_mode",
+        )
+        _require(
             requested_decode_mode in {None, "complete_context_replay", "stage_local_kv"},
             "invalid_requested_decode_mode",
         )
@@ -784,6 +802,7 @@ class PhysicalNodeService:
         self.socket_root = socket_root
         self.sidecar_binary = sidecar_binary.resolve(strict=False)
         self.sidecar_local_only = sidecar_local_only
+        self.sidecar_force_relay = sidecar_force_relay
         self.command_timeout = command_timeout
         self.endpoint_secret_file = _validated_endpoint_secret_file(
             endpoint_secret_file
@@ -1034,6 +1053,7 @@ class PhysicalNodeService:
             binary=self.sidecar_binary,
             socket_root=self.socket_root,
             local_only=self.sidecar_local_only,
+            force_relay=self.sidecar_force_relay,
             queue_capacity=128,
             startup_timeout=min(self.command_timeout, 30.0),
             endpoint_secret_file=self.endpoint_secret_file,
@@ -1442,9 +1462,21 @@ class PhysicalNodeService:
         self.runtime = runtime
         self.runtime_identity = loaded_runtime_identity
         self.sidecar = sidecar
-        self.endpoint_id = ready["endpoint_id"]
+        endpoint_id = ready["endpoint_id"]
+        _require(
+            isinstance(endpoint_id, str) and bool(endpoint_id),
+            "invalid_sidecar_ready",
+        )
+        self.endpoint_id = endpoint_id
         self.endpoint_addr = ready["endpoint_addr"]
-        self.signer = generate_ed25519_signer(endpoint_id=self.endpoint_id)
+        self.signer = (
+            generate_ed25519_signer(endpoint_id=endpoint_id)
+            if self.endpoint_secret_file is None
+            else load_node_signer(
+                self.endpoint_secret_file,
+                endpoint_id=endpoint_id,
+            )
+        )
         self.state = "CONFIGURED"
         configured_details = {
             "assignment_id": assignment["assignment_id"],
@@ -2045,6 +2077,67 @@ class PhysicalNodeService:
                 self._sinks.pop(cleanup_subject["request_id"], None)
         return self._signed_result("snapshot", details)
 
+    def _inbound_admission_snapshot(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        fields = {
+            "case_id",
+            "member_id",
+            "spec_digest",
+            "source_digest",
+            "challenge",
+            "expected_endpoint_id",
+            "dialed_endpoint_id",
+        }
+        data = _exact_fields(payload, fields, "invalid_inbound_admission_fields")
+        _require(
+            self.state == "RUNNING" and self.transport is not None,
+            "invalid_state_for_inbound_admission_snapshot",
+        )
+        _require(
+            data["case_id"] == "endpoint_identity_mismatch"
+            and all(
+                isinstance(data[field], str) and bool(data[field])
+                for field in fields
+            )
+            and data["expected_endpoint_id"] != data["dialed_endpoint_id"]
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", data["spec_digest"])
+            is not None
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", data["source_digest"])
+            is not None
+            and re.fullmatch(r"[A-Za-z0-9._:-]{16,256}", data["challenge"])
+            is not None,
+            "invalid_inbound_admission_identity",
+        )
+        admission = self.transport.inbound_admission_snapshot(
+            data["dialed_endpoint_id"]
+        )
+        paths = self.transport.evidence().transport_path_observations
+        expected_paths = [
+            path
+            for path in paths
+            if path.get("remote_endpoint_id") == data["expected_endpoint_id"]
+        ]
+        _require(
+            all(path.get("path_class") == "unknown" for path in expected_paths),
+            "inbound_admission_path_resolved",
+        )
+        details = {
+            "protocol": "mycelium.physical_node.inbound_admission_evidence.v1",
+            "case_id": data["case_id"],
+            "member_id": data["member_id"],
+            "spec_digest": data["spec_digest"],
+            "source_digest": data["source_digest"],
+            "sidecar_binary_digest": "sha256:"
+            + hashlib.sha256(self.sidecar_binary.read_bytes()).hexdigest(),
+            "challenge": data["challenge"],
+            "expected_endpoint_id": data["expected_endpoint_id"],
+            "dialed_endpoint_id": data["dialed_endpoint_id"],
+            "expected_peer_path_class": "unknown",
+            "admission": dict(admission),
+        }
+        return self._signed_result("inbound_admission_snapshot", details)
+
     def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = _exact_fields(payload, {"request_id"}, "invalid_cancel_fields")
         _require(
@@ -2622,6 +2715,7 @@ class PhysicalNodeService:
             "start": self._start,
             "health": self._health,
             "snapshot": self._snapshot,
+            "inbound_admission_snapshot": self._inbound_admission_snapshot,
             "cancel": self._cancel,
             "bind_request_control": self._bind_request_control,
             "update_request_control": self._update_request_control,
@@ -2694,7 +2788,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--socket-root", type=Path, required=True)
     parser.add_argument("--sidecar-binary", type=Path, required=True)
-    parser.add_argument("--sidecar-local-only", action="store_true")
+    network_mode = parser.add_mutually_exclusive_group()
+    network_mode.add_argument("--sidecar-local-only", action="store_true")
+    network_mode.add_argument("--sidecar-force-relay", action="store_true")
     parser.add_argument("--endpoint-secret-file", type=Path)
     parser.add_argument("--command-timeout", type=float, default=30.0)
     parser.add_argument(
@@ -2715,6 +2811,7 @@ def main() -> int:
             socket_root=args.socket_root,
             sidecar_binary=args.sidecar_binary,
             sidecar_local_only=args.sidecar_local_only,
+            sidecar_force_relay=args.sidecar_force_relay,
             command_timeout=args.command_timeout,
             endpoint_secret_file=args.endpoint_secret_file,
             requested_decode_mode=args.decode_mode,

@@ -4,6 +4,8 @@ import copy
 
 import pytest
 
+from mycelium_internet.contracts import compatibility_fixtures as internet_fixtures
+
 from mycelium_product_spine import (
     ENTITY_KINDS,
     ProductContractError,
@@ -13,6 +15,8 @@ from mycelium_product_spine import (
 
 
 def snapshot_fixture() -> dict:
+    internet = internet_fixtures()
+    activation = internet["internet-activation-observation-v1.json"]
     source_id = "membership-source"
     binding = {
         "deployment_id": None,
@@ -88,6 +92,13 @@ def snapshot_fixture() -> dict:
             },
         ],
         "notices": [],
+        "internet_native": {
+            "bootstrap_status": internet["internet-bootstrap-status-v1.json"],
+            "activation_observation": activation,
+            "activation_history": [activation],
+            "relay_projection": internet["relay-projection-v1.json"],
+            "qualification": internet["internet-native-qualification-v1.json"],
+        },
         "provenance": {
             "projector": "mycelium_product_spine",
             "projector_version": "m12-v1",

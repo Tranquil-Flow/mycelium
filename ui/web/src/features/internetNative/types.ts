@@ -68,15 +68,36 @@ export interface RelayProjection {
   readonly observed_at_unix_ms: number;
 }
 
-export interface InternetQualificationPublicProjection {
+export type InternetNativeGateKind = 'physical_positive' | 'physical_negative';
+export type InternetNativeQualificationResult = 'passed' | 'failed' | 'not_executed';
+
+export interface InternetNativeQualificationPublicProjection {
   readonly gate_case_ids: readonly string[];
   readonly outcomes: readonly string[];
   readonly relay_reference: string | null;
   readonly observed_at_unix_ms: number;
 }
 
-export interface InternetNativeQualificationPublic {
-  readonly public_projection: InternetQualificationPublicProjection;
-  readonly result: 'passed' | 'failed' | 'not_executed';
+export interface InternetNativeQualification {
+  readonly protocol: 'mycelium.internet_native_qualification.v1';
+  readonly qualification_id: string;
+  readonly gate_kind: InternetNativeGateKind;
+  readonly case_ids: readonly string[];
   readonly observed_at_unix_ms: number;
+  readonly executed: boolean;
+  readonly result: InternetNativeQualificationResult;
+  readonly spec_digest: string;
+  readonly source_digest: string;
+  readonly evidence_digests: readonly string[];
+  readonly fresh_until_unix_ms: number | null;
+  readonly projection_digest: string | null;
+  readonly public_projection: InternetNativeQualificationPublicProjection;
+}
+
+export interface InternetNativeSnapshot {
+  readonly bootstrap_status: InternetBootstrapStatus;
+  readonly activation_observation: InternetActivationObservation;
+  readonly activation_history: readonly InternetActivationObservation[];
+  readonly relay_projection: RelayProjection | null;
+  readonly qualification: InternetNativeQualification | null;
 }

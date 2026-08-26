@@ -596,16 +596,39 @@ def test_runtime_closure_includes_transitive_planner_packages(tmp_path: Path) ->
     bundle = tmp_path / "bundle"
     (repo / "mycelium_capacity_profiles").mkdir(parents=True)
     (repo / "mycelium_gossip").mkdir()
+    (repo / "mycelium_internet").mkdir()
+    (repo / "mycelium_invite").mkdir()
     (repo / "mycelium_layer_planner").mkdir()
+    (repo / "mycelium_membership").mkdir()
+    (repo / "mycelium_mobile").mkdir()
+    (repo / "mycelium_node").mkdir()
+    (repo / "mycelium_physical_runner").mkdir()
+    (repo / "mycelium_qualification").mkdir()
+    (repo / "mycelium_router").mkdir()
+    (repo / "mycelium_seed").mkdir()
     for relative in (
         "physical_inference_node.py",
         "weight_quantization.py",
+        "mycelium_performance_budget.py",
+        "mycelium_topology_evidence.py",
+        "physical_inference_qualification.py",
+        "two_process_runtime_qualification.py",
         "mycelium_capacity_profiles/__init__.py",
         "mycelium_capacity_profiles/status.py",
         "mycelium_gossip/__init__.py",
         "mycelium_gossip/signed_bundle.py",
+        "mycelium_internet/__init__.py",
+        "mycelium_invite/__init__.py",
         "mycelium_layer_planner/__init__.py",
         "mycelium_layer_planner/gossip_adapter.py",
+        "mycelium_membership/__init__.py",
+        "mycelium_mobile/__init__.py",
+        "mycelium_node/__init__.py",
+        "mycelium_node/identity.py",
+        "mycelium_physical_runner/__init__.py",
+        "mycelium_qualification/__init__.py",
+        "mycelium_router/__init__.py",
+        "mycelium_seed/__init__.py",
     ):
         path = repo / relative
         path.write_text(f"# {relative}\n", encoding="utf-8")
@@ -620,6 +643,11 @@ def test_runtime_closure_includes_transitive_planner_packages(tmp_path: Path) ->
     assert (bundle / "mycelium_capacity_profiles/status.py").is_file()
     assert (bundle / "mycelium_gossip/signed_bundle.py").is_file()
     assert (bundle / "mycelium_layer_planner/gossip_adapter.py").is_file()
+    assert (bundle / "mycelium_node/identity.py").is_file()
+    assert (bundle / "mycelium_performance_budget.py").is_file()
+    assert (bundle / "mycelium_topology_evidence.py").is_file()
+    assert (bundle / "physical_inference_qualification.py").is_file()
+    assert (bundle / "two_process_runtime_qualification.py").is_file()
 
 
 def test_target_proof_uses_assignment_control_plane_binding() -> None:

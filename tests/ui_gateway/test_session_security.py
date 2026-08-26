@@ -47,6 +47,110 @@ def test_configuration_defaults_to_loopback_and_external_mode_fails_closed(upstr
         )
 
 
+def test_loopback_trusted_https_proxy_uses_exact_external_origin_and_secure_cookie(
+    upstreams, coordinator
+) -> None:
+    observatory, request_gateway = upstreams
+    decisions: list[str] = []
+
+    def policy(scope):
+        decisions.append(scope["path"])
+        return any(
+            name.lower() == b"x-proxy-user" and value == b"owner"
+            for name, value in scope["headers"]
+        )
+
+    app = create_product_gateway_application(
+        config=GatewayConfig(
+            bind_host="127.0.0.1",
+            tls_enabled=True,
+            public_origin="https://a8.example.test",
+            trusted_https_proxy=True,
+        ),
+        observatory_app=observatory,
+        request_gateway_app=request_gateway,
+        swarm_coordinator=coordinator,
+        request_gateway_bearer_token=REQUEST_TOKEN,
+        access_policy=policy,
+    )
+
+    denied = request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        server=("a8.example.test", 443),
+        client=("127.0.0.1", 4100),
+    )
+    bootstrap = request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        server=("a8.example.test", 443),
+        client=("127.0.0.1", 4100),
+        headers=[(b"x-proxy-user", b"owner")],
+    )
+    wrong_host = request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        server=("attacker.invalid", 443),
+        client=("127.0.0.1", 4100),
+        headers=[(b"x-proxy-user", b"owner")],
+    )
+    remote = request(
+        app,
+        "/api/v1/bootstrap",
+        scheme="https",
+        server=("a8.example.test", 443),
+        client=("203.0.113.9", 4100),
+        headers=[(b"x-proxy-user", b"owner")],
+    )
+
+    assert denied.status == 403
+    assert denied.json()["code"] == "access_denied"
+    assert bootstrap.status == 200
+    assert "Secure" in (bootstrap.header("set-cookie") or "")
+    assert wrong_host.status == 403
+    assert wrong_host.json()["code"] == "invalid_origin"
+    assert remote.status == 403
+    assert remote.json()["code"] == "loopback_required"
+    assert decisions == [
+        "/api/v1/bootstrap",
+        "/api/v1/bootstrap",
+        "/api/v1/bootstrap",
+    ]
+
+
+def test_trusted_https_proxy_configuration_fails_closed(upstreams, coordinator) -> None:
+    with pytest.raises(ValueError, match="trusted_https_proxy_requires_tls"):
+        GatewayConfig(
+            public_origin="https://a8.example.test",
+            trusted_https_proxy=True,
+        )
+    with pytest.raises(ValueError, match="trusted_https_proxy_requires_loopback"):
+        GatewayConfig(
+            bind_host="0.0.0.0",
+            tls_enabled=True,
+            public_origin="https://a8.example.test",
+            trusted_https_proxy=True,
+        )
+
+    observatory, request_gateway = upstreams
+    with pytest.raises(ValueError, match="trusted_proxy_requires_access_policy"):
+        create_product_gateway_application(
+            config=GatewayConfig(
+                bind_host="127.0.0.1",
+                tls_enabled=True,
+                public_origin="https://a8.example.test",
+                trusted_https_proxy=True,
+            ),
+            observatory_app=observatory,
+            request_gateway_app=request_gateway,
+            swarm_coordinator=coordinator,
+            request_gateway_bearer_token=REQUEST_TOKEN,
+        )
+
+
 def test_bootstrap_creates_bounded_http_only_strict_session(app) -> None:
     result = request(app, "/api/v1/bootstrap")
 

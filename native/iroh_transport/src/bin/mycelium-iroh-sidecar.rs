@@ -34,6 +34,10 @@ struct Arguments {
     #[arg(long)]
     local_only: bool,
 
+    /// Retain production relays while disabling every direct IP transport.
+    #[arg(long, conflicts_with = "local_only")]
+    force_relay: bool,
+
     /// Independent capacity of the inbound and outbound message queues.
     #[arg(long, default_value_t = NonZeroUsize::new(DEFAULT_QUEUE_CAPACITY).unwrap())]
     queue_capacity: NonZeroUsize,
@@ -63,6 +67,7 @@ async fn main() -> ExitCode {
         uds: arguments.uds,
         queue_capacity: arguments.queue_capacity,
         local_only: arguments.local_only,
+        force_relay: arguments.force_relay,
         endpoint_secret,
     };
     match run_sidecar(config, secret).await {

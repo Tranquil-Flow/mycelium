@@ -122,6 +122,23 @@ def test_rejects_symlinked_or_public_parent(tmp_path: Path) -> None:
     assert permissions_error.value.code == "node_identity_permissions_invalid"
 
 
+def test_load_only_rejects_symlinked_ancestor_above_private_parent(
+    tmp_path: Path,
+) -> None:
+    real_root = tmp_path / "real-root"
+    private = real_root / "private"
+    private.mkdir(parents=True, mode=0o700)
+    key = private / "node.key"
+    key.write_bytes(b"x" * 32)
+    key.chmod(0o600)
+    linked_root = tmp_path / "linked-root"
+    linked_root.symlink_to(real_root, target_is_directory=True)
+
+    with pytest.raises(NodeIdentityError) as exc_info:
+        load_node_signer(linked_root / "private" / "node.key")
+    assert exc_info.value.code == "node_identity_path_invalid"
+
+
 def test_rejects_truncated_or_nonexact_key_file_mode(tmp_path: Path) -> None:
     private = tmp_path / "private"
     private.mkdir(mode=0o700)

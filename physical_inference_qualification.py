@@ -67,6 +67,9 @@ _FORBIDDEN_NAME_RE = re.compile(
     r"(?:^|[._-])(?:api[-_]?key|credentials?|id[-_]?rsa|password|private[-_]?key|secrets?|tokens?)(?:[._-]|$)",
     re.IGNORECASE,
 )
+_ALLOWED_CREDENTIAL_LIKE_SOURCE_MODULES = frozenset(
+    {PurePosixPath("mycelium_invite/token.py")}
+)
 _MAX_DOCUMENT_BYTES = 1_048_576
 _MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
@@ -788,6 +791,12 @@ class NodeProcessSession:
         self._stderr_thread.join(timeout=2.0)
 
 
+def _has_forbidden_transfer_name(path: PurePosixPath) -> bool:
+    if path in _ALLOWED_CREDENTIAL_LIKE_SOURCE_MODULES:
+        return False
+    return any(_FORBIDDEN_NAME_RE.search(part) for part in path.parts)
+
+
 def _safe_transfer_path(value: Any) -> PurePosixPath:
     if not isinstance(value, str) or not value or len(value) > 512:
         _reject("unsafe_transfer_path")
@@ -797,7 +806,7 @@ def _safe_transfer_path(value: Any) -> PurePosixPath:
         or str(path) != value
         or any(part in {"", ".", ".."} for part in path.parts)
         or any(part.lower() in _FORBIDDEN_PATH_PARTS for part in path.parts)
-        or any(_FORBIDDEN_NAME_RE.search(part) for part in path.parts)
+        or _has_forbidden_transfer_name(path)
         or any(part.lower() == ".env" for part in path.parts)
     ):
         _reject("unsafe_transfer_path")

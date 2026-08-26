@@ -116,6 +116,74 @@ def test_mint_binds_invite_to_the_public_origin(tmp_path: Path) -> None:
     assert bundle_path.stat().st_mode & 0o777 == 0o600
 
 
+def test_owner_probe_rejects_unqualified_member_before_any_assignment_mutation(
+    tmp_path: Path,
+) -> None:
+    import time
+    from itertools import count
+
+    from mycelium_invite import verify_invite_bundle
+    from mycelium_membership import HEARTBEAT_PROTOCOL
+    from mycelium_node.identity import load_or_create_node_signer
+    from mycelium_node.membership import NodeMembershipSession
+    from scripts.a8_run_rehearsal_seed import _probe_unqualified_member
+
+    state_root = tmp_path / "rehearsal-seed"
+    server, coordinator, _ = build_rehearsal_seed(
+        origin=ORIGIN,
+        state_root=state_root,
+        port=0,
+    )
+    try:
+        bundle = coordinator.mint_invite(nonce="unqualified", ttl_seconds=120)
+        verified = verify_invite_bundle(bundle, now=time.time())
+        messages = count(1)
+        node = NodeMembershipSession(
+            node_id="browser-member",
+            swarm_id=coordinator.swarm_id,
+            seed_node_id=coordinator.seed_node_id,
+            signer=load_or_create_node_signer(
+                tmp_path / "browser-member.key",
+                endpoint_id="browser-member-endpoint",
+            ),
+            incarnation="browser-member-1",
+            software_version="mycelium-test",
+            peer_class="browser_http",
+            runtime_capability={
+                "runtime_backend": "browser",
+                "transport": "http",
+                "activation_protocol": None,
+            },
+            clock=time.time,
+            id_source=lambda: f"browser-member-{next(messages)}",
+        )
+        acceptance = coordinator.accept_join(
+            invite_token=str(bundle["token"]),
+            join_envelope=node.join_request(
+                invite_nonce=str(verified["payload"]["nonce"]),
+                endpoint_addrs=["https://browser-member.invalid/control"],
+            ),
+        )
+        node.accept_join(
+            acceptance,
+            seed_key_digest=str(verified["seed_key_digest"]),
+        )
+        coordinator.receive_member_message(
+            node.heartbeat(lifecycle_state="CONFIGURED", active_requests=0),
+            expected_protocol=HEARTBEAT_PROTOCOL,
+        )
+
+        report = _probe_unqualified_member(coordinator, node.node_id)
+
+        assert report["member_visible"] is True
+        assert report["activation_eligible"] is False
+        assert set(report["authority_attempts"].values()) == {"rejected"}
+        assert not any(report["forbidden_side_effects"].values())
+        assert report["prompt_deliveries"] == 0
+    finally:
+        server.close()
+
+
 def test_origin_must_be_canonical_https(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         build_rehearsal_seed(

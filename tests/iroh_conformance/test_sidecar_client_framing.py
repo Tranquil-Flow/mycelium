@@ -6,6 +6,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import hashlib
 import hmac
+import json
 import socket
 import struct
 import threading
@@ -362,3 +363,55 @@ def test_authenticated_future_response_sequence_is_rejected() -> None:
 
         assert raised.value.code == "invalid_sequence"
         _assert_session_poisoned(client)
+
+
+def test_inbound_admission_snapshot_requires_exact_authenticated_envelope(monkeypatch) -> None:
+    client = SidecarClient("/unused", b"b" * 32, timeout=_WAIT_SECONDS)
+    payload = json.dumps({
+        "protocol": "mycelium.iroh_sidecar.inbound_admission.v1",
+        "inbound_identity_rejections": 2,
+        "inbound_frames_admitted": 3,
+        "candidate_identity_rejections": 1,
+        "measured_at_unix_ms": 1234,
+    }).encode()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: (
+            sidecar_client_module._ADMISSION_COUNTERS,
+            args[1],
+            payload,
+        ),
+    )
+
+    assert client.inbound_admission_snapshot("ab" * 32) == {
+        "protocol": "mycelium.iroh_sidecar.inbound_admission.v1",
+        "inbound_identity_rejections": 2,
+        "inbound_frames_admitted": 3,
+        "candidate_identity_rejections": 1,
+        "measured_at_unix_ms": 1234,
+    }
+
+
+def test_inbound_admission_snapshot_rejects_extra_fields(monkeypatch) -> None:
+    client = SidecarClient("/unused", b"b" * 32, timeout=_WAIT_SECONDS)
+    payload = json.dumps({
+        "protocol": "mycelium.iroh_sidecar.inbound_admission.v1",
+        "inbound_identity_rejections": 1,
+        "inbound_frames_admitted": 0,
+        "candidate_identity_rejections": 1,
+        "measured_at_unix_ms": 1234,
+        "raw_endpoint_id": "forbidden",
+    }).encode()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: (
+            sidecar_client_module._ADMISSION_COUNTERS,
+            args[1],
+            payload,
+        ),
+    )
+
+    with pytest.raises(ProtocolError, match="invalid_inbound_admission_snapshot"):
+        client.inbound_admission_snapshot("ab" * 32)

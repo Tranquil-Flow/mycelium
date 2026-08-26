@@ -30,6 +30,19 @@ _LEGACY_DEVICE_ATTRIBUTE_FIELDS = frozenset(
         "placement_id",
     }
 )
+_PRE_A8_SNAPSHOT_FIELDS = frozenset(
+    {
+        "protocol",
+        "publication",
+        "supported_entity_kinds",
+        "source_states",
+        "entities",
+        "relations",
+        "readiness",
+        "notices",
+        "provenance",
+    }
+)
 
 
 class ProductEvidenceStateError(RuntimeError):
@@ -77,6 +90,72 @@ def _upgrade_generation_one_event(value: object) -> object:
         ):
             attributes["authority_generation"] = 1
     return detached
+
+
+def _upgrade_pre_a8_internet_native_event(value: object) -> Any:
+    """Add only a claim-free projection to the exact pre-A8 snapshot shape."""
+
+    if not isinstance(value, dict):
+        return value
+    snapshot = value.get("snapshot")
+    if not isinstance(snapshot, dict) or set(snapshot) != _PRE_A8_SNAPSHOT_FIELDS:
+        return value
+    publication = snapshot.get("publication")
+    observed_at = (
+        publication.get("published_at_unix_ms")
+        if isinstance(publication, dict)
+        else None
+    )
+    if (
+        not isinstance(observed_at, int)
+        or isinstance(observed_at, bool)
+        or observed_at < 0
+    ):
+        return value
+    activation = {
+        "protocol": "mycelium.internet_activation_observation.v1",
+        "observation_id": f"internet-unknown-{observed_at}",
+        "connection_generation": 0,
+        "connection_reuse": 0,
+        "path_class": "unknown",
+        "path_source": "unknown",
+        "endpoint_pseudonym": None,
+        "observed_at_unix_ms": observed_at,
+        "freshness": "unknown",
+        "evidence_lifetime_until_unix_ms": observed_at,
+        "metrics": {
+            "rtt_ms": None,
+            "warm_rtt_ms": None,
+            "jitter_ms": None,
+            "goodput_bytes_per_second": None,
+            "loss_ratio": None,
+            "sample_count": None,
+            "measured_zero": False,
+        },
+    }
+    snapshot["internet_native"] = {
+        "bootstrap_status": {
+            "protocol": "mycelium.internet_bootstrap_status.v1",
+            "generation": 1,
+            "observed_at_unix_ms": observed_at,
+            "freshness": "unknown",
+            "tls_state": "unknown",
+            "canonical_origin_verified": False,
+            "seed_pin_state": "unknown",
+            "route_state": "unknown",
+            "invitation_state": "unknown",
+            "counters": {
+                "requests": 0,
+                "joins_accepted": 0,
+                "joins_rejected": 0,
+            },
+        },
+        "activation_observation": activation,
+        "activation_history": [activation],
+        "relay_projection": None,
+        "qualification": None,
+    }
+    return value
 
 
 class ProductEvidenceStateStore:
@@ -156,7 +235,11 @@ class ProductEvidenceStateStore:
             raise ProductEvidenceStateError("product_evidence_state_corrupt")
         try:
             events = [
-                validate_product_event(_upgrade_generation_one_event(event))
+                validate_product_event(
+                    _upgrade_pre_a8_internet_native_event(
+                        _upgrade_generation_one_event(event)
+                    )
+                )
                 for event in document["events"]
             ]
         except (TypeError, ValueError) as exc:

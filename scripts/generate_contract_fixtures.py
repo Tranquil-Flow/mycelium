@@ -1337,6 +1337,8 @@ def m15_plan_comparison() -> dict[str, Any]:
 
 
 def product_snapshot() -> dict[str, Any]:
+    internet = internet_fixtures()
+    activation = internet["internet-activation-observation-v1.json"]
     document = {
         "protocol": "mycelium.product_snapshot.v1",
         "publication": {
@@ -1409,6 +1411,13 @@ def product_snapshot() -> dict[str, Any]:
             },
         ],
         "notices": [],
+        "internet_native": {
+            "bootstrap_status": internet["internet-bootstrap-status-v1.json"],
+            "activation_observation": activation,
+            "activation_history": [activation],
+            "relay_projection": internet["relay-projection-v1.json"],
+            "qualification": internet["internet-native-qualification-v1.json"],
+        },
         "provenance": {
             "projector": "mycelium_product_spine",
             "projector_version": "m12-v1",

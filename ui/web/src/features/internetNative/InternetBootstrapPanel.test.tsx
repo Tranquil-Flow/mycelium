@@ -77,6 +77,7 @@ describe('InternetBootstrapPanel (Device Lab workspace)', () => {
     expect(field('preflight').textContent).toBe('ready');
     expect(field('is_member').textContent).toBe('yes');
     expect(field('activation_eligible').textContent).toBe('no');
+    expect(screen.getByText('requests 3')).toBeInTheDocument();
   });
 
   it('separates membership from activation eligibility', () => {

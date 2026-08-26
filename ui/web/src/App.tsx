@@ -23,6 +23,7 @@ import type {
 } from './data/observatoryEventSource';
 import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
+import { ProductInternetNativeProjection } from './features/internetNative/ProductInternetNativeProjection';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
 import { LiveKvStatusPanel } from './features/liveRoute/LiveKvStatusPanel';
@@ -460,6 +461,12 @@ export default function App({
           productState={renderedProductState}
         >
           {source.source_mode === 'live' ? <EvidenceProvenanceSource /> : null}
+          {productEvidence.visible !== null ? (
+            <ProductInternetNativeProjection
+              view={activeView}
+              snapshot={productEvidence.visible.snapshot}
+            />
+          ) : null}
           {content}
         </ProductFeatureSlot>
       </AppShell>

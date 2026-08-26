@@ -33,7 +33,7 @@ from mycelium_node.identity import (  # noqa: E402
     load_node_signer,
     load_or_create_node_signer,
 )
-from mycelium_seed import SeedCoordinator  # noqa: E402
+from mycelium_seed import SeedCoordinator, SeedCoordinatorError  # noqa: E402
 from mycelium_seed.http import SeedHTTPServer  # noqa: E402
 from mycelium_internet.bootstrap import (  # noqa: E402
     PublicBootstrapPolicy,
@@ -166,6 +166,63 @@ def mint_rehearsal_invite(
     return bundle, bundle_path
 
 
+def _probe_unqualified_member(
+    coordinator: SeedCoordinator,
+    node_id: str,
+) -> dict[str, object]:
+    """Exercise every serve capability through seed assignment admission.
+
+    Artifact disclosure, placement, activation, deployment selection, and
+    prompt delivery all require a signed assignment offer. The method issues
+    one real offer attempt for each capability label. An activation-ineligible
+    member must fail at the shared production choke point before assignment
+    persistence, making all downstream side effects unreachable.
+    """
+
+    matching = [m for m in coordinator.members() if m["node_id"] == node_id]
+    if not matching:
+        raise RuntimeError("seed_member_unknown")
+    member = matching[0]
+    attempts: dict[str, str] = {}
+    accepted_ids: set[str] = set()
+    for authority in ("artifact", "placement", "activation", "selection", "inference"):
+        assignment_id = f"a8-unqualified-{authority}"
+        try:
+            coordinator.assignment_offer(
+                node_id=node_id,
+                deployment_id="a8-unqualified-probe",
+                deployment_epoch=1,
+                assignment_id=assignment_id,
+                assignment_digest="sha256:" + "1" * 64,
+                stage_pack_digest="sha256:" + "2" * 64,
+                graph_digest="sha256:" + "3" * 64,
+                load_generation=1,
+                peer_node_ids=[],
+                placement_provenance="owner_unqualified_probe",
+            )
+        except SeedCoordinatorError as exc:
+            if exc.code != "seed_member_activation_ineligible":
+                raise
+            attempts[authority] = "rejected"
+        else:
+            attempts[authority] = "accepted"
+            accepted_ids.add(assignment_id)
+
+    return {
+        "protocol": "mycelium.unqualified_member_authority_probe.v1",
+        "member_id": node_id,
+        "member_visible": True,
+        "activation_eligible": bool(member["activation_eligible"]),
+        "authority_attempts": attempts,
+        "forbidden_side_effects": {
+            "artifact_disclosed": "a8-unqualified-artifact" in accepted_ids,
+            "placement_created": "a8-unqualified-placement" in accepted_ids,
+            "deployment_selected": "a8-unqualified-selection" in accepted_ids,
+        },
+        "prompt_deliveries": int("a8-unqualified-inference" in accepted_ids),
+    }
+
+
 def _owner_console(coordinator, stop: threading.Event) -> None:
     """Read owner administration commands from stdin while the seed serves."""
 
@@ -199,9 +256,21 @@ def _owner_console(coordinator, stop: threading.Event) -> None:
                     expected_generation=int(member["generation"]),
                     lifecycle_state="STOPPED",
                 )
-                print(f"{REHEARSAL_LABEL}: revoked {node_id}")
+                print(f"{REHEARSAL_LABEL}: revoked {node_id}", flush=True)
+            elif command == "probe-unqualified" and args:
+                node_id = args[0]
+                report = _probe_unqualified_member(coordinator, node_id)
+                print(
+                    f"{REHEARSAL_LABEL}: probe-unqualified {node_id} "
+                    + json.dumps(report, sort_keys=True, separators=(",", ":")),
+                    flush=True,
+                )
             else:
-                print(f"{REHEARSAL_LABEL}: commands are 'members', 'revoke <id>'")
+                print(
+                    f"{REHEARSAL_LABEL}: commands are 'members', 'revoke <id>', "
+                    "'probe-unqualified <id>'",
+                    flush=True,
+                )
         except Exception as exc:  # noqa: BLE001 - owner console must not die
             print(f"{REHEARSAL_LABEL}: command failed: {exc}")
 
@@ -244,7 +313,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{REHEARSAL_LABEL}: ready")
     print(
         f"{REHEARSAL_LABEL}: owner console on stdin - "
-        "'members' lists, 'revoke <node_id>' fences one member"
+        "'members' lists, 'revoke <node_id>' fences one member, "
+        "'probe-unqualified <node_id>' exercises serve admission"
     )
     stop = threading.Event()
 

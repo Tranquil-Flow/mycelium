@@ -1,22 +1,61 @@
 # A8 Infrastructure Requirements — Physical and Browser Gates
 
 **Gate:** A8 Internet-native control and activation
-**State:** `design_only` — no physical gate below has been executed
-**Owner input required:** operator-supplied public origin, certificate, and
-off-tailnet peer (spec §10)
-**Deterministic status:** contract + deterministic gates implemented and
-green (see `tests/a8_acceptance/inventory.v1.json` `deterministic_gates`)
+**Current state:** `complete`; all 14 exact-candidate physical/browser cases
+are freshly sealed and all local closure gates are green.
+**Fleet boundary:** A5 continues to own the fleet under run ID
+`a5-v18-window-diag-retry-1787471702`. A8 used a bounded operator-authorized
+side-by-side window on 2026-08-26 and did not stop or mutate A5's sessions.
 
-This document is the precise handover for the infrastructure that the A8
-physical positive, physical negative, and browser gates require. It is a
-deliverable, not a placeholder: every gate below names the exact host,
-network, DNS name, certificate, and peer configuration it needs, what it
-will prove, and the verification procedure that turns it into executed
-evidence. Nothing here claims execution.
+## Current exact candidate — physically qualified and complete
 
-Claim boundary: no physical, network, or browser result is asserted
-anywhere in this document. Until the gates below run on the specified
-infrastructure, A8 remains `design_only` (spec §12).
+- source manifest: `sha256:29a5a0dc9e2faf4e1dc53738ed283b2a0f6cd7a1644185d3393b03ca40adff97`
+  (1,083 files; base commit `1aa70c64b14754b08abe55e8095c597d91b6d13c`);
+- specification: `sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9`;
+- contract manifest: `sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268`
+  with 75 fixtures verified;
+- rebuilt local macOS ARM64 sidecar:
+  `sha256:de03e3da16faa20ec6331e9aa0d32a3728c7c9f127595b1bb60ce3956d5cca50`;
+- staged Linux x86-64 sidecar:
+  `sha256:a73bca6c6748ee27c9f31c20811f0c1680b299c17a81adeffef00038ebf8f38c`.
+
+The final deterministic regression passed: 4,661 Python tests, 13 skipped,
+and 121 subtests; frontend 99 Vitest files / 581 tests plus eight Node
+subtests, typecheck, bundle check, and build; Rust format, 35 tests, Clippy
+with warnings denied, and release build; changed-file Ruff lint and repository
+Python compilation; and the focused 67-test contract/governance/claim-boundary/
+release-security slice. The final post-evidence audit reruns are recorded in
+`docs/handover/a8-completion-record.v1.json`.
+
+Fresh staging and runner-sealed qualification output are retained in an
+owner-private root outside the repository. Exact path/size/hash parity and
+isolated startup checks passed on both selected architectures. All 14 selected
+source/spec-bound seals are owner-only read-only files (mode 0400), have result
+`passed`, and were independently enumerated before the privacy-reduced summary
+was generated.
+
+The physical positives include ordinary-browser direct inference, forced-relay
+inference with only a privacy-safe relay reference, and an observed direct to
+relay transition across connection generations 2 and 3. Both browser requests
+completed, all eight workspaces rendered, the old connection was not reused,
+and a subsequent request completed. The active-member negative used a real
+enrolled member, successful pre-revocation qualified relay inference, owner
+revocation, managed-session removal, and durable post-revocation refusal.
+
+A8's product, proxy, tunnel, rehearsal-seed, browser, and controller resources
+were stopped after sealing. No A8 process remains locally or on its staged
+external peer. A5's concurrent sessions were neither stopped nor mutated.
+Raw invitations, node identities, endpoint IDs, hostnames, addresses, keys,
+signed browser reports, and transport reports remain outside Git.
+
+## Historical superseded qualification — candidate `28c69e…` only
+
+Earlier owner-private seals for
+`sha256:28c69ef896866e6d24cf7acc6dc79728e8e8ed38d1add4eb2e7d7acabf91f19f`
+remain superseded forensic history and were not relabelled. The repository
+summary and completion record now describe only the freshly executed
+`29a5a0dc…` candidate. Historical execution does not assert indefinite route
+availability.
 
 ---
 
@@ -33,40 +72,45 @@ infrastructure, A8 remains `design_only` (spec §12).
 | 7 | Revocation + evidence roots | Operator-private revocation access (offline CLI or loopback administration) and owner-private evidence/output roots |
 | 8 | Test window | A window that does not share peers with destructive A3/A4 physical gates |
 
-## 0.1 Public origin topology (chosen route: Cloudflare Tunnel)
+## 0.1 Public origin topology (executed route: owner-controlled HTTPS bridge)
 
-The A8 public origin is provisioned through Cloudflare Tunnel: the client's
-TLS terminates at Cloudflare's publicly trusted edge, the tunnel forwards
-the single canonical hostname to the loopback seed listener, and no inbound
-ports are opened. No tailnet participates; the seed's
-`PublicBootstrapPolicy` remains the sole path-level authority. This
-satisfies inputs 1-4 above; firewall/NAT (input 3) is not needed.
+Final qualification used the canonical public origin through an owner-controlled
+nginx HTTPS edge. Publicly trusted TLS terminated at that edge; only the closed
+seed/product routes were forwarded through a bounded reverse bridge to the
+loopback listeners. No tailnet route participated and no inbound port was
+opened on the operator workstation. The seed's `PublicBootstrapPolicy` remained
+the path-level authority, while the public edge supplied transport reachability
+only. Raw host, tunnel, and infrastructure addresses remain owner-private.
 
-- Template: `release/a8-tls-bootstrap/cloudflared-config.yml.template`
-- Provisioner: `scripts/a8_provision_public_origin.sh <hostname> [--dry-run|--check]`
-- Runtime credentials: `~/.mycelium/a8-tls` (mode 700, never in repo)
-- Operator inputs still required: a Cloudflare-hosted public hostname and
-  one interactive `cloudflared tunnel login`.
+The repository also retains two reproducible alternatives for future windows:
 
-An alternative nginx/ACME topology is documented in
-`release/a8-tls-bootstrap/README.md` for a port-forwardable host with a
-domain.
+- Cloudflare Tunnel template:
+  `release/a8-tls-bootstrap/cloudflared-config.yml.template`
+- Cloudflare provisioner:
+  `scripts/a8_provision_public_origin.sh <hostname> [--dry-run|--check]`
+- nginx/ACME topology: `release/a8-tls-bootstrap/README.md`
+- Runtime credentials: `<OWNER_PRIVATE_RUNTIME_CREDENTIAL_ROOT>` (mode 700,
+  never in repo)
+
+Neither alternative grants seed authority; every deployment must still satisfy
+the pin-first and closed-route policy above.
 
 ## 0.2 Rehearsal boundary (same-LAN)
 
-Until the external peer sits on a genuinely unrelated network, every gate
-procedure may be REHEARSED against the live public origin from a same-LAN
-device with Tailscale stopped. Rehearsal output is labelled and can never
-be sealed. Spec §12 voids same-LAN Iroh observations and tailnet paths as
-gate evidence.
+Same-LAN rehearsal remained non-sealable throughout. Final evidence instead
+used public HTTPS and observed Iroh direct/relay transport between distinct
+physical hosts. The two no-Tailscale cases were rerun during a measured local
+Tailscale-down window; Tailscale was restored only after both passed. Earlier
+failed records showing `tailnet_path_present` remain retained and excluded
+from the passing selection.
 
 ## 0.3 Executable runner (physical-era entry point)
 
 Every physical case executes through
 `scripts/a8_run_physical_gate.py`; the case registry is machine-checked
 against this inventory (`tests/a8_acceptance/test_physical_gate_runner.py`).
-The three seed-side negative cases are fully executable once the origin
-and an owner-delivered invite exist:
+The three seed-side negative cases execute once the origin and an
+owner-delivered invite exist:
 
     scripts/a8_run_physical_gate.py run cleartext_or_redirect_bootstrap \
         --origin https://<canonical-origin> \
@@ -82,30 +126,50 @@ and an owner-delivered invite exist:
 
 The two projection-side negatives run without any adapter input.
 
-Of the nine peer-required cases, five have an execution path and CLI
-support: `unrelated_https_invite_without_tailscale`, `revoked_active_member`,
-`endpoint_identity_mismatch`, `tailscale_unavailable`, and `ssh_unavailable`.
-They fail closed with `peer_required` until the external peer, its node root,
-and the invite inputs are supplied, and execute through the same runner when
-they are. Invoke them with `--node-root <owner-private root>`;
+All nine peer-required cases have execution paths. The six non-browser cases
+use the live public seed adapter; the three browser cases consume an ordinary
+browser report synchronized to independently signed transport reports. They
+fail closed with `peer_required` until their physical inputs exist. Invoke the
+non-browser cases with `--node-root <owner-private root>`;
 `revoked_active_member` additionally needs `--revoke-command`, the owner's own
 administration command, which the runner executes between enrollment and the
-refusal check rather than minting any revocation authority of its own. The
-peer's tailnet exposure and SSH usage are observed by the runner on the host
-it runs on, not asserted by the operator.
+refusal check rather than minting any revocation authority of its own. Replay,
+member-visibility, revocation, Tailscale-independence, and SSH-independence
+claims additionally require `--case-probe-program` plus a new
+`--case-probe-output-file` beneath an owner-private `0700` root. The executable
+queries the live seed/runtime at the relevant event; the runner validates its
+closed schema, binds its canonical digest, and retains the exact report at mode
+`0600`. Revocation is two-phase: the executable receives
+`<case-id> <member-id> before` prior to owner revocation, then
+`<case-id> <member-id> after` with the exact canonical before report on stdin.
+The two reports share a probe-session identifier and candidate bindings, and
+the after report names the before-report digest. A static assertion document
+is not an execution probe. The peer's before/after tailnet exposure and SSH
+process audit are also observed by the runner on the host it runs on.
 
-The remaining four - the three browser cases and `unqualified_external_member`
-- stay `peer_required` unconditionally. They additionally need the A8 product
-surface mounted in the shared spine, which is owned by the A4 lane; there is
-deliberately no execution path for them yet.
+`endpoint_identity_mismatch` is the exception: it accepts only the repository's
+exact `scripts/a8_endpoint_mismatch_probe.py`, not an arbitrary executable.
+The run requires `--sidecar-binary`, an owner-only
+`--receiver-endpoint-secret-file`, and `--transport-authority-file`. The
+source-owned executor launches a real expected/receiver/rogue Iroh triad and
+emits signed candidate-bound admission counters. Runner and executor bind the
+exact native binary SHA-256, and the gate requires rejection counters to rise
+while admitted frames remain unchanged and path class remains `unknown`.
+
+`unqualified_external_member` consumes an owner-controlled executable passed
+through `--authority-probe-program`; the runner mints no serving authority.
+The three browser cases consume `--browser-report-file` and one or more
+`--transport-report-file` values. Forced relay additionally consumes the
+owner-private persistent relay-projection key. Transition reports are ordered
+chronologically and generation-fenced.
 
 Every executed case requires a live boundary first: the pin is verified over
 the canonical origin before any observation is recorded, so an absent boundary
 can never produce a pass.
 
-The rehearsal harness (`scripts/a8_run_rehearsal_seed.py`,
-`scripts/a8_run_rehearsal_peer.py`) runs the full pin-first flow over a
-live origin without sealing anything; it is labelled rehearsal throughout.
+The rehearsal seed's stdin-only owner console supplied live revocation and
+unqualified-member probes without adding public administration routes. Every
+final result was sealed only by `scripts/a8_run_physical_gate.py`.
 
 ---
 
@@ -185,9 +249,9 @@ persistent connection reuse within a generation, bounded reconnect, and a
 subsequent completed request.
 
 **Verification:**
-1. Capture observations at generations N (direct), N+1 (relay), N+2
-   (direct); assert `ActivationObservations.history()` retains all three in
-   order.
+1. Capture observations at generation N and N+1 with different observed path
+   classes; assert `ActivationObservations.history()` retains both in order
+   and the second generation is strictly greater.
 2. Record reuse counters per generation from the sidecar report.
 3. Interrupt connectivity; run
    `PublicBootstrapClient.reconnect(max_attempts=..., backoff_seconds=...)`;
@@ -208,12 +272,12 @@ outcome" must be observed before the gate is sealed.
 | 2.2 | `certificate_without_seed_authority` | A TLS-valid connection to a host that cannot produce the pinned seed signature fails closed BEFORE any invite secret is transmitted | Point a test client at a TLS-valid endpoint that serves an unsigned/foreign identity envelope; assert `pin_mismatch`/`seed_signature_invalid` and zero join transmissions |
 | 2.3 | `invalid_or_replayed_invitation` | Expired, reused, forged, wrong-swarm, wrong-seed, and changed-retry joins fail closed with no partial member and no single-use corruption | Exercise each variant through the adapter; assert `coordinator.members()` unchanged, invite registry state unchanged |
 | 2.4 | `revoked_active_member` | Revocation rejects the next control message and removes activation admission; an already-open Iroh connection cannot outlive revoked authority | Revoke via owner-private administration while the member has an open authenticated Iroh connection; send the next control message (rejected), then attempt further activation traffic (rejected by admission) |
-| 2.5 | `endpoint_identity_mismatch` | A dialed EndpointID differing from the signed membership EndpointID is rejected; path stays `unknown`; no activation frame is accepted | Configure a rogue dial to a different EndpointID; assert mismatch rejection and `path_class == "unknown"` |
+| 2.5 | `endpoint_identity_mismatch` | A dialed EndpointID differing from the signed membership EndpointID is rejected; path stays `unknown`; no activation frame is accepted | Run the exact source-owned native triad executor; verify trusted node signatures, exact sidecar-binary digest, increasing candidate/global identity-rejection counters, unchanged admitted-frame counter, and `path_class == "unknown"` |
 | 2.6 | `missing_or_stale_path_measurements` | Absent/expired/rejected measurements project `unknown` and block any planning/readiness objective that requires them | Clear or age out observations; assert every metric is `unknown` (never 0) and the required objective stays blocked |
 | 2.7 | `raw_relay_identity_injection` | Candidate projections containing relay URL/DNS/IP/port/credentials/exact location are rejected and nothing is emitted | Inject each raw value into a projection; assert `relay_projection_invalid` / privacy-scan violation and no public emission |
 | 2.8 | `unqualified_external_member` | An enrolled but unqualified member cannot receive artifacts, placement, activation, selection, or prompt traffic | Attempt each authority for a member lacking current artifact/load/topology/activation/qualification evidence; assert every one rejected, member visible but ineligible |
 | 2.9 | `tailscale_unavailable` | The supported path works with Tailscale fully disabled; no tailnet address or evidence appears anywhere | Re-verify gates 1.1-1.4 with Tailscale down; scan every emitted projection for CGNAT `100.64/10` and `*.ts.net` (privacy scan patterns) |
-| 2.10 | `ssh_unavailable` | The supported path works with no SSH server, client, key, or remote shell on the external peer; only the signed artifact path is used | Remove/never-install SSH on the external peer; re-run enrollment, artifact acquisition, activation, and serving checks; assert no remote-shell attempt in logs |
+| 2.10 | `ssh_unavailable` | The supported path requires no SSH; optional labelled owner staging cannot carry join, activation, measurement, qualification, or serving acceptance traffic | Observe the bounded window and assert no SSH invocation or remote-shell traffic while bootstrap and signed-path operation complete; the executed case reported `ssh_present_but_unused` and `no_ssh_invocation_in_window` |
 
 ---
 
@@ -238,21 +302,27 @@ EndpointID, hostname, relay URL) asserted absent from every rendered frame.
 
 ---
 
-## 4. Execution sequence when infra arrives
+## 4. Executed qualification sequence
 
-1. Provision DNS + certificate + reverse proxy; verify
-   `PublicBootstrapPolicy` canonical origin and allowlist on the live
-   listener (`GET /seed/identity` returns, everything else bounded).
-2. Bind the seed: `SeedHTTPServer(..., public_seed_url=<origin>,
-   policy=<policy>)` behind the TLS terminator.
-3. Mint one owner-delivered invite bound to the public origin.
-4. Prepare the external peer: Tailscale down, Iroh sidecar with stable
-   EndpointID, no SSH.
-5. Run physical positive gates 1.1 -> 1.4, then negative gates 2.1 -> 2.10,
-   then the browser gates — in that order, sealing each with the
-   `mycelium.internet_native_qualification.v1` owner-private record and its
-   privacy-reduced public projection (spec §12).
-6. Only then may A8 leave `design_only`.
+1. Froze the 51-file candidate in
+   `docs/handover/a8-source-manifest.v1.json` and deployed exact macOS arm64
+   (`sha256:c6e72e3c0e33d72a912576cbeca52508bbf194f11456bb3d95b3bdc87556e9b4`)
+   and Linux x86_64
+   (`sha256:c77dd9e69ff2d2400867e34786ec55394f5df7e44a34c102cde32d376bc9a35b`)
+   native sidecars.
+2. Verified canonical public HTTPS bootstrap and pin-first enrollment.
+3. Drove the ordinary Chromium product UI through all eight workspaces,
+   back/forward/reload reconstruction, a clean second browser session, and
+   completed inference.
+4. Captured forced-relay generation 66, advanced durable membership authority,
+   then captured direct generation 67 in the same browser process with the
+   same endpoint pseudonym and fresh signed transport evidence.
+5. Executed all seed, peer, process, privacy, and authority negative cases;
+   used a separate publicly trusted foreign-key seed for the certificate-only
+   authority refusal.
+6. Sealed one passing source/spec-bound qualification per case. The aggregate
+   audit found 14/14 cases and resolved every evidence digest to an
+   owner-private artifact.
 
 ## 5. Explicit prohibitions (spec §12, restated)
 

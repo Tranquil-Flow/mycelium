@@ -91,7 +91,7 @@ export function InternetBootstrapPanel({
         </p>
       ) : null}
       <div aria-label="Bootstrap counters">
-        <span>requests {renderMetric(null)}</span>
+        <span>requests {bootstrapStatus === null ? renderMetric(null) : renderMetric(bootstrapStatus.counters.requests)}</span>
         <span>joins accepted {rendered.counters.joins_accepted}</span>
         <span>joins rejected {rendered.counters.joins_rejected}</span>
       </div>
