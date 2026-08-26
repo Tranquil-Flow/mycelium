@@ -1,0 +1,26 @@
+{
+  "case_ids": [
+    "unrelated_https_invite_without_tailscale"
+  ],
+  "evidence_digests": [],
+  "executed": false,
+  "fresh_until_unix_ms": null,
+  "gate_kind": "physical_positive",
+  "observed_at_unix_ms": 1752500000000,
+  "projection_digest": null,
+  "protocol": "mycelium.internet_native_qualification.v1",
+  "public_projection": {
+    "gate_case_ids": [
+      "unrelated_https_invite_without_tailscale"
+    ],
+    "observed_at_unix_ms": 1752500000000,
+    "outcomes": [
+      "not_executed"
+    ],
+    "relay_reference": null
+  },
+  "qualification_id": "fixture-qualification",
+  "result": "not_executed",
+  "source_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "spec_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

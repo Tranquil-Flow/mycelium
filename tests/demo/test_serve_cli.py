@@ -148,6 +148,100 @@ def test_live_serve_delegates_to_qualified_physical_runtime(tmp_path: Path) -> N
     ]
 
 
+def test_live_serve_forwards_force_relay_but_fixture_rejects_it(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    base = [
+        "serve",
+        "--mode",
+        "live",
+        "--operator-plan",
+        str(tmp_path / "operator-plan.json"),
+        "--seed-state-root",
+        str(tmp_path / "seed"),
+        "--a8-force-relay",
+    ]
+
+    assert (
+        cli.main(
+            base,
+            live_server_main=lambda argv: calls.append(list(argv)) or 0,
+            environ={},
+        )
+        == 0
+    )
+    assert calls[0][-1] == "--a8-force-relay"
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            ["serve", "--mode", "fixture", "--a8-force-relay"],
+            environ={},
+        )
+    assert exc.value.code == 2
+
+
+def test_live_serve_forwards_explicit_trusted_https_proxy_boundary(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    base = [
+        "serve",
+        "--mode",
+        "live",
+        "--operator-plan",
+        str(tmp_path / "operator-plan.json"),
+        "--seed-state-root",
+        str(tmp_path / "seed"),
+        "--public-origin",
+        "https://a8.example.test",
+        "--trusted-https-proxy",
+        "--trusted-proxy-capability-file",
+        str(tmp_path / "proxy-capability"),
+    ]
+
+    assert cli.main(base, live_server_main=lambda argv: calls.append(list(argv)) or 0) == 0
+    assert calls[0][-5:] == [
+        "--public-origin",
+        "https://a8.example.test",
+        "--trusted-https-proxy",
+        "--trusted-proxy-capability-file",
+        str(tmp_path / "proxy-capability"),
+    ]
+
+    with pytest.raises(SystemExit) as missing_origin:
+        cli.main(
+            [
+                "serve",
+                "--mode",
+                "live",
+                "--operator-plan",
+                str(tmp_path / "operator-plan.json"),
+                "--seed-state-root",
+                str(tmp_path / "seed"),
+                "--trusted-https-proxy",
+                "--trusted-proxy-capability-file",
+                str(tmp_path / "proxy-capability"),
+            ],
+            live_server_main=lambda _argv: 0,
+        )
+    assert missing_origin.value.code == 2
+
+    with pytest.raises(SystemExit) as missing_capability:
+        cli.main(
+            [
+                "serve",
+                "--mode",
+                "live",
+                "--operator-plan",
+                str(tmp_path / "operator-plan.json"),
+                "--seed-state-root",
+                str(tmp_path / "seed"),
+                "--public-origin",
+                "https://a8.example.test",
+                "--trusted-https-proxy",
+            ],
+            live_server_main=lambda _argv: 0,
+        )
+    assert missing_capability.value.code == 2
+
+
 def test_live_serve_forwards_deployment_and_static_arguments(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 

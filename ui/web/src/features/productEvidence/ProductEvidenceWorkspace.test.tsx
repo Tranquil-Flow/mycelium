@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import fixture from '../../../../../contracts/compatibility-fixtures/product-snapshot-v1.json';
 import { ProductEvidenceProvider } from './ProductEvidenceContext';
 import { ProductEvidenceWorkspace } from './ProductEvidenceWorkspace';
 import { decodeProductSnapshot } from './contracts';
 import type { ProductEvidenceState } from './source';
+import { productSnapshotWithInternetNative } from '../internetNative/testFixtures';
 
 const state: ProductEvidenceState = {
   status: 'connected',
@@ -12,7 +12,7 @@ const state: ProductEvidenceState = {
   freshness: 'current',
   generation: 1,
   cursor: 1,
-  snapshot: decodeProductSnapshot(fixture),
+  snapshot: decodeProductSnapshot(productSnapshotWithInternetNative()),
   reason_code: null,
 };
 

@@ -1,4 +1,5 @@
 """Build exact, dynamic authority documents for frozen-route inference runs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -49,7 +50,9 @@ def _read_document(source_root: Path, relative_path: str) -> dict[str, Any]:
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RunnerError("authority_source_document_invalid") from exc
     _require(isinstance(value, dict), "authority_source_document_invalid")
-    _require(raw == canonical_json_bytes(value), "authority_source_document_noncanonical")
+    _require(
+        raw == canonical_json_bytes(value), "authority_source_document_noncanonical"
+    )
     return value
 
 
@@ -85,6 +88,49 @@ def _signed_observation_index(
     return envelopes, indexed
 
 
+def _node_control_paths(
+    run_plan: Mapping[str, Any], node_ids: list[str]
+) -> dict[str, tuple[str, str, str]]:
+    """Resolve authority inputs from the files each logical node actually uses."""
+
+    configured_nodes = run_plan.get("nodes")
+    if configured_nodes is None:
+        return {
+            node_id: (
+                f"control/{node_id}-assignment.json",
+                f"control/{node_id}-artifact-report.json",
+                f"control/{node_id}-load-proof.json",
+            )
+            for node_id in node_ids
+        }
+    _require(isinstance(configured_nodes, list), "authority_run_plan_invalid")
+    resolved: dict[str, tuple[str, str, str]] = {}
+    for item in configured_nodes:
+        _require(isinstance(item, Mapping), "authority_run_plan_invalid")
+        node_id = item.get("node_id")
+        configure = item.get("configure")
+        assignment_file = (
+            configure.get("assignment_file") if isinstance(configure, Mapping) else None
+        )
+        _require(
+            isinstance(node_id, str)
+            and node_id in node_ids
+            and node_id not in resolved
+            and isinstance(assignment_file, str)
+            and assignment_file.startswith("control/")
+            and assignment_file.endswith("-assignment.json"),
+            "authority_run_plan_invalid",
+        )
+        prefix = assignment_file[: -len("-assignment.json")]
+        resolved[node_id] = (
+            assignment_file,
+            f"{prefix}-artifact-report.json",
+            f"{prefix}-load-proof.json",
+        )
+    _require(set(resolved) == set(node_ids), "authority_run_plan_invalid")
+    return resolved
+
+
 def build_frozen_route_authority_documents(
     *,
     controller_config: Mapping[str, Any],
@@ -107,7 +153,9 @@ def build_frozen_route_authority_documents(
     source_root_value = controller_config.get("source_root")
     _require(isinstance(run_plan, Mapping), "authority_run_plan_invalid")
     _require(isinstance(peers, list) and len(peers) >= 2, "authority_peers_invalid")
-    _require(isinstance(transfer_manifest, Mapping), "authority_transfer_manifest_invalid")
+    _require(
+        isinstance(transfer_manifest, Mapping), "authority_transfer_manifest_invalid"
+    )
     _require(isinstance(membership, Mapping), "authority_membership_invalid")
     _require(isinstance(source_root_value, str), "authority_source_root_invalid")
     assert isinstance(run_plan, Mapping)
@@ -158,16 +206,23 @@ def build_frozen_route_authority_documents(
         "authority_peers_invalid",
     )
     peer_by_node = {str(peer["node_id"]): peer for peer in peers}
-    _require(len({peer.get("host_id") for peer in peers}) == len(peers), "physical_hosts_not_distinct")
+    _require(
+        len({peer.get("host_id") for peer in peers}) == len(peers),
+        "physical_hosts_not_distinct",
+    )
 
     identities = evidence.get("identities")
     observations = evidence.get("observations")
     cleanup = evidence.get("cleanup")
     _require(isinstance(identities, Mapping), "authority_identity_evidence_invalid")
-    _require(isinstance(observations, Mapping), "authority_observation_evidence_invalid")
+    _require(
+        isinstance(observations, Mapping), "authority_observation_evidence_invalid"
+    )
     _require(isinstance(cleanup, list), "authority_cleanup_evidence_invalid")
     _require(set(identities) == set(node_ids), "authority_identity_evidence_invalid")
-    _require(set(observations) == set(node_ids), "authority_observation_evidence_invalid")
+    _require(
+        set(observations) == set(node_ids), "authority_observation_evidence_invalid"
+    )
     cleanup_by_node = {
         item.get("node_id"): item for item in cleanup if isinstance(item, Mapping)
     }
@@ -217,7 +272,9 @@ def build_frozen_route_authority_documents(
         _require(isinstance(snapshot, Mapping), "physical_snapshot_invalid")
         transport = snapshot.get("transport")
         runtime = snapshot.get("runtime")
-        release_counts = runtime.get("release_counts", {}) if isinstance(runtime, Mapping) else {}
+        release_counts = (
+            runtime.get("release_counts", {}) if isinstance(runtime, Mapping) else {}
+        )
         release_reason = "cancellation" if cancellation_scope else "normal_completion"
         _require(
             isinstance(transport, Mapping)
@@ -230,8 +287,7 @@ def build_frozen_route_authority_documents(
             and transport.get("route_ready") is False
             and snapshot.get("transport_fatal_error") is None
             and isinstance(runtime, Mapping)
-            and runtime.get("mode")
-            in {"stage_local_kv", "complete_context_replay"}
+            and runtime.get("mode") in {"stage_local_kv", "complete_context_replay"}
             and runtime.get("active_state_count") == 0
             and isinstance(release_counts, Mapping)
             and release_counts.get(release_reason) == 1,
@@ -292,17 +348,15 @@ def build_frozen_route_authority_documents(
 
     model_manifest = _read_document(source_root, "control/model-manifest.json")
     execution_graph = _read_document(source_root, "control/execution-graph.json")
+    control_paths = _node_control_paths(run_plan, node_ids)
     assignments = [
-        _read_document(source_root, f"control/{node_id}-assignment.json")
-        for node_id in node_ids
+        _read_document(source_root, control_paths[node_id][0]) for node_id in node_ids
     ]
     provisioning_reports = [
-        _read_document(source_root, f"control/{node_id}-artifact-report.json")
-        for node_id in node_ids
+        _read_document(source_root, control_paths[node_id][1]) for node_id in node_ids
     ]
     load_proofs = [
-        _read_document(source_root, f"control/{node_id}-load-proof.json")
-        for node_id in node_ids
+        _read_document(source_root, control_paths[node_id][2]) for node_id in node_ids
     ]
 
     archive = build_transfer_archive(source_root, dict(transfer_manifest))
@@ -357,7 +411,9 @@ def build_frozen_route_authority_documents(
         challenge["cancellation"] = cancellation_record
     qualified_operations = ["cancellation"] if cancellation_scope else ["inference"]
     unqualified_operations = (
-        ["inference", "recovery"] if cancellation_scope else ["cancellation", "recovery"]
+        ["inference", "recovery"]
+        if cancellation_scope
+        else ["cancellation", "recovery"]
     )
     claim_boundary = (
         "cross-host cancellation only; inference is not qualified by this record; recovery is not qualified"
@@ -383,7 +439,10 @@ def build_frozen_route_authority_documents(
         "run/route-challenge.json": challenge,
         "run/negative-runs.json": scope,
     }
-    _require(set(documents) == set(REQUIRED_AUTHORITY_DOCUMENTS), "authority_documents_invalid")
+    _require(
+        set(documents) == set(REQUIRED_AUTHORITY_DOCUMENTS),
+        "authority_documents_invalid",
+    )
     return _clone(documents)
 
 

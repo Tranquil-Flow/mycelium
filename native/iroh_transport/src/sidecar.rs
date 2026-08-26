@@ -95,6 +95,7 @@ pub struct SidecarConfig {
     pub uds: PathBuf,
     pub queue_capacity: NonZeroUsize,
     pub local_only: bool,
+    pub force_relay: bool,
     pub endpoint_secret: Option<Zeroizing<[u8; 32]>>,
 }
 
@@ -108,6 +109,7 @@ pub enum SidecarError {
     SocketBind,
     EndpointBind,
     EndpointSecretSecurity,
+    InvalidNetworkMode,
     ReadyOutput,
     Runtime,
 }
@@ -123,6 +125,7 @@ impl SidecarError {
             Self::SocketBind => "socket_bind_error",
             Self::EndpointBind => "endpoint_bind_error",
             Self::EndpointSecretSecurity => "endpoint_secret_security_error",
+            Self::InvalidNetworkMode => "invalid_network_mode",
             Self::ReadyOutput => "ready_output_error",
             Self::Runtime => "runtime_error",
         }
@@ -219,9 +222,17 @@ pub async fn run_sidecar(
     config: SidecarConfig,
     secret: Zeroizing<[u8; 32]>,
 ) -> Result<(), SidecarError> {
+    if config.local_only && config.force_relay {
+        return Err(SidecarError::InvalidNetworkMode);
+    }
     let listener = bind_secure_uds(&config.uds)?;
     let _socket_cleanup = SocketCleanup(config.uds.clone());
-    let endpoint = bind_endpoint(config.local_only, config.endpoint_secret.as_deref()).await?;
+    let endpoint = bind_endpoint(
+        config.local_only,
+        config.force_relay,
+        config.endpoint_secret.as_deref(),
+    )
+    .await?;
     let endpoint_addr = endpoint.addr();
     let endpoint_id = endpoint.id().to_string();
 
@@ -303,6 +314,7 @@ pub async fn run_sidecar(
 
 async fn bind_endpoint(
     local_only: bool,
+    force_relay: bool,
     endpoint_secret: Option<&[u8; 32]>,
 ) -> Result<Endpoint, SidecarError> {
     let mut builder = if local_only {
@@ -311,6 +323,11 @@ async fn bind_endpoint(
             .clear_ip_transports()
             .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
             .map_err(|_| SidecarError::EndpointBind)?
+    } else if force_relay {
+        // Keep the production relay transport while removing every direct IP
+        // transport. The selected path still comes from Iroh's live
+        // connection observation; this setting never authors the outcome.
+        Endpoint::builder(presets::N0).clear_ip_transports()
     } else {
         Endpoint::builder(presets::N0)
     };
@@ -656,9 +673,28 @@ async fn process_local_record(
                 payload,
             }
         }
+        RecordKind::GetAdmissionCounters => {
+            let Ok(request) = serde_json::from_slice::<AdmissionCounterRequest>(&record.payload)
+            else {
+                return error_response(record.message_id, "invalid_candidate_endpoint");
+            };
+            let Ok(candidate_endpoint_id) = request.candidate_endpoint_id.parse::<EndpointId>()
+            else {
+                return error_response(record.message_id, "invalid_candidate_endpoint");
+            };
+            let payload =
+                serde_json::to_vec(&state.admission_counters(candidate_endpoint_id).await)
+                    .unwrap_or_default();
+            ResponseRecord {
+                kind: RecordKind::AdmissionCounters,
+                message_id: record.message_id,
+                payload,
+            }
+        }
         RecordKind::Delivery
         | RecordKind::DeliveryFrom
         | RecordKind::TransportObservations
+        | RecordKind::AdmissionCounters
         | RecordKind::Error => error_response(record.message_id, "invalid_kind"),
     }
 }
@@ -808,6 +844,23 @@ struct RuntimeState {
     outbound_tokens: Mutex<HashMap<MessageId, Arc<OutboundControl>>>,
     outbound_connections: Mutex<HashMap<(EndpointId, u64), iroh::endpoint::Connection>>,
     transport_observations: Mutex<HashMap<(EndpointId, u64), TransportObservationState>>,
+    inbound_identity_rejections: AtomicU64,
+    inbound_frames_admitted: AtomicU64,
+    inbound_identity_rejections_by_endpoint: Mutex<HashMap<EndpointId, u64>>,
+}
+
+#[derive(Deserialize)]
+struct AdmissionCounterRequest {
+    candidate_endpoint_id: String,
+}
+
+#[derive(Serialize)]
+struct AdmissionCounterEnvelope {
+    protocol: &'static str,
+    inbound_identity_rejections: u64,
+    inbound_frames_admitted: u64,
+    candidate_identity_rejections: u64,
+    measured_at_unix_ms: u64,
 }
 
 #[derive(Debug, Default)]
@@ -1042,7 +1095,30 @@ impl RuntimeState {
             outbound_tokens: Mutex::new(HashMap::with_capacity(capacity)),
             outbound_connections: Mutex::new(HashMap::new()),
             transport_observations: Mutex::new(HashMap::new()),
+            inbound_identity_rejections: AtomicU64::new(0),
+            inbound_frames_admitted: AtomicU64::new(0),
+            inbound_identity_rejections_by_endpoint: Mutex::new(HashMap::new()),
         })
+    }
+
+    async fn admission_counters(
+        &self,
+        candidate_endpoint_id: EndpointId,
+    ) -> AdmissionCounterEnvelope {
+        let candidate_identity_rejections = self
+            .inbound_identity_rejections_by_endpoint
+            .lock()
+            .await
+            .get(&candidate_endpoint_id)
+            .copied()
+            .unwrap_or(0);
+        AdmissionCounterEnvelope {
+            protocol: "mycelium.iroh_sidecar.inbound_admission.v1",
+            inbound_identity_rejections: self.inbound_identity_rejections.load(Ordering::Acquire),
+            inbound_frames_admitted: self.inbound_frames_admitted.load(Ordering::Acquire),
+            candidate_identity_rejections,
+            measured_at_unix_ms: unix_time_ms(),
+        }
     }
 
     /// Validate one peer configuration without touching any routing state.
@@ -1636,9 +1712,7 @@ fn update_selected_path(
     relay_identity: Option<String>,
     rtt_ms: Option<f64>,
 ) {
-    if !state.path_class.is_empty() && state.path_class != path_class {
-        state.selected_path_changes = state.selected_path_changes.saturating_add(1);
-    } else if state.path_class.is_empty() && path_class != "unknown" {
+    if state.path_class != path_class && (!state.path_class.is_empty() || path_class != "unknown") {
         state.selected_path_changes = state.selected_path_changes.saturating_add(1);
     }
     state.path_class = path_class;
@@ -1913,6 +1987,16 @@ async fn incoming_worker(endpoint: Endpoint, state: Arc<RuntimeState>) {
                     Some(binding) => binding.clone(),
                     None => {
                         drop(peers);
+                        connection_state
+                            .inbound_identity_rejections
+                            .fetch_add(1, Ordering::AcqRel);
+                        let mut by_endpoint = connection_state
+                            .inbound_identity_rejections_by_endpoint
+                            .lock()
+                            .await;
+                        let count = by_endpoint.entry(connection.remote_id()).or_insert(0);
+                        *count = count.saturating_add(1);
+                        drop(by_endpoint);
                         connection.close(REJECT_CODE, b"identity");
                         return;
                     }
@@ -2002,8 +2086,20 @@ async fn handle_remote_connection(
                 )
                 .await
             {
-                AdmissionOutcome::Admitted(control)
-                | AdmissionOutcome::PendingDuplicate(control) => {
+                AdmissionOutcome::Admitted(control) => {
+                    state.inbound_frames_admitted.fetch_add(1, Ordering::AcqRel);
+                    match timeout(STREAM_IO_TIMEOUT, control.wait_for_terminal()).await {
+                        Ok(InboundTerminal::Acknowledged) => (RemoteKind::Ack, b"".as_slice()),
+                        Ok(InboundTerminal::PeerRotated) => {
+                            (RemoteKind::Error, b"peer_rotated".as_slice())
+                        }
+                        Err(_) => {
+                            cancel_streams(&mut send, &mut receive);
+                            continue;
+                        }
+                    }
+                }
+                AdmissionOutcome::PendingDuplicate(control) => {
                     match timeout(STREAM_IO_TIMEOUT, control.wait_for_terminal()).await {
                         Ok(InboundTerminal::Acknowledged) => (RemoteKind::Ack, b"".as_slice()),
                         Ok(InboundTerminal::PeerRotated) => {
@@ -2067,6 +2163,26 @@ mod tests {
     }
 
     #[test]
+    fn selected_path_change_counter_preserves_unknown_and_transition_semantics() {
+        let mut state = TransportObservationState::default();
+
+        update_selected_path(&mut state, "unknown".to_owned(), None, None);
+        assert_eq!(state.selected_path_changes, 0);
+
+        update_selected_path(&mut state, "direct".to_owned(), None, None);
+        assert_eq!(state.selected_path_changes, 1);
+
+        update_selected_path(&mut state, "direct".to_owned(), None, None);
+        assert_eq!(state.selected_path_changes, 1);
+
+        update_selected_path(&mut state, "unknown".to_owned(), None, None);
+        assert_eq!(state.selected_path_changes, 2);
+
+        update_selected_path(&mut state, "relay".to_owned(), None, None);
+        assert_eq!(state.selected_path_changes, 3);
+    }
+
+    #[test]
     fn endpoint_secret_file_requires_owned_regular_mode_0600_bytes() {
         let path = temporary_path("secret");
         let mut file = OpenOptions::new()
@@ -2106,10 +2222,10 @@ mod tests {
     #[tokio::test]
     async fn explicit_endpoint_secret_stabilizes_endpoint_identity() {
         let secret = Zeroizing::new([9_u8; 32]);
-        let first = bind_endpoint(true, Some(&*secret)).await.unwrap();
+        let first = bind_endpoint(true, false, Some(&*secret)).await.unwrap();
         let first_id = first.id();
         first.close().await;
-        let second = bind_endpoint(true, Some(&*secret)).await.unwrap();
+        let second = bind_endpoint(true, false, Some(&*secret)).await.unwrap();
         assert_eq!(second.id(), first_id);
         second.close().await;
     }

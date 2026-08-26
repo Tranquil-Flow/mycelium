@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+use std::process::Command;
+
 use mycelium_iroh_transport::local::{
     LOCAL_PROTOCOL, RecordKind, SequenceGuard, client_proof, decode_record, derive_session_keys,
     encode_record, server_proof,
@@ -64,4 +66,29 @@ fn router_ingress_uses_canonical_decoder_and_16_mib_operational_cap() {
     assert_eq!(OPERATIONAL_MAX_FRAME_BYTES, 16 * 1024 * 1024);
     assert!(validate_router_ingress(&[]).is_err());
     assert!(validate_router_ingress(&vec![0; OPERATIONAL_MAX_FRAME_BYTES + 1]).is_err());
+}
+
+#[test]
+fn relay_only_cli_is_explicit_and_conflicts_with_local_only() {
+    let binary = env!("CARGO_BIN_EXE_mycelium-iroh-sidecar");
+    let help = Command::new(binary)
+        .arg("--help")
+        .output()
+        .expect("sidecar help");
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--force-relay"));
+
+    let rejected = Command::new(binary)
+        .args([
+            "--uds",
+            "/tmp/mycelium-force-relay-conflict.sock",
+            "--bootstrap-fd",
+            "0",
+            "--local-only",
+            "--force-relay",
+        ])
+        .output()
+        .expect("sidecar conflict");
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("cannot be used with"));
 }

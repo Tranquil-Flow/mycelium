@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:contracts": "node --test scripts/contract-diff.test.mjs",
     "test:interactive-contract": "node --test scripts/operator-contract.test.mjs",
+    "test:a8-browser-evidence": "node --test scripts/a8-browser-evidence.test.mjs",
     "test:interactive-bundle": "node scripts/check-interactive-bundle.mjs",
     "test:interactive-multibrowser": "node scripts/interactive-multibrowser-e2e.mjs",
     "test:a4-live-browser": "node scripts/a4-product-browser-e2e.mjs",
@@ -19,7 +20,7 @@
     "test:e2e:install": "playwright install chromium firefox webkit",
     "contracts:diff": "node scripts/contract-diff.mjs",
     "typecheck": "tsc -b --pretty false",
-    "check": "npm test && npm run test:contracts && npm run test:interactive-contract && npm run test:interactive-bundle && npm run typecheck && npm run build"
+    "check": "npm test && npm run test:contracts && npm run test:interactive-contract && npm run test:a8-browser-evidence && npm run test:interactive-bundle && npm run typecheck && npm run build"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.2",

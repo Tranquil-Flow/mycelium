@@ -588,9 +588,44 @@ def test_transfer_archive_contains_only_declared_files_and_is_deterministic(
         assert second_stream is not None and second_stream.read() == b"RUNTIME = 'v1'\n"
 
 
+def test_transfer_manifest_allows_digest_bound_token_python_module(
+    tmp_path: Path,
+) -> None:
+    source_root, transfers = _transfers(tmp_path)
+    source = source_root / "mycelium_invite" / "token.py"
+    source.parent.mkdir()
+    payload = b"PROTOCOL = 'mycelium.invite.v1'\n"
+    source.write_bytes(payload)
+    transfers["files"].append(
+        {
+            "path": "mycelium_invite/token.py",
+            "size_bytes": len(payload),
+            "content_digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }
+    )
+    transfers["files"].sort(key=lambda record: record["path"])
+
+    archive = build_transfer_archive(source_root, transfers)
+
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as opened:
+        assert "mycelium_invite/token.py" in opened.getnames()
+
+
 @pytest.mark.parametrize(
     "path",
-    ["../escape.py", ".git/config", ".env", ".cache/model.bin", "models/weights.bin", "private-key.pem"],
+    [
+        "../escape.py",
+        ".git/config",
+        ".env",
+        ".cache/model.bin",
+        "models/weights.bin",
+        "private-key.pem",
+        "token.py",
+        "secrets/token.py",
+        "pkg/credentials.py",
+        "pkg/password.py",
+        "pkg/token.py",
+    ],
 )
 def test_transfer_manifest_rejects_traversal_credentials_and_model_caches(
     tmp_path: Path,

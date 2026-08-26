@@ -103,6 +103,7 @@ from mycelium_live.activation import (
     validate_activation_status,
 )
 from mycelium_live.a4_contracts import compatibility_fixtures as a4_fixtures
+from mycelium_internet.contracts import compatibility_fixtures as internet_fixtures
 from mycelium_live.preparation import AUTHORIZATION_PROTOCOL
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
@@ -1336,6 +1337,8 @@ def m15_plan_comparison() -> dict[str, Any]:
 
 
 def product_snapshot() -> dict[str, Any]:
+    internet = internet_fixtures()
+    activation = internet["internet-activation-observation-v1.json"]
     document = {
         "protocol": "mycelium.product_snapshot.v1",
         "publication": {
@@ -1408,6 +1411,13 @@ def product_snapshot() -> dict[str, Any]:
             },
         ],
         "notices": [],
+        "internet_native": {
+            "bootstrap_status": internet["internet-bootstrap-status-v1.json"],
+            "activation_observation": activation,
+            "activation_history": [activation],
+            "relay_projection": internet["relay-projection-v1.json"],
+            "qualification": internet["internet-native-qualification-v1.json"],
+        },
         "provenance": {
             "projector": "mycelium_product_spine",
             "projector_version": "m12-v1",
@@ -2219,6 +2229,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "m15-plan-comparison-v1.json": m15_plan_comparison(),
         "concurrent-request-runtime-v1.json": m16_runtime_status(),
         **a4_fixtures(),
+        **internet_fixtures(),
         "m23-kv-gate-v1.json": m23_kv_gate(),
         "product-snapshot-v1.json": product_snapshot(),
         "product-event-v1.json": product_event(),

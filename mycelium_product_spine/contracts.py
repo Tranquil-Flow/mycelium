@@ -9,6 +9,13 @@ import math
 import re
 from typing import Any, Callable, Mapping
 
+from mycelium_internet.contracts import (
+    validate_activation_observation,
+    validate_bootstrap_status,
+    validate_internet_native_qualification,
+    validate_relay_projection,
+)
+
 
 SNAPSHOT_PROTOCOL = "mycelium.product_snapshot.v1"
 EVENT_PROTOCOL = "mycelium.product_event.v1"
@@ -593,6 +600,52 @@ def _unique(items: object, field: str) -> bool:
     )
 
 
+def validate_internet_native_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the closed A8 projection carried by every product snapshot."""
+
+    fields = {
+        "bootstrap_status",
+        "activation_observation",
+        "activation_history",
+        "relay_projection",
+        "qualification",
+    }
+    if not _exact(document, fields):
+        raise ProductContractError("product_snapshot_invalid")
+    history = document["activation_history"]
+    if not isinstance(history, list) or not 1 <= len(history) <= 64:
+        raise ProductContractError("product_snapshot_invalid")
+    try:
+        bootstrap = validate_bootstrap_status(document["bootstrap_status"])
+        activation = validate_activation_observation(
+            document["activation_observation"]
+        )
+        validated_history = [
+            validate_activation_observation(item) for item in history
+        ]
+        relay = (
+            None
+            if document["relay_projection"] is None
+            else validate_relay_projection(document["relay_projection"])
+        )
+        qualification = (
+            None
+            if document["qualification"] is None
+            else validate_internet_native_qualification(document["qualification"])
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProductContractError("product_snapshot_invalid") from exc
+    if validated_history[-1] != activation:
+        raise ProductContractError("product_snapshot_invalid")
+    return {
+        "bootstrap_status": bootstrap,
+        "activation_observation": activation,
+        "activation_history": validated_history,
+        "relay_projection": relay,
+        "qualification": qualification,
+    }
+
+
 def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and detach one closed privacy-reduced M12 product snapshot."""
 
@@ -605,6 +658,7 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         "relations",
         "readiness",
         "notices",
+        "internet_native",
         "provenance",
     }
     if not _exact(document, fields) or document["protocol"] != SNAPSHOT_PROTOCOL:
@@ -623,6 +677,7 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         or not all(_readiness(item) for item in document["readiness"])
         or not _unique(document["notices"], "notice_id")
         or not all(_notice(item) for item in document["notices"])
+        or not isinstance(document["internet_native"], Mapping)
         or not _provenance(document["provenance"])
         or document["publication"]["source_mode"]
         != document["provenance"]["source_mode"]
@@ -644,10 +699,13 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         raise ProductContractError("product_snapshot_readiness_unbound")
     if any(item["source_id"] not in source_ids for item in document["notices"]):
         raise ProductContractError("product_snapshot_notice_unbound")
+    internet_native = validate_internet_native_snapshot(document["internet_native"])
     try:
+        detached = dict(document)
+        detached["internet_native"] = internet_native
         return json.loads(
             json.dumps(
-                dict(document),
+                detached,
                 sort_keys=True,
                 separators=(",", ":"),
                 allow_nan=False,

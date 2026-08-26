@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from dataclasses import asdict
 import json
 import os
@@ -15,6 +16,7 @@ import uuid
 
 import pytest
 
+from mycelium_node.identity import load_node_signer
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.physical_deployment import (
     build_execution_graph,
@@ -86,6 +88,32 @@ def test_cli_parser_accepts_absent_and_absolute_endpoint_secret(
     assert str(present.endpoint_secret_file) == str(lexical)
 
 
+def test_force_relay_parser_is_explicit_and_conflicts_with_local_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        node.sys,
+        "argv",
+        [*_cli_argv(tmp_path), "--sidecar-force-relay"],
+    )
+    parsed = node._parse_args()
+    assert parsed.sidecar_force_relay is True
+
+    monkeypatch.setattr(
+        node.sys,
+        "argv",
+        [
+            *_cli_argv(tmp_path),
+            "--sidecar-local-only",
+            "--sidecar-force-relay",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        node._parse_args()
+    assert exc.value.code == 2
+
+
 def test_main_passes_exact_endpoint_secret_path_to_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -99,6 +127,7 @@ def test_main_passes_exact_endpoint_secret_path_to_service(
         socket_root=tmp_path / "socket",
         sidecar_binary=Path("/bin/false"),
         sidecar_local_only=True,
+        sidecar_force_relay=False,
         command_timeout=1.0,
         endpoint_secret_file=endpoint_secret_file,
         decode_mode=None,
@@ -119,6 +148,7 @@ def test_main_passes_exact_endpoint_secret_path_to_service(
     monkeypatch.setattr(node.sys, "stdin", SimpleNamespace(buffer=()))
     assert node.main() == 0
     assert captured["endpoint_secret_file"] is endpoint_secret_file
+    assert captured["sidecar_force_relay"] is False
 
 
 def test_service_accepts_absent_and_exact_absolute_endpoint_secret(
@@ -209,6 +239,31 @@ def test_native_sidecar_argv_and_service_factory_preserve_conduit(
     assert sidecar.endpoint_secret_file is endpoint_secret_file
     assert sidecar.local_only is True
     assert sidecar.queue_capacity == 128
+
+
+def test_native_sidecar_argv_includes_force_relay_only_when_requested(
+    tmp_path: Path,
+) -> None:
+    relay = node.NativeSidecarProcess(
+        binary=Path("/native/sidecar"),
+        socket_root=tmp_path / "relay",
+        local_only=False,
+        force_relay=True,
+        queue_capacity=7,
+        startup_timeout=3.0,
+    )
+    assert relay.force_relay is True
+    assert relay._argv(42)[-1] == "--force-relay"
+
+    direct = node.NativeSidecarProcess(
+        binary=Path("/native/sidecar"),
+        socket_root=tmp_path / "direct",
+        local_only=False,
+        queue_capacity=7,
+        startup_timeout=3.0,
+    )
+    assert direct.force_relay is False
+    assert "--force-relay" not in direct._argv(42)
 
 
 def test_native_sidecar_rejects_invalid_direct_path_without_disclosure(
@@ -336,7 +391,7 @@ def _run_configured_node(
     endpoint_secret_file: Path,
     deployment_id: str,
     configure_payload: dict[str, Any],
-) -> tuple[str, bytes]:
+) -> tuple[str, str, bytes]:
     run_id = str(uuid.uuid4())
     process = subprocess.Popen(
         [
@@ -367,6 +422,7 @@ def _run_configured_node(
     )
     output = bytearray()
     endpoint_id: str | None = None
+    verification_key_digest: str | None = None
     try:
         hello, raw = _send_bounded(
             process,
@@ -400,6 +456,9 @@ def _run_configured_node(
         observation = configured["result"]["observation"]
         assert observation["route_ready"] is False
         endpoint_id = observation["details"]["endpoint_addr"]["id"]
+        verification_key_digest = configured["result"]["verification_key"][
+            "verification_key_digest"
+        ]
 
         stopped, raw = _send_bounded(
             process,
@@ -419,7 +478,8 @@ def _run_configured_node(
     finally:
         output.extend(_close_process(process))
     assert endpoint_id is not None
-    return endpoint_id, bytes(output)
+    assert verification_key_digest is not None
+    return endpoint_id, verification_key_digest, bytes(output)
 
 
 def test_host_node_service_reuses_endpoint_identity_without_public_leakage(
@@ -445,10 +505,11 @@ def test_host_node_service_reuses_endpoint_identity_without_public_leakage(
 
     deployment_id, configure_payload = _configure_payload(tmp_path)
     endpoint_ids: list[str] = []
+    verification_key_digests: list[str] = []
     public_output = bytearray()
     with tempfile.TemporaryDirectory(prefix="myc-endpoint-", dir="/tmp") as socket_base:
         for index in range(2):
-            endpoint_id, output = _run_configured_node(
+            endpoint_id, verification_key_digest, output = _run_configured_node(
                 artifact_root=tmp_path,
                 socket_root=Path(socket_base) / f"service-{index}",
                 endpoint_secret_file=endpoint_secret_file,
@@ -456,8 +517,18 @@ def test_host_node_service_reuses_endpoint_identity_without_public_leakage(
                 configure_payload=configure_payload,
             )
             endpoint_ids.append(endpoint_id)
+            verification_key_digests.append(verification_key_digest)
             public_output.extend(output)
 
     assert endpoint_ids[0] == endpoint_ids[1]
+    authority_signer = load_node_signer(
+        endpoint_secret_file,
+        endpoint_id=endpoint_ids[0],
+    )
+    authority_public_key = base64.b64decode(
+        authority_signer.public_key_record()["verification_key"], validate=True
+    )
+    assert endpoint_ids[0] == authority_public_key.hex()
+    assert verification_key_digests == [authority_signer.verification_key_digest] * 2
     assert os.fsencode(endpoint_secret_file) not in public_output
     assert secret not in public_output

@@ -194,6 +194,34 @@ def test_physical_route_propagates_route_wide_decode_mode_to_node_command() -> N
     assert command[mode_flag + 1] == "stage_local_kv"
 
 
+def test_physical_route_emits_force_relay_only_under_explicit_runtime_control() -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._peers = {
+        "node-0": SimpleNamespace(
+            staging_root="/opt/mycelium/stage",
+            process_transport="local",
+        )
+    }
+    route._plans_by_node = {
+        "node-0": {
+            "python_executable": "/usr/bin/python3",
+            "socket_root": "/tmp/mycelium/socket",
+            "sidecar_binary": "/opt/mycelium/sidecar",
+            "endpoint_secret_file": "/opt/mycelium/identities/node-0.key",
+        }
+    }
+    route._plan = {
+        "run_id": "run-a8",
+        "deployment_id": "deployment-a8",
+        "decode_mode": "stage_local_kv",
+    }
+    route._force_relay = False
+    assert "--sidecar-force-relay" not in route._node_command("node-0")
+
+    route._force_relay = True
+    assert route._node_command("node-0").count("--sidecar-force-relay") == 1
+
+
 def test_physical_cancellation_cleanup_requires_every_peer_release() -> None:
     route = object.__new__(PhysicalLiveRoute)
     route._sessions = {"node-0": object(), "node-1": object()}

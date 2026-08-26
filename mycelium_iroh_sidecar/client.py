@@ -54,6 +54,8 @@ _RECEIVE_FROM = 12
 _DELIVERY_FROM = 13
 _GET_TRANSPORT_OBSERVATIONS = 14
 _TRANSPORT_OBSERVATIONS = 15
+_GET_ADMISSION_COUNTERS = 16
+_ADMISSION_COUNTERS = 17
 _ZERO_ID = b"\0" * 16
 
 
@@ -623,6 +625,58 @@ class SidecarClient:
             raise ProtocolError("invalid_transport_observations")
         return observations
 
+    def inbound_admission_snapshot(
+        self, candidate_endpoint_id: str
+    ) -> dict[str, Any]:
+        """Return native counters scoped to one candidate remote identity."""
+
+        if not isinstance(candidate_endpoint_id, str) or not candidate_endpoint_id:
+            raise ValueError("candidate_endpoint_id must be a non-empty string")
+        message_id = os.urandom(16)
+        request = json.dumps(
+            {"candidate_endpoint_id": candidate_endpoint_id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        kind, returned_id, payload = self._request(
+            _GET_ADMISSION_COUNTERS,
+            message_id,
+            request,
+        )
+        if returned_id != message_id:
+            raise ProtocolError("response_message_id_mismatch")
+        if kind != _ADMISSION_COUNTERS:
+            self._raise_response(kind, returned_id, payload, message_id)
+        try:
+            document = _decode_json_object(payload)
+        except (UnicodeError, ValueError, json.JSONDecodeError) as error:
+            raise ProtocolError("invalid_inbound_admission_snapshot") from error
+        if (
+            set(document)
+            != {
+                "protocol",
+                "inbound_identity_rejections",
+                "inbound_frames_admitted",
+                "candidate_identity_rejections",
+                "measured_at_unix_ms",
+            }
+            or document.get("protocol")
+            != "mycelium.iroh_sidecar.inbound_admission.v1"
+            or any(
+                type(document.get(field)) is not int or document[field] < 0
+                for field in (
+                    "inbound_identity_rejections",
+                    "inbound_frames_admitted",
+                    "candidate_identity_rejections",
+                    "measured_at_unix_ms",
+                )
+            )
+            or document["candidate_identity_rejections"]
+            > document["inbound_identity_rejections"]
+        ):
+            raise ProtocolError("invalid_inbound_admission_snapshot")
+        return document
+
     def _request(
         self,
         kind: int,
@@ -824,6 +878,8 @@ def _decode_record(
         _DELIVERY_FROM,
         _GET_TRANSPORT_OBSERVATIONS,
         _TRANSPORT_OBSERVATIONS,
+        _GET_ADMISSION_COUNTERS,
+        _ADMISSION_COUNTERS,
     }:
         raise ProtocolError("unknown_record_kind")
     if sequence != expected_sequence:

@@ -35,6 +35,52 @@ def _safe_code(value: object, fallback: str) -> str:
     return fallback
 
 
+def _unknown_internet_native(now_unix_ms: int) -> dict[str, Any]:
+    activation = {
+        "protocol": "mycelium.internet_activation_observation.v1",
+        "observation_id": f"internet-unknown-{now_unix_ms}",
+        "connection_generation": 0,
+        "connection_reuse": 0,
+        "path_class": "unknown",
+        "path_source": "unknown",
+        "endpoint_pseudonym": None,
+        "observed_at_unix_ms": now_unix_ms,
+        "freshness": "unknown",
+        "evidence_lifetime_until_unix_ms": now_unix_ms,
+        "metrics": {
+            "rtt_ms": None,
+            "warm_rtt_ms": None,
+            "jitter_ms": None,
+            "goodput_bytes_per_second": None,
+            "loss_ratio": None,
+            "sample_count": None,
+            "measured_zero": False,
+        },
+    }
+    return {
+        "bootstrap_status": {
+            "protocol": "mycelium.internet_bootstrap_status.v1",
+            "generation": 1,
+            "observed_at_unix_ms": now_unix_ms,
+            "freshness": "unknown",
+            "tls_state": "unknown",
+            "canonical_origin_verified": False,
+            "seed_pin_state": "unknown",
+            "route_state": "unknown",
+            "invitation_state": "unknown",
+            "counters": {
+                "requests": 0,
+                "joins_accepted": 0,
+                "joins_rejected": 0,
+            },
+        },
+        "activation_observation": activation,
+        "activation_history": [activation],
+        "relay_projection": None,
+        "qualification": None,
+    }
+
+
 def _stage_entity_id(stage: Mapping[str, Any], index: int) -> str:
     """Use the physical placement identity when one logical stage has replicas."""
 
@@ -105,6 +151,7 @@ class ProductProjector:
         assignments: Sequence[Mapping[str, Any]] | None = None,
         route_status: Mapping[str, Any] | None,
         qualification: Mapping[str, Any] | None,
+        internet_native: Mapping[str, Any] | None = None,
         now_unix_ms: int,
         source_mode: str = "live",
         source_errors: Mapping[str, str] | None = None,
@@ -136,6 +183,7 @@ class ProductProjector:
                 assignments=assignments,
                 route_status=route_status,
                 qualification=qualification,
+                internet_native=internet_native,
                 now_unix_ms=now_unix_ms,
                 source_mode=source_mode,
                 generation=generation,
@@ -154,6 +202,7 @@ class ProductProjector:
         assignments: Sequence[Mapping[str, Any]] | None,
         route_status: Mapping[str, Any] | None,
         qualification: Mapping[str, Any] | None,
+        internet_native: Mapping[str, Any] | None,
         now_unix_ms: int,
         source_mode: str,
         generation: int,
@@ -183,6 +232,11 @@ class ProductProjector:
             and qualification.get("topology_version") == route_status.get("topology_version")
         )
         qualification_current = qualification_shape_current and qualification_bound
+        internet_native_document = (
+            _unknown_internet_native(now_unix_ms)
+            if internet_native is None
+            else json.loads(json.dumps(dict(internet_native)))
+        )
         membership_error = source_errors.get("membership-source")
         assignment_error = source_errors.get("assignment-source")
         route_error = source_errors.get("route-source")
@@ -1014,6 +1068,7 @@ class ProductProjector:
             "relations": relations,
             "readiness": readiness,
             "notices": notices,
+            "internet_native": internet_native_document,
         }
         snapshot_digest = _digest(public_material).split(":", 1)[1]
         publication_mode = (
@@ -1047,6 +1102,7 @@ class ProductProjector:
             "relations": relations,
             "readiness": readiness,
             "notices": notices,
+            "internet_native": internet_native_document,
             "provenance": {
                 "projector": "mycelium_product_spine",
                 "projector_version": "m12-v1",

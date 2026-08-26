@@ -1,0 +1,16 @@
+{
+  "canonical_origin_verified": true,
+  "counters": {
+    "joins_accepted": 1,
+    "joins_rejected": 2,
+    "requests": 3
+  },
+  "freshness": "current",
+  "generation": 1,
+  "invitation_state": "pending",
+  "observed_at_unix_ms": 1752500000000,
+  "protocol": "mycelium.internet_bootstrap_status.v1",
+  "route_state": "available",
+  "seed_pin_state": "verified",
+  "tls_state": "publicly_trusted"
+}

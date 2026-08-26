@@ -543,6 +543,26 @@ CONTRACT_SPECS = (
         "mycelium.observatory.event.v1",
         ("mycelium_gateway/semantic.py",),
     ),
+    ContractSpec(
+        "internet-bootstrap-status-v1.json",
+        "mycelium.internet_bootstrap_status.v1",
+        ("mycelium_internet/contracts.py",),
+    ),
+    ContractSpec(
+        "internet-activation-observation-v1.json",
+        "mycelium.internet_activation_observation.v1",
+        ("mycelium_internet/contracts.py",),
+    ),
+    ContractSpec(
+        "relay-projection-v1.json",
+        "mycelium.relay_projection.v1",
+        ("mycelium_internet/contracts.py",),
+    ),
+    ContractSpec(
+        "internet-native-qualification-v1.json",
+        "mycelium.internet_native_qualification.v1",
+        ("mycelium_internet/contracts.py",),
+    ),
 )
 
 SPECS_BY_FIXTURE = {spec.fixture_name: spec for spec in CONTRACT_SPECS}

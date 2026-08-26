@@ -1,8 +1,8 @@
 {
   "protocol": "mycelium.completion_checklist.v1",
   "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
-  "updated_on": "2026-08-18",
-  "primary_gate": "A5",
+  "updated_on": "2026-08-26",
+  "primary_gate": "A9",
   "workspace_ids": [
     "inference",
     "device_lab",
@@ -183,27 +183,289 @@
     {
       "gate_id": "A8",
       "name": "Internet-native control and activation",
-      "dependencies": ["A3"],
+      "dependencies": [
+        "A3"
+      ],
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
-      "state": "design_only",
-      "blockers": ["dependency A3 atomic completion", "public HTTPS and off-tailnet test peer"],
-      "completed_requirements": ["specification"],
+      "state": "complete",
+      "blockers": [],
+      "completed_requirements": [
+        "specification",
+        "implementation",
+        "product_integration",
+        "deterministic_positive",
+        "deterministic_negative",
+        "physical_positive",
+        "physical_negative",
+        "ui_live_all_eight",
+        "browser_navigation_reconnect",
+        "browser_second_session",
+        "full_regressions_audits",
+        "architecture_handover",
+        "atomic_feature_commit"
+      ],
       "evidence_bindings": [
-        {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md", "artifact_digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9", "provenance": "source", "subject": "A8:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "specification",
+          "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a8-internet-native-control.md",
+          "artifact_digest": "sha256:694e653c37eed8c31b21e73eb4a423aea9f66b6b00a6c4e9c2031470b13396d9",
+          "provenance": "source",
+          "subject": "A8:specification",
+          "observed_at": "2026-08-18T00:00:00Z",
+          "fresh_until": null,
+          "binding_scope": "source",
+          "bindings": {
+            "contract_digest": null,
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": null,
+            "environment_digest": null,
+            "authority_generation": null
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "implementation",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:implementation",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "product_integration",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:product_integration",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "deterministic_positive",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:deterministic_positive",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "deterministic_negative",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:deterministic_negative",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "physical_positive",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:physical_positive",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "physical_negative",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:physical_negative",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "ui_live_all_eight",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:ui_live_all_eight",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "browser_navigation_reconnect",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:browser_navigation_reconnect",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "browser_second_session",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:browser_second_session",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "full_regressions_audits",
+          "artifact_reference": "docs/handover/a8-physical-qualification-summary.v1.json",
+          "artifact_digest": "sha256:02bb0baf04c72efc5b6726cdb59e6fde7ed61fa4eba0087f6acaaee35202a57e",
+          "provenance": "live",
+          "subject": "A8:full_regressions_audits",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": "2026-08-26T17:15:30.437Z",
+          "binding_scope": "runtime",
+          "bindings": {
+            "contract_digest": "sha256:0f7727d3efbaa48d84d110c500df5a867a7ed9a61c09dcdfbba17cf8d3acc268",
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": "sha256:0a368bb74f4005cbae1c53c17959b8e937b2ca8eb0634cd2f8701be4c72665c5",
+            "environment_digest": "sha256:cad1b104450b99f83bc7d78c801580319ed5d484806c531fdfdce66a2e65fe09",
+            "authority_generation": 3
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "architecture_handover",
+          "artifact_reference": "docs/handover/A8_INFRA_REQUIREMENTS.md",
+          "artifact_digest": "sha256:00a994efc0f33408435fae244a67538713827ef9e5d9945c5b432c2a492c7448",
+          "provenance": "source",
+          "subject": "A8:architecture_handover",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": null,
+          "binding_scope": "source",
+          "bindings": {
+            "contract_digest": null,
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": null,
+            "environment_digest": null,
+            "authority_generation": null
+          }
+        },
+        {
+          "protocol": "mycelium.executed_requirement_evidence.v1",
+          "requirement": "atomic_feature_commit",
+          "artifact_reference": "docs/handover/a8-completion-record.v1.json",
+          "artifact_digest": "sha256:9e51f6623939da580022db60dc4b14ae59bea7628bb02b4eb7eae3dc8ef403d8",
+          "provenance": "source",
+          "subject": "A8:atomic_feature_commit",
+          "observed_at": "2026-08-26T15:57:49.584Z",
+          "fresh_until": null,
+          "binding_scope": "source",
+          "bindings": {
+            "contract_digest": null,
+            "model_digest": null,
+            "representation_digest": null,
+            "runtime_digest": null,
+            "environment_digest": null,
+            "authority_generation": null
+          }
+        }
       ],
       "partial_requirements": [],
-      "pending_requirements": [
-        "implementation", "product_integration", "deterministic_positive",
-        "deterministic_negative", "physical_positive", "physical_negative",
-        "ui_live_all_eight", "browser_navigation_reconnect",
-        "browser_second_session", "full_regressions_audits",
-        "architecture_handover", "atomic_feature_commit"
-      ],
+      "pending_requirements": [],
       "ui_workspaces": [
-        "inference", "device_lab", "network", "nodes", "plans", "readiness",
-        "incidents", "settings"
+        "inference",
+        "device_lab",
+        "network",
+        "nodes",
+        "plans",
+        "readiness",
+        "incidents",
+        "settings"
       ],
-      "handover": null
+      "handover": "docs/handover/A8_INFRA_REQUIREMENTS.md"
     },
     {
       "gate_id": "A9",
@@ -211,7 +473,7 @@
       "dependencies": ["A8"],
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
       "state": "design_only",
-      "blockers": ["dependency A8 atomic completion", "membership migration test window", "native accelerated Windows x86_64 provider and device", "qualified efficient int8 kernels and reduced-precision activation codec", "frozen component-aware single-request benchmark"],
+      "blockers": ["membership migration test window", "native accelerated Windows x86_64 provider and device", "qualified efficient int8 kernels and reduced-precision activation codec", "frozen component-aware single-request benchmark"],
       "completed_requirements": ["specification"],
       "evidence_bindings": [
         {"protocol": "mycelium.executed_requirement_evidence.v1", "requirement": "specification", "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md", "artifact_digest": "sha256:65f2ebc829d64dfb3a466a5321be097a2078403f9077235c74bdcd08679e1d8e", "provenance": "source", "subject": "A9:specification", "observed_at": "2026-08-18T00:00:00Z", "fresh_until": null, "binding_scope": "source", "bindings": {"contract_digest": null, "model_digest": null, "representation_digest": null, "runtime_digest": null, "environment_digest": null, "authority_generation": null}}

@@ -98,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--state-root", type=Path)
     serve.add_argument("--operator-token-file", type=Path)
     serve.add_argument("--public-origin")
+    serve.add_argument(
+        "--trusted-https-proxy",
+        action="store_true",
+        help="trust an authenticated HTTPS loopback proxy capability",
+    )
+    serve.add_argument("--trusted-proxy-capability-file", type=Path)
     serve.add_argument("--static-root", type=Path)
     serve.add_argument("--worker-static-root", type=Path)
     serve.add_argument("--tls-cert", type=Path)
@@ -130,6 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--member-model-inventory-authorities-file", type=Path)
     serve.add_argument("--representation-authorization-file", type=Path)
     serve.add_argument("--seed-url")
+    serve.add_argument(
+        "--a8-force-relay",
+        action="store_true",
+        help="operator-only physical qualification control; never authors path evidence",
+    )
     return parser
 
 
@@ -211,16 +222,30 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         )
     if args.seed_url is not None:
         result.extend(("--seed-url", args.seed_url))
+    if args.public_origin is not None:
+        result.extend(("--public-origin", args.public_origin))
+    if args.trusted_https_proxy:
+        result.append("--trusted-https-proxy")
+    if args.trusted_proxy_capability_file is not None:
+        result.extend(
+            (
+                "--trusted-proxy-capability-file",
+                str(args.trusted_proxy_capability_file),
+            )
+        )
+    if args.a8_force_relay:
+        result.append("--a8-force-relay")
     return result
 
 
 def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
-    return any(
+    return args.a8_force_relay or args.trusted_https_proxy or any(
         value is not None
         for value in (
             args.state_root,
             args.operator_token_file,
             args.public_origin,
+            args.trusted_proxy_capability_file,
             args.static_root,
             args.worker_static_root,
             args.tls_cert,
@@ -344,12 +369,20 @@ def main(
             parser.error("live mode requires --operator-plan")
         if args.seed_state_root is None:
             parser.error("live mode requires --seed-state-root")
+        if not (
+            args.trusted_https_proxy
+            == (args.public_origin is not None)
+            == (args.trusted_proxy_capability_file is not None)
+        ):
+            parser.error(
+                "--trusted-https-proxy, --public-origin, and "
+                "--trusted-proxy-capability-file require each other"
+            )
         if any(
             value is not None
             for value in (
                 args.state_root,
                 args.operator_token_file,
-                args.public_origin,
                 args.worker_static_root,
                 args.tls_cert,
                 args.tls_key,

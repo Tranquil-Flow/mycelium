@@ -91,6 +91,8 @@ def build_production_runner(config: RunnerConfig) -> PhysicalRunner:
         peers=peers,
         source_root=Path(str(controller_config["source_root"])),
         transfer_manifest=dict(controller_config["transfer_manifest"]),
+        node_transfer_manifests=controller_config.get("node_transfer_manifests"),
+        prepositioned_artifacts=controller_config.get("prepositioned_artifacts"),
         membership_snapshot=dict(controller_config["membership_snapshot"]),
         now=float(controller_config["now"]),
         run_plan=dict(controller_config["run_plan"]),

@@ -54,6 +54,64 @@ def _qualification() -> dict:
     return value
 
 
+def _internet_native() -> dict:
+    fixtures = ROOT / "contracts" / "compatibility-fixtures"
+    return {
+        "bootstrap_status": json.loads(
+            (fixtures / "internet-bootstrap-status-v1.json").read_text()
+        ),
+        "activation_observation": json.loads(
+            (fixtures / "internet-activation-observation-v1.json").read_text()
+        ),
+        "activation_history": [
+            json.loads(
+                (fixtures / "internet-activation-observation-v1.json").read_text()
+            )
+        ],
+        "relay_projection": json.loads(
+            (fixtures / "relay-projection-v1.json").read_text()
+        ),
+        "qualification": json.loads(
+            (fixtures / "internet-native-qualification-v1.json").read_text()
+        ),
+    }
+
+
+def test_snapshot_always_contains_closed_unknown_internet_native_projection() -> None:
+    snapshot = ProductProjector(pseudonym_salt=b"i" * 32).project(
+        members=[],
+        route_status=None,
+        qualification=None,
+        now_unix_ms=1_500_000,
+    )
+
+    assert set(snapshot["internet_native"]) == {
+        "bootstrap_status",
+        "activation_observation",
+        "activation_history",
+        "relay_projection",
+        "qualification",
+    }
+    assert snapshot["internet_native"]["bootstrap_status"]["freshness"] == "unknown"
+    assert snapshot["internet_native"]["activation_observation"]["path_class"] == "unknown"
+    assert snapshot["internet_native"]["relay_projection"] is None
+    assert snapshot["internet_native"]["qualification"] is None
+
+
+def test_snapshot_detaches_supplied_internet_native_projection() -> None:
+    internet_native = _internet_native()
+    snapshot = ProductProjector(pseudonym_salt=b"j" * 32).project(
+        members=[],
+        route_status=None,
+        qualification=None,
+        internet_native=internet_native,
+        now_unix_ms=1_500_000,
+    )
+
+    assert snapshot["internet_native"] == internet_native
+    assert snapshot["internet_native"] is not internet_native
+
+
 def test_member_without_placement_is_visible_but_mobile_is_not_qualified() -> None:
     projector = ProductProjector(pseudonym_salt=b"p" * 32)
     snapshot = projector.project(

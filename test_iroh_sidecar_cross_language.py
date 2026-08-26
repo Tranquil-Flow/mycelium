@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -1292,3 +1293,116 @@ def test_send_routed_validates_destination_before_dispatch(short_root: Path) -> 
         client.send_routed("nothex!", frame)
     with pytest.raises(ValueError):
         client.send_routed("ab" * 16, frame)
+
+
+def test_authenticated_unknown_endpoint_increments_only_inbound_rejection_telemetry(
+    triad,
+) -> None:
+    expected, receiver, rogue = triad
+    receiver_client = receiver.client()
+    rogue_client = rogue.client()
+    try:
+        receiver_client.configure_peers([peer_entry(expected, 1)])
+        rogue_client.configure_peers([peer_entry(receiver, 1)])
+        before = receiver_client.inbound_admission_snapshot(
+            rogue.ready["endpoint_id"]
+        )
+
+        with pytest.raises(TimeoutError):
+            rogue_client.send_confirmed(
+                GOLDEN.read_bytes(),
+                b"i" * 16,
+                timeout=1,
+                expected_generation=1,
+                source_generation=1,
+            )
+
+        after = receiver_client.inbound_admission_snapshot(
+            rogue.ready["endpoint_id"]
+        )
+        expected_path = receiver_client.transport_observations()
+
+        assert after["inbound_identity_rejections"] > before[
+            "inbound_identity_rejections"
+        ]
+        assert after["candidate_identity_rejections"] > before[
+            "candidate_identity_rejections"
+        ]
+        assert after["inbound_frames_admitted"] == before[
+            "inbound_frames_admitted"
+        ]
+        assert len(expected_path) == 1
+        assert expected_path[0]["remote_endpoint_id"] == expected.ready["endpoint_id"]
+        assert expected_path[0]["path_class"] == "unknown"
+    finally:
+        receiver_client.close()
+        rogue_client.close()
+
+
+def test_source_owned_endpoint_mismatch_probe_emits_signed_native_counter_delta(
+    short_root: Path,
+) -> None:
+    from mycelium_node.identity import load_or_create_node_signer
+
+    identity_root = short_root.resolve() / "identity"
+    identity_root.mkdir(mode=0o700)
+    keys = {
+        name: identity_root / f"{name}.key"
+        for name in ("expected", "rogue", "receiver")
+    }
+    for key_file in keys.values():
+        load_or_create_node_signer(key_file)
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "MYCELIUM_A8_SIDECAR_BINARY": str(BINARY),
+            "MYCELIUM_A8_EXPECTED_ENDPOINT_SECRET_FILE": str(keys["expected"]),
+            "MYCELIUM_A8_ROGUE_ENDPOINT_SECRET_FILE": str(keys["rogue"]),
+            "MYCELIUM_A8_RECEIVER_ENDPOINT_SECRET_FILE": str(keys["receiver"]),
+            "MYCELIUM_A8_SPEC_DIGEST": "sha256:" + "a" * 64,
+            "MYCELIUM_A8_SOURCE_DIGEST": "sha256:" + "b" * 64,
+            "MYCELIUM_A8_SIDECAR_BINARY_DIGEST": "sha256:"
+            + hashlib.sha256(BINARY.read_bytes()).hexdigest(),
+            "MYCELIUM_A8_DEPLOYMENT_ID": "a8-endpoint-probe-test",
+        }
+    )
+    completed = subprocess.run(
+        [
+            str(ROOT / "scripts" / "a8_endpoint_mismatch_probe.py"),
+            "endpoint_identity_mismatch",
+            "member-under-test",
+            "observe",
+        ],
+        cwd=ROOT,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads(completed.stdout)
+    assert set(report) == {
+        "protocol",
+        "case_id",
+        "member_id",
+        "spec_digest",
+        "source_digest",
+        "sidecar_binary_digest",
+        "challenge",
+        "before",
+        "after",
+    }
+    assert report["protocol"] == "mycelium.a8_endpoint_activation_probe.v2"
+    before = report["before"]["observation"]["details"]["admission"]
+    after = report["after"]["observation"]["details"]["admission"]
+    assert (
+        after["candidate_identity_rejections"]
+        > before["candidate_identity_rejections"]
+    )
+    assert after["inbound_identity_rejections"] > before["inbound_identity_rejections"]
+    assert after["inbound_frames_admitted"] == before["inbound_frames_admitted"]
+    assert report["before"]["signature"] != report["after"]["signature"]

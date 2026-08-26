@@ -142,7 +142,7 @@ def _origin_from_request(scope: Mapping[str, Any], config: GatewayConfig) -> str
         or parsed.fragment
     ):
         raise BrowserRequestError(403, "invalid_origin")
-    if config.is_loopback:
+    if config.is_loopback and not config.trusted_https_proxy:
         if not _is_loopback(hostname):
             raise BrowserRequestError(403, "invalid_origin")
         return f"{required_scheme}://{host_text}"
@@ -241,6 +241,8 @@ class ProductGatewayASGIApplication:
             raise ValueError("invalid_product_application")
         if swarm_coordinator is None:
             raise ValueError("invalid_swarm_coordinator")
+        if config.trusted_https_proxy and access_policy is None:
+            raise ValueError("trusted_proxy_requires_access_policy")
         if not config.is_loopback and access_policy is None:
             raise ValueError("non_loopback_requires_access_policy")
         if access_policy is not None and not callable(access_policy):
@@ -387,7 +389,7 @@ class ProductGatewayASGIApplication:
                 or not _is_loopback(client[0])
             ):
                 raise BrowserRequestError(403, "loopback_required")
-        else:
+        if not self._config.is_loopback or self._config.trusted_https_proxy:
             assert self._access_policy is not None
             try:
                 decision = self._access_policy(scope)

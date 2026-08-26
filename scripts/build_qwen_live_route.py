@@ -102,7 +102,22 @@ _ROUTE_LABEL_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _RUNTIME_PACKAGE_CLOSURE = (
     "mycelium_capacity_profiles",
     "mycelium_gossip",
+    "mycelium_internet",
+    "mycelium_invite",
     "mycelium_layer_planner",
+    "mycelium_membership",
+    "mycelium_mobile",
+    "mycelium_node",
+    "mycelium_physical_runner",
+    "mycelium_qualification",
+    "mycelium_router",
+    "mycelium_seed",
+)
+_RUNTIME_MODULE_CLOSURE = (
+    "mycelium_performance_budget.py",
+    "mycelium_topology_evidence.py",
+    "physical_inference_qualification.py",
+    "two_process_runtime_qualification.py",
 )
 _PREPARATION_AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.v2"
 _LEGACY_PREPARATION_AUTHORIZATION_PROTOCOL = (
@@ -646,6 +661,7 @@ def _copy_runtime_closure(repo: Path, bundle: Path, template: dict[str, Any]) ->
         if not record["path"].startswith(("control/", "deployment/"))
     }
     paths.add("weight_quantization.py")
+    paths.update(_RUNTIME_MODULE_CLOSURE)
     for package in _RUNTIME_PACKAGE_CLOSURE:
         package_root = repo / package
         if not package_root.is_dir():

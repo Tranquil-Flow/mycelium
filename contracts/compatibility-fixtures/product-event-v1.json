@@ -37,6 +37,102 @@
         "source_id": "membership-source"
       }
     ],
+    "internet_native": {
+      "activation_history": [
+        {
+          "connection_generation": 3,
+          "connection_reuse": 2,
+          "endpoint_pseudonym": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "evidence_lifetime_until_unix_ms": 1752500090000,
+          "freshness": "current",
+          "metrics": {
+            "goodput_bytes_per_second": 1500000,
+            "jitter_ms": 2,
+            "loss_ratio": 0.0,
+            "measured_zero": true,
+            "rtt_ms": 12,
+            "sample_count": 64,
+            "warm_rtt_ms": 9
+          },
+          "observation_id": "fixture-observation",
+          "observed_at_unix_ms": 1752500000000,
+          "path_class": "direct",
+          "path_source": "bound_live_connection",
+          "protocol": "mycelium.internet_activation_observation.v1"
+        }
+      ],
+      "activation_observation": {
+        "connection_generation": 3,
+        "connection_reuse": 2,
+        "endpoint_pseudonym": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidence_lifetime_until_unix_ms": 1752500090000,
+        "freshness": "current",
+        "metrics": {
+          "goodput_bytes_per_second": 1500000,
+          "jitter_ms": 2,
+          "loss_ratio": 0.0,
+          "measured_zero": true,
+          "rtt_ms": 12,
+          "sample_count": 64,
+          "warm_rtt_ms": 9
+        },
+        "observation_id": "fixture-observation",
+        "observed_at_unix_ms": 1752500000000,
+        "path_class": "direct",
+        "path_source": "bound_live_connection",
+        "protocol": "mycelium.internet_activation_observation.v1"
+      },
+      "bootstrap_status": {
+        "canonical_origin_verified": true,
+        "counters": {
+          "joins_accepted": 1,
+          "joins_rejected": 2,
+          "requests": 3
+        },
+        "freshness": "current",
+        "generation": 1,
+        "invitation_state": "pending",
+        "observed_at_unix_ms": 1752500000000,
+        "protocol": "mycelium.internet_bootstrap_status.v1",
+        "route_state": "available",
+        "seed_pin_state": "verified",
+        "tls_state": "publicly_trusted"
+      },
+      "qualification": {
+        "case_ids": [
+          "unrelated_https_invite_without_tailscale"
+        ],
+        "evidence_digests": [],
+        "executed": false,
+        "fresh_until_unix_ms": null,
+        "gate_kind": "physical_positive",
+        "observed_at_unix_ms": 1752500000000,
+        "projection_digest": null,
+        "protocol": "mycelium.internet_native_qualification.v1",
+        "public_projection": {
+          "gate_case_ids": [
+            "unrelated_https_invite_without_tailscale"
+          ],
+          "observed_at_unix_ms": 1752500000000,
+          "outcomes": [
+            "not_executed"
+          ],
+          "relay_reference": null
+        },
+        "qualification_id": "fixture-qualification",
+        "result": "not_executed",
+        "source_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "spec_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "relay_projection": {
+        "observed_at_unix_ms": 1752500000000,
+        "projection_generation": 1,
+        "protocol": "mycelium.relay_projection.v1",
+        "region": "unknown",
+        "relay_reference": "hmac-sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "stable": true
+      }
+    },
     "notices": [],
     "protocol": "mycelium.product_snapshot.v1",
     "provenance": {
