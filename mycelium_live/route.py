@@ -3244,11 +3244,24 @@ class PhysicalLiveRoute:
             fanout_deadline = deadline
             if deadline - now > _CLEANUP_FALLBACK_RESERVE_SECONDS:
                 fanout_deadline = deadline - _CLEANUP_FALLBACK_RESERVE_SECONDS
+            # The node receives a duration, whereas this parent enforces an
+            # absolute deadline. Age that duration to the same reserved fanout
+            # boundary immediately before the frame is sent. Otherwise the
+            # node can keep its inline cleanup owner alive after this waiter is
+            # retired, causing it to overlap and starve the fallback snapshot
+            # during the final reserved interval.
+            node_payload = {
+                **payload,
+                "deadline_budget_ms": min(
+                    payload["deadline_budget_ms"],
+                    max(1, int((fanout_deadline - time.monotonic()) * 1_000)),
+                ),
+            }
             response = self._send_before(
                 node_id,
                 command_id=self._command_id(node_id, "infer-cancel"),
                 command="infer_cancel_wait",
-                payload=payload,
+                payload=node_payload,
                 deadline_monotonic_s=fanout_deadline,
             )
             observation = self._verify_observation(

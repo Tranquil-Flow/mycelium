@@ -1412,6 +1412,7 @@ def test_cancellation_fanout_commits_successful_receipt_before_sibling_error() -
 def test_cancellation_fanout_reserves_owner_budget_for_fallback_snapshot() -> None:
     cleanup_subject: dict[str, object] = {}
     command_deadlines: dict[str, float] = {}
+    command_budget_expiries: dict[str, float] = {}
     published_receipts: list[dict[str, object]] = []
     route = object.__new__(PhysicalLiveRoute)
     route._lock = threading.RLock()
@@ -1459,6 +1460,9 @@ def test_cancellation_fanout_reserves_owner_budget_for_fallback_snapshot() -> No
         del command_id
         command_deadlines[command] = deadline_monotonic_s
         if command == "infer_cancel_wait":
+            command_budget_expiries[command] = time.monotonic() + (
+                payload["deadline_budget_ms"] / 1_000.0
+            )
             cleanup_subject.update(
                 {
                     key: value
@@ -1492,6 +1496,10 @@ def test_cancellation_fanout_reserves_owner_budget_for_fallback_snapshot() -> No
 
     assert cleanup_subject == route._request_cleanup_subject("request-a")
     assert command_deadlines["infer_cancel_wait"] <= owner_deadline - 0.49
+    assert (
+        command_budget_expiries["infer_cancel_wait"]
+        <= command_deadlines["infer_cancel_wait"] + 0.01
+    )
     assert command_deadlines["snapshot"] <= owner_deadline
     assert route._cancellation_cleanup_complete(
         frozenset({"node-a"}),

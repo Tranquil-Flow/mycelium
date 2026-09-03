@@ -1,5 +1,5 @@
 {
-  "base_commit": "7757bce1d7c699c4d1e278916f00ff5b56533db6",
+  "base_commit": "81e71edc05a789934bd29a032624e4cff4042cbc",
   "files": [
     {
       "path": "contracts/compatibility-fixtures/artifact-verification-report-v1.json",
@@ -398,7 +398,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:54da5b9eb75c0a1fcf81e9db2812eeb3c8efb4b4264d9fcfcaeaf7eaa1ef6318",
+      "sha256": "sha256:ddee83f1ad217d1f456f04dfeeb125d5b1bb70724ce3b384a2c51510fce0f189",
       "size_bytes": 63321
     },
     {
@@ -1073,8 +1073,8 @@
     },
     {
       "path": "mycelium_live/route.py",
-      "sha256": "sha256:9c52126f8bc811f36ef376e35954d5a1b17329f9d7f22d84ebef32aad23c9497",
-      "size_bytes": 249294
+      "sha256": "sha256:e9d281b73ff7c447a3396ce667689ccf9fdf3650db61a7473066c96ca81a5773",
+      "size_bytes": 249999
     },
     {
       "path": "mycelium_live/router_port.py",
@@ -3468,8 +3468,8 @@
     },
     {
       "path": "tests/live/test_a4_ownership.py",
-      "sha256": "sha256:d40ec9c01e2f040f24db9c3c5309b5a0a2f1149d9a834d1bcdb2da38a42ba4f5",
-      "size_bytes": 66061
+      "sha256": "sha256:61ba059d30d3acf259138c3142717f803eeeea5727de4f901449d04dd6c309fa",
+      "size_bytes": 66379
     },
     {
       "path": "tests/live/test_a4_runtime_interruption.py",
