@@ -544,6 +544,26 @@ CONTRACT_SPECS = (
         ("mycelium_gateway/semantic.py",),
     ),
     ContractSpec(
+        "replica-plan-v1.json",
+        "mycelium.replica_plan.v1",
+        ("mycelium_replica_contracts.py",),
+    ),
+    ContractSpec(
+        "replica-qualification-v1.json",
+        "mycelium.replica_qualification.v1",
+        ("mycelium_replica_contracts.py",),
+    ),
+    ContractSpec(
+        "replica-runtime-v1.json",
+        "mycelium.replica_runtime.v1",
+        ("mycelium_replica_contracts.py",),
+    ),
+    ContractSpec(
+        "replica-benchmark-v1.json",
+        "mycelium.replica_benchmark.v1",
+        ("mycelium_replica_contracts.py",),
+    ),
+    ContractSpec(
         "internet-bootstrap-status-v1.json",
         "mycelium.internet_bootstrap_status.v1",
         ("mycelium_internet/contracts.py",),
@@ -564,6 +584,7 @@ CONTRACT_SPECS = (
         ("mycelium_internet/contracts.py",),
     ),
 )
+
 
 SPECS_BY_FIXTURE = {spec.fixture_name: spec for spec in CONTRACT_SPECS}
 EXPECTED_FIXTURE_NAMES = frozenset(SPECS_BY_FIXTURE)

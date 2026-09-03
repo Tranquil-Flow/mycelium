@@ -194,9 +194,10 @@ def test_terminal_is_published_only_after_exact_owner_cleanup_receipt(
             **_kwargs,
         ):
             assert locked_path_manifest["path_id"] == route_identity["path_id"]
-            assert command_identity["path_digest"] == route_identity[
-                "path_manifest_digest"
-            ]
+            assert (
+                command_identity["path_digest"]
+                == route_identity["path_manifest_digest"]
+            )
             sink.emit(0, 17)
             self.receipts[request_id] = {
                 "deployment_id": command_identity["deployment_id"],
@@ -209,9 +210,7 @@ def test_terminal_is_published_only_after_exact_owner_cleanup_receipt(
                 "path_digest": command_identity["path_digest"],
                 "topology_generation": command_identity["topology_generation"],
                 "command_id": command_identity["command_id"],
-                "cancellation_generation": command_identity[
-                    "cancellation_generation"
-                ],
+                "cancellation_generation": command_identity["cancellation_generation"],
                 "publisher_generation": command_identity["publisher_generation"],
                 "cleanup_owner_id": f"physical-live-route:{live_graph.deployment_id}",
                 "node_ids": ["node-a", "node-b"],
@@ -286,9 +285,7 @@ def test_reconnect_publisher_generation_reaches_live_route_and_cleanup_receipt(
             assert self.control is not None
             self.receipt = {
                 **self.control,
-                "cleanup_owner_id": (
-                    f"physical-live-route:{live_graph.deployment_id}"
-                ),
+                "cleanup_owner_id": (f"physical-live-route:{live_graph.deployment_id}"),
                 "node_ids": ["node-a", "node-b"],
             }
             return InferenceResult(request_id=request_id, token_ids=())
@@ -333,11 +330,14 @@ def test_reconnect_publisher_generation_reaches_live_route_and_cleanup_receipt(
         publisher_generation=1,
     )
     assert route.started.wait(timeout=1.0)
-    assert port.update_publisher_generation(
-        request.request_id,
-        expected_generation=1,
-        new_generation=2,
-    ) is True
+    assert (
+        port.update_publisher_generation(
+            request.request_id,
+            expected_generation=1,
+            new_generation=2,
+        )
+        is True
+    )
     route.release.set()
     _wait(lambda: port.request_status(request.request_id) == "COMPLETED")
     snapshot = port._commands.snapshot(request.request_id, request_attempt=1)
@@ -345,6 +345,170 @@ def test_reconnect_publisher_generation_reaches_live_route_and_cleanup_receipt(
     assert snapshot[0].cleanup_result is not None
     port.release_request(request.request_id)
     port.close()
+
+
+def test_cleanup_receipt_survives_later_publisher_generation(
+    live_graph, request_factory
+) -> None:
+    """Replay authority may overtake an already-frozen physical receipt."""
+
+    class Qualification:
+        qualification_digest = "sha256:" + "d" * 64
+
+    class FrozenReceiptRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.receipt = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            command_identity,
+            **_kwargs,
+        ):
+            self.receipt = {
+                **command_identity,
+                "cleanup_owner_id": (
+                    f"physical-live-route:{live_graph.deployment_id}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+            }
+            self.started.set()
+            assert self.release.wait(timeout=1.0)
+            return InferenceResult(request_id=request_id, token_ids=())
+
+        def update_publisher_generation(
+            self,
+            request_id,
+            *,
+            expected_generation,
+            new_generation,
+            route_identity,
+        ):
+            assert route_identity["request_id"] == request_id
+            assert self.receipt is not None
+            assert self.receipt["publisher_generation"] == expected_generation
+            assert new_generation == expected_generation + 1
+            # The real route has already frozen the exact physical cleanup
+            # subject.  Advancing replay authority must not rewrite it.
+            return True
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            self.receipt = None
+
+    route = FrozenReceiptRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("publisher-generation-after-cleanup-freeze")
+    port.admit(
+        request,
+        Sink(),
+        qualification_binding=Qualification(),
+        publisher_generation=1,
+    )
+    assert route.started.wait(timeout=1.0)
+    assert (
+        port.update_publisher_generation(
+            request.request_id,
+            expected_generation=1,
+            new_generation=2,
+        )
+        is True
+    )
+    route.release.set()
+    _wait(lambda: port.request_status(request.request_id) == "COMPLETED")
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)
+    assert snapshot[0].identity.publisher_generation == 2
+    assert snapshot[0].cleanup_result is not None
+    assert route.receipt is not None
+    assert route.receipt["publisher_generation"] == 1
+    port.release_request(request.request_id)
+    port.close()
+
+
+def test_cleanup_receipt_rejects_future_publisher_generation(
+    live_graph, request_factory
+) -> None:
+    class Qualification:
+        qualification_digest = "sha256:" + "d" * 64
+
+    class FutureReceiptRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.receipt = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            command_identity,
+            **_kwargs,
+        ):
+            self.receipt = {
+                **command_identity,
+                "publisher_generation": (
+                    command_identity["publisher_generation"] + 1
+                ),
+                "cleanup_owner_id": (
+                    f"physical-live-route:{live_graph.deployment_id}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+            }
+            return InferenceResult(request_id=request_id, token_ids=())
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            raise AssertionError("future cleanup proof must not release ownership")
+
+    route = FutureReceiptRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("future-publisher-cleanup-receipt")
+    port.admit(request, Sink(), qualification_binding=Qualification())
+    _wait(lambda: port.request_status(request.request_id) == "TERMINAL_BLOCKED")
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)
+    assert snapshot[0].cleanup_result is None
+    assert snapshot[0].terminal is None
+    port.release_request(request.request_id)
+    assert not port.is_idle()
+    with pytest.raises(RuntimeError, match="router_port_shutdown_cleanup_unproven"):
+        port.close()
 
 
 def test_missing_cleanup_receipt_blocks_terminal_and_m16_completion(
@@ -409,6 +573,7 @@ def test_terminal_blocked_request_retires_dispatch_slot(
     against `max_concurrent_requests` forever and every later request
     blocks in decode_one (the 2026-08-20 physical wedge).
     """
+
     class Qualification:
         qualification_digest = "sha256:" + "d" * 64
 
@@ -474,18 +639,20 @@ def test_terminal_blocked_request_retires_dispatch_slot(
             return None
 
     first = port.admit(
-        request_factory("cleanup-unproven-first"), Sink(),
+        request_factory("cleanup-unproven-first"),
+        Sink(),
         qualification_binding=Qualification(),
     )
     _wait(lambda: port.request_status(first) == "TERMINAL_BLOCKED")
 
     second = port.admit(
-        request_factory("second-request"), Sink(),
+        request_factory("second-request"),
+        Sink(),
         qualification_binding=Qualification(),
     )
-    assert route.second_started.wait(
-        timeout=2.0
-    ), "second request never dispatched: blocked request pinned the slot"
+    assert route.second_started.wait(timeout=2.0), (
+        "second request never dispatched: blocked request pinned the slot"
+    )
     _wait(lambda: port.decode_one(second))
     assert port.request_status(second) == "COMPLETED"
     # The blocked request's fail-closed shape is untouched.
@@ -558,14 +725,486 @@ def test_normal_completion_authorizes_generation_before_cleanup_and_terminal(
     port.admit(request, Sink(), qualification_binding=Qualification())
     assert port.decode_one(request.request_id)
     _wait(lambda: port.request_status(request.request_id) != "DECODING")
-    assert port.request_status(request.request_id) == "COMPLETED", (
-        port._pending[request.request_id].terminal_blocked_reason
-    )
+    assert port.request_status(request.request_id) == "COMPLETED", port._pending[
+        request.request_id
+    ].terminal_blocked_reason
     snapshot = port._commands.snapshot(request.request_id, request_attempt=1)
     assert snapshot[0].identity.cancellation_generation == 1
     assert snapshot[0].cleanup_result is not None
     assert snapshot[0].terminal is not None
+    # A cancellation/watchdog observer can race the worker between the
+    # controller terminal CAS and adapter publication. Re-observing the same
+    # proven terminal must be idempotent; a conflicting terminal must still
+    # fail closed.
+    port._record_command_terminal(
+        port._pending[request.request_id],
+        "COMPLETED",
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="command_terminal_rejected:already_terminal",
+    ):
+        port._record_command_terminal(
+            port._pending[request.request_id],
+            "CANCELLED",
+        )
     assert coordinator.phase(request.request_id) == "completed"
+    port.release_request(request.request_id)
+    port.close()
+
+
+def test_cancellation_wins_when_physical_route_returns_completed(
+    live_graph, request_factory
+) -> None:
+    """A cancellation CAS must win the route-completion return-window race."""
+
+    class Qualification:
+        qualification_digest = "sha256:" + "e" * 64
+
+    class CompletionRaceRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release_infer = threading.Event()
+            self.receipt = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            command_identity,
+            **_kwargs,
+        ):
+            self.started.set()
+            assert self.release_infer.wait(timeout=2.0)
+            self.receipt = {
+                **command_identity,
+                "cancellation_generation": 1,
+                "cleanup_owner_id": (
+                    f"physical-live-route:{command_identity['deployment_id']}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+            }
+            return InferenceResult(request_id=request_id, token_ids=())
+
+        def cancel_request(self, _request_id, **_kwargs):
+            return True
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            self.receipt = None
+
+    route = CompletionRaceRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("cancellation-completion-race")
+    port.admit(request, Sink(), qualification_binding=Qualification())
+    assert route.started.wait(timeout=2.0)
+    assert port.cancel(request.request_id) is True
+    route.release_infer.set()
+
+    _wait(lambda: port.request_status(request.request_id) != "DECODING")
+    assert port.request_status(request.request_id) == "CANCELLED", port._pending[
+        request.request_id
+    ].terminal_blocked_reason
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)
+    assert snapshot[0].identity.cancellation_generation == 1
+    assert snapshot[0].cleanup_result is not None
+    assert snapshot[0].terminal is not None
+    assert snapshot[0].terminal.status.value == "cancelled"
+    assert coordinator.phase(request.request_id) == "cancelled"
+    assert all(
+        placement["active_reservations"] == 0
+        for placement in coordinator.status()["placements"]
+    )
+    port.release_request(request.request_id)
+    port.close()
+
+
+def test_cleanup_proof_at_deadline_projects_controller_timeout_terminal(
+    live_graph, request_factory
+) -> None:
+    class Qualification:
+        qualification_digest = "sha256:" + "d" * 64
+
+    class DeadlineRaceRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release_infer = threading.Event()
+            self.receipt = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(self, _tokens, *, request_id, command_identity, **_kwargs):
+            self.started.set()
+            assert self.release_infer.wait(timeout=2.0)
+            self.receipt = {
+                **command_identity,
+                "cancellation_generation": 1,
+                "cleanup_owner_id": (
+                    f"physical-live-route:{command_identity['deployment_id']}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+            }
+            return InferenceResult(request_id=request_id, token_ids=())
+
+        def cancel_request(self, _request_id, **_kwargs):
+            return True
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            self.receipt = None
+
+    route = DeadlineRaceRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("cleanup-proof-deadline-race")
+    port.admit(request, Sink(), qualification_binding=Qualification())
+    assert route.started.wait(timeout=2.0)
+    assert port.cancel_with_deadline(
+        request.request_id,
+        deadline_monotonic_s=time.monotonic() + 0.05,
+    )
+    time.sleep(0.06)
+    route.release_infer.set()
+
+    _wait(lambda: port.request_status(request.request_id) != "DECODING")
+    pending = port._pending[request.request_id]
+    assert port.request_status(request.request_id) == "FAILED"
+    assert pending.terminal_error_code == "deadline_exceeded"
+    assert pending.terminal_blocked_reason is None
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)[0]
+    assert snapshot.terminal is not None
+    assert snapshot.terminal.status.value == "deadline_exceeded"
+    assert snapshot.cleanup_result is not None
+    assert snapshot.cleanup_result.status.value == "completed"
+    assert coordinator.phase(request.request_id) == "failed"
+    assert all(
+        placement["active_reservations"] == 0
+        for placement in coordinator.status()["placements"]
+    )
+    port.release_request(request.request_id)
+    port.close()
+
+
+def test_cleanup_receipt_publishes_cancelled_before_delayed_route_failure(
+    live_graph, request_factory
+) -> None:
+    """A proven cleanup terminal must not wait for ``infer`` to return."""
+
+    class Qualification:
+        qualification_digest = "sha256:" + "9" * 64
+
+    class ReceiptBeforeReturnRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.cancellation_installed = threading.Event()
+            self.receipt_published = threading.Event()
+            self.release_infer = threading.Event()
+            self.receipt = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            command_identity,
+            publish_cleanup_receipt,
+            **_kwargs,
+        ):
+            self.started.set()
+            assert self.cancellation_installed.wait(timeout=2.0)
+            self.receipt = {
+                **command_identity,
+                "cancellation_generation": 1,
+                "cleanup_owner_id": (
+                    f"physical-live-route:{command_identity['deployment_id']}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+                "completed_at_monotonic_ms": int(time.monotonic() * 1_000),
+            }
+            publish_cleanup_receipt(self.receipt)
+            # Route-scoped ownership can retire independently immediately
+            # after publication. The command owner must retain the receipt.
+            self.receipt = None
+            self.receipt_published.set()
+            assert self.release_infer.wait(timeout=2.0)
+            # A retired node command may surface a generic late failure after
+            # the exact cancellation receipt has already won.  It must not
+            # attempt a conflicting FAILED terminal.
+            raise RuntimeError("node_command_failed")
+
+        def cancel_request(self, _request_id, **_kwargs):
+            self.cancellation_installed.set()
+            return True
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            self.receipt = None
+
+    route = ReceiptBeforeReturnRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("cleanup-receipt-before-route-return")
+    port.admit(request, Sink(), qualification_binding=Qualification())
+    assert route.started.wait(timeout=2.0)
+    deadline = time.monotonic() + 0.3
+    assert port.cancel_with_deadline(
+        request.request_id,
+        deadline_monotonic_s=deadline,
+    )
+    assert route.receipt_published.wait(timeout=2.0)
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)[0]
+    assert snapshot.cleanup_result is not None
+    assert snapshot.terminal is not None
+    assert snapshot.terminal.status.value == "cancelled"
+
+    time.sleep(max(0.0, deadline - time.monotonic()) + 0.05)
+    route.release_infer.set()
+    _wait(lambda: port.request_status(request.request_id) != "DECODING")
+    assert port.request_status(request.request_id) == "CANCELLED"
+    assert coordinator.phase(request.request_id) == "cancelled"
+    port.release_request(request.request_id)
+    port.close()
+
+
+def test_cancellation_wins_when_route_returns_before_cancel_call_does(
+    live_graph, request_factory
+) -> None:
+    """Controller cancellation must be route-visible before physical fanout.
+
+    The physical cancel operation can wake the inference thread before the
+    cancel caller returns.  The inference terminal decision must already see
+    the controller's cancellation generation in that interval; otherwise it
+    attempts an illegal COMPLETED CAS after exact cleanup and strands the M16
+    request in its cleanup phase.
+    """
+
+    class Qualification:
+        qualification_digest = "sha256:" + "f" * 64
+
+    class CancelReturnWindowRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release_infer = threading.Event()
+            self.receipt_requested = threading.Event()
+            self.receipt = None
+            self.cancel_requested = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            command_identity,
+            cancel_requested,
+            **_kwargs,
+        ):
+            self.cancel_requested = cancel_requested
+            self.started.set()
+            assert self.release_infer.wait(timeout=2.0)
+            # Controller terminal authority is already cancelled, but the
+            # route callback stays false until cancel_request() has installed
+            # the matching physical generation and returned.
+            assert cancel_requested() is False
+            self.receipt = {
+                **command_identity,
+                "cancellation_generation": 1,
+                "cleanup_owner_id": (
+                    f"physical-live-route:{command_identity['deployment_id']}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+            }
+            return InferenceResult(request_id=request_id, token_ids=())
+
+        def cancel_request(self, _request_id, **_kwargs):
+            self.release_infer.set()
+            assert self.receipt_requested.wait(timeout=2.0)
+            return True
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            self.receipt_requested.set()
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            self.receipt = None
+
+    route = CancelReturnWindowRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("cancellation-return-window-race")
+    port.admit(request, Sink(), qualification_binding=Qualification())
+    assert route.started.wait(timeout=2.0)
+    assert port.cancel(request.request_id) is True
+    assert route.cancel_requested is not None
+    assert route.cancel_requested() is True
+
+    _wait(lambda: port.request_status(request.request_id) != "DECODING")
+    assert port.request_status(request.request_id) == "CANCELLED", port._pending[
+        request.request_id
+    ].terminal_blocked_reason
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)
+    assert snapshot[0].cleanup_result is not None
+    assert snapshot[0].terminal is not None
+    assert snapshot[0].terminal.status.value == "cancelled"
+    assert coordinator.phase(request.request_id) == "cancelled"
+    assert all(
+        placement["active_reservations"] == 0
+        for placement in coordinator.status()["placements"]
+    )
+    port.release_request(request.request_id)
+    port.close()
+
+
+def test_late_exact_receipt_revives_terminal_after_dispatch_slot_retired(
+    live_graph, request_factory
+) -> None:
+    """A receipt ordered after worker exit must finish retained cleanup."""
+
+    class Qualification:
+        qualification_digest = "sha256:" + "9" * 64
+
+    class LateReceiptRoute:
+        is_simulated = False
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.release_infer = threading.Event()
+            self.publisher = None
+            self.command_identity = None
+            self.receipt = None
+            self.port = None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(
+            self,
+            _tokens,
+            *,
+            request_id,
+            command_identity,
+            publish_cleanup_receipt,
+            **_kwargs,
+        ):
+            self.publisher = publish_cleanup_receipt
+            self.command_identity = command_identity
+            self.started.set()
+            assert self.release_infer.wait(timeout=2.0)
+            return InferenceResult(request_id=request_id, token_ids=())
+
+        def cancel_request(self, request_id, **_kwargs):
+            self.release_infer.set()
+            assert self.port is not None
+            _wait(lambda: self.port.request_status(request_id) == "TERMINAL_BLOCKED")
+            assert self.command_identity is not None
+            self.receipt = {
+                **self.command_identity,
+                "cancellation_generation": 1,
+                "cleanup_owner_id": (
+                    f"physical-live-route:{self.command_identity['deployment_id']}"
+                ),
+                "node_ids": ["node-a", "node-b"],
+                "completed_at_monotonic_ms": int(time.monotonic() * 1_000),
+            }
+            assert self.publisher is not None
+            self.publisher(self.receipt)
+            return True
+
+        def request_cleanup_receipt_scoped(self, _request_id, **_identity):
+            return self.receipt
+
+        def release_request_scoped(self, _request_id, **_identity):
+            self.receipt = None
+
+    route = LateReceiptRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route,
+        execution_graph=live_graph,
+        runtime_coordinator=coordinator,
+    )
+    route.port = port
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    request = request_factory("late-receipt-after-retired-slot")
+    port.admit(request, Sink(), qualification_binding=Qualification())
+    assert route.started.wait(timeout=2.0)
+    assert port.cancel(request.request_id) is True
+
+    _wait(lambda: port.request_status(request.request_id) == "CANCELLED")
+    assert coordinator.phase(request.request_id) == "cancelled"
+    assert all(
+        placement["active_reservations"] == 0
+        for placement in coordinator.status()["placements"]
+    )
+    snapshot = port._commands.snapshot(request.request_id, request_attempt=1)[0]
+    assert snapshot.cleanup_result is not None
+    assert snapshot.terminal is not None
+    assert snapshot.terminal.status.value == "cancelled"
     port.release_request(request.request_id)
     port.close()
 
@@ -631,16 +1270,15 @@ def test_queue_saturation_returns_bounded_backpressure_without_leak(
     assert getattr(caught.value, "code", None) == "queue_full"
     status = coordinator.status()
     assert status["queue"]["depth"] == 1
-    assert all(
-        item["request_id"] != "queue-rejected" for item in status["requests"]
-    )
+    assert all(item["request_id"] != "queue-rejected" for item in status["requests"])
     assert any(
-        item["kind"] == "backpressure"
-        and item["request_id"] == "queue-rejected"
+        item["kind"] == "backpressure" and item["request_id"] == "queue-rejected"
         for item in status["incidents"]
     )
     assert coordinator.cancel("queue-owner") is True
-    assert all(item["active_reservations"] == 0 for item in coordinator.status()["placements"])
+    assert all(
+        item["active_reservations"] == 0 for item in coordinator.status()["placements"]
+    )
 
 
 def test_worker_exit_fails_only_owned_request_and_releases_resources(
@@ -674,7 +1312,9 @@ def test_worker_exit_fails_only_owned_request_and_releases_resources(
     port.release_request(failed)
     port.release_request(healthy)
     _wait(port.is_idle)
-    assert all(item["active_reservations"] == 0 for item in coordinator.status()["placements"])
+    assert all(
+        item["active_reservations"] == 0 for item in coordinator.status()["placements"]
+    )
     port.close()
 
 

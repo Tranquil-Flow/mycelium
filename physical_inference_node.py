@@ -56,16 +56,28 @@ from mycelium_router.live_ports import (
 )
 from mycelium_router.layer_builder import layer_load_proof_digest
 from mycelium_router.router import Router
-from mycelium_router.transports.iroh import IrohTransport, PeerBinding
+from mycelium_router.transports.iroh import (
+    IrohTransport,
+    IrohTransportError,
+    PeerBinding,
+)
 from mycelium_router.validation import validate_execution_graph, validate_manifest
 from physical_sqlite_capacity import SQLiteQualificationCapacityPort
 
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
+CLEANUP_CONTROL_FRAME_PREFIX = b"MYCELIUM_CLEANUP_RESPONSE_V1 "
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS = 5.0
 _MAX_IROH_DELIVERY_TIMEOUT_SECONDS = 240.0
 _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS = 240.0
+_CANCEL_RECEIPT_POLL_SECONDS = 0.05
+# Reserve one complete parent snapshot attempt inside the immutable two-second
+# owner budget.  If node-local teardown has not sealed by this handoff, the
+# correlated command returns its non-authoritative pending observation and the
+# route can perform exactly one fresh fallback proof without extending the
+# deadline or racing duplicate work for the whole interval.
+_CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS = 0.5
 _COMMAND_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
 )
@@ -85,6 +97,133 @@ _REQUEST_CONTROL_FIELDS = frozenset(
         "cancellation_generation",
     }
 )
+_INFERENCE_COMMANDS = frozenset({"infer_start", "infer_decode"})
+
+
+def _is_exact_owner_cancellation_successor(
+    command_control: Mapping[str, Any],
+    owner_control: object,
+) -> bool:
+    """Return whether owner cancellation monotonically overtook a command."""
+
+    if not isinstance(owner_control, Mapping):
+        return False
+    immutable_fields = _REQUEST_CONTROL_FIELDS - {"cancellation_generation"}
+    return bool(
+        type(owner_control.get("cancellation_generation")) is int
+        and type(command_control.get("cancellation_generation")) is int
+        and owner_control["cancellation_generation"]
+        > command_control["cancellation_generation"]
+        and all(
+            owner_control.get(field) == command_control.get(field)
+            for field in immutable_fields
+        )
+    )
+
+
+def _command_uses_inference_lane(document: object) -> bool:
+    """Keep model execution out of the reserved cleanup/control lane."""
+
+    return (
+        isinstance(document, Mapping) and document.get("command") in _INFERENCE_COMMANDS
+    )
+
+
+def _command_uses_cleanup_response_priority(document: object) -> bool:
+    """Return whether this response carries deadline-bound cleanup authority."""
+
+    if not isinstance(document, Mapping):
+        return False
+    operation = document.get("command")
+    if operation == "infer_cancel_wait":
+        return True
+    payload = document.get("payload")
+    return bool(
+        operation == "snapshot"
+        and isinstance(payload, Mapping)
+        and payload.get("receipt_only") is True
+    )
+
+
+def _owner_cancellation_interrupted_inference(
+    service: object,
+    document: object,
+    error: BaseException,
+) -> bool:
+    """Recognize only the exact owner fence that overtook this command."""
+
+    if not isinstance(error, IrohTransportError) or error.code != "path_cancelled":
+        return False
+    if not isinstance(document, Mapping):
+        return False
+    operation = document.get("command")
+    payload = document.get("payload")
+    if operation not in _INFERENCE_COMMANDS or not isinstance(payload, Mapping):
+        return False
+    if operation == "infer_start":
+        request = payload.get("request")
+        request_id = request.get("request_id") if isinstance(request, Mapping) else None
+    else:
+        request_id = payload.get("request_id")
+    command_control = payload.get("control")
+    if not isinstance(request_id, str) or not isinstance(command_control, Mapping):
+        return False
+    control_lock = getattr(service, "_control_lock", None)
+    cancellation_controls = getattr(service, "_cancellation_controls", None)
+    if control_lock is None or not isinstance(cancellation_controls, Mapping):
+        return False
+    with control_lock:
+        owner_control = cancellation_controls.get(request_id)
+        if not isinstance(owner_control, Mapping):
+            # A cleanup snapshot retires transient cancellation-control state
+            # as soon as exact runtime/transport absence is proved.  An
+            # inference command already executing on another worker can then
+            # unwind through its late ``path_cancelled`` exception.  The
+            # bounded complete receipt is the monotonic successor authority;
+            # use it to classify that already-fenced command instead of
+            # turning a successful cancellation into request_failed_closed.
+            receipts = getattr(service, "_request_cleanup_receipts", None)
+            receipt = (
+                receipts.get(request_id) if isinstance(receipts, Mapping) else None
+            )
+            if isinstance(receipt, Mapping) and receipt.get("complete") is True:
+                owner_control = receipt
+        if not isinstance(owner_control, Mapping):
+            return False
+        return _is_exact_owner_cancellation_successor(
+            command_control,
+            owner_control,
+        )
+
+
+def _age_cleanup_command_budget(
+    document: object,
+    *,
+    queued_seconds: float,
+) -> object:
+    """Keep node-local receipt polling inside the frame's original budget."""
+
+    if (
+        not isinstance(document, Mapping)
+        or document.get("command") != "infer_cancel_wait"
+        or not isinstance(document.get("payload"), Mapping)
+    ):
+        return document
+    payload = document["payload"]
+    budget_ms = payload.get("deadline_budget_ms")
+    if type(budget_ms) is not int or not 1 <= budget_ms <= 2_000:
+        return document
+    queued_ms = max(0, int(queued_seconds * 1_000.0))
+    aged = dict(document)
+    aged["payload"] = {
+        **payload,
+        # A command that reaches its reserved worker near expiry must still
+        # apply the generation fence and take one exact snapshot, but it must
+        # not start a new duration window after waiting in the stdin/executor
+        # queue. The parent independently enforces the absolute owner deadline.
+        "deadline_budget_ms": max(1, budget_ms - queued_ms),
+    }
+    return aged
 
 
 class NodeCommandError(RuntimeError):
@@ -834,14 +973,25 @@ class PhysicalNodeService:
         )
         self._sinks: dict[str, _CaptureSink] = {}
         self._last_cancellation: dict[str, Any] | None = None
-        self._cancellations_by_subject: dict[
-            tuple[str, str, int], dict[str, Any]
-        ] = {}
+        self._cancellations_by_subject: dict[tuple[str, str, int], dict[str, Any]] = {}
         self._control_lock = threading.RLock()
         self._request_controls: dict[str, dict[str, Any]] = {}
         self._pending_cancellations: dict[str, dict[str, Any]] = {}
         self._cancellation_controls: dict[str, dict[str, Any]] = {}
+        self._cancellation_workers: dict[str, threading.Thread] = {}
+        # ``infer_cancel_wait`` may wait briefly for the exact receipt produced
+        # by its independently running teardown worker.  The event is only a
+        # delivery optimization: the signed request-scoped receipt remains the
+        # sole cleanup authority.
+        self._cancellation_receipt_events: dict[str, threading.Event] = {}
+        # A worker disappearing is not, by itself, cleanup proof.  Retain a
+        # bounded request-scoped failure marker until the same generation-
+        # fenced teardown succeeds.  Without this marker an exception in the
+        # daemon worker's body was erased by its ``finally`` block and a later
+        # snapshot could mistake "thread absent" for "teardown complete".
+        self._cancellation_worker_errors: dict[str, str] = {}
         self._request_cleanup_receipts: dict[str, dict[str, Any]] = {}
+        self._request_cleanup_receipt_counters: dict[str, dict[str, int]] = {}
 
     def _safe_document(self, relative_path: Any, code: str) -> dict[str, Any]:
         _require(
@@ -1000,11 +1150,7 @@ class PhysicalNodeService:
             for architecture in supported_architectures
         }
         supported_decode_modes = sorted(
-            {
-                mode
-                for modes in decode_modes_by_architecture.values()
-                for mode in modes
-            }
+            {mode for modes in decode_modes_by_architecture.values() for mode in modes}
         )
         object_root = self.artifact_root / ".mycelium" / "objects" / "sha256"
         cached_content_digests = (
@@ -1173,9 +1319,7 @@ class PhysicalNodeService:
         loaded_stages = {placement.placement_id: loaded}
         runtime_proof = getattr(loaded, "proof", None)
         runtime_document = (
-            runtime_proof.get("runtime")
-            if isinstance(runtime_proof, Mapping)
-            else None
+            runtime_proof.get("runtime") if isinstance(runtime_proof, Mapping) else None
         )
         architecture = (
             runtime_document.get("architecture")
@@ -1233,6 +1377,27 @@ class PhysicalNodeService:
                 decode_mode=route_decode_mode,
             )
         raise NodeCommandError("unsupported_runtime_backend")
+
+    def _bind_router_config_to_runtime(self, runtime: Any) -> None:
+        """Make Router prefill framing follow the runtime's resolved mode.
+
+        ``requested_decode_mode`` may be omitted in a physical operator plan.
+        In that case the runtime resolves the architecture-supported mode while
+        the service is configured.  Basing chunking only on the optional CLI
+        request leaves an auto-selected stage-local-KV runtime receiving one
+        unbounded prefill operation, defeating its cooperative cancellation
+        boundary.
+        """
+
+        mode = getattr(runtime, "decode_mode", None)
+        _require(
+            mode in {"complete_context_replay", "stage_local_kv"},
+            "invalid_runtime_decode_mode",
+        )
+        self._router_config = replace(
+            self._router_config,
+            prefill_chunk_size_tokens=8 if mode == "stage_local_kv" else 0,
+        )
 
     def _configure(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(self.state == "NEW", "invalid_state_for_configure")
@@ -1449,6 +1614,7 @@ class PhysicalNodeService:
             loaded,
             parent_assignment_digest=parent_assignment_digest,
         )
+        self._bind_router_config_to_runtime(runtime)
         sidecar = self._new_sidecar_process()
         try:
             ready = sidecar.start()
@@ -1633,8 +1799,7 @@ class PhysicalNodeService:
             and type(control["path_attempt"]) is int
             and control["path_attempt"] >= 0
             and isinstance(control["path_digest"], str)
-            and re.fullmatch(r"sha256:[0-9a-f]{64}", control["path_digest"])
-            is not None
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", control["path_digest"]) is not None
             and type(control["topology_generation"]) is int
             and control["topology_generation"] >= 1
             and type(control["cancellation_generation"]) is int
@@ -1668,17 +1833,47 @@ class PhysicalNodeService:
             initial=True,
         )
         with self._control_lock:
-            _require(
-                data["request_id"] not in self._request_cleanup_receipts,
-                "request_already_cleaned",
-            )
+            stored_cleanup = self._request_cleanup_receipts.get(data["request_id"])
+            if stored_cleanup is not None:
+                # Owner cancellation may overtake a generation-0 bind on the
+                # independent priority command lane and seal exact cleanup
+                # before this ordinary response reaches the node.  The sealed
+                # receipt is the monotonic successor of that bind identity:
+                # validate it and acknowledge the bind without recreating any
+                # request control after cleanup.  Forcing physical fanout to
+                # wait for every bind response consumed the cancellation's
+                # fixed two-second budget under concurrent admission even
+                # though the node already had all immutable identity fields in
+                # infer_cancel_wait.
+                immutable_fields = _REQUEST_CONTROL_FIELDS - {"cancellation_generation"}
+                _require(
+                    stored_cleanup.get("complete") is True
+                    and all(
+                        stored_cleanup.get(field) == control[field]
+                        for field in immutable_fields
+                    )
+                    and stored_cleanup.get("cancellation_generation")
+                    == control["cancellation_generation"] + 1,
+                    "request_already_cleaned",
+                )
+                bound_control = {
+                    field: stored_cleanup[field] for field in _REQUEST_CONTROL_FIELDS
+                }
+                return self._signed_result(
+                    "request_control_bound",
+                    {
+                        "request_id": data["request_id"],
+                        "control_digest": "sha256:"
+                        + hashlib.sha256(
+                            canonical_json_bytes(bound_control)
+                        ).hexdigest(),
+                    },
+                )
             current = self._request_controls.get(data["request_id"])
             pending_cancel = self._pending_cancellations.get(data["request_id"])
             bound_control = dict(control)
             if current is not None:
-                immutable_fields = _REQUEST_CONTROL_FIELDS - {
-                    "cancellation_generation"
-                }
+                immutable_fields = _REQUEST_CONTROL_FIELDS - {"cancellation_generation"}
                 cancellation_control = self._cancellation_controls.get(
                     data["request_id"]
                 )
@@ -1734,9 +1929,7 @@ class PhysicalNodeService:
             {
                 "request_id": data["request_id"],
                 "control_digest": "sha256:"
-                + hashlib.sha256(
-                    canonical_json_bytes(bound_control)
-                ).hexdigest(),
+                + hashlib.sha256(canonical_json_bytes(bound_control)).hexdigest(),
             },
         )
 
@@ -1790,30 +1983,44 @@ class PhysicalNodeService:
         _exact_fields(payload, set(), "invalid_health_fields")
         _require(self.state in {"CONFIGURED", "RUNNING"}, "invalid_state_for_health")
         fatal = None if self.transport is None else self.transport.fatal_error
+        details: dict[str, Any] = {
+            "state": self.state,
+            "sidecar_process": (
+                None if self.sidecar is None else self.sidecar.status()
+            ),
+            "transport_fatal_error": (
+                None if fatal is None else {"code": fatal.code, "detail": fatal.detail}
+            ),
+            "transport_running": (
+                False if self.transport is None else self.transport.running
+            ),
+        }
+        if self.transport is not None:
+            details["transport_counters"] = _plain_json(
+                self.transport.counter_snapshot()
+            )
+        runtime = getattr(self, "runtime", None)
+        operation_counters = getattr(runtime, "operation_counter_snapshot", None)
+        if callable(operation_counters):
+            details["runtime_counters"] = _plain_json(operation_counters())
         return self._signed_result(
             "health",
-            {
-                "state": self.state,
-                "sidecar_process": (
-                    None if self.sidecar is None else self.sidecar.status()
-                ),
-                "transport_fatal_error": (
-                    None
-                    if fatal is None
-                    else {"code": fatal.code, "detail": fatal.detail}
-                ),
-                "transport_running": (
-                    False if self.transport is None else self.transport.running
-                ),
-            },
+            details,
         )
 
     def _snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         _require(
-            set(payload) in (set(), {"cleanup_subject"}),
+            set(payload)
+            in (
+                set(),
+                {"cleanup_subject"},
+                {"cleanup_subject", "receipt_only"},
+            ),
             "invalid_snapshot_fields",
         )
         cleanup_subject = payload.get("cleanup_subject")
+        receipt_only = payload.get("receipt_only", False)
+        _require(type(receipt_only) is bool, "invalid_snapshot_fields")
         if cleanup_subject is not None:
             cleanup_subject = _exact_fields(
                 cleanup_subject,
@@ -1867,68 +2074,176 @@ class PhysicalNodeService:
             )
         _require(self.state in {"CONFIGURED", "RUNNING"}, "invalid_state_for_snapshot")
         assert self.runtime is not None
-        details: dict[str, Any] = {
-            "runtime": self.runtime.kv_snapshot(),
-            "capacity": None
-            if self.capacity is None
-            else _plain_json(self.capacity.snapshot()),
-            "host_resources": self._host_resources(),
-            "transport": None,
-            "sidecar_process": (
-                None if self.sidecar is None else self.sidecar.status()
-            ),
-        }
-        details["interruptibility"] = {
-            "runtime_backend": details["runtime"].get("backend"),
-            "decode_mode": details["runtime"].get("mode"),
-            "work_unit": "transformer_layer",
-            "maximum_observed_work_unit_ms": details["runtime"].get(
-                "maximum_observed_work_unit_ms"
-            ),
-            "observed_work_unit_count": details["runtime"].get(
-                "observed_work_unit_count", 0
-            ),
-            "maximum_total_cleanup_ms": 2_000,
-            "physical_proof_required": True,
-            "backend_candidate": details["runtime"].get("mode")
-            == "stage_local_kv",
-            "cooperative_bound_candidate": (
-                details["runtime"].get("mode") == "stage_local_kv"
-                and type(details["runtime"].get("observed_work_unit_count")) is int
-                and details["runtime"].get("observed_work_unit_count", 0) > 0
-                and isinstance(
-                    details["runtime"].get("maximum_observed_work_unit_ms"),
-                    (int, float),
+        if receipt_only and cleanup_subject is not None:
+            # A committed receipt is the monotonic successor of every mutable
+            # runtime/transport observation for this exact subject.  Check it
+            # before touching even the nonblocking probe path: under sustained
+            # node work, a fallback command used to spend its entire bounded
+            # response attempt observing unrelated state even though the
+            # lifecycle worker had already sealed the requested receipt.
+            with self._control_lock:
+                stored_cleanup = self._request_cleanup_receipts.get(
+                    cleanup_subject["request_id"]
                 )
-                and details["runtime"].get("maximum_observed_work_unit_ms", 2_000)
-                < 2_000
-            ),
+                stored_counters = getattr(
+                    self,
+                    "_request_cleanup_receipt_counters",
+                    {},
+                ).get(cleanup_subject["request_id"])
+            if stored_cleanup is not None:
+                _require(
+                    all(
+                        stored_cleanup.get(field) == value
+                        for field, value in cleanup_subject.items()
+                    ),
+                    "cleanup_receipt_identity_mismatch",
+                )
+                details = {"request_cleanup": dict(stored_cleanup)}
+                if isinstance(stored_counters, Mapping):
+                    details["transport_counters"] = dict(stored_counters)
+                elif self.transport is not None:
+                    # Compatibility for a receipt restored or injected without
+                    # the co-committed counter projection. Production receipt
+                    # sealing always stores the exact counters observed in the
+                    # same snapshot below, so the fast path does not reacquire
+                    # mutable transport state under load.
+                    details["transport_counters"] = _plain_json(
+                        self.transport.counter_snapshot()
+                    )
+                return self._signed_result("snapshot", details)
+        runtime_observation_complete = True
+        runtime_subject_clean: bool | None = None
+        if receipt_only and cleanup_subject is not None:
+            subject_probe = getattr(self.runtime, "kv_subject_clean", None)
+            if callable(subject_probe):
+                runtime_subject_clean = bool(
+                    subject_probe(
+                        cleanup_subject["request_id"],
+                        cleanup_subject["path_id"],
+                        cleanup_subject["path_attempt"],
+                    )
+                )
+            nonblocking_snapshot = getattr(
+                self.runtime, "kv_snapshot_nonblocking", None
+            )
+            runtime_snapshot = (
+                nonblocking_snapshot()
+                if callable(nonblocking_snapshot)
+                else self.runtime.kv_snapshot()
+            )
+            if runtime_snapshot is None:
+                runtime_observation_complete = False
+                runtime_snapshot = {
+                    "mode": getattr(self.runtime, "decode_mode", None),
+                    "states": {},
+                    "active_state_count": 1,
+                    "active_kv_bytes": 0,
+                    "cleanup_observation_pending": True,
+                }
+        else:
+            runtime_snapshot = self.runtime.kv_snapshot()
+        details: dict[str, Any] = {
+            "runtime": runtime_snapshot,
+            "runtime_cleanup_observation_complete": runtime_observation_complete,
         }
         cancellation = self._last_cancellation
-        if self.transport is not None:
-            details["transport"] = _plain_json(self.transport.evidence())
-            fatal = self.transport.fatal_error
-            details["transport_fatal_error"] = (
-                None if fatal is None else {"code": fatal.code, "detail": fatal.detail}
+        transport_receipt_observation: (
+            tuple[Mapping[str, Any], Mapping[str, Any]] | None
+        ) = None
+        transport_observation_complete = True
+        if receipt_only and self.transport is not None:
+            nonblocking_transport_observation = getattr(
+                self.transport,
+                "cancellation_cleanup_observation_nonblocking",
+                None,
             )
-            details["transport_worker_threads"] = self.transport.worker_threads_alive
-            details["transport_dispatcher_phase"] = self.transport.dispatcher_phase
-            details["transport_last_dispatch_error"] = (
-                self.transport.last_dispatch_error
-            )
-            details["transport_outbound_trace"] = list(self.transport.outbound_trace)
-            details["transport_pending_delivery_count"] = (
-                self.transport.pending_delivery_count
-            )
-            cancellation = cancellation or self.transport.last_cancellation
-            details["transport_cancellation_cleanup_complete"] = (
-                False
-                if cancellation is None
-                else self.transport.cancellation_cleanup_complete(
-                    str(cancellation["request_id"]),
-                    str(cancellation["path_id"]),
+            if callable(nonblocking_transport_observation):
+                transport_receipt_observation = nonblocking_transport_observation(
+                    cleanup_subject["request_id"],
+                    cleanup_subject["path_id"],
+                    cleanup_subject["path_attempt"],
                 )
+                if transport_receipt_observation is None:
+                    transport_observation_complete = False
+                else:
+                    details["transport_counters"] = _plain_json(
+                        transport_receipt_observation[0]
+                    )
+            else:
+                details["transport_counters"] = _plain_json(
+                    self.transport.counter_snapshot()
+                )
+        details["transport_cleanup_observation_complete"] = (
+            transport_observation_complete
+        )
+        if not receipt_only:
+            details.update(
+                {
+                    "capacity": None
+                    if self.capacity is None
+                    else _plain_json(self.capacity.snapshot()),
+                    "host_resources": self._host_resources(),
+                    "transport": None,
+                    "sidecar_process": (
+                        None if self.sidecar is None else self.sidecar.status()
+                    ),
+                }
             )
+            details["interruptibility"] = {
+                "runtime_backend": details["runtime"].get("backend"),
+                "decode_mode": details["runtime"].get("mode"),
+                "work_unit": "transformer_layer",
+                "maximum_observed_work_unit_ms": details["runtime"].get(
+                    "maximum_observed_work_unit_ms"
+                ),
+                "observed_work_unit_count": details["runtime"].get(
+                    "observed_work_unit_count", 0
+                ),
+                "maximum_total_cleanup_ms": 2_000,
+                "physical_proof_required": True,
+                "backend_candidate": details["runtime"].get("mode") == "stage_local_kv",
+                "cooperative_bound_candidate": (
+                    details["runtime"].get("mode") == "stage_local_kv"
+                    and type(details["runtime"].get("observed_work_unit_count")) is int
+                    and details["runtime"].get("observed_work_unit_count", 0) > 0
+                    and isinstance(
+                        details["runtime"].get("maximum_observed_work_unit_ms"),
+                        (int, float),
+                    )
+                    and details["runtime"].get("maximum_observed_work_unit_ms", 2_000)
+                    < 2_000
+                ),
+            }
+            if self.transport is not None:
+                details["transport"] = _plain_json(self.transport.evidence())
+                fatal = self.transport.fatal_error
+                details["transport_fatal_error"] = (
+                    None
+                    if fatal is None
+                    else {"code": fatal.code, "detail": fatal.detail}
+                )
+                details["transport_worker_threads"] = (
+                    self.transport.worker_threads_alive
+                )
+                details["transport_dispatcher_phase"] = self.transport.dispatcher_phase
+                details["transport_last_dispatch_error"] = (
+                    self.transport.last_dispatch_error
+                )
+                details["transport_outbound_trace"] = list(
+                    self.transport.outbound_trace
+                )
+                details["transport_pending_delivery_count"] = (
+                    self.transport.pending_delivery_count
+                )
+                cancellation = cancellation or self.transport.last_cancellation
+                details["transport_cancellation_cleanup_complete"] = (
+                    False
+                    if cancellation is None
+                    else self.transport.cancellation_cleanup_complete(
+                        str(cancellation["request_id"]),
+                        str(cancellation["path_id"]),
+                    )
+                )
         if cleanup_subject is not None:
             with self._control_lock:
                 stored_cleanup = self._request_cleanup_receipts.get(
@@ -1945,38 +2260,81 @@ class PhysicalNodeService:
                 details["request_cleanup"] = dict(stored_cleanup)
                 return self._signed_result("snapshot", details)
             runtime_states = details["runtime"].get("states", {})
-            runtime_subject_clean = not any(
-                path_id == cleanup_subject["path_id"]
-                and state.get("request_id") == cleanup_subject["request_id"]
-                and state.get("path_attempt") == cleanup_subject["path_attempt"]
-                for path_id, state in runtime_states.items()
-            )
-            transport_subject_clean = (
-                True
-                if self.transport is None
-                else self.transport.cancellation_cleanup_complete(
+            if runtime_subject_clean is None:
+                runtime_subject_clean = runtime_observation_complete and not any(
+                    path_id == cleanup_subject["path_id"]
+                    and state.get("request_id") == cleanup_subject["request_id"]
+                    and state.get("path_attempt") == cleanup_subject["path_attempt"]
+                    for path_id, state in runtime_states.items()
+                )
+            transport_state: Mapping[str, Any] | None = None
+            if self.transport is None:
+                transport_subject_clean = True
+            elif receipt_only and not transport_observation_complete:
+                transport_subject_clean = False
+            elif transport_receipt_observation is not None:
+                transport_state = transport_receipt_observation[1]
+                transport_subject_clean = all(
+                    value in (0, False)
+                    for key, value in transport_state.items()
+                    if key != "cancellation_observed"
+                )
+            else:
+                # One lock-bounded transport snapshot owns both the cleanup
+                # decision and its signed blocker projection. Calling the
+                # boolean probe and state probe separately allowed a racing
+                # path lifecycle to produce internally contradictory evidence
+                # from two different instants. A receipt must describe exactly
+                # one observed state.
+                transport_state = self.transport.cancellation_cleanup_state(
                     cleanup_subject["request_id"],
                     cleanup_subject["path_id"],
                     cleanup_subject["path_attempt"],
                 )
+                transport_subject_clean = all(
+                    value in (0, False)
+                    for key, value in transport_state.items()
+                    if key != "cancellation_observed"
+                )
+            with self._control_lock:
+                cancellation_worker = getattr(self, "_cancellation_workers", {}).get(
+                    cleanup_subject["request_id"]
+                )
+                cancellation_worker_error = getattr(
+                    self,
+                    "_cancellation_worker_errors",
+                    {},
+                ).get(cleanup_subject["request_id"])
+            cancellation_worker_complete = (
+                cancellation_worker is None or not cancellation_worker.is_alive()
+            ) and cancellation_worker_error is None
+            resource_cleanup_complete = (
+                runtime_subject_clean
+                and transport_subject_clean
+                and cancellation_worker_complete
             )
             details["request_cleanup"] = {
                 **cleanup_subject,
                 "runtime_clean": runtime_subject_clean,
                 "transport_clean": transport_subject_clean,
-                "complete": runtime_subject_clean and transport_subject_clean,
+                "cancellation_worker_complete": cancellation_worker_complete,
+                # Resource absence alone cannot prove that the owner-issued
+                # cancellation generation was applied.  A receipt becomes
+                # complete only after the control proof below also succeeds.
+                "complete": False,
             }
-            if self.transport is not None:
-                details["request_cleanup"]["transport_state"] = (
-                    self.transport.cancellation_cleanup_state(
-                        cleanup_subject["request_id"],
-                        cleanup_subject["path_id"],
-                        cleanup_subject["path_attempt"],
-                    )
+            if cancellation_worker_error is not None:
+                details["request_cleanup"]["cancellation_worker_error"] = (
+                    cancellation_worker_error
                 )
-            if runtime_subject_clean and transport_subject_clean:
+            if transport_state is not None:
+                details["request_cleanup"]["transport_state"] = dict(transport_state)
+            if resource_cleanup_complete:
                 with self._control_lock:
                     cancellation_control = self._cancellation_controls.get(
+                        cleanup_subject["request_id"]
+                    )
+                    pending_cancellation = self._pending_cancellations.get(
                         cleanup_subject["request_id"]
                     )
                 cancellation_observed = (
@@ -1998,10 +2356,13 @@ class PhysicalNodeService:
                         cancellation_control.get(field) == value
                         for field, value in cleanup_subject.items()
                     )
-                with self._control_lock:
-                    control = self._request_controls.get(
-                        cleanup_subject["request_id"]
+                if pending_cancellation is not None:
+                    cancellation_observed = cancellation_observed or all(
+                        pending_cancellation.get(field) == value
+                        for field, value in cleanup_subject.items()
                     )
+                with self._control_lock:
+                    control = self._request_controls.get(cleanup_subject["request_id"])
                     if control is None:
                         # Cancel-before-start: this node received the owner's
                         # infer_cancel before any infer_start/infer_decode
@@ -2024,57 +2385,106 @@ class PhysicalNodeService:
                                 for key, value in pending.items()
                                 if key != "deadline_budget_ms"
                             }
-                            control["cancellation_generation"] = (
-                                cleanup_subject["cancellation_generation"]
+                            control["cancellation_generation"] = cleanup_subject[
+                                "cancellation_generation"
+                            ]
+                            self._request_controls[cleanup_subject["request_id"]] = (
+                                dict(control)
                             )
-                            self._request_controls[
-                                cleanup_subject["request_id"]
-                            ] = dict(control)
                     immutable_fields = _REQUEST_CONTROL_FIELDS - {
                         "cancellation_generation"
                     }
+                    cancellation_generation_proven = False
                     if (
                         control is not None
                         and cleanup_subject["cancellation_generation"]
                         == control["cancellation_generation"] + 1
                     ):
-                        _require(
-                            cancellation_observed,
-                            "cleanup_cancellation_generation_unproven",
-                        )
-                        control["cancellation_generation"] = cleanup_subject[
-                            "cancellation_generation"
-                        ]
-                    _require(
+                        if cancellation_observed:
+                            control["cancellation_generation"] = cleanup_subject[
+                                "cancellation_generation"
+                            ]
+                            cancellation_generation_proven = True
+                    elif (
                         control is not None
-                        and all(
-                            cleanup_subject[field] == control[field]
-                            for field in immutable_fields
-                        ),
-                        "cleanup_subject_generation_mismatch",
-                    )
-                    _require(
-                        cleanup_subject["cancellation_generation"]
-                        == control["cancellation_generation"],
-                        "cleanup_cancellation_generation_mismatch",
-                    )
-                    receipt = dict(details["request_cleanup"])
-                    if len(self._request_cleanup_receipts) >= 256:
-                        oldest_request_id = next(iter(self._request_cleanup_receipts))
-                        self._request_cleanup_receipts.pop(oldest_request_id, None)
-                    self._request_cleanup_receipts[
-                        cleanup_subject["request_id"]
-                    ] = receipt
-                    self._request_controls.pop(
-                        cleanup_subject["request_id"], None
-                    )
-                    self._pending_cancellations.pop(
-                        cleanup_subject["request_id"], None
-                    )
-                    self._cancellation_controls.pop(
-                        cleanup_subject["request_id"], None
-                    )
-                self._sinks.pop(cleanup_subject["request_id"], None)
+                        and cleanup_subject["cancellation_generation"]
+                        == control["cancellation_generation"]
+                    ):
+                        cancellation_generation_proven = (
+                            cleanup_subject["cancellation_generation"] == 0
+                            or cancellation_observed
+                        )
+                    if control is not None:
+                        _require(
+                            all(
+                                cleanup_subject[field] == control[field]
+                                for field in immutable_fields
+                            ),
+                            "cleanup_subject_generation_mismatch",
+                        )
+                    if cancellation_generation_proven:
+                        details["request_cleanup"]["complete"] = True
+                        receipt = dict(details["request_cleanup"])
+                        if len(self._request_cleanup_receipts) >= 256:
+                            oldest_request_id = next(
+                                iter(self._request_cleanup_receipts)
+                            )
+                            self._request_cleanup_receipts.pop(oldest_request_id, None)
+                            getattr(
+                                self,
+                                "_request_cleanup_receipt_counters",
+                                {},
+                            ).pop(oldest_request_id, None)
+                        self._request_cleanup_receipts[
+                            cleanup_subject["request_id"]
+                        ] = receipt
+                        transport_counters = details.get("transport_counters")
+                        if isinstance(transport_counters, Mapping):
+                            receipt_counters = getattr(
+                                self,
+                                "_request_cleanup_receipt_counters",
+                                None,
+                            )
+                            if receipt_counters is None:
+                                receipt_counters = {}
+                                self._request_cleanup_receipt_counters = (
+                                    receipt_counters
+                                )
+                            receipt_counters[cleanup_subject["request_id"]] = {
+                                str(key): int(value)
+                                for key, value in transport_counters.items()
+                                if type(value) is int
+                            }
+                        self._request_controls.pop(cleanup_subject["request_id"], None)
+                        self._pending_cancellations.pop(
+                            cleanup_subject["request_id"], None
+                        )
+                        self._cancellation_controls.pop(
+                            cleanup_subject["request_id"], None
+                        )
+                if details["request_cleanup"]["complete"] is True:
+                    self._sinks.pop(cleanup_subject["request_id"], None)
+            # A route fallback snapshot can begin immediately after a pending
+            # ``infer_cancel_wait`` response. Both observers may have passed
+            # the initial receipt lookup before either commits cleanup. The
+            # winner retires request control state; without this final
+            # monotonic read, the loser can then sign its stale
+            # ``complete=False`` projection even though an authoritative
+            # receipt already exists. Always project the committed receipt so
+            # cleanup proof cannot move backwards across adjacent observers.
+            with self._control_lock:
+                committed_cleanup = self._request_cleanup_receipts.get(
+                    cleanup_subject["request_id"]
+                )
+            if committed_cleanup is not None:
+                _require(
+                    all(
+                        committed_cleanup.get(field) == value
+                        for field, value in cleanup_subject.items()
+                    ),
+                    "cleanup_receipt_identity_mismatch",
+                )
+                details["request_cleanup"] = dict(committed_cleanup)
         return self._signed_result("snapshot", details)
 
     def _inbound_admission_snapshot(
@@ -2188,9 +2598,9 @@ class PhysicalNodeService:
                 "path_id": path_id,
                 "path_attempt": path_attempt,
             }
-            self._cancellations_by_subject[
-                (request_id, path_id, path_attempt)
-            ] = dict(self._last_cancellation)
+            self._cancellations_by_subject[(request_id, path_id, path_attempt)] = dict(
+                self._last_cancellation
+            )
         return self._signed_result(
             "cancelled", {"request_id": request_id, "result": _plain_json(result)}
         )
@@ -2248,8 +2658,7 @@ class PhysicalNodeService:
         _require(
             isinstance(excluded_placement_ids, list)
             and all(
-                isinstance(item, str) and bool(item)
-                for item in excluded_placement_ids
+                isinstance(item, str) and bool(item) for item in excluded_placement_ids
             )
             and len(excluded_placement_ids) == len(set(excluded_placement_ids)),
             "invalid_excluded_placement_ids",
@@ -2264,17 +2673,19 @@ class PhysicalNodeService:
             )
             with self._control_lock:
                 current = self._request_controls.get(request.request_id)
-                immutable_fields = _REQUEST_CONTROL_FIELDS - {
-                    "cancellation_generation"
-                }
+                immutable_fields = _REQUEST_CONTROL_FIELDS - {"cancellation_generation"}
                 cancellation_preceded_start = bool(
                     current is not None
                     and current["cancellation_generation"]
                     == control["cancellation_generation"] + 1
-                    and all(current[field] == control[field] for field in immutable_fields)
+                    and all(
+                        current[field] == control[field] for field in immutable_fields
+                    )
                 )
                 _require(
-                    current is None or current == control or cancellation_preceded_start,
+                    current is None
+                    or current == control
+                    or cancellation_preceded_start,
                     "conflicting_request_control",
                 )
                 if not cancellation_preceded_start:
@@ -2339,7 +2750,9 @@ class PhysicalNodeService:
                 excluded_placements=frozenset(excluded_placement_ids),
             )
         else:
-            _require(not excluded_placement_ids, "locked_path_cannot_exclude_placements")
+            _require(
+                not excluded_placement_ids, "locked_path_cannot_exclude_placements"
+            )
             manifest_data = data.get("path_manifest")
             _require(isinstance(manifest_data, dict), "invalid_path_manifest")
             try:
@@ -2348,13 +2761,16 @@ class PhysicalNodeService:
                 validate_manifest(manifest, self.graph)
             except (TypeError, ValueError):
                 raise NodeCommandError("invalid_path_manifest") from None
-            manifest_digest = "sha256:" + hashlib.sha256(
-                json.dumps(
-                    manifest_data,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
+            manifest_digest = (
+                "sha256:"
+                + hashlib.sha256(
+                    json.dumps(
+                        manifest_data,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+            )
             _require(
                 manifest.request_id == request.request_id
                 and manifest.path_id == control["path_id"]
@@ -2400,12 +2816,30 @@ class PhysicalNodeService:
                     raise NodeCommandError(self.transport.fatal_error.code)
                 time.sleep(0.01)
                 status = self.router.request_status(request_id)
+            if status == "CANCELLED":
+                # Owner cancellation can overtake the separately ordered
+                # first TokenEvent after prefill has already transitioned the
+                # Router to DECODING.  That is the same valid cancellation
+                # terminal as cancel-before-start, not a missing-token
+                # failure.  Do not dereference the Router record here: exact
+                # generation-fenced teardown may already have retired it.
+                return self._signed_result(
+                    "inference_started",
+                    {
+                        "request_id": request_id,
+                        "status": "CANCELLED",
+                        "output": sink.snapshot(),
+                        "path": None,
+                    },
+                )
             _require(
                 bool(sink.token_ids) or status == "COMPLETED",
                 "prefill_token_timeout",
             )
         record = self.router.get_request(request_id)
         manifest = record.manifest
+        if control_data is None and status in {"COMPLETED", "FAILED", "CANCELLED"}:
+            self._retire_legacy_terminal_path(request_id)
         return self._signed_result(
             "inference_started",
             {
@@ -2425,7 +2859,8 @@ class PhysicalNodeService:
     def _infer_decode(self, payload: dict[str, Any]) -> dict[str, Any]:
         fields = set(payload)
         _require(
-            fields in (
+            fields
+            in (
                 {"request_id", "count"},
                 {"request_id", "count", "control"},
             ),
@@ -2446,8 +2881,9 @@ class PhysicalNodeService:
             self.state == "RUNNING" and self.router is not None,
             "invalid_state_for_infer_decode",
         )
-        sink = self._sinks.get(data["request_id"])
-        _require(sink is not None, "unknown_request_id")
+        request_id = data["request_id"]
+        command_control: dict[str, Any] | None = None
+        owner_cancellation_overtook_decode = False
         if "control" in data:
             control = _exact_fields(
                 data["control"],
@@ -2468,15 +2904,100 @@ class PhysicalNodeService:
                 "invalid_infer_decode_control",
             )
             with self._control_lock:
-                current = self._request_controls.get(data["request_id"])
+                current = self._request_controls.get(request_id)
+                owner_control: object = current
+                if current is None:
+                    receipt = self._request_cleanup_receipts.get(request_id)
+                    if (
+                        isinstance(receipt, Mapping)
+                        and receipt.get("complete") is True
+                    ):
+                        owner_control = receipt
+                owner_cancellation_overtook_decode = (
+                    _is_exact_owner_cancellation_successor(control, owner_control)
+                )
                 _require(
-                    current is not None and control == current,
+                    current == control or owner_cancellation_overtook_decode,
                     "stale_infer_decode_generation",
                 )
+            command_control = dict(control)
+        sink = self._sinks.get(request_id)
+        if sink is None:
+            _require(
+                owner_cancellation_overtook_decode,
+                "unknown_request_id",
+            )
+
+        def cancelled_decode_result() -> dict[str, Any]:
+            # Owner cancellation can advance before a queued decode enters the
+            # inference lane, while it is inside transport dispatch, or just
+            # before its terminal status read.  In each ordering, wait only
+            # inside this command's existing completion budget for the Router
+            # teardown that the exact successor generation authorized.
+            deadline = time.monotonic() + min(
+                self.command_timeout * 0.8,
+                _MAX_INFERENCE_COMPLETION_TIMEOUT_SECONDS,
+            )
+            while True:
+                try:
+                    status = self.router.request_status(request_id)
+                except KeyError:
+                    status = "CANCELLED"
+                if status in {"COMPLETED", "FAILED", "CANCELLED"}:
+                    break
+                _require(
+                    time.monotonic() < deadline,
+                    "decode_cancellation_completion_timeout",
+                )
+                time.sleep(0.01)
+            return self._signed_result(
+                "inference_decoded",
+                {
+                    "request_id": request_id,
+                    "dispatched": 0,
+                    "status": status,
+                    "output": (
+                        sink.snapshot()
+                        if sink is not None
+                        else {"token_indexes": [], "token_ids": []}
+                    ),
+                },
+            )
+
+        if owner_cancellation_overtook_decode:
+            return cancelled_decode_result()
+
+        assert sink is not None
         dispatched = 0
         for _ in range(data["count"]):
             output_count = len(sink.token_ids)
-            if not self.router.decode_one_distributed(data["request_id"]):
+            try:
+                decode_dispatched = self.router.decode_one_distributed(
+                    data["request_id"]
+                )
+            except IrohTransportError as exc:
+                if exc.code != "path_cancelled" or command_control is None:
+                    raise
+                with self._control_lock:
+                    current = self._request_controls.get(request_id)
+                    owner_control = current
+                    if current is None:
+                        receipt = self._request_cleanup_receipts.get(request_id)
+                        if (
+                            isinstance(receipt, Mapping)
+                            and receipt.get("complete") is True
+                        ):
+                            owner_control = receipt
+                    owner_cancellation_overtook_decode = (
+                        _is_exact_owner_cancellation_successor(
+                            command_control,
+                            owner_control,
+                        )
+                    )
+                if not owner_cancellation_overtook_decode:
+                    raise
+                return cancelled_decode_result()
+            if not decode_dispatched:
                 break
             dispatched += 1
             deadline = time.monotonic() + min(
@@ -2501,17 +3022,254 @@ class PhysicalNodeService:
                 or status in {"COMPLETED", "CANCELLED", "FAILED"},
                 "decode_completion_timeout",
             )
+        terminal_status = self.router.request_status(data["request_id"])
+        if command_control is None and terminal_status in {
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+        }:
+            self._retire_legacy_terminal_path(data["request_id"])
         return self._signed_result(
             "inference_decoded",
             {
                 "request_id": data["request_id"],
                 "dispatched": dispatched,
-                "status": self.router.request_status(data["request_id"]),
+                "status": terminal_status,
                 "output": sink.snapshot(),
             },
         )
 
-    def _infer_cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _retire_legacy_terminal_path(self, request_id: str) -> None:
+        """Retire a completed legacy qualification path before acknowledging it.
+
+        Product inference owns generation-fenced cleanup through
+        ``infer_cancel_wait`` on every participant. The startup qualifier is the
+        sole legacy caller: it has no product control identity, but its terminal
+        Router record still contains the exact request/path attempt needed to
+        release remote relay state and mirrored capacity. Dispatch that existing
+        entry-authoritative teardown and wait for its delivery receipt before the
+        legacy command returns. This prevents route shutdown from racing the
+        asynchronous cancellation worker and leaving persistent capacity behind.
+        """
+
+        router = self.router
+        transport = self.transport
+        _require(
+            router is not None and transport is not None,
+            "legacy_cleanup_unavailable",
+        )
+        try:
+            record = router.get_request(request_id)
+        except KeyError:
+            return
+        _require(
+            record.status in {"COMPLETED", "FAILED", "CANCELLED"},
+            "legacy_cleanup_before_terminal",
+        )
+        manifest = record.manifest
+        cancellation = PathCancellation(
+            request_id=request_id,
+            path_id=manifest.path_id,
+            path_attempt=manifest.path_attempt,
+            topology_version=manifest.topology_version,
+        )
+        transport.send_path_cancellation_if_entry(cancellation)
+        deadline = time.monotonic() + min(2.0, self.command_timeout * 0.8)
+        while not transport.cancellation_cleanup_complete(
+            request_id,
+            manifest.path_id,
+            manifest.path_attempt,
+        ):
+            fatal = transport.fatal_error
+            if fatal is not None:
+                raise NodeCommandError(fatal.code)
+            _require(
+                time.monotonic() < deadline,
+                "legacy_terminal_cleanup_timeout",
+            )
+            time.sleep(0.01)
+
+    def _apply_generation_fenced_cancellation(self, data: Mapping[str, Any]) -> None:
+        transport = getattr(self, "transport", None)
+        deadline_budget_ms = data.get("deadline_budget_ms")
+        cleanup_deadline_monotonic_s = (
+            None
+            if type(deadline_budget_ms) is not int
+            else time.monotonic()
+            + max(
+                0.0,
+                deadline_budget_ms / 1_000.0 - _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS,
+            )
+        )
+        # Fence model execution before touching Router/relay ownership. Entry
+        # record teardown and participant path teardown may briefly wait on
+        # their own subject locks; the runtime marker must already be visible
+        # so active MLX/NumPy work exits at its next per-layer checkpoint.
+        # Repeating runtime.cancel later through relay release is idempotent.
+        runtime_cancel = getattr(getattr(self, "runtime", None), "cancel", None)
+        if callable(runtime_cancel):
+            runtime_cancel(data["path_id"])
+        controlled_cancellation = PathCancellation(
+            request_id=data["request_id"],
+            path_id=data["path_id"],
+            path_attempt=data["path_attempt"],
+            topology_version=data["topology_generation"],
+        )
+        # Fence and interrupt exact-subject transport work before Router
+        # teardown. A send can hold RelayEngine's per-path operation lock;
+        # calling cancel_local first would then wait behind the very send that
+        # controlled transport cancellation is responsible for interrupting.
+        # This ordering is runtime fence -> transport fence -> Router release.
+        apply_controlled = getattr(
+            transport,
+            "apply_controlled_path_cancellation",
+            None,
+        )
+        transport_cancelled = False
+        if callable(apply_controlled):
+            transport_cancelled = bool(
+                apply_controlled(
+                    controlled_cancellation,
+                    entry_cancelled=False,
+                    cleanup_deadline_monotonic_s=cleanup_deadline_monotonic_s,
+                )
+            )
+        cancel_local = getattr(self.router, "cancel_local", None)
+        if callable(cancel_local):
+            router_cancelled = bool(cancel_local(data["request_id"]))
+            cancelled = transport_cancelled or router_cancelled
+        else:
+            cancelled = bool(self.router.cancel(data["request_id"]))
+        if not cancelled and transport is not None:
+            transport.send_path_cancellation_if_entry(controlled_cancellation)
+
+    @staticmethod
+    def _cancellation_worker_error_code(error: BaseException) -> str:
+        """Return a bounded non-payload diagnostic for fail-closed receipts."""
+
+        error_type = type(error).__name__
+        code = getattr(error, "code", None)
+        if not isinstance(code, str) or not code:
+            code = "unclassified"
+        return f"{error_type}:{code}"[:128]
+
+    def _apply_cancellation_until_deadline(self, data: Mapping[str, Any]) -> None:
+        """Retry one idempotent teardown inside the original owner budget.
+
+        The cancellation fence is monotonic and every release operation is
+        idempotent.  Retrying the same exact identity is therefore the correct
+        recovery when a transient lower-layer release raises after publishing
+        only part of teardown.  The retry window is derived from the aged
+        ``deadline_budget_ms`` received from the owner and preserves the same
+        fallback reserve used by ``infer_cancel_wait``; it never extends the
+        frozen two-second protocol deadline.
+        """
+
+        request_id = str(data["request_id"])
+        deadline_budget_ms = data.get("deadline_budget_ms")
+        retry_deadline = (
+            time.monotonic()
+            if type(deadline_budget_ms) is not int
+            else time.monotonic()
+            + max(
+                0.0,
+                deadline_budget_ms / 1_000.0 - _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS,
+            )
+        )
+        attempt = dict(data)
+        while True:
+            try:
+                self._apply_generation_fenced_cancellation(attempt)
+            except Exception as error:
+                with self._control_lock:
+                    errors = getattr(self, "_cancellation_worker_errors", None)
+                    if errors is None:
+                        errors = {}
+                        self._cancellation_worker_errors = errors
+                    errors[request_id] = self._cancellation_worker_error_code(error)
+                    while len(errors) > 256:
+                        errors.pop(next(iter(errors)), None)
+                remaining = retry_deadline - time.monotonic()
+                if remaining <= 0:
+                    return
+                time.sleep(min(_CANCEL_RECEIPT_POLL_SECONDS, remaining))
+                # ``_apply_generation_fenced_cancellation`` passes an absolute
+                # deadline to transport after subtracting the fixed fallback
+                # reserve.  Re-age the duration so every retry observes the
+                # same original deadline rather than receiving a fresh one.
+                remaining = max(0.0, retry_deadline - time.monotonic())
+                attempt["deadline_budget_ms"] = max(
+                    1,
+                    int((remaining + _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS) * 1_000),
+                )
+                continue
+            with self._control_lock:
+                getattr(self, "_cancellation_worker_errors", {}).pop(
+                    request_id,
+                    None,
+                )
+            return
+
+    def _seal_cancellation_receipt_until_deadline(
+        self,
+        data: Mapping[str, Any],
+        *,
+        deadline_monotonic_s: float,
+    ) -> None:
+        """Commit exact cleanup proof from the teardown lifecycle itself.
+
+        A route snapshot remains a fail-closed fallback, but it must not be the
+        only component capable of turning completed physical teardown into a
+        receipt.  Under concurrent cancellation that ordering produced a
+        positive-feedback loop: every owner observed the worker as pending,
+        queued another snapshot, and exhausted the response lane before any
+        snapshot could commit the already-clean subject.  The lifecycle worker
+        owns the exact identity and original deadline, so it seals the same
+        receipt as soon as its worker marker has been retired.
+        """
+
+        # Several direct unit fixtures exercise only generation fencing and do
+        # not construct a runtime.  A configured physical service always has
+        # one; leaving those narrow fixtures on the explicit snapshot path does
+        # not alter production behavior.
+        if getattr(self, "runtime", None) is None:
+            return
+        cleanup_subject = {
+            key: value for key, value in data.items() if key != "deadline_budget_ms"
+        }
+        while True:
+            try:
+                observation = self._snapshot(
+                    {
+                        "cleanup_subject": cleanup_subject,
+                        "receipt_only": True,
+                    }
+                )
+            except Exception:
+                # Snapshot validation remains fail closed.  A transient
+                # nonblocking observation can be retried only inside the
+                # immutable owner deadline; the route's independent observer
+                # retains the same authority and diagnostic surface.
+                observation = None
+            details = (
+                observation.get("details") if isinstance(observation, Mapping) else None
+            )
+            receipt = (
+                details.get("request_cleanup") if isinstance(details, Mapping) else None
+            )
+            if isinstance(receipt, Mapping) and receipt.get("complete") is True:
+                return
+            remaining = deadline_monotonic_s - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(_CANCEL_RECEIPT_POLL_SECONDS, remaining))
+
+    def _infer_cancel(
+        self,
+        payload: dict[str, Any],
+        *,
+        defer_cleanup: bool = True,
+    ) -> dict[str, Any]:
         fields = set(payload)
         _require(
             fields
@@ -2545,12 +3303,10 @@ class PhysicalNodeService:
             self.state == "RUNNING" and self.router is not None,
             "invalid_state_for_infer_cancel",
         )
+        pending_start = False
         if len(fields) > 1:
             cancel_control = self._validated_request_control(
-                {
-                    field: data[field]
-                    for field in _REQUEST_CONTROL_FIELDS
-                },
+                {field: data[field] for field in _REQUEST_CONTROL_FIELDS},
                 code="invalid_infer_cancel_control",
                 initial=False,
             )
@@ -2569,50 +3325,30 @@ class PhysicalNodeService:
                         "conflicting_pending_cancellation",
                     )
                     self._pending_cancellations[data["request_id"]] = dict(data)
-                    return self._signed_result(
-                        "inference_cancelled",
-                        {
-                            "request_id": data["request_id"],
-                            "cancelled": True,
-                            "status": "CANCELLED",
-                            "pending_start": True,
-                        },
-                    )
-                _require(
-                    all(
-                        data[field] == control[field]
-                        for field in (
-                            "deployment_id",
-                            "deployment_epoch",
-                            "qualification_digest",
-                            "command_id",
-                            "publisher_generation",
-                            "absolute_deadline_ms",
-                            "request_attempt",
-                            "path_id",
-                            "path_attempt",
-                            "path_digest",
-                            "topology_generation",
+                    pending_start = True
+                else:
+                    _require(
+                        all(
+                            data[field] == control[field]
+                            for field in (
+                                "deployment_id",
+                                "deployment_epoch",
+                                "qualification_digest",
+                                "command_id",
+                                "publisher_generation",
+                                "absolute_deadline_ms",
+                                "request_attempt",
+                                "path_id",
+                                "path_attempt",
+                                "path_digest",
+                                "topology_generation",
+                            )
                         )
+                        and data["cancellation_generation"]
+                        == control["cancellation_generation"] + 1,
+                        "stale_infer_cancel_generation",
                     )
-                    and data["cancellation_generation"]
-                    == control["cancellation_generation"] + 1,
-                    "stale_infer_cancel_generation",
-                )
-                control["cancellation_generation"] = data[
-                    "cancellation_generation"
-                ]
-        cancelled = self.router.cancel(data["request_id"])
-        transport = getattr(self, "transport", None)
-        if not cancelled and len(fields) > 1 and transport is not None:
-            transport.send_path_cancellation_if_entry(
-                PathCancellation(
-                    request_id=data["request_id"],
-                    path_id=data["path_id"],
-                    path_attempt=data["path_attempt"],
-                    topology_version=data["topology_generation"],
-                )
-            )
+                    control["cancellation_generation"] = data["cancellation_generation"]
         if len(fields) > 1:
             with self._control_lock:
                 cancellation_controls = getattr(
@@ -2628,6 +3364,118 @@ class PhysicalNodeService:
                     for key, value in data.items()
                     if key != "deadline_budget_ms"
                 }
+            if not defer_cleanup:
+                # ``infer_cancel_wait`` already owns a reserved control-lane
+                # worker and cannot acknowledge until its ordered receipt
+                # attempt is complete. Spawning a detached lifecycle worker
+                # here lets this command publish ``cleanup_pending`` before the
+                # only component capable of sealing its receipt has finished.
+                # Under concurrent cancellation every owner then queues
+                # fallback snapshots over the same remote control channel,
+                # even though teardown is already complete locally. Apply and
+                # retry the generation fence in this reserved worker instead,
+                # and keep it registered for the whole teardown. A fallback
+                # snapshot can still run concurrently on another reserved
+                # worker, but cannot seal a transiently clean observation.
+                with self._control_lock:
+                    workers = getattr(self, "_cancellation_workers", None)
+                    if workers is None:
+                        workers = {}
+                        self._cancellation_workers = workers
+                    existing = workers.get(data["request_id"])
+                    _require(
+                        existing is None or not existing.is_alive(),
+                        "duplicate_infer_cancel_worker",
+                    )
+                    inline_worker = threading.current_thread()
+                    workers[data["request_id"]] = inline_worker
+                try:
+                    self._apply_cancellation_until_deadline(dict(data))
+                finally:
+                    with self._control_lock:
+                        current = self._cancellation_workers.get(data["request_id"])
+                        if current is inline_worker:
+                            self._cancellation_workers.pop(data["request_id"], None)
+                return self._signed_result(
+                    "inference_cancelled",
+                    {
+                        "request_id": data["request_id"],
+                        "cancelled": True,
+                        "status": "CANCELLING",
+                        "cleanup_pending": True,
+                        **({"pending_start": True} if pending_start else {}),
+                    },
+                )
+            with self._control_lock:
+                workers = getattr(self, "_cancellation_workers", None)
+                if workers is None:
+                    workers = {}
+                    self._cancellation_workers = workers
+                _require(
+                    data["request_id"] not in workers,
+                    "duplicate_infer_cancel_worker",
+                )
+                receipt_events = getattr(
+                    self,
+                    "_cancellation_receipt_events",
+                    None,
+                )
+                if receipt_events is None:
+                    receipt_events = {}
+                    self._cancellation_receipt_events = receipt_events
+                receipt_event = threading.Event()
+                receipt_events[data["request_id"]] = receipt_event
+                receipt_deadline_monotonic_s = time.monotonic() + (
+                    data["deadline_budget_ms"] / 1_000.0
+                )
+
+                def apply_cancellation() -> None:
+                    try:
+                        self._apply_cancellation_until_deadline(dict(data))
+                    finally:
+                        with self._control_lock:
+                            current = self._cancellation_workers.get(data["request_id"])
+                            if current is threading.current_thread():
+                                self._cancellation_workers.pop(data["request_id"], None)
+                    try:
+                        self._seal_cancellation_receipt_until_deadline(
+                            dict(data),
+                            deadline_monotonic_s=receipt_deadline_monotonic_s,
+                        )
+                    finally:
+                        receipt_event.set()
+                        with self._control_lock:
+                            current_event = self._cancellation_receipt_events.get(
+                                data["request_id"]
+                            )
+                            if current_event is receipt_event:
+                                self._cancellation_receipt_events.pop(
+                                    data["request_id"], None
+                                )
+
+                worker = threading.Thread(
+                    target=apply_cancellation,
+                    name=f"mycelium-cancel-{data['request_id'][:12]}",
+                    daemon=True,
+                )
+                workers[data["request_id"]] = worker
+                try:
+                    worker.start()
+                except BaseException:
+                    workers.pop(data["request_id"], None)
+                    raise
+            return self._signed_result(
+                "inference_cancelled",
+                {
+                    "request_id": data["request_id"],
+                    "cancelled": True,
+                    "status": "CANCELLING",
+                    "cleanup_pending": True,
+                    **({"pending_start": True} if pending_start else {}),
+                },
+            )
+
+        cancelled = self.router.cancel(data["request_id"])
         try:
             status = self.router.request_status(data["request_id"])
         except KeyError:
@@ -2642,6 +3490,61 @@ class PhysicalNodeService:
                 "request_id": data["request_id"],
                 "cancelled": bool(cancelled),
                 "status": status,
+            },
+        )
+
+    def _infer_cancel_wait(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Fence cancellation and return the ordered lifecycle receipt.
+
+        This reserved worker owns generation fencing, teardown, receipt
+        sealing, and response publication in that order. It never extends the
+        owner's fixed budget: both its teardown and receipt polling stop before
+        the existing route fallback reserve. Request-scoped route snapshots may
+        still race this worker, but the worker marker prevents them from proving
+        cleanup until teardown has retired and committed its monotonic receipt.
+        """
+
+        _require(
+            "deadline_budget_ms" in payload,
+            "invalid_infer_cancel_control",
+        )
+        started_at = time.monotonic()
+        result = self._infer_cancel(payload, defer_cleanup=False)
+        request_id = payload.get("request_id")
+        if not isinstance(request_id, str):
+            return result
+
+        inline_deadline = started_at + max(
+            0.0,
+            payload["deadline_budget_ms"] / 1_000.0
+            - _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS,
+        )
+        self._seal_cancellation_receipt_until_deadline(
+            payload,
+            deadline_monotonic_s=inline_deadline,
+        )
+
+        def stored_receipt() -> Mapping[str, Any] | None:
+            lock = getattr(self, "_control_lock", None)
+            receipts = getattr(self, "_request_cleanup_receipts", None)
+            if lock is None or not isinstance(receipts, Mapping):
+                return None
+            with lock:
+                receipt = receipts.get(request_id)
+                return dict(receipt) if isinstance(receipt, Mapping) else None
+
+        receipt = stored_receipt()
+        if not isinstance(receipt, Mapping) or receipt.get("complete") is not True:
+            return result
+        details = result.get("details")
+        if not isinstance(details, Mapping):
+            details = {}
+        return self._signed_result(
+            "inference_cancelled",
+            {
+                **details,
+                "cleanup_pending": False,
+                "request_cleanup": dict(receipt),
             },
         )
 
@@ -2722,6 +3625,7 @@ class PhysicalNodeService:
             "infer_start": self._infer_start,
             "infer_decode": self._infer_decode,
             "infer_cancel": self._infer_cancel,
+            "infer_cancel_wait": self._infer_cancel_wait,
             "rotate": self._rotate,
             "stop": self._stop,
         }
@@ -2774,10 +3678,62 @@ def _response(
     return response
 
 
-def _emit(document: dict[str, Any]) -> None:
-    encoded = canonical_json_bytes(document)
+def _emit(encoded: bytes, *, cleanup_priority: bool = False) -> None:
+    if cleanup_priority:
+        # Deadline-bound cleanup authority uses SSH's separately supervised
+        # stderr data stream. An ordinary response can already occupy stdout
+        # before infer_cancel_wait reaches stdin; no in-process priority queue
+        # can reorder bytes after that point. The parent recognizes only this
+        # exact prefix and then applies the same canonical response,
+        # command-ID, node-ID, and signed-observation validation as stdout.
+        # Diagnostics remain unprefixed stderr data.
+        sys.stderr.buffer.write(CLEANUP_CONTROL_FRAME_PREFIX + encoded + b"\n")
+        sys.stderr.buffer.flush()
+        return
     sys.stdout.buffer.write(encoded + b"\n")
     sys.stdout.buffer.flush()
+
+
+class _ResponseEmitter:
+    """Publish ordinary and cleanup responses on independent wire lanes."""
+
+    def __init__(self) -> None:
+        self._stdout_condition = threading.Condition()
+        self._stdout_active = False
+        self._cleanup_lock = threading.Lock()
+
+    def emit(
+        self,
+        document: dict[str, Any],
+        *,
+        cleanup_priority: bool = False,
+    ) -> None:
+        encoded = canonical_json_bytes(document)
+        if cleanup_priority:
+            # Cleanup authority has a separately supervised stderr channel.
+            # Serialize that channel against itself, but never wait behind a
+            # large or backpressured stdout inference response: doing so
+            # defeats the independent lane and can strand an already-complete
+            # signed receipt beyond its immutable owner deadline.
+            with self._cleanup_lock:
+                _emit(encoded, cleanup_priority=True)
+            return
+        with self._stdout_condition:
+            # stdout and the deadline-bound cleanup channel are deliberately
+            # independent. Reserving stdout for a cleanup response that will
+            # never use it couples unrelated request lifecycles: sustained
+            # cancellation can then retain at least one reservation forever,
+            # starving completed inference responses and creating a backlog of
+            # late replies after their parent waiters have already retired.
+            while self._stdout_active:
+                self._stdout_condition.wait()
+            self._stdout_active = True
+        try:
+            _emit(encoded, cleanup_priority=False)
+        finally:
+            with self._stdout_condition:
+                self._stdout_active = False
+                self._stdout_condition.notify_all()
 
 
 def _parse_args() -> argparse.Namespace:
@@ -2829,49 +3785,113 @@ def main() -> int:
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
 
-    write_lock = threading.Lock()
+    response_emitter = _ResponseEmitter()
     active_lock = threading.Lock()
     active_command_ids: set[str] = set()
-    capacity = threading.BoundedSemaphore(16)
+    inference_capacity = threading.BoundedSemaphore(8)
+    control_capacity = threading.BoundedSemaphore(16)
+    cleanup_capacity = threading.BoundedSemaphore(16)
 
-    def emit(document: dict[str, Any]) -> None:
-        with write_lock:
-            _emit(document)
-
-    def execute(command: Any, command_id: str) -> None:
+    def execute(
+        command: Any,
+        command_id: str,
+        lane_capacity: threading.BoundedSemaphore,
+        received_at_monotonic_s: float,
+    ) -> None:
+        cleanup_priority = _command_uses_cleanup_response_priority(command)
         try:
             # Long inference commands own absolute deadlines and cooperative
             # cancellation points. The stdin reader must stay free to accept
             # cancellation, cleanup, probes, and unrelated request commands.
-            result = service.dispatch(command)
-            emit(_response(service, command_id=command_id, ok=True, result=result))
+            result = service.dispatch(
+                _age_cleanup_command_budget(
+                    command,
+                    queued_seconds=max(
+                        0.0,
+                        time.monotonic() - received_at_monotonic_s,
+                    ),
+                )
+            )
+            response_emitter.emit(
+                _response(service, command_id=command_id, ok=True, result=result),
+                cleanup_priority=cleanup_priority,
+            )
         except NodeCommandError as exc:
-            emit(_response(service, command_id=command_id, ok=False, error_code=exc.code))
+            response_emitter.emit(
+                _response(
+                    service, command_id=command_id, ok=False, error_code=exc.code
+                ),
+                cleanup_priority=cleanup_priority,
+            )
+        except IrohTransportError as exc:
+            if _owner_cancellation_interrupted_inference(service, command, exc):
+                response_emitter.emit(
+                    _response(
+                        service,
+                        command_id=command_id,
+                        ok=False,
+                        error_code="request_cancelled",
+                    ),
+                    cleanup_priority=cleanup_priority,
+                )
+            else:
+                print(
+                    f"physical-node command failed: {type(exc).__name__}",
+                    file=sys.stderr,
+                )
+                traceback.print_exc(file=sys.stderr)
+                response_emitter.emit(
+                    _response(
+                        service,
+                        command_id=command_id,
+                        ok=False,
+                        error_code="node_command_failed",
+                    ),
+                    cleanup_priority=cleanup_priority,
+                )
         except BaseException as exc:
             print(
                 f"physical-node command failed: {type(exc).__name__}",
                 file=sys.stderr,
             )
             traceback.print_exc(file=sys.stderr)
-            emit(
+            response_emitter.emit(
                 _response(
                     service,
                     command_id=command_id,
                     ok=False,
                     error_code="node_command_failed",
-                )
+                ),
+                cleanup_priority=cleanup_priority,
             )
         finally:
             with active_lock:
                 active_command_ids.discard(command_id)
-            capacity.release()
+            lane_capacity.release()
 
-    executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mycelium-node-command")
+    # Long inference commands and cleanup/liveness control use independently
+    # bounded lanes.  Retired or slow model execution can consume only the
+    # inference lane; generation-fenced cancellation, cleanup snapshots, and
+    # health probes retain reserved workers and cannot queue behind it.
+    inference_executor = ThreadPoolExecutor(
+        max_workers=8,
+        thread_name_prefix="mycelium-node-inference",
+    )
+    control_executor = ThreadPoolExecutor(
+        max_workers=16,
+        thread_name_prefix="mycelium-node-control",
+    )
+    cleanup_executor = ThreadPoolExecutor(
+        max_workers=16,
+        thread_name_prefix="mycelium-node-cleanup",
+    )
     try:
         for raw_line in sys.stdin.buffer:
+            received_at_monotonic_s = time.monotonic()
             command_id = "unknown"
+            command: Any = None
             if len(raw_line) > MAX_COMMAND_BYTES:
-                emit(
+                response_emitter.emit(
                     _response(
                         service,
                         command_id=command_id,
@@ -2882,55 +3902,85 @@ def main() -> int:
                 continue
             try:
                 command = canonical_json_loads(raw_line.rstrip(b"\n"), path="stdin")
-                if isinstance(command, dict) and isinstance(command.get("command_id"), str):
+                if isinstance(command, dict) and isinstance(
+                    command.get("command_id"), str
+                ):
                     command_id = command["command_id"]
-                if not capacity.acquire(blocking=False):
-                    emit(
+                inference_lane = _command_uses_inference_lane(command)
+                cleanup_lane = _command_uses_cleanup_response_priority(command)
+                if cleanup_lane:
+                    lane_capacity = cleanup_capacity
+                    lane_executor = cleanup_executor
+                elif inference_lane:
+                    lane_capacity = inference_capacity
+                    lane_executor = inference_executor
+                else:
+                    lane_capacity = control_capacity
+                    lane_executor = control_executor
+                if not lane_capacity.acquire(blocking=False):
+                    response_emitter.emit(
                         _response(
                             service,
                             command_id=command_id,
                             ok=False,
                             error_code="command_capacity_exhausted",
-                        )
+                        ),
+                        cleanup_priority=(
+                            _command_uses_cleanup_response_priority(command)
+                        ),
                     )
                     continue
                 with active_lock:
                     if command_id in active_command_ids:
-                        capacity.release()
-                        emit(
+                        lane_capacity.release()
+                        response_emitter.emit(
                             _response(
                                 service,
                                 command_id=command_id,
                                 ok=False,
                                 error_code="duplicate_command_id",
-                            )
+                            ),
+                            cleanup_priority=(
+                                _command_uses_cleanup_response_priority(command)
+                            ),
                         )
                         continue
                     active_command_ids.add(command_id)
-                executor.submit(execute, command, command_id)
-                if (
-                    isinstance(command, dict)
-                    and command.get("command") == "stop"
-                ):
+                lane_executor.submit(
+                    execute,
+                    command,
+                    command_id,
+                    lane_capacity,
+                    received_at_monotonic_s,
+                )
+                if isinstance(command, dict) and command.get("command") == "stop":
                     break
             except NodeCommandError as exc:
-                emit(_response(service, command_id=command_id, ok=False, error_code=exc.code))
+                response_emitter.emit(
+                    _response(
+                        service, command_id=command_id, ok=False, error_code=exc.code
+                    ),
+                    cleanup_priority=_command_uses_cleanup_response_priority(command),
+                )
             except BaseException as exc:
                 print(
                     f"physical-node command failed: {type(exc).__name__}",
                     file=sys.stderr,
                 )
-                emit(
+                response_emitter.emit(
                     _response(
                         service,
                         command_id=command_id,
                         ok=False,
                         error_code="node_command_failed",
-                    )
+                    ),
+                    cleanup_priority=_command_uses_cleanup_response_priority(command),
                 )
         return 0
     finally:
-        executor.shutdown(wait=True, cancel_futures=False)
+        inference_executor.shutdown(wait=True, cancel_futures=False)
+        control_executor.shutdown(wait=True, cancel_futures=False)
+        cleanup_executor.shutdown(wait=True, cancel_futures=False)
         for signum, handler in prior_signal_handlers.items():
             signal.signal(signum, handler)
         service.close()

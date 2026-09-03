@@ -70,7 +70,7 @@ class _DispatchCall:
 
 
 class _Hub:
-    """Thread-safe, event-scripted stand-in for three local sidecar sessions."""
+    """Thread-safe, event-scripted stand-in for local sidecar sessions."""
 
     def __init__(self) -> None:
         self.endpoint_id = "local-endpoint"
@@ -439,11 +439,23 @@ class ProductionAdapterDriver:
         )
         self._workers[symbol] = worker
         before = len(self.hub.send_calls)
+        with self.transport._state_lock:
+            pending_before = len(self.transport._pending)
         worker.thread.start()
-        self._eventually(
-            lambda: len(self.hub.send_calls) > before or not worker.thread.is_alive(),
-            f"send admission {symbol}",
-        )
+        if pending_before:
+            self._eventually(
+                lambda: (
+                    len(self.transport._pending) > pending_before
+                    or not worker.thread.is_alive()
+                ),
+                f"send queue admission {symbol}",
+            )
+        else:
+            self._eventually(
+                lambda: len(self.hub.send_calls) > before
+                or not worker.thread.is_alive(),
+                f"send admission {symbol}",
+            )
 
     def _join_send(self, symbol: str) -> None:
         worker = self._workers.get(symbol)
@@ -613,7 +625,24 @@ class ProductionAdapterDriver:
         call.outcome = outcome
         call.begin.set()
         call.release.set()
+        before_calls = len(self.hub.send_calls)
         self._join_send(symbol)
+        waiting_worker = next(
+            (
+                candidate
+                for candidate_symbol, candidate in self._workers.items()
+                if candidate_symbol != symbol
+                and candidate.thread.is_alive()
+                and self._unreleased_send_call(candidate_symbol) is None
+            ),
+            None,
+        )
+        if waiting_worker is not None:
+            self.hub.wait_for(
+                lambda: len(self.hub.send_calls) > before_calls
+                or not waiting_worker.thread.is_alive(),
+                "queued send entered data client",
+            )
 
     def _begin_send_reconnect(self, action: AdapterAction) -> None:
         symbol = self._pending_symbol(action.message_id)
@@ -644,7 +673,7 @@ class ProductionAdapterDriver:
         if call is None:
             return
         if fail:
-            call.outcome = ConnectionResetError("scripted reconnect failure")
+            call.outcome = IrohTransportError("sidecar_receive_reconnect_failed")
         before_sends = len(self.hub.send_calls)
         call.release.set()
         if role == "send":
@@ -684,6 +713,10 @@ class ProductionAdapterDriver:
             return
         generation = action.generation or self.transport.peer_binding.generation + 1
         self.transport.rotate_peer(self._binding(generation))
+        self._eventually(
+            lambda: not self.transport._delivery_cancel_threads,
+            "rotation cancellation acknowledgement",
+        )
         dispatch = self._unreleased_dispatch()
         ack = self._unreleased_ack()
         if dispatch is not None:
@@ -800,6 +833,13 @@ class ProductionAdapterDriver:
                 ("send", self.transport._send_client),
                 ("receive", self.transport._receive_client),
                 ("control", self.transport._control_client),
+                ("forward", self.transport._forward_client),
+                *(
+                    (f"cancellation-{index}", client)
+                    for index, client in enumerate(
+                        self.transport._cancellation_clients
+                    )
+                ),
             )
             roles = tuple(role for role, client in role_clients if client is not None)
             for _role, client in role_clients:

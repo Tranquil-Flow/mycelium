@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import stat
 import struct
+import subprocess
 import time as _time_module
 import urllib.error
 import urllib.request
@@ -52,6 +53,17 @@ _DEFAULT_SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_SOURCE_MANIFEST = (
     _DEFAULT_SOURCE_ROOT / "docs" / "handover" / "a8-source-manifest.v1.json"
 )
+_COMBINED_SOURCE_MANIFEST = (
+    _DEFAULT_SOURCE_ROOT
+    / "docs"
+    / "handover"
+    / "a5-integration-source-manifest.v1.json"
+)
+_HISTORICAL_A8_SOURCE_COMMIT = "519955e6b5ec61e224b3b9b4e73b5c3a5111a1c5"
+_HISTORICAL_A8_SOURCE_DIGEST = (
+    "sha256:29a5a0dc9e2faf4e1dc53738ed283b2a0f6cd7a1644185d3393b03ca40adff97"
+)
+_VERIFIED_HISTORICAL_SOURCE_DIGESTS: set[str] = set()
 
 A8_PHYSICAL_CASES = frozenset(
     {
@@ -243,63 +255,188 @@ def _read_source_path_bytes(source_root: Path, relative_path: str) -> bytes:
             os.close(descriptor)
 
 
+def _validate_source_relative_path(relative_path: object) -> str:
+    if (
+        not isinstance(relative_path, str)
+        or not relative_path
+        or "\\" in relative_path
+        or relative_path.startswith("/")
+        or any(component in {"", ".", ".."} for component in relative_path.split("/"))
+    ):
+        raise OSError("unsafe source path")
+    return relative_path
+
+
+def _read_git_source_paths(
+    source_root: Path,
+    commit: str,
+    relative_paths: list[str],
+) -> dict[str, bytes]:
+    """Read regular blobs from one immutable Git tree with one batch process."""
+
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise OSError("unsafe source commit")
+    paths = [_validate_source_relative_path(path) for path in relative_paths]
+    if paths != sorted(set(paths)):
+        raise OSError("source paths invalid")
+    queries = b"".join(
+        f"{commit}:{path}\n".encode("utf-8") for path in paths
+    )
+    completed = subprocess.run(
+        ["git", "-C", str(source_root), "cat-file", "--batch"],
+        input=queries,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        raise OSError("git source read failed")
+    output = completed.stdout
+    offset = 0
+    documents: dict[str, bytes] = {}
+    for path in paths:
+        header_end = output.find(b"\n", offset)
+        if header_end < 0:
+            raise OSError("source blob header unavailable")
+        header = output[offset : header_end + 1]
+        match = re.fullmatch(rb"[0-9a-f]{40} blob ([0-9]+)\n", header)
+        if match is None:
+            raise OSError("source blob unavailable")
+        size = int(match.group(1))
+        if size > 64 * 1024 * 1024:
+            raise OSError("source blob too large")
+        content_start = header_end + 1
+        content_end = content_start + size
+        if content_end >= len(output) or output[content_end : content_end + 1] != b"\n":
+            raise OSError("short source blob read")
+        documents[path] = output[content_start:content_end]
+        offset = content_end + 1
+    if offset != len(output):
+        raise OSError("unexpected source blob output")
+    return documents
+
+
+def _parse_source_manifest(manifest_raw: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    manifest = json.loads(
+        manifest_raw.decode("utf-8"),
+        object_pairs_hook=_strict_json_object,
+    )
+    if not isinstance(manifest, dict) or set(manifest) != {
+        "protocol",
+        "base_commit",
+        "files",
+    }:
+        raise ValueError("source manifest shape invalid")
+    if manifest["protocol"] not in {
+        "mycelium.a8_source_manifest.v1",
+        "mycelium.combined_candidate_source_manifest.v1",
+    }:
+        raise ValueError("source manifest protocol invalid")
+    if re.fullmatch(r"[0-9a-f]{40}", manifest["base_commit"]) is None:
+        raise ValueError("source manifest commit invalid")
+    pins = manifest["files"]
+    if not isinstance(pins, list) or not 1 <= len(pins) <= 10_000:
+        raise ValueError("source manifest pins invalid")
+    paths: list[str] = []
+    for pin in pins:
+        if not isinstance(pin, dict) or set(pin) != {
+            "path",
+            "sha256",
+            "size_bytes",
+        }:
+            raise ValueError("source pin shape invalid")
+        path = _validate_source_relative_path(pin["path"])
+        digest = pin["sha256"]
+        size = pin["size_bytes"]
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+        ):
+            raise ValueError("source pin invalid")
+        paths.append(path)
+    if paths != sorted(set(paths)):
+        raise ValueError("source manifest paths invalid")
+    return manifest, pins
+
+
+def _verify_source_pins(
+    pins: list[dict[str, Any]],
+    contents: Mapping[str, bytes],
+) -> None:
+    for pin in pins:
+        content = contents.get(pin["path"])
+        if content is None or len(content) != pin["size_bytes"] or (
+            "sha256:" + hashlib.sha256(content).hexdigest() != pin["sha256"]
+        ):
+            raise ValueError("source pin drift")
+
+
 def _verify_default_source_binding(expected_digest: object) -> str:
     expected = _require_source_binding(expected_digest)
+    if expected in _VERIFIED_HISTORICAL_SOURCE_DIGESTS:
+        return expected
     try:
-        manifest_relative = _DEFAULT_SOURCE_MANIFEST.relative_to(
-            _DEFAULT_SOURCE_ROOT
-        ).as_posix()
-        manifest_raw = _read_source_path_bytes(
-            _DEFAULT_SOURCE_ROOT, manifest_relative
-        )
-        manifest = json.loads(
-            manifest_raw.decode("utf-8"),
-            object_pairs_hook=_strict_json_object,
-        )
-        if not isinstance(manifest, dict) or set(manifest) != {
-            "protocol",
-            "base_commit",
-            "files",
-        }:
-            raise ValueError("source manifest shape invalid")
-        if manifest["protocol"] != "mycelium.a8_source_manifest.v1":
-            raise ValueError("source manifest protocol invalid")
-        if re.fullmatch(r"[0-9a-f]{40}", manifest["base_commit"]) is None:
-            raise ValueError("source manifest commit invalid")
-        pins = manifest["files"]
-        if not isinstance(pins, list) or not 1 <= len(pins) <= 10_000:
-            raise ValueError("source manifest pins invalid")
+        if expected == _HISTORICAL_A8_SOURCE_DIGEST:
+            manifest_relative = _DEFAULT_SOURCE_MANIFEST.relative_to(
+                _DEFAULT_SOURCE_ROOT
+            ).as_posix()
+            manifest_and_sources = _read_git_source_paths(
+                _DEFAULT_SOURCE_ROOT,
+                _HISTORICAL_A8_SOURCE_COMMIT,
+                [manifest_relative],
+            )
+            manifest_raw = manifest_and_sources[manifest_relative]
+            manifest, pins = _parse_source_manifest(manifest_raw)
+            contents = _read_git_source_paths(
+                _DEFAULT_SOURCE_ROOT,
+                _HISTORICAL_A8_SOURCE_COMMIT,
+                [pin["path"] for pin in pins],
+            )
+        else:
+            require_combined_protocol = True
+            try:
+                manifest_relative = _COMBINED_SOURCE_MANIFEST.relative_to(
+                    _DEFAULT_SOURCE_ROOT
+                ).as_posix()
+            except ValueError:
+                require_combined_protocol = False
+                manifest_relative = _DEFAULT_SOURCE_MANIFEST.relative_to(
+                    _DEFAULT_SOURCE_ROOT
+                ).as_posix()
+            manifest_raw = _read_source_path_bytes(
+                _DEFAULT_SOURCE_ROOT, manifest_relative
+            )
+            manifest, pins = _parse_source_manifest(manifest_raw)
+            if require_combined_protocol and (
+                manifest["protocol"]
+                != "mycelium.combined_candidate_source_manifest.v1"
+            ):
+                raise ValueError("combined source manifest protocol invalid")
+            contents = {
+                pin["path"]: _read_source_path_bytes(
+                    _DEFAULT_SOURCE_ROOT, pin["path"]
+                )
+                for pin in pins
+            }
         manifest_digest = "sha256:" + hashlib.sha256(manifest_raw).hexdigest()
         if manifest_digest != expected:
             raise ValueError("source manifest digest mismatch")
-        paths: list[str] = []
-        for pin in pins:
-            if not isinstance(pin, dict) or set(pin) != {
-                "path",
-                "sha256",
-                "size_bytes",
-            }:
-                raise ValueError("source pin shape invalid")
-            path = pin["path"]
-            digest = pin["sha256"]
-            size = pin["size_bytes"]
-            if (
-                not isinstance(path, str)
-                or not isinstance(digest, str)
-                or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
-                or not isinstance(size, int)
-                or isinstance(size, bool)
-                or size < 0
-            ):
-                raise ValueError("source pin invalid")
-            content = _read_source_path_bytes(_DEFAULT_SOURCE_ROOT, path)
-            if len(content) != size or "sha256:" + hashlib.sha256(content).hexdigest() != digest:
-                raise ValueError("source pin drift")
-            paths.append(path)
-        if paths != sorted(set(paths)):
-            raise ValueError("source manifest paths invalid")
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        _verify_source_pins(pins, contents)
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+        TypeError,
+        ValueError,
+    ) as exc:
         raise PhysicalGateError("source_binding_invalid") from exc
+    if expected == _HISTORICAL_A8_SOURCE_DIGEST:
+        _VERIFIED_HISTORICAL_SOURCE_DIGESTS.add(expected)
     return expected
 
 

@@ -139,6 +139,76 @@ def test_admission_commits_complete_bound_path_before_dispatch() -> None:
     assert all(item["reserved_memory_bytes"] > 0 for item in status["placements"])
 
 
+def test_router_dispatch_waits_for_pending_binding_publication(monkeypatch) -> None:
+    coordinator, _ = _coordinator()
+    registration_entered = threading.Event()
+    release_registration = threading.Event()
+    route_started = threading.Event()
+
+    class ImmediateRoute:
+        is_simulated = True
+
+        @staticmethod
+        def is_alive() -> bool:
+            return True
+
+        @staticmethod
+        def infer(*_args, **_kwargs) -> None:
+            route_started.set()
+
+        @staticmethod
+        def release_request(_request_id: str) -> None:
+            return None
+
+    class Sink:
+        @staticmethod
+        def emit(_index: int, _token: int) -> None:
+            return None
+
+    port = LiveRouterPort(
+        route=ImmediateRoute(),
+        execution_graph=_graph(),
+        runtime_coordinator=coordinator,
+    )
+    original_register = port._commands.register
+
+    def blocking_register(envelope):
+        registration_entered.set()
+        assert release_registration.wait(timeout=2.0)
+        return original_register(envelope)
+
+    monkeypatch.setattr(port._commands, "register", blocking_register)
+    admission_errors: list[BaseException] = []
+
+    def admit() -> None:
+        try:
+            port.admit(
+                _request("request-publication-race"),
+                Sink(),
+                workload_profile_id="interactive_chat_v1",
+            )
+        except BaseException as error:
+            admission_errors.append(error)
+
+    admission = threading.Thread(target=admit)
+    admission.start()
+    assert registration_entered.wait(timeout=2.0)
+    time.sleep(0.05)
+    request = next(
+        item
+        for item in coordinator.status()["requests"]
+        if item["request_id"] == "request-publication-race"
+    )
+    assert request["phase"] == "queued"
+    assert route_started.is_set() is False
+
+    release_registration.set()
+    admission.join(timeout=2.0)
+    assert not admission.is_alive()
+    assert admission_errors == []
+    assert route_started.wait(timeout=2.0)
+
+
 def test_infeasible_complete_path_rejects_before_queue_and_releases_partial_reservations() -> None:
     coordinator, _ = _coordinator(capacity_b=1)
     with pytest.raises(M16AdmissionError, match="resource_unavailable"):
@@ -194,6 +264,27 @@ def test_status_contract_is_closed_privacy_reduced_and_detached() -> None:
         validate_m16_runtime_status(private)
 
 
+def test_status_projection_stays_bounded_after_long_lived_request_history() -> None:
+    coordinator, _ = _coordinator()
+    for index in range(1_025):
+        request_id = f"request-{index:04d}"
+        coordinator.admit(
+            _request(request_id),
+            workload_profile_id="interactive_chat_v1",
+        )
+        assert coordinator.next_dispatch() == request_id
+        coordinator.complete(request_id)
+
+    document = coordinator.status()
+
+    assert len(document["requests"]) == 1_024
+    assert document["requests"][0]["request_id"] == "request-0001"
+    assert document["requests"][-1]["request_id"] == "request-1024"
+    # Projection truncation must not discard exact internal identity authority.
+    assert coordinator.route_identity("request-0000")["request_id"] == "request-0000"
+    assert validate_m16_runtime_status(copy.deepcopy(document)) == document
+
+
 def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_cancel() -> None:
     coordinator, _ = _coordinator()
 
@@ -217,12 +308,16 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
             request_id,
             sink,
             cancel_requested,
-            selected_placement_ids,
-            **_kwargs,
+            locked_path_manifest,
+            **options,
         ):
+            assert "selected_placement_ids" not in options
+            selected_placement_ids = tuple(
+                hop["placement_id"] for hop in locked_path_manifest["ordered_hops"]
+            )
             with self.route_lock:
                 self.started.append(request_id)
-                self.selected[request_id] = tuple(selected_placement_ids)
+                self.selected[request_id] = selected_placement_ids
                 gate = self.gates.setdefault(request_id, threading.Event())
                 while not gate.wait(0.01):
                     if cancel_requested():
@@ -232,6 +327,11 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
         def release_request(self, request_id: str) -> None:
             with self.route_lock:
                 self.released.append(request_id)
+
+        def release_request_scoped(self, *_args, **_kwargs) -> None:
+            raise AssertionError(
+                "queued cancellation never entered the physical route"
+            )
 
     class Sink:
         def emit(self, _index: int, _token: int) -> None:
@@ -274,3 +374,4 @@ def test_live_router_dispatches_interactive_ahead_of_queued_batch_and_cleans_can
     wait_for(lambda: port.request_status("interactive-queued") == "COMPLETED")
     cleanup.join(timeout=1.0)
     assert not cleanup.is_alive()
+    assert "batch-queued" in route.released

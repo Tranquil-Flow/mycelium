@@ -79,6 +79,7 @@ class ModelState:
     terminal_count: int
     outcome: str | None
     counters: SideEffectCounters
+    publication_pending_kind: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,7 +181,44 @@ class GatewayModel:
         )
 
     def apply(self, action: Action, *, state: ModelState | None = None) -> StepResult:
+        """Apply one action, modeling the terminal-publication window.
+
+        The real service publishes a terminal after the backend commits its
+        outcome; a cancel that lands in between is forwarded to the backend
+        (which bumps its cancel counter) and loses to the already-committed
+        outcome. ``publication_pending_kind`` marks that window in the serial
+        model: any non-cancel action settles it first (publication completes
+        before the next operation observes the service), while a cancel
+        landing inside it bumps the backend cancel counter — except when the
+        pending terminal is itself a cancellation, which the service absorbs
+        via ``cancellation_started`` without a second backend forward.
+        """
+
         current_state = self.initial_state if state is None else state
+        pending = current_state.publication_pending_kind
+        if pending is not None:
+            if action.kind == "cancel" and pending == "completed":
+                # The worker has not yet delivered the backend's committed
+                # completion; a cancel forwarded in this window bumps the
+                # backend's cancel counter and loses to the committed
+                # outcome. Cancelled/failed terminals publish on the
+                # service's own paths and absorb or precede the forward, so
+                # no window bump applies to them.
+                counters = replace(
+                    current_state.counters,
+                    backend_cancels=current_state.counters.backend_cancels + 1,
+                )
+                return StepResult(
+                    replace(
+                        current_state,
+                        publication_pending_kind=None,
+                        counters=counters,
+                    ),
+                    "already_terminal",
+                )
+            current_state = replace(
+                current_state, publication_pending_kind=None
+            )
         handler = getattr(self, f"_apply_{action.kind}", None)
         if handler is None:
             return StepResult(current_state, "unknown_action")
@@ -434,6 +472,19 @@ class GatewayModel:
         return self._finish(state, Phase.CANCELLED, "cancelled", cancel_backend=True)
 
     @staticmethod
+    def _apply_publish(state: ModelState, action: Action) -> StepResult:
+        """Settle a pending terminal publication (idempotent no-op).
+
+        The sequential production harness waits for terminal publication
+        between actions; this explicit step models that wait. In the
+        concurrent race alphabet publication is an independent event, so
+        traces that never publish keep the window open.
+        """
+
+        del action
+        return StepResult(state, "publication_settled")
+
+    @staticmethod
     def _apply_change_authority(state: ModelState, action: Action) -> StepResult:
         field = action.field
         value = action.value
@@ -593,6 +644,7 @@ class GatewayModel:
                 terminal_count=1,
                 outcome=code,
                 counters=counters,
+                publication_pending_kind=terminal_kind,
             ),
             code,
         )

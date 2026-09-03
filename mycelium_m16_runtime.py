@@ -35,6 +35,7 @@ from mycelium_performance_budget import PerformanceBudgetError, validate_perform
 
 
 PROTOCOL = "mycelium.concurrent_request_runtime.v1"
+_MAX_STATUS_REQUESTS = 1_024
 _PRIVATE_FIELDS = {
     "prompt",
     "response",
@@ -396,14 +397,24 @@ class M16RuntimeCoordinator:
         request: RequestContext,
         *,
         workload_profile_id: str,
+        excluded_placements: frozenset[str] = frozenset(),
     ) -> PathManifest:
+        if not isinstance(excluded_placements, frozenset) or not all(
+            isinstance(item, str) and item for item in excluded_placements
+        ):
+            raise M16AdmissionError("invalid_excluded_placements")
         expected_qos = self._profiles.get(workload_profile_id)
         if expected_qos is None or request.qos_class != expected_qos:
             raise M16AdmissionError("workload_not_qualified")
         if request.request_id in self._requests:
             raise M16AdmissionError("duplicate_request_id")
         try:
-            build = self._builder.start(request, self._graph, path_attempt=0)
+            build = self._builder.start(
+                request,
+                self._graph,
+                path_attempt=0,
+                excluded_placements=excluded_placements,
+            )
             while not self._builder.is_complete(build):
                 build = self._builder.advance(
                     build,
@@ -511,14 +522,27 @@ class M16RuntimeCoordinator:
 
     @_synchronized
     def complete(self, request_id: str, *, state: str = "completed") -> None:
-        if request_id not in self._active_request_ids or state not in {
+        record = self._requests.get(request_id)
+        active = request_id in self._active_request_ids
+        # Cleanup-unproven retires only its dispatch slot while retaining the
+        # request's reservations and cleanup phase.  An exact physical receipt
+        # may arrive immediately afterward on the cancellation owner thread.
+        # That receipt must be able to finish the same request; requiring the
+        # already-retired dispatch marker would strand proven-clean resources.
+        late_cleanup_proof = bool(
+            not active
+            and record is not None
+            and record["phase"] == "cleanup"
+            and record["terminal_state"] is None
+        )
+        if (not active and not late_cleanup_proof) or state not in {
             "completed",
             "failed",
             "cancelled",
         }:
             raise ValueError("m16_completion_invalid")
         self._ledger.release_request(request_id)
-        record = self._requests[request_id]
+        assert record is not None
         record["phase"] = state
         record["terminal_state"] = state
         record["terminal_at"] = self._clock.now()
@@ -565,6 +589,13 @@ class M16RuntimeCoordinator:
             for record in self._requests.values()
             if record["phase"] == "queued"
         ]
+        # Exact lifecycle and route-identity lookups retain every request, but
+        # the public status contract is deliberately bounded. A long-lived
+        # physical serve can exceed that projection bound; emitting the whole
+        # internal mapping made this endpoint fail validation at request 1,025.
+        # Project the newest history while queue.active_request_ids remains the
+        # complete authority for current work.
+        request_records = list(self._requests.values())[-_MAX_STATUS_REQUESTS:]
         document = {
             "protocol": PROTOCOL,
             "generated_at_monotonic_s": float(self._clock.now()),
@@ -587,7 +618,7 @@ class M16RuntimeCoordinator:
                 "maximum_active_requests": self._max_concurrent_requests,
             },
             "placements": self._ledger.placement_status(),
-            "requests": [self._request_projection(item) for item in self._requests.values()],
+            "requests": [self._request_projection(item) for item in request_records],
             "incidents": list(self._incidents[-256:]),
             "batch_state": {
                 "mode": "concurrent_request_sequential_stage_dispatch",
@@ -785,7 +816,7 @@ def validate_m16_runtime_status(document: Mapping[str, Any]) -> dict[str, Any]:
         or not document["placements"]
         or any(not isinstance(item, Mapping) or set(item) != placement_fields for item in document["placements"])
         or not isinstance(document.get("requests"), list)
-        or len(document["requests"]) > 1_024
+        or len(document["requests"]) > _MAX_STATUS_REQUESTS
         or any(not isinstance(item, Mapping) or set(item) != request_fields for item in document["requests"])
         or not isinstance(document.get("incidents"), list)
         or len(document["incidents"]) > 256

@@ -560,6 +560,19 @@ class EntryCoordinator:
       return self._requests[request_id]
 
    def cancel(self, request_id: str) -> bool:
+      return self._cancel(request_id, propagate_path_cancellation=True)
+
+   def cancel_local(self, request_id: str) -> bool:
+      """Cancel entry-owned state when an authenticated owner fans out control."""
+
+      return self._cancel(request_id, propagate_path_cancellation=False)
+
+   def _cancel(
+      self,
+      request_id: str,
+      *,
+      propagate_path_cancellation: bool,
+   ) -> bool:
       pending = self._pending_prefills.get(request_id)
       if pending is not None:
          with pending.lock:
@@ -578,7 +591,8 @@ class EntryCoordinator:
                cancellation = None
          if cancellation is not None:
             try:
-               self.transport.send_path_cancellation(cancellation)
+               if propagate_path_cancellation:
+                  self.transport.send_path_cancellation(cancellation)
             finally:
                self.builder.abort(pending.build)
                self.relay.release_path(
@@ -598,7 +612,12 @@ class EntryCoordinator:
             return False
          record.state_machine.transition(
             "CANCELLED",
-            path_attempt=record.manifest.path_attempt,
+            # Recovery advances the state machine before building and
+            # committing the replacement manifest.  Owner cancellation can
+            # linearize in that build window, so transition against the live
+            # lifecycle attempt while retaining the committed manifest below
+            # as the exact resource identity to retire.
+            path_attempt=record.state_machine.path_attempt,
          )
          cancellation = PathCancellation(
             request_id=request_id,
@@ -607,7 +626,8 @@ class EntryCoordinator:
             topology_version=record.manifest.topology_version,
          )
       try:
-         self.transport.send_path_cancellation(cancellation)
+         if propagate_path_cancellation:
+            self.transport.send_path_cancellation(cancellation)
       finally:
          self._cleanup_record(record)
       return True

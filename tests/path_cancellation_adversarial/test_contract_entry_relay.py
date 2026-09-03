@@ -233,6 +233,107 @@ def test_authenticated_cancellation_before_path_arrival_blocks_late_registration
    assert target.relay.runtime.executed == []
 
 
+def test_owner_controlled_cancellation_before_path_arrival_blocks_registration() -> None:
+   case = build_mesh_case(request_id="request-owner-cancel-before-arrival")
+   target = _unregistered_router_for_case(case)
+
+   assert target.apply_controlled_path_cancellation(case.cancellation)
+   assert not target.relay.register_path(
+      case.request,
+      case.record.manifest,
+      case.record.graph,
+      entry_node_id="node-a",
+   )
+   assert case.record.manifest.path_id not in target.relay._paths
+   assert target.relay.runtime.executed == []
+
+
+def test_owner_controlled_cancellation_releases_synchronized_capacity() -> None:
+   case = build_mesh_case(request_id="request-owner-releases-mirrored-capacity")
+   relay = case.routers["node-c"].relay
+   releases: list[tuple[str, ...]] = []
+   relay.builder.capacity.release_synchronized_build = releases.append
+
+   assert relay.apply_controlled_path_cancellation(case.cancellation)
+
+   assert releases == [
+      tuple(hop.reservation_id for hop in case.record.manifest.ordered_hops)
+   ]
+
+
+def test_owner_controlled_cancellation_preempts_active_path_operation_lock() -> None:
+   case = build_mesh_case(request_id="request-owner-preempts-operation")
+   relay = case.routers["node-c"].relay
+   path_id = case.cancellation.path_id
+   operation_entered = Event()
+   release_operation = Event()
+   cancellation_complete = Event()
+   result: list[bool] = []
+
+   def hold_operation() -> None:
+      with relay._path_operation_lock(path_id):
+         operation_entered.set()
+         assert release_operation.wait(timeout=1.0)
+
+   def cancel() -> None:
+      result.append(relay.apply_controlled_path_cancellation(case.cancellation))
+      cancellation_complete.set()
+
+   operation = Thread(target=hold_operation)
+   cancellation = Thread(target=cancel)
+   operation.start()
+   assert operation_entered.wait(timeout=1.0)
+   cancellation.start()
+   preempted = cancellation_complete.wait(timeout=0.1)
+   release_operation.set()
+   operation.join(timeout=1.0)
+   cancellation.join(timeout=1.0)
+
+   assert preempted
+   assert result == [True]
+   assert not operation.is_alive()
+   assert not cancellation.is_alive()
+   assert path_id not in relay._paths
+
+
+def test_entry_release_after_owner_cancellation_does_not_rejoin_active_operation() -> None:
+   case = build_mesh_case(request_id="request-owner-release-after-preemption")
+   relay = case.routers["node-c"].relay
+   path_id = case.cancellation.path_id
+   operation_entered = Event()
+   release_operation = Event()
+   redundant_release_complete = Event()
+
+   def hold_operation() -> None:
+      with relay._path_operation_lock(path_id):
+         operation_entered.set()
+         assert release_operation.wait(timeout=1.0)
+
+   operation = Thread(target=hold_operation)
+   operation.start()
+   assert operation_entered.wait(timeout=1.0)
+
+   assert relay.apply_controlled_path_cancellation(case.cancellation)
+   redundant_release = Thread(
+      target=lambda: (
+         relay.release_path(
+            path_id,
+            path_attempt=case.cancellation.path_attempt,
+         ),
+         redundant_release_complete.set(),
+      )
+   )
+   redundant_release.start()
+   completed_without_rejoining = redundant_release_complete.wait(timeout=0.1)
+   release_operation.set()
+   operation.join(timeout=1.0)
+   redundant_release.join(timeout=1.0)
+
+   assert completed_without_rejoining
+   assert not operation.is_alive()
+   assert not redundant_release.is_alive()
+
+
 def test_unverified_pending_cancellation_cannot_block_different_entry() -> None:
    case = build_mesh_case(request_id="request-forged-cancel-before-arrival")
    target = _unregistered_router_for_case(case)
@@ -393,6 +494,41 @@ def test_path_release_does_not_hold_registry_lock_across_foreign_calls() -> None
    assert all(not worker.is_alive() for worker in workers)
 
 
+def test_distinct_paths_never_share_an_operation_lock() -> None:
+   case = build_mesh_case(request_id="request-distinct-path-operation-locks")
+   relay = case.routers["node-c"].relay
+   first_entered = Event()
+   release_first = Event()
+   second_entered = Event()
+
+   # These identities collide in the former 64-stripe lock table. A slow
+   # operation for one request must not consume another request's cancellation
+   # budget merely because their path hashes share a bucket.
+   def hold_first() -> None:
+      with relay._path_operation_lock("independent-path-0"):
+         first_entered.set()
+         assert release_first.wait(timeout=1.0)
+
+   def enter_second() -> None:
+      with relay._path_operation_lock("independent-path-3"):
+         second_entered.set()
+
+   first = Thread(target=hold_first)
+   second = Thread(target=enter_second)
+   first.start()
+   assert first_entered.wait(timeout=1.0)
+   second.start()
+   second_was_independent = second_entered.wait(timeout=0.1)
+   release_first.set()
+   first.join(timeout=1.0)
+   second.join(timeout=1.0)
+
+   assert second_was_independent
+   assert not first.is_alive()
+   assert not second.is_alive()
+   assert relay._path_operation_locks == {}
+
+
 def test_registration_returns_its_atomic_generation_permit() -> None:
    case = build_mesh_case(request_id="request-registration-permit")
    relay = case.routers["node-c"].relay
@@ -523,3 +659,27 @@ def test_entry_cancels_before_manifest_lock_exactly_once() -> None:
    assert len(capacity.release_calls) == 1
    assert runtime.cancel_calls == [transport.path_cancellations[0].path_id]
    assert not hasattr(transport, "route_ready")
+
+
+def test_owner_cancel_wins_recovery_build_before_manifest_commit() -> None:
+   """Cancellation uses the live attempt but retires committed resources."""
+
+   case = build_mesh_case(
+      request_id="request-cancel-recovery-build",
+   )
+   record = case.record
+   committed_manifest = record.manifest
+
+   # receive_failure_report deliberately advances the lifecycle before it
+   # builds and commits a replacement manifest outside record.lock.
+   record.state_machine.begin_recovery(
+      path_attempt=committed_manifest.path_attempt + 1,
+   )
+
+   assert case.entry.cancel_local(case.request.request_id)
+   assert record.status == "CANCELLED"
+   assert record.manifest == committed_manifest
+   assert case.capacity.release_calls[-1] == tuple(
+      hop.reservation_id for hop in committed_manifest.ordered_hops
+   )
+   assert case.runtimes["node-a"].cancel_calls[-1] == committed_manifest.path_id

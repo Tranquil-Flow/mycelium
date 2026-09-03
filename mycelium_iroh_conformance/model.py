@@ -17,12 +17,19 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Final
 
-CLIENT_ROLES: Final[tuple[str, ...]] = ("send", "receive", "control")
+CLIENT_ROLES: Final[tuple[str, ...]] = (
+    "send",
+    "receive",
+    "control",
+    "forward",
+    "cancellation-0",
+    "cancellation-1",
+)
 LIFECYCLES: Final[frozenset[str]] = frozenset(
     {"NEW", "BOUND", "RUNNING", "CLOSING", "FATAL", "CLOSED"}
 )
 SEND_PHASES: Final[frozenset[str]] = frozenset(
-    {"QUEUED", "SENDING", "RECONNECTING", "RETRYING", "CANCELLED"}
+    {"WAITING", "QUEUED", "SENDING", "RECONNECTING", "RETRYING", "CANCELLED"}
 )
 DELIVERY_PHASES: Final[frozenset[str]] = frozenset(
     {"RECEIVING", "RECEIVED", "DISPATCHING", "ACK_PENDING", "ACKING"}
@@ -160,6 +167,7 @@ class ModelState:
     lifecycle: str = "NEW"
     router_bound: bool = False
     installed_client_roles: tuple[str, ...] = ()
+    closed_installed_client_roles: tuple[str, ...] = ()
     closed_client_count: int = 0
     closed_replacement_count: int = 0
     pending_receipt_ids: tuple[str, ...] = ()
@@ -206,6 +214,10 @@ class ModelState:
             raise ValueError("installed_client_roles_must_have_stable_order")
         if len(set(self.installed_client_roles)) != len(self.installed_client_roles):
             raise ValueError("duplicate_installed_client_role")
+        if not set(self.closed_installed_client_roles) <= set(
+            self.installed_client_roles
+        ):
+            raise ValueError("closed_installed_clients_must_remain_installed")
         reconnect_roles = tuple(attempt.role for attempt in self.reconnect_attempts)
         if len(set(reconnect_roles)) != len(reconnect_roles):
             raise ValueError("one_reconnect_per_role")
@@ -409,6 +421,7 @@ class IrohAdapterModel:
             state,
             lifecycle="RUNNING",
             installed_client_roles=CLIENT_ROLES,
+            closed_installed_client_roles=(),
         )
         return self._accept(state, updated, "started", ("clients_installed",))
 
@@ -419,13 +432,17 @@ class IrohAdapterModel:
         waits_for_receive = any(
             attempt.role == "receive" for attempt in state.reconnect_attempts
         )
+        already_closed_installed = len(state.closed_installed_client_roles)
         updated = self._with_pending(
             state,
             pending,
             lifecycle="CLOSING" if waits_for_receive else "CLOSED",
             installed_client_roles=(),
+            closed_installed_client_roles=(),
             closed_client_count=(
-                state.closed_client_count + len(state.installed_client_roles)
+                state.closed_client_count
+                + len(state.installed_client_roles)
+                - already_closed_installed
             ),
             cancellation_count=state.cancellation_count + newly_cancelled,
             active_delivery=None,
@@ -519,8 +536,9 @@ class IrohAdapterModel:
         message_id = action.message_id or f"send-{state.next_receipt_index}"
         if message_id in state.used_receipt_ids:
             return self._reject(state, "receipt_id_reused")
+        selected_phase = "WAITING" if state.pending_sends else phase
         pending = state.pending_sends + (
-            PendingSend(message_id, action.payload_id, generation, phase),
+            PendingSend(message_id, action.payload_id, generation, selected_phase),
         )
         updated = self._with_pending(
             state,
@@ -547,6 +565,8 @@ class IrohAdapterModel:
         if index is None:
             return self._reject(state, "unknown_pending_receipt")
         item = state.pending_sends[index]
+        if item.phase == "WAITING":
+            return self._reject(state, "send_waiting_for_data_client")
         if item.phase == "RECONNECTING":
             return self._reject(state, "send_reconnecting")
         if item.phase == "CANCELLED":
@@ -661,6 +681,14 @@ class IrohAdapterModel:
             pending,
             reconnect_attempts=state.reconnect_attempts + (attempt,),
             next_replacement_index=state.next_replacement_index + 1,
+            closed_client_count=(
+                state.closed_client_count + (1 if role == "receive" else 0)
+            ),
+            closed_installed_client_roles=(
+                state.closed_installed_client_roles + ("receive",)
+                if role == "receive"
+                else state.closed_installed_client_roles
+            ),
         )
         return self._accept(state, updated, f"{role}_reconnect_blocked")
 
@@ -693,7 +721,14 @@ class IrohAdapterModel:
                 else "reconnect_fenced_by_fatal",
                 ("replacement_closed",),
             )
-        changes["closed_client_count"] = state.closed_client_count + 1
+        if role == "send":
+            changes["closed_client_count"] = state.closed_client_count + 1
+        else:
+            changes["closed_installed_client_roles"] = tuple(
+                installed_role
+                for installed_role in state.closed_installed_client_roles
+                if installed_role != "receive"
+            )
         if attempt.owner_message_id:
             owner_index = self._pending_index(state, attempt.owner_message_id)
             if owner_index is not None:
@@ -1083,6 +1118,12 @@ class IrohAdapterModel:
 
     def _release_pending(self, state: ModelState, index: int) -> ModelState:
         pending = state.pending_sends[:index] + state.pending_sends[index + 1 :]
+        if pending and pending[0].phase == "WAITING":
+            pending = self._replace_item(
+                pending,
+                0,
+                replace(pending[0], phase="QUEUED"),
+            )
         return self._with_pending(
             state,
             pending,
@@ -1104,8 +1145,9 @@ class IrohAdapterModel:
                 and (before_generation is None or item.generation < before_generation)
             )
             if should_cancel:
+                sidecar_cancellation = item.phase != "WAITING"
                 item = replace(item, phase="CANCELLED", cancel_reason=reason)
-                count += 1
+                count += int(sidecar_cancellation)
             changed.append(item)
         return tuple(changed), count
 

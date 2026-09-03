@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Callable, cast
 
 from mycelium_request_gateway.backend import RouterSessionBackend
@@ -133,3 +134,76 @@ def test_router_backend_cancel_is_sticky_before_run_entry():
     assert outcome == "cancelled"
     assert router.cancelled == ["request-router-sticky"]
     assert router.admit_calls == 0
+
+
+def test_router_backend_routes_owner_cancel_that_wins_during_admit():
+    admit_entered = threading.Event()
+    release_admit = threading.Event()
+    routed_cancellations: list[tuple[str, float]] = []
+    status = "DECODING"
+
+    class RacingRouter:
+        def admit(self, request, *_args, **_kwargs):
+            admit_entered.set()
+            assert release_admit.wait(timeout=2.0)
+            return request.request_id
+
+        def cancel_with_deadline(
+            self,
+            request_id: str,
+            *,
+            deadline_monotonic_s: float,
+        ) -> bool:
+            nonlocal status
+            routed_cancellations.append((request_id, deadline_monotonic_s))
+            status = "CANCELLED"
+            return True
+
+        def request_status(self, _request_id: str) -> str:
+            return status
+
+        def decode_one(self, _request_id: str) -> bool:
+            return False
+
+    class Codec:
+        def encode(self, _prompt: str) -> tuple[int, ...]:
+            return (1, 2, 3)
+
+        def decode_token(self, token_id: int) -> str:
+            return str(token_id)
+
+    router = RacingRouter()
+    backend = RouterSessionBackend(
+        router=router,
+        codec=Codec(),
+        clock=time.monotonic,
+    )
+    qualification = synthetic_qualification()
+    outcomes: list[str] = []
+    worker = threading.Thread(
+        target=lambda: outcomes.append(
+            backend.run(
+                "request-admit-race",
+                submission(qualification),
+                lambda _index, _text: None,
+                lambda: False,
+            )
+        )
+    )
+    worker.start()
+    assert admit_entered.wait(timeout=2.0)
+    owner_deadline = time.monotonic() + 1.0
+
+    assert backend.cancel_with_deadline(
+        "request-admit-race",
+        deadline_monotonic_s=owner_deadline,
+    )
+    assert routed_cancellations == []
+
+    release_admit.set()
+    worker.join(timeout=2.0)
+    assert not worker.is_alive()
+    assert outcomes == ["cancelled"]
+    assert routed_cancellations == [
+        ("request-admit-race", owner_deadline)
+    ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import sqlite3
 
 import pytest
 
@@ -72,6 +73,61 @@ def test_cross_host_lock_synchronizes_path_carried_reservations(tmp_path) -> Non
         hop.reservation_id for hop in build.ordered_hops
     }
     assert {record.status for record in snapshot.reservations.values()} == {"COMMITTED"}
+
+
+def test_cross_host_synchronized_reservations_release_idempotently(tmp_path) -> None:
+    clock = ManualClock()
+    source_capacity = _capacity(tmp_path / "source.sqlite3", clock=clock)
+    remote_capacity = _capacity(tmp_path / "remote.sqlite3", clock=clock)
+    source_builder = _builder(source_capacity)
+    remote_builder = _builder(remote_capacity)
+    build = source_builder.start(
+        request_fixture(request_id="remote-release"),
+        graph_fixture(),
+        path_attempt=0,
+    )
+    while not source_builder.is_complete(build):
+        build = source_builder.advance(build, state_table(), now=clock.now())
+    remote_builder.lock(build, now=clock.now())
+    reservation_ids = tuple(hop.reservation_id for hop in build.ordered_hops)
+
+    remote_capacity.release_synchronized_build(reservation_ids)
+    remote_capacity.release_synchronized_build(reservation_ids)
+
+    snapshot = remote_capacity.snapshot()
+    assert all(
+        snapshot.node_reserved_kv_bytes[node_id] == 0
+        for node_id in snapshot.node_reserved_kv_bytes
+    )
+    assert {
+        snapshot.reservations[reservation_id].status
+        for reservation_id in reservation_ids
+    } == {"RELEASED"}
+
+
+def test_repeated_snapshots_close_every_sqlite_connection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    clock = ManualClock()
+    capacity = _capacity(tmp_path / "capacity.sqlite3", clock=clock)
+    real_connect = sqlite3.connect
+    opened = []
+
+    def tracking_connect(*args, **kwargs):
+        connection = real_connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", tracking_connect)
+
+    for _ in range(32):
+        capacity.snapshot()
+
+    assert len(opened) == 32
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
 
 
 def test_cross_host_sync_rejects_oversized_lease_without_import(tmp_path) -> None:

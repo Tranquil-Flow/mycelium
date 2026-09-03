@@ -491,9 +491,15 @@ class SidecarClient:
         return message_id, payload
 
     def recv_with_generation(
-        self, *, timeout: Optional[float] = None
-    ) -> Tuple[bytes, int, bytes]:
-        maximum_wait = self._timeout if timeout is None else timeout
+        self,
+        *,
+        timeout: Optional[float] = None,
+        wait_seconds: Optional[float] = None,
+    ) -> Optional[Tuple[bytes, int, bytes]]:
+        if timeout is not None and wait_seconds is not None:
+            raise ValueError("timeout and wait_seconds are mutually exclusive")
+        single_poll = wait_seconds is not None
+        maximum_wait = self._timeout if single_poll or timeout is None else timeout
         if maximum_wait <= 0:
             raise ValueError("timeout must be positive")
         deadline = time.monotonic() + maximum_wait
@@ -526,15 +532,23 @@ class SidecarClient:
                     raise ProtocolError("invalid_router_delivery") from error
                 return message_id, generation, router_frame
             if kind == _ERROR and _error_code(payload) == "empty":
+                if single_poll:
+                    return None
                 continue
             self._raise_response(kind, message_id, payload, _ZERO_ID)
 
     def recv_with_source(
-        self, *, timeout: Optional[float] = None
-    ) -> Tuple[bytes, Optional[str], int, bytes]:
+        self,
+        *,
+        timeout: Optional[float] = None,
+        wait_seconds: Optional[float] = None,
+    ) -> Optional[Tuple[bytes, Optional[str], int, bytes]]:
         """Receive one frame with authenticated source endpoint provenance."""
 
-        maximum_wait = self._timeout if timeout is None else timeout
+        if timeout is not None and wait_seconds is not None:
+            raise ValueError("timeout and wait_seconds are mutually exclusive")
+        single_poll = wait_seconds is not None
+        maximum_wait = self._timeout if single_poll or timeout is None else timeout
         if maximum_wait <= 0:
             raise ValueError("timeout must be positive")
         deadline = time.monotonic() + maximum_wait
@@ -576,6 +590,8 @@ class SidecarClient:
                     raise ProtocolError("invalid_router_delivery") from error
                 return message_id, source_endpoint_id, generation, router_frame
             if kind == _ERROR and _error_code(payload) == "empty":
+                if single_poll:
+                    return None
                 continue
             self._raise_response(kind, message_id, payload, _ZERO_ID)
 

@@ -1,5 +1,29 @@
 import type { LiveRouteStatus, M13PlacementProjection, M14TopologyProjection } from './routeStatus';
 
+export function a5QualificationFixture(
+  changes: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const digest = (character: string) => `sha256:${character.repeat(64)}`;
+  return {
+    protocol: 'mycelium.replica_qualification.v1',
+    qualification_id: digest('a'), qualification_digest: digest('a'),
+    deployment_id: 'deployment-fixture', deployment_epoch: 1,
+    replica_group_id: 'group-fixture-0',
+    placement_id: 'placement-fixture-replica',
+    placement_ids: ['placement-fixture-replica', 'placement-fixture-stage-1'],
+    track_id: 'track-fixture', traffic_fraction: 0.5,
+    qualifier_generation: 1, issued_at_unix_ms: 10_000,
+    expires_at_unix_ms: 2_000_000_000_000,
+    evidence_bundle_digest: digest('b'), load_proof_digest: digest('c'),
+    assignment_digest: digest('a'), artifact_verification_digest: digest('d'),
+    parity_verified: true, startup_challenge_passed: true,
+    memory_within_bounds: true, cleanup_within_bounds: true,
+    directed_link_qualified: true, workload_envelope_digest: digest('e'),
+    rejected_reasons: [], route_ready: true,
+    ...changes,
+  };
+}
+
 export function m13PlacementFixture(): M13PlacementProjection {
   const digest = (character: string) => `sha256:${character.repeat(64)}`;
   return {
@@ -62,6 +86,9 @@ export function liveRouteStatusFixture(): LiveRouteStatus {
         node_id: 'node-0', placements: [], frames_sent: 20, frames_received: 19,
         applied_operation_count: 12, decode_mode: 'stage_local_kv',
         architecture: 'qwen2', supported_decode_modes: ['complete_context_replay', 'stage_local_kv'],
+        data_plane_health_observed: true, sidecar_process_alive: true,
+        transport_running: true, transport_fatal: false,
+        transport_fatal_code: null,
         active_kv_state_count: 0, retained_result_count: 2,
         active_kv_bytes: 0, peak_kv_bytes: 4096, current_position: null,
         prefill_operation_count: 1, prefill_input_token_count: 9,
@@ -86,6 +113,10 @@ export function liveRouteStatusFixture(): LiveRouteStatus {
     topology: null,
     liveness: { protocol: 'mycelium.traffic_liveness.v1', deployment_id: 'deployment-1', generated_at_monotonic_ms: 100, subjects: [], incidents: [], deployment_fatal_reason: null },
     concurrency_liveness_qualification: { protocol: 'mycelium.product_concurrency_liveness_qualification.v1', deployment_id: 'deployment-1', qualification_digest: `sha256:${'b'.repeat(64)}`, maximum_concurrent_requests: 4, cancellation_and_cleanup_bound_ms: 2_000, cooperative_interruption_proven: false, request_scoped_cleanup_proven: false, shared_process_termination_used: false, publisher_generation_fencing_proven: false, scoped_liveness_proven: false, eligible: false, evidence_digest: `sha256:${'c'.repeat(64)}` },
+    replica_track_qualification: [a5QualificationFixture({
+      deployment_id: 'deployment-1',
+    }) as unknown as LiveRouteStatus['replica_track_qualification'][number]],
+    replica_loss_placement_ids: [],
   };
 }
 

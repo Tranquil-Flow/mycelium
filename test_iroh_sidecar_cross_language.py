@@ -13,6 +13,7 @@ import socket
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -1369,6 +1370,7 @@ def test_source_owned_endpoint_mismatch_probe_emits_signed_native_counter_delta(
     )
     completed = subprocess.run(
         [
+            sys.executable,
             str(ROOT / "scripts" / "a8_endpoint_mismatch_probe.py"),
             "endpoint_identity_mismatch",
             "member-under-test",

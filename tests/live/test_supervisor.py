@@ -12,7 +12,7 @@ import pytest
 
 import mycelium_live.supervisor as supervisor_module
 from mycelium_live.artifact_provisioner import ArtifactAcquisitionStore
-from mycelium_live.route import FakeLiveRoute, RouteIdentity
+from mycelium_live.route import FakeLiveRoute, PhysicalLiveRoute, RouteIdentity
 from mycelium_live.supervisor import (
     LiveObservatoryApplication,
     LiveSwarmCoordinator,
@@ -30,6 +30,63 @@ from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from mycelium_ui_gateway.validation import validate_observatory_envelope
 from physical_inference_qualification import ControllerError
+
+
+def test_main_forwards_isolated_product_state_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        supervisor_module,
+        "run_physical_server",
+        lambda **kwargs: captured.update(kwargs) or 0,
+    )
+
+    product_state_root = tmp_path / "product-state"
+    assert (
+        supervisor_module.main(
+            [
+                "--operator-plan",
+                str(tmp_path / "operator-plan.json"),
+                "--seed-state-root",
+                str(tmp_path / "seed"),
+                "--product-state-root",
+                str(product_state_root),
+            ]
+        )
+        == 0
+    )
+    assert captured["product_state_root"] == product_state_root
+
+
+def test_main_composes_a8_relay_authority_with_a5_product_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        supervisor_module,
+        "run_physical_server",
+        lambda **kwargs: captured.update(kwargs) or 0,
+    )
+    product_state_root = tmp_path / "combined-product-state"
+
+    assert (
+        supervisor_module.main(
+            [
+                "--operator-plan",
+                str(tmp_path / "operator-plan.json"),
+                "--seed-state-root",
+                str(tmp_path / "seed"),
+                "--product-state-root",
+                str(product_state_root),
+                "--a8-force-relay",
+            ]
+        )
+        == 0
+    )
+    assert captured["force_relay"] is True
+    assert captured["product_state_root"] == product_state_root
 
 
 def test_supervisor_main_propagates_force_relay_to_single_and_registry(
@@ -373,6 +430,84 @@ def test_qualification_renewal_reruns_challenge_and_releases_private_tokens(
 
     assert _qualify_open_route(route) is qualification
     assert route.released == [route.request_id]
+
+
+def test_qualification_renewal_prefers_exact_startup_challenge_path(
+    monkeypatch,
+) -> None:
+    qualification = object()
+
+    class RenewableRoute:
+        startup_challenge = ((1, 2), (3, 4))
+
+        def __init__(self) -> None:
+            self.released = []
+            self.request_id = None
+
+        def infer_startup_challenge(self, *, request_id, sink):
+            del sink
+            self.request_id = request_id
+            return SimpleNamespace(token_ids=(3, 4))
+
+        def infer(self, *_args, **_kwargs):
+            raise AssertionError("renewal used product-filtered inference")
+
+        def counters(self):
+            return SimpleNamespace(fatal=None)
+
+        def live_attestation(self, *, request_id):
+            assert request_id == self.request_id
+            return {"request_id": request_id}
+
+        def release_request(self, request_id):
+            self.released.append(request_id)
+
+    route = RenewableRoute()
+    monkeypatch.setattr(
+        "mycelium_live.supervisor.issue_live_route_qualification",
+        lambda attestation, **expected: (
+            qualification
+            if attestation["request_id"] == route.request_id
+            and expected["expected_prompt_token_ids"] == (1, 2)
+            and expected["expected_output_token_ids"] == (3, 4)
+            else None
+        ),
+    )
+
+    assert _qualify_open_route(route) is qualification
+    assert route.released == [route.request_id]
+
+
+def test_physical_startup_challenge_uses_request_local_empty_stop_set(
+    monkeypatch,
+) -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._plan = {
+        "request": {"prompt_token_ids": [1, 2]},
+        "expected_token_ids": [3, 151645, 4],
+    }
+    captured = {}
+    expected = SimpleNamespace(token_ids=(3, 151645, 4))
+
+    def infer(token_ids, **kwargs):
+        captured["token_ids"] = token_ids
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(route, "infer", infer)
+    sink = object()
+
+    assert (
+        route.infer_startup_challenge(request_id="startup-renewal", sink=sink)
+        is expected
+    )
+    assert captured == {
+        "token_ids": (1, 2),
+        "max_new_tokens": 3,
+        "request_id": "startup-renewal",
+        "sink": sink,
+        "_stop_token_ids_override": frozenset(),
+    }
 
 
 def _identity(endpoint_ids: tuple[str, ...]) -> RouteIdentity:
@@ -1447,3 +1582,152 @@ def test_optional_m18_replica_plan_loader_fails_closed(tmp_path: Path) -> None:
     target.symlink_to(Path(__file__))
     with pytest.raises(ValueError, match="m18_replica_plan_unsafe"):
         _m18_replica_plan(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# A5 runtime replica-qualification install surface (operator-scoped, no
+# request-path contract change; baseline = empty set -> incumbent rotation)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingQualificationRoute:
+    """Records what the install endpoint hands to the route method."""
+
+    def __init__(self) -> None:
+        self.installs: list[list[dict]] = []
+
+    def set_replica_track_qualification(self, documents) -> None:
+        self.installs.append([dict(document) for document in documents])
+
+
+def _install_server(tmp_path: Path, route=None):
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    (static_root / "index.html").write_text("ok", encoding="utf-8")
+
+    async def app(*_args):
+        raise AssertionError("replica_qualification_endpoint_reached_asgi")
+
+    server = create_server(
+        app=app,
+        route=route if route is not None else _RecordingQualificationRoute(),
+        static_root=static_root,
+        host="127.0.0.1",
+        port=0,
+        artifact_acquisition_store=ArtifactAcquisitionStore(
+            tmp_path / "artifact-state"
+        ),
+        replica_operator_token="test-a5-operator-token-000000000000",
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def _post_install(
+    server,
+    *,
+    origin: str | None,
+    payload: object,
+    operator_token: str | None = "test-a5-operator-token-000000000000",
+) -> tuple[int, dict]:
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+    headers = {"Content-Type": "application/json"}
+    if origin is not None:
+        headers["Origin"] = origin
+    if operator_token is not None:
+        headers["Authorization"] = f"Bearer {operator_token}"
+    body = json.dumps(payload)
+    connection.request(
+        "POST",
+        "/__mycelium/replica-qualification/install",
+        body=body,
+        headers=headers,
+    )
+    response = connection.getresponse()
+    document = json.loads(response.read())
+    connection.close()
+    return response.status, document
+
+
+def _valid_replica_qualification() -> dict:
+    from mycelium_replica_contracts import compatibility_fixtures
+
+    return compatibility_fixtures()["replica-qualification-v1.json"]
+
+
+def test_replica_qualification_install_clears_and_restores(tmp_path: Path) -> None:
+    """Baseline (empty) and candidate (validated doc) installs both land."""
+
+    server, thread = _install_server(tmp_path)
+    route = server.route
+    try:
+        origin = f"http://127.0.0.1:{server.server_port}"
+        status, document = _post_install(server, origin=origin, payload={"documents": []})
+        assert (status, document) == (200, {"installed": 0})
+        assert route.installs[-1] == []
+
+        valid = _valid_replica_qualification()
+        status, document = _post_install(
+            server, origin=origin, payload={"documents": [valid]}
+        )
+        assert (status, document) == (200, {"installed": 1})
+        assert route.installs[-1] == [valid]
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_replica_qualification_install_rejects_bad_payloads(tmp_path: Path) -> None:
+    server, thread = _install_server(tmp_path)
+    route = server.route
+    try:
+        origin = f"http://127.0.0.1:{server.server_port}"
+        # Missing Origin -> operator boundary holds.
+        status, document = _post_install(server, origin=None, payload={"documents": []})
+        assert (status, document) == (403, {"error": "origin_mismatch"})
+        status, document = _post_install(
+            server,
+            origin=origin,
+            payload={"documents": []},
+            operator_token="",
+        )
+        assert (status, document) == (
+            403,
+            {"error": "operator_authorization_required"},
+        )
+        # Wrong shape -> 400.
+        status, document = _post_install(
+            server, origin=origin, payload={"documents": "not-a-list"}
+        )
+        assert (status, document) == (400, {"error": "invalid_replica_qualification"})
+        # Structurally invalid qualification -> 400, nothing installed.
+        broken = _valid_replica_qualification()
+        broken["qualification_digest"] = "not-a-digest"
+        status, document = _post_install(
+            server, origin=origin, payload={"documents": [broken]}
+        )
+        assert (status, document) == (400, {"error": "invalid_replica_qualification"})
+        assert route.installs == []
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def test_replica_qualification_install_unavailable_without_route_method(
+    tmp_path: Path,
+) -> None:
+    server, thread = _install_server(tmp_path, route=SimpleNamespace())
+    try:
+        status, document = _post_install(
+            server,
+            origin=f"http://127.0.0.1:{server.server_port}",
+            payload={"documents": []},
+        )
+        assert (status, document) == (404, {"error": "replica_qualification_unavailable"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()

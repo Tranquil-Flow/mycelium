@@ -29,6 +29,7 @@ from mycelium_qualification.evidence import canonical_json_bytes
 
 
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
+CLEANUP_CONTROL_FRAME_PREFIX = b"MYCELIUM_CLEANUP_RESPONSE_V1 "
 MAX_CONTROL_FRAME_BYTES = 1024 * 1024
 MAX_STDERR_BYTES = 16 * 1024
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$")
@@ -145,6 +146,38 @@ class NodeProcessError(RuntimeError):
 
 class _RemoteNodeError(NodeProcessError):
     pass
+
+
+class _ControlFrameWriteTimeout(NodeProcessError):
+    def __init__(self, *, partial: bool) -> None:
+        self.partial = partial
+        super().__init__("node_response_timeout")
+
+
+def _write_control_frame_before(stream: Any, payload: bytes, deadline: float) -> None:
+    """Write one owned JSONL frame without exceeding its command deadline."""
+
+    descriptor = stream.fileno()
+    os.set_blocking(descriptor, False)
+    offset = 0
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(descriptor, selectors.EVENT_WRITE)
+        while offset < len(payload):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _ControlFrameWriteTimeout(partial=offset > 0)
+            if not selector.select(timeout=remaining):
+                raise _ControlFrameWriteTimeout(partial=offset > 0)
+            try:
+                written = os.write(descriptor, payload[offset:])
+            except (BlockingIOError, InterruptedError):
+                continue
+            if written <= 0:
+                raise BrokenPipeError("node control pipe write failed")
+            offset += written
+    finally:
+        selector.close()
 
 
 _STDERR_TAIL_CHARS = 4_000
@@ -1044,8 +1077,7 @@ def _identity_matches_pre_exec_ownership(
         and current.process_group == ownership.process_group
         and current.session_id == ownership.session_id
         and current.start_token == ownership.start_token
-        and current.executable
-        in {ownership.launcher_executable, target_executable}
+        and current.executable in {ownership.launcher_executable, target_executable}
     )
 
 
@@ -1326,14 +1358,23 @@ class PhysicalNodeProcess:
         self._command = tuple(command)
         # A4: only a single canonical frame write is serialized. Responses are
         # correlated to bounded per-command waiters by the dedicated reader.
-        self._write_lock = threading.Lock()
+        # Cancellation cleanup has a bounded owner deadline, so its control
+        # frames must not sit behind already-queued inference/health writes.
+        # The active frame remains atomic; priority only chooses the next
+        # writer after the current frame has completed.
+        self._write_condition = threading.Condition()
+        self._write_active = False
+        self._priority_writers_waiting = 0
+        self._control_frame_writer = _write_control_frame_before
         self._waiters_lock = threading.RLock()
         self._close_lock = threading.Lock()
         self._waiters: dict[
             str,
             Queue[bytes | object | _ReaderError | _CommandInterrupted],
         ] = {}
+        self._pending_interruptions: OrderedDict[str, str] = OrderedDict()
         self._retired_command_ids: OrderedDict[str, None] = OrderedDict()
+        self._reader_failure_code: str | None = None
         self._state_lock = threading.RLock()
         self._closed = False
         self._cleanup_complete = False
@@ -1421,7 +1462,16 @@ class PhysicalNodeProcess:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                bufsize=0,
+                # _read_stdout uses bounded newline framing.  Leaving the pipe
+                # unbuffered turns FileIO.readline() into raw byte-at-a-time
+                # reads; under sustained physical inference, one large JSON
+                # response can then leave already-flushed cancellation
+                # receipts queued behind seconds of parent-side pipe draining.
+                # BufferedReader still enforces max_frame_bytes below, while
+                # draining each SSH stdout burst in blocks so command receipt
+                # order reaches the correlated waiter inside its original
+                # immutable deadline.
+                bufsize=-1,
                 shell=False,
                 close_fds=True,
                 pass_fds=(ready_write, release_read, exec_write),
@@ -1517,6 +1567,13 @@ class PhysicalNodeProcess:
             return not self._closed and self._process.poll() is None
 
     @property
+    def reader_failure_code(self) -> str | None:
+        """Return the first fatal response-reader code for this process."""
+
+        with self._waiters_lock:
+            return getattr(self, "_reader_failure_code", None)
+
+    @property
     def returncode(self) -> int | None:
         return self._process.poll()
 
@@ -1544,6 +1601,12 @@ class PhysicalNodeProcess:
 
     def _fail_waiters(self, item: object | _ReaderError) -> None:
         with self._waiters_lock:
+            if (
+                isinstance(item, _ReaderError)
+                and item.code != "node_process_closed"
+                and getattr(self, "_reader_failure_code", None) is None
+            ):
+                self._reader_failure_code = item.code
             waiters = tuple(self._waiters.values())
         for waiter in waiters:
             try:
@@ -1561,24 +1624,34 @@ class PhysicalNodeProcess:
         if not isinstance(command_id, str) or not command_id:
             self._fail_waiters(_ReaderError("invalid_node_response"))
             return False
+        # Correlating the waiter and publishing its response are one lifecycle
+        # operation.  In particular, do not release this lock between lookup
+        # and put: interrupt_command may otherwise fill and retire the one-slot
+        # waiter while this reader still holds its stale reference.  Treating
+        # the resulting Full as corrupt input poisons every unrelated waiter
+        # and stops the shared response demultiplexer.
         with self._waiters_lock:
             waiter = self._waiters.get(command_id)
-        if waiter is None:
-            # A timed-out command may still finish cooperatively.  Its late
-            # result is fenced by command ID and can be discarded without
-            # failing unrelated waiters or stopping this shared response loop.
-            with self._waiters_lock:
-                retired = command_id in self._retired_command_ids
-            if retired:
-                return True
-            # A genuinely unsolicited command ID is still a protocol violation.
-            self._fail_waiters(_ReaderError("response_command_mismatch"))
-            return False
-        try:
-            waiter.put_nowait(raw)
-        except Exception:
-            self._fail_waiters(_ReaderError("invalid_node_response"))
-            return False
+            if waiter is None:
+                # A timed-out command may still finish cooperatively.  Its late
+                # result is fenced by command ID and can be discarded without
+                # failing unrelated waiters or stopping this shared response
+                # loop.  Consuming the exact response also acknowledges and
+                # removes its tombstone.  Keeping acknowledged tombstones used
+                # to turn sustained cancellation churn into an eviction queue:
+                # after 1,024 later interruptions, a genuinely outstanding ID
+                # was forgotten and its valid reply killed the demultiplexer.
+                if command_id in self._retired_command_ids:
+                    self._retired_command_ids.pop(command_id, None)
+                    return True
+                # A genuinely unsolicited command ID is still a protocol violation.
+                self._fail_waiters(_ReaderError("response_command_mismatch"))
+                return False
+            try:
+                waiter.put_nowait(raw)
+            except Exception:
+                self._fail_waiters(_ReaderError("invalid_node_response"))
+                return False
         return True
 
     def _read_stdout(self) -> None:
@@ -1603,12 +1676,22 @@ class PhysicalNodeProcess:
         assert stream is not None
         try:
             while True:
-                chunk = stream.read(4096)
-                if not chunk:
+                line = stream.readline(
+                    self.max_frame_bytes + len(CLEANUP_CONTROL_FRAME_PREFIX) + 2
+                )
+                if not line:
                     return
+                if line.startswith(CLEANUP_CONTROL_FRAME_PREFIX):
+                    raw = line[len(CLEANUP_CONTROL_FRAME_PREFIX) :]
+                    if len(raw) > self.max_frame_bytes + 1 or not raw.endswith(b"\n"):
+                        self._fail_waiters(_ReaderError("invalid_node_response_frame"))
+                        return
+                    if not self._deliver_response(raw[:-1]):
+                        return
+                    continue
                 with self._stderr_lock:
-                    self._stderr_chunks.append(chunk)
-                    self._stderr_size += len(chunk)
+                    self._stderr_chunks.append(line)
+                    self._stderr_size += len(line)
                     while self._stderr_size > MAX_STDERR_BYTES and self._stderr_chunks:
                         excess = self._stderr_size - MAX_STDERR_BYTES
                         first = self._stderr_chunks[0]
@@ -1870,10 +1953,21 @@ class PhysicalNodeProcess:
                 group_complete = self._terminate_process(deadline)
         else:
             group_complete = self._owned_group_state(deadline) == "empty"
-        complete = group_complete and complete
-        complete = self._close_stream(self._process.stdout) and complete
-        complete = self._close_stream(self._process.stderr) and complete
-        complete = self._join_readers(deadline) and complete
+        if not group_complete:
+            # BufferedReader.close() takes the same internal lock as the
+            # blocking readline() in each reader thread.  If the bounded
+            # process-group cleanup deadline expires while the child is still
+            # alive, closing either output stream here can therefore wait
+            # forever behind its reader.  Preserve the streams for the next
+            # idempotent cleanup attempt; once the owned group is gone, EOF
+            # releases both readers without an unbounded cross-thread close.
+            self._cleanup_complete = False
+            return False
+        readers_complete = self._join_readers(deadline)
+        complete = readers_complete and complete
+        if readers_complete:
+            complete = self._close_stream(self._process.stdout) and complete
+            complete = self._close_stream(self._process.stderr) and complete
         self._cleanup_complete = complete
         return complete
 
@@ -1941,34 +2035,111 @@ class PhysicalNodeProcess:
         frame: bytes,
         timeout: float,
         terminate_on_timeout: bool,
+        priority_write: bool = False,
     ) -> Any:
+        deadline = time.monotonic() + timeout
         waiter: Queue[bytes | object | _ReaderError | _CommandInterrupted] = Queue(
             maxsize=1
         )
         with self._waiters_lock:
+            reader_failure_code = getattr(self, "_reader_failure_code", None)
+            if reader_failure_code is not None:
+                raise NodeProcessError(reader_failure_code)
             if command_id in self._waiters:
                 raise NodeProcessError("duplicate_command_id")
+            pending_interruptions = getattr(self, "_pending_interruptions", None)
+            if pending_interruptions is None:
+                pending_interruptions = OrderedDict()
+                self._pending_interruptions = pending_interruptions
+            pending_code = pending_interruptions.pop(command_id, None)
+            if pending_code is not None:
+                # The route published this command as request-inflight just
+                # before command() registered its correlated waiter. Preserve
+                # an interrupt that won in that narrow handoff and reject the
+                # command before it can recreate state after cancellation.
+                raise NodeProcessError(pending_code)
             self._waiters[command_id] = waiter
+        response_received = False
+        interrupted = False
         try:
             stdin = self._process.stdin
             assert stdin is not None
             try:
-                with self._write_lock:
+                with self._write_condition:
+                    if priority_write:
+                        self._priority_writers_waiting += 1
+                    try:
+                        while self._write_active or (
+                            not priority_write and self._priority_writers_waiting > 0
+                        ):
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                raise NodeProcessError("node_response_timeout")
+                            self._write_condition.wait(timeout=remaining)
+                        self._write_active = True
+                    finally:
+                        if priority_write:
+                            self._priority_writers_waiting -= 1
+                try:
+                    # interrupt_command retires the waiter before its
+                    # cancellation frame is queued. A normal command that was
+                    # still waiting for write ownership must therefore not
+                    # publish after cleanup overtakes it: doing so can recreate
+                    # request/transport state after an exact receipt has been
+                    # sealed. Once this thread owns the wire, the check and
+                    # write are ordered before any priority writer by
+                    # _write_active, so an interrupt racing after this point is
+                    # a normal late response lifecycle.
+                    with self._waiters_lock:
+                        if self._waiters.get(command_id) is not waiter:
+                            try:
+                                retired = waiter.get_nowait()
+                            except Empty as exc:
+                                raise NodeProcessError(
+                                    "command_interrupted_before_write"
+                                ) from exc
+                            if isinstance(retired, _CommandInterrupted):
+                                interrupted = True
+                                # No frame reached the child, so no response can
+                                # acknowledge this retirement tombstone.
+                                self._retired_command_ids.pop(command_id, None)
+                                raise NodeProcessError(retired.code)
+                            raise NodeProcessError("command_interrupted_before_write")
                     with self._state_lock:
                         if self._closed:
                             raise NodeProcessError("node_process_closed")
                         if self._process.poll() is not None:
                             self._closed = True
                             raise NodeProcessError("node_process_exited")
-                    stdin.write(frame + b"\n")
-                    stdin.flush()
-            except NodeProcessError:
+                    try:
+                        frame_writer = getattr(
+                            self,
+                            "_control_frame_writer",
+                            _write_control_frame_before,
+                        )
+                        frame_writer(stdin, frame + b"\n", deadline)
+                    except _ControlFrameWriteTimeout as exc:
+                        if exc.partial or terminate_on_timeout:
+                            self._abort()
+                        raise NodeProcessError("node_response_timeout") from exc
+                finally:
+                    with self._write_condition:
+                        self._write_active = False
+                        self._write_condition.notify_all()
+            except NodeProcessError as exc:
+                if exc.code == "node_response_timeout" and terminate_on_timeout:
+                    self._abort()
                 raise
             except (BrokenPipeError, OSError, ValueError) as exc:
                 self._abort()
                 raise NodeProcessError("node_process_unavailable") from exc
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                if terminate_on_timeout:
+                    self._abort()
+                raise NodeProcessError("node_response_timeout")
             try:
-                item = waiter.get(timeout=timeout)
+                item = waiter.get(timeout=remaining)
             except Empty as exc:
                 if terminate_on_timeout:
                     self._abort()
@@ -1977,11 +2148,13 @@ class PhysicalNodeProcess:
                 self._abort()
                 raise NodeProcessError("node_process_exited")
             if isinstance(item, _CommandInterrupted):
+                interrupted = True
                 raise NodeProcessError(item.code)
             if isinstance(item, _ReaderError):
                 self._abort()
                 raise NodeProcessError(item.code)
             assert isinstance(item, bytes)
+            response_received = True
             try:
                 return self._validate_response(item, command_id)
             except _RemoteNodeError:
@@ -1992,10 +2165,43 @@ class PhysicalNodeProcess:
         finally:
             with self._waiters_lock:
                 self._waiters.pop(command_id, None)
-                self._retired_command_ids[command_id] = None
-                self._retired_command_ids.move_to_end(command_id)
-                while len(self._retired_command_ids) > 1_024:
-                    self._retired_command_ids.popitem(last=False)
+                # Queue.get may report its timeout just before the response
+                # reader wins this same lock and publishes the correlated
+                # bytes.  That response has already been consumed from the
+                # wire, so retiring its ID would leave an unanswerable
+                # tombstone.  Inspect the one-slot handoff while publication is
+                # excluded and retire only when a response can still arrive.
+                response_published = False
+                if not response_received:
+                    try:
+                        response_published = isinstance(
+                            waiter.get_nowait(),
+                            bytes,
+                        )
+                    except Empty:
+                        pass
+                # Only an interrupted/timed-out command can legally answer
+                # after its waiter has retired. Successful correlated replies
+                # are complete and must not churn this bounded late-response
+                # ledger: doing so used to evict a genuinely delayed inference
+                # command after 1,024 unrelated health/cleanup replies. Its
+                # eventual valid response was then mistaken for unsolicited
+                # traffic, stopping the sole stdout demultiplexer while leaving
+                # the child alive and able to deadlock on a full stdout pipe.
+                # interrupt_command already performs the retirement while it
+                # atomically removes the waiter.  Its exact late response can
+                # acknowledge and remove that tombstone before this command
+                # thread consumes the queued interrupt marker.  Re-adding the
+                # ID here would resurrect an already-acknowledged lifecycle;
+                # sustained cancellation then fills the bounded ledger with
+                # impossible tombstones and can evict a genuinely outstanding
+                # response ID.  Timeout owns no earlier retirement and still
+                # uses the publication check above.
+                if not interrupted and not response_received and not response_published:
+                    self._retired_command_ids[command_id] = None
+                    self._retired_command_ids.move_to_end(command_id)
+                    while len(self._retired_command_ids) > 1_024:
+                        self._retired_command_ids.popitem(last=False)
 
     def command(
         self,
@@ -2016,8 +2222,10 @@ class PhysicalNodeProcess:
             raise ValueError("payload must be a JSON object")
         else:
             payload_document = dict(payload)
-        timeout = self.response_timeout_seconds if timeout_seconds is None else _positive_seconds(
-            timeout_seconds, "timeout_seconds"
+        timeout = (
+            self.response_timeout_seconds
+            if timeout_seconds is None
+            else _positive_seconds(timeout_seconds, "timeout_seconds")
         )
         if not isinstance(terminate_on_timeout, bool):
             raise ValueError("terminate_on_timeout is invalid")
@@ -2045,6 +2253,13 @@ class PhysicalNodeProcess:
             frame=frame,
             timeout=timeout,
             terminate_on_timeout=terminate_on_timeout,
+            priority_write=(
+                operation == "infer_cancel_wait"
+                or (
+                    operation == "snapshot"
+                    and payload_document.get("receipt_only") is True
+                )
+            ),
         )
 
     def interrupt_command(self, command_id: str, *, code: str) -> bool:
@@ -2055,13 +2270,34 @@ class PhysicalNodeProcess:
             raise ValueError("interrupt code is invalid")
         with self._waiters_lock:
             waiter = self._waiters.get(command_id)
-        if waiter is None:
-            return False
-        try:
-            waiter.put_nowait(_CommandInterrupted(code))
-        except Exception:
-            return False
-        return True
+            if waiter is None:
+                pending_interruptions = getattr(self, "_pending_interruptions", None)
+                if pending_interruptions is None:
+                    pending_interruptions = OrderedDict()
+                    self._pending_interruptions = pending_interruptions
+                prior = pending_interruptions.get(command_id)
+                if prior is not None:
+                    return prior == code
+                pending_interruptions[command_id] = code
+                pending_interruptions.move_to_end(command_id)
+                while len(pending_interruptions) > 1_024:
+                    pending_interruptions.popitem(last=False)
+                return True
+            try:
+                waiter.put_nowait(_CommandInterrupted(code))
+            except Exception:
+                return False
+            # Publish retirement before the response reader can observe the
+            # full waiter. A cooperatively cancelled node command may answer
+            # immediately; leaving its interrupt marker registered used to
+            # make that valid late response look like a duplicate/corrupt
+            # frame and permanently stop the sole stdout demultiplexer.
+            self._waiters.pop(command_id, None)
+            self._retired_command_ids[command_id] = None
+            self._retired_command_ids.move_to_end(command_id)
+            while len(self._retired_command_ids) > 1_024:
+                self._retired_command_ids.popitem(last=False)
+            return True
 
     def close(self) -> None:
         with self._close_lock:

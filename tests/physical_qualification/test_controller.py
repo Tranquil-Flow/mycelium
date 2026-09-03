@@ -33,6 +33,7 @@ from physical_inference_qualification import (
     SubprocessRunner,
     _REMOTE_CLEANUP_SCRIPT,
     _REMOTE_STAGE_SCRIPT,
+    _NODE_PROCESS_ENV_PREFIX,
     _peer_argument,
     _peer_process_argv,
     _parser,
@@ -1322,8 +1323,9 @@ def test_physical_run_orchestrates_signed_nodes_and_cleans_staging(
     for peer in peers:
         remote_argv = shlex.split(sessions[peer.node_id].argv[-1])
         node_index = peers.index(peer)
-        assert remote_argv[0] == f"/opt/mycelium/python-{node_index}/bin/python3"
-        assert remote_argv[1] == "-B"
+        assert tuple(remote_argv[:4]) == _NODE_PROCESS_ENV_PREFIX
+        assert remote_argv[4] == f"/opt/mycelium/python-{node_index}/bin/python3"
+        assert remote_argv[5] == "-B"
         key_flag = remote_argv.index("--endpoint-secret-file")
         assert remote_argv[key_flag + 1] == (
             f"/var/lib/mycelium/identities/{peer.node_id}.key"
@@ -1400,7 +1402,8 @@ def test_physical_run_uses_declared_local_and_ssh_process_transports(
 
     local_argv = sessions["node-0"].argv
     remote_argv = sessions["node-1"].argv
-    assert local_argv[0] == "/opt/mycelium/python-0/bin/python3"
+    assert local_argv[:4] == _NODE_PROCESS_ENV_PREFIX
+    assert local_argv[4] == "/opt/mycelium/python-0/bin/python3"
     assert "ssh" not in local_argv
     assert remote_argv[0] == "ssh"
     assert "BatchMode=yes" in remote_argv
@@ -1441,8 +1444,17 @@ def test_ssh_process_transport_round_trips_exact_remote_argv(tmp_path: Path) -> 
     argv = _peer_process_argv(peer, command)
 
     assert argv[0] == "ssh"
-    assert argv[9:11] == ("-i", peer.ssh_identity_file)
+    assert argv[11:13] == ("-i", peer.ssh_identity_file)
     assert shlex.split(argv[-1]) == list(command)
+
+
+def test_node_process_environment_reserves_native_control_capacity() -> None:
+    assert _NODE_PROCESS_ENV_PREFIX == (
+        "env",
+        "OPENBLAS_NUM_THREADS=1",
+        "OMP_NUM_THREADS=1",
+        "MKL_NUM_THREADS=1",
+    )
 
 
 @pytest.mark.parametrize("kind", ["missing", "directory", "hardlink", "permissive"])
@@ -1696,7 +1708,7 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
     assert len(runner.calls) == len(peers)
     for peer, call in zip(peers, runner.calls, strict=True):
         argv = call[0]
-        assert argv[:13] == (
+        assert argv[:15] == (
             "ssh",
             "-o",
             "BatchMode=yes",
@@ -1706,6 +1718,8 @@ def test_physical_cleanup_attempts_every_declared_peer_and_stays_not_ready(
             "StrictHostKeyChecking=yes",
             "-o",
             "ConnectTimeout=15",
+            "-o",
+            "IPQoS=ef",
             "-i",
             peer.ssh_identity_file,
             "--",
@@ -1861,7 +1875,7 @@ def test_physical_recover_restarts_dead_remote_once_and_rotates_predecessor(
     assert result["restart_attempts"] == {failed_node_id: 1}
     assert len(attempts[failed_node_id]) == 2
     assert all(
-        shlex.split(session.argv[-1])[1] == "-B"
+        shlex.split(session.argv[-1])[5] == "-B"
         for node_attempts in attempts.values()
         for session in node_attempts
     )
@@ -1930,8 +1944,9 @@ def test_physical_recover_restarts_local_peer_without_ssh(
     local_attempts = attempts[failed_node_id]
     assert result["recovered_nodes"] == [failed_node_id]
     assert len(local_attempts) == 2
-    assert all(session.argv[0].endswith("/python3") for session in local_attempts)
-    assert all(session.argv[1] == "-B" for session in local_attempts)
+    assert all(session.argv[:4] == _NODE_PROCESS_ENV_PREFIX for session in local_attempts)
+    assert all(session.argv[4].endswith("/python3") for session in local_attempts)
+    assert all(session.argv[5] == "-B" for session in local_attempts)
     assert all("ssh" not in session.argv for session in local_attempts)
     assert all(
         attempts[peer.node_id][0].argv[0] == "ssh"

@@ -3,7 +3,7 @@ import {
   HttpLiveRouteStatusClient,
   decodeLiveRouteStatus,
 } from './routeStatus';
-import { liveRouteStatusFixture, m13PlacementFixture, m14TopologyFixture } from './routeStatusTestFixture';
+import { a5QualificationFixture, liveRouteStatusFixture, m13PlacementFixture, m14TopologyFixture } from './routeStatusTestFixture';
 import canonicalRuntimeStatus from '../../../../../contracts/compatibility-fixtures/live-route-status-v1.json';
 
 describe('live route status contract', () => {
@@ -15,6 +15,55 @@ describe('live route status contract', () => {
       [12, 24],
     ]);
     expect(Object.isFrozen(decoded.recent_inferences)).toBe(true);
+  });
+
+  it('decodes the canonical directed-edge liveness subject identity', () => {
+    const fixture = liveRouteStatusFixture();
+    const decoded = decodeLiveRouteStatus({
+      ...fixture,
+      liveness: {
+        ...fixture.liveness,
+        subjects: [{
+          subject_id: 'node-0->node-2',
+          kind: 'edge',
+          membership_generation: 1,
+          state: 'fresh',
+          last_fresh_ms: 90,
+          last_observed_ms: 90,
+          next_keepalive_due_ms: 95,
+          consecutive_misses: 0,
+          last_source: 'application_receipt',
+        }],
+      },
+    });
+
+    expect(decoded.liveness.subjects[0].subject_id).toBe('node-0->node-2');
+  });
+
+  it('decodes closed A5 replica qualification and loss projections', () => {
+    const decoded = decodeLiveRouteStatus({
+      ...liveRouteStatusFixture(),
+      replica_track_qualification: [a5QualificationFixture()],
+      replica_loss_placement_ids: ['placement-fixture-replica'],
+    });
+
+    expect(decoded.replica_track_qualification).toHaveLength(1);
+    expect(decoded.replica_track_qualification[0]).toMatchObject({
+      replica_group_id: 'group-fixture-0',
+      placement_id: 'placement-fixture-replica',
+      route_ready: true,
+    });
+    expect(decoded.replica_loss_placement_ids).toEqual([
+      'placement-fixture-replica',
+    ]);
+  });
+
+  it('rejects malformed A5 loss placement identities', () => {
+    expect(() => decodeLiveRouteStatus({
+      ...liveRouteStatusFixture(),
+      replica_track_qualification: [a5QualificationFixture()],
+      replica_loss_placement_ids: ['private placement'],
+    })).toThrow(/replica_loss_placement_ids/i);
   });
 
   it('decodes the frozen runtime and KV compatibility fixture', () => {

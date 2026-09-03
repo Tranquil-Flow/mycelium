@@ -5,6 +5,7 @@ from __future__ import annotations
 import mlx.core as mx
 import numpy as np
 import pytest
+import numpy_runtime as numpy_runtime_module
 
 from mycelium_router.mlx_runtime import (
     _qwen2_block_with_kv,
@@ -18,6 +19,7 @@ from numpy_runtime import (
     _qwen2_block_with_kv as _numpy_qwen2_block_with_kv,
     _qwen2_embedding as _numpy_qwen2_embedding,
     _qwen2_linear as _numpy_qwen2_linear,
+    _qwen2_linear_checkpointed as _numpy_qwen2_linear_checkpointed,
     _rms_norm as _numpy_rms_norm,
     quantize_qwen2_numpy_tensors,
 )
@@ -85,6 +87,123 @@ def _tensors() -> dict[str, np.ndarray]:
                 value = rng.normal(0.0, 0.04, shape)
             tensors[f"model.layers.{layer}.{suffix}"] = value.astype(np.float32)
     return tensors
+
+
+@pytest.mark.parametrize("quantization", ("none", "int8-weight-only"))
+def test_numpy_kv_sequence_chunking_preserves_block_output(
+    monkeypatch: pytest.MonkeyPatch,
+    quantization: str,
+) -> None:
+    tensors = _tensors()
+    if quantization == "int8-weight-only":
+        tensors = quantize_qwen2_numpy_tensors(tensors)
+    config = _runtime("numpy", quantization)["model_config"]
+    hidden = np.random.default_rng(17).normal(
+        0.0,
+        0.05,
+        (1, 129, 8),
+    ).astype(np.float32)
+    expected, expected_kv = _numpy_qwen2_block_with_kv(
+        hidden,
+        tensors,
+        "model.layers.0.",
+        config,
+        0,
+        None,
+    )
+    checkpoints = 0
+
+    def checkpoint() -> None:
+        nonlocal checkpoints
+        checkpoints += 1
+
+    softmax_query_sizes: list[int] = []
+    original_softmax = numpy_runtime_module._softmax
+
+    def bounded_softmax(value, axis):
+        softmax_query_sizes.append(int(value.shape[-2]))
+        return original_softmax(value, axis)
+
+    monkeypatch.setattr(numpy_runtime_module, "_softmax", bounded_softmax)
+    actual, actual_kv = _numpy_qwen2_block_with_kv(
+        hidden,
+        tensors,
+        "model.layers.0.",
+        config,
+        0,
+        None,
+        checkpoint=checkpoint,
+    )
+
+    assert checkpoints > 20
+    assert len(softmax_query_sizes) > 1
+    assert max(softmax_query_sizes) <= 32
+    np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=2e-6)
+    np.testing.assert_allclose(actual_kv[0], expected_kv[0], rtol=0, atol=0)
+    np.testing.assert_allclose(actual_kv[1], expected_kv[1], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("quantization", ("none", "int8-weight-only"))
+def test_numpy_output_chunking_preserves_linear_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    quantization: str,
+) -> None:
+    rng = np.random.default_rng(23)
+    hidden = rng.normal(0.0, 0.05, (1, 8, 8)).astype(np.float32)
+    raw_weight = rng.normal(0.0, 0.04, (17, 8)).astype(np.float32)
+    weight = raw_weight
+    if quantization == "int8-weight-only":
+        weight = quantize_qwen2_numpy_tensors(
+            {"lm_head.weight": raw_weight}
+        )["lm_head.weight"]
+    expected = _numpy_qwen2_linear(hidden, weight)
+    checkpoints = 0
+
+    def checkpoint() -> None:
+        nonlocal checkpoints
+        checkpoints += 1
+
+    monkeypatch.setattr(numpy_runtime_module, "_CANCELLABLE_OUTPUT_CHUNK", 4)
+    actual = _numpy_qwen2_linear_checkpointed(
+        hidden,
+        weight,
+        checkpoint=checkpoint,
+    )
+
+    assert checkpoints == 5
+    np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=2e-6)
+
+
+@pytest.mark.parametrize("quantization", ("none", "int8-weight-only"))
+def test_numpy_output_chunking_also_bounds_long_sequence_work(
+    monkeypatch: pytest.MonkeyPatch,
+    quantization: str,
+) -> None:
+    rng = np.random.default_rng(29)
+    hidden = rng.normal(0.0, 0.05, (1, 9, 8)).astype(np.float32)
+    raw_weight = rng.normal(0.0, 0.04, (17, 8)).astype(np.float32)
+    weight = raw_weight
+    if quantization == "int8-weight-only":
+        weight = quantize_qwen2_numpy_tensors(
+            {"lm_head.weight": raw_weight}
+        )["lm_head.weight"]
+    expected = _numpy_qwen2_linear(hidden, weight)
+    checkpoints = 0
+
+    def checkpoint() -> None:
+        nonlocal checkpoints
+        checkpoints += 1
+
+    monkeypatch.setattr(numpy_runtime_module, "_CANCELLABLE_OUTPUT_CHUNK", 4)
+    monkeypatch.setattr(numpy_runtime_module, "_CANCELLABLE_SEQUENCE_CHUNK", 4)
+    actual = _numpy_qwen2_linear_checkpointed(
+        hidden,
+        weight,
+        checkpoint=checkpoint,
+    )
+
+    assert checkpoints == 15
+    np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=2e-6)
 
 
 def test_qwen2_monolithic_mlx_numpy_parity() -> None:

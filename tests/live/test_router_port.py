@@ -117,3 +117,82 @@ def test_cancel_reaches_route_and_deferred_release_drops_adapter_state(
         time.sleep(0.001)
 
     assert port.cancel(request_id) is False
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_code"),
+    [
+        ("a5_track_identity_mismatch:private detail", "a5_track_identity_mismatch"),
+        ("private path /Users/operator/secret", "runtime_error"),
+    ],
+)
+def test_worker_failure_exposes_only_bounded_error_code(
+    live_graph,
+    recording_sink,
+    request_factory,
+    message,
+    expected_code,
+) -> None:
+    class FailingRoute(FakeLiveRoute):
+        def infer(
+            self,
+            token_ids,
+            *,
+            max_new_tokens,
+            request_id,
+            sink,
+            cancel_requested=None,
+            **_options,
+        ):
+            raise RuntimeError(message)
+
+    route = FailingRoute(scripted_tokens=())
+    route.open()
+    port = LiveRouterPort(route=route, execution_graph=live_graph)
+    request_id = port.admit(request_factory("request-failed"), recording_sink)
+
+    assert port.decode_one(request_id) is False
+    assert port.request_status(request_id) == "FAILED"
+    assert port.request_error_code(request_id) == expected_code
+
+
+def test_poll_one_returns_immediately_while_route_worker_is_active(
+    live_graph,
+    recording_sink,
+    request_factory,
+) -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class WaitingRoute(FakeLiveRoute):
+        def infer(
+            self,
+            token_ids,
+            *,
+            max_new_tokens,
+            request_id,
+            sink,
+            cancel_requested=None,
+            **_options,
+        ):
+            started.set()
+            assert release.wait(timeout=5.0)
+            return InferenceResult(request_id=request_id, token_ids=())
+
+    route = WaitingRoute(scripted_tokens=())
+    route.open()
+    port = LiveRouterPort(route=route, execution_graph=live_graph)
+    request_id = port.admit(request_factory("request-poll"), recording_sink)
+    assert started.wait(timeout=5.0)
+
+    started_at = time.monotonic()
+    assert port.poll_one(request_id) is False
+    assert time.monotonic() - started_at < 0.1
+    assert port.request_status(request_id) == "DECODING"
+
+    release.set()
+    deadline = time.monotonic() + 5.0
+    while port.request_status(request_id) != "COMPLETED":
+        if time.monotonic() >= deadline:
+            raise AssertionError("route_worker_did_not_complete")
+        time.sleep(0.001)

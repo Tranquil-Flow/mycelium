@@ -18,7 +18,7 @@ import time
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from threading import RLock
+from threading import Condition, RLock, Thread
 from types import MappingProxyType
 from typing import Any, NoReturn
 
@@ -46,7 +46,7 @@ from numpy_runtime import (
    NumpyRuntimeError as _StageNumpyRuntimeError,
    _qwen2_block_with_kv,
    _qwen2_embedding,
-   _qwen2_linear,
+   _qwen2_linear_checkpointed,
    _rms_norm,
    execute_loaded_stage as _numpy_execute_loaded_stage,
 )
@@ -287,6 +287,7 @@ class NumpyRuntimePort:
          _reject("invalid_runtime_clock")
       self._clock = clock or (importlib.import_module("time").monotonic)
       self._cancelled_paths: OrderedDict[str, None] = OrderedDict()
+      self._deferred_cancellation_cleanup: set[str] = set()
       self._kv_states: dict[str, _KVState] = {}
       self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
@@ -304,6 +305,14 @@ class NumpyRuntimePort:
       self._closed = False
       self._state_lock = RLock()
       self._cancellation_lock = RLock()
+      self._cancellation_condition = Condition(self._cancellation_lock)
+      self._cancellation_pending = 0
+      self._execution_admission_lock = RLock()
+      # Cleanup proof is request/path scoped. It must remain observable while
+      # an unrelated stage operation owns the heavyweight state lock.
+      self._resource_index_lock = RLock()
+      self._executing_subjects: dict[str, tuple[str, int]] = {}
+      self._kv_subjects: dict[str, tuple[str, int]] = {}
 
    @staticmethod
    def _validate_graph_stage_roles(graph: ExecutionGraph) -> None:
@@ -496,11 +505,138 @@ class NumpyRuntimePort:
 
       if not isinstance(path_id, str):
          return
-      with self._cancellation_lock:
+      with self._cancellation_condition:
          self._remember_path_marker(self._cancelled_paths, path_id, None)
-      with self._state_lock:
-         if not self._release_state(path_id, "cancelled"):
-            self._purge_path_replays(path_id)
+         self._deferred_cancellation_cleanup.add(path_id)
+         self._cancellation_pending += 1
+      cleanup_deferred = True
+      try:
+         # The marker above is the cancellation fence.  Do not wait for the
+         # admission lock here: a different execution may hold it while
+         # queued behind the stage state lock, which would make cancellation
+         # wait for an unrelated whole-stage operation.  If admission is
+         # currently free, opportunistically reclaim the state now; otherwise
+         # the admitted operation observes the marker at its next checkpoint
+         # and its finally block performs the exact release.
+         admission_acquired = self._execution_admission_lock.acquire(
+            blocking=False
+         )
+         if admission_acquired:
+            try:
+               cleanup_now = self._state_lock.acquire(blocking=False)
+               if cleanup_now:
+                  try:
+                     if not self._release_state(path_id, "cancelled"):
+                        self._purge_path_replays(path_id)
+                     with self._cancellation_condition:
+                        self._deferred_cancellation_cleanup.discard(path_id)
+                     cleanup_deferred = False
+                  finally:
+                     self._state_lock.release()
+            finally:
+               self._execution_admission_lock.release()
+      finally:
+         with self._cancellation_condition:
+            self._cancellation_pending -= 1
+            self._cancellation_condition.notify_all()
+      if cleanup_deferred:
+         self._schedule_deferred_cancellation_cleanup(path_id)
+
+   def _schedule_deferred_cancellation_cleanup(self, path_id: str) -> None:
+      """Finish fenced cleanup even when no execution finalizer remains.
+
+      A health or cleanup snapshot can briefly own ``_state_lock`` after the
+      last stage operation has already returned.  Cancellation must stay
+      nonblocking, but merely adding the path to the deferred set strands its
+      KV forever because no later execute-finally handoff is guaranteed.  One
+      bounded daemon worker waits for the ordinary admission/state ordering
+      and consumes the already-authorized cancellation; proof snapshots remain
+      observers of the resulting absence rather than cleanup authority.
+      """
+
+      with self._cancellation_condition:
+         cleanup_workers = getattr(self, "_deferred_cleanup_worker_paths", None)
+         if cleanup_workers is None:
+            cleanup_workers = set()
+            self._deferred_cleanup_worker_paths = cleanup_workers
+         if path_id in cleanup_workers:
+            return
+         cleanup_workers.add(path_id)
+
+      def finish() -> None:
+         try:
+            with self._execution_admission_lock:
+               with self._state_lock:
+                  with self._cancellation_condition:
+                     if path_id in self._deferred_cancellation_cleanup:
+                        if not self._release_state(path_id, "cancelled"):
+                           self._purge_path_replays(path_id)
+                        self._deferred_cancellation_cleanup.discard(path_id)
+         finally:
+            with self._cancellation_condition:
+               self._deferred_cleanup_worker_paths.discard(path_id)
+               self._cancellation_condition.notify_all()
+
+      worker = Thread(
+         target=finish,
+         name=f"mycelium-numpy-cancel-cleanup-{path_id[:12]}",
+         daemon=True,
+      )
+      try:
+         worker.start()
+      except BaseException:
+         with self._cancellation_condition:
+            self._deferred_cleanup_worker_paths.discard(path_id)
+         raise
+
+   def _acquire_execution_state(self, item: HopWorkItem) -> None:
+      while True:
+         with self._execution_admission_lock:
+            with self._cancellation_condition:
+               if item.path_id in self._cancelled_paths:
+                  _reject("path_cancelled")
+               cancellation_pending = (
+                  self._cancellation_pending > 0
+                  or bool(self._deferred_cancellation_cleanup)
+               )
+            if not cancellation_pending:
+               # A queued stage operation may wait here for the active one,
+               # but it must never retain the cancellation mutex while doing
+               # so. The active operation reaches checkpoints under that
+               # mutex; holding it here would invert the two locks and strand
+               # both executions plus every subsequent cancellation.
+               self._state_lock.acquire()
+               with self._cancellation_condition:
+                  cancelled = item.path_id in self._cancelled_paths
+                  cancellation_pending = (
+                     self._cancellation_pending > 0
+                     or bool(self._deferred_cancellation_cleanup)
+                  )
+                  if not cancelled and not cancellation_pending:
+                     with self._resource_index_lock:
+                        self._executing_subjects[item.path_id] = (
+                           item.request_id,
+                           item.path_attempt,
+                        )
+               if cancelled:
+                  self._state_lock.release()
+                  _reject("path_cancelled")
+               if not cancellation_pending:
+                  return
+               # Cancellation may linearize while this execution already owns
+               # admission but is waiting for stage state. Yield both locks so
+               # the registered cleanup worker can reclaim the fenced subject
+               # before unrelated model work starts another whole operation.
+               self._state_lock.release()
+         with self._cancellation_condition:
+            while (
+               (
+                  self._cancellation_pending > 0
+                  or bool(self._deferred_cancellation_cleanup)
+               )
+               and item.path_id not in self._cancelled_paths
+            ):
+               self._cancellation_condition.wait()
 
    def _checkpoint_path(self, path_id: str) -> None:
       with self._cancellation_lock:
@@ -567,6 +703,8 @@ class NumpyRuntimePort:
       state = self._kv_states.pop(path_id, None)
       if state is None:
          return False
+      with self._resource_index_lock:
+         self._kv_subjects.pop(path_id, None)
       if path_id not in self._released_paths:
          self._remember_path_marker(self._released_paths, path_id, reason)
       self._release_counts[reason] += 1
@@ -679,12 +817,54 @@ class NumpyRuntimePort:
             "release_counts": dict(sorted(self._release_counts.items())),
          }
 
+   def kv_snapshot_nonblocking(self) -> dict[str, Any] | None:
+      """Return a snapshot only when no stage operation owns runtime state."""
+
+      if not self._state_lock.acquire(blocking=False):
+         return None
+      try:
+         return self.kv_snapshot()
+      finally:
+         self._state_lock.release()
+
+   def operation_counter_snapshot(self) -> dict[str, int]:
+      """Return lock-free monotonic work telemetry for active health probes."""
+
+      return {"applied_operation_count": self._applied_operation_count}
+
+   def kv_subject_clean(
+      self,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+   ) -> bool:
+      """Prove exact-path absence without waiting on unrelated model work."""
+
+      if (
+         not isinstance(request_id, str)
+         or not request_id
+         or not isinstance(path_id, str)
+         or not path_id
+         or type(path_attempt) is not int
+         or path_attempt < 0
+      ):
+         return False
+      with self._resource_index_lock:
+         return (
+            path_id not in self._executing_subjects
+            and path_id not in self._kv_subjects
+         )
+
    def execute(self, item: HopWorkItem) -> RuntimeResult:
       """Execute one fail-closed, path-serialized complete-context-replay call."""
 
       if not isinstance(item, HopWorkItem):
          return self._failure("invalid_runtime_work_item")
-      with self._state_lock:
+      try:
+         self._acquire_execution_state(item)
+      except NumpyRouterRuntimeError as exc:
+         return self._failure(exc.code)
+      try:
          if self._closed:
             return self._failure("runtime_closed")
          try:
@@ -702,6 +882,25 @@ class NumpyRuntimePort:
             return self._failure(str(exc) or "runtime_execution_rejected")
          except Exception:
             return self._failure("runtime_execution_rejected")
+      finally:
+         # One stage lock serializes all path-local KV state.  Cancellations
+         # for inactive paths may have fenced their future work while this
+         # unrelated operation held that lock, so drain every deferred path
+         # before publishing the lock as free.  Holding the cancellation lock
+         # through state-lock release closes the race where a new cancellation
+         # could otherwise miss both the active finalizer and its own
+         # opportunistic cleanup attempt.
+         with self._cancellation_condition:
+            for cancelled_path in tuple(
+               self._deferred_cancellation_cleanup
+            ):
+               if not self._release_state(cancelled_path, "cancelled"):
+                  self._purge_path_replays(cancelled_path)
+               self._deferred_cancellation_cleanup.discard(cancelled_path)
+            with self._resource_index_lock:
+               self._executing_subjects.pop(item.path_id, None)
+            self._cancellation_condition.notify_all()
+            self._state_lock.release()
 
    def _decode_input(
       self,
@@ -822,6 +1021,13 @@ class NumpyRuntimePort:
       ):
          self._checkpoint_path(path_id)
          work_unit_started = time.monotonic()
+
+         def sublayer_checkpoint() -> None:
+            nonlocal work_unit_started
+            self._observe_cooperative_work_unit(work_unit_started)
+            self._checkpoint_path(path_id)
+            work_unit_started = time.monotonic()
+
          hidden, layer_kv = _qwen2_block_with_kv(
             hidden,
             tensors,
@@ -830,6 +1036,7 @@ class NumpyRuntimePort:
             position,
             past_layers.get(layer),
             runtime["architecture"],
+            checkpoint=sublayer_checkpoint,
          )
          next_layers[layer] = tuple(
             np.ascontiguousarray(array) for array in layer_kv
@@ -869,7 +1076,11 @@ class NumpyRuntimePort:
             or not isinstance(head_keys[0], str)
          ):
             _reject("invalid_loaded_stage_aliases")
-         hidden = _qwen2_linear(hidden, tensors[head_keys[0]])
+         hidden = _qwen2_linear_checkpointed(
+            hidden,
+            tensors[head_keys[0]],
+            checkpoint=sublayer_checkpoint,
+         )
          self._observe_cooperative_work_unit(work_unit_started)
          self._checkpoint_path(path_id)
       output = np.ascontiguousarray(hidden, dtype=np.dtype(runtime["dtype"]))
@@ -912,7 +1123,22 @@ class NumpyRuntimePort:
             _reject("decode_sequence_mismatch")
 
       try:
-         if "input_embedding" in stage.component_roles:
+         if runtime["architecture"] in {"qwen2", "qwen3"}:
+            # Complete-context replay still needs the same per-layer and
+            # sublayer cancellation checkpoints as stage-local KV execution.
+            # Recompute from position zero with an empty KV map, then discard
+            # the temporary cache after producing this command's result.
+            output, _temporary_layers = self._execute_stage_with_kv(
+               stage=stage,
+               loaded=loaded,
+               runtime=runtime,
+               token_ids=token_ids,
+               hidden_states=hidden_states,
+               position=0,
+               past_layers={},
+               path_id=item.path_id,
+            )
+         elif "input_embedding" in stage.component_roles:
             output = _numpy_execute_loaded_stage(loaded, token_ids=token_ids)
          else:
             output = _numpy_execute_loaded_stage(
@@ -1062,6 +1288,11 @@ class NumpyRuntimePort:
             cached_context_tokens=sequence,
             layers=layers,
          )
+         with self._resource_index_lock:
+            self._kv_subjects[item.path_id] = (
+               item.request_id,
+               item.path_attempt,
+            )
          self._update_kv_watermark()
       else:
          state = self._kv_states.get(item.path_id)

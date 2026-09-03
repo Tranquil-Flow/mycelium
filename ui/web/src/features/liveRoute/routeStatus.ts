@@ -1,3 +1,8 @@
+import {
+  decodeA5ReplicaTrackQualifications,
+  type A5ReplicaTrackQualification,
+} from './a5Replication';
+
 export const LIVE_ROUTE_STATUS_PATH = '/__mycelium/live-status';
 export const LIVE_ROUTE_STATUS_PROTOCOL = 'mycelium.live_route_status.v1' as const;
 
@@ -31,6 +36,11 @@ export interface LiveRoutePeer {
   readonly decode_mode: string | null;
   readonly architecture: string | null;
   readonly supported_decode_modes: readonly string[];
+  readonly data_plane_health_observed: boolean;
+  readonly sidecar_process_alive: boolean | null;
+  readonly transport_running: boolean | null;
+  readonly transport_fatal: boolean;
+  readonly transport_fatal_code: string | null;
   readonly active_kv_state_count: number;
   readonly active_kv_bytes: number;
   readonly peak_kv_bytes: number;
@@ -245,6 +255,8 @@ export interface LiveRouteStatus {
   readonly topology: M14TopologyProjection | null;
   readonly liveness: TrafficLivenessStatus;
   readonly concurrency_liveness_qualification: A4QualificationStatus;
+  readonly replica_track_qualification: readonly A5ReplicaTrackQualification[];
+  readonly replica_loss_placement_ids: readonly string[];
 }
 
 function record(value: unknown, keys: readonly string[], path: string): Record<string, unknown> {
@@ -288,6 +300,21 @@ function identifier(value: unknown, path: string): string {
     throw new TypeError(`${path} must be a public identifier`);
   }
   return value;
+}
+
+function trafficSubjectIdentifier(
+  value: unknown,
+  kind: unknown,
+  path: string,
+): string {
+  if (typeof value === 'string' && IDENTIFIER.test(value)) return value;
+  if (typeof value === 'string' && kind === 'edge') {
+    const endpoints = value.split('->');
+    if (endpoints.length === 2 && endpoints.every((item) => IDENTIFIER.test(item))) {
+      return value;
+    }
+  }
+  throw new TypeError(`${path} must be a public identifier`);
 }
 
 function boundedText(value: unknown, path: string): string {
@@ -366,6 +393,11 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       'decode_mode',
       'architecture',
       'supported_decode_modes',
+      'data_plane_health_observed',
+      'sidecar_process_alive',
+      'transport_running',
+      'transport_fatal',
+      'transport_fatal_code',
       'active_kv_state_count',
       'active_kv_bytes',
       'peak_kv_bytes',
@@ -389,6 +421,21 @@ function peer(value: unknown, path: string): LiveRoutePeer {
   }
   const architecture = item.architecture;
   if (architecture !== null && typeof architecture !== 'string') throw new TypeError(`${path}.architecture is invalid`);
+  if (typeof item.data_plane_health_observed !== 'boolean' || typeof item.transport_fatal !== 'boolean') {
+    throw new TypeError(`${path}.transport health is invalid`);
+  }
+  for (const field of ['sidecar_process_alive', 'transport_running'] as const) {
+    if (item[field] !== null && typeof item[field] !== 'boolean') {
+      throw new TypeError(`${path}.${field} is invalid`);
+    }
+  }
+  if (
+    item.transport_fatal_code !== null
+    && (typeof item.transport_fatal_code !== 'string' || item.transport_fatal_code.length > 128)
+  ) throw new TypeError(`${path}.transport_fatal_code is invalid`);
+  if (item.transport_fatal !== (item.transport_fatal_code !== null)) {
+    throw new TypeError(`${path}.transport fatal projection is inconsistent`);
+  }
   const currentPosition = item.current_position;
   if (currentPosition !== null) integer(currentPosition, `${path}.current_position`);
   if (!['idle', 'active', 'released', 'closed', 'unknown'].includes(String(item.release_state))) throw new TypeError(`${path}.release_state is invalid`);
@@ -449,6 +496,11 @@ function peer(value: unknown, path: string): LiveRoutePeer {
     decode_mode: mode,
     architecture: architecture === null ? null : identifier(architecture, `${path}.architecture`),
     supported_decode_modes: Object.freeze(array(item.supported_decode_modes, `${path}.supported_decode_modes`).map((value, index) => identifier(value, `${path}.supported_decode_modes[${index}]`))),
+    data_plane_health_observed: item.data_plane_health_observed,
+    sidecar_process_alive: item.sidecar_process_alive as boolean | null,
+    transport_running: item.transport_running as boolean | null,
+    transport_fatal: item.transport_fatal,
+    transport_fatal_code: item.transport_fatal_code === null ? null : identifier(item.transport_fatal_code, `${path}.transport_fatal_code`),
     active_kv_state_count: integer(item.active_kv_state_count, `${path}.active_kv_state_count`),
     active_kv_bytes: integer(item.active_kv_bytes, `${path}.active_kv_bytes`),
     peak_kv_bytes: integer(item.peak_kv_bytes, `${path}.peak_kv_bytes`),
@@ -523,7 +575,11 @@ function trafficLiveness(value: unknown): TrafficLivenessStatus {
       throw new TypeError(`route_status.liveness.subjects[${index}] is invalid`);
     }
     return Object.freeze({
-      subject_id: identifier(subject.subject_id, `route_status.liveness.subjects[${index}].subject_id`),
+      subject_id: trafficSubjectIdentifier(
+        subject.subject_id,
+        subject.kind,
+        `route_status.liveness.subjects[${index}].subject_id`,
+      ),
       kind: subject.kind as TrafficLivenessSubject['kind'],
       membership_generation: integer(subject.membership_generation, `route_status.liveness.subjects[${index}].membership_generation`),
       state: subject.state as TrafficLivenessSubject['state'],
@@ -551,7 +607,11 @@ function trafficLiveness(value: unknown): TrafficLivenessStatus {
       sequence: integer(incident.sequence, `route_status.liveness.incidents[${index}].sequence`),
       source: incident.source as TrafficLivenessIncident['source'],
       scope: incident.scope as TrafficLivenessIncident['scope'],
-      subject_id: identifier(incident.subject_id, `route_status.liveness.incidents[${index}].subject_id`),
+      subject_id: trafficSubjectIdentifier(
+        incident.subject_id,
+        incident.scope,
+        `route_status.liveness.incidents[${index}].subject_id`,
+      ),
       membership_generation: integer(incident.membership_generation, `route_status.liveness.incidents[${index}].membership_generation`),
       observed_at_ms: integer(incident.observed_at_ms, `route_status.liveness.incidents[${index}].observed_at_ms`),
       affected_track_ids: Object.freeze(array(incident.affected_track_ids, `route_status.liveness.incidents[${index}].affected_track_ids`).map((track, trackIndex) => identifier(track, `route_status.liveness.incidents[${index}].affected_track_ids[${trackIndex}]`))),
@@ -851,6 +911,8 @@ export function decodeLiveRouteStatus(value: unknown): LiveRouteStatus {
         ...(value as Record<string, unknown>),
         ...(!Object.prototype.hasOwnProperty.call(value, 'placement') ? { placement: null } : {}),
         ...(!Object.prototype.hasOwnProperty.call(value, 'topology') ? { topology: null } : {}),
+        ...(!Object.prototype.hasOwnProperty.call(value, 'replica_track_qualification') ? { replica_track_qualification: [] } : {}),
+        ...(!Object.prototype.hasOwnProperty.call(value, 'replica_loss_placement_ids') ? { replica_loss_placement_ids: [] } : {}),
       }
     : value;
   const item = record(
@@ -873,6 +935,8 @@ export function decodeLiveRouteStatus(value: unknown): LiveRouteStatus {
       'topology',
       'liveness',
       'concurrency_liveness_qualification',
+      'replica_track_qualification',
+      'replica_loss_placement_ids',
     ],
     'route_status',
   );
@@ -902,6 +966,18 @@ export function decodeLiveRouteStatus(value: unknown): LiveRouteStatus {
     topology: topology(item.topology, 'route_status.topology'),
     liveness: trafficLiveness(item.liveness),
     concurrency_liveness_qualification: a4Qualification(item.concurrency_liveness_qualification),
+    replica_track_qualification: decodeA5ReplicaTrackQualifications(
+      item.replica_track_qualification,
+    ),
+    replica_loss_placement_ids: Object.freeze(
+      array(
+        item.replica_loss_placement_ids,
+        'route_status.replica_loss_placement_ids',
+      ).map((placementId, index) => identifier(
+        placementId,
+        `route_status.replica_loss_placement_ids[${index}]`,
+      )),
+    ),
   });
 }
 

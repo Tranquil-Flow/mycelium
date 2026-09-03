@@ -43,17 +43,22 @@ def test_bounded_generation_is_exhaustive_for_declared_alphabet_and_deterministi
     assert first == second
     assert len({trace_to_json(trace) for trace in first}) == len(first)
     assert len({_materialized_json(trace) for trace in first}) == len(first)
-    assert max(len(trace) for trace in first) == 4
+    # publish steps model the harness's terminal-publication wait; the
+    # longest tail is a terminal transition plus its publish step.
+    assert max(len(trace) for trace in first) == 6
 
 
 def test_race_generation_enumerates_every_ordering_once():
     traces = generate_race_traces(CURRENT)
 
     assert len(RACE_ACTIONS) == 5
-    assert len(traces) == 45
-    assert len({trace_to_json(trace) for trace in traces}) == 45
-    assert len({_materialized_json(trace) for trace in traces}) == 45
-    assert {len(trace) for trace in traces} == {6, 7, 8}
+    # Each ordering yields two serializations: window-open (no publish — a
+    # cancel may outrun the worker's terminal publication) and settled
+    # (publish right after the terminal transition).
+    assert len(traces) == 90
+    assert len({trace_to_json(trace) for trace in traces}) == 90
+    assert len({_materialized_json(trace) for trace in traces}) == 90
+    assert {len(trace) for trace in traces} == {6, 7, 8, 9}
     assert all(trace[2] == Action.reconnect(-1) for trace in traces)
 
 

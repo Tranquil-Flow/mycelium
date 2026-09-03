@@ -2516,6 +2516,7 @@ def test_local_two_node_native_process_e2e(
                             "ProgressivePrefillMessage",
                             "HopHeader",
                             "HopHeader",
+                            "PathCancellation",
                         ),
                         NODE_IDS[1]: (
                             "ManifestLocked",

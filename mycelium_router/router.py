@@ -108,11 +108,17 @@ class Router:
    def cancel(self, request_id):
       return self.entry.cancel(request_id)
 
+   def cancel_local(self, request_id):
+      return self.entry.cancel_local(request_id)
+
    def receive_path_cancellation(self, cancellation, *, source_node_id=None):
       return self.relay.receive_path_cancellation(
          cancellation,
          source_node_id=source_node_id,
       )
+
+   def apply_controlled_path_cancellation(self, cancellation):
+      return self.relay.apply_controlled_path_cancellation(cancellation)
 
    def register_path(
       self,

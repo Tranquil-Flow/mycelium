@@ -399,6 +399,22 @@ class LiveDeploymentRegistry:
         router = self._request_router(request_id)
         return False if router is None else router.cancel(request_id)
 
+    def cancel_with_deadline(
+        self,
+        request_id: str,
+        *,
+        deadline_monotonic_s: float,
+    ) -> bool:
+        """Preserve the gateway owner's cancellation deadline across selection."""
+
+        router = self._request_router(request_id)
+        if router is None:
+            return False
+        return router.cancel_with_deadline(
+            request_id,
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+
     def release_request(self, request_id: str) -> None:
         with self._lock:
             deployment_id = self._requests.pop(request_id, None)

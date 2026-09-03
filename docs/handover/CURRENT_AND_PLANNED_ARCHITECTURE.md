@@ -1,6 +1,6 @@
 # Mycelium current and planned architecture
 
-**Status:** Canonical review entry point, updated 2026-08-18. This document supersedes
+**Status:** Canonical review entry point, updated 2026-08-30. This document supersedes
 the operational status in `ARCHITECTURE_HANDOVER.md`; the older file remains historical
 provenance. Milestone evidence through M23 exists; remaining unchecked gates in the
 governing plan are still authoritative.
@@ -20,11 +20,14 @@ Review these sources in order:
 6. `docs/reviews/2026-08-10-external-review-status.md` for independent findings and
    their disposition.
 
-Repository baseline: branch `codex/flexible-swarm-catalog`. The A3 physical feature is
-closed by `905786df41ffdad5718d3464733e2f5cb8727532`; the hardened A4-A15 acceptance
-baseline follows at `e61e780`. Earlier M-stage commits and evidence remain historical
-inputs, not substitutes for the current A-stage gates. Never infer a source revision
-from an evidence timestamp alone.
+Repository baseline: branch `codex/a5-multistage-replication`. A3 and A4 are atomically
+closed. A5 is also terminal: its implementation, physical, browser, negative, and audit
+protocols executed, but the frozen benchmark was `inconclusive`, so the capability was
+not promoted and remains `design_only`. The closing A5 commit is the commit containing
+this document and `a5-completion-record.v1.json`; its SHA is assigned by Git at commit
+time. Earlier M-stage commits and evidence remain historical inputs, not substitutes
+for the current A-stage gates. Never infer a source revision from an evidence timestamp
+alone.
 
 For an external architecture review, inspect the working-tree diff in addition to the recorded HEAD.
 Private evidence paths in this document are host-local and may not resolve on another
@@ -33,15 +36,20 @@ assuming absence. The complete physical/MLX gate must run on a compatible macOS 
 The authoritative remaining release conditions are the numbered conditions in the
 external-review status document.
 
-Current gate checkpoint: A2 and A3 are complete. A3 qualified the exact local
+Current gate checkpoint: A2, A3, and A4 are complete. A3 qualified the exact local
 Qwen2.5-7B `int8-weight-only` representation over the M4 Pro/MLX → Surface/NumPy
 physical route, proved cold acquisition and exact zero-transfer warm reacquisition,
 streamed a real browser answer, exercised fail-closed selector negatives, and restored
 the qualified Qwen2.5-0.5B incumbent. The 7B candidate remains qualified standby; the
 0.5B route remains active and selected. No download or model substitution occurred.
-A4 request-scoped concurrency, cooperative cancellation, liveness, and fencing is the
-next primary gate. Current qualification may expire independently without invalidating
-the retained, atomically committed A3 completion record.
+A4 subsequently closed request-scoped concurrency, cooperative cancellation, liveness,
+receipt ordering, and generation fencing. A5 then executed request-level stage replicas
+end to end across three physical hosts and all eight browser workspaces. Its point
+estimate was +16.71%, but the paired 95% lower bound was -41.97%, below the frozen 10%
+materiality threshold. A5 is therefore a concluded `design_only` result with
+`promotion_authorized=false`; A6 is the next primary gate. Expired live authority does
+not invalidate these retained, source-bound completion records or authorize new
+admission.
 
 ## As-built request path
 
@@ -76,11 +84,14 @@ owns node processes, endpoint challenges, stage execution, transport counters,
 stage-local KV cleanup, and fail-closed route state.
 
 Browser cancellation now sets a request-local cancellation signal. The physical
-route observes it between bounded node commands, sends `infer_cancel`, verifies
-every peer's cleanup state, and returns `CANCELLED`. Adapter and physical prompt/
-output token state is released after terminal lifecycle. A transport command that
-is already blocked cannot yet prove request-scoped interruption and cleanup within
-2,000 ms; A4 owns that cooperative cancellation and liveness closure.
+route observes it inside bounded node work, fences the publisher generation, tears down
+the request, seals monotonic node/route/gateway cleanup receipts, and only then publishes
+the terminal result. `_infer_cancel_wait` reserves an inline response worker inside the
+original 2,000 ms owner budget; an unproven dispatcher slot is retired rather than
+reused. Adapter and physical prompt/output token state is released after terminal
+lifecycle. The final physical repeat completed 72/72 concurrent cancellations across
+24 campaigns, with a 676.876 ms maximum cancel-to-terminal time, no new incidents, and
+zero live resources.
 
 ## Current deployments and topology
 
@@ -114,9 +125,17 @@ prepared, qualified, or selectable until the explicit conversion decision and al
 gates complete. The catalogue remains dynamic; only qualified deployments enter the
 selector.
 
+On 2026-08-30 A5 rebound that same model as a two-stage, three-placement graph:
+`node-0` and `node-3-r2` were independent stage-0 MLX replicas for `[0,23)`, and
+`node-2` was the shared final NumPy stage for `[23,24)`. Concurrent ordinary-product
+requests ran on distinct complete tracks, every placement performed real work, and
+the replica-loss gate cancelled only the affected request while an incumbent-track
+request and a follow-up completed. The live process was intentionally stopped after
+sealing evidence, so this is retained execution evidence rather than current health.
+
 | Model | Quantization | Stage 0 | Stage 1 | Purpose |
 | --- | --- | --- | --- | --- |
-| `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX `[0,23)` | NumPy `[23,24)` | current Lenovo-independent qualified route; replacement acquisition awaits owner approval |
+| `Qwen/Qwen2.5-0.5B-Instruct` | int8 weight-only | MLX replicas on `node-0` and `node-3-r2` `[0,23)` | NumPy `node-2` `[23,24)` | executed A5 candidate, intentionally stopped after evidence; material promotion withheld |
 | `Qwen/Qwen2.5-1.5B-Instruct` | int8 weight-only | MLX `[0,14)` | MLX `[14,28)` | unavailable after observed timeout; must requalify |
 | `Qwen/Qwen2.5-3B-Instruct` | int8 weight-only | three-stage MLX/MLX/NumPy physical route | — | browser-inference verified historically; currently unavailable |
 
@@ -136,9 +155,12 @@ that correction has software coverage but is not yet the artifact lineage of the
 previously active 3B candidate. Normal decode uses request-, deployment-, generation-,
 and layer-bound stage-local KV; the ordinary activation path does not transfer KV.
 
-The current product does **not** claim tensor parallelism, data-parallel replicas,
+The current product implements request-level data-parallel replicas of one contiguous
+stage and selects exactly one complete legal track per request. It does **not** claim a
+material throughput gain, split one request across replicas, or claim tensor parallelism,
 pipeline microbatch overlap, continuous batching, speculative decode, request-time
-layer reallocation, continuous topology re-optimization, or in-flight KV migration.
+layer reallocation, continuous topology re-optimization, in-flight recovery, or KV
+migration.
 
 The generic native enrollment path includes `node-lenovo`, classified as
 `linux_numpy_iroh`. Fresh capability and complete directed-link evidence assigned exactly
@@ -319,12 +341,12 @@ promote the rest of a composite capability.
 | 4.5 Assignment-local artifacts | `partial` | M13 materializes and proves only each host's assigned shard plus shared static assets, with assignment-bound load proofs. Cache eviction, corruption recovery, concurrent staging, and full runtime memory/thermal admission are not qualified. |
 | 4.6 Progressive routing and immutable execution | `qualified` | M16 reserves every placement before dispatch, projects the progressive candidate, commits an immutable graph/topology-bound `PathManifest`, and releases all request resources on every terminal path. |
 | 4.7 Batching/scheduling/backpressure | `partial` | M16 physically qualifies bounded concurrent admission, interactive/batch QoS with aging, sequential dispatch, queue bounds, cancellation, and cleanup. Physical runtime batching, continuous batching, and pipeline overlap remain explicitly unclaimed. |
-| 4.8 Data-parallel stage replication | `implemented_unintegrated` | Planner/flow concepts exist; no live replica group or multi-track physical throughput proof exists. |
+| 4.8 Data-parallel stage replication | `design_only` | An executed A5 candidate integrated a real stage-0 replica group into a two-stage graph, dispatched concurrent ordinary-product requests over distinct complete tracks, proved physical work on all three placements, passed scoped loss and cleanup, and rendered the same authority in all eight workspaces across Chromium, Firefox, and WebKit. The frozen benchmark was `inconclusive` (+16.71% point estimate, -41.97% paired 95% lower bound), so promotion remains false and no material performance claim is made. |
 | 4.9 Speculative decode | `design_only` | No promoted draft/target runtime path. |
 | 4.10 KV ownership/fault tolerance | `partial` | M23 physically qualifies stage-local KV ownership and cleanup on one three-host MLX/MLX/NumPy Qwen2 route. Live replay recovery and fenced successor recovery are not integrated; the M23 result does not claim KV migration or a general cross-backend cache format. |
 | 4.11 Deterministic scoped replanning | `implemented_unintegrated` | Replan types/logic exist; current failure rebuilds or switches a complete deployment. |
 | 4.12 Signed heterogeneous membership | `partial` | Durable signed membership now binds two MLX Macs and one `linux_numpy_iroh` host as fresh activation-eligible members. Platform-neutral Android/iOS and off-tailnet heterogeneous activation remain open. |
-| 4.13 Traffic-aware liveness | `implemented_unintegrated` | General liveness code exists, but the live route can remain blocked until node command timeout after peer loss. |
+| 4.13 Traffic-aware liveness | `qualified` | A4/A5 physically prove request-scoped cooperative interruption, generation fencing, monotonic cleanup receipts, and sub-2,000 ms cancellation on the qualified route, including 72/72 concurrent cancellations. Automatic successor recovery and in-flight migration remain outside this boundary. |
 | 4.14 Authenticated direct/relay transport | `partial` | Native authenticated Iroh publishes path class and activation-connection observations. M14 physically observed six direct edges; forced relay, relay region/redaction, unknown rather than zero for missing samples, and off-tailnet control-plane operation remain open. |
 | 4.15 Privacy/authority/qualification | `partial` | Privacy-reduced projections, qualifier-gated admission, durable authority generation, and refresh persistence are real. A0 static boundary/contract governance is green. A1 separates a monotonic `live_runtime` envelope from immutable `sealed_historical` records, removes the numbered historical browser endpoints, and refuses historical evidence as current. The ordinary product URL was browser-verified live: one 0.5B request completed, runtime generation advanced from 4 to 5, physical frames advanced from 9/9 to 15/15, server-retained terminal history advanced from one to two, and refresh preserved both the terminal history and the original recorded-evidence timestamp. The composite remains `partial` because A15 release closure and the other listed privacy/authority gates remain open, not because the A1 browser gate is open. |
 
@@ -377,7 +399,7 @@ references, not public release artifacts.
 | M15 | Two workload profiles, three policies, robust/Pareto comparison, exact-shape physical calibration, UI attribution/defaults, and explicit M16 deferrals completed | `docs/handover/M15_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m15-calibration-input.json` | Improve model accuracy; peak-memory, energy/thermal, and reconnect are approved exclusions; concurrent admission/batching remain M16 |
 | M16 | Three concurrent admissions, complete-path reservations, immutable locked paths, QoS priority/aging, bounded queueing, v2 lifecycle events, cancellation cleanup, and synchronized UI completed | `docs/handover/M16_PROGRESS_2026-08-10.md`; `/Users/evinova-self/mycelium-physical-run/m14-directed-topology-20260810/m16-physical-gate.json` | Runtime reports sequential dispatch; microbatching, continuous batching, and pipeline overlap remain unclaimed |
 | M17 | `partial` | Multi-model inventory, dense Qwen2/Qwen3 adapters, representation-bound resident/load-peak feasibility, fail-closed selection, live capacity refresh, exact owner-authorized local preparation, and prepared-deployment activation exist; live 0.5B/1.5B and no-restart 3B qualification are the physical boundary | Successful representation-approved 7B preparation/qualification and the remaining acquisition failure matrix stay open |
-| M18 | `implemented_unintegrated` | Historical replica contracts, planner documents, and a qualification-only whole-model throughput observation exist. They are no longer served through a polling endpoint as live runtime state. | Re-prove a replicated stage inside a multi-stage pipeline through concurrent browser requests on the normal product path; do not promote the historical single-stage whole-model result as stage replication |
+| M18 | `design_only` | An executed A5 candidate physically ran a replicated contiguous stage inside a multi-stage pipeline through concurrent normal-product and three-engine browser requests. The positive, illegal-plan, concurrent-cancellation, replica-loss, navigation/reconnect, and second-session protocols passed, but the frozen paired benchmark was `inconclusive`; see `/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33` and `docs/handover/a5-completion-record.v1.json`. | No further A5 execution is pending. A future, separately authorized performance effort may reduce variance or change the architecture, but must use a new frozen protocol and cannot retroactively promote this result. |
 | M19 | `implemented_unintegrated` | Historical liveness/recovery contracts and script-driven positive replay evidence exist. They are no longer exposed as live sources. The qualification script now measures detection, delivery, and cleanup and marks the unexecuted negative gate explicitly instead of fabricating success. | Integrate traffic-aware detection, scoped failure, full-context replay, fenced KV successors, circuit breakers, restart reconciliation, and observed positive/negative browser-path recovery |
 | M20 | `design_only` | Target-authoritative speculative contracts and pure decoders remain; the stored disabled decision is not a live browser authority and no speculative capability endpoint is exposed. | Add real multi-position target verification, same-session measurement, bounded draft fallback, and either measured material gain or an honestly measured disabled decision |
 | M21 | `partial` | Durable heterogeneous membership and physical MLX/NumPy execution are real. Participation and OS class no longer fabricate per-member connectivity or external-network proof; current direct-path observations remain historical. | Derive member connectivity only from bound activation observations, prove off-tailnet join plus direct/relay serving, version generic peer capabilities, and separately qualify Android/iOS eligibility |
@@ -396,7 +418,8 @@ model outputs. Never describe all four as model-quality generations.
 - On 2026-08-10 both routes requalified, then the Evi MacBook Pro went offline during
   the first new request. The product cancellation became terminal immediately, while
   the in-flight physical command remained bounded by the node command timeout. This is
-  a concrete example of why M18 traffic-aware liveness and scoped recovery remain open.
+  historical pre-A4 evidence; A4/A5 later closed cooperative interruption and cleanup,
+  while automatic replay recovery remains A6 scope.
 - Evi MacBook Pro has a user LaunchAgent at
   `~/Library/LaunchAgents/com.mycelium.keep-awake.plist` which keeps `caffeinate -si`
   active across logins. It protects against ordinary idle sleep but not lid-triggered sleep. Supported closed-lid service
@@ -404,20 +427,30 @@ model outputs. Never describe all four as model-quality generations.
   explicit, reversible administrator override for an operator-approved unattended run.
 - A fatal route error latches fail-closed. Recovery rebuilds and requalifies a complete
   topology; there is no transparent in-flight failover or KV migration.
+- A5 replica loss is scoped: an affected request is cancelled while an already-bound
+  surviving-track request and a follow-up can complete. It does not migrate the affected
+  request, transfer KV, or automatically create a replacement replica.
+- The A5 benchmark does not establish material gain. Its +16.71% point estimate has a
+  -41.97% paired 95% lower bound, so the frozen rule requires `inconclusive`,
+  `design_only`, and `promotion_authorized=false`.
+- During the browser reconnect scenario the client intentionally went offline before it
+  could acknowledge cancellation, so browser history truthfully recorded
+  `cancellation_unconfirmed`. The server-side physical cancellation and cleanup receipt
+  proof remained sealed; the UI result is not presented as a client-observed
+  cancellation acknowledgement.
 - The larger model is materially more useful than the 0.5B baseline but remains slow
   over the present two-host route.
 - After the final 2026-08-10 rebuild, both deployments passed their startup challenge.
   The first 1.5B browser request then streamed six decoded tokens before a
   `decode_completion_timeout`; that deployment failed closed and the operator selected
   the still-qualified 0.5B route. Treat the larger deployment as unavailable until it
-  is rebuilt and a fresh request completes. This is additional physical evidence for
-  the M18 traffic-aware liveness/recovery scope, not a successful M9 availability claim.
+  is rebuilt and a fresh request completes. This is historical failure evidence, not a
+  successful M9 availability claim or a contradiction of the later A5 route.
 - Assignment-local remote staging now hashes a bounded stream into an owner-only
   temporary archive and extracts from disk. The 1.79 GB physical restage held the
   helper near 15-18 MB RSS instead of buffering the complete archive and forcing swap.
-- M11 evidence is distributed across private run directories and is not yet one sealed
-  release manifest. Task 0 of the post-M11 plan is therefore the immediate gate before
-  M12 implementation.
+- Older M11 evidence remains distributed across private run directories and is not a
+  substitute for the later atomically closed A-stage records.
 
 ## Planned architecture, M12-M23 and next boundaries
 
@@ -476,16 +509,17 @@ The machine-checked live progress register is
 `docs/handover/mycelium-completion-checklist.v1.json`; `scripts/mycelium_completion_audit.py`
 requires exactly one primary gate, binds every gate to its specification, partitions all
 closure requirements into completed/partial/pending state, and requires all eight UI
-workspaces. The register is navigation, not qualification evidence. A3 remains the sole
-primary gate; A4-A15 remain `design_only` even where their dependency-ready specification
-and deterministic acceptance inputs now exist.
+workspaces. The register is navigation, not qualification evidence. A3 and A4 are
+complete. A5 is a fully executed terminal `design_only` outcome because its frozen
+benchmark did not authorize promotion. A6 is the sole primary gate; later gates remain
+at their recorded boundaries.
 
 | Gate | Current state | Frozen boundary |
 | --- | --- | --- |
-| A3 | `integrated_unqualified` | Exact authorized local Qwen2.5-7B preparation, qualification, selector, physical runtime, and live browser gate |
-| A4 | `design_only` | Concurrent dispatch, interruptible commands, traffic-aware scoped liveness, cleanup, and second-session privacy |
-| A5 | `design_only` | Request-level replicas of a contiguous stage in a real multi-stage graph, complete legal tracks, and measured marginal gain |
-| A6 | `design_only` | Gateway-committed full-context replay with request-scoped cutover, exact-once delivery, and explicit no-successor abort |
+| A3 | `complete` | Exact authorized local Qwen2.5-7B preparation, qualification, selector, physical runtime, and live browser gate |
+| A4 | `complete` | Concurrent dispatch, interruptible commands, traffic-aware scoped liveness, cleanup, and second-session privacy |
+| A5 | `design_only` (concluded) | Real request-level replicas and complete legal tracks passed physical/browser/negative qualification, but the frozen materiality benchmark was inconclusive; promotion is false |
+| A6 | `design_only` (primary) | Gateway-committed full-context replay with request-scoped cutover, exact-once delivery, and explicit no-successor abort |
 | A7 | `design_only` | Byte-compatible acknowledged KV successor with generation fencing and mandatory A6/abort fallback |
 | A8 | `design_only` | Pinned public-HTTPS membership control plus EndpointID-authenticated Iroh direct/relay activation without Tailscale dependency |
 | A9 | `design_only` | Versioned platform-neutral membership/profile/capability/qualification with unknown-ineligible and no legacy eligibility carry-over; physically qualified accelerated Windows x86_64 backend; persistent int8 execution without warm decode-time whole-weight materialization; qualified reduced-precision activations; component/edge timing and component-aware placement; frozen single-request performance floor |

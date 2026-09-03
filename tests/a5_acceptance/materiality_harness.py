@@ -11,9 +11,11 @@ from typing import Any, Mapping
 
 
 PROTOCOL_PATH = Path(__file__).with_name("benchmark_protocol.v1.json")
+WORKLOAD_PATH = Path(__file__).with_name("workload_manifest.v1.json")
 RUN_PROTOCOL = "mycelium.a5_benchmark_run_fixture.v1"
 DECISION_PROTOCOL = "mycelium.a5_benchmark_decision.v1"
-RUN_FIELDS = {"protocol", "benchmark_protocol_digest", "warmups", "windows"}
+WORKLOAD_PROTOCOL = "mycelium.a5_workload_manifest.v1"
+RUN_FIELDS = {"protocol", "benchmark_protocol_digest", "workload_manifest_digest", "warmups", "windows"}
 WARMUP_FIELDS = {
     "mode",
     "scored",
@@ -50,6 +52,31 @@ def load_protocol() -> dict[str, Any]:
     value = json.loads(PROTOCOL_PATH.read_text("utf-8"))
     assert isinstance(value, dict)
     return value
+
+
+def load_workload_manifest() -> dict[str, Any]:
+    """Load the frozen A5 workload corpus.
+
+    Returns the canonical manifest dict. The digest of this manifest is one of
+    the bindings a benchmark run fixture must carry (per spec §9 identical
+    binding fields). If the manifest file is missing or malformed, the harness
+    cannot validate any run fixture that references it.
+    """
+    if not WORKLOAD_PATH.is_file():
+        raise FileNotFoundError(f"workload manifest not found: {WORKLOAD_PATH}")
+    value = json.loads(WORKLOAD_PATH.read_text("utf-8"))
+    assert isinstance(value, dict)
+    assert value.get("protocol") == WORKLOAD_PROTOCOL, (
+        f"workload manifest protocol mismatch: got {value.get('protocol')!r}, "
+        f"expected {WORKLOAD_PROTOCOL!r}"
+    )
+    return value
+
+
+def workload_manifest_digest(manifest: Mapping[str, Any] | None = None) -> str:
+    """Canonical sha256 digest of the workload manifest, in `sha256:<hex>` form."""
+    value = load_workload_manifest() if manifest is None else dict(manifest)
+    return "sha256:" + hashlib.sha256(_canonical(value)).hexdigest()
 
 
 def protocol_digest(protocol: Mapping[str, Any] | None = None) -> str:

@@ -96,11 +96,23 @@ class RouterSessionBackend:
         qualification_source: QualificationSource | None = None,
         excluded_placements: frozenset[str] = frozenset(),
         sampling_seed: int = 0,
+        selected_placements: frozenset[str] | None = None,
     ) -> None:
         if not isinstance(excluded_placements, frozenset) or not all(
             isinstance(item, str) and item for item in excluded_placements
         ):
             raise ValueError("invalid_excluded_placements")
+        if selected_placements is not None and (
+            not isinstance(selected_placements, frozenset)
+            or not selected_placements
+            or not all(isinstance(item, str) and item for item in selected_placements)
+        ):
+            raise ValueError("invalid_selected_placements")
+        if (
+            selected_placements is not None
+            and selected_placements & excluded_placements
+        ):
+            raise ValueError("selected_placements_conflict")
         if not isinstance(sampling_seed, int) or isinstance(sampling_seed, bool):
             raise ValueError("invalid_sampling_seed")
         self._router = router
@@ -108,6 +120,7 @@ class RouterSessionBackend:
         self._clock = clock
         self._qualification_source = qualification_source
         self._excluded_placements = excluded_placements
+        self._selected_placements = selected_placements
         self._sampling_seed = sampling_seed
         self._lock = threading.RLock()
         self._active: set[str] = set()
@@ -375,13 +388,20 @@ class RouterSessionBackend:
             current,
             deployment,
         )
-        if selected_placements & self._excluded_placements:
-            raise AdmissionError("qualification_mismatch")
         live_placements = frozenset(
             placement.placement_id
             for stage in deployment.stages
             for placement in stage.placements
         )
+        override = self._selected_placements
+        if override is not None:
+            if not override <= live_placements:
+                raise AdmissionError("qualification_mismatch")
+            if override & self._excluded_placements:
+                raise AdmissionError("qualification_mismatch")
+            selected_placements = override
+        elif selected_placements & self._excluded_placements:
+            raise AdmissionError("qualification_mismatch")
         return _AdmissionDecision(
             graph=deployment,
             excluded_placements=live_placements - selected_placements,
@@ -547,7 +567,9 @@ class RouterSessionBackend:
             if external and request_id in self._awaiting_cancel_ack:
                 self._awaiting_cancel_ack.discard(request_id)
                 return True
-            if request_id not in self._active:
+            active = request_id in self._active
+            router_admitted = request_id in self._router_admitted
+            if not active:
                 if not external or request_id in self._pending_cancelled:
                     return True
                 self._pending_cancelled.add(request_id)
@@ -555,13 +577,25 @@ class RouterSessionBackend:
                 if external:
                     self._external_cancellation_observed.add(request_id)
                     self._internally_cancelled.discard(request_id)
-                return True
+                if not router_admitted:
+                    # The backend run has started, but Router admission has
+                    # not published its request record yet. Keep cancellation
+                    # sticky; the first post-admit polling round will route it
+                    # with this same owner deadline.
+                    self._pending_cancelled.add(request_id)
+                    return True
+                if request_id not in self._pending_cancelled:
+                    return True
+                self._pending_cancelled.discard(request_id)
             else:
                 self._cancelled.add(request_id)
                 if external:
                     self._external_cancellation_observed.add(request_id)
                 else:
                     self._internally_cancelled.add(request_id)
+                if not router_admitted:
+                    self._pending_cancelled.add(request_id)
+                    return True
             effective_deadline = self._cancellation_deadlines.get(request_id)
         cancel_with_deadline = getattr(self._router, "cancel_with_deadline", None)
         if effective_deadline is not None and callable(cancel_with_deadline):

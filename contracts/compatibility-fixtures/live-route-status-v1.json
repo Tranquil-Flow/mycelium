@@ -39,6 +39,7 @@
       "applied_operation_count": 0,
       "architecture": "qwen2",
       "current_position": null,
+      "data_plane_health_observed": true,
       "decode_input_token_count": 8,
       "decode_mode": "stage_local_kv",
       "decode_operation_count": 8,
@@ -79,10 +80,14 @@
       },
       "release_state": "released",
       "retained_result_count": 0,
+      "sidecar_process_alive": true,
       "supported_decode_modes": [
         "complete_context_replay",
         "stage_local_kv"
-      ]
+      ],
+      "transport_fatal": false,
+      "transport_fatal_code": null,
+      "transport_running": true
     },
     {
       "activation_output_bytes": 8192,
@@ -91,6 +96,7 @@
       "applied_operation_count": 0,
       "architecture": "qwen2",
       "current_position": null,
+      "data_plane_health_observed": true,
       "decode_input_token_count": 8,
       "decode_mode": "stage_local_kv",
       "decode_operation_count": 8,
@@ -132,10 +138,14 @@
       },
       "release_state": "released",
       "retained_result_count": 0,
+      "sidecar_process_alive": true,
       "supported_decode_modes": [
         "complete_context_replay",
         "stage_local_kv"
-      ]
+      ],
+      "transport_fatal": false,
+      "transport_fatal_code": null,
+      "transport_running": true
     }
   ],
   "protocol": "mycelium.live_route_status.v1",

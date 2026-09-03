@@ -120,7 +120,11 @@ def test_invalid_token_transition_fails_once_without_duplicate_token_event(actio
     assert failed.state.counters.failures == 1
     assert failed.state.counters.capacity_releases == 1
     assert failed.state.counters.kv_cleanups == 1
-    assert repeated.state == failed.state
+    # The terminal's publication window settles on the next action; the
+    # settled state is semantically identical to the terminal state.
+    assert repeated.state == replace(
+        failed.state, publication_pending_kind=None
+    )
     assert repeated.code == "already_terminal"
 
 
@@ -155,7 +159,12 @@ def test_cancel_disconnect_reconnect_and_terminal_cleanup_are_idempotent():
     assert cancelled.state.counters.capacity_releases == 1
     assert cancelled.state.counters.kv_cleanups == 1
     assert again.code == "already_terminal"
-    assert again.state == cancelled.state
+    # A second cancel is absorbed by cancellation_started: no backend
+    # forward, no second counter bump; only the publication window settles.
+    assert again.state == replace(
+        cancelled.state, publication_pending_kind=None
+    )
+    assert again.state.counters.backend_cancels == 1
 
 
 def test_bounded_buffer_reserves_terminal_slot_and_ack_releases_backpressure():
@@ -212,7 +221,72 @@ def test_cancel_before_start_has_no_runtime_capacity_or_cleanup_effects():
     assert cancelled.state.counters.capacity_releases == 0
     assert cancelled.state.counters.kv_acquires == 0
     assert cancelled.state.counters.kv_cleanups == 0
-    assert late_start.state == cancelled.state
+    assert late_start.state == replace(
+        cancelled.state, publication_pending_kind=None
+    )
+
+
+def test_cancel_inside_publication_window_bumps_backend_without_changing_terminal():
+    """The serial model must permit the backend-commit/publication race.
+
+    Pin the exact linearization that used to be under-permitted (the
+    load-dependent flake): accepted -> token -> completed with
+    backend_cancels == 1. A cancel landing after the backend committed
+    ``completed`` but before the service published the terminal is forwarded
+    to the backend (counter bump) and loses to the committed outcome. A
+    later cancel, after publication settled, does not bump again.
+    """
+
+    model = GatewayModel(current=CURRENT)
+    state = model.apply(Action.admit(CURRENT, payload="prompt-a")).state
+    state = model.apply(Action.start(), state=state).state
+    state = model.apply(Action.token(0, "token-0"), state=state).state
+    completed = model.apply(Action.complete(), state=state)
+    assert completed.state.phase is Phase.COMPLETED
+    assert completed.state.counters.backend_cancels == 0
+    assert completed.state.publication_pending_kind == "completed"
+
+    window_cancel = model.apply(Action.cancel(), state=completed.state)
+    assert window_cancel.code == "already_terminal"
+    assert window_cancel.state.phase is Phase.COMPLETED
+    assert window_cancel.state.counters.backend_cancels == 1
+    assert [event.kind for event in window_cancel.state.events] == [
+        "accepted",
+        "token",
+        "completed",
+    ]
+
+    settled_cancel = model.apply(Action.cancel(), state=window_cancel.state)
+    assert settled_cancel.state.counters.backend_cancels == 1
+    assert settled_cancel.state == window_cancel.state
+
+
+def test_cancel_inside_failed_publication_window_does_not_bump():
+    """The failed terminal publishes on the service's own synchronous path.
+
+    The backend-commit/publication window exists only for worker-delivered
+    completions. A failed terminal (token violation / revocation) is
+    published synchronously by the service, so a subsequent cancel is
+    absorbed with no second backend bump — the exact behavior the sequential
+    production harness shows.
+    """
+
+    model = GatewayModel(current=CURRENT)
+    state = model.apply(Action.admit(CURRENT, payload="prompt-a")).state
+    state = model.apply(Action.start(), state=state).state
+    revoked = model.apply(Action.change_authority("ready", False), state=state)
+    failed = model.apply(Action.complete(), state=revoked.state)
+    assert failed.state.phase is Phase.FAILED
+    assert failed.state.counters.backend_cancels == 1
+    assert failed.state.publication_pending_kind == "failed"
+
+    window_cancel = model.apply(Action.cancel(), state=failed.state)
+    assert window_cancel.state.phase is Phase.FAILED
+    assert window_cancel.state.counters.backend_cancels == 1
+    assert window_cancel.state.events[-1].kind == "failed"
+    assert window_cancel.state == replace(
+        failed.state, publication_pending_kind=None
+    )
 
 
 def test_non_utf8_token_text_fails_as_invalid_backend_token():
@@ -315,7 +389,11 @@ def test_terminal_model_state_retains_only_digests_and_exact_replay_identity():
     assert "private-token" not in repr(terminal)
     replay = model.apply(admission, state=terminal)
     assert replay.code == "exact_request_replay"
-    assert replay.state == terminal
+    # The publication window settles on the next action; everything else
+    # (privacy-cleared identity fields) is retained exactly.
+    assert replay.state == replace(
+        terminal, publication_pending_kind=None
+    )
 
 
 def test_next_event_is_at_least_once_delivery_until_ack_like_production():

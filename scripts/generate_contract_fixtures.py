@@ -104,6 +104,7 @@ from mycelium_live.activation import (
 )
 from mycelium_live.a4_contracts import compatibility_fixtures as a4_fixtures
 from mycelium_internet.contracts import compatibility_fixtures as internet_fixtures
+from mycelium_replica_contracts import compatibility_fixtures as replica_fixtures
 from mycelium_live.preparation import AUTHORIZATION_PROTOCOL
 from mycelium_topology_evidence import (
     build_m14_topology_projection,
@@ -1575,6 +1576,11 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
                     "complete_context_replay",
                     "stage_local_kv",
                 ],
+                "data_plane_health_observed": True,
+                "sidecar_process_alive": True,
+                "transport_running": True,
+                "transport_fatal": False,
+                "transport_fatal_code": None,
                 "active_kv_state_count": 0,
                 "active_kv_bytes": 0,
                 "peak_kv_bytes": 4096,
@@ -2230,6 +2236,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "concurrent-request-runtime-v1.json": m16_runtime_status(),
         **a4_fixtures(),
         **internet_fixtures(),
+        **replica_fixtures(),
         "m23-kv-gate-v1.json": m23_kv_gate(),
         "product-snapshot-v1.json": product_snapshot(),
         "product-event-v1.json": product_event(),

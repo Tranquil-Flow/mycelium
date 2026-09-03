@@ -1,0 +1,30 @@
+{
+  "artifact_verification_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "assignment_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "cleanup_within_bounds": true,
+  "deployment_epoch": 1,
+  "deployment_id": "deployment-fixture",
+  "directed_link_qualified": true,
+  "evidence_bundle_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expires_at_unix_ms": 600000,
+  "issued_at_unix_ms": 10000,
+  "load_proof_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "memory_within_bounds": true,
+  "parity_verified": true,
+  "placement_id": "placement-fixture-replica",
+  "placement_ids": [
+    "placement-fixture-replica",
+    "placement-fixture-stage-1"
+  ],
+  "protocol": "mycelium.replica_qualification.v1",
+  "qualification_digest": "sha256:1551f8e0285e3de3fb2748a5c8d7dc90e18fc91e10c8b6eb498430465d8ef80c",
+  "qualification_id": "sha256:1551f8e0285e3de3fb2748a5c8d7dc90e18fc91e10c8b6eb498430465d8ef80c",
+  "qualifier_generation": 1,
+  "rejected_reasons": [],
+  "replica_group_id": "group-fixture-0",
+  "route_ready": true,
+  "startup_challenge_passed": true,
+  "track_id": "track-fixture",
+  "traffic_fraction": 0.5,
+  "workload_envelope_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+}

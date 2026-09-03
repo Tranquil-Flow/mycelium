@@ -8,6 +8,7 @@ from mycelium_node.reconnect import (
     RenewalRetryPolicy,
     transient_renewal_failure,
 )
+from mycelium_seed.http import SeedHTTPError
 
 
 def test_heartbeat_jitter_is_bounded_and_symmetric() -> None:
@@ -59,8 +60,10 @@ class _HTTPFailure(RuntimeError):
 def test_only_transport_and_availability_failures_are_retryable() -> None:
     assert transient_renewal_failure(TimeoutError()) is True
     assert transient_renewal_failure(ConnectionError()) is True
+    assert transient_renewal_failure(SeedHTTPError("seed_http_unreachable")) is True
     assert transient_renewal_failure(_HTTPFailure(503)) is True
     assert transient_renewal_failure(_HTTPFailure(429)) is True
     assert transient_renewal_failure(_HTTPFailure(401)) is False
     assert transient_renewal_failure(_HTTPFailure(409)) is False
+    assert transient_renewal_failure(SeedHTTPError("seed_http_seed_signature_invalid")) is False
     assert transient_renewal_failure(RuntimeError("malformed signed renewal")) is False

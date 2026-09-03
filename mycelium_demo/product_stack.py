@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hmac
-from typing import Any
+from typing import Any, Callable, Iterable, Mapping
 
 from mycelium_request_gateway import create_request_gateway_application
 from mycelium_ui_gateway import GatewayConfig, create_product_gateway_application
@@ -53,6 +53,8 @@ def build_loopback_product_stack(
     product_app: Any | None = None,
     swarm_coordinator: Any,
     request_bearer_token: str,
+    replica_qualifications_factory: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
+    replica_loss_placement_ids_factory: Callable[[], frozenset[str]] | None = None,
     public_origin: str | None = None,
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
@@ -72,6 +74,8 @@ def build_loopback_product_stack(
         router=router,
         codec=codec,
         bearer_token=request_bearer_token,
+        replica_qualifications_factory=replica_qualifications_factory,
+        replica_loss_placement_ids_factory=replica_loss_placement_ids_factory,
     )
     return create_product_gateway_application(
         config=GatewayConfig(

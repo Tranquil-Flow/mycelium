@@ -89,22 +89,35 @@ def generate_bounded_traces(
                 applied = _apply_symbolic(model, prefix_state, symbolic)
                 if applied is None:
                     continue
-                concrete, next_state = applied
+                concrete, _next_state = applied
                 # Symbolic prefixes are unique only when their concrete action
                 # sequence is unique. Re-materialize from the initial state.
                 concrete_trace: list[Action] = []
                 replay_state = model.initial_state
+                published = False
                 for item in (*prefix, symbolic):
                     action = materialize_action(item, replay_state)
                     concrete_trace.append(action)
                     replay_state = model.apply(action, state=replay_state).state
+                    # The sequential production harness waits for terminal
+                    # publication after every terminal transition; model it
+                    # as an explicit publish step.
+                    if replay_state.publication_pending_kind is not None:
+                        publish = Action("publish")
+                        concrete_trace.append(publish)
+                        replay_state = model.apply(
+                            publish, state=replay_state
+                        ).state
+                        published = True
                 key = tuple(concrete_trace)
                 if key in seen_concrete:
                     continue
                 seen_concrete.add(key)
                 trace = (*prefix, symbolic)
+                if published:
+                    trace = (*trace, _symbolic_action("publish"))
                 traces.append(trace)
-                next_frontier.append((trace, next_state))
+                next_frontier.append((trace, replay_state))
         frontier = next_frontier
 
     # Public no-request negatives. Backend callbacks and completion have no
@@ -138,25 +151,37 @@ def generate_race_traces(current: Authority) -> tuple[tuple[Action, ...], ...]:
     seen_concrete: set[tuple[Action, ...]] = set()
 
     for ordering in itertools.permutations(actions):
-        trace: list[Action] = [admit, start, reconnect]
-        state = model.initial_state
-        concrete_trace: list[Action] = []
-        for item in trace:
-            concrete = materialize_action(item, state)
-            concrete_trace.append(concrete)
-            state = model.apply(concrete, state=state).state
-        for symbolic in ordering:
-            applied = _apply_symbolic(model, state, symbolic)
-            if applied is None:
+        for settle_publication in (False, True):
+            trace: list[Action] = [admit, start, reconnect]
+            state = model.initial_state
+            concrete_trace: list[Action] = []
+            published = False
+            for item in trace:
+                concrete = materialize_action(item, state)
+                concrete_trace.append(concrete)
+                state = model.apply(concrete, state=state).state
+            for symbolic in ordering:
+                applied = _apply_symbolic(model, state, symbolic)
+                if applied is None:
+                    continue
+                concrete, state = applied
+                trace.append(symbolic)
+                concrete_trace.append(concrete)
+                if (
+                    settle_publication
+                    and not published
+                    and state.publication_pending_kind is not None
+                ):
+                    publish = _symbolic_action("publish")
+                    trace.append(publish)
+                    concrete_trace.append(Action("publish"))
+                    state = model.apply(Action("publish"), state=state).state
+                    published = True
+            key = tuple(concrete_trace)
+            if key in seen_concrete:
                 continue
-            concrete, state = applied
-            trace.append(symbolic)
-            concrete_trace.append(concrete)
-        key = tuple(concrete_trace)
-        if key in seen_concrete:
-            continue
-        seen_concrete.add(key)
-        traces.append(tuple(trace))
+            seen_concrete.add(key)
+            traces.append(tuple(trace))
     return tuple(traces)
 
 

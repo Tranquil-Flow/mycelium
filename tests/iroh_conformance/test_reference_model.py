@@ -81,8 +81,35 @@ def test_start_close_restart_is_irreversible_and_idempotent() -> None:
         "transport_closed",
     )
     assert run.final_state.lifecycle == "CLOSED"
-    assert run.final_state.closed_client_count == 3
+    assert run.final_state.closed_client_count == 6
     assert run.final_state.installed_client_roles == ()
+
+
+def test_receive_reconnect_retires_old_session_before_replacement() -> None:
+    success = _run(
+        "bind_router",
+        "start",
+        "receive_disconnect",
+        "receive_reconnect_complete",
+        "close",
+    )
+    assert success.states[3].closed_client_count == 1
+    assert success.states[3].closed_installed_client_roles == ("receive",)
+    assert success.states[4].closed_client_count == 1
+    assert success.states[4].closed_installed_client_roles == ()
+    assert success.final_state.closed_client_count == 7
+
+    failure = _run(
+        "bind_router",
+        "start",
+        "receive_disconnect",
+        "receive_reconnect_fail",
+        "close",
+    )
+    assert failure.states[4].closed_client_count == 2
+    assert failure.states[4].closed_replacement_count == 1
+    assert failure.states[4].closed_installed_client_roles == ("receive",)
+    assert failure.final_state.closed_client_count == 7
 
 
 def test_queue_exhaustion_and_completion_release_exactly_one_permit() -> None:

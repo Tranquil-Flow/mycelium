@@ -1,13 +1,15 @@
 """Adapt the request gateway's RouterPort onto a persistent LiveRoute."""
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from typing import Any, cast, Iterable, Mapping
 
 from mycelium_m16_runtime import M16AdmissionError, M16RuntimeCoordinator
 from mycelium_router.contracts import ExecutionGraph, RequestContext
@@ -25,7 +27,10 @@ from .command_controller import (
 from .a4_contracts import validate_interruptible_stage_command
 from .lock_order import LockOrderDetector, LockOrderViolation
 
-from .route import AffectedPeerQuarantined, InferenceCancelled, LiveRoute
+from .route import AffectedPeerQuarantined, InferenceCancelled, LiveRoute, TokenSink
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,10 +41,13 @@ class _Pending:
     path_manifest: dict[str, Any] | None = None
     command_identity: CommandIdentity | None = None
     cleanup_owner_id: str | None = None
+    cleanup_receipt: dict[str, Any] | None = None
     tokens: list[tuple[int, int]] = field(default_factory=list)
     cursor: int = 0
     terminal_status: str | None = None
+    terminal_error_code: str | None = None
     terminal_blocked_reason: str | None = None
+    cancellation_linearized: bool = False
     cancellation_requested: threading.Event = field(default_factory=threading.Event)
     release_requested: bool = False
     execution_started: bool = False
@@ -64,6 +72,11 @@ class LiveRouterPort:
         self._graph = execution_graph
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
+        # Coordinator admission makes a request dispatch-visible before this
+        # adapter has finished binding its command identity and pending state.
+        # Serialize that publication boundary with dispatcher selection so a
+        # fast dispatcher cannot consume and fail a request in the sub-ms gap.
+        self._admission_dispatch_lock = threading.Lock()
         self._pending: dict[str, _Pending] = {}
         self._sinks: dict[str, object] = {}
         self._coordinator = runtime_coordinator
@@ -105,6 +118,22 @@ class LiveRouterPort:
         pinned_deployment: ExecutionGraph | None = None,
         **kwargs: object,
     ) -> str:
+        with self._admission_dispatch_lock:
+            return self._admit_serialized(
+                request,
+                client_sink,
+                pinned_deployment=pinned_deployment,
+                **kwargs,
+            )
+
+    def _admit_serialized(
+        self,
+        request: RequestContext,
+        client_sink: object,
+        *,
+        pinned_deployment: ExecutionGraph | None = None,
+        **kwargs: object,
+    ) -> str:
         if not self._route.is_alive():
             raise RuntimeError("route_not_open")
 
@@ -120,7 +149,16 @@ class LiveRouterPort:
                 )
             if not isinstance(profile, str):
                 raise M16AdmissionError("workload_not_qualified")
-            manifest = coordinator.admit(request, workload_profile_id=profile)
+            excluded_placements = kwargs.get("excluded_placements", frozenset())
+            if not isinstance(excluded_placements, frozenset) or not all(
+                isinstance(item, str) and item for item in excluded_placements
+            ):
+                raise M16AdmissionError("invalid_excluded_placements")
+            manifest = coordinator.admit(
+                request,
+                workload_profile_id=profile,
+                excluded_placements=excluded_placements,
+            )
             pending.placement_ids = tuple(
                 hop.placement_id for hop in manifest.ordered_hops
             )
@@ -144,10 +182,7 @@ class LiveRouterPort:
                 )
             issued_at_ms = int(time.monotonic() * 1_000)
             publisher_generation = kwargs.get("publisher_generation", 1)
-            if (
-                type(publisher_generation) is not int
-                or publisher_generation < 1
-            ):
+            if type(publisher_generation) is not int or publisher_generation < 1:
                 coordinator.cancel(request.request_id)
                 raise M16AdmissionError("publisher_generation_invalid")
             first_placement = manifest.ordered_hops[0].placement_id
@@ -182,25 +217,28 @@ class LiveRouterPort:
                 absolute_deadline_ms=issued_at_ms + 3_600_000,
             )
             cleanup_owner_id = f"physical-live-route:{self._graph.deployment_id}"
-            idempotency_digest = "sha256:" + hashlib.sha256(
-                json.dumps(
-                    pending.route_identity,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
+            idempotency_digest = (
+                "sha256:"
+                + hashlib.sha256(
+                    json.dumps(
+                        pending.route_identity,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+            )
             envelope = CommandEnvelope(
-                    identity=identity,
-                    stage_id=stage.stage_id,
-                    placement_id=placement.placement_id,
-                    assignment_id=placement.assignment_id,
-                    kind=CommandKind.PREFILL,
-                    issued_at_ms=issued_at_ms,
-                    idempotency_digest=idempotency_digest,
-                    cleanup_owner_id=cleanup_owner_id,
-                    maximum_request_bytes=131_072,
-                    maximum_response_bytes=16_777_216,
-                )
+                identity=identity,
+                stage_id=stage.stage_id,
+                placement_id=placement.placement_id,
+                assignment_id=placement.assignment_id,
+                kind=CommandKind.PREFILL,
+                issued_at_ms=issued_at_ms,
+                idempotency_digest=idempotency_digest,
+                cleanup_owner_id=cleanup_owner_id,
+                maximum_request_bytes=131_072,
+                maximum_response_bytes=16_777_216,
+            )
             validate_interruptible_stage_command(
                 {
                     "protocol": "mycelium.interruptible_stage_command.v1",
@@ -258,38 +296,42 @@ class LiveRouterPort:
             self._changed.notify_all()
 
         if coordinator is None:
-            self._worker_pool.submit(self._run_route, request.request_id, request, pending)
+            self._worker_pool.submit(
+                self._run_route, request.request_id, request, pending
+            )
         return request.request_id
 
     def _dispatch_loop(self) -> None:
         coordinator = self._coordinator
         assert coordinator is not None
         while True:
-            with self._changed:
-                if self._closed:
-                    return
-                request_id = coordinator.next_dispatch()
-                if request_id is None:
-                    self._changed.wait(timeout=0.05)
-                    continue
-                pending = self._pending.get(request_id)
-                stored = None if pending is None else pending.request
+            with self._admission_dispatch_lock:
+                with self._changed:
+                    if self._closed:
+                        return
+                    request_id = coordinator.next_dispatch()
+                    if request_id is None:
+                        self._changed.wait(timeout=0.05)
+                        continue
+                    pending = self._pending.get(request_id)
+                    stored = None if pending is None else pending.request
             if pending is None or stored is None:
                 coordinator.complete(request_id, state="failed")
                 continue
-            self._worker_pool.submit(self._run_route, request_id, stored, pending)
+            self._worker_pool.submit(
+                self._run_route, request_id, stored, pending
+            )
 
-    def _route_has_scoped_incident_for(
-        self, request: RequestContext | None
-    ) -> bool:
+    def _route_has_scoped_incident_for(self, request: RequestContext | None) -> bool:
         if request is None:
             return False
         incidents = getattr(self._route, "_scoped_runtime_incidents", None)
         if isinstance(incidents, Iterable):
             for incident in incidents:
-                if isinstance(incident, Mapping) and incident.get(
-                    "request_id"
-                ) == request.request_id:
+                if (
+                    isinstance(incident, Mapping)
+                    and incident.get("request_id") == request.request_id
+                ):
                     return True
         # Route-level cleanup incidents (request_cleanup_unproven, recorded
         # when exact cleanup could not be proven within the original
@@ -330,6 +372,7 @@ class LiveRouterPort:
                     pending.tokens.append((token_index, token_id))
                     self_outer._changed.notify_all()
 
+        terminal_error_code: str | None = None
         try:
             with self._changed:
                 pending.execution_started = True
@@ -346,7 +389,7 @@ class LiveRouterPort:
                 )
                 identity = pending.command_identity
             route_options: dict[str, object] = {}
-            if placement_ids is not None:
+            if placement_ids is not None and path_manifest is None:
                 route_options["selected_placement_ids"] = placement_ids
             if route_identity is not None:
                 route_options["route_identity"] = route_identity
@@ -375,6 +418,9 @@ class LiveRouterPort:
                         completion_cleanup=True,
                     )
                 )
+                route_options["publish_cleanup_receipt"] = lambda receipt: (
+                    self_outer._publish_route_cleanup_receipt(pending, receipt)
+                )
             self._route.infer(
                 request.prompt_token_ids,
                 max_new_tokens=request.max_new_tokens,
@@ -386,14 +432,32 @@ class LiveRouterPort:
         except InferenceCancelled:
             terminal = "CANCELLED"
             admission_refused = False
-        except AffectedPeerQuarantined:
+        except AffectedPeerQuarantined as error:
             terminal = "FAILED"
             admission_refused = True
-        except BaseException:
+            terminal_error_code = self._bounded_error_code(error)
+        except Exception as error:
             terminal = "FAILED"
             admission_refused = False
+            terminal_error_code = self._bounded_error_code(error)
         else:
-            terminal = "COMPLETED"
+            # Cancellation is linearized by the command controller before the
+            # physical route is interrupted.  The route can still return its
+            # completed result in the narrow window between that CAS and its
+            # local cancellation check.  Do not then try to publish COMPLETED
+            # for a command whose cancellation generation already advanced:
+            # the controller correctly rejects that transition and the M16
+            # reservation would otherwise remain in cleanup forever despite
+            # an exact route cleanup receipt.
+            terminal = "CANCELLED" if pending.cancellation_linearized else "COMPLETED"
+            admission_refused = False
+        if pending.cancellation_linearized and pending.cleanup_receipt is not None:
+            # The route can publish exact physical cleanup before its original
+            # inference command unwinds.  Any later return or exception belongs
+            # to the retired generation and cannot override the already-sealed
+            # cancellation terminal.
+            terminal = "CANCELLED"
+            terminal_error_code = None
             admission_refused = False
         if coordinator is not None:
             coordinator.mark_phase(request_id, "cleanup")
@@ -408,9 +472,17 @@ class LiveRouterPort:
                 coordinator.complete(request_id, state="failed")
         else:
             try:
-                self._record_command_terminal(pending, terminal)
+                recorded_terminal = self._record_command_terminal(pending, terminal)
+                if recorded_terminal == "FAILED" and terminal != "FAILED":
+                    terminal_error_code = "deadline_exceeded"
+                terminal = recorded_terminal
             except RuntimeError as error:
                 terminal_blocked_reason = str(error)
+                _LOGGER.error(
+                    "live route terminal blocked request_id=%s reason=%s",
+                    request_id,
+                    terminal_blocked_reason[:256],
+                )
                 # If a scoped liveness incident already projected the affected
                 # track's terminal status (e.g. a participating peer's transport
                 # is fatally failed), the scoped incident is the authoritative
@@ -420,9 +492,8 @@ class LiveRouterPort:
                 # surfaces as the authoritative outcome. Without a scoped
                 # incident we keep the fail-closed "cleanup" phase so the
                 # operator can see the unproven cleanup.
-                if (
-                    coordinator is not None
-                    and self._route_has_scoped_incident_for(pending.request)
+                if coordinator is not None and self._route_has_scoped_incident_for(
+                    pending.request
                 ):
                     coordinator.complete(request_id, state="failed")
                 elif coordinator is not None:
@@ -437,6 +508,7 @@ class LiveRouterPort:
                     coordinator.complete(request_id, state=terminal.lower())
         should_release = False
         with self._changed:
+            pending.terminal_error_code = terminal_error_code
             if terminal_blocked_reason is None:
                 pending.terminal_status = terminal
             else:
@@ -469,22 +541,40 @@ class LiveRouterPort:
         sink.emit(token_index, token_id)
         return True
 
+    def poll_one(self, request_id: str) -> bool:
+        """Deliver one available token without waiting for route progress."""
+
+        with self._changed:
+            pending = self._pending.get(request_id)
+            if pending is None or pending.cursor >= len(pending.tokens):
+                return False
+            token_index, token_id = pending.tokens[pending.cursor]
+            pending.cursor += 1
+            sink = cast(TokenSink, self._sinks[request_id])
+        sink.emit(token_index, token_id)
+        return True
+
     def request_status(self, request_id: str) -> str:
         with self._lock:
             pending = self._pending.get(request_id)
             if pending is None:
                 return "UNKNOWN"
-            if (
-                pending.terminal_status is not None
-                and pending.cursor >= len(pending.tokens)
+            if pending.terminal_status is not None and pending.cursor >= len(
+                pending.tokens
             ):
                 return pending.terminal_status
-            if (
-                pending.terminal_blocked_reason is not None
-                and pending.cursor >= len(pending.tokens)
+            if pending.terminal_blocked_reason is not None and pending.cursor >= len(
+                pending.tokens
             ):
                 return "TERMINAL_BLOCKED"
             return "DECODING"
+
+    def request_error_code(self, request_id: str) -> str | None:
+        """Return one bounded terminal failure code without private diagnostics."""
+
+        with self._lock:
+            pending = self._pending.get(request_id)
+            return None if pending is None else pending.terminal_error_code
 
     def cancel(self, request_id: str) -> bool:
         return self.cancel_with_deadline(
@@ -510,6 +600,8 @@ class LiveRouterPort:
                     pending,
                     deadline_monotonic_s=deadline_monotonic_s,
                 )
+                pending.cancellation_linearized = True
+                pending.cancellation_requested.set()
                 self._record_command_terminal(pending, "CANCELLED")
                 pending.terminal_status = "CANCELLED"
                 self._changed.notify_all()
@@ -518,6 +610,12 @@ class LiveRouterPort:
                 pending,
                 deadline_monotonic_s=deadline_monotonic_s,
             )
+            # The command-controller CAS is terminal authority immediately,
+            # including while physical cancel_request() is still returning.
+            # Keep its state separate from the route's cancel_requested
+            # callback: that callback must not become true until physical
+            # fanout has installed the matching cancellation generation.
+            pending.cancellation_linearized = True
             route_cancel = getattr(self._route, "cancel_request", None)
         if callable(route_cancel):
             try:
@@ -582,14 +680,34 @@ class LiveRouterPort:
         return True
 
     @staticmethod
+    def _bounded_error_code(error: BaseException) -> str:
+        code = getattr(error, "remote_code", None) or getattr(error, "code", None)
+        if not isinstance(code, str) or not code:
+            code = str(error).partition(":")[0]
+        if (
+            not code
+            or len(code) > 64
+            or not code[0].islower()
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyz0123456789_"
+                for character in code
+            )
+        ):
+            return "runtime_error"
+        return code
+
+    @staticmethod
     def _digest_document(document: object) -> str:
-        return "sha256:" + hashlib.sha256(
-            json.dumps(
-                document,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        return (
+            "sha256:"
+            + hashlib.sha256(
+                json.dumps(
+                    document,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        )
 
     def _request_command_cancellation(
         self,
@@ -611,9 +729,7 @@ class LiveRouterPort:
             return snapshots[0].cleanup_deadline_ms / 1_000.0
         now_ms = int(time.monotonic() * 1_000)
         cleanup_deadline_ms = (
-            None
-            if deadline_monotonic_s is None
-            else int(deadline_monotonic_s * 1_000)
+            None if deadline_monotonic_s is None else int(deadline_monotonic_s * 1_000)
         )
         result = self._commands.cancel(
             identity,
@@ -635,45 +751,107 @@ class LiveRouterPort:
             raise RuntimeError("command_cancellation_deadline_missing")
         return result.snapshot.cleanup_deadline_ms / 1_000.0
 
-    def _record_command_terminal(self, pending: _Pending, terminal: str) -> None:
+    def _publish_route_cleanup_receipt(
+        self,
+        pending: _Pending,
+        receipt: Mapping[str, Any],
+    ) -> None:
+        """Publish physical cleanup at the route proof boundary."""
+
+        should_release = False
+        with self._changed:
+            # Retain the exact receipt with command ownership before any
+            # terminal publication.  The route may release its request-scoped
+            # copy as soon as the gateway observes this callback; a racing
+            # worker must not then fall back to a missing route lookup.
+            pending.cleanup_receipt = dict(receipt)
+            if pending.cancellation_linearized:
+                self._record_command_terminal(
+                    pending,
+                    "CANCELLED",
+                    cleanup_receipt=receipt,
+                )
+                # The route worker can return in the narrow interval after
+                # physical teardown proves clean but before cancel_request()
+                # publishes this receipt.  It then fail-closes terminal
+                # publication and retires only the dispatch slot.  The exact
+                # owner receipt is authoritative recovery for that ordering:
+                # finish retained M16 reservations and revive the pending
+                # terminal instead of leaving a proven-clean request stuck in
+                # cleanup forever.
+                coordinator = self._coordinator
+                request = pending.request
+                request_id = None if request is None else request.request_id
+                phase = (
+                    None
+                    if coordinator is None or request_id is None
+                    else coordinator.phase(request_id)
+                )
+                if coordinator is not None and request_id is not None:
+                    if phase == "cleanup":
+                        coordinator.complete(request_id, state="cancelled")
+                    elif phase not in {
+                        "queued",
+                        "prefill",
+                        "first_token",
+                        "decode",
+                        "cancelled",
+                    }:
+                        raise RuntimeError("command_cleanup_phase_invalid")
+                if phase in {"cleanup", "cancelled"} or coordinator is None:
+                    pending.terminal_error_code = None
+                    pending.terminal_blocked_reason = None
+                    pending.terminal_status = "CANCELLED"
+                    if pending.release_requested and request_id is not None:
+                        self._pending.pop(request_id, None)
+                        self._sinks.pop(request_id, None)
+                        should_release = True
+                    self._changed.notify_all()
+            else:
+                self._record_command_cleanup(pending, receipt=receipt)
+        if should_release:
+            self._release_route_request(pending)
+            self._retire_command(pending)
+
+    def _record_command_cleanup(
+        self,
+        pending: _Pending,
+        *,
+        receipt: Mapping[str, Any] | None = None,
+    ) -> None:
         identity = pending.command_identity
         owner_id = pending.cleanup_owner_id
         if identity is None or owner_id is None:
             return
-        now_ms = int(time.monotonic() * 1_000)
-        if terminal == "CANCELLED":
-            if identity.cancellation_generation == 0:
-                self._request_command_cancellation(pending)
-                identity = pending.command_identity
-                assert identity is not None
-            status = TerminalStatus.CANCELLED
-        elif terminal == "COMPLETED":
-            status = TerminalStatus.COMPLETED
-        else:
-            status = TerminalStatus.ERROR
-        scoped_receipt_source = getattr(
-            self._route,
-            "request_cleanup_receipt_scoped",
-            None,
-        )
-        if callable(scoped_receipt_source):
-            receipt = scoped_receipt_source(
-                identity.request_id,
-                request_attempt=identity.request_attempt,
-                path_id=identity.path_id,
-                path_attempt=identity.path_attempt,
-                path_digest=identity.path_digest,
-                cleanup_owner_id=owner_id,
-            )
-        else:
-            receipt_source = getattr(self._route, "request_cleanup_receipt", None)
-            receipt = (
-                receipt_source(identity.request_id)
-                if callable(receipt_source)
-                else None
-            )
+        if receipt is None and pending.cleanup_receipt is not None:
+            receipt = dict(pending.cleanup_receipt)
         if receipt is None:
-            if pending.execution_started and getattr(self._route, "is_simulated", False) is not True:
+            scoped_receipt_source = getattr(
+                self._route,
+                "request_cleanup_receipt_scoped",
+                None,
+            )
+            if callable(scoped_receipt_source):
+                receipt = scoped_receipt_source(
+                    identity.request_id,
+                    request_attempt=identity.request_attempt,
+                    path_id=identity.path_id,
+                    path_attempt=identity.path_attempt,
+                    path_digest=identity.path_digest,
+                    cleanup_owner_id=owner_id,
+                )
+            else:
+                receipt_source = getattr(self._route, "request_cleanup_receipt", None)
+                receipt = (
+                    receipt_source(identity.request_id)
+                    if callable(receipt_source)
+                    else None
+                )
+        if receipt is None:
+            if (
+                pending.execution_started
+                and getattr(self._route, "is_simulated", False) is not True
+            ):
                 raise RuntimeError("command_cleanup_receipt_missing")
             receipt = {
                 "deployment_id": identity.deployment_id,
@@ -692,23 +870,58 @@ class LiveRouterPort:
                 "node_ids": [],
                 "simulation_only": bool(pending.execution_started),
             }
-        if any(
-            receipt.get(field) != expected
-            for field, expected in (
-                ("deployment_id", identity.deployment_id),
-                ("deployment_epoch", identity.deployment_epoch),
-                ("qualification_digest", identity.qualification_digest),
-                ("request_id", identity.request_id),
-                ("request_attempt", identity.request_attempt),
-                ("path_id", identity.path_id),
-                ("path_attempt", identity.path_attempt),
-                ("path_digest", identity.path_digest),
-                ("topology_generation", identity.topology_generation),
-                ("command_id", identity.command_id),
-                ("cancellation_generation", identity.cancellation_generation),
-                ("publisher_generation", identity.publisher_generation),
-            )
+        # Physical cleanup is fenced by the immutable request/path/command and
+        # cancellation generation that was actually torn down.  Publisher
+        # generation is independent gateway replay authority: it may advance
+        # after the route freezes its cleanup subject but before the receipt
+        # callback reaches this adapter.  The command controller has already
+        # CAS-validated every such advance, so an older positive publisher
+        # generation remains exact cleanup proof for the current command.  A
+        # future generation is impossible and still fails closed.
+        identity_fields = (
+            ("deployment_id", identity.deployment_id),
+            ("deployment_epoch", identity.deployment_epoch),
+            ("qualification_digest", identity.qualification_digest),
+            ("request_id", identity.request_id),
+            ("request_attempt", identity.request_attempt),
+            ("path_id", identity.path_id),
+            ("path_attempt", identity.path_attempt),
+            ("path_digest", identity.path_digest),
+            ("topology_generation", identity.topology_generation),
+            ("command_id", identity.command_id),
+            (
+                "cancellation_generation",
+                identity.cancellation_generation,
+            ),
+        )
+        identity_mismatch_fields = tuple(
+            field
+            for field, expected in identity_fields
+            if receipt.get(field) != expected
+        )
+        receipt_publisher_generation = receipt.get("publisher_generation")
+        publisher_generation_mismatch = (
+            type(receipt_publisher_generation) is not int
+            or not 1
+            <= receipt_publisher_generation
+            <= identity.publisher_generation
+        )
+        if (
+            identity_mismatch_fields
+            or publisher_generation_mismatch
         ):
+            _LOGGER.error(
+                "cleanup receipt identity mismatch request_id=%s fields=%s "
+                "receipt_publisher_generation=%r controller_publisher_generation=%r "
+                "receipt_cancellation_generation=%r "
+                "controller_cancellation_generation=%r",
+                identity.request_id,
+                identity_mismatch_fields,
+                receipt_publisher_generation,
+                identity.publisher_generation,
+                receipt.get("cancellation_generation"),
+                identity.cancellation_generation,
+            )
             raise RuntimeError("command_cleanup_receipt_identity_mismatch")
         if receipt.get("cleanup_owner_id") != owner_id:
             raise RuntimeError("command_cleanup_receipt_owner_mismatch")
@@ -717,6 +930,13 @@ class LiveRouterPort:
             isinstance(node_id, str) and node_id for node_id in node_ids
         ):
             raise RuntimeError("command_cleanup_receipt_invalid")
+        completed_at_ms = receipt.get("completed_at_monotonic_ms")
+        now_ms = (
+            completed_at_ms
+            if isinstance(completed_at_ms, int)
+            and not isinstance(completed_at_ms, bool)
+            else int(time.monotonic() * 1_000)
+        )
         cleanup = self._commands.record_cleanup(
             identity,
             owner_id=owner_id,
@@ -730,6 +950,40 @@ class LiveRouterPort:
         )
         if not cleanup.accepted:
             raise RuntimeError(f"command_cleanup_rejected:{cleanup.reason}")
+
+    def _record_command_terminal(
+        self,
+        pending: _Pending,
+        terminal: str,
+        *,
+        cleanup_receipt: Mapping[str, Any] | None = None,
+    ) -> str:
+        identity = pending.command_identity
+        owner_id = pending.cleanup_owner_id
+        if identity is None or owner_id is None:
+            return terminal
+        if terminal == "CANCELLED":
+            if identity.cancellation_generation == 0:
+                self._request_command_cancellation(pending)
+                identity = pending.command_identity
+                assert identity is not None
+            status = TerminalStatus.CANCELLED
+        elif terminal == "COMPLETED":
+            status = TerminalStatus.COMPLETED
+        else:
+            status = TerminalStatus.ERROR
+        self._record_command_cleanup(pending, receipt=cleanup_receipt)
+        completed_at_ms = (
+            cleanup_receipt.get("completed_at_monotonic_ms")
+            if cleanup_receipt is not None
+            else None
+        )
+        now_ms = (
+            completed_at_ms
+            if isinstance(completed_at_ms, int)
+            and not isinstance(completed_at_ms, bool)
+            else int(time.monotonic() * 1_000)
+        )
         result = TerminalResult(
             identity=identity,
             status=status,
@@ -744,7 +998,41 @@ class LiveRouterPort:
             expected_terminal_revision=0,
         )
         if not mutation.accepted:
+            snapshot = mutation.snapshot
+            if (
+                mutation.reason == "already_terminal"
+                and snapshot is not None
+                and snapshot.identity == identity
+                and snapshot.terminal is not None
+                and snapshot.terminal.status is status
+                and snapshot.cleanup_result is not None
+                and snapshot.cleanup_result.status is CleanupStatus.COMPLETED
+            ):
+                # The controller CAS is the terminal linearization point.  A
+                # watchdog/cancellation observer can re-enter this adapter
+                # after that CAS but before _Pending.terminal_status is
+                # published. Exact identity, terminal status, and cleanup
+                # proof make that observation idempotent; every conflicting
+                # terminal continues to fail closed below.
+                return terminal
+            if (
+                mutation.reason == "already_terminal"
+                and snapshot is not None
+                and snapshot.identity == identity
+                and snapshot.terminal is not None
+                and snapshot.terminal.status is TerminalStatus.DEADLINE_EXCEEDED
+                and snapshot.cleanup_result is not None
+                and snapshot.cleanup_result.status is CleanupStatus.COMPLETED
+            ):
+                # Cleanup proof and terminal CAS are deliberately separate.
+                # If proof completes at the fixed cleanup deadline, the
+                # controller can install DEADLINE_EXCEEDED between those two
+                # operations. Preserve that authoritative terminal and project
+                # it as a bounded failed request instead of stranding an exact,
+                # fully cleaned command in the runtime cleanup phase.
+                return "FAILED"
             raise RuntimeError(f"command_terminal_rejected:{mutation.reason}")
+        return terminal
 
     def runtime_status(self) -> dict[str, Any] | None:
         coordinator = self._coordinator
@@ -771,7 +1059,12 @@ class LiveRouterPort:
         identity = pending.command_identity
         owner_id = pending.cleanup_owner_id
         scoped_release = getattr(self._route, "release_request_scoped", None)
-        if identity is not None and owner_id is not None and callable(scoped_release):
+        if (
+            pending.execution_started
+            and identity is not None
+            and owner_id is not None
+            and callable(scoped_release)
+        ):
             scoped_release(
                 identity.request_id,
                 request_attempt=identity.request_attempt,

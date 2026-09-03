@@ -1,0 +1,159 @@
+{
+  "protocol": "mycelium.gate_completion_record.v1",
+  "gate_id": "A5",
+  "state": "design_only",
+  "outcome": {
+    "decision": "inconclusive",
+    "gate_state": "design_only",
+    "point_estimate_fraction": 0.16710745942796965,
+    "paired_95_percent_bootstrap_lower_bound_fraction": -0.4196995766436599,
+    "materiality_threshold_fraction": 0.1,
+    "promotion_authorized": false,
+    "qualification_claim": false,
+    "reason": "paired_confidence_lower_bound_below_material_threshold"
+  },
+  "claim_boundary": "A5 is terminal and fully executed, but it is not promoted: request-level replicas of one contiguous stage ran through complete legal tracks on the ordinary physical and browser product paths, while the frozen paired benchmark was inconclusive. This record asserts retained proof of that executed A5 outcome only. It does not assert current route health, material throughput gain, automatic successor recovery, in-flight migration, KV handoff, tensor parallelism, or release readiness. The single atomic A5 feature commit is the closing commit that contains this record; its SHA is assigned by Git at commit time.",
+  "closing_commit": "assigned_by_git_to_the_atomic_commit_containing_this_record",
+  "bindings": {
+    "contract_digest": "sha256:dc15dd0280c8bad8a7f7db2041bdc7529d2b1cc50f11acb824cca2063bdbdddd",
+    "model_digest": "sha256:2729a427933ffaf01af4739ef70206023f2e7aa1061c2791283d3356f686d305",
+    "representation_digest": "sha256:2729a427933ffaf01af4739ef70206023f2e7aa1061c2791283d3356f686d305",
+    "runtime_digest": "sha256:d3748976a412caf809603f02f0dcc0b10e6ec96e3de221ad118af0187adcede0",
+    "environment_digest": "sha256:5fa774139d2cdb488519401f62339a0482b3d021856225e956454d2651f81d6b",
+    "authority_generation": 1788114871273
+  },
+  "route": {
+    "deployment_id": "e1d1a2fa-f68d-5b38-a507-34b367c8d855",
+    "model_id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "stage_count": 2,
+    "replica_group_id": "stage-000-replicas",
+    "placements": [
+      {
+        "placement_id": "placement-000",
+        "node_id": "node-0",
+        "stage_id": "stage-000",
+        "layers": "[0,23)",
+        "runtime_backend": "mlx"
+      },
+      {
+        "placement_id": "placement-002",
+        "node_id": "node-3-r2",
+        "stage_id": "stage-000",
+        "layers": "[0,23)",
+        "runtime_backend": "mlx"
+      },
+      {
+        "placement_id": "placement-001",
+        "node_id": "node-2",
+        "stage_id": "stage-001",
+        "layers": "[23,24)",
+        "runtime_backend": "numpy"
+      }
+    ]
+  },
+  "source_binding": {
+    "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/source-manifest.v1.json",
+    "artifact_digest": "sha256:d3748976a412caf809603f02f0dcc0b10e6ec96e3de221ad118af0187adcede0",
+    "protocol": "mycelium.candidate_source_manifest.v1",
+    "base_commit": "1fd3a6f8733fea52e55e0fbcbf46e86fa7bed03f",
+    "branch": "codex/a5-multistage-replication",
+    "entry_count": 101,
+    "total_size_bytes": 3008354,
+    "scope": "exact staged physical runtime and gate sources used by the positive, benchmark, cancellation, and negative protocols; final closure-only UI validator, browser harness, audit, test, checklist, and documentation edits are bound by the closing atomic commit"
+  },
+  "authority": {
+    "observed_at": "2026-08-30T18:34:31.273Z",
+    "fresh_until": "2026-09-06T18:34:31.284Z",
+    "route_qualification_id": "sha256:9498ccaf9407196f9ed2492fc93070423e7c4112b9542eeee3a7ebbbadd6e48b",
+    "replica_qualification_id": "sha256:9e8377d1070ddd31c2c8d26c7f85a104a35fdcc211b281b151aba12a8f61dc98",
+    "qualification_digest": "sha256:3f3e4b49d9e0437462b533c93a7dea31c8e5516df53042c4f1c8f368c5cad0d9"
+  },
+  "sealed_evidence": [
+    {
+      "name": "concurrent_cancellation_repeat",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/concurrent-cancel-24x3/concurrent-cancellation-reproducer.summary.json",
+      "artifact_digest": "sha256:1f59646ec227dc08e819155ac87a585fea205521d80a4ab8802b3522ecc5ab32",
+      "protocol": "mycelium.a5_concurrent_cancellation_repeat.v1",
+      "result": "passed",
+      "detail": "24/24 campaigns, 72/72 cancellations, 676.876 ms maximum cancel-to-terminal, zero new incidents, zero live resources"
+    },
+    {
+      "name": "physical_positive",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-product-positive.json",
+      "artifact_digest": "sha256:d76c78e4d6265d3cc82cfad51e85538e14ca92da513e997a8be99eeab6b7c0bf",
+      "protocol": "mycelium.a5_product_positive_observation.v1",
+      "result": "passed",
+      "detail": "two overlapping complete requests used distinct legal tracks; nodes node-0, node-2, and node-3-r2 all performed real work; final reservations, queue, and stage-local KV deltas were zero"
+    },
+    {
+      "name": "frozen_benchmark",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-benchmark.json",
+      "artifact_digest": "sha256:c7ba027cc784915afdb263de8b880e81f3180454c8081a699264c06339bba5c7",
+      "protocol": "mycelium.a5_benchmark_evidence.v1",
+      "result": "inconclusive",
+      "detail": "two warmups plus twelve scored windows at 60 requests per window; no invalidations or cleanup failures; +16.710745942796965% point estimate and -41.96995766436599% paired 95% lower bound; promotion false"
+    },
+    {
+      "name": "illegal_replica_negative",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-negative-illegal.json",
+      "artifact_digest": "sha256:3f4908c1ad5ed54e8b364160da4c3c6d9b20f53e8af415116069196b2c862dcc",
+      "protocol": "mycelium.a5_negative_illegal_observation.v1",
+      "result": "passed",
+      "detail": "memory, parity, and stale-authority failures were rejected fail closed; the incumbent was preserved and restored with zero final resources"
+    },
+    {
+      "name": "replica_loss_negative",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-negative-replica-loss.json",
+      "artifact_digest": "sha256:9c346b07b5bdf607756df119b1d81dea7d3f716713ed20e40dffb96edd991f62",
+      "protocol": "mycelium.a5_replica_loss_negative_observation.v1",
+      "result": "passed",
+      "detail": "replica loss cancelled the affected request in 797.296 ms; the unaffected request and follow-up completed; final reservations and queue were zero"
+    },
+    {
+      "name": "browser_positive",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-browser-positive.json",
+      "artifact_digest": "sha256:dfca33c2007fbb85151abdf2662f1f4527fb45b00cf6b8462904bd139d10b691",
+      "protocol": "mycelium.a5_product_browser_observation.v1",
+      "result": "passed",
+      "detail": "Chromium, Firefox, and WebKit each verified all eight workspaces, distinct complete tracks, refresh, back/forward, reconnect, terminal reconstruction, and a clean second session with zero browser failures"
+    },
+    {
+      "name": "browser_lifetime_replica_loss",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-negative-replica-loss-browser-lifetime.json",
+      "artifact_digest": "sha256:8cb0e6fa4e851eac14f68a35bf4f73da99b271aca6ec5c7b4e59a9b28e829b87",
+      "protocol": "mycelium.a5_replica_loss_negative_observation.v1",
+      "result": "passed",
+      "detail": "loss of placement-002 cancelled only the affected request in 916.503 ms; the unaffected request and follow-up completed; final reservations and queue were zero"
+    },
+    {
+      "name": "browser_degraded_survivor",
+      "artifact": "/Users/evinova-self/mycelium-physical-run/a5-multistage-20260822/final-v190-r33/a5-browser-degraded.json",
+      "artifact_digest": "sha256:6d1d58af7858e976a7a148cdcdb590502c7f5619523085ce8e1a8a32d9329243",
+      "protocol": "mycelium.a5_product_browser_observation.v1",
+      "result": "passed",
+      "detail": "all three engines verified all eight workspaces after loss and completed a surviving incumbent-track request with zero browser failures"
+    }
+  ],
+  "verification": {
+    "a5_acceptance": "200 passed",
+    "python_regression": "4677 passed, 13 skipped, 121 subtests passed",
+    "ui_unit_integration": "91 files and 539 tests passed",
+    "ui_contract_diff": "3/3 passed",
+    "ui_operator_contract": "3/3 passed",
+    "ui_typecheck_build": "passed; the existing chunk-size advisory remains non-fatal",
+    "contract_fixture_audit": "75 fixtures and 75 manifest contracts passed",
+    "ruff": "all checks passed",
+    "compileall": "passed",
+    "governance": "15 capabilities, 7 milestones, and 8 product-action clients passed",
+    "claim_boundary": "474 source files and 1258 tracked files scanned; route_ready=false and release_ready=false",
+    "release_security": "1258 tracked files passed"
+  },
+  "limitations": [
+    "The frozen benchmark is inconclusive and does not authorize a material-performance or qualification claim.",
+    "Replica loss cancels the affected request; it does not migrate in-flight state, hand off KV, or automatically create a successor.",
+    "The deliberate browser-offline cancellation window records cancellation_unconfirmed because the client cannot acknowledge a server terminal while disconnected; server-side cleanup remained independently proven.",
+    "The foreground physical route was intentionally stopped after evidence capture, so retained evidence is not current admission authority.",
+    "Physical model artifacts were pre-existing and prepositioned; no model substitution occurred and no download or network transfer over 1 GB was performed during this closure."
+  ]
+}

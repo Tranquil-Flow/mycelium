@@ -1,4 +1,5 @@
 from collections import deque
+import json
 import threading
 from types import SimpleNamespace
 
@@ -24,6 +25,44 @@ def test_route_is_not_alive_before_open():
 def test_physical_cancelled_status_wins_before_local_callback_is_visible() -> None:
     assert live_route_module._request_is_cancelled("CANCELLED", lambda: False) is True
     assert live_route_module._request_is_cancelled("DECODING", lambda: False) is False
+
+
+def test_public_transport_health_exposes_only_bounded_fatal_code() -> None:
+    healthy = live_route_module._public_transport_health(
+        {
+            "details": {
+                "sidecar_process": {"alive": True, "pid": 1234},
+                "transport_running": True,
+                "transport_fatal_error": None,
+            }
+        }
+    )
+    assert healthy == {
+        "data_plane_health_observed": True,
+        "sidecar_process_alive": True,
+        "transport_running": True,
+        "transport_fatal": False,
+        "transport_fatal_code": None,
+    }
+
+    fatal = live_route_module._public_transport_health(
+        {
+            "details": {
+                "sidecar_process": {"alive": True},
+                "transport_running": False,
+                "transport_fatal_error": {
+                    "code": "sidecar_receive_reconnect_failed" + "x" * 256,
+                    "detail": "private transport detail",
+                },
+            }
+        }
+    )
+    assert fatal["transport_fatal"] is True
+    assert fatal["transport_fatal_code"].startswith(
+        "sidecar_receive_reconnect_failed"
+    )
+    assert len(fatal["transport_fatal_code"]) == 128
+    assert "private transport detail" not in repr(fatal)
 
 
 def test_infer_emits_each_token_and_route_stays_alive():
@@ -113,6 +152,96 @@ def test_physical_route_initializes_optional_public_projections(monkeypatch) -> 
     route.close()
 
 
+def test_physical_route_preserves_prepositioned_artifacts_for_cleanup(
+    monkeypatch, tmp_path
+) -> None:
+    captured: dict[str, object] = {}
+    prepositioned = {
+        "protocol": "mycelium.controller_prepositioned_artifacts.v1",
+        "members": {
+            "node-0": [
+                {
+                    "destination_path": "deployment/model.safetensors",
+                    "source_path": "/private/model.safetensors",
+                    "size_bytes": 1,
+                    "content_digest": "sha256:" + "a" * 64,
+                }
+            ]
+        },
+    }
+    run_plan = {
+        "nodes": [{"node_id": "node-0", "configure": {"graph": {}}}],
+    }
+
+    class RecordingController:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+            self.peers = kwargs["peers"]
+
+        def _validate_physical_distinctness(self) -> None:
+            return None
+
+        def _validate_membership(self):
+            return {"node-0": {"endpoint_id": "endpoint-0"}}
+
+        def _validate_run_plan(self):
+            return run_plan
+
+    authority = SimpleNamespace(
+        signer=object(),
+        seed_node_id="seed-0",
+        members={},
+        close=lambda: None,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "_load_live_seed_authority",
+        lambda **_kwargs: authority,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "_refresh_membership_snapshot",
+        lambda snapshot, **_kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "PeerIdentity",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "QualificationController",
+        RecordingController,
+    )
+    monkeypatch.setattr(
+        live_route_module,
+        "execution_graph_from_document",
+        lambda _document: SimpleNamespace(topology_version=1),
+    )
+    plan = {
+        "controller": {
+            "mode": "physical",
+            "peers": [{"node_id": "node-0"}],
+            "source_root": "/private/source",
+            "transfer_manifest": {"protocol": "transfer"},
+            "node_transfer_manifests": {"protocol": "node-transfers"},
+            "prepositioned_artifacts": prepositioned,
+            "membership_snapshot": {"protocol": "membership"},
+            "run_plan": run_plan,
+        }
+    }
+    plan_path = tmp_path / "operator-plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    route = PhysicalLiveRoute.from_operator_plan(
+        plan_path,
+        seed_state_root=tmp_path / "seed",
+    )
+
+    assert captured["prepositioned_artifacts"] == prepositioned
+    route.close()
+
+
 def test_single_physical_route_publishes_one_honest_qualified_model(monkeypatch) -> None:
     graph = SimpleNamespace(
         topology_version=1,
@@ -190,8 +319,45 @@ def test_physical_route_propagates_route_wide_decode_mode_to_node_command() -> N
 
     command = route._node_command("node-0")
 
+    assert command[0] == "/usr/bin/python3"
     mode_flag = command.index("--decode-mode")
     assert command[mode_flag + 1] == "stage_local_kv"
+
+
+def test_physical_route_reserves_native_threads_on_remote_nodes(monkeypatch) -> None:
+    route = object.__new__(PhysicalLiveRoute)
+    route._peers = {
+        "node-2": SimpleNamespace(
+            staging_root="/opt/mycelium/stage",
+            process_transport="ssh",
+        )
+    }
+    route._plans_by_node = {
+        "node-2": {
+            "python_executable": "/usr/bin/python3",
+            "socket_root": "/tmp/mycelium/socket",
+            "sidecar_binary": "/opt/mycelium/sidecar",
+            "endpoint_secret_file": "/opt/mycelium/identities/node-2.key",
+        }
+    }
+    route._plan = {
+        "run_id": "run-a5-control-capacity",
+        "deployment_id": "deployment-a5-control-capacity",
+        "decode_mode": "stage_local_kv",
+    }
+    monkeypatch.setattr(
+        "mycelium_live.route._peer_process_argv",
+        lambda _peer, command: command,
+    )
+
+    command = route._node_command("node-2")
+
+    assert command[:4] == (
+        "env",
+        "OPENBLAS_NUM_THREADS=1",
+        "OMP_NUM_THREADS=1",
+        "MKL_NUM_THREADS=1",
+    )
 
 
 def test_physical_route_emits_force_relay_only_under_explicit_runtime_control() -> None:
@@ -224,6 +390,7 @@ def test_physical_route_emits_force_relay_only_under_explicit_runtime_control() 
 
 def test_physical_cancellation_cleanup_requires_every_peer_release() -> None:
     route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.RLock()
     route._sessions = {"node-0": object(), "node-1": object()}
     released = {
         "details": {

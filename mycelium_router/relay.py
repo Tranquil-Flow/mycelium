@@ -1,8 +1,10 @@
 """Inter-layer relay execution over an already locked path manifest."""
 
 from collections import OrderedDict
+from contextlib import contextmanager
 import hashlib
 from threading import Lock, RLock
+from typing import Iterator
 
 from mycelium_router.batching import PhaseAwareBatchController
 from mycelium_router.contracts import (
@@ -46,7 +48,6 @@ _MAX_PENDING_PATH_CANCELLATIONS = 4096
 _CANCELLED_PATH_FILTER_BYTES = 1 << 20
 _CANCELLED_PATH_FILTER_HASHES = 5
 _CANCELLED_PATH_FILTER_ROTATION_CAPACITY = 100_000
-_PATH_OPERATION_LOCK_STRIPES = 64
 
 
 class _RotatingReplayFilter:
@@ -138,9 +139,13 @@ class RelayEngine:
          tuple[ExecutionGraph, PathManifest, RequestContext],
       ] = {}
       self._path_lock = RLock()
-      self._path_operation_locks = tuple(
-         Lock() for _ in range(_PATH_OPERATION_LOCK_STRIPES)
-      )
+      # Operations for one path must serialize, but unrelated paths must never
+      # share a lock: cancellation owns a fixed two-second proof budget and
+      # cannot wait behind a slow request that merely hashes to the same stripe.
+      # References include holders and waiters, so an idle entry can be removed
+      # without replacing the lock while another thread is about to acquire it.
+      self._path_operation_registry_lock = Lock()
+      self._path_operation_locks: dict[str, tuple[Lock, int]] = {}
       self._path_generations: OrderedDict[str, int] = OrderedDict()
       self._cancelled_path_attempts: OrderedDict[str, int] = OrderedDict()
       self._cancelled_path_filter = _RotatingReplayFilter(
@@ -184,10 +189,30 @@ class RelayEngine:
          if path_id not in self._paths and path_id not in self._provisional_paths:
             self._path_generations.pop(path_id, None)
 
-   def _path_operation_lock(self, path_id: str) -> Lock:
-      digest = hashlib.blake2b(path_id.encode("utf-8"), digest_size=8).digest()
-      index = int.from_bytes(digest, "big") % len(self._path_operation_locks)
-      return self._path_operation_locks[index]
+   @contextmanager
+   def _path_operation_lock(self, path_id: str) -> Iterator[None]:
+      with self._path_operation_registry_lock:
+         registered = self._path_operation_locks.get(path_id)
+         if registered is None:
+            operation_lock = Lock()
+            references = 0
+         else:
+            operation_lock, references = registered
+         self._path_operation_locks[path_id] = (operation_lock, references + 1)
+      try:
+         with operation_lock:
+            yield
+      finally:
+         with self._path_operation_registry_lock:
+            current_lock, current_references = self._path_operation_locks[path_id]
+            assert current_lock is operation_lock and current_references >= 1
+            if current_references == 1:
+               self._path_operation_locks.pop(path_id)
+            else:
+               self._path_operation_locks[path_id] = (
+                  operation_lock,
+                  current_references - 1,
+               )
 
    def _mark_cancelled_attempt_locked(self, path_id: str, path_attempt: int) -> None:
       self._cancelled_path_filter.add(path_id, path_attempt)
@@ -2144,12 +2169,72 @@ class RelayEngine:
                != expected
             ):
                return False
+            registered_for_release = registered
             if not self._release_path_state_locked(
                cancellation.path_id,
                path_attempt=cancellation.path_attempt,
             ):
                return False
+         self._release_synchronized_capacity(registered_for_release)
          self._release_path_resources(cancellation.path_id)
+      return True
+
+   def apply_controlled_path_cancellation(
+      self,
+      cancellation: PathCancellation,
+   ) -> bool:
+      """Install an owner-authoritative tombstone before path publication.
+
+      Physical control has already generation-fenced the exact request/path
+      identity.  Unlike a data-plane cancellation, it does not depend on an
+      already-published entry node.  This closes the lifecycle gap where
+      cancellation can win after request control is bound but before
+      ``register_path`` publishes its provisional or registered path.
+      """
+
+      if (
+         type(cancellation.request_id) is not str
+         or not cancellation.request_id
+         or type(cancellation.path_id) is not str
+         or not cancellation.path_id
+         or type(cancellation.path_attempt) is not int
+         or type(cancellation.topology_version) is not int
+      ):
+         return False
+      # Owner control must publish the generation tombstone immediately.  A
+      # live execution owns the per-path operation lock across runtime work and
+      # transport delivery; waiting for that lock here serialized cancellation
+      # behind the operation it was meant to interrupt.  Every publication
+      # boundary already validates the generation under ``_path_lock``, so
+      # advancing it atomically is the safe preemption point.  The active
+      # operation observes the new generation and cannot republish state.
+      with self._path_lock:
+         registered = self._paths.get(cancellation.path_id)
+         provisional = self._provisional_paths.get(cancellation.path_id)
+         if registered is not None:
+            graph, manifest, request = registered
+            if (
+               request.request_id,
+               manifest.path_attempt,
+               graph.topology_version,
+            ) != (
+               cancellation.request_id,
+               cancellation.path_attempt,
+               cancellation.topology_version,
+            ):
+               return False
+         elif provisional is not None and provisional[:3] != (
+            cancellation.request_id,
+            cancellation.path_attempt,
+            cancellation.topology_version,
+         ):
+            return False
+         self._release_path_state_locked(
+            cancellation.path_id,
+            path_attempt=cancellation.path_attempt,
+         )
+      self._release_synchronized_capacity(registered)
+      self._release_path_resources(cancellation.path_id)
       return True
 
    def _cancel_runtime(self, path_id: str) -> None:
@@ -2162,6 +2247,24 @@ class RelayEngine:
       self.scheduler.release_path(path_id)
       self.batch_scheduler.release_path(path_id)
       self._cancel_runtime(path_id)
+
+   def _release_synchronized_capacity(
+      self,
+      registered: tuple[ExecutionGraph, PathManifest, RequestContext] | None,
+   ) -> None:
+      """Retire host-local charges imported for one registered remote path."""
+
+      if registered is None:
+         return
+      release = getattr(
+         self.builder.capacity,
+         "release_synchronized_build",
+         None,
+      )
+      if not callable(release):
+         return
+      manifest = registered[1]
+      release(tuple(hop.reservation_id for hop in manifest.ordered_hops))
 
    def _release_path_state_locked(
       self,
@@ -2231,13 +2334,32 @@ class RelayEngine:
       *,
       path_attempt: int | None = None,
    ) -> None:
+      # Owner-controlled cancellation publishes the exact-attempt tombstone
+      # without waiting for a live send's per-path operation lock. Entry
+      # cleanup then calls release_path for the same attempt. Waiting for that
+      # operation lock a second time can strand infer_cancel_wait behind the
+      # data-plane operation it already fenced, even though all relay state and
+      # runtime resources are gone. The tombstone is authoritative and blocks
+      # late same-attempt registration, so this exact retired attempt is a
+      # complete idempotent release. A newer registered attempt is deliberately
+      # excluded from the fast path and remains protected by the operation lock.
+      if path_attempt is not None:
+         with self._path_lock:
+            if (
+               path_id not in self._paths
+               and path_id not in self._provisional_paths
+               and self._was_cancelled_attempt_locked(path_id, path_attempt)
+            ):
+               return
       with self._path_operation_lock(path_id):
          with self._path_lock:
+            registered = self._paths.get(path_id)
             known_path = self._release_path_state_locked(
                path_id,
                path_attempt=path_attempt,
             )
          if known_path:
+            self._release_synchronized_capacity(registered)
             self._release_path_resources(path_id)
 
    def cached_outcome_count(self) -> int:

@@ -119,8 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--a4-negative-data-plane-observation", type=Path, action="append")
     serve.add_argument("--a4-negative-qualification-observation", type=Path)
     serve.add_argument("--a4-negative-shutdown-observation", type=Path)
+    serve.add_argument("--replica-qualification", type=Path, action="append")
     serve.add_argument("--save-live-qualification", type=Path)
     serve.add_argument("--seed-state-root", type=Path)
+    serve.add_argument("--product-state-root", type=Path)
     serve.add_argument("--candidate-plan-root", type=Path)
     serve.add_argument("--artifact-acquisition-root", type=Path)
     serve.add_argument("--model-preparation-template-plan", type=Path)
@@ -173,6 +175,8 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
                 str(args.a4_negative_shutdown_observation),
             )
         )
+    for qualification in args.replica_qualification or ():
+        result.extend(("--replica-qualification", str(qualification)))
     if args.save_live_qualification is not None:
         result.extend(("--save-live-qualification", str(args.save_live_qualification)))
     for inventory_file in args.member_model_inventory_file or ():
@@ -188,6 +192,7 @@ def _live_arguments(args: argparse.Namespace) -> list[str]:
         ("--static-root", args.static_root),
         ("--registry-state", args.registry_state),
         ("--seed-state-root", args.seed_state_root),
+        ("--product-state-root", args.product_state_root),
         ("--candidate-plan-root", args.candidate_plan_root),
         ("--artifact-acquisition-root", args.artifact_acquisition_root),
         ("--model-preparation-template-plan", args.model_preparation_template_plan),
@@ -252,6 +257,7 @@ def _fixture_has_live_only_arguments(args: argparse.Namespace) -> bool:
             args.tls_key,
             args.operator_plan,
             args.seed_state_root,
+            args.product_state_root,
             args.deployment_dir,
             args.model_operation_file,
             args.model_cache_root,

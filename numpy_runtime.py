@@ -9,7 +9,7 @@ import importlib.metadata
 import json
 import math
 from types import MappingProxyType
-from typing import Any, Mapping, NoReturn
+from typing import Any, Callable, Mapping, NoReturn
 
 import numpy as np
 
@@ -23,6 +23,10 @@ from runtime_contracts import (
     validate_normalized_numpy_runtime,
 )
 from weight_quantization import Int8RowwiseWeight
+
+
+_CANCELLABLE_SEQUENCE_CHUNK = 32
+_CANCELLABLE_OUTPUT_CHUNK = 1024
 
 
 class NumpyRuntimeError(ValueError):
@@ -131,6 +135,55 @@ def _qwen2_linear(hidden: np.ndarray, weight: Any) -> np.ndarray:
         projected = np.matmul(hidden, weight.values.astype(np.float32).T)
         return projected * weight.scales
     return np.matmul(hidden, weight.T)
+
+
+def _qwen2_linear_checkpointed(
+    hidden: np.ndarray,
+    weight: Any,
+    *,
+    checkpoint: Callable[[], None] | None,
+) -> np.ndarray:
+    """Project large matrices in bounded, cancellable row/sequence blocks."""
+
+    output_features = int(
+        weight.values.shape[0]
+        if isinstance(weight, Int8RowwiseWeight)
+        else weight.shape[0]
+    )
+    sequence = int(hidden.shape[-2])
+    if checkpoint is None or (
+        output_features <= _CANCELLABLE_OUTPUT_CHUNK
+        and sequence <= _CANCELLABLE_SEQUENCE_CHUNK
+    ):
+        return _qwen2_linear(hidden, weight)
+    output_chunks: list[np.ndarray] = []
+    for output_start in range(0, output_features, _CANCELLABLE_OUTPUT_CHUNK):
+        output_end = min(
+            output_start + _CANCELLABLE_OUTPUT_CHUNK,
+            output_features,
+        )
+        if isinstance(weight, Int8RowwiseWeight):
+            matrix = weight.values[output_start:output_end].astype(np.float32)
+            scales = weight.scales[output_start:output_end]
+        else:
+            matrix = weight[output_start:output_end]
+            scales = None
+        sequence_chunks: list[np.ndarray] = []
+        for sequence_start in range(0, sequence, _CANCELLABLE_SEQUENCE_CHUNK):
+            sequence_end = min(
+                sequence_start + _CANCELLABLE_SEQUENCE_CHUNK,
+                sequence,
+            )
+            projected = np.matmul(
+                hidden[..., sequence_start:sequence_end, :],
+                matrix.T,
+            )
+            if scales is not None:
+                projected = projected * scales
+            sequence_chunks.append(projected)
+            checkpoint()
+        output_chunks.append(np.concatenate(sequence_chunks, axis=-2))
+    return np.concatenate(output_chunks, axis=-1)
 
 
 def _qwen2_embedding(weight: Any, ids: np.ndarray) -> np.ndarray:
@@ -278,8 +331,52 @@ def _qwen2_block_with_kv(
     position: int,
     past: tuple[np.ndarray, np.ndarray] | None,
     architecture: str = "qwen2",
+    *,
+    checkpoint: Callable[[], None] | None = None,
 ) -> tuple[np.ndarray, tuple[np.ndarray, np.ndarray]]:
     """Execute one dense Qwen decoder block while retaining local K/V state."""
+
+    def checked() -> None:
+        if checkpoint is not None:
+            checkpoint()
+
+    def linear(value: np.ndarray, weight: Any) -> np.ndarray:
+        output_features = int(
+            weight.values.shape[0]
+            if isinstance(weight, Int8RowwiseWeight)
+            else weight.shape[0]
+        )
+        if (
+            checkpoint is not None
+            and output_features > _CANCELLABLE_OUTPUT_CHUNK
+        ):
+            return _qwen2_linear_checkpointed(
+                value,
+                weight,
+                checkpoint=checkpoint,
+            )
+        sequence = int(value.shape[-2])
+        if checkpoint is None or sequence <= _CANCELLABLE_SEQUENCE_CHUNK:
+            return _qwen2_linear(value, weight)
+        if isinstance(weight, Int8RowwiseWeight):
+            matrix = weight.values.astype(np.float32).T
+
+            def project(chunk: np.ndarray) -> np.ndarray:
+                return np.matmul(chunk, matrix) * weight.scales
+
+        else:
+            matrix = weight.T
+
+            def project(chunk: np.ndarray) -> np.ndarray:
+                return np.matmul(chunk, matrix)
+
+        chunks = []
+        for start in range(0, sequence, _CANCELLABLE_SEQUENCE_CHUNK):
+            chunks.append(
+                project(value[..., start : start + _CANCELLABLE_SEQUENCE_CHUNK, :])
+            )
+            checked()
+        return np.concatenate(chunks, axis=-2)
 
     n_head = int(config["n_head"])
     n_kv_head = int(config["n_kv_head"])
@@ -289,9 +386,13 @@ def _qwen2_block_with_kv(
     normalized = _rms_norm(
         hidden, tensors[prefix + "input_layernorm.weight"], epsilon
     )
-    query = _qwen2_linear(normalized, tensors[prefix + "self_attn.q_proj.weight"])
-    key = _qwen2_linear(normalized, tensors[prefix + "self_attn.k_proj.weight"])
-    value = _qwen2_linear(normalized, tensors[prefix + "self_attn.v_proj.weight"])
+    checked()
+    query = linear(normalized, tensors[prefix + "self_attn.q_proj.weight"])
+    checked()
+    key = linear(normalized, tensors[prefix + "self_attn.k_proj.weight"])
+    checked()
+    value = linear(normalized, tensors[prefix + "self_attn.v_proj.weight"])
+    checked()
     if architecture == "qwen2":
         query = query + tensors[prefix + "self_attn.q_proj.bias"]
         key = key + tensors[prefix + "self_attn.k_proj.bias"]
@@ -317,6 +418,7 @@ def _qwen2_block_with_kv(
         position=position,
         theta=float(config["rope_theta"]),
     )
+    checked()
     if past is None:
         all_key = key
         all_value = value
@@ -326,31 +428,56 @@ def _qwen2_block_with_kv(
     repeats = n_head // n_kv_head
     attention_key = np.repeat(all_key, repeats, axis=1)
     attention_value = np.repeat(all_value, repeats, axis=1)
-    scores = (
-        np.matmul(query, attention_key.transpose(0, 1, 3, 2))
-        / math.sqrt(head_dim)
-    )
+    transposed_key = attention_key.transpose(0, 1, 3, 2)
     query_positions = np.arange(position, position + sequence)
     key_positions = np.arange(int(all_key.shape[2]))
-    causal = query_positions[:, None] >= key_positions[None, :]
-    probabilities = _softmax(
-        np.where(causal[None, None, :, :], scores, -np.inf), axis=-1
-    )
-    attended = np.matmul(probabilities, attention_value)
+    if checkpoint is not None and sequence > _CANCELLABLE_SEQUENCE_CHUNK:
+        attended_chunks = []
+        for start in range(0, sequence, _CANCELLABLE_SEQUENCE_CHUNK):
+            end = min(start + _CANCELLABLE_SEQUENCE_CHUNK, sequence)
+            scores = (
+                np.matmul(query[:, :, start:end, :], transposed_key)
+                / math.sqrt(head_dim)
+            )
+            checked()
+            causal = query_positions[start:end, None] >= key_positions[None, :]
+            probabilities = _softmax(
+                np.where(causal[None, None, :, :], scores, -np.inf),
+                axis=-1,
+            )
+            checked()
+            attended_chunks.append(np.matmul(probabilities, attention_value))
+            checked()
+        attended = np.concatenate(attended_chunks, axis=2)
+    else:
+        scores = np.matmul(query, transposed_key) / math.sqrt(head_dim)
+        checked()
+        causal = query_positions[:, None] >= key_positions[None, :]
+        probabilities = _softmax(
+            np.where(causal[None, None, :, :], scores, -np.inf), axis=-1
+        )
+        checked()
+        attended = np.matmul(probabilities, attention_value)
+    checked()
     attended = attended.transpose(0, 2, 1, 3).reshape(batch, sequence, -1)
-    hidden = residual + _qwen2_linear(
+    hidden = residual + linear(
         attended, tensors[prefix + "self_attn.o_proj.weight"]
     )
+    checked()
 
     residual = hidden
     normalized = _rms_norm(
         hidden, tensors[prefix + "post_attention_layernorm.weight"], epsilon
     )
-    gate = _silu(
-        _qwen2_linear(normalized, tensors[prefix + "mlp.gate_proj.weight"])
+    checked()
+    gate = linear(
+        normalized, tensors[prefix + "mlp.gate_proj.weight"]
     )
-    up = _qwen2_linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
-    hidden = residual + _qwen2_linear(
+    checked()
+    gate = _silu(gate)
+    up = linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
+    checked()
+    hidden = residual + linear(
         gate * up, tensors[prefix + "mlp.down_proj.weight"]
     )
     return hidden, (all_key, all_value)

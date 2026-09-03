@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+import hmac
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -449,6 +450,16 @@ def build_live_stack(
         product_app=product_app,
         swarm_coordinator=LiveSwarmCoordinator(route, health, seed_url=seed_url),
         request_bearer_token=bearer_token,
+        replica_qualifications_factory=(
+            route.replica_track_qualifications
+            if callable(getattr(route, "replica_track_qualifications", None))
+            else None
+        ),
+        replica_loss_placement_ids_factory=(
+            route.replica_loss_placement_ids
+            if callable(getattr(route, "replica_loss_placement_ids", None))
+            else None
+        ),
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
@@ -1158,6 +1169,90 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 "application/json; charset=utf-8",
             )
 
+        def _install_replica_qualification(self) -> None:
+            """Install (or clear) the live replica-qualification set at runtime.
+
+            A5-owned operator surface, no restart, no request-path contract
+            change. ``{"documents": []}`` clears the set — rotation then
+            degenerates to the incumbent A4 default path (baseline mode).
+            ``{"documents": [<validated replica_qualification.v1>...]}``
+            restores candidate tracks. Every document is re-validated against
+            the closed A5 contract before the route method installs it; the
+            route method validates again fail-closed.
+            """
+
+            install = getattr(
+                self.server.route, "set_replica_track_qualification", None
+            )
+            if not callable(install):
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "replica_qualification_unavailable"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            expected_origin = f"http://{self.headers.get('host', '')}"
+            if self.headers.get("origin") != expected_origin:
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "origin_mismatch"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            operator_token = self.server.replica_operator_token
+            authorization = self.headers.get("authorization", "")
+            if (
+                not isinstance(operator_token, str)
+                or len(operator_token) < 32
+                or not hmac.compare_digest(
+                    authorization,
+                    f"Bearer {operator_token}",
+                )
+            ):
+                self._send_bytes(
+                    403,
+                    _json_bytes({"error": "operator_authorization_required"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            body = self._read_body(limit=64 * 1024)
+            if body is None:
+                return
+            if not body:
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_request"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            try:
+                from mycelium_replica_contracts import (
+                    validate_replica_qualification,
+                )
+
+                document = json.loads(body)
+                if set(document) != {"documents"} or not isinstance(
+                    document["documents"], list
+                ):
+                    raise ValueError
+                validated = [
+                    validate_replica_qualification(item)
+                    for item in document["documents"]
+                ]
+                install(validated)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self._send_bytes(
+                    400,
+                    _json_bytes({"error": "invalid_replica_qualification"}),
+                    "application/json; charset=utf-8",
+                )
+                return
+            self._send_bytes(
+                200,
+                _json_bytes({"installed": len(validated)}),
+                "application/json; charset=utf-8",
+            )
+
         def _promote_candidate(self) -> None:
             promote = getattr(self.server.route, "promote_candidate", None)
             if not callable(promote):
@@ -1451,6 +1546,11 @@ def _handler() -> type[BaseHTTPRequestHandler]:
                 and not parsed.query
             ):
                 self._reacquire_model_candidate()
+            elif (
+                parsed.path == "/__mycelium/replica-qualification/install"
+                and not parsed.query
+            ):
+                self._install_replica_qualification()
             elif parsed.path == "/__mycelium/candidates/canary" and not parsed.query:
                 self._canary_candidate()
             elif parsed.path == "/__mycelium/candidates/promote" and not parsed.query:
@@ -1479,6 +1579,7 @@ def create_server(
     governance_projection: Mapping[str, Any] | None = None,
     evidence_registry: EvidenceProjectionRegistry | None = None,
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None,
+    replica_operator_token: str | None = None,
     trusted_https_proxy: bool = False,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
@@ -1496,6 +1597,9 @@ def create_server(
     server.governance_projection = governance_projection
     server.evidence_registry = evidence_registry
     server.artifact_acquisition_store = artifact_acquisition_store
+    if replica_operator_token is None:
+        replica_operator_token = os.environ.get("MYCELIUM_A5_OPERATOR_TOKEN")
+    server.replica_operator_token = replica_operator_token
     server.trusted_https_proxy = trusted_https_proxy
     return server
 
@@ -1621,6 +1725,30 @@ def _representation_authorization(path: Path | None) -> Mapping[str, Any] | None
     ):
         raise ValueError("representation_authorization_invalid")
     return document
+
+
+def _read_replica_qualification_file(path: Path) -> Mapping[str, Any]:
+    """Read and validate one closed replica-qualification artifact.
+
+    Mirrors the A4 evidence reader's safety surface: no symlinks, bounded
+    size, JSON-only, closed protocol, validated against the A5 closed
+    contract. Anything else fails closed and aborts serve startup.
+    """
+
+    from mycelium_replica_contracts import validate_replica_qualification
+
+    candidate = Path(path)
+    if (
+        candidate.is_symlink()
+        or not candidate.is_file()
+        or candidate.stat().st_size > 4 * 1024 * 1024
+    ):
+        raise ValueError("replica_qualification_unsafe")
+    try:
+        document = json.loads(candidate.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise ValueError("replica_qualification_invalid") from exc
+    return validate_replica_qualification(document)
 
 
 def _m18_replica_plan(deployment_dir: Path) -> Mapping[str, Any] | None:
@@ -1869,12 +1997,19 @@ def _qualify_open_route(route: Any) -> Any:
     request_id = f"startup-{uuid.uuid4().hex}"
     try:
         try:
-            result = route.infer(
-                startup_prompt,
-                max_new_tokens=len(startup_output),
-                request_id=request_id,
-                sink=_DiscardSink(),
-            )
+            exact_challenge = getattr(route, "infer_startup_challenge", None)
+            if callable(exact_challenge):
+                result = exact_challenge(
+                    request_id=request_id,
+                    sink=_DiscardSink(),
+                )
+            else:
+                result = route.infer(
+                    startup_prompt,
+                    max_new_tokens=len(startup_output),
+                    request_id=request_id,
+                    sink=_DiscardSink(),
+                )
         except ControllerError as exc:
             safe_code = exc.remote_code or exc.code
             raise RuntimeError(f"startup_route_rejected:{safe_code}") from exc
@@ -2050,6 +2185,7 @@ def run_registry_server(
     static_root: Path | None = None,
     registry_state: Path | None = None,
     seed_state_root: Path,
+    product_state_root: Path | None = None,
     model_operation_file: Path | None = None,
     seed_url: str | None = None,
     candidate_plan_root: Path | None = None,
@@ -2202,7 +2338,7 @@ def run_registry_server(
         stack = build_registry_stack(
             registry=registry,
             bearer_token=secrets.token_urlsafe(32),
-            product_state_root=seed_state_root,
+            product_state_root=product_state_root or seed_state_root,
             seed_url=seed_url,
             public_origin=public_origin,
             trusted_https_proxy=trusted_https_proxy,
@@ -2291,6 +2427,7 @@ def run_physical_server(
     model_operation_file: Path | None = None,
     static_root: Path | None = None,
     seed_state_root: Path,
+    product_state_root: Path | None = None,
     seed_url: str | None = None,
     model_cache_root: Path | None = None,
     artifact_acquisition_root: Path | None = None,
@@ -2301,6 +2438,7 @@ def run_physical_server(
     historical_evidence_files: Sequence[Path] = (),
     a4_evidence: Mapping[str, Any] | None = None,
     save_live_qualification: Path | None = None,
+    replica_qualification_files: Sequence[Path] = (),
     public_origin: str | None = None,
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
@@ -2350,6 +2488,13 @@ def run_physical_server(
             )
             route.set_a4_qualification(a4_document)
 
+        if replica_qualification_files:
+            replica_documents = [
+                _read_replica_qualification_file(path)
+                for path in replica_qualification_files
+            ]
+            route.set_replica_track_qualification(replica_documents)
+
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         route.set_public_projections(
             placement=_placement_projection(selected_deployment_dir),
@@ -2367,7 +2512,7 @@ def run_physical_server(
             deployment_dir=selected_deployment_dir,
             execution_graph=route.execution_graph,
             bearer_token=secrets.token_urlsafe(32),
-            product_state_root=seed_state_root,
+            product_state_root=product_state_root or seed_state_root,
             seed_url=seed_url,
             public_origin=public_origin,
             trusted_https_proxy=trusted_https_proxy,
@@ -2524,6 +2669,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--historical-evidence-file", type=Path, action="append")
     parser.add_argument("--seed-state-root", type=Path, required=True)
     parser.add_argument(
+        "--product-state-root",
+        type=Path,
+        help="private product-event journal root; defaults to the seed state root",
+    )
+    parser.add_argument(
         "--candidate-plan-root",
         type=Path,
         help="private directory of operator-prepared deployment plans",
@@ -2606,6 +2756,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="sealed A4 negative shutdown observation (bounded SIGTERM)",
     )
     parser.add_argument(
+        "--replica-qualification",
+        type=Path,
+        action="append",
+        help="sealed A5 replica-track qualification; repeat for each qualified track",
+    )
+    parser.add_argument(
         "--save-live-qualification",
         type=Path,
         help="if set, persist the freshly issued live-route qualification to this path",
@@ -2662,6 +2818,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model_operation_file=args.model_operation_file,
             static_root=args.static_root,
             seed_state_root=args.seed_state_root,
+            product_state_root=args.product_state_root,
             seed_url=args.seed_url,
             model_cache_root=args.model_cache_root,
             artifact_acquisition_root=args.artifact_acquisition_root,
@@ -2676,6 +2833,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             historical_evidence_files=tuple(args.historical_evidence_file or ()),
             save_live_qualification=args.save_live_qualification,
             a4_evidence=_a4_evidence_from_args(args),
+            replica_qualification_files=tuple(args.replica_qualification or ()),
             public_origin=args.public_origin,
             trusted_https_proxy=args.trusted_https_proxy,
             trusted_proxy_capability=trusted_proxy_capability,
@@ -2690,6 +2848,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         static_root=args.static_root,
         registry_state=args.registry_state,
         seed_state_root=args.seed_state_root,
+        product_state_root=args.product_state_root,
         model_operation_file=args.model_operation_file,
         seed_url=args.seed_url,
         candidate_plan_root=args.candidate_plan_root,

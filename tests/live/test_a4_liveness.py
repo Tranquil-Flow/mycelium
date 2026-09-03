@@ -503,6 +503,7 @@ def _monitor_route(
     route._closed = False
     route._lock = threading.RLock()
     route._sessions = {"node-2": session}
+    route._active_route_requests = {}
     route._last_health = {}
     route._command_id = lambda node_id, operation: f"{node_id}:{operation}"
     route._monotonic_ms = lambda: clock["t"]
@@ -590,6 +591,39 @@ def test_idle_keepalive_probe_miss_suspects_then_quarantines() -> None:
         and incident.action == "remove_from_affected_admission"
         for incident in incidents
     )
+
+
+@pytest.mark.parametrize("cancellation_requested", (False, True))
+def test_idle_keepalive_does_not_probe_peer_owned_by_nonterminal_request(
+    cancellation_requested: bool,
+) -> None:
+    detector = TrafficAwareLivenessDetector()
+    subject = _subject("node-2", kind=SubjectKind.PEER)
+    _register(detector, subject, observed_at_ms=1_000)
+    session = _FakeProbeSession(fail=True)
+    route = _monitor_route(
+        detector,
+        subject,
+        clock={"t": 16_000},
+        session=session,
+        refresh_on_probe=False,
+    )
+    route._active_route_requests = {
+        "request-active": {
+            "participating_node_ids": frozenset({"node-2"}),
+            "cancellation_requested": cancellation_requested,
+            "terminal": False,
+        }
+    }
+
+    route._monitor_idle_keepalives_once()
+
+    assert session.calls == 0
+    snapshot = detector.subject_snapshot(subject)
+    assert snapshot is not None
+    assert snapshot.state is LivenessState.FRESH
+    assert snapshot.consecutive_misses == 0
+    assert detector.incidents() == ()
 
 
 def test_quarantined_peer_admission_fails_closed() -> None:

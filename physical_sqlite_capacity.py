@@ -12,7 +12,8 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from types import MappingProxyType
 
@@ -82,16 +83,25 @@ class SQLiteQualificationCapacityPort(CapacityPort):
             raise ValueError("invalid_node_capacity")
         self._initialize(graph)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(
             self._database,
             timeout=10.0,
             isolation_level=None,
         )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 10000")
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA busy_timeout = 10000")
+            connection.execute("PRAGMA foreign_keys = ON")
+            yield connection
+        finally:
+            # sqlite3.Connection.__exit__ commits or rolls back but does not
+            # close the database.  Physical nodes take frequent capacity
+            # snapshots, so relying on that context-manager behavior leaks one
+            # DB and WAL descriptor per observation until the process reaches
+            # its file limit.
+            connection.close()
 
     def _initialize(self, graph: ExecutionGraph) -> None:
         with self._connect() as connection:
@@ -461,6 +471,22 @@ class SQLiteQualificationCapacityPort(CapacityPort):
             except BaseException:
                 connection.execute("ROLLBACK")
                 raise
+
+    def release_synchronized_build(
+        self,
+        reservation_ids: tuple[str, ...],
+    ) -> None:
+        """Release a path mirrored into this host by ``synchronize_build``.
+
+        Remote relays validate and commit the entry-owned reservation IDs in
+        their own SQLite authority. Their path teardown must therefore retire
+        those mirrored charges too; releasing only the entry authority leaves
+        every successful remote path permanently committed. The ordinary
+        release operation is already idempotent, so the entry relay may safely
+        traverse this same capability after its coordinator released the path.
+        """
+
+        self.release(reservation_ids)
 
     def snapshot(self) -> CapacitySnapshot:
         graph = self._graph()

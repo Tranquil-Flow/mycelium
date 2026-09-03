@@ -174,3 +174,116 @@ def assign_flow(
         for key in edge_used
     }
     return FlowResult(admitted, remaining, tracks, stage_utilization, edge_utilization)
+
+
+# --- A5 extension: demand allocation over an explicit legal-track set ---
+
+def assign_flow_over_legal_tracks(
+    groups: Sequence[Sequence[str]],
+    placements: Mapping[str, StagePlacement],
+    forward_edges: Sequence[FlowEdge],
+    loopback_edges: Sequence[FlowEdge],
+    *,
+    tracks: Sequence[tuple[str, ...]],
+    fractions: Sequence[float],
+    demand: float,
+) -> FlowResult:
+    """Allocate demand mass across explicitly enumerated legal tracks.
+
+    Unlike :func:`assign_flow`, this does not search for shortest loops; it
+    consumes the caller's legal-track enumeration in the given order and
+    allocates ``demand * fraction`` to each track up to its residual
+    placement/edge capacity. Deterministic for a fixed input order. Fractions
+    must be finite, non-negative, and sum to one within a fixed tolerance.
+
+    Requests are allocated across tracks by fraction; a single request is
+    never split across tracks (dispatch-level invariant; the solver only
+    allocates demand mass).
+    """
+    if demand < 0 or not math.isfinite(demand):
+        raise ValueError("demand must be finite and non-negative")
+    if not tracks:
+        raise ValueError("at least one legal track is required")
+    if len(fractions) != len(tracks):
+        raise ValueError("one fraction per track")
+    if any(not math.isfinite(f) or f < 0 for f in fractions):
+        raise ValueError("fractions must be finite and non-negative")
+    if abs(math.fsum(fractions) - 1.0) > 1e-6:
+        raise ValueError("fractions must sum to one within tolerance")
+
+    ordered_groups = tuple(tuple(sorted(group)) for group in groups)
+    if not ordered_groups or any(not group for group in ordered_groups):
+        raise ValueError("stage groups must be non-empty")
+    flattened = [pid for group in ordered_groups for pid in group]
+    if len(flattened) != len(set(flattened)) or any(pid not in placements for pid in flattened):
+        raise ValueError("groups must reference each placement exactly once")
+    forward = _edge_map(tuple(forward_edges))
+    loops = _edge_map(tuple(loopback_edges))
+
+    # Validate each track is complete and legal.
+    for path in tracks:
+        if len(path) != len(ordered_groups):
+            raise ValueError("track must select one placement per group")
+        if any(pid not in placements for pid in path):
+            raise ValueError("track references unknown placement")
+        for group, pid in zip(ordered_groups, path):
+            if pid not in group:
+                raise ValueError("track placement not in its group")
+        for src, dst in zip(path, path[1:]):
+            if (src, dst) not in forward:
+                raise ValueError("track uses unqualified forward edge")
+        if len(path) > 1 and (path[-1], path[0]) not in loops:
+            raise ValueError("track uses unqualified loopback edge")
+
+    placement_residual = {pid: placements[pid].service_capacity_rps for pid in flattened}
+    forward_residual = {key: edge.capacity for key, edge in forward.items()}
+    loop_residual = {key: edge.capacity for key, edge in loops.items()}
+    placement_used = {pid: 0.0 for pid in flattened}
+    edge_used = {key: 0.0 for key in tuple(forward) + tuple(loops)}
+    track_results: list[FlowTrack] = []
+    for path, fraction in zip(tracks, fractions):
+        wanted = demand * fraction
+        capacities = [placement_residual[pid] for pid in path]
+        for src, dst in zip(path, path[1:]):
+            capacities.append(forward_residual[(src, dst)])
+        closure_cost = 0.0
+        if len(path) > 1:
+            capacities.append(loop_residual[(path[-1], path[0])])
+            closure_cost = loops[(path[-1], path[0])].cost_ms
+        amount = min([wanted] + capacities) if capacities else 0.0
+        if amount <= NUMERIC_EPSILON:
+            amount = 0.0
+        if amount <= 0.0:
+            track_results.append(
+                FlowTrack(path, 0.0, fraction, 0.0, (path[-1], path[0]) if len(path) > 1 else (path[0], path[0]))
+            )
+            continue
+        for pid in path:
+            placement_residual[pid] -= amount
+            placement_used[pid] += amount
+        for src, dst in zip(path, path[1:]):
+            forward_residual[(src, dst)] -= amount
+            edge_used[(src, dst)] += amount
+        if len(path) > 1:
+            loop_residual[(path[-1], path[0])] -= amount
+            edge_used[(path[-1], path[0])] += amount
+        path_cost = sum(
+            forward[(src, dst)].cost_ms for src, dst in zip(path, path[1:])
+        ) + closure_cost
+        track_results.append(
+            FlowTrack(path, amount, fraction, path_cost, (path[-1], path[0]) if len(path) > 1 else (path[0], path[0]))
+        )
+
+    admitted = math.fsum(track.amount for track in track_results)
+    remaining = max(0.0, demand - admitted)
+    stage_utilization = {
+        pid: placement_used[pid] / placements[pid].service_capacity_rps
+        if placements[pid].service_capacity_rps > 0 else 0.0
+        for pid in flattened
+    }
+    all_edges = {**forward, **loops}
+    edge_utilization = {
+        key: edge_used[key] / all_edges[key].capacity if all_edges[key].capacity > 0 else 0.0
+        for key in edge_used
+    }
+    return FlowResult(admitted, remaining, tuple(track_results), stage_utilization, edge_utilization)

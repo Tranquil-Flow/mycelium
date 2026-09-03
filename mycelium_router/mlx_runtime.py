@@ -17,7 +17,7 @@ import time
 from collections import Counter, OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from threading import RLock
+from threading import Condition, RLock, Thread
 from types import MappingProxyType
 from typing import Any, NoReturn
 
@@ -491,6 +491,7 @@ class MLXRuntimePort:
          _reject("invalid_runtime_clock")
       self._clock = clock or time.monotonic
       self._cancelled_paths: OrderedDict[str, None] = OrderedDict()
+      self._deferred_cancellation_cleanup: set[str] = set()
       self._kv_states: dict[str, _KVState] = {}
       self._released_paths: OrderedDict[str, str] = OrderedDict()
       self._replays: OrderedDict[tuple[str, str], _ReplayResult] = OrderedDict()
@@ -508,6 +509,13 @@ class MLXRuntimePort:
       self._closed = False
       self._state_lock = RLock()
       self._cancellation_lock = RLock()
+      self._cancellation_condition = Condition(self._cancellation_lock)
+      self._cancellation_pending = 0
+      self._execution_admission_lock = RLock()
+      # Exact-path cleanup proof must not queue behind unrelated model work.
+      self._resource_index_lock = RLock()
+      self._executing_subjects: dict[str, tuple[str, int]] = {}
+      self._kv_subjects: dict[str, tuple[str, int]] = {}
 
    @staticmethod
    def _validate_graph_stage_roles(graph: ExecutionGraph) -> None:
@@ -685,11 +693,123 @@ class MLXRuntimePort:
 
       if not isinstance(path_id, str):
          return
-      with self._cancellation_lock:
+      with self._cancellation_condition:
          self._remember_path_marker(self._cancelled_paths, path_id, None)
-      with self._state_lock:
-         self._release_state(path_id, "cancellation")
-         self._purge_path_replays(path_id)
+         self._deferred_cancellation_cleanup.add(path_id)
+         self._cancellation_pending += 1
+      cleanup_deferred = True
+      try:
+         # Never wait behind a whole stage operation. New execute calls see the
+         # cancellation marker before acquiring state; if one operation already
+         # owns state, its per-layer checkpoint exits and its finally block
+         # performs the exact cleanup below.
+         admission_acquired = self._execution_admission_lock.acquire(
+            blocking=False
+         )
+         if admission_acquired:
+            try:
+               cleanup_now = self._state_lock.acquire(blocking=False)
+               if cleanup_now:
+                  try:
+                     self._release_state(path_id, "cancellation")
+                     self._purge_path_replays(path_id)
+                     with self._cancellation_condition:
+                        self._deferred_cancellation_cleanup.discard(path_id)
+                     cleanup_deferred = False
+                  finally:
+                     self._state_lock.release()
+            finally:
+               self._execution_admission_lock.release()
+      finally:
+         with self._cancellation_condition:
+            self._cancellation_pending -= 1
+            self._cancellation_condition.notify_all()
+      if cleanup_deferred:
+         self._schedule_deferred_cancellation_cleanup(path_id)
+
+   def _schedule_deferred_cancellation_cleanup(self, path_id: str) -> None:
+      """Finish fenced cleanup when a transient observer owned stage state."""
+
+      with self._cancellation_condition:
+         cleanup_workers = getattr(self, "_deferred_cleanup_worker_paths", None)
+         if cleanup_workers is None:
+            cleanup_workers = set()
+            self._deferred_cleanup_worker_paths = cleanup_workers
+         if path_id in cleanup_workers:
+            return
+         cleanup_workers.add(path_id)
+
+      def finish() -> None:
+         try:
+            with self._execution_admission_lock:
+               with self._state_lock:
+                  with self._cancellation_condition:
+                     if path_id in self._deferred_cancellation_cleanup:
+                        self._release_state(path_id, "cancellation")
+                        self._purge_path_replays(path_id)
+                        self._deferred_cancellation_cleanup.discard(path_id)
+         finally:
+            with self._cancellation_condition:
+               self._deferred_cleanup_worker_paths.discard(path_id)
+               self._cancellation_condition.notify_all()
+
+      worker = Thread(
+         target=finish,
+         name=f"mycelium-mlx-cancel-cleanup-{path_id[:12]}",
+         daemon=True,
+      )
+      try:
+         worker.start()
+      except BaseException:
+         with self._cancellation_condition:
+            self._deferred_cleanup_worker_paths.discard(path_id)
+         raise
+
+   def _acquire_execution_state(self, item: HopWorkItem) -> None:
+      while True:
+         with self._execution_admission_lock:
+            with self._cancellation_condition:
+               if item.path_id in self._cancelled_paths:
+                  _reject("path_cancelled")
+               cancellation_pending = (
+                  self._cancellation_pending > 0
+                  or bool(self._deferred_cancellation_cleanup)
+               )
+            if not cancellation_pending:
+               # Never wait for the active stage while holding the
+               # cancellation mutex. Active MLX work checkpoints under that
+               # mutex, so the inverse order deadlocks the entire stage.
+               self._state_lock.acquire()
+               with self._cancellation_condition:
+                  cancelled = item.path_id in self._cancelled_paths
+                  cancellation_pending = (
+                     self._cancellation_pending > 0
+                     or bool(self._deferred_cancellation_cleanup)
+                  )
+                  if not cancelled and not cancellation_pending:
+                     with self._resource_index_lock:
+                        self._executing_subjects[item.path_id] = (
+                           item.request_id,
+                           item.path_attempt,
+                        )
+               if cancelled:
+                  self._state_lock.release()
+                  _reject("path_cancelled")
+               if not cancellation_pending:
+                  return
+               # A cancellation can arrive after this execution acquired
+               # admission but while it was queued for stage state. Yield both
+               # locks so exact cleanup wins the handoff before unrelated work.
+               self._state_lock.release()
+         with self._cancellation_condition:
+            while (
+               (
+                  self._cancellation_pending > 0
+                  or bool(self._deferred_cancellation_cleanup)
+               )
+               and item.path_id not in self._cancelled_paths
+            ):
+               self._cancellation_condition.wait()
 
    def _checkpoint_path(self, path_id: str) -> None:
       with self._cancellation_lock:
@@ -757,6 +877,8 @@ class MLXRuntimePort:
       state = self._kv_states.pop(path_id, None)
       if state is None:
          return False
+      with self._resource_index_lock:
+         self._kv_subjects.pop(path_id, None)
       if path_id not in self._released_paths:
          self._remember_path_marker(self._released_paths, path_id, reason)
       self._release_counts[reason] += 1
@@ -864,12 +986,54 @@ class MLXRuntimePort:
             "release_counts": dict(sorted(self._release_counts.items())),
          }
 
+   def kv_snapshot_nonblocking(self) -> dict[str, Any] | None:
+      """Return a snapshot only when no stage operation owns runtime state."""
+
+      if not self._state_lock.acquire(blocking=False):
+         return None
+      try:
+         return self.kv_snapshot()
+      finally:
+         self._state_lock.release()
+
+   def operation_counter_snapshot(self) -> dict[str, int]:
+      """Return lock-free monotonic work telemetry for active health probes."""
+
+      return {"applied_operation_count": self._applied_operation_count}
+
+   def kv_subject_clean(
+      self,
+      request_id: str,
+      path_id: str,
+      path_attempt: int,
+   ) -> bool:
+      """Prove exact-path absence without waiting on unrelated model work."""
+
+      if (
+         not isinstance(request_id, str)
+         or not request_id
+         or not isinstance(path_id, str)
+         or not path_id
+         or type(path_attempt) is not int
+         or path_attempt < 0
+      ):
+         return False
+      with self._resource_index_lock:
+         return (
+            path_id not in self._executing_subjects
+            and path_id not in self._kv_subjects
+         )
+
    def execute(self, item: HopWorkItem) -> RuntimeResult:
       """Execute one fail-closed, path-serialized stage-local KV operation."""
 
       if not isinstance(item, HopWorkItem):
          return self._failure("invalid_runtime_work_item")
-      with self._state_lock:
+      try:
+         self._acquire_execution_state(item)
+      except MLXRuntimeError as exc:
+         return self._failure(exc.code)
+      try:
          if self._closed:
             return self._failure("runtime_closed")
          try:
@@ -887,6 +1051,22 @@ class MLXRuntimePort:
             return self._failure(str(exc) or "runtime_execution_rejected")
          except Exception:
             return self._failure("runtime_execution_rejected")
+      finally:
+         # Drain cancellation-fenced KV owned by other, inactive paths while
+         # this operation still owns the one stage-state lock.  Keep the
+         # cancellation lock until state unlock so a newly arriving cancel
+         # cannot fall between the final sweep and its own nonblocking cleanup.
+         with self._cancellation_condition:
+            for cancelled_path in tuple(
+               self._deferred_cancellation_cleanup
+            ):
+               self._release_state(cancelled_path, "cancellation")
+               self._purge_path_replays(cancelled_path)
+               self._deferred_cancellation_cleanup.discard(cancelled_path)
+            with self._resource_index_lock:
+               self._executing_subjects.pop(item.path_id, None)
+            self._cancellation_condition.notify_all()
+            self._state_lock.release()
 
    def _decode_input(
       self,
@@ -1170,7 +1350,22 @@ class MLXRuntimePort:
             _reject("decode_sequence_mismatch")
 
       try:
-         if "input_embedding" in stage.component_roles:
+         if runtime["architecture"] in {"qwen2", "qwen3"}:
+            # Replay from position zero through the checkpointed executor.
+            # The temporary KV is intentionally discarded: complete-context
+            # mode recomputes on every decode, but it must remain cooperatively
+            # interruptible while holding the relay's exact-path operation lock.
+            output, _temporary_layers = self._execute_stage_with_kv(
+               stage=stage,
+               loaded=loaded,
+               runtime=runtime,
+               token_ids=token_ids,
+               hidden_states=hidden_states,
+               position=0,
+               past_layers={},
+               path_id=item.path_id,
+            )
+         elif "input_embedding" in stage.component_roles:
             output = _execute_loaded_stage(loaded, token_ids=token_ids)
          else:
             output = _execute_loaded_stage(loaded, hidden_states=hidden_states)
@@ -1306,6 +1501,11 @@ class MLXRuntimePort:
             layers=layers,
          )
          self._kv_states[item.path_id] = state
+         with self._resource_index_lock:
+            self._kv_subjects[item.path_id] = (
+               item.request_id,
+               item.path_attempt,
+            )
          self._update_kv_watermark()
       else:
          state = self._kv_states.get(item.path_id)

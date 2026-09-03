@@ -5,6 +5,7 @@ import {
   type LiveRouteStatusClient,
 } from './routeStatus';
 import styles from './LiveRouteWorkspace.module.css';
+import { A5ReplicaTrackPanel, type A5ReplicaTrackView } from './A5ReplicaTrackPanel';
 
 export type ConcurrencyWorkspace =
   | 'inference'
@@ -30,15 +31,29 @@ function readiness(status: LiveRouteStatus) {
 export function ConcurrencyLivenessProjection({
   status,
   view,
+  nowUnixMs = Date.now(),
 }: {
   readonly status: LiveRouteStatus;
   readonly view: ConcurrencyWorkspace;
+  readonly nowUnixMs?: number;
 }) {
   const qualification = status.concurrency_liveness_qualification;
   const candidatePeers = status.peers.filter(
     (peer) => peer.interruptibility?.cooperative_bound_candidate === true,
   );
+  const replicaView: A5ReplicaTrackView = view === 'readiness' || view === 'settings'
+    ? 'qualification'
+    : view === 'incidents'
+      ? 'loss'
+      : 'tracks';
   return (
+    <>
+    <A5ReplicaTrackPanel
+      qualifications={status.replica_track_qualification}
+      lossPlacementIds={status.replica_loss_placement_ids}
+      nowUnixMs={nowUnixMs}
+      view={replicaView}
+    />
     <section className={styles.panel} aria-label="Concurrent execution and scoped liveness">
       <div className={styles.panelTitlebar}>
         <div>
@@ -117,6 +132,7 @@ export function ConcurrencyLivenessProjection({
       {view === 'lab' ? <p>{candidatePeers.length} of {status.peers.length} physical peers advertise a bounded-work-unit backend candidate. Advertising is not qualification.</p> : null}
       {status.liveness.deployment_fatal_reason === null ? null : <p role="alert">Deployment fatal: {status.liveness.deployment_fatal_reason}</p>}
     </section>
+    </>
   );
 }
 
@@ -134,14 +150,24 @@ export function ConcurrencyLivenessSource({
 
   useEffect(() => {
     let mounted = true;
-    const load = () => void source.load().then((value) => {
-      if (!mounted) return;
-      setStatus(value);
-      setError(null);
-    }).catch((reason) => {
-      if (!mounted) return;
-      setError(reason instanceof Error ? reason.message : 'concurrency_liveness_unavailable');
-    });
+    let inFlight = false;
+    setStatus(null);
+    setError(null);
+    const load = () => {
+      if (inFlight) return;
+      inFlight = true;
+      void source.load().then((value) => {
+        if (!mounted) return;
+        setStatus(value);
+        setError(null);
+      }).catch((reason) => {
+        if (!mounted) return;
+        setStatus(null);
+        setError(reason instanceof Error ? reason.message : 'concurrency_liveness_unavailable');
+      }).finally(() => {
+        inFlight = false;
+      });
+    };
     load();
     const timer = window.setInterval(load, 1_000);
     return () => {

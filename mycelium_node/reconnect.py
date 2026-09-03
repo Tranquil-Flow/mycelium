@@ -120,6 +120,11 @@ def transient_renewal_failure(exc: BaseException) -> bool:
 
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return True
+    if (
+        getattr(exc, "code", None) == "seed_http_unreachable"
+        and getattr(exc, "status", None) is None
+    ):
+        return True
     status = getattr(exc, "status", None)
     return type(status) is int and status in {408, 425, 429, 500, 502, 503, 504}
 

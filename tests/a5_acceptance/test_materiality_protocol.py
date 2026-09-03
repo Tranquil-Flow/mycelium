@@ -10,6 +10,7 @@ from .materiality_harness import (
     evaluate_benchmark,
     load_protocol,
     protocol_digest,
+    workload_manifest_digest,
 )
 
 
@@ -158,6 +159,7 @@ def _run(improvements: list[float]) -> dict:
     return {
         "protocol": "mycelium.a5_benchmark_run_fixture.v1",
         "benchmark_protocol_digest": protocol_digest(protocol),
+        "workload_manifest_digest": workload_manifest_digest(),
         "warmups": warmups,
         "windows": windows,
     }

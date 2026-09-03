@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
+import math
 from typing import Mapping, Sequence
 
 from .allocation import stage_cost
 from .contracts import NUMERIC_EPSILON, ModelIdentity, PlanningPolicy, StagePlacement, WorkloadScenario
 from .flow import FlowEdge, FlowResult, assign_flow
+from .contracts import LegalTrack
 from .network_cost import transfer_time_ms
 from .physical_graph import PhysicalGraph
 from .primary_plan import PrimaryPlan
@@ -301,4 +304,128 @@ def replicate_stages(
         zero_flow_removed_placement_ids=tuple(sorted(removable)),
         primary_capacity_rps=primary_capacity_rps,
         iterations=iterations,
+    )
+
+
+# --- A5 legal-track enumeration (extension; existing functions untouched) ---
+
+TRACK_FRACTION_TOLERANCE = 1e-6
+
+
+@dataclass(frozen=True)
+class LegalTrackEnumeration:
+    tracks: tuple[LegalTrack, ...]
+    missing_edges: tuple[tuple[str, str], ...]
+    reversed_edges: tuple[tuple[str, str], ...]
+    total_combinations: int
+
+
+def _track_id(placement_ids: Sequence[str]) -> str:
+    joined = "|".join(placement_ids)
+    return "track-" + hashlib.sha256(joined.encode("utf-8")).hexdigest()[:24]
+
+
+def enumerate_legal_tracks(
+    groups: Sequence[Sequence[str]],
+    placements: Mapping[str, StagePlacement],
+    forward_edges: Sequence[FlowEdge],
+    loopback_edges: Sequence[FlowEdge],
+    *,
+    traffic_fractions: Mapping[tuple[str, ...], float] | None = None,
+) -> LegalTrackEnumeration:
+    """Enumerate every complete legal track over ordered replica groups.
+
+    A complete legal track selects exactly one placement from every group in
+    group order, every consecutive pair is covered by a qualified forward
+    edge, and (with more than one group) the closure (last, first) is covered
+    by a qualified loopback edge. Enumeration is deterministic and sorted by
+    the placement-id tuple, so ties are stable across calls.
+
+    ``traffic_fractions`` optionally pins per-track fractions (keys are the
+    exact placement-id tuples). Fractions must be finite, non-negative, and
+    sum to one within ``TRACK_FRACTION_TOLERANCE``. When omitted, an equal
+    split is used. Fractions allocate whole requests across tracks; they
+    never split one request across tracks.
+    """
+    if not groups or any(not group for group in groups):
+        raise ValueError("stage groups must be non-empty")
+    ordered_groups = tuple(tuple(sorted(group)) for group in groups)
+    flattened = [pid for group in ordered_groups for pid in group]
+    if len(flattened) != len(set(flattened)) or any(
+        pid not in placements for pid in flattened
+    ):
+        raise ValueError("groups must reference each placement exactly once")
+    forward = {(edge.src, edge.dst): edge for edge in forward_edges}
+    loops = {(edge.src, edge.dst): edge for edge in loopback_edges}
+
+    # Enumerate every selection: one placement per group, in group order.
+    selections: list[tuple[str, ...]] = [()]
+    for group in ordered_groups:
+        selections = [prefix + (pid,) for prefix in selections for pid in group]
+
+    tracks: list[LegalTrack] = []
+    missing: list[tuple[str, str]] = []
+    reversed_edges: list[tuple[str, str]] = []
+    for path in selections:
+        complete = True
+        cost_ms = 0.0
+        for src, dst in zip(path, path[1:]):
+            edge = forward.get((src, dst))
+            if edge is None:
+                complete = False
+                missing.append((src, dst))
+                if forward.get((dst, src)) is not None:
+                    reversed_edges.append((src, dst))
+            else:
+                cost_ms += edge.cost_ms
+        if len(path) > 1:
+            closure = loops.get((path[-1], path[0]))
+            if closure is None:
+                complete = False
+                missing.append((path[-1], path[0]))
+            else:
+                cost_ms += closure.cost_ms
+        if not complete:
+            continue
+        tracks.append(
+            LegalTrack(
+                track_id=_track_id(path),
+                placement_ids=path,
+                traffic_fraction=0.0,
+                cost_ms=cost_ms,
+            )
+        )
+
+    if traffic_fractions is not None:
+        known = {track.placement_ids for track in tracks}
+        if set(traffic_fractions) - known:
+            raise ValueError("traffic fraction for non-legal track")
+        if set(traffic_fractions) != known:
+            raise ValueError("traffic fractions must cover every legal track")
+        for key, fraction in traffic_fractions.items():
+            if not math.isfinite(fraction) or fraction < 0:
+                raise ValueError("traffic fractions must be finite and non-negative")
+        total = math.fsum(traffic_fractions.values())
+        if abs(total - 1.0) > TRACK_FRACTION_TOLERANCE:
+            raise ValueError("traffic fractions must sum to one")
+        fraction_map = dict(traffic_fractions)
+    else:
+        fraction_map = {
+            track.placement_ids: 1.0 / len(tracks) for track in tracks
+        } if tracks else {}
+
+    tracks = tuple(
+        LegalTrack(
+            track_id=track.track_id,
+            placement_ids=track.placement_ids,
+            traffic_fraction=fraction_map[track.placement_ids],
+            cost_ms=track.cost_ms,
+        )
+        for track in tracks
+    )
+    return LegalTrackEnumeration(
+        tracks=tracks,
+        missing_edges=tuple(sorted(set(missing))),
+        reversed_edges=tuple(sorted(set(reversed_edges))),
+        total_combinations=len(selections),
     )

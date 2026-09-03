@@ -491,6 +491,7 @@ def _case_probe_via(
     *,
     phase: str = "observe",
     environment: Mapping[str, str] | None = None,
+    interpreter: Path | None = None,
 ):
     """Execute one bounded live case probe and retain its exact private JSON.
 
@@ -505,6 +506,10 @@ def _case_probe_via(
         import subprocess
 
         if not program.is_file() or not os.access(program, os.X_OK):
+            raise PhysicalGateError("physical_infrastructure_unavailable")
+        if interpreter is not None and (
+            not interpreter.is_file() or not os.access(interpreter, os.X_OK)
+        ):
             raise PhysicalGateError("physical_infrastructure_unavailable")
         if phase == "after":
             if not isinstance(previous_report, dict):
@@ -535,8 +540,11 @@ def _case_probe_via(
         else:
             run_kwargs["input"] = standard_input
         try:
+            command = [str(program), case_id, member_id, phase]
+            if interpreter is not None:
+                command.insert(0, str(interpreter))
             completed = subprocess.run(
-                [str(program), case_id, member_id, phase],
+                command,
                 **run_kwargs,
             )
         except (OSError, subprocess.SubprocessError) as exc:
@@ -1253,6 +1261,7 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                         "MYCELIUM_A8_DEPLOYMENT_ID": str(deployment_id),
                     },
+                    interpreter=Path(sys.executable).resolve(),
                 )
             elif args.case_id == "unqualified_external_member":
                 if args.authority_probe_program is None:

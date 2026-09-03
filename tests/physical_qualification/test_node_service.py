@@ -10,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import threading
 import time
 from typing import Any
 import uuid
@@ -71,6 +72,111 @@ class _ProcBSDInfo(ctypes.Structure):
 
 
 _PROC_PIDTBSDINFO_SIZE = ctypes.sizeof(_ProcBSDInfo)
+
+
+def test_cleanup_response_publication_is_independent_of_blocked_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    normal_started = threading.Event()
+    release_normal = threading.Event()
+    published: list[tuple[bool, bytes]] = []
+
+    def blocked_emit(encoded: bytes, *, cleanup_priority: bool = False) -> None:
+        if not cleanup_priority:
+            normal_started.set()
+            assert release_normal.wait(2.0)
+        published.append((cleanup_priority, encoded))
+
+    monkeypatch.setattr(node_module, "_emit", blocked_emit)
+    emitter = node_module._ResponseEmitter()
+    normal = threading.Thread(target=emitter.emit, args=({"lane": "stdout"},))
+    normal.start()
+    assert normal_started.wait(1.0)
+
+    cleanup = threading.Thread(
+        target=emitter.emit,
+        args=({"lane": "cleanup"},),
+        kwargs={"cleanup_priority": True},
+    )
+    cleanup.start()
+    cleanup.join(timeout=1.0)
+    assert cleanup.is_alive() is False
+    assert published == [(True, b'{"lane":"cleanup"}')]
+
+    release_normal.set()
+    normal.join(timeout=1.0)
+    assert normal.is_alive() is False
+    assert published == [
+        (True, b'{"lane":"cleanup"}'),
+        (False, b'{"lane":"stdout"}'),
+    ]
+
+
+def test_ordinary_response_publication_is_independent_of_blocked_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cleanup_started = threading.Event()
+    release_cleanup = threading.Event()
+    published: list[tuple[bool, bytes]] = []
+
+    def blocked_emit(encoded: bytes, *, cleanup_priority: bool = False) -> None:
+        if cleanup_priority:
+            cleanup_started.set()
+            assert release_cleanup.wait(2.0)
+        published.append((cleanup_priority, encoded))
+
+    monkeypatch.setattr(node_module, "_emit", blocked_emit)
+    emitter = node_module._ResponseEmitter()
+    cleanup = threading.Thread(
+        target=emitter.emit,
+        args=({"lane": "cleanup"},),
+        kwargs={"cleanup_priority": True},
+    )
+    cleanup.start()
+    assert cleanup_started.wait(1.0)
+
+    normal = threading.Thread(target=emitter.emit, args=({"lane": "stdout"},))
+    normal.start()
+    normal.join(timeout=1.0)
+    assert normal.is_alive() is False
+    assert published == [(False, b'{"lane":"stdout"}')]
+
+    release_cleanup.set()
+    cleanup.join(timeout=1.0)
+    assert cleanup.is_alive() is False
+    assert published == [
+        (False, b'{"lane":"stdout"}'),
+        (True, b'{"lane":"cleanup"}'),
+    ]
+
+
+@pytest.mark.parametrize("operation", ("infer_start", "infer_decode"))
+def test_long_inference_commands_use_the_bounded_inference_lane(
+    operation: str,
+) -> None:
+    assert node_module._command_uses_inference_lane({"command": operation}) is True
+
+
+@pytest.mark.parametrize(
+    "operation",
+    (
+        "hello",
+        "configure",
+        "start",
+        "health",
+        "snapshot",
+        "bind_request_control",
+        "update_request_control",
+        "infer_cancel",
+        "infer_cancel_wait",
+        "rotate",
+        "stop",
+    ),
+)
+def test_cleanup_and_liveness_commands_use_the_reserved_control_lane(
+    operation: str,
+) -> None:
+    assert node_module._command_uses_inference_lane({"command": operation}) is False
 
 
 @dataclass(frozen=True, slots=True)
@@ -630,6 +736,71 @@ def test_node_service_uses_run_scoped_physical_host_identity(
     assert service.host_id == "host-run-physical-identity"
 
 
+@pytest.mark.parametrize(
+    ("runtime_mode", "expected_chunk_size"),
+    (
+        ("stage_local_kv", 8),
+        ("complete_context_replay", 0),
+    ),
+)
+def test_router_prefill_chunking_follows_resolved_runtime_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runtime_mode: str,
+    expected_chunk_size: int,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-auto-decode-mode",
+        deployment_id="deployment-auto-decode-mode",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/usr/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+        requested_decode_mode=None,
+    )
+
+    service._bind_router_config_to_runtime(
+        type("Runtime", (), {"decode_mode": runtime_mode})()
+    )
+
+    assert service._router_config.prefill_chunk_size_tokens == expected_chunk_size
+
+
+def test_cleanup_command_budget_excludes_executor_queue_time() -> None:
+    command = {
+        "protocol": "mycelium.physical_node_control.v1",
+        "command_id": "command-a",
+        "run_id": "run-a",
+        "deployment_id": "deployment-a",
+        "command": "infer_cancel_wait",
+        "payload": {
+            "request_id": "request-a",
+            "deadline_budget_ms": 1_400,
+        },
+    }
+
+    aged = node_module._age_cleanup_command_budget(
+        command,
+        queued_seconds=0.375,
+    )
+    expired = node_module._age_cleanup_command_budget(
+        command,
+        queued_seconds=2.0,
+    )
+
+    assert aged is not command
+    assert aged["payload"]["deadline_budget_ms"] == 1_025
+    assert expired["payload"]["deadline_budget_ms"] == 1
+    assert command["payload"]["deadline_budget_ms"] == 1_400
+
+
 def test_infer_decode_accepts_eos_completion_without_visible_token(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -659,8 +830,40 @@ def test_infer_decode_accepts_eos_completion_without_visible_token(
             assert request_id == "request-eos"
             return "COMPLETED"
 
+        def get_request(self, request_id: str) -> Any:
+            assert request_id == "request-eos"
+            return type(
+                "CompletedRecord",
+                (),
+                {
+                    "status": "COMPLETED",
+                    "manifest": type(
+                        "CompletedManifest",
+                        (),
+                        {
+                            "path_id": "path-eos",
+                            "path_attempt": 0,
+                            "topology_version": 1,
+                        },
+                    )(),
+                },
+            )()
+
+    class RetiringTransport:
+        fatal_error = None
+        cancellation = None
+
+        def send_path_cancellation_if_entry(self, cancellation: Any) -> bool:
+            self.cancellation = cancellation
+            return True
+
+        def cancellation_cleanup_complete(self, *identity: Any) -> bool:
+            assert identity == ("request-eos", "path-eos", 0)
+            return True
+
     service.state = "RUNNING"
     service.router = CompletedRouter()  # type: ignore[assignment]
+    service.transport = RetiringTransport()  # type: ignore[assignment]
     service._sinks["request-eos"] = node_module._CaptureSink()
     service._signed_result = (  # type: ignore[method-assign]
         lambda event, details: {"event": event, "details": details}
@@ -674,6 +877,182 @@ def test_infer_decode_accepts_eos_completion_without_visible_token(
         "status": "COMPLETED",
         "output": {"token_indexes": [], "token_ids": []},
     }
+    assert service.transport.cancellation.request_id == "request-eos"
+
+
+def test_infer_decode_reports_owner_cancellation_that_overtakes_transport_send(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-decode-cancel-order",
+        deployment_id="deployment-decode-cancel-order",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/usr/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+    control = {
+        "deployment_id": "deployment-decode-cancel-order",
+        "deployment_epoch": 4,
+        "qualification_digest": "sha256:" + "a" * 64,
+        "command_id": "command-decode-cancel-order",
+        "publisher_generation": 3,
+        "absolute_deadline_ms": 99_000,
+        "request_attempt": 2,
+        "path_id": "path-decode-cancel-order",
+        "path_attempt": 1,
+        "path_digest": "sha256:" + "b" * 64,
+        "topology_generation": 7,
+        "cancellation_generation": 0,
+    }
+
+    class CancellingRouter:
+        def decode_one_distributed(self, request_id: str) -> bool:
+            assert request_id == "request-decode-cancel-order"
+            with service._control_lock:
+                service._request_controls[request_id][
+                    "cancellation_generation"
+                ] = 1
+            raise node_module.IrohTransportError("path_cancelled")
+
+        def request_status(self, request_id: str) -> str:
+            assert request_id == "request-decode-cancel-order"
+            return "CANCELLED"
+
+    service.state = "RUNNING"
+    service.graph = type(
+        "Graph",
+        (),
+        {
+            "deployment_id": control["deployment_id"],
+            "deployment_epoch": control["deployment_epoch"],
+            "topology_version": control["topology_generation"],
+        },
+    )()
+    service.router = CancellingRouter()  # type: ignore[assignment]
+    service._sinks["request-decode-cancel-order"] = node_module._CaptureSink()
+    service._request_controls["request-decode-cancel-order"] = dict(control)
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+
+    decoded = service._infer_decode(
+        {
+            "request_id": "request-decode-cancel-order",
+            "count": 1,
+            "control": control,
+        }
+    )
+
+    assert decoded["event"] == "inference_decoded"
+    assert decoded["details"]["dispatched"] == 0
+    assert decoded["details"]["status"] == "CANCELLED"
+
+
+def test_infer_decode_reports_owner_cancellation_that_overtakes_lane_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-decode-cancel-entry-order",
+        deployment_id="deployment-decode-cancel-entry-order",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/usr/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+    command_control = {
+        "deployment_id": "deployment-decode-cancel-entry-order",
+        "deployment_epoch": 4,
+        "qualification_digest": "sha256:" + "a" * 64,
+        "command_id": "command-decode-cancel-entry-order",
+        "publisher_generation": 3,
+        "absolute_deadline_ms": 99_000,
+        "request_attempt": 2,
+        "path_id": "path-decode-cancel-entry-order",
+        "path_attempt": 1,
+        "path_digest": "sha256:" + "b" * 64,
+        "topology_generation": 7,
+        "cancellation_generation": 0,
+    }
+    owner_control = {**command_control, "cancellation_generation": 1}
+
+    class CancelledRouter:
+        decode_calls = 0
+
+        def decode_one_distributed(self, request_id: str) -> bool:
+            self.decode_calls += 1
+            raise AssertionError("overtaken decode must not be dispatched")
+
+        def request_status(self, request_id: str) -> str:
+            assert request_id == "request-decode-cancel-entry-order"
+            return "CANCELLED"
+
+    router = CancelledRouter()
+    service.state = "RUNNING"
+    service.router = router  # type: ignore[assignment]
+    service._sinks["request-decode-cancel-entry-order"] = node_module._CaptureSink()
+    service._request_controls["request-decode-cancel-entry-order"] = dict(
+        owner_control
+    )
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+
+    decoded = service._infer_decode(
+        {
+            "request_id": "request-decode-cancel-entry-order",
+            "count": 1,
+            "control": command_control,
+        }
+    )
+
+    assert decoded["event"] == "inference_decoded"
+    assert decoded["details"]["dispatched"] == 0
+    assert decoded["details"]["status"] == "CANCELLED"
+    assert router.decode_calls == 0
+
+    # Exact cleanup may retire both the request control and token sink before
+    # the already-queued decode enters its lane.  Its complete receipt is the
+    # same monotonic successor authority and must not reopen a failed request.
+    service._request_controls.clear()
+    service._sinks.clear()
+    service._request_cleanup_receipts["request-decode-cancel-entry-order"] = {
+        "request_id": "request-decode-cancel-entry-order",
+        **owner_control,
+        "complete": True,
+    }
+    decoded_after_receipt = service._infer_decode(
+        {
+            "request_id": "request-decode-cancel-entry-order",
+            "count": 1,
+            "control": command_control,
+        }
+    )
+
+    assert decoded_after_receipt["event"] == "inference_decoded"
+    assert decoded_after_receipt["details"]["dispatched"] == 0
+    assert decoded_after_receipt["details"]["status"] == "CANCELLED"
+    assert decoded_after_receipt["details"]["output"] == {
+        "token_indexes": [],
+        "token_ids": [],
+    }
+    assert router.decode_calls == 0
 
 
 def test_a4_decode_and_cleanup_require_bound_canonical_identity(
@@ -815,6 +1194,83 @@ def test_a4_decode_and_cleanup_require_bound_canonical_identity(
         )
 
 
+def test_receipt_only_snapshot_returns_committed_receipt_before_mutable_probes() -> (
+    None
+):
+    service = PhysicalNodeService.__new__(PhysicalNodeService)
+    service.state = "RUNNING"
+    service._control_lock = threading.RLock()
+    cleanup_subject = {
+        "deployment_id": "deployment-receipt-first",
+        "deployment_epoch": 1,
+        "qualification_digest": "sha256:" + "a" * 64,
+        "request_id": "request-receipt-first",
+        "request_attempt": 1,
+        "path_id": "path-receipt-first",
+        "path_attempt": 0,
+        "path_digest": "sha256:" + "b" * 64,
+        "topology_generation": 1,
+        "command_id": "command-receipt-first",
+        "cancellation_generation": 1,
+        "publisher_generation": 1,
+        "absolute_deadline_ms": 99_000,
+    }
+    receipt = {
+        **cleanup_subject,
+        "runtime_clean": True,
+        "transport_clean": True,
+        "cancellation_worker_complete": True,
+        "complete": True,
+    }
+    service._request_cleanup_receipts = {
+        cleanup_subject["request_id"]: dict(receipt)
+    }
+    service._request_cleanup_receipt_counters = {
+        cleanup_subject["request_id"]: {
+            "remote_frames_sent": 5,
+            "remote_frames_received": 7,
+        }
+    }
+
+    class Runtime:
+        @staticmethod
+        def kv_subject_clean(*_args: Any) -> bool:
+            raise AssertionError("committed receipt must bypass runtime probe")
+
+        @staticmethod
+        def kv_snapshot_nonblocking() -> dict[str, Any] | None:
+            raise AssertionError("committed receipt must bypass runtime snapshot")
+
+    class Transport:
+        @staticmethod
+        def cancellation_cleanup_observation_nonblocking(*_args: Any):
+            raise AssertionError("committed receipt must bypass transport probe")
+
+    service.runtime = Runtime()
+    service.transport = Transport()
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+
+    observation = service._snapshot(
+        {
+            "cleanup_subject": cleanup_subject,
+            "receipt_only": True,
+        }
+    )
+
+    assert observation == {
+        "event": "snapshot",
+        "details": {
+            "request_cleanup": receipt,
+            "transport_counters": {
+                "remote_frames_sent": 5,
+                "remote_frames_received": 7,
+            },
+        },
+    }
+
+
 def test_stage_local_infer_start_waits_for_prefill_token_event(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -891,6 +1347,73 @@ def test_stage_local_infer_start_waits_for_prefill_token_event(
     assert service.router.status_calls == 2
 
 
+def test_stage_local_infer_start_reports_cancellation_before_first_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        node_module,
+        "derive_local_run_scoped_identity",
+        lambda run_id: (f"host-{run_id}", f"boot-{run_id}"),
+    )
+    service = PhysicalNodeService(
+        run_id="run-stage-local-prefill-cancel",
+        deployment_id="deployment-stage-local-prefill-cancel",
+        node_id="node-0",
+        artifact_root=tmp_path,
+        socket_root=tmp_path / "socket",
+        sidecar_binary=Path("/usr/bin/false"),
+        sidecar_local_only=True,
+        command_timeout=1.0,
+    )
+
+    class Router:
+        status_calls = 0
+
+        def start_distributed_prefill(self, request, _sink, **_kwargs: Any) -> str:
+            return request.request_id
+
+        def request_status(self, request_id: str) -> str:
+            assert request_id == "request-stage-local-prefill-cancel"
+            self.status_calls += 1
+            return "DECODING" if self.status_calls == 1 else "CANCELLED"
+
+        def get_request(self, _request_id: str):
+            raise AssertionError("cancelled Router record must not be dereferenced")
+
+    service.state = "RUNNING"
+    service.runtime = type("Runtime", (), {"decode_mode": "stage_local_kv"})()
+    service.router = Router()  # type: ignore[assignment]
+    service._signed_result = (  # type: ignore[method-assign]
+        lambda event, details: {"event": event, "details": details}
+    )
+
+    started = service._infer_start(
+        {
+            "request": {
+                "request_id": "request-stage-local-prefill-cancel",
+                "prompt_token_ids": [1, 2, 3],
+                "max_new_tokens": 4,
+                "expected_new_tokens": 4,
+                "qos_class": "interactive",
+                "admitted_at": 0.0,
+                "target_ttft_ms": 1_000.0,
+                "target_tpot_ms": 1_000.0,
+                "target_tokens_per_second": 1.0,
+                "sampling_seed": 17,
+                "generation_config_digest": "sha256:" + "b" * 64,
+            }
+        }
+    )
+
+    assert started["details"] == {
+        "request_id": "request-stage-local-prefill-cancel",
+        "status": "CANCELLED",
+        "output": {"token_indexes": [], "token_ids": []},
+        "path": None,
+    }
+
+
 def test_native_sidecar_status_reports_child_exit_without_process_identity() -> None:
     class _ExitedProcess:
         @staticmethod
@@ -939,6 +1462,48 @@ def test_node_health_reports_sidecar_exit_without_runtime_snapshot() -> None:
         },
     }
 
+
+def test_node_health_reports_nonblocking_physical_work_counters() -> None:
+    service = PhysicalNodeService.__new__(PhysicalNodeService)
+    service.state = "RUNNING"
+    service.sidecar = None
+    service.runtime = type(
+        "Runtime",
+        (),
+        {
+            "operation_counter_snapshot": staticmethod(
+                lambda: {"applied_operation_count": 23}
+            )
+        },
+    )()
+    service.transport = type(
+        "Transport",
+        (),
+        {
+            "fatal_error": None,
+            "running": True,
+            "counter_snapshot": staticmethod(
+                lambda: {
+                    "remote_frames_sent": 17,
+                    "remote_frames_received": 19,
+                }
+            ),
+        },
+    )()
+    service._signed_result = lambda event, details=None: {
+        "event": event,
+        "details": details,
+    }
+
+    health = service._health({})
+
+    assert health["details"]["transport_counters"] == {
+        "remote_frames_sent": 17,
+        "remote_frames_received": 19,
+    }
+    assert health["details"]["runtime_counters"] == {
+        "applied_operation_count": 23,
+    }
 
 def test_native_sidecar_close_removes_owned_socket_root(tmp_path: Path) -> None:
     socket_root = tmp_path / "socket"

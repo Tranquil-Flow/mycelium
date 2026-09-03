@@ -20,6 +20,7 @@ import mycelium_router.transports.iroh as iroh_module
 from mycelium_router.contracts import (
     FailureReport,
     HopHeader,
+    PathCancellation,
     PathBuildState,
     PathHop,
     ProgressivePrefillContext,
@@ -64,9 +65,11 @@ class _Hub:
         self.release_confirmed_send = threading.Event()
         self.block_confirmed_send = False
         self.confirmed_send_timeouts: list[float | None] = []
+        self.confirmed_sender_indices: list[int] = []
         self.send_failure: BaseException | None = None
         self.send_failures: deque[BaseException] = deque()
         self.connect_delay = 0.0
+        self.connect_failures: deque[BaseException] = deque()
         self.block_connect = False
         self.connect_entered = threading.Event()
         self.release_connect = threading.Event()
@@ -79,6 +82,7 @@ class _Hub:
 
     def client(self, *_args, **_kwargs) -> "_FakeClient":
         client = _FakeClient(self)
+        client.index = len(self.clients)
         self.clients.append(client)
         return client
 
@@ -98,6 +102,7 @@ class _FakeClient:
         self.hub = hub
         self.connected = False
         self.endpoint_id = None
+        self.index = -1
 
     def connect(self, *, deadline: float | None = None) -> None:
         del deadline
@@ -106,6 +111,8 @@ class _FakeClient:
             self.hub.release_connect.wait(timeout=1)
         if self.hub.connect_delay:
             time.sleep(self.hub.connect_delay)
+        if self.hub.connect_failures:
+            raise self.hub.connect_failures.popleft()
         self.connected = True
         self.endpoint_id = self.hub.endpoint_id
 
@@ -113,6 +120,9 @@ class _FakeClient:
         self.connected = False
         with self.hub.inbound_ready:
             self.hub.inbound_ready.notify_all()
+
+    def interrupt(self) -> None:
+        self.hub.release_confirmed_send.set()
 
     def configure_peer(
         self,
@@ -150,6 +160,7 @@ class _FakeClient:
         if not self.connected:
             raise ProtocolError("not_connected")
         self.hub.confirmed_send_timeouts.append(timeout)
+        self.hub.confirmed_sender_indices.append(self.index)
         self.hub.confirmed_send_entered.set()
         if len(self.hub.confirmed_send_timeouts) == 2:
             self.hub.retry_confirmed_send_entered.set()
@@ -316,6 +327,47 @@ def _transport(
         poll_interval_seconds=0.01,
         client_factory=hub.client,
     )
+
+
+def test_cleanup_receipt_observation_never_waits_for_data_plane_state_lock() -> None:
+    transport = _transport(_Hub())
+    lock_owned = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_state_lock() -> None:
+        with transport._state_lock:
+            lock_owned.set()
+            assert release_lock.wait(timeout=1.0)
+
+    holder = threading.Thread(target=hold_state_lock)
+    holder.start()
+    assert lock_owned.wait(timeout=1.0)
+    started = time.monotonic()
+    try:
+        observation = transport.cancellation_cleanup_observation_nonblocking(
+            "request-1",
+            "path-1",
+            0,
+        )
+    finally:
+        release_lock.set()
+        holder.join(timeout=1.0)
+
+    assert observation is None
+    assert time.monotonic() - started < 0.1
+    assert not holder.is_alive()
+    counters, state = transport.cancellation_cleanup_observation_nonblocking(
+        "request-1",
+        "path-1",
+        0,
+    )
+    assert counters == {
+        "remote_frames_sent": 0,
+        "remote_frames_received": 0,
+        "router_frames_dispatched": 0,
+        "duplicate_frames": 0,
+    }
+    assert state["cancellation_observed"] is False
 
 
 def test_remote_router_frame_uses_confirmed_sidecar_path_and_canonical_wire() -> None:
@@ -488,6 +540,78 @@ def test_multi_hop_progressive_frame_preserves_graph_entry_not_previous_hop() ->
     assert transport._entry_nodes[request.request_id] == first.node_id
 
 
+def test_progressive_dispatch_cannot_republish_path_after_controlled_cancel() -> None:
+    hub = _Hub()
+    transport = _transport(hub)
+    graph = graph_fixture()
+    request = request_fixture()
+    first = graph.stages[0].placements[0]
+    build = PathBuildState(
+        request=request,
+        graph=graph,
+        path_id="path-cancel-during-progressive-dispatch",
+        path_attempt=0,
+        ordered_hops=(
+            PathHop(
+                stage_id=graph.stages[0].stage_id,
+                placement_id=first.placement_id,
+                reservation_id="reservation-cancelled-dispatch",
+                reservation_expires_at=30.0,
+                reservation_epoch=graph.deployment_epoch,
+            ),
+        ),
+    )
+    header = HopHeader(
+        request_id=request.request_id,
+        path_id=build.path_id,
+        path_attempt=build.path_attempt,
+        phase="PREFILL",
+        token_index=-1,
+        hop_index=0,
+        source_placement_id="",
+        destination_placement_id=first.placement_id,
+        topology_version=graph.topology_version,
+        idempotency_key=f"{request.request_id}:cancelled-dispatch:0:PREFILL:-1:0",
+    )
+    frame = encode_progressive_prefill(
+        header,
+        ProgressivePrefillContext(
+            graph=graph,
+            request=request,
+            build=build,
+            payload=b"activation",
+        ),
+    )
+    cancellation = PathCancellation(
+        request.request_id,
+        build.path_id,
+        build.path_attempt,
+        graph.topology_version,
+    )
+
+    class CancellationWinsRouter(_RecordingRouter):
+        def receive_progressive_prefill(self, *_args, **_kwargs):
+            raise AssertionError("cancelled progressive frame reached Router")
+
+    transport.bind_router(CancellationWinsRouter())
+    transport.start()
+    try:
+        with transport._state_lock:
+            transport._remember_cancellation_locked(cancellation)
+        transport._dispatch(decode_frame(frame), source_node_id="node-b")
+
+        assert transport.cancellation_observed(
+            request.request_id,
+            build.path_id,
+            build.path_attempt,
+        )
+        assert request.request_id not in transport._entry_nodes
+        assert build.path_id not in transport._path_graphs
+        assert build.path_id not in transport._participant_nodes_by_path
+    finally:
+        transport.close()
+
+
 def test_multi_peer_transport_configures_peer_set_atomically_on_start() -> None:
     hub = _Hub()
     primary = _binding(node_id="peer-a", endpoint_id="endpoint-a", generation=3)
@@ -497,7 +621,7 @@ def test_multi_peer_transport_configures_peer_set_atomically_on_start() -> None:
     transport.start()
     try:
         assert hub.configurations == []
-        assert hub.peer_configurations == [
+        expected_configuration = [
             [
                 {
                     "endpoint_id": "endpoint-a",
@@ -511,6 +635,7 @@ def test_multi_peer_transport_configures_peer_set_atomically_on_start() -> None:
                 },
             ]
         ]
+        assert hub.peer_configurations == expected_configuration * 4
     finally:
         transport.close()
 
@@ -531,7 +656,9 @@ def test_multi_peer_transport_routes_non_primary_destination_by_endpoint() -> No
 
     assert hub.sent == []
     assert len(hub.routed_sent) == 1
-    routed_endpoint, message_id, frame, _timeout, expected_generation = hub.routed_sent[0]
+    routed_endpoint, message_id, frame, _timeout, expected_generation = hub.routed_sent[
+        0
+    ]
     assert routed_endpoint == "endpoint-b"
     assert frame == _event_frame()
     assert expected_generation == 4
@@ -564,9 +691,7 @@ def test_confirmed_send_binds_distinct_local_membership_generation() -> None:
     transport.bind_router(_RecordingRouter())
     transport.start()
     try:
-        transport.send_router_frame(
-            _event_frame(), destination_node_id="peer-node"
-        )
+        transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
     finally:
         transport.close()
 
@@ -630,9 +755,8 @@ def test_outbound_trace_binds_public_request_and_bounded_frame_identity() -> Non
         )
         assert sent[0].hex() in message_trace
         assert receipt_identity["message_id"] == sent[0].hex()
-        assert (
-            receipt_identity["delivery_receipt_sha256"]
-            == _delivery_receipt_digest(receipt)
+        assert receipt_identity["delivery_receipt_sha256"] == _delivery_receipt_digest(
+            receipt
         )
     assert all(len(entry.encode()) <= 512 for entry in trace)
 
@@ -980,7 +1104,9 @@ def test_failure_trace_identity_preserves_bounded_failure_diagnostics() -> None:
     }
 
 
-def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_generation() -> None:
+def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_generation() -> (
+    None
+):
     hub = _Hub(endpoint_id="unexpected")
     transport = _transport(hub)
     transport.bind_router(_RecordingRouter())
@@ -993,9 +1119,9 @@ def test_start_binds_expected_authenticated_local_endpoint_and_exact_peer_genera
     transport.bind_router(_RecordingRouter())
     transport.start()
     try:
-        assert good.configurations == [
-            ("peer-endpoint", _binding().endpoint_addr, 7)
-        ]
+        assert (
+            good.configurations == [("peer-endpoint", _binding().endpoint_addr, 7)] * 4
+        )
         assert transport.peer_binding == _binding()
     finally:
         transport.close()
@@ -1124,10 +1250,7 @@ def test_rejected_manifest_registration_is_never_acked_as_delivered() -> None:
         deadline = time.monotonic() + 1
         while not transport.evidence().scoped_events and time.monotonic() < deadline:
             time.sleep(0.01)
-        while (
-            transport._dispatcher_phase != "idle"
-            and time.monotonic() < deadline
-        ):
+        while transport._dispatcher_phase != "idle" and time.monotonic() < deadline:
             time.sleep(0.01)
         assert transport.fatal_error is None
         assert transport.evidence().scoped_events[-1]["code"] == (
@@ -1148,9 +1271,7 @@ def test_bounded_send_queue_fails_closed_and_deadline_cancels_message() -> None:
 
     def first_send() -> None:
         try:
-            transport.send_router_frame(
-                _event_frame(), destination_node_id="peer-node"
-            )
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
         except BaseException as error:  # captured for assertion in test thread
             first_error.append(error)
 
@@ -1165,6 +1286,7 @@ def test_bounded_send_queue_fails_closed_and_deadline_cancels_message() -> None:
         assert len(first_error) == 1
         assert isinstance(first_error[0], IrohTransportError)
         assert first_error[0].code == "delivery_deadline_exceeded"
+        assert hub.cancel_completed.wait(timeout=1)
         assert len(hub.cancels) == 1
     finally:
         hub.release_confirmed_send.set()
@@ -1181,9 +1303,7 @@ def test_rotation_is_monotonic_and_cancels_old_generation_inflight() -> None:
 
     def send() -> None:
         try:
-            transport.send_router_frame(
-                _event_frame(), destination_node_id="peer-node"
-            )
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
         except BaseException as error:
             errors.append(error)
 
@@ -1295,9 +1415,7 @@ def test_replacement_endpoint_document_is_owned_before_remote_configure() -> Non
         assert not rotation.is_alive()
         assert errors == []
 
-        replacement_addr["relay"]["urls"].append(
-            "https://relay.invalid/after-commit"
-        )
+        replacement_addr["relay"]["urls"].append("https://relay.invalid/after-commit")
         replacement_addr["post_commit_marker"] = "caller-owned"
         expected = {
             "id": "peer-endpoint",
@@ -1329,9 +1447,7 @@ def test_sidecar_configure_document_cannot_mutate_candidate_binding() -> None:
     ) -> None:
         del endpoint_id, generation, timeout
         configured_documents.append(endpoint_addr)
-        endpoint_addr["relay"]["urls"].append(
-            "https://relay.invalid/sidecar-mutated"
-        )
+        endpoint_addr["relay"]["urls"].append("https://relay.invalid/sidecar-mutated")
         endpoint_addr["sidecar_marker"] = True
 
     control.configure_peer = mutate_configure_document
@@ -1751,9 +1867,7 @@ def test_rotation_and_deadline_reserve_one_cancel_per_message(
 
     def send() -> None:
         try:
-            transport.send_router_frame(
-                _event_frame(), destination_node_id="peer-node"
-            )
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
         except BaseException as error:
             errors.append(error)
 
@@ -1906,10 +2020,7 @@ def test_close_or_rotation_first_blocked_cancel_has_bounded_lifecycle(
         if first_winner == "close":
             assert len(lifecycle_errors) == 1
             assert isinstance(lifecycle_errors[0], IrohTransportError)
-            assert (
-                lifecycle_errors[0].code
-                == "delivery_cancellation_shutdown_timeout"
-            )
+            assert lifecycle_errors[0].code == "delivery_cancellation_shutdown_timeout"
         else:
             assert lifecycle_errors == []
             with pytest.raises(
@@ -2073,9 +2184,7 @@ def test_sidecar_crash_never_returns_false_delivery_success() -> None:
     transport.start()
     try:
         with pytest.raises(IrohTransportError, match="delivery_not_confirmed"):
-            transport.send_router_frame(
-                _event_frame(), destination_node_id="peer-node"
-            )
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
         assert transport.evidence().remote_frames_sent == 0
     finally:
         transport.close()
@@ -2111,6 +2220,38 @@ def test_receive_reconnects_after_sidecar_disconnected_protocol_error() -> None:
         while not hub.acks and time.monotonic() < deadline:
             time.sleep(0.01)
         assert hub.acks == [b"p" * 16]
+        assert len(router.token_events) == 1
+        assert transport.fatal_error is None
+    finally:
+        transport.close()
+
+
+def test_receive_reconnect_retires_old_session_and_retries_transient_handshake() -> None:
+    hub = _Hub()
+    router = _RecordingRouter()
+    transport = _transport(hub, delivery_timeout_seconds=0.2)
+    transport.bind_router(router)
+    transport.start()
+    try:
+        old_receive = transport._receive_client
+        assert old_receive is not None
+        initial_client_count = len(hub.clients)
+        hub.connect_failures.append(ProtocolError("handshake_rejected"))
+        hub.fail_receive(ProtocolError("sidecar_disconnected"))
+
+        deadline = time.monotonic() + 1
+        while (
+            (len(hub.clients) < initial_client_count + 2 or old_receive.connected)
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        assert len(hub.clients) >= initial_client_count + 2
+        assert old_receive.connected is False
+
+        hub.deliver(b"q" * 16, _event_frame())
+        while not hub.acks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert hub.acks == [b"q" * 16]
         assert len(router.token_events) == 1
         assert transport.fatal_error is None
     finally:
@@ -2203,14 +2344,14 @@ def test_concurrent_starts_create_one_client_set() -> None:
     second.start()
     time.sleep(0.05)
     try:
-        assert len(hub.clients) == 3
+        assert len(hub.clients) == 6
     finally:
         release.set()
         first.join(timeout=1)
         second.join(timeout=1)
         transport.close()
     assert errors == []
-    assert len(hub.clients) == 3
+    assert len(hub.clients) == 6
 
 
 def test_concurrent_rotations_commit_in_generation_order() -> None:
@@ -2276,12 +2417,11 @@ def test_manifest_delta_sink_is_bounded_and_never_false_acks() -> None:
         while len(hub.acks) < 1 and time.monotonic() < deadline:
             time.sleep(0.01)
         hub.deliver(b"2" * 16, frame)
-        while len(transport.evidence().scoped_events) < 1 and time.monotonic() < deadline:
-            time.sleep(0.01)
         while (
-            transport._dispatcher_phase != "idle"
-            and time.monotonic() < deadline
+            len(transport.evidence().scoped_events) < 1 and time.monotonic() < deadline
         ):
+            time.sleep(0.01)
+        while transport._dispatcher_phase != "idle" and time.monotonic() < deadline:
             time.sleep(0.01)
         assert transport.fatal_error is None
         assert transport.evidence().scoped_events[-1]["code"] == (
@@ -2292,7 +2432,9 @@ def test_manifest_delta_sink_is_bounded_and_never_false_acks() -> None:
         transport.close()
 
 
-def test_close_reports_blocked_router_callback_instead_of_false_clean_shutdown() -> None:
+def test_close_reports_blocked_router_callback_instead_of_false_clean_shutdown() -> (
+    None
+):
     hub = _Hub()
     entered = threading.Event()
     release = threading.Event()
@@ -2371,9 +2513,7 @@ def test_reconnect_retry_uses_original_end_to_end_deadline() -> None:
 
     def send() -> None:
         try:
-            transport.send_router_frame(
-                _event_frame(), destination_node_id="peer-node"
-            )
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
         except BaseException as error:
             errors.append(error)
         finally:
@@ -2414,9 +2554,7 @@ def test_reconnect_can_exhaust_deadline_before_retry_confirmed_send() -> None:
     hub.connect_delay = 0.08
     try:
         with pytest.raises(IrohTransportError) as raised:
-            transport.send_router_frame(
-                _event_frame(), destination_node_id="peer-node"
-            )
+            transport.send_router_frame(_event_frame(), destination_node_id="peer-node")
         assert raised.value.code == "delivery_deadline_exceeded"
         assert len(hub.confirmed_send_timeouts) == 1
         assert not hub.retry_confirmed_send_entered.is_set()
@@ -2512,6 +2650,42 @@ def test_client_receive_deadline_covers_trickled_delivery() -> None:
         server_stream.close()
         thread.join(timeout=1)
     assert elapsed < 0.15
+
+
+def test_client_single_receive_poll_uses_session_deadline_not_caller_cadence() -> None:
+    client_stream, server_stream = socket.socketpair()
+    client = SidecarClient("/unused", b"s" * 32, timeout=1.0)
+    client._socket = client_stream
+    client._send_key = bytearray(b"a" * 32)
+    client._receive_key = bytearray(b"b" * 32)
+
+    def delayed_empty_poll() -> None:
+        request_length = struct.unpack(">I", server_stream.recv(4))[0]
+        request = bytearray()
+        while len(request) < request_length:
+            request.extend(server_stream.recv(request_length - len(request)))
+        time.sleep(0.25)
+        encoded = sidecar_client_module._encode_record(
+            sidecar_client_module._ERROR,
+            0,
+            sidecar_client_module._ZERO_ID,
+            sidecar_client_module._canonical_json({"code": "empty"}),
+            b"b" * 32,
+        )
+        server_stream.sendall(struct.pack(">I", len(encoded)) + encoded)
+
+    thread = threading.Thread(target=delayed_empty_poll, daemon=True)
+    thread.start()
+    started = time.monotonic()
+    try:
+        assert client.recv_with_source(wait_seconds=0.05) is None
+        assert client.connected is True
+    finally:
+        elapsed = time.monotonic() - started
+        client.close()
+        server_stream.close()
+        thread.join(timeout=1)
+    assert 0.2 <= elapsed < 0.8
 
 
 def test_close_fences_receive_reconnect_install() -> None:

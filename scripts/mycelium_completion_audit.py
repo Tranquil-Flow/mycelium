@@ -198,6 +198,9 @@ def _audit_completed_evidence(
     findings: list[str],
 ) -> None:
     prefix = f"gate:{gate_id}"
+    terminal_outcome = gate_state == "complete" or (
+        gate_state == "design_only" and completed == REQUIREMENTS
+    )
     if not isinstance(value, list):
         findings.append(f"{prefix}:evidence_bindings_invalid")
         return
@@ -310,7 +313,7 @@ def _audit_completed_evidence(
                     findings.append(
                         f"{prefix}:evidence_freshness_window_invalid:{requirement}"
                     )
-                if gate_state != "complete" and fresh_until <= datetime.now(timezone.utc):
+                if not terminal_outcome and fresh_until <= datetime.now(timezone.utc):
                     findings.append(f"{prefix}:evidence_expired:{requirement}")
 
     actual_requirements = set(by_requirement)
@@ -478,11 +481,14 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
             gate.get("evidence_bindings"),
             findings,
         )
-        if gate.get("state") == "design_only" and completed != {"specification"}:
+        if gate.get("state") == "design_only" and completed not in (
+            {"specification"},
+            REQUIREMENTS,
+        ):
             findings.append(f"{prefix}:design_only_completion_invalid")
         if gate.get("state") == "complete" and completed != REQUIREMENTS:
             findings.append(f"{prefix}:complete_requirements_invalid")
-        if gate.get("state") != "complete" and "atomic_feature_commit" in completed:
+        if "atomic_feature_commit" in completed and completed != REQUIREMENTS:
             findings.append(f"{prefix}:premature_commit_completion")
         try:
             ui_workspaces = set(_string_list(gate.get("ui_workspaces")))
@@ -513,12 +519,21 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
                         f"completed_dependency_incomplete:{gate_id}:{dependency}"
                     )
 
+    terminal_design_only = {
+        gate.get("gate_id")
+        for gate in gates_value
+        if isinstance(gate, dict)
+        and gate.get("state") == "design_only"
+        and set(gate.get("completed_requirements", ())) == REQUIREMENTS
+    }
     primary_gate = document.get("primary_gate")
     if primary_gate not in EXPECTED_GATES:
         findings.append("primary_gate_invalid")
     else:
         if gate_states.get(primary_gate) == "complete":
             findings.append(f"primary_gate_already_complete:{primary_gate}")
+        if primary_gate in terminal_design_only:
+            findings.append(f"primary_gate_already_concluded:{primary_gate}")
         for dependency in gate_dependencies.get(primary_gate, set()):
             if dependency in gate_states and gate_states[dependency] != "complete":
                 findings.append(

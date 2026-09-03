@@ -152,7 +152,11 @@ def test_cleartext_marked_request_is_refused_at_the_server(env: Env) -> None:
             ),
             timeout=5,
         )
-    assert exc_info.value.code == 400
+    error = exc_info.value
+    try:
+        assert error.code == 400
+    finally:
+        error.close()
 
 
 # ---------------------------------------------------------------------------

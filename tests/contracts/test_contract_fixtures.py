@@ -149,6 +149,10 @@ EXPECTED_PROTOCOLS = {
     "product-ui-bootstrap-v1.json": "mycelium.product_ui.bootstrap.v1",
     "observatory-snapshot-v1.json": "mycelium.observatory.snapshot.v1",
     "observatory-event-v1.json": "mycelium.observatory.event.v1",
+    "replica-plan-v1.json": "mycelium.replica_plan.v1",
+    "replica-qualification-v1.json": "mycelium.replica_qualification.v1",
+    "replica-runtime-v1.json": "mycelium.replica_runtime.v1",
+    "replica-benchmark-v1.json": "mycelium.replica_benchmark.v1",
 }
 
 

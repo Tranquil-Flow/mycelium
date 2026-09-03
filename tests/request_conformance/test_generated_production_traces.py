@@ -132,6 +132,10 @@ def _assert_generated_trace(trace: Sequence[Action], index: int) -> None:
             elif action.kind == "complete":
                 assert before.phase is Phase.STREAMING, trace_document
                 backend.complete()
+            elif action.kind == "publish":
+                # The harness's terminal wait below already models the
+                # publication step; nothing to do here.
+                pass
             elif action.kind == "cancel":
                 if request_id is None:
                     try:
@@ -240,7 +244,18 @@ def _assert_generated_trace(trace: Sequence[Action], index: int) -> None:
 
 
 def test_all_generated_traces_match_production_events_counters_and_cleanup():
-    traces = (*generate_bounded_traces(CURRENT), *generate_race_traces(CURRENT))
+    # The sequential production harness waits for terminal publication after
+    # every terminal transition, so it replays the SETTLED serializations:
+    # bounded traces carry an explicit publish step, and race traces are the
+    # publish-carrying variants. The window-open race variants (no publish)
+    # describe the concurrent race environment only — replaying them
+    # sequentially cannot reproduce a cancel that outran publication.
+    settled_race_traces = tuple(
+        trace
+        for trace in generate_race_traces(CURRENT)
+        if any(action.kind == "publish" for action in trace)
+    )
+    traces = (*generate_bounded_traces(CURRENT), *settled_race_traces)
     assert len(traces) == len({trace_to_json(trace) for trace in traces})
 
     for index, trace in enumerate(traces):

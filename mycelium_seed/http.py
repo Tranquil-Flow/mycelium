@@ -836,19 +836,24 @@ class SeedHTTPClient:
                 status = response.status
                 response_headers = response.headers
         except HTTPError as exc:
-            response_body = exc.read(MAX_HTTP_FRAME_BYTES + 1)
+            status = exc.code
+            response_headers = exc.headers
+            try:
+                response_body = exc.read(MAX_HTTP_FRAME_BYTES + 1)
+            finally:
+                exc.close()
             exposed_code = (
                 _authoritative_remote_error_code(response_body)
-                if _has_exact_json_content_type(exc.headers)
+                if _has_exact_json_content_type(response_headers)
                 else None
             )
             if path == "/seed/join" and (
                 exposed_code is None
-                or JOIN_ROUTE_ERROR_STATUSES.get(exposed_code) != exc.code
+                or JOIN_ROUTE_ERROR_STATUSES.get(exposed_code) != status
             ):
                 exposed_code = None
             code = exposed_code or "seed_http_remote_error"
-            raise SeedHTTPError(code, status=exc.code) from exc
+            raise SeedHTTPError(code, status=status) from exc
         except (OSError, URLError) as exc:
             raise SeedHTTPError("seed_http_unreachable") from exc
         if len(response_body) > MAX_HTTP_FRAME_BYTES:

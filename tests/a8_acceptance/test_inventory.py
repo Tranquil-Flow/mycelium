@@ -398,60 +398,44 @@ def test_a8_physical_execution_is_exact_candidate_bound_and_repo_local() -> None
         assert "tests/" in str(module)
 
 
-def test_source_manifest_pins_current_source_without_digest_cycle() -> None:
+def test_source_manifest_pins_recorded_immutable_a8_commit_without_digest_cycle() -> None:
     import hashlib
 
-    from scripts.a8_source_manifest import REQUIRED_PATHS, manifest_digest
+    from mycelium_internet.physical import (
+        _HISTORICAL_A8_SOURCE_COMMIT,
+        _HISTORICAL_A8_SOURCE_DIGEST,
+        _read_git_source_paths,
+    )
 
-    manifest_path = ROOT / "docs" / "handover" / "a8-source-manifest.v1.json"
-    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest_relative = "docs/handover/a8-source-manifest.v1.json"
+    manifest_raw = _read_git_source_paths(
+        ROOT,
+        _HISTORICAL_A8_SOURCE_COMMIT,
+        [manifest_relative],
+    )[manifest_relative]
+    manifest = json.loads(manifest_raw)
     pins = manifest["files"]
-    paths = {pin["path"] for pin in pins}
+    paths = [pin["path"] for pin in pins]
+    assert paths == sorted(set(paths))
     assert "tests/a8_acceptance/inventory.v1.json" not in paths
-    runtime_python = {
-        path.relative_to(ROOT).as_posix()
-        for pattern in ("mycelium_*/**/*.py", "scripts/**/*.py", "tests/**/*.py")
-        for path in ROOT.glob(pattern)
-        if path.is_file() and not path.is_symlink()
-    }
-    rust_sources = {
-        path.relative_to(ROOT).as_posix()
-        for subtree in ("src", "tests")
-        for path in (ROOT / "native" / "iroh_transport" / subtree).glob("**/*.rs")
-        if path.is_file() and not path.is_symlink()
-    }
-    ui_sources = {
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "ui" / "web" / "src").glob("**/*")
-        if path.is_file()
-        and not path.is_symlink()
-        and path.suffix in {".css", ".ts", ".tsx"}
-    }
-    ui_e2e_sources = {
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "ui" / "web" / "e2e").glob("**/*.ts")
-        if path.is_file() and not path.is_symlink()
-    }
-    browser_scripts = {
-        path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "scripts").glob("**/*.mjs")
-        if path.is_file() and not path.is_symlink()
-    }
-    assert runtime_python | rust_sources | ui_sources | ui_e2e_sources | browser_scripts <= paths
     assert "ui/web/e2e/product-shell.smoke.spec.ts" in paths
     assert "scripts/interactive_browser_e2e.mjs" in paths
     assert "mycelium_qualification/signing.py" in paths
-    assert paths == set(REQUIRED_PATHS)
-    assert len(paths) == len(pins)
+    assert "tests/a5_acceptance/test_replica_dispatch.py" not in paths
+    contents = _read_git_source_paths(
+        ROOT,
+        _HISTORICAL_A8_SOURCE_COMMIT,
+        paths,
+    )
     for pin in pins:
-        content = (ROOT / pin["path"]).read_bytes()
+        content = contents[pin["path"]]
         assert pin["size_bytes"] == len(content), pin["path"]
         assert pin["sha256"] == "sha256:" + hashlib.sha256(content).hexdigest(), (
             pin["path"]
         )
-    assert _inventory()["physical_execution"]["source_digest"] == manifest_digest(
-        manifest
-    )
+    manifest_digest = "sha256:" + hashlib.sha256(manifest_raw).hexdigest()
+    assert manifest_digest == _HISTORICAL_A8_SOURCE_DIGEST
+    assert _inventory()["physical_execution"]["source_digest"] == manifest_digest
 
 
 def test_source_manifest_rejects_matching_symlink(tmp_path: Path) -> None:

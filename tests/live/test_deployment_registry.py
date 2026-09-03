@@ -23,6 +23,30 @@ def test_registry_advertises_delegated_a4_router_capabilities() -> None:
     assert LiveDeploymentRegistry.supports_publisher_generation is True
 
 
+def test_registry_preserves_owner_cancellation_deadline() -> None:
+    registry = LiveDeploymentRegistry([_runtime(0)])
+    observed: list[tuple[str, float]] = []
+
+    class Router:
+        def cancel_with_deadline(
+            self,
+            request_id: str,
+            *,
+            deadline_monotonic_s: float,
+        ) -> bool:
+            observed.append((request_id, deadline_monotonic_s))
+            return True
+
+    registry._requests["request-a"] = "deployment-0"
+    registry._routers["deployment-0"] = Router()  # type: ignore[assignment]
+
+    assert registry.cancel_with_deadline(
+        "request-a",
+        deadline_monotonic_s=123.25,
+    )
+    assert observed == [("request-a", 123.25)]
+
+
 class _Codec:
     def __init__(self, prefix: str) -> None:
         self.prefix = prefix

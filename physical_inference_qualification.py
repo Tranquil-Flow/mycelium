@@ -84,6 +84,12 @@ _STAGE_ACK_PROTOCOL = "mycelium.controller_remote_stage_ack.v1"
 _CLEANUP_ACK_PROTOCOL = "mycelium.controller_remote_cleanup_ack.v1"
 _NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 _NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
+_NODE_PROCESS_ENV_PREFIX = (
+    "env",
+    "OPENBLAS_NUM_THREADS=1",
+    "OMP_NUM_THREADS=1",
+    "MKL_NUM_THREADS=1",
+)
 _RUN_PLAN_PROTOCOL = "mycelium.controller_run_plan.v1"
 _REMOTE_STAGE_SCRIPT = r'''import hashlib,json,os,shutil,stat,sys,tarfile
 from pathlib import Path,PurePosixPath
@@ -512,6 +518,14 @@ def _peer_process_argv(
         "StrictHostKeyChecking=yes",
         "-o",
         "ConnectTimeout=15",
+        # This persistent SSH process is the node lifecycle control plane, not
+        # a bulk artifact transfer. Mark every non-interactive packet as
+        # expedited so cancellation receipts and cleanup snapshots retain the
+        # reserved control lane when activation traffic saturates the same
+        # physical overlay. This preserves the fixed proof deadline instead of
+        # weakening it or retrying around an unproven cleanup generation.
+        "-o",
+        "IPQoS=ef",
         "-i",
         peer.ssh_identity_file,
         "--",
@@ -1722,6 +1736,7 @@ class QualificationController:
                 node_plan = plans_by_node[node_id]
                 node_script = f"{peer.staging_root}/physical_inference_node.py"
                 node_command = (
+                    *_NODE_PROCESS_ENV_PREFIX,
                     node_plan["python_executable"],
                     "-B",
                     node_script,
@@ -1974,6 +1989,7 @@ class QualificationController:
                     node_plan = plans_by_node[node_id]
                     node_script = f"{peer.staging_root}/physical_inference_node.py"
                     node_command = (
+                        *_NODE_PROCESS_ENV_PREFIX,
                         node_plan["python_executable"],
                         "-B",
                         node_script,

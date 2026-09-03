@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from typing import Any
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -1079,6 +1080,38 @@ print(json.dumps({
     assert json.loads(after_file.read_text("utf-8")) == after_report
     assert before_file.stat().st_mode & 0o777 == 0o600
     assert after_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_case_probe_can_bind_the_running_python_instead_of_ambient_shebang(
+    tmp_path: Path,
+) -> None:
+    from scripts.a8_run_physical_gate import _case_probe_via
+
+    private_root = tmp_path / "private"
+    private_root.mkdir(mode=0o700)
+    output_file = private_root / "probe.json"
+    program = tmp_path / "probe.py"
+    program.write_text(
+        """#!/bin/false
+import json, sys
+print(json.dumps({"case_id": sys.argv[1], "member_id": sys.argv[2]}))
+""",
+        encoding="utf-8",
+    )
+    program.chmod(0o700)
+
+    report = _case_probe_via(
+        program,
+        "endpoint_identity_mismatch",
+        "peer-node-mismatch",
+        output_file,
+        interpreter=Path(sys.executable).resolve(),
+    )()
+
+    assert report == {
+        "case_id": "endpoint_identity_mismatch",
+        "member_id": "peer-node-mismatch",
+    }
 
 
 def test_revocation_case_probe_inputs_use_before_and_after_phases(
