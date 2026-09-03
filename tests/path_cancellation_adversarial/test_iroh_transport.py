@@ -287,10 +287,12 @@ def test_controlled_cancellation_passes_owner_deadline_to_delivery_worker() -> N
     def capture_start(
         _control,
         candidate_message_id,
+        candidate_pending,
         *,
         cleanup_deadline_monotonic_s=None,
     ) -> None:
         assert candidate_message_id == message_id
+        assert candidate_pending is transport._pending[message_id]
         captured.append(cleanup_deadline_monotonic_s)
 
     transport._start_delivery_cancel_locked = capture_start
@@ -860,6 +862,79 @@ def test_concurrent_delivery_cancels_use_independent_sidecar_clients() -> None:
     assert shared_calls == []
     assert sorted(first.calls + second.calls) == sorted(message_ids)
     assert transport._available_cancellation_clients.qsize() == 2
+    assert transport.cancellation_cleanup_complete("request-a", "path-a", 1)
+
+
+def test_obsolete_admission_race_releases_client_for_live_cleanup_blocker() -> None:
+    """A retired send must not monopolize the bounded cancellation pool."""
+
+    from mycelium_iroh_sidecar import ProtocolError
+
+    stale_id = b"s" * 16
+    live_id = b"l" * 16
+    stale_attempted = threading.Event()
+    release_first_unknown = threading.Event()
+    live_cancelled = threading.Event()
+    stale_admission_states: list[bool] = []
+
+    class DedicatedControl:
+        connected = True
+
+        @staticmethod
+        def cancel(message_id: bytes, *, timeout: float) -> None:
+            assert 0 < timeout <= 0.2
+            if message_id == stale_id:
+                stale_admission_states.append(stale_pending.admission_finished)
+                stale_attempted.set()
+                if len(stale_admission_states) == 1:
+                    assert release_first_unknown.wait(timeout=0.2)
+                raise ProtocolError("unknown_message")
+            assert message_id == live_id
+            live_cancelled.set()
+
+    stale_pending = _PendingSend(
+        7,
+        "request-a",
+        "path-a",
+        1,
+        admission_started=True,
+    )
+    transport = _transport(_Hub())
+    dedicated = DedicatedControl()
+    cancellation = PathCancellation("request-a", "path-a", 1, 3)
+    cleanup_deadline = time.monotonic() + 0.4
+    with transport._state_lock:
+        transport._cancellation_clients = (dedicated,)
+        transport._available_cancellation_clients.put_nowait(dedicated)
+        transport._pending[stale_id] = stale_pending
+        transport._cancel_pending_scope_locked(
+            cancellation,
+            cleanup_deadline_monotonic_s=cleanup_deadline,
+        )
+
+    assert stale_attempted.wait(timeout=0.2)
+    with transport._state_lock:
+        transport._pending[live_id] = _PendingSend(
+            7,
+            cancellation.request_id,
+            cancellation.path_id,
+            cancellation.path_attempt,
+            admission_started=True,
+        )
+        transport._cancel_pending_scope_locked(
+            cancellation,
+            cleanup_deadline_monotonic_s=cleanup_deadline,
+        )
+        # The original data sender has now unwound after its admission race.
+        # Its sidecar admission call cannot create the message after the valid
+        # unknown-message response, so the cancellation lane can move on.
+        transport._pending[stale_id].admission_finished = True
+        transport._pending.pop(stale_id)
+    release_first_unknown.set()
+
+    assert live_cancelled.wait(timeout=0.2)
+    _wait_until(lambda: transport._pending[live_id].cancel_confirmed)
+    assert stale_admission_states == [False, True]
     assert transport.cancellation_cleanup_complete("request-a", "path-a", 1)
 
 

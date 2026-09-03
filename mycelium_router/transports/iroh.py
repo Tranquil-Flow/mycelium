@@ -439,6 +439,7 @@ class _PendingSend:
     path_attempt: int | None = None
     cancellable_forward: bool = False
     admission_started: bool = False
+    admission_finished: bool = False
     cancelled: bool = False
     reason: str = ""
     cancel_started: bool = False
@@ -1087,6 +1088,7 @@ class IrohTransport:
                     self._start_delivery_cancel_locked(
                         cancellation_client,
                         message_id,
+                        pending,
                     )
 
     def send_router_frame(
@@ -1354,6 +1356,7 @@ class IrohTransport:
             if cancel_timer is not None:
                 cancel_timer.cancel()
             with self._state_lock:
+                pending.admission_finished = True
                 self._pending.pop(message_id, None)
             if send_operation_acquired:
                 self._send_operation_lock.release()
@@ -1496,7 +1499,7 @@ class IrohTransport:
                 reason,
             )
             if reserved:
-                self._start_delivery_cancel_locked(control, message_id)
+                self._start_delivery_cancel_locked(control, message_id, pending)
 
     def _reserve_pending_cancellation_locked(
         self,
@@ -1574,7 +1577,7 @@ class IrohTransport:
                 # exact message ID as well so request cleanup can rely on a real
                 # acknowledgement instead of waiting for the original send's
                 # longer delivery timeout.
-                self._start_delivery_cancel_locked(control, message_id)
+                self._start_delivery_cancel_locked(control, message_id, pending)
 
         interrupted_client = None
         if self._active_forward_scope == scope:
@@ -1606,6 +1609,7 @@ class IrohTransport:
                 self._start_delivery_cancel_locked(
                     control,
                     message_id,
+                    pending,
                     cleanup_deadline_monotonic_s=cleanup_deadline_monotonic_s,
                 )
 
@@ -1659,6 +1663,7 @@ class IrohTransport:
         self,
         control: Any | None,
         message_id: bytes,
+        pending: _PendingSend,
         *,
         cleanup_deadline_monotonic_s: float | None = None,
     ) -> None:
@@ -1666,7 +1671,7 @@ class IrohTransport:
             raise IrohTransportError("delivery_cancel_worker_collision")
         thread = threading.Thread(
             target=self._delivery_cancel_worker,
-            args=(control, message_id, cleanup_deadline_monotonic_s),
+            args=(control, message_id, pending, cleanup_deadline_monotonic_s),
             name=f"mycelium-iroh-cancel-{message_id.hex()}",
             daemon=True,
         )
@@ -1684,6 +1689,7 @@ class IrohTransport:
         self,
         control: Any | None,
         message_id: bytes,
+        pending: _PendingSend,
         cleanup_deadline_monotonic_s: float | None = None,
     ) -> None:
         if cleanup_deadline_monotonic_s is None:
@@ -1708,8 +1714,7 @@ class IrohTransport:
         confirmed = False
         with self._state_lock:
             dedicated_pool_available = bool(self._cancellation_clients)
-            pending = self._pending.get(message_id)
-            if pending is not None and not pending.admission_started:
+            if not pending.admission_started:
                 # The explicit data-client operation lane proves this waiter has
                 # not written a sidecar record. Marking it locally cancelled is
                 # authoritative because the sender must recheck ``cancelled``
@@ -1732,6 +1737,10 @@ class IrohTransport:
                             )
                         except Empty:
                             break
+                    with self._state_lock:
+                        admission_finished_before_cancel = (
+                            pending.admission_finished
+                        )
                     outcome = self._cancel_with_client(
                         dedicated,
                         message_id,
@@ -1760,6 +1769,11 @@ class IrohTransport:
                     # expected admission crossing. Other failures remain a single
                     # fail-closed attempt rather than being amplified in a loop.
                     if outcome != "retry":
+                        break
+                    # Once admission has finished, a cancellation attempt that
+                    # began afterward and returned ``unknown_message`` is
+                    # definitive: this exact message can no longer appear.
+                    if admission_finished_before_cancel:
                         break
                     remaining = deadline - time.monotonic()
                     if remaining > 0:
@@ -3132,6 +3146,7 @@ class IrohTransport:
                         self._start_delivery_cancel_locked(
                             cancellation_client,
                             message_id,
+                            pending,
                         )
                 clients = (
                     self._receive_client,

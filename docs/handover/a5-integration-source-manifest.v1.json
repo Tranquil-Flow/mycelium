@@ -1,5 +1,5 @@
 {
-  "base_commit": "81e71edc05a789934bd29a032624e4cff4042cbc",
+  "base_commit": "49c2d3f47673454c93e42a8ba6035126559ac90a",
   "files": [
     {
       "path": "contracts/compatibility-fixtures/artifact-verification-report-v1.json",
@@ -398,7 +398,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:ddee83f1ad217d1f456f04dfeeb125d5b1bb70724ce3b384a2c51510fce0f189",
+      "sha256": "sha256:f28785ae1cec024cdb26c11b3c88759051ac53a38d77a6adff01f4eed2caa5da",
       "size_bytes": 63321
     },
     {
@@ -1693,8 +1693,8 @@
     },
     {
       "path": "mycelium_router/transports/iroh.py",
-      "sha256": "sha256:b2b7095c664c024a21c2b3b93fd2cda9dbc4abdcee098cdfa8b1f2d303a1ddac",
-      "size_bytes": 134371
+      "sha256": "sha256:0e78ebb65c66a964decc472c16f132c1372c4cd662c3eac628e104a3f2061aa0",
+      "size_bytes": 135070
     },
     {
       "path": "mycelium_router/transports/loopback_socket.py",
@@ -3753,8 +3753,8 @@
     },
     {
       "path": "tests/path_cancellation_adversarial/test_iroh_transport.py",
-      "sha256": "sha256:4321f9bfcbbc5948a66d430f6b3f71897747241e1c9f91238db605a02d1bd155",
-      "size_bytes": 60250
+      "sha256": "sha256:a57936ff44cb201d2d0d80f8ba947327e9a028ae13a9597f677586ca752bae94",
+      "size_bytes": 63089
     },
     {
       "path": "tests/physical_preflight/conftest.py",
