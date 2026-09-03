@@ -3153,16 +3153,55 @@ class PhysicalNodeService:
             code = "unclassified"
         return f"{error_type}:{code}"[:128]
 
+    def _cancellation_resources_clean(self, data: Mapping[str, Any]) -> bool:
+        """Return whether the exact runtime and transport subject is released.
+
+        This deliberately excludes the cancellation worker marker: this helper is
+        called by that worker while it still owns teardown.  Router teardown is
+        synchronous; the two lower layers are the ones that can finish or fail
+        asynchronously after a sweep was successfully dispatched.
+        """
+
+        request_id = str(data["request_id"])
+        path_id = str(data["path_id"])
+        path_attempt = int(data["path_attempt"])
+
+        runtime_clean = True
+        runtime_subject_clean = getattr(
+            getattr(self, "runtime", None),
+            "kv_subject_clean",
+            None,
+        )
+        if callable(runtime_subject_clean):
+            runtime_clean = bool(
+                runtime_subject_clean(request_id, path_id, path_attempt)
+            )
+
+        transport_clean = True
+        transport_subject_clean = getattr(
+            getattr(self, "transport", None),
+            "cancellation_cleanup_complete",
+            None,
+        )
+        if callable(transport_subject_clean):
+            transport_clean = bool(
+                transport_subject_clean(request_id, path_id, path_attempt)
+            )
+
+        return runtime_clean and transport_clean
+
     def _apply_cancellation_until_deadline(self, data: Mapping[str, Any]) -> None:
         """Retry one idempotent teardown inside the original owner budget.
 
         The cancellation fence is monotonic and every release operation is
         idempotent.  Retrying the same exact identity is therefore the correct
         recovery when a transient lower-layer release raises after publishing
-        only part of teardown.  The retry window is derived from the aged
-        ``deadline_budget_ms`` received from the owner and preserves the same
-        fallback reserve used by ``infer_cancel_wait``; it never extends the
-        frozen two-second protocol deadline.
+        only part of teardown *or* when asynchronous delivery cancellation
+        returns from dispatch before the exact subject is clean.  The retry
+        window is derived from the aged ``deadline_budget_ms`` received from the
+        owner and preserves the same fallback reserve used by
+        ``infer_cancel_wait``; it never extends the frozen two-second protocol
+        deadline.
         """
 
         request_id = str(data["request_id"])
@@ -3180,6 +3219,13 @@ class PhysicalNodeService:
         while True:
             try:
                 self._apply_generation_fenced_cancellation(attempt)
+                with self._control_lock:
+                    getattr(self, "_cancellation_worker_errors", {}).pop(
+                        request_id,
+                        None,
+                    )
+                if self._cancellation_resources_clean(attempt):
+                    return
             except Exception as error:
                 with self._control_lock:
                     errors = getattr(self, "_cancellation_worker_errors", None)
@@ -3189,26 +3235,19 @@ class PhysicalNodeService:
                     errors[request_id] = self._cancellation_worker_error_code(error)
                     while len(errors) > 256:
                         errors.pop(next(iter(errors)), None)
-                remaining = retry_deadline - time.monotonic()
-                if remaining <= 0:
-                    return
-                time.sleep(min(_CANCEL_RECEIPT_POLL_SECONDS, remaining))
-                # ``_apply_generation_fenced_cancellation`` passes an absolute
-                # deadline to transport after subtracting the fixed fallback
-                # reserve.  Re-age the duration so every retry observes the
-                # same original deadline rather than receiving a fresh one.
-                remaining = max(0.0, retry_deadline - time.monotonic())
-                attempt["deadline_budget_ms"] = max(
-                    1,
-                    int((remaining + _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS) * 1_000),
-                )
-                continue
-            with self._control_lock:
-                getattr(self, "_cancellation_worker_errors", {}).pop(
-                    request_id,
-                    None,
-                )
-            return
+            remaining = retry_deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(_CANCEL_RECEIPT_POLL_SECONDS, remaining))
+            # ``_apply_generation_fenced_cancellation`` passes an absolute
+            # deadline to transport after subtracting the fixed fallback
+            # reserve.  Re-age the duration so every retry observes the same
+            # original deadline rather than receiving a fresh one.
+            remaining = max(0.0, retry_deadline - time.monotonic())
+            attempt["deadline_budget_ms"] = max(
+                1,
+                int((remaining + _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS) * 1_000),
+            )
 
     def _seal_cancellation_receipt_until_deadline(
         self,

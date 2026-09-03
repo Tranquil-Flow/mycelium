@@ -8,6 +8,7 @@ import time
 
 import pytest
 
+from physical_inference_node import PhysicalNodeService
 from mycelium_router.contracts import (
     FailureReport,
     HopHeader,
@@ -1004,6 +1005,85 @@ def test_failed_sidecar_cancellation_remains_cleanup_blocker() -> None:
     assert transport._pending[exact_id].cancel_confirmed is False
     assert transport._pending[exact_id].cancel_started is False
     assert not transport.cancellation_cleanup_complete("request-a", "path-a", 1)
+
+
+def test_node_owner_retries_retryable_async_sidecar_cancellation() -> None:
+    class RetryOnceControl:
+        def __init__(self) -> None:
+            self.cancel_calls = 0
+
+        def cancel(self, message_id: bytes, *, timeout: float) -> None:
+            assert message_id == b"e" * 16
+            assert timeout > 0
+            self.cancel_calls += 1
+            if self.cancel_calls == 1:
+                raise RuntimeError("transient sidecar cancellation failure")
+
+        def close(self) -> None:
+            pass
+
+    class CleanRuntime:
+        @staticmethod
+        def cancel(path_id: str) -> None:
+            assert path_id == "path-a"
+
+        @staticmethod
+        def kv_subject_clean(
+            request_id: str,
+            path_id: str,
+            path_attempt: int,
+        ) -> bool:
+            assert (request_id, path_id, path_attempt) == (
+                "request-a",
+                "path-a",
+                1,
+            )
+            return True
+
+    class IdempotentRouter:
+        @staticmethod
+        def cancel_local(request_id: str) -> bool:
+            assert request_id == "request-a"
+            return True
+
+    transport = _transport(_Hub())
+    transport.bind_router(_OwnerCancellationRouter())
+    control = RetryOnceControl()
+    exact_id = b"e" * 16
+    with transport._state_lock:
+        transport._running = True
+        transport._control_client = control
+        transport._pending[exact_id] = _PendingSend(
+            7,
+            "request-a",
+            "path-a",
+            1,
+            admission_started=True,
+        )
+
+    service = object.__new__(PhysicalNodeService)
+    service.__dict__.update(
+        runtime=CleanRuntime(),
+        transport=transport,
+        router=IdempotentRouter(),
+        _control_lock=threading.RLock(),
+        _cancellation_worker_errors={},
+    )
+    service._apply_cancellation_until_deadline(
+        {
+            "request_id": "request-a",
+            "path_id": "path-a",
+            "path_attempt": 1,
+            "topology_generation": 3,
+            "deadline_budget_ms": 1_500,
+        }
+    )
+
+    assert control.cancel_calls == 2
+    assert transport._pending[exact_id].cancel_confirmed is True
+    assert transport.cancellation_cleanup_complete("request-a", "path-a", 1)
+    assert service._cancellation_worker_errors == {}
+    transport.close()
 
 
 def test_controlled_cancellation_removes_only_exact_queued_forwards() -> None:

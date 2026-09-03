@@ -566,6 +566,100 @@ def test_deferred_cancel_retries_partial_teardown_inside_original_deadline() -> 
     assert sealed_after_worker_retired[0] <= time.monotonic() + 2.0
 
 
+def test_deferred_cancel_retries_async_teardown_until_resources_are_clean() -> None:
+    """A successful sweep dispatch is not proof that its async work succeeded."""
+
+    request_id = "request-retry-async-teardown"
+    path_id = "path-retry-async-teardown"
+    payload = {
+        "request_id": request_id,
+        "deployment_id": "deployment-a",
+        "deployment_epoch": 4,
+        "qualification_digest": "sha256:" + "a" * 64,
+        "command_id": "command-retry-async-teardown",
+        "publisher_generation": 3,
+        "absolute_deadline_ms": int(time.monotonic() * 1_000) + 60_000,
+        "request_attempt": 2,
+        "path_id": path_id,
+        "path_attempt": 1,
+        "path_digest": "sha256:" + "b" * 64,
+        "topology_generation": 7,
+        "cancellation_generation": 1,
+        "deadline_budget_ms": 1_500,
+    }
+
+    class EventuallyCleanTransport:
+        def __init__(self) -> None:
+            self.attempts = 0
+            self.clean = False
+
+        def apply_controlled_path_cancellation(
+            self,
+            _cancellation: Any,
+            *,
+            entry_cancelled: bool,
+            cleanup_deadline_monotonic_s: float,
+        ) -> bool:
+            assert entry_cancelled is False
+            assert cleanup_deadline_monotonic_s > time.monotonic()
+            self.attempts += 1
+            # The first sweep successfully dispatches an asynchronous sidecar
+            # cancellation, but that worker later leaves the subject retryable.
+            self.clean = self.attempts >= 2
+            return True
+
+        def cancellation_cleanup_complete(
+            self,
+            observed_request_id: str,
+            observed_path_id: str,
+            observed_path_attempt: int,
+        ) -> bool:
+            assert observed_request_id == request_id
+            assert observed_path_id == path_id
+            assert observed_path_attempt == 1
+            return self.clean
+
+    class CleanRuntime:
+        def __init__(self) -> None:
+            self.cancelled_paths: list[str] = []
+
+        def cancel(self, observed_path_id: str) -> None:
+            self.cancelled_paths.append(observed_path_id)
+
+        def kv_subject_clean(
+            self,
+            observed_request_id: str,
+            observed_path_id: str,
+            observed_path_attempt: int,
+        ) -> bool:
+            assert observed_request_id == request_id
+            assert observed_path_id == path_id
+            assert observed_path_attempt == 1
+            return True
+
+    class IdempotentRouter:
+        def cancel_local(self, observed_request_id: str) -> bool:
+            assert observed_request_id == request_id
+            return True
+
+    service = object.__new__(PhysicalNodeService)
+    untyped_service = cast(Any, service)
+    runtime = CleanRuntime()
+    transport = EventuallyCleanTransport()
+    untyped_service.runtime = runtime
+    untyped_service.transport = transport
+    untyped_service.router = IdempotentRouter()
+    untyped_service._control_lock = threading.RLock()
+    untyped_service._cancellation_worker_errors = {}
+
+    service._apply_cancellation_until_deadline(payload)
+
+    assert transport.attempts == 2
+    assert transport.clean is True
+    assert runtime.cancelled_paths == [path_id, path_id]
+    assert service._cancellation_worker_errors == {}
+
+
 def test_cancel_before_start_still_fences_registered_transport_path() -> None:
     """Data-plane registration may overtake generation-0 control binding."""
 
