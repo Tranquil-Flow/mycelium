@@ -868,7 +868,7 @@ def test_concurrent_delivery_cancels_use_independent_sidecar_clients() -> None:
 def test_obsolete_admission_race_releases_client_for_live_cleanup_blocker() -> None:
     """A retired send must not monopolize the bounded cancellation pool."""
 
-    from mycelium_iroh_sidecar import ProtocolError
+    from mycelium_iroh_sidecar import SidecarError
 
     stale_id = b"s" * 16
     live_id = b"l" * 16
@@ -888,7 +888,7 @@ def test_obsolete_admission_race_releases_client_for_live_cleanup_blocker() -> N
                 stale_attempted.set()
                 if len(stale_admission_states) == 1:
                     assert release_first_unknown.wait(timeout=0.2)
-                raise ProtocolError("unknown_message")
+                raise SidecarError("unknown_message")
             assert message_id == live_id
             live_cancelled.set()
 
@@ -950,9 +950,9 @@ def test_delivery_cancel_retries_connected_sidecar_admission_race() -> None:
             assert 0 < timeout <= 0.2
             self.calls += 1
             if self.calls == 1:
-                from mycelium_iroh_sidecar import ProtocolError
+                from mycelium_iroh_sidecar import SidecarError
 
-                raise ProtocolError("unknown_message")
+                raise SidecarError("unknown_message")
 
     transport = _transport(_Hub())
     dedicated = DedicatedControl()

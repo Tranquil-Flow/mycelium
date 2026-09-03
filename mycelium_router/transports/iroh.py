@@ -1841,7 +1841,7 @@ class IrohTransport:
             return False
         try:
             control.cancel(message_id, timeout=timeout)
-        except ProtocolError as error:
+        except SidecarError as error:
             if error.code == "unknown_message":
                 return "retry"
             if getattr(control, "connected", None) is False:
