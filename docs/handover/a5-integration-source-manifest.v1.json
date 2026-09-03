@@ -1,5 +1,5 @@
 {
-  "base_commit": "efcdf44d80d688af2344563ace0d8c6c8c39988d",
+  "base_commit": "c17f523e24e50fef6e03c325b3b2e1200251e33b",
   "files": [
     {
       "path": "contracts/compatibility-fixtures/artifact-verification-report-v1.json",
@@ -398,7 +398,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:aca24c4cac8622322c2630062dc1f88faa4bd59d36db81b90cf0ca69531d5ecf",
+      "sha256": "sha256:9d13f701b66a5d581dca3e62bb17dcdee76ff3ea7c867b9e78231dff283e36d1",
       "size_bytes": 63321
     },
     {
@@ -1898,8 +1898,8 @@
     },
     {
       "path": "physical_inference_node.py",
-      "sha256": "sha256:f9dd9db09d159e9ec5f261e98d0fb35b9320f2153097ae909fe157312a2e4812",
-      "size_bytes": 164986
+      "sha256": "sha256:89b11b40c0fad8a07f36f5f72886376de40987e6d63b4c4457b627d4be9eaf26",
+      "size_bytes": 166485
     },
     {
       "path": "physical_inference_qualification.py",
@@ -2288,8 +2288,8 @@
     },
     {
       "path": "scripts/run_a5_benchmark_supervisor.py",
-      "sha256": "sha256:829cd470d31bb79dbbc065519926ea94bf0c7e566647a86ce5334263d41ed70d",
-      "size_bytes": 11535
+      "sha256": "sha256:2751283a68ed94698f304e569d22abcfc04171c7feb3a3362c4eb6feb1dcdd2e",
+      "size_bytes": 10949
     },
     {
       "path": "scripts/run_a5_negative_illegal_gate.py",
@@ -2933,8 +2933,8 @@
     },
     {
       "path": "tests/a5_acceptance/test_benchmark_supervisor.py",
-      "sha256": "sha256:04e37be6176b6dca87a39ef9d17bdf896ebf83e5b7306de2c7787d24e6abdfac",
-      "size_bytes": 7046
+      "sha256": "sha256:7a21c5398d85945b67fad0062b9ad47385c6c2f236a3d29bd29f0d794161bbff",
+      "size_bytes": 8312
     },
     {
       "path": "tests/a5_acceptance/test_flow_legal_tracks.py",
@@ -3753,8 +3753,8 @@
     },
     {
       "path": "tests/path_cancellation_adversarial/test_iroh_transport.py",
-      "sha256": "sha256:9e188b53a5376a71b43834f7cda1f0bd68ee142e7063ff98d9794380eb558d3b",
-      "size_bytes": 57832
+      "sha256": "sha256:4321f9bfcbbc5948a66d430f6b3f71897747241e1c9f91238db605a02d1bd155",
+      "size_bytes": 60250
     },
     {
       "path": "tests/physical_preflight/conftest.py",
@@ -3798,8 +3798,8 @@
     },
     {
       "path": "tests/physical_qualification/test_a4_node_cancellation.py",
-      "sha256": "sha256:90e0990c290dea265efa5ae940ea14a9bd8eee331c6ed9508559db75155434b2",
-      "size_bytes": 61910
+      "sha256": "sha256:607486395eb0028e20d5fae695972d82db7991a798ec65612ac9982ac0098362",
+      "size_bytes": 65227
     },
     {
       "path": "tests/physical_qualification/test_controller.py",

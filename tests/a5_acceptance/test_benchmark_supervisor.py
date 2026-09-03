@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import signal
 import stat
@@ -22,9 +23,7 @@ def _sha(data: bytes) -> str:
 def _fixture(tmp_path: Path, child_source: str):
     manifest = tmp_path / "source-manifest.v1.json"
     manifest.write_bytes(b'{"protocol":"test.source_manifest.v1"}\n')
-    token = tmp_path / "operator-token.secret"
-    token.write_text("t" * 44, encoding="utf-8")
-    token.chmod(0o600)
+    token = "t" * 44
     child = tmp_path / "child.py"
     child.write_text(child_source, encoding="utf-8")
     output = tmp_path / "benchmark.v1.json"
@@ -55,8 +54,6 @@ def _command(manifest, token, child, output, failure, receipt, expected):
         str(manifest),
         "--expected-source-manifest-digest",
         expected,
-        "--operator-token-file",
-        str(token),
         "--receipt",
         str(receipt),
         "--output",
@@ -67,6 +64,12 @@ def _command(manifest, token, child, output, failure, receipt, expected):
         *child_argv,
     ]
     return command, child_argv
+
+
+def _environment(token: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["MYCELIUM_A5_OPERATOR_TOKEN"] = token
+    return environment
 
 
 def test_supervisor_hashes_manifest_and_writes_success_receipt(tmp_path) -> None:
@@ -84,7 +87,13 @@ Path(a.output).write_text(json.dumps({'protocol':'test.success.v1'})+'\\n')
         manifest, token, child, output, failure, receipt, expected
     )
 
-    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
 
     assert result.returncode == 0
     document = json.loads(receipt.read_text("utf-8"))
@@ -112,7 +121,13 @@ def test_supervisor_rejects_manifest_digest_mismatch_before_child(tmp_path) -> N
     wrong = "sha256:" + "0" * 64
     command, _ = _command(manifest, token, child, output, failure, receipt, wrong)
 
-    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
 
     assert result.returncode == 2
     assert not marker.exists()
@@ -131,7 +146,13 @@ def test_supervisor_receipt_exists_when_child_has_no_terminal_artifact(tmp_path)
     expected = _sha(manifest.read_bytes())
     command, _ = _command(manifest, token, child, output, failure, receipt, expected)
 
-    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
 
     assert result.returncode == 9
     document = json.loads(receipt.read_text("utf-8"))
@@ -163,7 +184,13 @@ while True: time.sleep(0.05)
     )
     expected = _sha(manifest.read_bytes())
     command, _ = _command(manifest, token, child, output, failure, receipt, expected)
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_environment(token),
+    )
     started = Path(str(failure) + ".started")
     deadline = time.monotonic() + 10
     while not started.exists() and time.monotonic() < deadline:
@@ -181,3 +208,30 @@ while True: time.sleep(0.05)
     assert document["failure_artifact"]["exists"] is True
     assert document["terminal_valid"] is True
     assert document["reason_code"] == "failure_artifact_present"
+
+
+def test_supervisor_rejects_missing_environment_token_before_child(tmp_path) -> None:
+    marker = tmp_path / "child-started"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('started')\n",
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+    environment = os.environ.copy()
+    environment.pop("MYCELIUM_A5_OPERATOR_TOKEN", None)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=environment,
+    )
+
+    assert result.returncode == 2
+    assert not marker.exists()
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["child_started"] is False
+    assert document["terminal_valid"] is False
+    assert document["reason_code"] == "operator_token_environment_invalid"

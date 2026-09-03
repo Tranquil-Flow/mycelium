@@ -95,26 +95,14 @@ def _one_value(argv: list[str], flag: str) -> str:
     return argv[positions[0] + 1]
 
 
-def _token(path: Path) -> str:
-    try:
-        metadata = path.lstat()
-        if (
-            path.is_symlink()
-            or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or metadata.st_nlink != 1
-            or metadata.st_size < 32
-            or metadata.st_size > 4096
-        ):
-            raise SupervisorError("operator_token_file_invalid")
-        value = path.read_text("utf-8").strip()
-    except SupervisorError:
-        raise
-    except (OSError, UnicodeError) as error:
-        raise SupervisorError("operator_token_file_invalid") from error
-    if len(value) < 32:
-        raise SupervisorError("operator_token_file_invalid")
+def _environment_token() -> str:
+    value = os.environ.get("MYCELIUM_A5_OPERATOR_TOKEN")
+    if (
+        value is None
+        or not 32 <= len(value) <= 4096
+        or value != value.strip()
+    ):
+        raise SupervisorError("operator_token_environment_invalid")
     return value
 
 
@@ -148,7 +136,6 @@ def main() -> int:
     parser.add_argument("--candidate-tree", required=True)
     parser.add_argument("--source-manifest", type=Path, required=True)
     parser.add_argument("--expected-source-manifest-digest", required=True)
-    parser.add_argument("--operator-token-file", type=Path, required=True)
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--failure-output", type=Path, required=True)
@@ -184,7 +171,7 @@ def main() -> int:
             raise SupervisorError("child_argv_binding_invalid")
         if Path(_one_value(child_argv, "--failure-output")).resolve() != failure_path:
             raise SupervisorError("child_argv_binding_invalid")
-        operator_token = _token(args.operator_token_file.resolve(strict=True))
+        operator_token = _environment_token()
     except (SupervisorError, OSError) as error:
         document["completed_at_unix_ms"] = int(time.time() * 1000)
         document["reason_code"] = (
