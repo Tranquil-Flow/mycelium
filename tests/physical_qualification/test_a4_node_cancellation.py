@@ -235,7 +235,7 @@ def test_cancel_wait_returns_receipt_sealed_in_reserved_worker() -> None:
         }
 
     def seal(_payload, *, deadline_monotonic_s):
-        assert deadline_monotonic_s <= time.monotonic() + 1.5
+        assert deadline_monotonic_s <= time.monotonic() + 2.0
         order.append("seal")
         with service._control_lock:
             service._request_cleanup_receipts[request_id] = dict(receipt)
@@ -382,6 +382,97 @@ def test_cancel_wait_budget_starts_before_inline_teardown(monkeypatch) -> None:
 
     assert result["details"]["cleanup_pending"] is True
     assert Clock.sleeps == []
+
+
+def test_cancel_wait_retains_receipt_seal_window_after_contended_teardown(
+    monkeypatch,
+) -> None:
+    """A saturated cleanup lane must still seal already-clean teardown.
+
+    The route has already removed its own fallback slice before transmitting
+    ``deadline_budget_ms``.  Model teardown consuming that node-local fallback
+    interval and the first nonblocking receipt observation losing a runtime or
+    transport lock to a sibling cancellation.  The ordered worker must retain
+    enough of the transmitted budget to retry receipt sealing; otherwise the
+    gateway sees ``command_cleanup_receipt_missing`` even though teardown is
+    complete.
+    """
+
+    class Clock:
+        now = 10.0
+        sleeps: list[float] = []
+
+        @classmethod
+        def monotonic(cls) -> float:
+            return cls.now
+
+        @classmethod
+        def sleep(cls, seconds: float) -> None:
+            cls.sleeps.append(seconds)
+            cls.now += seconds
+
+    request_id = "request-contended-receipt-seal"
+    payload = {
+        "request_id": request_id,
+        "path_id": "path-contended-receipt-seal",
+        "deadline_budget_ms": 1_500,
+    }
+    receipt = {
+        "request_id": request_id,
+        "path_id": payload["path_id"],
+        "runtime_clean": True,
+        "transport_clean": True,
+        "cancellation_worker_complete": True,
+        "complete": True,
+    }
+    service = object.__new__(PhysicalNodeService)
+    service.runtime = object()
+    service._control_lock = threading.RLock()
+    service._request_cleanup_receipts = {}
+    snapshot_count = 0
+
+    def cancel(_payload, *, defer_cleanup):
+        assert defer_cleanup is False
+        # Generation fencing and exact teardown consume the worker's first
+        # 1,000 ms while sibling requests contend for the same physical node.
+        Clock.now += 1.0
+        return {
+            "event": "inference_cancelled",
+            "details": {
+                "request_id": request_id,
+                "status": "CANCELLING",
+                "cleanup_pending": True,
+            },
+        }
+
+    def snapshot(_payload):
+        nonlocal snapshot_count
+        snapshot_count += 1
+        if snapshot_count == 1:
+            return {
+                "event": "snapshot",
+                "details": {"request_cleanup": {**receipt, "complete": False}},
+            }
+        service._request_cleanup_receipts[request_id] = dict(receipt)
+        return {
+            "event": "snapshot",
+            "details": {"request_cleanup": dict(receipt)},
+        }
+
+    service._infer_cancel = cancel
+    service._snapshot = snapshot
+    service._signed_result = lambda event, details: {
+        "event": event,
+        "details": details,
+    }
+    monkeypatch.setattr(node_module, "time", Clock)
+
+    result = service._infer_cancel_wait(payload)
+
+    assert snapshot_count == 2
+    assert Clock.sleeps == [node_module._CANCEL_RECEIPT_POLL_SECONDS]
+    assert result["details"]["cleanup_pending"] is False
+    assert result["details"]["request_cleanup"] == receipt
 
 
 def test_cancel_wait_does_not_consume_parent_deadline_with_inline_poll(

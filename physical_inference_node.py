@@ -3553,10 +3553,16 @@ class PhysicalNodeService:
         if not isinstance(request_id, str):
             return result
 
+        # The route has already removed its own fallback-snapshot reserve from
+        # the duration carried in ``deadline_budget_ms``.  Teardown deliberately
+        # stops one further reserve before this deadline inside
+        # ``_apply_cancellation_until_deadline``.  Keep that remaining interval
+        # for lifecycle-owned receipt sealing instead of subtracting the same
+        # reserve a second time here.  The transmitted budget (and therefore
+        # the original route owner deadline) is unchanged.
         inline_deadline = started_at + max(
             0.0,
-            payload["deadline_budget_ms"] / 1_000.0
-            - _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS,
+            payload["deadline_budget_ms"] / 1_000.0,
         )
         self._seal_cancellation_receipt_until_deadline(
             payload,
