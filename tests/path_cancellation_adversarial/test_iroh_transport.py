@@ -934,7 +934,75 @@ def test_obsolete_admission_race_releases_client_for_live_cleanup_blocker() -> N
 
     assert live_cancelled.wait(timeout=0.2)
     _wait_until(lambda: transport._pending[live_id].cancel_confirmed)
+    _wait_until(lambda: stale_admission_states == [False, True])
     assert stale_admission_states == [False, True]
+    assert transport.cancellation_cleanup_complete("request-a", "path-a", 1)
+
+
+def test_admission_race_yields_bounded_client_to_live_cleanup_blocker() -> None:
+    """One admission race must not hold the sole cancel lane until deadline."""
+
+    from mycelium_iroh_sidecar import SidecarError
+
+    racing_id = b"r" * 16
+    live_id = b"l" * 16
+    racing_attempted = threading.Event()
+    live_cancelled = threading.Event()
+
+    class DedicatedControl:
+        connected = True
+
+        @staticmethod
+        def cancel(message_id: bytes, *, timeout: float) -> None:
+            assert 0 < timeout <= 0.2
+            if message_id == racing_id:
+                racing_attempted.set()
+                raise SidecarError("unknown_message")
+            assert message_id == live_id
+            live_cancelled.set()
+
+    racing_pending = _PendingSend(
+        7,
+        "request-a",
+        "path-a",
+        1,
+        admission_started=True,
+    )
+    transport = _transport(_Hub())
+    dedicated = DedicatedControl()
+    cancellation = PathCancellation("request-a", "path-a", 1, 3)
+    cleanup_deadline = time.monotonic() + 0.3
+    with transport._state_lock:
+        transport._cancellation_clients = (dedicated,)
+        transport._available_cancellation_clients.put_nowait(dedicated)
+        transport._pending[racing_id] = racing_pending
+        transport._cancel_pending_scope_locked(
+            cancellation,
+            cleanup_deadline_monotonic_s=cleanup_deadline,
+        )
+
+    assert racing_attempted.wait(timeout=0.1)
+    with transport._state_lock:
+        transport._pending[live_id] = _PendingSend(
+            7,
+            cancellation.request_id,
+            cancellation.path_id,
+            cancellation.path_attempt,
+            admission_started=True,
+        )
+        transport._cancel_pending_scope_locked(
+            cancellation,
+            cleanup_deadline_monotonic_s=cleanup_deadline,
+        )
+
+    live_serviced_while_race_pending = live_cancelled.wait(timeout=0.1)
+    with transport._state_lock:
+        racing_pending.admission_finished = True
+        transport._pending.pop(racing_id)
+    _wait_until(lambda: not transport._delivery_cancel_threads, timeout=0.5)
+
+    assert live_serviced_while_race_pending is True
+    assert transport._pending[live_id].cancel_confirmed is True
     assert transport.cancellation_cleanup_complete("request-a", "path-a", 1)
 
 

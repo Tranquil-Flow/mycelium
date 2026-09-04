@@ -1775,6 +1775,15 @@ class IrohTransport:
                     # definitive: this exact message can no longer appear.
                     if admission_finished_before_cancel:
                         break
+                    # The message may still cross admission, so this worker
+                    # must retry.  It must not retain one of the small bounded
+                    # cancellation-client pool while waiting, though: another
+                    # already-admitted message is an immediately actionable
+                    # cleanup blocker.  Return the authenticated lane before
+                    # the retry cadence so sibling workers can make progress
+                    # inside the same immutable owner deadline.
+                    self._available_cancellation_clients.put_nowait(dedicated)
+                    dedicated = None
                     remaining = deadline - time.monotonic()
                     if remaining > 0:
                         self._stop.wait(min(0.01, remaining))
