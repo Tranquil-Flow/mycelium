@@ -1763,7 +1763,26 @@ class IrohTransport:
                             dedicated,
                             deadline=deadline,
                         ):
+                            # Reconnection is bounded by this request's owner
+                            # deadline, but the pre-established client object is
+                            # reusable after ``close``.  Do not permanently
+                            # subtract a lane from the fixed pool merely because
+                            # this owner ran out of time: a later cancellation
+                            # has independent authority to reconnect the same
+                            # authenticated lane inside its own deadline.
+                            with self._state_lock:
+                                reusable = (
+                                    not self._closed
+                                    and dedicated in self._cancellation_clients
+                                )
+                            if reusable:
+                                self._available_cancellation_clients.put_nowait(
+                                    dedicated
+                                )
                             dedicated = None
+                            remaining = deadline - time.monotonic()
+                            if remaining > 0:
+                                self._stop.wait(min(0.01, remaining))
                         continue
                     # Only a valid sidecar ``unknown_message`` response is the
                     # expected admission crossing. Other failures remain a single

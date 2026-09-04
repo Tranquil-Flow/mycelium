@@ -1115,6 +1115,106 @@ def test_delivery_cancel_reauthenticates_timed_out_sidecar_lane() -> None:
     assert transport._available_cancellation_clients.qsize() == 1
 
 
+def test_failed_cancellation_lane_reconnect_is_available_to_later_owner() -> None:
+    """One expired reconnect must not permanently shrink the fixed lane pool."""
+
+    first_cancel_attempted = threading.Event()
+    second_cancelled = threading.Event()
+
+    class DedicatedControl:
+        endpoint_id = "local-endpoint"
+
+        def __init__(self) -> None:
+            self.connected = True
+            self.cancel_calls = 0
+            self.connect_calls = 0
+
+        def cancel(self, message_id: bytes, *, timeout: float) -> None:
+            assert 0 < timeout <= 0.2
+            self.cancel_calls += 1
+            if self.connected and self.cancel_calls == 1:
+                self.connected = False
+                first_cancel_attempted.set()
+                raise TimeoutError("sidecar request deadline")
+            if not self.connected:
+                raise RuntimeError("sidecar disconnected")
+            assert message_id == second_id
+            second_cancelled.set()
+
+        def close(self) -> None:
+            self.connected = False
+
+        def connect(self, *, deadline: float) -> None:
+            self.connect_calls += 1
+            if self.connect_calls == 1:
+                # Exhaust only the first owner's immutable deadline.  The same
+                # authenticated lane remains reusable by a later owner with a
+                # fresh, independently bounded cleanup deadline.
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(remaining)
+                raise TimeoutError("reconnect deadline")
+            self.connected = True
+
+        def configure_peers(self, peers, *, timeout: float) -> None:
+            assert peers
+            assert timeout > 0
+
+        def configure_peer(
+            self,
+            endpoint_id,
+            endpoint_addr,
+            *,
+            generation,
+            timeout: float,
+        ) -> None:
+            assert endpoint_id
+            assert endpoint_addr
+            assert generation > 0
+            assert timeout > 0
+
+    transport = _transport(_Hub())
+    dedicated = DedicatedControl()
+    first_id = b"f" * 16
+    second_id = b"s" * 16
+    with transport._state_lock:
+        transport._running = True
+        transport._cancellation_clients = (dedicated,)
+        transport._available_cancellation_clients.put_nowait(dedicated)
+        transport._pending[first_id] = _PendingSend(
+            7,
+            "request-first",
+            "path-first",
+            1,
+            admission_started=True,
+        )
+        transport._cancel_pending_scope_locked(
+            PathCancellation("request-first", "path-first", 1, 3),
+            cleanup_deadline_monotonic_s=time.monotonic() + 0.05,
+        )
+
+    assert first_cancel_attempted.wait(timeout=0.1)
+    _wait_until(lambda: not transport._delivery_cancel_threads, timeout=0.5)
+
+    with transport._state_lock:
+        transport._pending[second_id] = _PendingSend(
+            7,
+            "request-second",
+            "path-second",
+            1,
+            admission_started=True,
+        )
+        transport._cancel_pending_scope_locked(
+            PathCancellation("request-second", "path-second", 1, 3),
+            cleanup_deadline_monotonic_s=time.monotonic() + 0.3,
+        )
+
+    assert second_cancelled.wait(timeout=0.2)
+    _wait_until(lambda: transport._pending[second_id].cancel_confirmed, timeout=0.5)
+    assert dedicated.connect_calls == 2
+    assert transport._available_cancellation_clients.qsize() == 1
+
+
 def test_failed_sidecar_cancellation_remains_cleanup_blocker() -> None:
     cancel_attempted = threading.Event()
 
