@@ -18,6 +18,10 @@ import time
 from typing import Any
 
 
+DETACH_ACK_TIMEOUT_SECONDS = 10.0
+DETACH_REPARENT_TIMEOUT_SECONDS = 5.0
+
+
 class SupervisorError(RuntimeError):
     """Stable pre-launch supervisor rejection."""
 
@@ -64,10 +68,15 @@ def _artifact(path: Path) -> dict[str, Any]:
     }
 
 
-def _exclusive_json(path: Path, document: dict[str, Any]) -> None:
+def _exclusive_json(
+    path: Path,
+    document: dict[str, Any],
+    *,
+    exists_reason: str = "terminal_receipt_exists",
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        raise SupervisorError("terminal_receipt_exists")
+    if os.path.lexists(path):
+        raise SupervisorError(exists_reason)
     payload = json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n"
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
@@ -77,7 +86,10 @@ def _exclusive_json(path: Path, document: dict[str, Any]) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.chmod(temporary, 0o600)
-        os.link(temporary, path)
+        try:
+            os.link(temporary, path)
+        except FileExistsError as error:
+            raise SupervisorError(exists_reason) from error
         temporary.unlink()
         try:
             directory = os.open(path.parent, os.O_RDONLY)
@@ -93,6 +105,68 @@ def _exclusive_json(path: Path, document: dict[str, Any]) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def _canonical_digest(document: dict[str, Any]) -> str:
+    return _sha_bytes(
+        json.dumps(
+            document,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+
+
+def _attempt_state_paths(receipt_path: Path) -> tuple[Path, Path]:
+    return (
+        receipt_path.with_name(receipt_path.name + ".attempt-claim.v1.json"),
+        receipt_path.with_name(receipt_path.name + ".attempt-started.v1.json"),
+    )
+
+
+def _claim_attempt(
+    *,
+    args: argparse.Namespace,
+    child_argv: list[str],
+    source_digest: str,
+    receipt_path: Path,
+    output_path: Path,
+    failure_path: Path,
+) -> tuple[Path, Path, str]:
+    claim_path, started_path = _attempt_state_paths(receipt_path)
+    path_binding_digest = _canonical_digest(
+        {
+            "failure_output": os.fspath(failure_path),
+            "output": os.fspath(output_path),
+            "receipt": os.fspath(receipt_path),
+        }
+    )
+    attempt_binding = {
+        "authorization_sha256": args.authorization_digest,
+        "candidate_tree": args.candidate_tree,
+        "child_argv_digest": _sha_bytes(
+            json.dumps(child_argv, sort_keys=True, separators=(",", ":")).encode()
+        ),
+        "cycle_id": args.cycle_id,
+        "expected_source_manifest_digest": args.expected_source_manifest_digest,
+        "source_manifest_digest": source_digest,
+        "terminal_path_binding_digest": path_binding_digest,
+    }
+    attempt_id = _canonical_digest(attempt_binding)
+    claim = {
+        "protocol": "mycelium.a5_benchmark_attempt_claim.v1",
+        "state": "claimed",
+        "attempt_id": attempt_id,
+        "attempt_binding": attempt_binding,
+        "claim_owner_identity": _process_identity(os.getpid()),
+        "claimed_at_unix_ms": int(time.time() * 1000),
+        "detached_requested": bool(args.detach),
+        "qualification_claim": False,
+        "promotion_authorized": False,
+    }
+    _exclusive_json(claim_path, claim, exists_reason="attempt_already_claimed")
+    return claim_path, started_path, attempt_id
 
 
 def _one_value(argv: list[str], flag: str) -> str:
@@ -150,15 +224,33 @@ def _process_identity(pid: int) -> dict[str, Any]:
     }
 
 
+def _before_detached_startup_ack() -> None:
+    """Controlled-test seam; production startup performs no delay."""
+
+
+def _send_detached_startup_ack(write_fd: int, launch: dict[str, Any]) -> None:
+    os.write(
+        write_fd,
+        (json.dumps(launch, sort_keys=True) + "\n").encode("utf-8"),
+    )
+
+
 def _detach_from_launcher() -> dict[str, Any] | None:
-    """Double-fork; parent returns launch identity, OS-owned child returns None."""
+    """Double-fork; parent reports best-effort ack, OS-owned child continues."""
 
     read_fd, write_fd = os.pipe()
-    first_pid = os.fork()
+    try:
+        first_pid = os.fork()
+    except OSError as error:
+        os.close(read_fd)
+        os.close(write_fd)
+        raise SupervisorError("detached_supervisor_start_failed") from error
     if first_pid != 0:
         os.close(write_fd)
         try:
-            ready, _, _ = select.select([read_fd], [], [], 10.0)
+            ready, _, _ = select.select(
+                [read_fd], [], [], DETACH_ACK_TIMEOUT_SECONDS
+            )
             if not ready:
                 raise SupervisorError("detached_supervisor_start_timeout")
             payload = os.read(read_fd, 8192)
@@ -179,7 +271,7 @@ def _detach_from_launcher() -> dict[str, Any] | None:
         second_pid = os.fork()
         if second_pid != 0:
             os._exit(0)
-        deadline = time.monotonic() + 5.0
+        deadline = time.monotonic() + DETACH_REPARENT_TIMEOUT_SECONDS
         while os.getppid() != 1 and time.monotonic() < deadline:
             time.sleep(0.01)
         identity = _process_identity(os.getpid())
@@ -191,11 +283,16 @@ def _detach_from_launcher() -> dict[str, Any] | None:
             "supervisor_start_identity": identity["start_identity"],
             "supervisor_start_identity_source": identity["start_identity_source"],
         }
-        os.write(
-            write_fd,
-            (json.dumps(launch, sort_keys=True) + "\n").encode("utf-8"),
-        )
-        os.close(write_fd)
+        _before_detached_startup_ack()
+        try:
+            _send_detached_startup_ack(write_fd, launch)
+        except OSError:
+            # The launcher can time out, fail, or disappear after the immutable
+            # attempt claim. Its informational ack is not authority to start or
+            # abort the already-owned attempt.
+            pass
+        finally:
+            os.close(write_fd)
         null_fd = os.open(os.devnull, os.O_RDWR)
         try:
             for descriptor in (0, 1, 2):
@@ -218,8 +315,13 @@ def _base_receipt(args: argparse.Namespace, child_argv: list[str]) -> dict[str, 
         "qualification_claim": False,
         "promotion_authorized": False,
         "candidate_tree": args.candidate_tree,
+        "cycle_id": args.cycle_id,
+        "authorization_sha256": args.authorization_digest,
         "expected_source_manifest_digest": args.expected_source_manifest_digest,
         "source_manifest_digest": None,
+        "attempt_id": None,
+        "attempt_claim_artifact": {"exists": False, "sha256": None, "size_bytes": 0},
+        "attempt_started_artifact": {"exists": False, "sha256": None, "size_bytes": 0},
         "child_argv_digest": _sha_bytes(
             json.dumps(child_argv, sort_keys=True, separators=(",", ":")).encode()
         ),
@@ -244,6 +346,8 @@ def _base_receipt(args: argparse.Namespace, child_argv: list[str]) -> dict[str, 
 def main() -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--candidate-tree", required=True)
+    parser.add_argument("--cycle-id")
+    parser.add_argument("--authorization-digest")
     parser.add_argument("--source-manifest", type=Path, required=True)
     parser.add_argument("--expected-source-manifest-digest", required=True)
     parser.add_argument("--receipt", type=Path, required=True)
@@ -260,10 +364,19 @@ def main() -> int:
     if child_argv and child_argv[0] == "--":
         child_argv.pop(0)
     receipt_path = _absolute_name(args.receipt)
+    claim_path, started_path = _attempt_state_paths(receipt_path)
     if os.path.lexists(receipt_path):
         print(
             json.dumps(
                 {"reason_code": "terminal_receipt_exists", "terminal_valid": False},
+                sort_keys=True,
+            )
+        )
+        return 2
+    if os.path.lexists(claim_path) or os.path.lexists(started_path):
+        print(
+            json.dumps(
+                {"reason_code": "attempt_already_claimed", "terminal_valid": False},
                 sort_keys=True,
             )
         )
@@ -273,6 +386,13 @@ def main() -> int:
     try:
         if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_tree):
             raise SupervisorError("candidate_tree_invalid")
+        if (args.cycle_id is None) != (args.authorization_digest is None):
+            raise SupervisorError("attempt_authorization_binding_incomplete")
+        if args.cycle_id is not None:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", args.cycle_id):
+                raise SupervisorError("cycle_id_invalid")
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", args.authorization_digest):
+                raise SupervisorError("authorization_digest_invalid")
         if not child_argv:
             raise SupervisorError("child_argv_binding_invalid")
         source_path = args.source_manifest.resolve(strict=True)
@@ -304,6 +424,31 @@ def main() -> int:
         print(json.dumps({"reason_code": document["reason_code"], "terminal_valid": False}, sort_keys=True))
         return 2
 
+    try:
+        claim_path, started_path, attempt_id = _claim_attempt(
+            args=args,
+            child_argv=child_argv,
+            source_digest=source_digest,
+            receipt_path=receipt_path,
+            output_path=output_path,
+            failure_path=failure_path,
+        )
+    except (SupervisorError, OSError) as error:
+        reason_code = (
+            str(error)
+            if isinstance(error, SupervisorError)
+            else "attempt_claim_write_failed"
+        )
+        print(
+            json.dumps(
+                {"reason_code": reason_code, "terminal_valid": False},
+                sort_keys=True,
+            )
+        )
+        return 2
+    document["attempt_id"] = attempt_id
+    document["attempt_claim_artifact"] = _artifact(claim_path)
+
     environment = os.environ.copy()
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         environment.pop(name, None)
@@ -314,12 +459,12 @@ def main() -> int:
         try:
             launch = _detach_from_launcher()
         except SupervisorError as error:
-            document["completed_at_unix_ms"] = int(time.time() * 1000)
-            document["reason_code"] = str(error)
-            _exclusive_json(receipt_path, document)
+            # A durable claim already exists. Ack failure cannot prove that the
+            # detached owner will not later start, so the launcher must not seal
+            # a definitive no-child terminal record on the owner's behalf.
             print(
                 json.dumps(
-                    {"reason_code": document["reason_code"], "terminal_valid": False},
+                    {"reason_code": str(error), "terminal_valid": False},
                     sort_keys=True,
                 )
             )
@@ -357,6 +502,23 @@ def main() -> int:
         child_holder[0] = child
         child_identity = _process_identity(child.pid)
         document["child_identity"] = child_identity
+        started_record = {
+            "protocol": "mycelium.a5_benchmark_attempt_started.v1",
+            "state": "workload_started",
+            "attempt_id": attempt_id,
+            "attempt_claim_sha256": document["attempt_claim_artifact"]["sha256"],
+            "supervisor_identity": document["supervisor_identity"],
+            "child_identity": child_identity,
+            "started_at_unix_ms": int(time.time() * 1000),
+            "qualification_claim": False,
+            "promotion_authorized": False,
+        }
+        _exclusive_json(
+            started_path,
+            started_record,
+            exists_reason="attempt_started_record_exists",
+        )
+        document["attempt_started_artifact"] = _artifact(started_path)
         if received_signal and child.poll() is None:
             child.send_signal(received_signal[0])
     except OSError:
