@@ -133,7 +133,7 @@ Path(a.output).write_text(json.dumps({'protocol':'test.success.v1'})+'\\n')
     assert result.returncode == 0
     document = json.loads(receipt.read_text("utf-8"))
     assert stat.S_IMODE(receipt.stat().st_mode) == 0o600
-    assert document["protocol"] == "mycelium.a5_benchmark_supervisor_receipt.v1"
+    assert document["protocol"] == "mycelium.a5_benchmark_supervisor_receipt.v2"
     assert document["candidate_tree"] == TREE
     assert document["source_manifest_digest"] == expected
     assert document["child_argv_digest"] == _sha(

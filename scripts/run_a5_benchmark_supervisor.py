@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -20,6 +21,7 @@ from typing import Any
 
 DETACH_ACK_TIMEOUT_SECONDS = 10.0
 DETACH_REPARENT_TIMEOUT_SECONDS = 5.0
+TERMINATION_GRACE_SECONDS = 30.0
 
 
 class SupervisorError(RuntimeError):
@@ -152,10 +154,11 @@ def _claim_attempt(
         "expected_source_manifest_digest": args.expected_source_manifest_digest,
         "source_manifest_digest": source_digest,
         "terminal_path_binding_digest": path_binding_digest,
+        "maximum_lifetime_seconds": args.maximum_lifetime_seconds,
     }
     attempt_id = _canonical_digest(attempt_binding)
     claim = {
-        "protocol": "mycelium.a5_benchmark_attempt_claim.v1",
+        "protocol": "mycelium.a5_benchmark_attempt_claim.v2",
         "state": "claimed",
         "attempt_id": attempt_id,
         "attempt_binding": attempt_binding,
@@ -311,7 +314,7 @@ def _detach_from_launcher() -> dict[str, Any] | None:
 
 def _base_receipt(args: argparse.Namespace, child_argv: list[str]) -> dict[str, Any]:
     return {
-        "protocol": "mycelium.a5_benchmark_supervisor_receipt.v1",
+        "protocol": "mycelium.a5_benchmark_supervisor_receipt.v2",
         "qualification_claim": False,
         "promotion_authorized": False,
         "candidate_tree": args.candidate_tree,
@@ -340,6 +343,9 @@ def _base_receipt(args: argparse.Namespace, child_argv: list[str]) -> dict[str, 
         "failure_artifact": {"exists": False, "sha256": None, "size_bytes": 0},
         "terminal_valid": False,
         "reason_code": None,
+        "maximum_lifetime_seconds": None,
+        "lifetime_exceeded": False,
+        "cleanup_blocked": False,
     }
 
 
@@ -353,6 +359,7 @@ def main() -> int:
     parser.add_argument("--receipt", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--failure-output", type=Path, required=True)
+    parser.add_argument("--maximum-lifetime-seconds", default="21600")
     parser.add_argument(
         "--detach",
         action="store_true",
@@ -384,6 +391,14 @@ def main() -> int:
     document = _base_receipt(args, child_argv)
 
     try:
+        try:
+            lifetime = float(args.maximum_lifetime_seconds)
+        except ValueError:
+            raise SupervisorError("maximum_lifetime_invalid") from None
+        if not math.isfinite(lifetime) or not 0 < lifetime <= 86400:
+            raise SupervisorError("maximum_lifetime_invalid")
+        args.maximum_lifetime_seconds = lifetime
+        document["maximum_lifetime_seconds"] = lifetime
         if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_tree):
             raise SupervisorError("candidate_tree_invalid")
         if (args.cycle_id is None) != (args.authorization_digest is None):
@@ -476,11 +491,12 @@ def main() -> int:
     child_holder: list[subprocess.Popen | None] = [None]
     received_signal: list[int] = []
     termination_deadline: list[float | None] = [None]
+    lifetime_deadline = time.monotonic() + args.maximum_lifetime_seconds
 
     def relay_signal(signum: int, _frame: Any) -> None:
         if not received_signal:
             received_signal.append(signum)
-            termination_deadline[0] = time.monotonic() + 30.0
+            termination_deadline[0] = time.monotonic() + TERMINATION_GRACE_SECONDS
         child_process = child_holder[0]
         if child_process is not None and child_process.poll() is None:
             try:
@@ -516,11 +532,20 @@ def main() -> int:
     def wait_for_owned_child(
         child: subprocess.Popen,
         child_identity: dict[str, Any] | None,
-    ) -> int:
+    ) -> int | None:
         while True:
             try:
                 return child.wait(timeout=0.25)
             except subprocess.TimeoutExpired:
+                if time.monotonic() >= lifetime_deadline and not document["lifetime_exceeded"]:
+                    document["lifetime_exceeded"] = True
+                    if termination_deadline[0] is None:
+                        termination_deadline[0] = time.monotonic() + TERMINATION_GRACE_SECONDS
+                    # The unreaped direct Popen child remains our signal authority.
+                    try:
+                        child.terminate()
+                    except ProcessLookupError:
+                        pass
                 deadline = termination_deadline[0]
                 if deadline is None or time.monotonic() < deadline:
                     continue
@@ -528,16 +553,15 @@ def main() -> int:
                     child_identity is None
                     or child_identity["start_identity_source"] != "os_ps_lstart"
                 ):
-                    # SIGKILL is forbidden without the originally observed
-                    # OS start identity. Continue supervision until a terminal
-                    # state or separately authorized external cleanup.
-                    termination_deadline[0] = None
-                    continue
+                    # Bounded supervision is not authority to signal an unknown
+                    # identity, nor to declare its resources released.
+                    document["cleanup_blocked"] = True
+                    return None
                 try:
                     current_identity = _process_identity(child.pid)
                 except (SupervisorError, OSError):
-                    termination_deadline[0] = None
-                    continue
+                    document["cleanup_blocked"] = True
+                    return None
                 if (
                     current_identity["start_identity_source"] != "os_ps_lstart"
                     or current_identity["pid"] != child_identity["pid"]
@@ -546,19 +570,20 @@ def main() -> int:
                     or current_identity["parent_pid"] != child_identity["parent_pid"]
                     or current_identity["session_id"] != child_identity["session_id"]
                 ):
-                    # Never escalate against a PID that cannot be re-bound to
-                    # the freshly launched child. Keep supervising rather than
-                    # signal an unproven process.
-                    termination_deadline[0] = None
-                    continue
+                    document["cleanup_blocked"] = True
+                    return None
                 try:
                     child.kill()
                 except OSError:
-                    termination_deadline[0] = None
-                    continue
+                    document["cleanup_blocked"] = True
+                    return None
                 document["child_termination_escalated_to_sigkill"] = True
                 document["child_sigkill_identity_revalidated"] = True
-                return child.wait()
+                try:
+                    return child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    document["cleanup_blocked"] = True
+                    return None
 
     try:
         child = subprocess.Popen(
@@ -649,7 +674,7 @@ def main() -> int:
             except OSError:
                 pass
         if termination_deadline[0] is None:
-            termination_deadline[0] = time.monotonic() + 30.0
+            termination_deadline[0] = time.monotonic() + TERMINATION_GRACE_SECONDS
         returncode = wait_for_owned_child(child, child_identity)
         document["child_returncode"] = returncode
         if received_signal:
@@ -692,7 +717,11 @@ def main() -> int:
     document["failure_artifact"] = _artifact(failure_path)
     success_exists = document["success_artifact"]["exists"] is True
     failure_exists = document["failure_artifact"]["exists"] is True
-    if returncode == 0 and success_exists and not failure_exists:
+    if document["cleanup_blocked"]:
+        document["reason_code"] = "owned_child_cleanup_blocked"
+    elif document["lifetime_exceeded"]:
+        document["reason_code"] = "maximum_lifetime_exceeded"
+    elif returncode == 0 and success_exists and not failure_exists:
         document["terminal_valid"] = True
         document["reason_code"] = "success_artifact_present"
     elif returncode != 0 and failure_exists and not success_exists:
@@ -716,7 +745,7 @@ def main() -> int:
             sort_keys=True,
         )
     )
-    return returncode
+    return 125 if returncode is None or document["lifetime_exceeded"] else returncode
 
 
 if __name__ == "__main__":

@@ -341,7 +341,7 @@ def _validate_start_observation(
         },
         "start_observation_invalid",
     )
-    if claim["protocol"] != "mycelium.a5_benchmark_attempt_claim.v1" or claim["state"] != "claimed":
+    if claim["protocol"] not in {"mycelium.a5_benchmark_attempt_claim.v1", "mycelium.a5_benchmark_attempt_claim.v2"} or claim["state"] != "claimed":
         raise RecoveryError("start_observation_invalid")
     _sha(claim["attempt_id"], reason="start_observation_invalid")
     binding = claim["attempt_binding"]
@@ -357,9 +357,13 @@ def _validate_start_observation(
             "expected_source_manifest_digest",
             "source_manifest_digest",
             "terminal_path_binding_digest",
-        },
+        } | ({"maximum_lifetime_seconds"} if claim["protocol"].endswith(".v2") else set()),
         "start_observation_invalid",
     )
+    if claim["protocol"].endswith(".v2"):
+        lifetime = binding["maximum_lifetime_seconds"]
+        if type(lifetime) not in (int, float) or not 0 < lifetime <= 86400:
+            raise RecoveryError("start_observation_invalid")
     if _sha_bytes(_canonical_bytes(binding)) != claim["attempt_id"]:
         raise RecoveryError("start_observation_invalid")
     if (
