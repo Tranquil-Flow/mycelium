@@ -33,6 +33,7 @@ from mycelium_internet.physical import (  # noqa: E402 - path bootstrap above
     execute_case,
     preflight_document,
     seal_qualification,
+    verify_source_binding,
 )
 from mycelium_node.identity import NodeIdentityError, load_node_signer  # noqa: E402
 from mycelium_internet.bootstrap import canonical_https_origin  # noqa: E402
@@ -844,6 +845,14 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--spec-digest", type=_bound_sha256_digest, required=True)
     run.add_argument("--source-digest", type=_bound_sha256_digest, required=True)
     run.add_argument(
+        "--source-manifest", type=Path,
+        help="explicit absolute owner-controlled combined manifest; no fallback",
+    )
+    run.add_argument(
+        "--candidate-commit",
+        help="operator-pinned current Git commit; required with --source-manifest",
+    )
+    run.add_argument(
         "--bundle-file",
         type=Path,
         help="owner-delivered invite bundle for the seed-side adapter cases",
@@ -1042,6 +1051,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         adapter = None
         case_inputs: dict[str, Any] = {}
+        # Reject explicit selection before reading peer inputs or creating adapters.
+        if args.source_manifest is not None or args.candidate_commit is not None:
+            verify_source_binding(
+                args.source_digest, source_manifest=args.source_manifest,
+                candidate_commit=args.candidate_commit,
+            )
         if (
             args.transport_origin is not None
             and args.case_id != "certificate_without_seed_authority"
@@ -1292,6 +1307,8 @@ def main(argv: list[str] | None = None) -> int:
             case_inputs=case_inputs,
             spec_digest=args.spec_digest,
             source_digest=args.source_digest,
+            source_manifest=args.source_manifest,
+            candidate_commit=args.candidate_commit,
         )
     except PhysicalGateError as exc:
         print(f"gate rejected: {exc.code}", file=sys.stderr)
@@ -1308,6 +1325,8 @@ def main(argv: list[str] | None = None) -> int:
             record = seal_qualification(
                 document,
                 evidence_root=args.evidence_root,
+                source_manifest=args.source_manifest,
+                candidate_commit=args.candidate_commit,
             )
         except PhysicalGateError as exc:
             print(f"gate rejected: {exc.code}", file=sys.stderr)

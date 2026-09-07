@@ -228,7 +228,8 @@ def _read_source_path_bytes(source_root: Path, relative_path: str) -> bytes:
             components[-1],
             os.O_RDONLY
             | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_NONBLOCK", 0),
             dir_fd=current,
         )
         descriptors.append(descriptor)
@@ -283,7 +284,8 @@ def _read_git_source_paths(
         f"{commit}:{path}\n".encode("utf-8") for path in paths
     )
     completed = subprocess.run(
-        ["git", "-C", str(source_root), "cat-file", "--batch"],
+        ["git", "--no-replace-objects", "-C", str(source_root), "cat-file", "--batch"],
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
         input=queries,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -437,6 +439,87 @@ def _verify_default_source_binding(expected_digest: object) -> str:
         raise PhysicalGateError("source_binding_invalid") from exc
     if expected == _HISTORICAL_A8_SOURCE_DIGEST:
         _VERIFIED_HISTORICAL_SOURCE_DIGESTS.add(expected)
+    return expected
+
+
+def verify_source_binding(
+    expected_digest: object,
+    *,
+    source_manifest: Path | None = None,
+    candidate_commit: str | None = None,
+) -> str:
+    """Verify operator selection against this loaded candidate, never evidence roots.
+
+    Explicit manifests may live outside the tree (avoiding self-reference), but
+    must cover every regular blob in the operator-pinned current commit. The
+    manifest cannot choose a checkout, commit authority, or a reduced closure.
+    No explicit error is eligible for historical fallback or historical caching.
+    """
+    if source_manifest is None and candidate_commit is None:
+        return _verify_default_source_binding(expected_digest)
+    expected = _require_source_binding(expected_digest)
+    try:
+        if source_manifest is None or not isinstance(candidate_commit, str):
+            raise ValueError("incomplete source selection")
+        if re.fullmatch(r"[0-9a-f]{40}", candidate_commit) is None:
+            raise ValueError("candidate commit invalid")
+        path = Path(source_manifest)
+        if not path.is_absolute():
+            raise ValueError("absolute manifest path required")
+        # Descriptor-walk from / rejects symlinks in every manifest component.
+        raw = _read_source_path_bytes(Path("/"), str(path)[1:])
+        metadata = path.lstat()
+        parent_metadata = path.parent.lstat()
+        if any(
+            item.st_uid != os.geteuid() or stat.S_IMODE(item.st_mode) & 0o022
+            for item in (metadata, parent_metadata)
+        ):
+            raise ValueError("manifest storage is not owner controlled")
+        if "sha256:" + hashlib.sha256(raw).hexdigest() != expected:
+            raise ValueError("source manifest digest mismatch")
+        manifest, pins = _parse_source_manifest(raw)
+        if (
+            manifest["protocol"] != "mycelium.combined_candidate_source_manifest.v1"
+            or manifest["base_commit"] != candidate_commit
+        ):
+            raise ValueError("manifest candidate mismatch")
+        # Git environment/replace refs must not redirect the loaded trust root.
+        environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+        def git(*args: str) -> bytes:
+            return subprocess.run(
+                ["git", "--no-replace-objects", "--no-optional-locks", "-C",
+                 str(_DEFAULT_SOURCE_ROOT), *args],
+                env=environment, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                check=True, timeout=30,
+            ).stdout
+
+        if git("rev-parse", "HEAD").decode().strip() != candidate_commit:
+            raise ValueError("loaded candidate commit mismatch")
+        modes: dict[str, str] = {}
+        for row in git("ls-tree", "-rz", candidate_commit).split(b"\0"):
+            if not row:
+                continue
+            header, name = row.decode("utf-8").split("\t", 1)
+            mode, kind, _oid = header.split()
+            if mode not in {"100644", "100755"} or kind != "blob":
+                raise ValueError("nonregular committed source")
+            modes[_validate_source_relative_path(name)] = mode
+        paths = [pin["path"] for pin in pins]
+        if paths != sorted(modes):
+            raise ValueError("incomplete candidate source closure")
+        committed = _read_git_source_paths(_DEFAULT_SOURCE_ROOT, candidate_commit, paths)
+        _verify_source_pins(pins, committed)
+        contents = {}
+        for name in paths:
+            contents[name] = _read_source_path_bytes(_DEFAULT_SOURCE_ROOT, name)
+            mode = stat.S_IMODE((_DEFAULT_SOURCE_ROOT / name).lstat().st_mode)
+            allowed = {0o600, 0o644} if modes[name] == "100644" else {0o700, 0o755}
+            if mode not in allowed:
+                raise ValueError("source mode drift")
+        _verify_source_pins(pins, contents)
+    except (OSError, UnicodeError, subprocess.SubprocessError, TypeError, ValueError) as exc:
+        raise PhysicalGateError("source_binding_invalid") from exc
     return expected
 
 
@@ -2596,6 +2679,8 @@ def execute_case(
     spec_digest: str,
     source_digest: str,
     adapter: PublicBootstrapClient | None = None,
+    source_manifest: Path | None = None,
+    candidate_commit: str | None = None,
     case_inputs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Execute one physical case if, and only if, its inputs exist.
@@ -2607,7 +2692,9 @@ def execute_case(
     """
 
     spec_digest = _require_source_binding(spec_digest)
-    source_digest = _verify_default_source_binding(source_digest)
+    source_digest = verify_source_binding(
+        source_digest, source_manifest=source_manifest, candidate_commit=candidate_commit,
+    )
     if case_id not in A8_PHYSICAL_CASES:
         raise PhysicalGateError("case_unknown")
     try:
@@ -2678,6 +2765,8 @@ def seal_qualification(
     document: Mapping[str, Any],
     *,
     evidence_root: Path,
+    source_manifest: Path | None = None,
+    candidate_commit: str | None = None,
 ) -> Path:
     """Validate and lock one executed qualification record into the
     owner-private evidence root. Sealing never fabricates a result."""
@@ -2688,7 +2777,10 @@ def seal_qualification(
         raise PhysicalGateError("qualification_not_passed")
     root = Path(evidence_root)
     _require_source_binding(data.get("spec_digest"))
-    _verify_default_source_binding(data.get("source_digest"))
+    verify_source_binding(
+        data.get("source_digest"), source_manifest=source_manifest,
+        candidate_commit=candidate_commit,
+    )
     qualification_id = data["qualification_id"]
     if not _CODE_RE.fullmatch(qualification_id) and not re.fullmatch(
         r"[A-Za-z0-9._-]{1,128}", qualification_id
@@ -2770,7 +2862,10 @@ def seal_qualification(
             or stat.S_IMODE(final_name.st_mode) != 0o400
         ):
             raise PhysicalGateError("evidence_root_unsafe")
-        _verify_default_source_binding(data.get("source_digest"))
+        verify_source_binding(
+            data.get("source_digest"), source_manifest=source_manifest,
+            candidate_commit=candidate_commit,
+        )
     except FileExistsError as exc:
         raise PhysicalGateError("record_exists") from exc
     except PhysicalGateError:
@@ -2805,4 +2900,5 @@ __all__ = [
     "preflight_document",
     "probe_bootstrap_over_cleartext",
     "seal_qualification",
+    "verify_source_binding",
 ]
