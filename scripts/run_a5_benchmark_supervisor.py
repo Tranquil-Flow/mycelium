@@ -492,6 +492,74 @@ def main() -> int:
     previous_handlers = {
         signum: signal.signal(signum, relay_signal) for signum in watched_signals
     }
+
+    def restore_signal_handlers() -> None:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+
+    def seal_terminal_receipt() -> bool:
+        try:
+            _exclusive_json(receipt_path, document)
+        except (SupervisorError, OSError):
+            print(
+                json.dumps(
+                    {
+                        "reason_code": "terminal_receipt_write_failed",
+                        "terminal_valid": False,
+                    },
+                    sort_keys=True,
+                )
+            )
+            return False
+        return True
+
+    def wait_for_owned_child(
+        child: subprocess.Popen,
+        child_identity: dict[str, Any] | None,
+    ) -> int:
+        while True:
+            try:
+                return child.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                deadline = termination_deadline[0]
+                if deadline is None or time.monotonic() < deadline:
+                    continue
+                if (
+                    child_identity is None
+                    or child_identity["start_identity_source"] != "os_ps_lstart"
+                ):
+                    # SIGKILL is forbidden without the originally observed
+                    # OS start identity. Continue supervision until a terminal
+                    # state or separately authorized external cleanup.
+                    termination_deadline[0] = None
+                    continue
+                try:
+                    current_identity = _process_identity(child.pid)
+                except (SupervisorError, OSError):
+                    termination_deadline[0] = None
+                    continue
+                if (
+                    current_identity["start_identity_source"] != "os_ps_lstart"
+                    or current_identity["pid"] != child_identity["pid"]
+                    or current_identity["start_identity"]
+                    != child_identity["start_identity"]
+                    or current_identity["parent_pid"] != child_identity["parent_pid"]
+                    or current_identity["session_id"] != child_identity["session_id"]
+                ):
+                    # Never escalate against a PID that cannot be re-bound to
+                    # the freshly launched child. Keep supervising rather than
+                    # signal an unproven process.
+                    termination_deadline[0] = None
+                    continue
+                try:
+                    child.kill()
+                except OSError:
+                    termination_deadline[0] = None
+                    continue
+                document["child_termination_escalated_to_sigkill"] = True
+                document["child_sigkill_identity_revalidated"] = True
+                return child.wait()
+
     try:
         child = subprocess.Popen(
             child_argv,
@@ -499,9 +567,42 @@ def main() -> int:
             stdin=subprocess.DEVNULL,
             close_fds=True,
         )
-        child_holder[0] = child
+    except OSError:
+        document["completed_at_unix_ms"] = int(time.time() * 1000)
+        document["reason_code"] = "child_start_failed"
+        if received_signal:
+            document["supervisor_termination_signal"] = signal.Signals(
+                received_signal[0]
+            ).name
+        sealed = seal_terminal_receipt()
+        restore_signal_handlers()
+        if sealed:
+            print(
+                json.dumps(
+                    {
+                        "reason_code": document["reason_code"],
+                        "terminal_valid": False,
+                    },
+                    sort_keys=True,
+                )
+            )
+        return 125
+
+    # Popen is the post-spawn boundary: from here onward the receipt must never
+    # claim that no child existed, even if identity or started-record persistence
+    # fails. Keep the Popen handle as supervision authority immediately.
+    child_holder[0] = child
+    document["child_started"] = True
+    document["child_pid"] = child.pid
+    child_identity: dict[str, Any] | None = None
+    bookkeeping_failure: str | None = None
+    try:
         child_identity = _process_identity(child.pid)
         document["child_identity"] = child_identity
+    except (SupervisorError, OSError):
+        bookkeeping_failure = "child_identity_observation_failed"
+
+    if bookkeeping_failure is None:
         started_record = {
             "protocol": "mycelium.a5_benchmark_attempt_started.v1",
             "state": "workload_started",
@@ -513,53 +614,74 @@ def main() -> int:
             "qualification_claim": False,
             "promotion_authorized": False,
         }
-        _exclusive_json(
-            started_path,
-            started_record,
-            exists_reason="attempt_started_record_exists",
-        )
-        document["attempt_started_artifact"] = _artifact(started_path)
-        if received_signal and child.poll() is None:
-            child.send_signal(received_signal[0])
-    except OSError:
-        document["completed_at_unix_ms"] = int(time.time() * 1000)
-        document["reason_code"] = "child_start_failed"
+        try:
+            _exclusive_json(
+                started_path,
+                started_record,
+                exists_reason="attempt_started_record_exists",
+            )
+            document["attempt_started_artifact"] = _artifact(started_path)
+        except SupervisorError as error:
+            bookkeeping_failure = str(error)
+            try:
+                document["attempt_started_artifact"] = _artifact(started_path)
+            except OSError:
+                pass
+        except OSError:
+            bookkeeping_failure = "attempt_started_record_write_failed"
+            try:
+                document["attempt_started_artifact"] = _artifact(started_path)
+            except OSError:
+                pass
+
+    if bookkeeping_failure is not None:
+        # Retry observation only to enable identity-bound escalation. The initial
+        # bookkeeping failure still invalidates the run and is never erased.
+        if child_identity is None and child.poll() is None:
+            try:
+                child_identity = _process_identity(child.pid)
+                document["child_identity"] = child_identity
+            except (SupervisorError, OSError):
+                child_identity = None
+        if child.poll() is None:
+            try:
+                child.terminate()
+            except OSError:
+                pass
+        if termination_deadline[0] is None:
+            termination_deadline[0] = time.monotonic() + 30.0
+        returncode = wait_for_owned_child(child, child_identity)
+        document["child_returncode"] = returncode
         if received_signal:
             document["supervisor_termination_signal"] = signal.Signals(
                 received_signal[0]
             ).name
-        _exclusive_json(receipt_path, document)
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
-        print(json.dumps({"reason_code": document["reason_code"], "terminal_valid": False}, sort_keys=True))
+        document["completed_at_unix_ms"] = int(time.time() * 1000)
+        document["success_artifact"] = _artifact(output_path)
+        document["failure_artifact"] = _artifact(failure_path)
+        document["terminal_valid"] = False
+        document["reason_code"] = bookkeeping_failure
+        sealed = seal_terminal_receipt()
+        restore_signal_handlers()
+        if sealed:
+            print(
+                json.dumps(
+                    {
+                        "child_returncode": returncode,
+                        "reason_code": bookkeeping_failure,
+                        "terminal_valid": False,
+                    },
+                    sort_keys=True,
+                )
+            )
         return 125
 
-    document["child_started"] = True
-    document["child_pid"] = child.pid
-    while True:
+    if received_signal and child.poll() is None:
         try:
-            returncode = child.wait(timeout=0.25)
-            break
-        except subprocess.TimeoutExpired:
-            deadline = termination_deadline[0]
-            if deadline is not None and time.monotonic() >= deadline:
-                current_identity = _process_identity(child.pid)
-                if (
-                    child_identity["start_identity_source"] != "os_ps_lstart"
-                    or current_identity["start_identity_source"] != "os_ps_lstart"
-                    or current_identity["start_identity"]
-                    != child_identity["start_identity"]
-                ):
-                    # Never escalate against a PID that cannot be re-bound to
-                    # the freshly launched child. Keep waiting for authorized
-                    # external cleanup rather than signal an unproven process.
-                    termination_deadline[0] = None
-                    continue
-                child.kill()
-                document["child_termination_escalated_to_sigkill"] = True
-                document["child_sigkill_identity_revalidated"] = True
-                returncode = child.wait()
-                break
+            child.send_signal(received_signal[0])
+        except OSError:
+            pass
+    returncode = wait_for_owned_child(child, child_identity)
     document["child_returncode"] = returncode
     if received_signal:
         document["supervisor_termination_signal"] = signal.Signals(
@@ -580,9 +702,10 @@ def main() -> int:
         document["reason_code"] = "child_terminal_artifact_missing"
     else:
         document["reason_code"] = "child_terminal_artifact_inconsistent"
-    _exclusive_json(receipt_path, document)
-    for signum, handler in previous_handlers.items():
-        signal.signal(signum, handler)
+    sealed = seal_terminal_receipt()
+    restore_signal_handlers()
+    if not sealed:
+        return 125
     print(
         json.dumps(
             {

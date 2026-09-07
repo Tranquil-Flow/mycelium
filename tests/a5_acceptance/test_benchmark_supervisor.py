@@ -786,3 +786,281 @@ Path(a.output).write_text(json.dumps({'protocol':'test.success.v1'})+'\\n')
     assert terminal["attempt_started_artifact"]["sha256"] == _sha(
         started_path.read_bytes()
     )
+
+
+def _postspawn_fault_harness(
+    tmp_path: Path,
+    command: list[str],
+    *,
+    mode: str,
+    starts: Path | None = None,
+    receipt: Path | None = None,
+) -> list[str]:
+    harness = tmp_path / f"postspawn-fault-{mode}.py"
+    wait_for_child = ""
+    if starts is not None:
+        wait_for_child = f"""
+        deadline=time.monotonic()+3.0
+        while not pathlib.Path({str(starts)!r}).exists() and time.monotonic()<deadline:
+            time.sleep(0.01)
+        if not pathlib.Path({str(starts)!r}).exists():
+            raise RuntimeError('controlled child did not start')
+"""
+    injection = {
+        "started_oserror": f"""
+original=module._exclusive_json
+def injected(path, document, **kwargs):
+    if str(path).endswith('.attempt-started.v1.json'):
+{wait_for_child.rstrip()}
+        raise OSError('controlled local started-record persistence failure')
+    return original(path, document, **kwargs)
+module._exclusive_json=injected
+""",
+        "started_conflict": f"""
+original=module._exclusive_json
+def injected(path, document, **kwargs):
+    if str(path).endswith('.attempt-started.v1.json'):
+{wait_for_child.rstrip()}
+        fd=os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+        os.write(fd, b'controlled-conflict\\n'); os.fsync(fd); os.close(fd)
+    return original(path, document, **kwargs)
+module._exclusive_json=injected
+""",
+        "identity_once": f"""
+original_identity=module._process_identity
+failed=[False]
+def injected_identity(pid):
+    if pid != os.getpid() and not failed[0]:
+{wait_for_child.rstrip()}
+        failed[0]=True
+        raise module.SupervisorError('controlled_child_identity_failure')
+    return original_identity(pid)
+module._process_identity=injected_identity
+""",
+        "receipt_oserror": f"""
+original=module._exclusive_json
+def injected(path, document, **kwargs):
+    if str(path) == {str(receipt)!r}:
+        raise OSError('controlled terminal-receipt persistence failure')
+    return original(path, document, **kwargs)
+module._exclusive_json=injected
+""",
+    }[mode]
+    harness.write_text(
+        f"""import importlib.util, os, pathlib, sys, time
+spec=importlib.util.spec_from_file_location('p01s_supervisor', {str(SUPERVISOR)!r})
+module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+{injection}
+sys.argv={[str(SUPERVISOR), *command[2:]]!r}
+raise SystemExit(module.main())
+""",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(harness)]
+
+
+def _terminating_child_source(starts: Path, terminated: Path) -> str:
+    return f"""import argparse, os, signal, time
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--source-manifest'); p.add_argument('--source-manifest-digest'); p.add_argument('--output'); p.add_argument('--failure-output'); p.parse_args()
+def terminate(_signum, _frame):
+    Path({str(terminated)!r}).write_text('terminated')
+    raise SystemExit(77)
+signal.signal(signal.SIGTERM, terminate)
+fd=os.open({str(starts)!r}, os.O_WRONLY|os.O_CREAT|os.O_APPEND, 0o600)
+os.write(fd, (str(os.getpid())+'\\n').encode()); os.fsync(fd); os.close(fd)
+deadline=time.monotonic()+5.0
+while time.monotonic()<deadline: time.sleep(0.02)
+"""
+
+
+def _process_exists(pid: int) -> bool:
+    return bool(
+        subprocess.run(
+            ["/bin/ps", "-p", str(pid), "-o", "pid="],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+    )
+
+
+def test_started_record_oserror_supervises_real_child_and_records_truth(tmp_path) -> None:
+    starts = tmp_path / "starts"
+    terminated = tmp_path / "terminated"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path, _terminating_child_source(starts, terminated)
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+    fault_command = _postspawn_fault_harness(
+        tmp_path, command, mode="started_oserror", starts=starts
+    )
+
+    result = subprocess.run(
+        fault_command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 125, (result.stdout, result.stderr)
+    pid = int(starts.read_text("utf-8").strip())
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["child_started"] is True
+    assert document["child_pid"] == pid
+    assert document["child_identity"]["pid"] == pid
+    assert document["child_returncode"] == 77
+    assert document["attempt_started_artifact"]["exists"] is False
+    assert document["reason_code"] == "attempt_started_record_write_failed"
+    assert document["terminal_valid"] is False
+    assert terminated.read_text("utf-8") == "terminated"
+    assert not _process_exists(pid)
+
+
+def test_started_record_exclusive_conflict_is_postspawn_failure_not_no_child(tmp_path) -> None:
+    starts = tmp_path / "starts"
+    terminated = tmp_path / "terminated"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path, _terminating_child_source(starts, terminated)
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+    fault_command = _postspawn_fault_harness(
+        tmp_path, command, mode="started_conflict", starts=starts
+    )
+
+    result = subprocess.run(
+        fault_command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 125, (result.stdout, result.stderr)
+    pid = int(starts.read_text("utf-8").strip())
+    document = json.loads(receipt.read_text("utf-8"))
+    started_path = _attempt_state_paths(receipt)[1]
+    assert started_path.read_bytes() == b"controlled-conflict\n"
+    assert document["child_started"] is True
+    assert document["child_pid"] == pid
+    assert document["child_returncode"] == 77
+    assert document["attempt_started_artifact"]["exists"] is True
+    assert document["attempt_started_artifact"]["sha256"] == _sha(
+        started_path.read_bytes()
+    )
+    assert document["reason_code"] == "attempt_started_record_exists"
+    assert document["terminal_valid"] is False
+    assert terminated.exists()
+    assert not _process_exists(pid)
+
+
+def test_child_identity_failure_retries_identity_for_bounded_teardown(tmp_path) -> None:
+    starts = tmp_path / "starts"
+    terminated = tmp_path / "terminated"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path, _terminating_child_source(starts, terminated)
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+    fault_command = _postspawn_fault_harness(
+        tmp_path, command, mode="identity_once", starts=starts
+    )
+
+    result = subprocess.run(
+        fault_command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 125, (result.stdout, result.stderr)
+    pid = int(starts.read_text("utf-8").strip())
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["child_started"] is True
+    assert document["child_pid"] == pid
+    assert document["child_identity"]["pid"] == pid
+    assert document["child_returncode"] == 77
+    assert document["attempt_started_artifact"]["exists"] is False
+    assert document["reason_code"] == "child_identity_observation_failed"
+    assert document["terminal_valid"] is False
+    assert terminated.exists()
+    assert not _process_exists(pid)
+
+
+def test_true_popen_failure_remains_no_child_startup_failure(tmp_path) -> None:
+    marker = tmp_path / "must-not-start"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path, f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\n"
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+    separator = command.index("--")
+    command[separator + 1] = str(tmp_path / "executable-that-does-not-exist")
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 125
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["child_started"] is False
+    assert document["child_pid"] is None
+    assert document["child_identity"] is None
+    assert document["child_returncode"] is None
+    assert document["reason_code"] == "child_start_failed"
+    assert document["terminal_valid"] is False
+    assert not marker.exists()
+
+
+def test_terminal_receipt_write_failure_consumes_attempt_without_replay(tmp_path) -> None:
+    starts = tmp_path / "starts"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        f"""import argparse, json, os
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--source-manifest'); p.add_argument('--source-manifest-digest'); p.add_argument('--output'); p.add_argument('--failure-output'); a=p.parse_args()
+fd=os.open({str(starts)!r}, os.O_WRONLY|os.O_CREAT|os.O_APPEND, 0o600); os.write(fd,b'started\\n'); os.fsync(fd); os.close(fd)
+Path(a.output).write_text(json.dumps({{'protocol':'test.success.v1'}})+'\\n')
+""",
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+    fault_command = _postspawn_fault_harness(
+        tmp_path, command, mode="receipt_oserror", receipt=receipt
+    )
+
+    result = subprocess.run(
+        fault_command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_environment(token),
+    )
+    restarted = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_environment(token),
+    )
+
+    claim, started = _attempt_state_paths(receipt)
+    assert result.returncode == 125, (result.stdout, result.stderr)
+    assert json.loads(result.stdout) == {
+        "reason_code": "terminal_receipt_write_failed",
+        "terminal_valid": False,
+    }
+    assert not receipt.exists()
+    assert claim.exists()
+    assert started.exists()
+    assert starts.read_text("utf-8") == "started\n"
+    assert restarted.returncode == 2
+    assert json.loads(restarted.stdout)["reason_code"] == "attempt_already_claimed"
