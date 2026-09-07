@@ -10,6 +10,8 @@ import subprocess
 import sys
 import time
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUPERVISOR = REPO_ROOT / "scripts/run_a5_benchmark_supervisor.py"
@@ -32,7 +34,17 @@ def _fixture(tmp_path: Path, child_source: str):
     return manifest, token, child, output, failure, receipt
 
 
-def _command(manifest, token, child, output, failure, receipt, expected):
+def _command(
+    manifest,
+    token,
+    child,
+    output,
+    failure,
+    receipt,
+    expected,
+    *,
+    detach: bool = False,
+):
     child_argv = [
         sys.executable,
         str(child),
@@ -60,16 +72,27 @@ def _command(manifest, token, child, output, failure, receipt, expected):
         str(output),
         "--failure-output",
         str(failure),
-        "--",
-        *child_argv,
     ]
+    if detach:
+        command.append("--detach")
+    command.extend(["--", *child_argv])
     return command, child_argv
 
 
 def _environment(token: str) -> dict[str, str]:
     environment = os.environ.copy()
+    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+        environment.pop(name, None)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment["MYCELIUM_A5_OPERATOR_TOKEN"] = token
     return environment
+
+
+def _wait_for_file(path: Path, *, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert path.exists()
 
 
 def test_supervisor_hashes_manifest_and_writes_success_receipt(tmp_path) -> None:
@@ -235,3 +258,222 @@ def test_supervisor_rejects_missing_environment_token_before_child(tmp_path) -> 
     assert document["child_started"] is False
     assert document["terminal_valid"] is False
     assert document["reason_code"] == "operator_token_environment_invalid"
+
+
+def test_supervisor_rejects_preexisting_receipt_before_child(tmp_path) -> None:
+    marker = tmp_path / "child-started"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('started')\n",
+    )
+    original = b'{"preserved":true}\n'
+    receipt.write_bytes(original)
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 2
+    assert not marker.exists()
+    assert receipt.read_bytes() == original
+    assert json.loads(result.stdout) == {
+        "reason_code": "terminal_receipt_exists",
+        "terminal_valid": False,
+    }
+
+
+@pytest.mark.parametrize("existing_name", ["output", "failure"])
+def test_supervisor_rejects_preexisting_terminal_artifact_before_child(
+    tmp_path, existing_name: str
+) -> None:
+    marker = tmp_path / "child-started"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('started')\n",
+    )
+    existing = output if existing_name == "output" else failure
+    existing.write_text("preserve\n", encoding="utf-8")
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 2
+    assert not marker.exists()
+    assert existing.read_text("utf-8") == "preserve\n"
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["child_started"] is False
+    assert document["reason_code"] == "terminal_artifact_preexists"
+
+
+@pytest.mark.parametrize("existing_name", ["receipt", "output", "failure"])
+def test_supervisor_rejects_broken_symlink_artifact_name_before_child(
+    tmp_path, existing_name: str
+) -> None:
+    marker = tmp_path / "child-started"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('started')\n",
+    )
+    paths = {"receipt": receipt, "output": output, "failure": failure}
+    existing = paths[existing_name]
+    existing.symlink_to(tmp_path / f"missing-{existing_name}")
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
+
+    assert result.returncode == 2
+    assert not marker.exists()
+    assert existing.is_symlink()
+    if existing_name == "receipt":
+        assert json.loads(result.stdout)["reason_code"] == "terminal_receipt_exists"
+    else:
+        document = json.loads(receipt.read_text("utf-8"))
+        assert document["child_started"] is False
+        assert document["reason_code"] == "terminal_artifact_preexists"
+
+
+def test_supervisor_seals_normal_child_failure_without_restart(tmp_path) -> None:
+    run_count = tmp_path / "run-count"
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        f"""import argparse, json, os
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--source-manifest'); p.add_argument('--source-manifest-digest'); p.add_argument('--output'); p.add_argument('--failure-output'); a=p.parse_args()
+count=Path({str(run_count)!r}); count.write_text((count.read_text() if count.exists() else '') + 'run\\n')
+descriptor=os.open(a.failure_output, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
+with os.fdopen(descriptor, 'w') as stream:
+    json.dump({{'protocol':'test.failure.v1','reason_code':'controlled_failure'}}, stream)
+    stream.write('\\n'); stream.flush(); os.fsync(stream.fileno())
+raise SystemExit(7)
+""",
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(manifest, token, child, output, failure, receipt, expected)
+
+    first = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
+    second = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(token),
+    )
+
+    assert first.returncode == 7
+    assert second.returncode == 2
+    assert run_count.read_text("utf-8") == "run\n"
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["child_returncode"] == 7
+    assert document["failure_artifact"]["exists"] is True
+    assert document["terminal_valid"] is True
+    assert document["reason_code"] == "failure_artifact_present"
+
+
+def test_supervisor_records_exact_process_identity_and_persists_no_token(
+    tmp_path,
+) -> None:
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        """import argparse, json, os, time
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--source-manifest'); p.add_argument('--source-manifest-digest'); p.add_argument('--output'); p.add_argument('--failure-output'); a=p.parse_args()
+report={'protocol':'test.success.v1','operator_capability_present':len(os.environ['MYCELIUM_A5_OPERATOR_TOKEN']) >= 32,'python_environment_scrubbed':all(name not in os.environ for name in ('PYTHONPATH','PYTHONHOME','VIRTUAL_ENV')) and os.environ.get('PYTHONDONTWRITEBYTECODE') == '1'}
+time.sleep(0.2)
+Path(a.output).write_text(json.dumps(report)+'\\n')
+""",
+    )
+    test_token = "P01_LOCAL_TEST_CAPABILITY_" + "x" * 32
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(
+        manifest, test_token, child, output, failure, receipt, expected
+    )
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env=_environment(test_token),
+    )
+
+    assert result.returncode == 0
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["supervisor_identity"]["pid"] > 1
+    assert document["supervisor_identity"]["start_identity"]
+    assert document["child_identity"]["pid"] == document["child_pid"]
+    assert document["child_identity"]["start_identity"]
+    child_report = json.loads(output.read_text("utf-8"))
+    assert child_report["operator_capability_present"] is True
+    assert child_report["python_environment_scrubbed"] is True
+    persisted = receipt.read_text("utf-8") + output.read_text("utf-8")
+    persisted += result.stdout + result.stderr
+    assert test_token not in persisted
+
+
+def test_detached_supervisor_survives_launcher_exit_and_seals_receipt(
+    tmp_path,
+) -> None:
+    manifest, token, child, output, failure, receipt = _fixture(
+        tmp_path,
+        """import argparse, json, time
+from pathlib import Path
+p=argparse.ArgumentParser(); p.add_argument('--source-manifest'); p.add_argument('--source-manifest-digest'); p.add_argument('--output'); p.add_argument('--failure-output'); a=p.parse_args()
+time.sleep(0.4)
+Path(a.output).write_text(json.dumps({'protocol':'test.success.v1'})+'\\n')
+""",
+    )
+    expected = _sha(manifest.read_bytes())
+    command, _ = _command(
+        manifest, token, child, output, failure, receipt, expected, detach=True
+    )
+    launcher = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=_environment(token),
+    )
+    launcher_pid = launcher.pid
+
+    stdout, stderr = launcher.communicate(timeout=10)
+    assert launcher.returncode == 0, (stdout, stderr)
+    launch = json.loads(stdout)
+    assert launch["detached"] is True
+    assert launch["supervisor_pid"] != launcher_pid
+    assert launch["supervisor_parent_pid"] == 1
+    _wait_for_file(receipt)
+
+    document = json.loads(receipt.read_text("utf-8"))
+    assert document["detached"] is True
+    assert document["supervisor_identity"]["pid"] == launch["supervisor_pid"]
+    assert document["supervisor_identity"]["start_identity"] == launch[
+        "supervisor_start_identity"
+    ]
+    assert document["terminal_valid"] is True
+    assert document["reason_code"] == "success_artifact_present"
