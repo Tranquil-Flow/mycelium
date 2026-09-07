@@ -1,0 +1,47 @@
+"""Offline packaging must use the real controller archive validator."""
+import importlib.util
+from pathlib import Path
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def module():
+    spec = importlib.util.spec_from_file_location('runtime_bundle', ROOT/'scripts/prepare_a5_runtime_bundle.py')
+    assert spec and spec.loader
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+def test_assembly_rejects_gitless_source(tmp_path):
+    with pytest.raises(ValueError, match='source_git_root_invalid'):
+        module().source_identity(tmp_path)
+
+
+def test_manifest_serialization_and_archive_consumer(tmp_path):
+    m = module()
+    (tmp_path/'runtime.py').write_text('print(1)\n')
+    manifest = m.transfer_manifest(tmp_path)
+    import json, io, tarfile
+    from physical_inference_qualification import build_transfer_archive, ControllerError
+    serialized = json.loads(json.dumps(manifest))
+    archive = build_transfer_archive(tmp_path, serialized)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        assert tar.getnames() == ['runtime.py']
+    (tmp_path/'runtime.py').write_text('print(2)\n')
+    with pytest.raises(ControllerError):
+        build_transfer_archive(tmp_path, serialized)
+
+
+def test_manifest_rejects_symlink(tmp_path):
+    (tmp_path/'real.py').write_text('x=1')
+    (tmp_path/'alias.py').symlink_to(tmp_path/'real.py')
+    with pytest.raises(ValueError, match='unsafe_artifact'):
+        module().transfer_manifest(tmp_path)
+
+
+def test_native_architecture_is_checked(tmp_path):
+    fake = tmp_path/'binary'
+    fake.write_bytes(b'not executable'); fake.chmod(0o700)
+    with pytest.raises(ValueError, match='native_architecture_invalid'):
+        module().native_identity(fake)

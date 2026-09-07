@@ -100,3 +100,23 @@ def test_new_claim_roundtrips_through_recovery(tmp_path):
     candidate['source_manifest_sha256'] = authorization['source_manifest']['sha256']
     result = recovery._validate_start_observation({'claim': _artifact_input(claim_path), 'started': _artifact_input(started_path)}, candidate=candidate, authorization_sha256=_artifact_input(tmp_path/'authorization.json')['sha256'])
     assert result['status'] == 'source_bound_observed'
+
+
+def test_timeout_allows_child_owned_descendant_cleanup(tmp_path):
+    released = tmp_path/'descendant-reaped'
+    inputs = _fixture(tmp_path, f'''import signal,subprocess,sys,time
+from pathlib import Path
+p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(5)'])
+def cleanup(signum, frame):
+    p.terminate(); p.wait(timeout=2)
+    Path({str(released)!r}).write_text(str(p.returncode))
+    raise SystemExit(77)
+signal.signal(signal.SIGTERM,cleanup)
+time.sleep(5)
+''')
+    command, _ = _command(*inputs, _sha(inputs[0].read_bytes()))
+    command[2:2] = ['--maximum-lifetime-seconds', '0.5']
+    result = subprocess.run(command, env=_environment(inputs[1]), capture_output=True, text=True, timeout=8)
+    assert result.returncode == 125, result.stderr
+    assert released.exists()
+    assert json.loads(inputs[-1].read_text())['child_returncode'] == 77
