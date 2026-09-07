@@ -254,6 +254,102 @@ def _produce(input_path: Path, output: Path) -> subprocess.CompletedProcess[str]
     )
 
 
+def test_empty_opaque_frozen_evidence_roundtrips_without_mutation(tmp_path) -> None:
+    input_path, output, value, _ = _case(tmp_path)
+    frozen = Path(value["frozen_inputs"][0]["path"])
+    frozen.write_bytes(b"")
+    before = frozen.stat()
+    value["frozen_inputs"] = [_artifact_input(frozen)]
+    _write_json(input_path, value)
+    produced = _produce(input_path, output)
+    assert produced.returncode == 0, produced.stdout + produced.stderr
+    document = json.loads(output.read_text())
+    assert document["frozen_inputs"][0] == {
+        "exists": True, "path": str(frozen), "size_bytes": 0,
+        "sha256": _sha_bytes(b""), "mode": f"{stat.S_IMODE(before.st_mode):04o}",
+    }
+    verified = _run("verify", "--record", str(output))
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+    assert json.loads(verified.stdout)["valid"] is True
+    assert frozen.read_bytes() == b""
+    after = frozen.stat()
+    assert (after.st_mode, after.st_mtime_ns, after.st_ino) == (
+        before.st_mode, before.st_mtime_ns, before.st_ino,
+    )
+
+
+@pytest.mark.parametrize("target", ["input", "record", "authorization", "claim", "started", "acknowledgment"])
+@pytest.mark.parametrize("payload", [b"", b"{"])
+def test_required_json_rejects_empty_or_invalid_documents(tmp_path, target, payload) -> None:
+    input_path, output, value, _ = _case(
+        tmp_path, with_start=True, later_statuses={"node-0": "observed"},
+    )
+    if target == "record":
+        output.write_bytes(payload)
+        output.chmod(0o600)
+        result = _run("verify", "--record", str(output))
+    else:
+        if target == "input":
+            input_path.write_bytes(payload)
+        else:
+            if target == "authorization":
+                ref = value["authorization"]
+            elif target in ("claim", "started"):
+                ref = value["start_observation"][target]
+            else:
+                ref = value["later_resource_release_observation"]["hosts"][0]["cleanup_acknowledgment"]
+            path = Path(ref["path"])
+            path.write_bytes(payload)
+            ref.update(_artifact_input(path))
+            _write_json(input_path, value)
+        result = _produce(input_path, output)
+        assert not output.exists()
+    assert result.returncode == 2
+    assert json.loads(result.stdout)["reason_code"] in {
+        "schema_invalid", "input_not_regular", "json_invalid",
+    }
+
+
+@pytest.mark.parametrize("mutation", ["missing", "symlink", "content", "mode", "oversized", "hash", "size"])
+def test_empty_frozen_evidence_verification_retains_integrity_checks(tmp_path, mutation) -> None:
+    input_path, output, value, _ = _case(tmp_path)
+    frozen = Path(value["frozen_inputs"][0]["path"])
+    frozen.write_bytes(b"")
+    value["frozen_inputs"] = [_artifact_input(frozen)]
+    _write_json(input_path, value)
+    assert _produce(input_path, output).returncode == 0
+    if mutation == "missing":
+        frozen.unlink()
+    elif mutation == "symlink":
+        target = frozen.with_suffix(".other")
+        frozen.rename(target)
+        frozen.symlink_to(target)
+    elif mutation == "content":
+        frozen.write_bytes(b"drift")
+    elif mutation == "mode":
+        frozen.chmod(0o640 if stat.S_IMODE(frozen.stat().st_mode) != 0o640 else 0o600)
+    elif mutation == "oversized":
+        with frozen.open("wb") as handle:
+            handle.truncate(16 * 1024 * 1024 + 1)
+    else:
+        document = json.loads(output.read_text())
+        artifact = document["frozen_inputs"][0]
+        artifact["sha256" if mutation == "hash" else "size_bytes"] = (
+            "sha256:" + "0" * 64 if mutation == "hash" else 1
+        )
+        unsigned = dict(document)
+        unsigned.pop("record_sha256")
+        document["record_sha256"] = _sha_bytes(json.dumps(
+            unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            allow_nan=False,
+        ).encode())
+        _write_json(output, document)
+    verified = _run("verify", "--record", str(output))
+    assert verified.returncode == 2
+    assert json.loads(verified.stdout)["valid"] is False
+    assert json.loads(verified.stdout)["reason_code"] != "record_digest_mismatch"
+
+
 def test_recovery_producer_preserves_unknowns_and_never_claims_success(tmp_path) -> None:
     input_path, output, _, preserved = _case(tmp_path)
 

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -690,40 +691,145 @@ Path(a.output).write_text(json.dumps({'protocol':'test.success.v1'})+'\\n')
     assert json.loads(receipt.read_text("utf-8"))["terminal_valid"] is True
 
 
-def test_detached_owner_survives_launcher_sigkill_before_ack(tmp_path) -> None:
+def _interrupt_at_detach_phase(tmp_path: Path, phase: str):
+    """Real process barrier: claim-before-fork or detached-before-ack."""
+    starts = tmp_path / "starts.txt"
     manifest, token, child, output, failure, receipt = _fixture(
         tmp_path,
-        """import argparse, json
+        f"""import argparse, json, os
 from pathlib import Path
 p=argparse.ArgumentParser(); p.add_argument('--source-manifest'); p.add_argument('--source-manifest-digest'); p.add_argument('--output'); p.add_argument('--failure-output'); a=p.parse_args()
-Path(a.output).write_text(json.dumps({'protocol':'test.success.v1'})+'\\n')
+fd=os.open({str(starts)!r}, os.O_WRONLY|os.O_CREAT|os.O_APPEND, 0o600)
+os.write(fd,b'started\\n'); os.close(fd)
+Path(a.output).write_text(json.dumps({{'protocol':'test.success.v1'}})+'\\n')
 """,
     )
-    expected = _sha(manifest.read_bytes())
-    command, _ = _command(
-        manifest, token, child, output, failure, receipt, expected, detach=True
+    command, child_argv = _command(
+        manifest, token, child, output, failure, receipt,
+        _sha(manifest.read_bytes()), detach=True,
     )
-    harness_command = _detach_harness(
-        tmp_path, command, startup_delay_seconds=0.4, ack_timeout_seconds=5.0
+    controller, endpoint = socket.socketpair()
+    controller.settimeout(5)
+    harness = tmp_path / "phase-harness.py"
+    harness.write_text(
+        f"""import importlib.util, json, os, socket, sys
+spec=importlib.util.spec_from_file_location('phase_supervisor', {str(SUPERVISOR)!r})
+module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+channel=socket.socket(fileno={endpoint.fileno()}); channel.settimeout(5)
+def barrier():
+    identity=module._process_identity(os.getpid())
+    channel.sendall((json.dumps(identity)+'\\n').encode())
+    if channel.recv(1)!=b'G': raise RuntimeError('barrier_not_released')
+    channel.close()
+original_detach=module._detach_from_launcher
+def before_fork():
+    barrier()
+    return original_detach()
+if {phase!r}=='before_fork': module._detach_from_launcher=before_fork
+else: module._before_detached_startup_ack=barrier
+sys.argv={[str(SUPERVISOR), *command[2:]]!r}
+raise SystemExit(module.main())
+""", encoding="utf-8",
     )
     launcher = subprocess.Popen(
-        harness_command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=_environment(token),
+        [sys.executable, str(harness)], stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, env=_environment(token),
+        pass_fds=(endpoint.fileno(),),
+    )
+    endpoint.close()
+    claim, started = _attempt_state_paths(receipt)
+    try:
+        payload = b""
+        while not payload.endswith(b"\n"):
+            chunk = controller.recv(4096)
+            assert chunk, "phase owner disappeared before handshake"
+            payload += chunk
+        identity = json.loads(payload)
+        observed = subprocess.run(
+            ["/bin/ps", "-p", str(identity["pid"]), "-o", "ppid=,lstart="],
+            capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip().split(maxsplit=1)
+        assert identity["start_identity_source"] == "os_ps_lstart"
+        assert observed == [str(identity["parent_pid"]), identity["start_identity"]]
+        assert os.getsid(identity["pid"]) == identity["session_id"]
+        assert claim.exists()
+        claim_bytes = claim.read_bytes()
+        assert not started.exists() and not receipt.exists() and not starts.exists()
+        if phase == "before_fork":
+            assert identity["pid"] == launcher.pid
+        else:
+            assert identity["pid"] != launcher.pid
+            assert identity["parent_pid"] == 1
+        launcher.kill()
+        assert launcher.wait(timeout=5) == -signal.SIGKILL
+        if phase != "before_fork":
+            controller.sendall(b"G")
+            _wait_for_file(receipt)
+        launcher.communicate(timeout=5)
+        terminal_bytes = receipt.read_bytes() if receipt.exists() else None
+        restarted = subprocess.run(
+            command, capture_output=True, text=True, timeout=10,
+            env=_environment(token),
+        )
+        assert restarted.returncode == 2
+        assert json.loads(restarted.stdout) == {
+            "reason_code": (
+                "attempt_already_claimed" if phase == "before_fork"
+                else "terminal_receipt_exists"
+            ),
+            "terminal_valid": False,
+        }
+        assert (receipt.read_bytes() if receipt.exists() else None) == terminal_bytes
+        assert claim.read_bytes() == claim_bytes
+        evidence = {
+            "phase": phase, "barrier_identity": identity,
+            "independent_ps_identity": observed, "launcher_pid": launcher.pid,
+            "launcher_returncode": launcher.returncode,
+            "restart_rejected": True, "claim_sha256": _sha(claim_bytes),
+            "started_exists": started.exists(), "receipt_exists": receipt.exists(),
+            "workload_starts": starts.read_text().count("started\n") if starts.exists() else 0,
+        }
+        (tmp_path / "phase-evidence.json").write_text(json.dumps(evidence, indent=2))
+        return manifest, child_argv, starts, output, failure, receipt, identity
+    finally:
+        controller.close()
+        if launcher.poll() is None:
+            launcher.kill()
+        launcher.communicate(timeout=5)
+
+
+def test_claim_before_fork_interruption_never_launches_or_replays(tmp_path) -> None:
+    _, _, starts, output, failure, receipt, _ = _interrupt_at_detach_phase(
+        tmp_path, "before_fork",
     )
     claim, started = _attempt_state_paths(receipt)
-    _wait_for_file(claim)
-    launcher.kill()
-    launcher.communicate(timeout=5)
-
-    _wait_for_file(receipt)
     assert claim.exists()
-    assert started.exists()
+    assert not started.exists()
+    assert not starts.exists() and not output.exists() and not failure.exists()
+    assert not receipt.exists()
+
+
+def test_detached_owner_survives_launcher_sigkill_before_ack(tmp_path) -> None:
+    manifest, child_argv, starts, output, failure, receipt, identity = (
+        _interrupt_at_detach_phase(tmp_path, "before_ack")
+    )
+    claim, started = _attempt_state_paths(receipt)
+    assert claim.exists() and started.exists()
+    assert starts.read_text() == "started\n"
+    assert output.exists() and not failure.exists()
     document = json.loads(receipt.read_text("utf-8"))
     assert document["child_started"] is True
+    assert document["child_returncode"] == 0
     assert document["terminal_valid"] is True
+    assert document["candidate_tree"] == TREE
+    assert document["source_manifest_digest"] == _sha(manifest.read_bytes())
+    assert document["child_argv_digest"] == _sha(
+        json.dumps(child_argv, sort_keys=True, separators=(",", ":")).encode()
+    )
+    assert document["supervisor_identity"]["pid"] == identity["pid"]
+    assert document["supervisor_identity"]["start_identity"] == identity["start_identity"]
+    assert document["attempt_claim_artifact"]["sha256"] == _sha(claim.read_bytes())
+    assert len(list(tmp_path.glob("benchmark.supervisor-receipt.v1.json"))) == 1
 
 
 def test_attempt_claim_and_start_bind_cycle_authorization_before_launch(tmp_path) -> None:

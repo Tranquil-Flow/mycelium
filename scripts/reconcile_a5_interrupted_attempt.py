@@ -59,8 +59,9 @@ def _read_regular_bytes(
     path: Path,
     *,
     missing_reason: str,
+    allow_empty: bool = False,
 ) -> tuple[bytes, os.stat_result]:
-    named = _regular_metadata(path, missing_reason=missing_reason)
+    named = _regular_metadata(path, missing_reason=missing_reason, allow_empty=allow_empty)
     flags = os.O_RDONLY
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
@@ -114,7 +115,9 @@ def _absolute(path: str | Path, *, reason: str = "path_invalid") -> Path:
     return absolute
 
 
-def _regular_metadata(path: Path, *, missing_reason: str) -> os.stat_result:
+def _regular_metadata(
+    path: Path, *, missing_reason: str, allow_empty: bool = False,
+) -> os.stat_result:
     try:
         metadata = path.lstat()
     except FileNotFoundError as error:
@@ -128,7 +131,7 @@ def _regular_metadata(path: Path, *, missing_reason: str) -> os.stat_result:
             raise RecoveryError("input_not_regular")
     except OSError as error:
         raise RecoveryError("input_not_regular") from error
-    if metadata.st_size <= 0 or metadata.st_size > MAXIMUM_INPUT_BYTES:
+    if metadata.st_size < (0 if allow_empty else 1) or metadata.st_size > MAXIMUM_INPUT_BYTES:
         raise RecoveryError("input_not_regular")
     return metadata
 
@@ -179,15 +182,15 @@ def _integer(value: Any, *, minimum: int = 0) -> int:
     return value
 
 
-def _artifact_ref(value: Any) -> dict[str, Any]:
+def _artifact_ref(value: Any, *, allow_empty: bool = False) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RecoveryError("schema_invalid")
     _keys(value, {"path", "sha256", "size_bytes"})
     path = _absolute(value["path"])
     expected_sha = _sha(value["sha256"])
-    expected_size = _integer(value["size_bytes"], minimum=1)
+    expected_size = _integer(value["size_bytes"], minimum=0 if allow_empty else 1)
     payload, metadata = _read_regular_bytes(
-        path, missing_reason="bound_artifact_missing"
+        path, missing_reason="bound_artifact_missing", allow_empty=allow_empty,
     )
     actual_sha = _sha_bytes(payload)
     if metadata.st_size != expected_size or actual_sha != expected_sha:
@@ -214,7 +217,7 @@ def _artifact_ref_from_path(path: Path) -> dict[str, Any]:
     }
 
 
-def _verify_bound_artifact(value: Any) -> None:
+def _verify_bound_artifact(value: Any, *, allow_empty: bool = False) -> None:
     if not isinstance(value, dict):
         raise RecoveryError("schema_invalid")
     _keys(value, {"exists", "path", "sha256", "size_bytes", "mode"})
@@ -222,11 +225,11 @@ def _verify_bound_artifact(value: Any) -> None:
         raise RecoveryError("schema_invalid")
     path = _absolute(value["path"])
     payload, metadata = _read_regular_bytes(
-        path, missing_reason="bound_artifact_missing"
+        path, missing_reason="bound_artifact_missing", allow_empty=allow_empty,
     )
     if (
         _sha_bytes(payload) != _sha(value["sha256"])
-        or metadata.st_size != _integer(value["size_bytes"], minimum=1)
+        or metadata.st_size != _integer(value["size_bytes"], minimum=0 if allow_empty else 1)
         or f"{stat.S_IMODE(metadata.st_mode):04o}" != value["mode"]
     ):
         raise RecoveryError("bound_artifact_drift")
@@ -735,7 +738,8 @@ def _build_record(input_path: Path, *, recorded_at_unix_ms: int) -> dict[str, An
     frozen_value = operator_input["frozen_inputs"]
     if not isinstance(frozen_value, list) or not frozen_value:
         raise RecoveryError("schema_invalid")
-    frozen = [_artifact_ref(value) for value in frozen_value]
+    # Opaque retained evidence may prove emptiness; required JSON stays nonempty.
+    frozen = [_artifact_ref(value, allow_empty=True) for value in frozen_value]
     roots = _roots(
         operator_input["retained_evidence_roots"],
         operator_input["removable_runtime_stage_roots"],
@@ -1020,11 +1024,13 @@ def _verify_record(document: dict[str, Any]) -> None:
     frozen = document["frozen_inputs"]
     if not isinstance(frozen, list) or not frozen:
         raise RecoveryError("schema_invalid")
-    expected_frozen = [_artifact_ref(value) for value in operator_input["frozen_inputs"]]
+    expected_frozen = [
+        _artifact_ref(value, allow_empty=True) for value in operator_input["frozen_inputs"]
+    ]
     if frozen != expected_frozen:
         raise RecoveryError("bound_artifact_drift")
     for artifact in frozen:
-        _verify_bound_artifact(artifact)
+        _verify_bound_artifact(artifact, allow_empty=True)
     roots = document["evidence_roots"]
     if not isinstance(roots, dict):
         raise RecoveryError("schema_invalid")
