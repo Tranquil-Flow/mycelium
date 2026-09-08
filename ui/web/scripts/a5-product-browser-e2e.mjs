@@ -7,7 +7,7 @@ import process from 'node:process';
 const origin = (process.env.MYCELIUM_A5_PRODUCT_ORIGIN ?? '').replace(/\/$/, '');
 const outputPath = process.env.MYCELIUM_A5_BROWSER_EVIDENCE ?? '';
 const browserPhase = process.env.MYCELIUM_A5_BROWSER_PHASE ?? '';
-const closureWords = /(?:^|\s)(?:Completed|Cancelled|Failed|Cancellation unconfirmed)/;
+const closureWords = /^(?:Completed|Cancelled|Failed)\b/;
 
 const OPTIONAL_CAPABILITY_PATHS = Object.freeze([
   '/__mycelium/models/operation',
@@ -234,7 +234,7 @@ async function terminalPhase(page, timeout = 300_000) {
     .first();
   await status.waitFor({ state: 'visible', timeout });
   const text = (await status.innerText()).trim();
-  const match = text.match(/^(Completed|Cancelled|Failed|Cancellation unconfirmed)\b/);
+  const match = text.match(/^(Completed|Cancelled|Failed)\b/);
   if (match === null) fail('terminal_phase_invalid');
   return match[1].toLowerCase().replace(/\s+/g, '_');
 }
@@ -351,10 +351,14 @@ async function concurrentInferenceScenario(browser, primaryPage, engine, failure
       terminalPhase(primaryPage),
       terminalPhase(secondaryPage),
     ]);
-    if (!['cancelled', 'failed', 'cancellation_unconfirmed'].includes(cancelledTerminal)) {
+    if (!['cancelled', 'failed'].includes(cancelledTerminal)) {
       fail('browser_cancel_terminal_invalid');
     }
     if (completedTerminal !== 'completed') fail('browser_unaffected_request_not_completed');
+    await primaryPage.reload({ waitUntil: 'domcontentloaded' });
+    if (await terminalPhase(primaryPage, 60_000) !== cancelledTerminal) {
+      fail('browser_cancel_history_not_reconstructed');
+    }
     await secondaryPage.reload({ waitUntil: 'domcontentloaded' });
     const reconstructedTerminal = await terminalPhase(secondaryPage, 60_000);
     if (reconstructedTerminal !== 'completed') {

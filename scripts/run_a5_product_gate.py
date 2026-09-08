@@ -403,6 +403,9 @@ def run_gate(base_url: str, *, maximum_new_tokens: int) -> dict[str, Any]:
     )
     after_status = public_json(base_url, "/__mycelium/live-status")
     after_peers = _peer_snapshot(after_status)
+    # An absent peer is unknown cleanup, not a zero-valued observation.
+    if set(after_peers) != set(before_peers):
+        raise GateError("peer_cleanup_coverage_changed")
 
     worked_placements = sorted(
         {
@@ -458,6 +461,8 @@ def run_gate(base_url: str, *, maximum_new_tokens: int) -> dict[str, Any]:
         - before_peers.get(node_id, {}).get("active_kv_state_count", 0)
         for node_id in after_peers
     }
+    if any(delta != 0 for delta in kv_deltas.values()):
+        raise GateError("stage_local_kv_cleanup_unproven")
 
     final_requests = _request_map(after_runtime)
     if any(item["request_id"] not in final_requests for item in accepted):
