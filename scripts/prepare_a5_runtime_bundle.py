@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import re
 import shutil
 import stat
 import subprocess
@@ -21,7 +20,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from physical_inference_qualification import build_transfer_archive
+from physical_inference_qualification import build_transfer_archive, node_transfer_manifests
 
 
 def digest(path: Path) -> str:
@@ -80,43 +79,6 @@ def transfer_manifest(root: Path) -> dict:
     # Same validation and archive path as physical controller, without its runner.
     build_transfer_archive(root, result)
     return result
-
-
-def node_transfer_manifests(manifest: dict, selections: dict) -> dict:
-    """Select byte-identical subsets; selection is not model/host admission."""
-    if not isinstance(manifest, dict) or set(manifest) != {'protocol', 'files'} or manifest['protocol'] != 'mycelium.controller_transfer_manifest.v1':
-        raise ValueError('node_transfer_base_invalid')
-    records = manifest['files']
-    if not isinstance(records, list) or not 1 <= len(records) <= 256:
-        raise ValueError('node_transfer_base_invalid')
-    for record in records:
-        if not isinstance(record, dict) or set(record) != {'path', 'size_bytes', 'content_digest'}:
-            raise ValueError('node_transfer_base_invalid')
-        relative = record['path']
-        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or '..' in Path(relative).parts:
-            raise ValueError('node_transfer_base_invalid')
-        if type(record['size_bytes']) is not int or record['size_bytes'] < 0 or not isinstance(record['content_digest'], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', record['content_digest']):
-            raise ValueError('node_transfer_base_invalid')
-    paths = [record['path'] for record in records]
-    if paths != sorted(set(paths)):
-        raise ValueError('node_transfer_base_invalid')
-    if not isinstance(selections, dict) or not 1 <= len(selections) <= 256:
-        raise ValueError('node_transfer_selection_invalid')
-    by_path = {record['path']: record for record in records}
-    covered = set()
-    manifests = {}
-    for node_id, selected in selections.items():
-        if not isinstance(node_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', node_id):
-            raise ValueError('node_transfer_selection_invalid')
-        if not isinstance(selected, list) or not 1 <= len(selected) <= 256 or not all(isinstance(item, str) for item in selected):
-            raise ValueError('node_transfer_selection_invalid')
-        if len(set(selected)) != len(selected) or 'physical_inference_node.py' not in selected or not set(selected) <= set(by_path):
-            raise ValueError('node_transfer_selection_invalid')
-        covered.update(selected)
-        manifests[node_id] = {'protocol': manifest['protocol'], 'files': [dict(by_path[item]) for item in sorted(selected)]}
-    if covered != set(by_path):
-        raise ValueError('node_transfer_selection_incomplete')
-    return {'protocol': 'mycelium.controller_node_transfer_manifests.v1', 'manifests': dict(sorted(manifests.items()))}
 
 
 def write_json(path: Path, value: object) -> None:

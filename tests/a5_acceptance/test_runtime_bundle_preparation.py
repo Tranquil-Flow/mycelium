@@ -43,12 +43,13 @@ def test_manifest_rejects_symlink(tmp_path):
 def test_node_subsets_roundtrip_through_real_controller(tmp_path):
     from physical_inference_qualification import PeerIdentity, QualificationController
     m = module()
-    for name in ['physical_inference_node.py', 'stage-left.bin', 'stage-right.bin']:
+    (tmp_path/'deployment').mkdir()
+    for name in ['physical_inference_node.py', 'deployment/stage-left.safetensors', 'deployment/stage-right.safetensors']:
         (tmp_path/name).write_bytes(name.encode())
     manifest = m.transfer_manifest(tmp_path)
     subsets = m.node_transfer_manifests(manifest, {
-        'left': ['physical_inference_node.py', 'stage-left.bin'],
-        'right': ['physical_inference_node.py', 'stage-right.bin'],
+        'left': ['physical_inference_node.py', 'deployment/stage-left.safetensors'],
+        'right': ['physical_inference_node.py', 'deployment/stage-right.safetensors'],
     })
     peers = tuple(PeerIdentity(node_id=name, ssh_target='fixture@localhost', host_id=f'host-{name}',
         boot_id=f'boot-{name}', staging_root=f'/tmp/mycelium-test/{name}',
@@ -57,7 +58,12 @@ def test_node_subsets_roundtrip_through_real_controller(tmp_path):
         transfer_manifest=manifest, node_transfer_manifests=subsets,
         membership_snapshot={}, now=1.0)
     assert list(controller._validate_transfers()) == manifest['files']
-    assert subsets['manifests']['left']['files'] == manifest['files'][:2]
+    assert {item['path'] for item in subsets['manifests']['left']['files']} == {'physical_inference_node.py', 'deployment/stage-left.safetensors'}
+    from scripts.build_qwen_live_route import _node_transfer_manifests
+    assert _node_transfer_manifests(manifest, [
+        {'node_id': name, 'artifacts': [{'upstream_path': f'stage-{name}.safetensors'}]}
+        for name in ['left', 'right']
+    ]) == subsets
 
 
 @pytest.mark.parametrize('selections', [
@@ -71,6 +77,16 @@ def test_node_subsets_reject_incomplete_or_unbound_selection(tmp_path, selection
         (tmp_path/name).write_bytes(b'local fixture')
     with pytest.raises(ValueError, match='node_transfer'):
         m.node_transfer_manifests(m.transfer_manifest(tmp_path), selections)
+
+
+@pytest.mark.parametrize('fault', ['missing-artifact', 'duplicate-node'])
+def test_stage_pack_subset_producer_rejects_ambiguous_ownership(tmp_path, fault):
+    from scripts.build_qwen_live_route import _node_transfer_manifests
+    (tmp_path/'physical_inference_node.py').write_bytes(b'fixture')
+    manifest = module().transfer_manifest(tmp_path)
+    pack = {'node_id': 'left', 'artifacts': [{'upstream_path': 'missing.safetensors'}] if fault == 'missing-artifact' else []}
+    with pytest.raises(ValueError, match='node_transfer'):
+        _node_transfer_manifests(manifest, [pack, pack] if fault == 'duplicate-node' else [pack])
 
 
 def test_explicit_null_node_selection_cannot_disable_binding(tmp_path, monkeypatch):

@@ -987,6 +987,64 @@ def _stage_timeout_seconds(archive_size_bytes: int) -> float:
     )
 
 
+def node_transfer_manifests(manifest: dict, selections: dict) -> dict:
+    """Select byte-identical subsets; selection is not model/host admission."""
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"protocol", "files"}
+        or manifest["protocol"] != _TRANSFER_PROTOCOL
+    ):
+        raise ValueError("node_transfer_base_invalid")
+    records = manifest["files"]
+    if not isinstance(records, list) or not 1 <= len(records) <= 256:
+        raise ValueError("node_transfer_base_invalid")
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {"path", "size_bytes", "content_digest"}:
+            raise ValueError("node_transfer_base_invalid")
+        try:
+            _safe_transfer_path(record["path"])
+        except ControllerError as exc:
+            raise ValueError("node_transfer_base_invalid") from exc
+        if (
+            type(record["size_bytes"]) is not int
+            or not 0 <= record["size_bytes"] <= _MAX_TRANSFER_BYTES
+            or not isinstance(record["content_digest"], str)
+            or _DIGEST_RE.fullmatch(record["content_digest"]) is None
+        ):
+            raise ValueError("node_transfer_base_invalid")
+    paths = [record["path"] for record in records]
+    if paths != sorted(set(paths)):
+        raise ValueError("node_transfer_base_invalid")
+    if not isinstance(selections, dict) or not 1 <= len(selections) <= 256:
+        raise ValueError("node_transfer_selection_invalid")
+    by_path = {record["path"]: record for record in records}
+    covered: set[str] = set()
+    manifests: dict[str, Any] = {}
+    for node_id, selected in selections.items():
+        if not isinstance(node_id, str) or _SEGMENT_RE.fullmatch(node_id) is None:
+            raise ValueError("node_transfer_selection_invalid")
+        if (
+            not isinstance(selected, list)
+            or not 1 <= len(selected) <= 256
+            or not all(isinstance(item, str) for item in selected)
+        ):
+            raise ValueError("node_transfer_selection_invalid")
+        if (
+            len(set(selected)) != len(selected)
+            or "physical_inference_node.py" not in selected
+            or not set(selected) <= set(by_path)
+        ):
+            raise ValueError("node_transfer_selection_invalid")
+        covered.update(selected)
+        manifests[node_id] = {
+            "protocol": _TRANSFER_PROTOCOL,
+            "files": [dict(by_path[item]) for item in sorted(selected)],
+        }
+    if covered != set(by_path):
+        raise ValueError("node_transfer_selection_incomplete")
+    return {"protocol": _NODE_TRANSFERS_PROTOCOL, "manifests": dict(sorted(manifests.items()))}
+
+
 class QualificationController:
     """Validate inputs, orchestrate bounded physical work, never self-promote."""
 

@@ -714,20 +714,17 @@ def _node_transfer_manifests(
             and record["path"].endswith(".safetensors")
         )
     }
-    manifests: dict[str, Any] = {}
+    from physical_inference_qualification import node_transfer_manifests
+
+    selections: dict[str, list[str]] = {}
     for pack in packs:
+        if pack["node_id"] in selections:
+            raise ValueError("node_transfer_duplicate_node")
         owned = {
             f"deployment/{artifact['upstream_path']}" for artifact in pack["artifacts"]
         }
-        allowed = common | owned
-        manifests[pack["node_id"]] = {
-            "protocol": "mycelium.controller_transfer_manifest.v1",
-            "files": [record for record in records if record["path"] in allowed],
-        }
-    return {
-        "protocol": "mycelium.controller_node_transfer_manifests.v1",
-        "manifests": manifests,
-    }
+        selections[pack["node_id"]] = sorted(common | owned)
+    return node_transfer_manifests(transfer_manifest, selections)
 
 
 def _endpoint_ids(template: dict[str, Any]) -> dict[str, str]:
