@@ -28,3 +28,29 @@ for (const label of ['Completed', 'Cancelled', 'Failed']) {
     assert.equal(await vm.runInContext('terminalPhase(page)', context), label.toLowerCase());
   });
 }
+
+test('every workspace is checked by direct URL, reload, back and forward', async () => {
+  const visits = [];
+  context.visits = visits;
+  context.replicaState = {};
+  context.page = {
+    async waitForURL() {},
+    async goto(url) { visits.push(['goto', url]); },
+    async reload() { visits.push(['reload']); },
+    async goBack() { visits.push(['back']); },
+    async goForward() { visits.push(['forward']); },
+  };
+  vm.runInContext('verifyPanel = async (_page, hash) => visits.push(["panel", hash]);', context);
+  const results = await vm.runInContext('verifyWorkspaceNavigation(page, replicaState)', context);
+  assert.equal(results.length, 8);
+  for (const hash of ['inference', 'lab', 'network', 'nodes', 'plans', 'readiness', 'incidents', 'settings']) {
+    for (const suffix of ['direct', 'refresh', 'back', 'forward']) {
+      assert.ok(visits.some(([kind, name]) => kind === 'panel' && name === `${hash}-${suffix}`));
+    }
+  }
+});
+
+test('clean sessions reject another tab private canary', async () => {
+  context.page = { locator() { return { async innerText() { return 'REPLICA-BROWSER-chromium-PRIMARY'; } }; } };
+  await assert.rejects(vm.runInContext('verifyPrivateIsolation(page)', context), /private_canary_leaked/);
+});

@@ -80,6 +80,21 @@ test('product shell navigation stays truthful, local, and inference-disabled', a
     await navigation.getByRole('link', { name: new RegExp(`^${label}`) }).click();
     await expect(page).toHaveURL(new RegExp(`#${hash}$`));
     await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    // Exercise the real history router, not just navigation-link presence.
+    await page.goto(`/#${hash}`);
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    await page.goto(`/#${hash === 'settings' ? 'inference' : 'settings'}`);
+    await page.goBack();
+    await expect(page).toHaveURL(new RegExp(`#${hash}$`));
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    await page.goto(`/#${hash === 'settings' ? 'inference' : 'settings'}`);
+    await page.goto(`/#${hash}`);
+    await page.goBack();
+    await page.goForward();
+    await expect(page).toHaveURL(new RegExp(`#${hash}$`));
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
   }
 
   await navigation.getByRole('link', { name: /^Readiness/ }).click();

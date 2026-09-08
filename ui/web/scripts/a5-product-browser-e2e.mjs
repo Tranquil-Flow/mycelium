@@ -391,6 +391,41 @@ async function degradedInferenceScenario(page, engine) {
   };
 }
 
+async function verifyPrivateIsolation(page) {
+  const text = await page.locator('body').innerText();
+  if (/REPLICA-(?:BROWSER|DEGRADED)-/.test(text)) fail('private_canary_leaked');
+  const inputs = await page.locator('textarea, input').evaluateAll((elements) =>
+    elements.map((element) => element.value).join('\n'));
+  if (/REPLICA-(?:BROWSER|DEGRADED)-/.test(inputs)) fail('private_canary_leaked');
+}
+
+async function verifyWorkspaceNavigation(page, replicaState, clean = false) {
+  const observations = [];
+  for (const [, hash, view] of WORKSPACES) {
+    const verify = async (step) => {
+      await page.waitForURL(`${origin}/#${hash}`, { timeout: 60_000 });
+      await verifyPanel(page, `${hash}-${step}`, view, replicaState);
+      if (clean) await verifyPrivateIsolation(page);
+    };
+    await page.goto(`${origin}/#${hash}`, { waitUntil: 'domcontentloaded' });
+    await verify('direct');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await verify('refresh');
+    const away = hash === 'settings' ? 'inference' : 'settings';
+    await page.goto(`${origin}/#${away}`, { waitUntil: 'domcontentloaded' });
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await verify('back');
+    // Create an entry whose forward destination is this same workspace.
+    await page.goto(`${origin}/#${away}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${origin}/#${hash}`, { waitUntil: 'domcontentloaded' });
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await page.goForward({ waitUntil: 'domcontentloaded' });
+    await verify('forward');
+    observations.push({ workspace: hash, direct: true, refresh: true, back: true, forward: true, private_isolation: clean });
+  }
+  return observations;
+}
+
 async function verifyEngine(name, engine, replicaState, failures) {
   const browser = await engine.launch({ headless: true });
   try {
@@ -420,23 +455,20 @@ async function verifyEngine(name, engine, replicaState, failures) {
       visited.push({ workspace: hash, replica_view: view, fields_verified: true });
     }
 
-    await page.goBack({ waitUntil: 'domcontentloaded' });
-    await verifyPanel(page, 'incidents-back', 'loss', replicaState);
-    await page.goForward({ waitUntil: 'domcontentloaded' });
-    await verifyPanel(page, 'settings-forward', 'qualification', replicaState);
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await verifyPanel(page, 'settings-refresh', 'qualification', replicaState);
+    const navigation = await verifyWorkspaceNavigation(page, replicaState);
 
     const cleanContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const cleanPage = await cleanContext.newPage();
     observePage(cleanPage, `${name}-clean-session`, failures);
-    await cleanPage.goto(`${origin}/#inference`, { waitUntil: 'domcontentloaded' });
-    await verifyPanel(cleanPage, 'inference-clean-session', 'tracks', replicaState);
+    const cleanNavigation = await verifyWorkspaceNavigation(cleanPage, replicaState, true);
     await cleanContext.close();
     await context.close();
     return {
       engine: name,
       workspaces: visited,
+      navigation,
+      clean_session_navigation: cleanNavigation,
+      private_canary_isolation_verified: true,
       refresh_verified: true,
       back_forward_verified: true,
       clean_second_session_reconstructed: true,
