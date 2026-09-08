@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ConcurrencyLivenessProjection, ConcurrencyLivenessSource, type ConcurrencyWorkspace } from './ConcurrencyLivenessPanel';
 import type { LiveRouteStatus, LiveRouteStatusClient } from './routeStatus';
@@ -24,10 +24,46 @@ describe('ConcurrencyLivenessProjection', () => {
       expect(screen.getByRole('region', {
         name: `${replicaView} request-level stage replication`,
       })).toBeInTheDocument();
-      expect(screen.getByText('placement-fixture-replica')).toBeInTheDocument();
+      expect(within(screen.getByRole('region', { name: `${replicaView} request-level stage replication` })).getByText('placement-fixture-replica')).toBeInTheDocument();
       expect(screen.getAllByText('data parallel').length).toBeGreaterThan(0);
     });
   }
+
+  it('shows placement-specific artifact and load requirements in Device Lab', () => {
+    const status = liveRouteStatusFixture();
+    render(<ConcurrencyLivenessProjection status={status} view="lab" nowUnixMs={20_000} />);
+    expect(screen.getByRole('region', { name: 'Replica placement requirements' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Artifact binding' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Load binding' })).toBeInTheDocument();
+    expect(screen.getByTitle(status.replica_track_qualification[0].artifact_verification_digest)).toBeInTheDocument();
+    expect(screen.getByTitle(status.replica_track_qualification[0].load_proof_digest)).toBeInTheDocument();
+    expect(screen.getByText(/Synthetic browser workers are ineligible for model stages/)).toBeInTheDocument();
+    expect(screen.getByText(/Bindings alone do not prove readiness/)).toBeInTheDocument();
+  });
+
+  it.each(['Expired', 'Not yet valid', 'Placement lost', 'Not qualified'])('keeps Device Lab evidence non-current when %s', (state) => {
+    const status = liveRouteStatusFixture();
+    const original = status.replica_track_qualification[0];
+    const now = original.issued_at_unix_ms + 1;
+    const record = { ...original,
+      expires_at_unix_ms: state === 'Expired' ? now : original.expires_at_unix_ms,
+      issued_at_unix_ms: state === 'Not yet valid' ? now + 1 : original.issued_at_unix_ms,
+      route_ready: state !== 'Not qualified',
+    };
+    render(<ConcurrencyLivenessProjection status={{ ...status, replica_track_qualification: [record],
+      replica_loss_placement_ids: state === 'Placement lost' ? [record.placement_id] : [] }} view="lab" nowUnixMs={now} />);
+    const region = within(screen.getByRole('region', { name: 'Replica placement requirements' }));
+    expect(region.getByText(state, { exact: true })).toBeInTheDocument();
+    expect(region.queryByText('Pass', { exact: true })).not.toBeInTheDocument();
+    expect(region.queryByText('Current qualification')).not.toBeInTheDocument();
+  });
+
+  it('renders unavailable Device Lab evidence without inventing placements', () => {
+    render(<ConcurrencyLivenessProjection status={{ ...liveRouteStatusFixture(), replica_track_qualification: [] }} view="lab" />);
+    const region = within(screen.getByRole('region', { name: 'Replica placement requirements' }));
+    expect(region.getByRole('status')).toHaveTextContent('Placement qualification evidence unavailable.');
+    expect(region.getAllByRole('row')).toHaveLength(1);
+  });
 
   it('does not promote an advertising node to qualified', () => {
     render(<ConcurrencyLivenessProjection status={liveRouteStatusFixture()} view="lab" />);

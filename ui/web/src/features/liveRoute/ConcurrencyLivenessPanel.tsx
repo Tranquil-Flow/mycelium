@@ -49,6 +49,34 @@ export function ConcurrencyLivenessProjection({
       : 'tracks';
   return (
     <>
+    {view === 'lab' ? (
+      <section className={styles.panel} aria-label="Replica placement requirements">
+        <h2>Replica placement requirements</h2>
+        <p>Synthetic browser workers are ineligible for model stages. Physical placements require exact artifacts, independent loading, a startup challenge, parity, resource fit, directed links, and cleanup evidence.</p>
+        <p>Bindings alone do not prove readiness. These records describe the qualifier&apos;s named replica placement, not independent proof for every placement in its track.</p>
+        <div className={styles.tableWrap}><table>
+          <thead><tr><th>Replica placement</th><th>Artifact binding</th><th>Load binding</th><th>Startup</th><th>Parity</th><th>Resource fit</th><th>Directed link</th><th>Cleanup</th><th>Evidence currency</th></tr></thead>
+          <tbody>{status.replica_track_qualification.map((record) => {
+            const currency = record.issued_at_unix_ms > nowUnixMs ? 'Not yet valid'
+              : record.expires_at_unix_ms <= nowUnixMs ? 'Expired'
+              : record.placement_ids.some((id) => status.replica_loss_placement_ids.includes(id)) ? 'Placement lost'
+              : record.route_ready ? 'Current qualification' : 'Not qualified';
+            const proof = (value: boolean) => currency === 'Current qualification'
+              ? value ? 'Pass' : 'Fail'
+              : value ? 'Recorded pass — not current' : 'Not proven';
+            return <tr key={record.qualification_id} data-qualification-id={record.qualification_id}>
+              <th scope="row">{record.placement_id}</th>
+              <td title={record.artifact_verification_digest}>Bound: {record.artifact_verification_digest.slice(0, 19)}…</td>
+              <td title={record.load_proof_digest}>Bound: {record.load_proof_digest.slice(0, 19)}…</td>
+              <td>{proof(record.startup_challenge_passed)}</td><td>{proof(record.parity_verified)}</td>
+              <td>{proof(record.memory_within_bounds)}</td><td>{proof(record.directed_link_qualified)}</td>
+              <td>{proof(record.cleanup_within_bounds)}</td><td>{currency}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
+        {status.replica_track_qualification.length === 0 ? <p role="status">Placement qualification evidence unavailable.</p> : null}
+      </section>
+    ) : null}
     {view === 'nodes' ? <A5PlacementPanel status={status} nowUnixMs={nowUnixMs} /> : null}
     <A5ReplicaTrackPanel
       qualifications={status.replica_track_qualification}

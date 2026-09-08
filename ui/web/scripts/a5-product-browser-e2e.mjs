@@ -149,7 +149,38 @@ function expectedTrackState(qualification, losses) {
   return qualification.rejected_reasons.join(' ').replaceAll('_', ' ');
 }
 
+async function verifyPlacementRequirements(page, replicaState) {
+  const panel = page.getByRole('region', { name: 'Replica placement requirements', exact: true });
+  await panel.waitFor({ state: 'visible', timeout: 30_000 });
+  const text = await panel.innerText();
+  if (!text.includes('Synthetic browser workers are ineligible for model stages')
+      || !text.includes('Bindings alone do not prove readiness')) fail('placement_requirements_boundary_missing');
+  const rows = panel.locator('tbody tr');
+  if (await rows.count() !== replicaState.qualifications.length) fail('placement_requirements_count_invalid');
+  for (const qualification of replicaState.qualifications) {
+    const row = panel.locator(`tr[data-qualification-id="${qualification.qualification_id}"]`);
+    if (await row.count() !== 1) fail('placement_requirements_identity_invalid');
+    if ((await row.locator('th').innerText()).trim() !== qualification.placement_id) fail('placement_requirements_placement_invalid');
+    const cells = row.locator('td');
+    if (await cells.nth(0).getAttribute('title') !== qualification.artifact_verification_digest
+        || await cells.nth(1).getAttribute('title') !== qualification.load_proof_digest) fail('placement_requirements_binding_invalid');
+    const now = Date.now();
+    const currency = qualification.issued_at_unix_ms > now ? 'Not yet valid'
+      : qualification.expires_at_unix_ms <= now ? 'Expired'
+      : qualification.placement_ids.some((id) => replicaState.losses.has(id)) ? 'Placement lost'
+      : qualification.route_ready ? 'Current qualification' : 'Not qualified';
+    const proof = (value) => currency === 'Current qualification' ? value ? 'Pass' : 'Fail'
+      : value ? 'Recorded pass — not current' : 'Not proven';
+    const expected = [qualification.startup_challenge_passed, qualification.parity_verified,
+      qualification.memory_within_bounds, qualification.directed_link_qualified,
+      qualification.cleanup_within_bounds].map(proof);
+    expected.push(currency);
+    if (JSON.stringify((await cells.allTextContents()).slice(2)) !== JSON.stringify(expected)) fail('placement_requirements_evidence_invalid');
+  }
+}
+
 async function verifyPanel(page, hash, view, replicaState) {
+  if (hash === 'lab' || hash.startsWith('lab-')) await verifyPlacementRequirements(page, replicaState);
   const panel = page.locator(
     `section[aria-label="${view} request-level stage replication"]`,
   );
