@@ -38,17 +38,30 @@ def _absolute_name(path: Path) -> Path:
     return Path(os.path.abspath(os.fspath(path)))
 
 
+def _file_identity(metadata: os.stat_result) -> tuple[int, ...]:
+    return (metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_size,
+            metadata.st_mtime_ns, metadata.st_ctime_ns)
+
+
 def _sha_file(path: Path, *, maximum_bytes: int = 16 * 1024 * 1024) -> str:
     try:
-        metadata = path.lstat()
-        if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
-            raise SupervisorError("source_manifest_invalid")
-        if metadata.st_size <= 0 or metadata.st_size > maximum_bytes:
-            raise SupervisorError("source_manifest_invalid")
-        digest = hashlib.sha256()
-        with path.open("rb") as stream:
-            while block := stream.read(1024 * 1024):
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+        descriptor = os.open(path, flags)
+        with os.fdopen(descriptor, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= maximum_bytes:
+                raise SupervisorError("source_manifest_invalid")
+            digest = hashlib.sha256()
+            total = 0
+            while block := stream.read(min(1024 * 1024, maximum_bytes + 1 - total)):
+                total += len(block)
+                if total > maximum_bytes:
+                    raise SupervisorError("source_manifest_invalid")
                 digest.update(block)
+            after = os.fstat(stream.fileno())
+            if (total != before.st_size or _file_identity(before) != _file_identity(after)
+                    or _file_identity(after) != _file_identity(path.lstat())):
+                raise SupervisorError("source_manifest_invalid")
     except SupervisorError:
         raise
     except OSError as error:
@@ -57,17 +70,22 @@ def _sha_file(path: Path, *, maximum_bytes: int = 16 * 1024 * 1024) -> str:
 
 
 def _artifact(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
         return {"exists": False, "sha256": None, "size_bytes": 0}
-    metadata = path.lstat()
-    if path.is_symlink() or not stat.S_ISREG(metadata.st_mode):
-        return {"exists": True, "sha256": None, "size_bytes": metadata.st_size}
-    return {
-        "exists": True,
-        "sha256": _sha_file(path, maximum_bytes=64 * 1024 * 1024),
-        "size_bytes": metadata.st_size,
-        "mode": f"{stat.S_IMODE(metadata.st_mode):04o}",
-    }
+    except OSError:
+        return {"exists": True, "sha256": None, "size_bytes": 0}
+    result: dict[str, Any] = {"exists": True, "sha256": None, "size_bytes": metadata.st_size,
+              "mode": f"{stat.S_IMODE(metadata.st_mode):04o}"}
+    try:
+        result["sha256"] = _sha_file(path, maximum_bytes=64 * 1024 * 1024)
+        if _file_identity(metadata) != _file_identity(path.lstat()):
+            result["sha256"] = None
+    except (SupervisorError, OSError):
+        # Bad terminal output must not prevent a truthful terminal receipt.
+        pass
+    return result
 
 
 def _exclusive_json(
@@ -721,6 +739,9 @@ def main() -> int:
         document["reason_code"] = "owned_child_cleanup_blocked"
     elif document["lifetime_exceeded"]:
         document["reason_code"] = "maximum_lifetime_exceeded"
+    elif any(artifact["exists"] and artifact["sha256"] is None
+             for artifact in (document["success_artifact"], document["failure_artifact"])):
+        document["reason_code"] = "terminal_artifact_invalid"
     elif returncode == 0 and success_exists and not failure_exists:
         document["terminal_valid"] = True
         document["reason_code"] = "success_artifact_present"
@@ -745,7 +766,10 @@ def main() -> int:
             sort_keys=True,
         )
     )
-    return 125 if returncode is None or document["lifetime_exceeded"] else returncode
+    return 125 if (
+        returncode is None or document["lifetime_exceeded"]
+        or document["reason_code"] == "terminal_artifact_invalid"
+    ) else returncode
 
 
 if __name__ == "__main__":

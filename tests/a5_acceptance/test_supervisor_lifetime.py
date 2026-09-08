@@ -8,6 +8,33 @@ import sys
 import time
 
 
+@pytest.mark.parametrize('kind', ['symlink', 'broken-symlink', 'directory', 'fifo', 'empty', 'oversized'])
+def test_terminal_artifact_must_be_hashable_regular_bytes(tmp_path, kind):
+    inputs = _fixture(tmp_path, f'''import os,sys
+from pathlib import Path
+p=Path(sys.argv[sys.argv.index('--output')+1])
+kind={kind!r}
+if kind == 'symlink':
+    target=p.with_name('target.json'); target.write_bytes(b'{{}}'); p.symlink_to(target)
+elif kind == 'broken-symlink': p.symlink_to(p.with_name('absent'))
+elif kind == 'directory': p.mkdir()
+elif kind == 'fifo': os.mkfifo(p)
+elif kind == 'empty': p.touch()
+else:
+    with p.open('wb') as f: f.truncate(64*1024*1024+1)
+''')
+    command, _ = _command(*inputs, _sha(inputs[0].read_bytes()))
+    result = subprocess.run(command, env=_environment(inputs[1]), capture_output=True, timeout=10)
+    assert result.returncode != 0
+    document = json.loads(inputs[-1].read_text())
+    assert document['child_started'] is True
+    assert document['child_returncode'] == 0
+    assert document['success_artifact']['exists'] is True
+    assert document['success_artifact']['sha256'] is None
+    assert document['terminal_valid'] is False
+    assert document['reason_code'] == 'terminal_artifact_invalid'
+
+
 def test_total_lifetime_terminates_owned_child_and_seals(tmp_path):
     inputs = _fixture(tmp_path, "import time\nwhile True: time.sleep(0.02)\n")
     manifest, token, child, output, failure, receipt = inputs
