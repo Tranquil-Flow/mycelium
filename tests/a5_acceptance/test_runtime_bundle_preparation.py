@@ -40,6 +40,54 @@ def test_manifest_rejects_symlink(tmp_path):
         module().transfer_manifest(tmp_path)
 
 
+def test_node_subsets_roundtrip_through_real_controller(tmp_path):
+    from physical_inference_qualification import PeerIdentity, QualificationController
+    m = module()
+    for name in ['physical_inference_node.py', 'stage-left.bin', 'stage-right.bin']:
+        (tmp_path/name).write_bytes(name.encode())
+    manifest = m.transfer_manifest(tmp_path)
+    subsets = m.node_transfer_manifests(manifest, {
+        'left': ['physical_inference_node.py', 'stage-left.bin'],
+        'right': ['physical_inference_node.py', 'stage-right.bin'],
+    })
+    peers = tuple(PeerIdentity(node_id=name, ssh_target='fixture@localhost', host_id=f'host-{name}',
+        boot_id=f'boot-{name}', staging_root=f'/tmp/mycelium-test/{name}',
+        process_transport='local') for name in ['left', 'right'])
+    controller = QualificationController(mode='dry-run', peers=peers, source_root=tmp_path,
+        transfer_manifest=manifest, node_transfer_manifests=subsets,
+        membership_snapshot={}, now=1.0)
+    assert list(controller._validate_transfers()) == manifest['files']
+    assert subsets['manifests']['left']['files'] == manifest['files'][:2]
+
+
+@pytest.mark.parametrize('selections', [
+    {}, {'left': ['runtime.py']}, {'left': ['physical_inference_node.py']},
+    {'left': ['physical_inference_node.py', 'physical_inference_node.py']},
+    {'left': ['physical_inference_node.py', '../private']},
+])
+def test_node_subsets_reject_incomplete_or_unbound_selection(tmp_path, selections):
+    m = module()
+    for name in ['physical_inference_node.py', 'runtime.py']:
+        (tmp_path/name).write_bytes(b'local fixture')
+    with pytest.raises(ValueError, match='node_transfer'):
+        m.node_transfer_manifests(m.transfer_manifest(tmp_path), selections)
+
+
+def test_explicit_null_node_selection_cannot_disable_binding(tmp_path, monkeypatch):
+    import sys
+    m = module()
+    selection = tmp_path/'selection.json'
+    selection.write_text('null')
+    monkeypatch.setattr(sys, 'argv', ['prepare', '--repo', str(tmp_path), '--sidecar', 'unused',
+        '--ui-root', 'unused', '--output', 'unused', '--transfer-path', 'unused',
+        '--node-transfer-paths', str(selection)])
+    def forbidden(*args):
+        raise AssertionError('invalid selection reached packaging')
+    monkeypatch.setattr(m, 'prepare', forbidden)
+    with pytest.raises(ValueError, match='node_transfer_selection_invalid'):
+        m.main()
+
+
 def test_native_architecture_is_checked(tmp_path):
     fake = tmp_path/'binary'
     fake.write_bytes(b'not executable'); fake.chmod(0o700)

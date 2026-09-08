@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -81,6 +82,43 @@ def transfer_manifest(root: Path) -> dict:
     return result
 
 
+def node_transfer_manifests(manifest: dict, selections: dict) -> dict:
+    """Select byte-identical subsets; selection is not model/host admission."""
+    if not isinstance(manifest, dict) or set(manifest) != {'protocol', 'files'} or manifest['protocol'] != 'mycelium.controller_transfer_manifest.v1':
+        raise ValueError('node_transfer_base_invalid')
+    records = manifest['files']
+    if not isinstance(records, list) or not 1 <= len(records) <= 256:
+        raise ValueError('node_transfer_base_invalid')
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {'path', 'size_bytes', 'content_digest'}:
+            raise ValueError('node_transfer_base_invalid')
+        relative = record['path']
+        if not isinstance(relative, str) or not relative or Path(relative).is_absolute() or '..' in Path(relative).parts:
+            raise ValueError('node_transfer_base_invalid')
+        if type(record['size_bytes']) is not int or record['size_bytes'] < 0 or not isinstance(record['content_digest'], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', record['content_digest']):
+            raise ValueError('node_transfer_base_invalid')
+    paths = [record['path'] for record in records]
+    if paths != sorted(set(paths)):
+        raise ValueError('node_transfer_base_invalid')
+    if not isinstance(selections, dict) or not 1 <= len(selections) <= 256:
+        raise ValueError('node_transfer_selection_invalid')
+    by_path = {record['path']: record for record in records}
+    covered = set()
+    manifests = {}
+    for node_id, selected in selections.items():
+        if not isinstance(node_id, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', node_id):
+            raise ValueError('node_transfer_selection_invalid')
+        if not isinstance(selected, list) or not 1 <= len(selected) <= 256 or not all(isinstance(item, str) for item in selected):
+            raise ValueError('node_transfer_selection_invalid')
+        if len(set(selected)) != len(selected) or 'physical_inference_node.py' not in selected or not set(selected) <= set(by_path):
+            raise ValueError('node_transfer_selection_invalid')
+        covered.update(selected)
+        manifests[node_id] = {'protocol': manifest['protocol'], 'files': [dict(by_path[item]) for item in sorted(selected)]}
+    if covered != set(by_path):
+        raise ValueError('node_transfer_selection_incomplete')
+    return {'protocol': 'mycelium.controller_node_transfer_manifests.v1', 'manifests': dict(sorted(manifests.items()))}
+
+
 def write_json(path: Path, value: object) -> None:
     raw = (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)+'\n').encode()
     fd = os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
@@ -88,7 +126,7 @@ def write_json(path: Path, value: object) -> None:
         f.write(raw); f.flush(); os.fsync(f.fileno())
 
 
-def prepare(repo: Path, sidecar: Path, ui: Path, output: Path, paths: list[str]) -> dict:
+def prepare(repo: Path, sidecar: Path, ui: Path, output: Path, paths: list[str], node_paths: dict | None = None) -> dict:
     source = source_identity(repo)
     native = native_identity(sidecar)
     if not (ui/'index.html').is_file() or ui.is_symlink():
@@ -123,6 +161,9 @@ def prepare(repo: Path, sidecar: Path, ui: Path, output: Path, paths: list[str])
         ui_files.append({'path': p.relative_to(ui).as_posix(), 'sha256': digest(target), 'size_bytes': target.stat().st_size})
     manifest = transfer_manifest(payload)
     write_json(output/'transfer-manifest.json', manifest)
+    node_manifest_path = output/'node-transfer-manifests.json'
+    if node_paths is not None:
+        write_json(node_manifest_path, node_transfer_manifests(manifest, node_paths))
     archive = build_transfer_archive(payload, manifest)
     fd = os.open(output/'runtime.tar', os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600)
     with os.fdopen(fd,'wb') as f:
@@ -134,6 +175,7 @@ def prepare(repo: Path, sidecar: Path, ui: Path, output: Path, paths: list[str])
         'python': {'executable': sys.executable, 'version': sys.version,
                    'dependency_lock_sha256': digest(repo/'release/python-requirements.lock')},
         'transfer_manifest_sha256': digest(output/'transfer-manifest.json'),
+        'node_transfer_manifests_sha256': digest(node_manifest_path) if node_paths is not None else None,
         'archive_sha256': digest(output/'runtime.tar'),
         'transfer_scope': 'explicit runtime subset, not a model or complete placement',
         'model_identity': None, 'target_native_identity': None,
@@ -152,8 +194,17 @@ def main() -> int:
     p.add_argument('--ui-root', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--transfer-path', action='append', required=True)
+    p.add_argument('--node-transfer-paths', type=Path, help='JSON mapping of exact node IDs to payload paths; no host discovery')
     a = p.parse_args()
-    print(json.dumps(prepare(a.repo,a.sidecar,a.ui_root,a.output,a.transfer_path), sort_keys=True))
+    node_paths = None
+    if a.node_transfer_paths is not None:
+        regular(a.node_transfer_paths)
+        if a.node_transfer_paths.stat().st_size > 1_048_576:
+            raise ValueError('node_transfer_selection_too_large')
+        node_paths = json.loads(a.node_transfer_paths.read_text())
+        if not isinstance(node_paths, dict) or not node_paths:
+            raise ValueError('node_transfer_selection_invalid')
+    print(json.dumps(prepare(a.repo,a.sidecar,a.ui_root,a.output,a.transfer_path,node_paths), sort_keys=True))
     return 0
 
 if __name__ == '__main__':
