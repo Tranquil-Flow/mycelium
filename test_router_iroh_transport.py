@@ -1050,6 +1050,70 @@ def test_local_trace_append_rechecks_running_after_builder_race(
     assert router.token_events == []
 
 
+def test_hop_trace_binds_request_path_placement_and_delivery_receipt() -> None:
+    header = HopHeader(
+        request_id='request-1', path_id='path-1', path_attempt=2,
+        phase='DECODE', token_index=3, hop_index=1,
+        source_placement_id='placement-first', destination_placement_id='placement-replica',
+        topology_version=1, idempotency_key='private-idempotency-key',
+    )
+    identity = json.loads(_bounded_trace_identity(header, delivery_message_id=b'x' * 16))
+    assert identity['request_id'] == header.request_id
+    assert identity['path_id'] == header.path_id
+    assert identity['path_attempt'] == header.path_attempt
+    assert identity['destination_placement_id'] == header.destination_placement_id
+    assert identity['source_placement_id'] == header.source_placement_id
+    assert identity['delivery_message_id'] == (b'x' * 16).hex()
+    assert 'idempotency' not in json.dumps(identity)
+
+
+def test_hop_trace_does_not_leak_overlong_attribution_or_displace_receipt() -> None:
+    header = HopHeader(
+        request_id='request-short', path_id='private-path-' + 'x' * 2048, path_attempt=2,
+        phase='DECODE', token_index=3, hop_index=1,
+        source_placement_id='private-source-' + 'x' * 2048,
+        destination_placement_id='private-destination-' + 'x' * 2048,
+        topology_version=1, idempotency_key='private-idempotency-key',
+    )
+    rendered = _bounded_trace_identity(header, delivery_message_id=b'x' * 16)
+    identity = json.loads(rendered)
+    assert len(rendered.encode()) <= 512
+    assert identity['delivery_message_id'] == (b'x' * 16).hex()
+    assert identity['request_id'] == header.request_id
+    assert 'private-' not in rendered
+    assert 'path_id' not in identity
+    assert 'source_placement_id' not in identity
+    assert 'destination_placement_id' not in identity
+
+
+def test_remote_send_retains_hop_scope_with_matching_receipt() -> None:
+    """Actual wire/adapter path against a mocked sidecar, not fleet evidence."""
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.bind_router(_RecordingRouter())
+    header = HopHeader(
+        request_id='request-scoped', path_id='path-scoped', path_attempt=1,
+        phase='DECODE', token_index=1, hop_index=1,
+        source_placement_id='source-slot', destination_placement_id='replica-slot',
+        topology_version=1, idempotency_key='private-key',
+    )
+    transport.start()
+    try:
+        transport._send_or_dispatch('peer-node', encode_frame(header, b'private-activation'))
+        trace = transport.outbound_trace
+        hop = next(json.loads(row[row.index('{'):]) for row in trace if row.startswith('HopHeader'))
+        receipt = next(json.loads(row[row.index('{'):]) for row in trace if row.startswith('DeliveryReceipt'))
+        assert hop['delivery_message_id'] == receipt['message_id']
+        assert hop['request_id'] == header.request_id
+        assert hop['path_id'] == header.path_id
+        assert hop['path_attempt'] == header.path_attempt
+        assert hop['destination_placement_id'] == header.destination_placement_id
+        assert 'private-activation' not in ''.join(trace)
+        assert 'private-key' not in ''.join(trace)
+    finally:
+        transport.close()
+
+
 def test_trace_identity_omits_overlong_public_fields_without_leaking_them() -> None:
     sensitive_request = "request-sensitive-" + "r" * 2_048
     sensitive_phase = "phase-sensitive-" + "p" * 2_048

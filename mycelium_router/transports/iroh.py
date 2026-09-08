@@ -221,6 +221,19 @@ def _bounded_trace_identity(
         }
         if fits(candidate):
             identity = candidate
+    if isinstance(source, HopHeader):
+        # Retain the existing bounded request/receipt evidence first. Missing
+        # optional attribution means unknown, never permission to infer a hop.
+        for field_name in ('destination_placement_id', 'path_id', 'source_placement_id'):
+            value = getattr(source, field_name)
+            if isinstance(value, str) and len(value.encode('utf-8')) <= _TRACE_ID_BYTES:
+                candidate = {**identity, field_name: value}
+                if fits(candidate):
+                    identity = candidate
+        if type(source.path_attempt) is int and 0 <= source.path_attempt < 2**63:
+            candidate = {**identity, 'path_attempt': source.path_attempt}
+            if fits(candidate):
+                identity = candidate
     rendered = render(identity)
     if len(rendered.encode("utf-8")) > max_bytes:
         raise IrohTransportError("trace_identity_too_large")
