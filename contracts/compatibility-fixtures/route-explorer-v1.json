@@ -1,0 +1,10 @@
+{
+  "digest": "sha256:4c9a8980ed336032602c8f1112a9ad1b1f3497c34fe2a9a658a49a186819ab25",
+  "generation": 1,
+  "nodes": [],
+  "overlays": "unavailable",
+  "protocol": "mycelium.route_explorer.v1",
+  "segments": [],
+  "source_digest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "source_mode": "fixture"
+}

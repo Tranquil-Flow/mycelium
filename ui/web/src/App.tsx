@@ -23,6 +23,7 @@ import type {
 } from './data/observatoryEventSource';
 import { EvidenceView } from './views/EvidenceView';
 import { DeviceLabWorkspace } from './features/deviceLab/DeviceLabWorkspace';
+import { RouteExplorerWorkspace } from './features/routeExplorer/RouteExplorer';
 import { ProductInternetNativeProjection } from './features/internetNative/ProductInternetNativeProjection';
 import { InferenceWorkspace } from './features/inference/InferenceWorkspace';
 import { HttpDeploymentRegistryClient } from './features/inference/deploymentClient';
@@ -467,6 +468,7 @@ export default function App({
               snapshot={productEvidence.visible.snapshot}
             />
           ) : null}
+          {activeView === 'network' ? <RouteExplorerWorkspace /> : null}
           {content}
         </ProductFeatureSlot>
       </AppShell>

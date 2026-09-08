@@ -191,6 +191,9 @@ class ProductProjector:
                 source_errors=errors,
             )
             validated = validate_product_snapshot(snapshot)
+            from .route_explorer import project_route_explorer
+            validated['route_explorer'] = project_route_explorer(validated)
+            validated = validate_product_snapshot(validated)
             self._generation = generation
             self._cursor = cursor
             return validated

@@ -103,6 +103,7 @@ from mycelium_live.activation import (
     validate_activation_status,
 )
 from mycelium_live.a4_contracts import compatibility_fixtures as a4_fixtures
+from mycelium_product_spine.route_explorer import compatibility_fixtures as route_explorer_fixtures
 from mycelium_internet.contracts import compatibility_fixtures as internet_fixtures
 from mycelium_replica_contracts import compatibility_fixtures as replica_fixtures
 from mycelium_live.preparation import AUTHORIZATION_PROTOCOL
@@ -2236,6 +2237,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "concurrent-request-runtime-v1.json": m16_runtime_status(),
         **a4_fixtures(),
         **internet_fixtures(),
+        **route_explorer_fixtures(),
         **replica_fixtures(),
         "m23-kv-gate-v1.json": m23_kv_gate(),
         "product-snapshot-v1.json": product_snapshot(),

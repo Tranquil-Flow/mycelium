@@ -209,6 +209,7 @@ def test_restart_upgrades_exact_pre_a8_internet_native_state(tmp_path: Path) -> 
     ]
     for event in persisted["events"]:
         event["snapshot"].pop("internet_native")
+        event["snapshot"].pop("route_explorer", None)  # pre-A8 state predates A14 too
     state_file.write_text(json.dumps(persisted, sort_keys=True, separators=(",", ":")))
     state_file.chmod(0o600)
 

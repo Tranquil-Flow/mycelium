@@ -661,6 +661,9 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         "internet_native",
         "provenance",
     }
+    # Older product-v1 publications remain readable, explicitly without an explorer.
+    if isinstance(document, Mapping) and 'route_explorer' in document:
+        fields.add('route_explorer')
     if not _exact(document, fields) or document["protocol"] != SNAPSHOT_PROTOCOL:
         raise ProductContractError("product_snapshot_invalid")
     if (
@@ -703,6 +706,12 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
     try:
         detached = dict(document)
         detached["internet_native"] = internet_native
+        if 'route_explorer' in document:
+            from .route_explorer import project_route_explorer, validate_route_explorer
+            explorer = validate_route_explorer(document['route_explorer'])
+            if explorer != project_route_explorer(detached):
+                raise ProductContractError('product_route_explorer_unbound')
+            detached['route_explorer'] = explorer
         return json.loads(
             json.dumps(
                 detached,
