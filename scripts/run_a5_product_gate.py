@@ -341,6 +341,23 @@ def run_gate(base_url: str, *, maximum_new_tokens: int) -> dict[str, Any]:
             expected_node_ids,
         ):
             return None
+        # Node activity can be visible before every selected placement has
+        # decoded. Keep polling inside the original overlap deadline.
+        current_peers = _peer_snapshot(live)
+        selected = {p for request_id in request_ids for p in requests[request_id]["placement_ids"]}
+        for placement_id in selected:
+            node_id = placement_nodes.get(placement_id)
+            if not isinstance(node_id, str):
+                return None
+            baseline = before_peers.get(node_id, {}).get("placement_counters", {}).get(placement_id)
+            current = current_peers.get(node_id, {}).get("placement_counters", {}).get(placement_id)
+            if not isinstance(baseline, dict) or not isinstance(current, dict):
+                return None
+            for field in ("prefill_operation_count", "decode_operation_count", "active_state_count", "active_kv_bytes"):
+                if type(current.get(field)) is not int or type(baseline.get(field)) is not int:
+                    return None
+                if current[field] <= baseline[field]:
+                    return None
         return {"runtime": runtime, "live": live}
 
     overlap_bundle = wait_for(observed_overlap, timeout=60.0)

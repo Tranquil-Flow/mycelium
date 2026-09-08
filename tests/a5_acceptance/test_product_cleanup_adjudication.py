@@ -5,7 +5,7 @@ from scripts import run_a5_product_gate as gate
 from tests.a5_acceptance.test_replica_contracts import _qualification_payload
 
 
-def exercise(monkeypatch, *, final_kv=0, omit_final_peer=False, missing_work=False):
+def exercise(monkeypatch, *, final_kv=0, omit_final_peer=False, missing_work=False, delayed_decode=False):
     qualification = _qualification_payload()
     placements = ['primary', 'placement-fixture-replica', 'placement-fixture-stage-1']
     nodes = {p: f'node-{i}' for i, p in enumerate(placements)}
@@ -28,8 +28,20 @@ def exercise(monkeypatch, *, final_kv=0, omit_final_peer=False, missing_work=Fal
     final = live(4, final_kv)
     if omit_final_peer:
         final['peers'].pop()
-    snapshots = iter([live(0, 0), runtime(False), runtime(True), live(4, 1), runtime(False), final])
-    monkeypatch.setattr(gate, 'public_json', lambda *args: next(snapshots))
+    early = live(4, 1)
+    for peer in early['peers']:
+        for counters in peer['placement_counters'].values():
+            counters['decode_operation_count'] = 0
+    runtime_snapshots = iter([runtime(False), *([runtime(True)] if delayed_decode else []), runtime(True), runtime(False)])
+    live_snapshots = iter([live(0, 0), *([early] if delayed_decode else []), live(4, 1), final])
+    def snapshot(_base, path):
+        if path.endswith('live-status'):
+            return next(live_snapshots, final)
+        return next(runtime_snapshots, runtime(False))
+    monkeypatch.setattr(gate, 'public_json', snapshot)
+    ticks = iter(range(1000))
+    monkeypatch.setattr(gate.time, 'monotonic', lambda: next(ticks))
+    monkeypatch.setattr(gate.time, 'sleep', lambda _: None)
     class Session:
         count = 0
         def __init__(self, _):
@@ -47,6 +59,10 @@ def test_clean_control(monkeypatch):
     assert exercise(monkeypatch)['cleanup_zero_delta'] is True
 
 
+def test_overlap_waits_for_placement_decode_not_only_node_activity(monkeypatch):
+    assert exercise(monkeypatch, delayed_decode=True)['cleanup_zero_delta'] is True
+
+
 @pytest.mark.parametrize('kwargs', [{'final_kv': 1}, {'omit_final_peer': True}])
 def test_positive_gate_rejects_unproven_cleanup(monkeypatch, kwargs):
     with pytest.raises(gate.GateError, match='cleanup'):
@@ -54,5 +70,5 @@ def test_positive_gate_rejects_unproven_cleanup(monkeypatch, kwargs):
 
 
 def test_node_aggregate_work_cannot_substitute_for_placement_work(monkeypatch):
-    with pytest.raises(gate.GateError, match='placement_work'):
+    with pytest.raises(gate.GateError, match='gate_state_timeout'):
         exercise(monkeypatch, missing_work=True)
