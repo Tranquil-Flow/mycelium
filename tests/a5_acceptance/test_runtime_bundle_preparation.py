@@ -187,6 +187,43 @@ def test_metadata_rejects_fifo_without_blocking(tmp_path):
         module().load_model_metadata(p)
 
 
+def test_serialized_subsets_reach_inert_cli_without_execution(tmp_path):
+    """Signed fixture membership, actual CLI/archives; no physical authority."""
+    import json, os, subprocess, sys
+    from physical_inference_qualification import PeerIdentity
+    from tests.physical_qualification.test_controller import _snapshot, NOW
+    m = module()
+    (tmp_path/'physical_inference_node.py').write_bytes((ROOT/'physical_inference_node.py').read_bytes())
+    peers = tuple(PeerIdentity(node_id=name, ssh_target='fixture@localhost',
+        host_id=f'fixture-host-{name}', boot_id=f'fixture-boot-{name}',
+        staging_root=f'/tmp/mycelium-local-conformance/{name}', process_transport='local')
+        for name in ['left', 'right'])
+    base = m.transfer_manifest(tmp_path)
+    subsets = m.node_transfer_manifests(base, {p.node_id: ['physical_inference_node.py'] for p in peers})
+    for name, value in [('transfer', base), ('subsets', subsets), ('membership', _snapshot(peers))]:
+        m.write_json(tmp_path/f'{name}.json', value)
+    # Fail at the actual interpreter audit boundary if preflight ever tries to
+    # launch a worker or connect/bind a socket. Not merely a mocked runner.
+    guard = "import sys,runpy; sys.addaudithook(lambda event,args: (_ for _ in ()).throw(RuntimeError('execution_forbidden')) if event in {'subprocess.Popen','os.system','os.fork','socket.connect','socket.bind'} else None); sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')"
+    argv = [sys.executable, '-B', '-c', guard, str(ROOT/'physical_inference_qualification.py'),
+        'preflight', '--dry-run', '--source-root', str(tmp_path),
+        '--transfer-manifest', str(tmp_path/'transfer.json'), '--node-transfer-manifests', str(tmp_path/'subsets.json'),
+        '--membership-snapshot', str(tmp_path/'membership.json'), '--now', str(NOW + 1), '--peers']
+    argv += [f'{p.node_id},{p.ssh_target},{p.host_id},{p.boot_id},{p.staging_root},local,-' for p in peers]
+    environment = {k: v for k, v in os.environ.items() if k not in {'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV'}}
+    completed = subprocess.run(argv, cwd=ROOT, env=environment, capture_output=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr.decode()
+    result = json.loads(completed.stdout)
+    assert result['physical_execution'] is False
+    assert result['route_ready'] is False
+    assert result['peer_count'] == len(peers)
+    assert all(a['argv'] is None and a['transfers'] == base['files'] for a in result['actions'])
+    (tmp_path/'physical_inference_node.py').write_bytes(b'tampered')
+    rejected = subprocess.run(argv, cwd=ROOT, env=environment, capture_output=True, timeout=10)
+    assert rejected.returncode != 0
+    assert b'transfer_size_mismatch' in rejected.stdout + rejected.stderr
+
+
 def test_native_architecture_is_checked(tmp_path):
     fake = tmp_path/'binary'
     fake.write_bytes(b'not executable'); fake.chmod(0o700)
