@@ -397,6 +397,11 @@ async function verifyPrivateIsolation(page) {
   const inputs = await page.locator('textarea, input').evaluateAll((elements) =>
     elements.map((element) => element.value).join('\n'));
   if (/REPLICA-(?:BROWSER|DEGRADED)-/.test(inputs)) fail('private_canary_leaked');
+  const output = page.getByRole('log', { name: 'Decoded output' });
+  if (await output.count() > 0
+    && (await output.innerText()).trim() !== 'Decoded output will appear here and stay only in this tab session.') {
+    fail('private_output_leaked');
+  }
 }
 
 async function verifyWorkspaceNavigation(page, replicaState, clean = false) {

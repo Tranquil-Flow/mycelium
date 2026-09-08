@@ -6,6 +6,7 @@ import {
 } from './routeStatus';
 import styles from './LiveRouteWorkspace.module.css';
 import { A5ReplicaTrackPanel, type A5ReplicaTrackView } from './A5ReplicaTrackPanel';
+import { A5PlacementPanel } from './A5PlacementPanel';
 
 export type ConcurrencyWorkspace =
   | 'inference'
@@ -48,6 +49,7 @@ export function ConcurrencyLivenessProjection({
       : 'tracks';
   return (
     <>
+    {view === 'nodes' ? <A5PlacementPanel status={status} nowUnixMs={nowUnixMs} /> : null}
     <A5ReplicaTrackPanel
       qualifications={status.replica_track_qualification}
       lossPlacementIds={status.replica_loss_placement_ids}

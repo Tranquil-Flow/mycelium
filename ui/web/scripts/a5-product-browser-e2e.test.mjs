@@ -54,3 +54,11 @@ test('clean sessions reject another tab private canary', async () => {
   context.page = { locator() { return { async innerText() { return 'REPLICA-BROWSER-chromium-PRIMARY'; } }; } };
   await assert.rejects(vm.runInContext('verifyPrivateIsolation(page)', context), /private_canary_leaked/);
 });
+
+test('clean sessions reject decoded output even without a prompt canary', async () => {
+  context.page = {
+    locator() { return { async innerText() { return ''; }, async evaluateAll() { return ''; } }; },
+    getByRole() { return { async count() { return 1; }, async innerText() { return 'Other tab generated output'; } }; },
+  };
+  await assert.rejects(vm.runInContext('verifyPrivateIsolation(page)', context), /private_output_leaked/);
+});
