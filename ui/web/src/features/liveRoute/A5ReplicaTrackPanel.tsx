@@ -27,7 +27,15 @@ export function A5ReplicaTrackPanel({
   const hasLostPlacement = (qualification: A5ReplicaTrackQualification) =>
     qualification.placement_ids.some((placementId) => lost.has(placementId));
   const isCurrent = (qualification: A5ReplicaTrackQualification) =>
-    qualification.route_ready && qualification.expires_at_unix_ms > nowUnixMs;
+    qualification.route_ready && qualification.issued_at_unix_ms <= nowUnixMs && qualification.expires_at_unix_ms > nowUnixMs;
+  const state = (record: A5ReplicaTrackQualification) =>
+    record.issued_at_unix_ms > nowUnixMs ? 'not yet valid'
+      : record.expires_at_unix_ms <= nowUnixMs ? 'expired'
+      : hasLostPlacement(record) ? 'placement lost'
+      : record.route_ready ? 'qualified' : 'not qualified';
+  const proof = (record: A5ReplicaTrackQualification, value: boolean) =>
+    state(record) === 'qualified' ? value ? 'pass' : 'fail'
+      : value ? 'recorded pass — not current' : 'not proven';
   const qualified = qualifications.filter(
     (qualification) => isCurrent(qualification),
   );
@@ -59,7 +67,7 @@ export function A5ReplicaTrackPanel({
       </div>
       <p>
         Each request is admitted onto exactly one complete legal track.
-        Distinct requests use distinct complete tracks; a single request is
+        Different requests can use different complete tracks; a single request is
         never split across replica placements and its KV stays pinned to the
         admitted track.
       </p>
@@ -71,6 +79,7 @@ export function A5ReplicaTrackPanel({
               <tr>
                 <th>Track</th>
                 <th>Placement</th>
+                <th>Complete placement sequence</th>
                 <th>Replica group</th>
                 <th>Generation</th>
                 <th>State</th>
@@ -81,18 +90,11 @@ export function A5ReplicaTrackPanel({
                 <tr key={qualification.qualification_id} data-qualification-id={qualification.qualification_id}>
                   <th scope="row">{short(qualification.track_id)}</th>
                   <td>{qualification.placement_id}</td>
+                  <td>{qualification.placement_ids.join(' → ')}</td>
                   <td>{qualification.replica_group_id}</td>
                   <td>{qualification.qualifier_generation}</td>
                   <td>
-                    {qualification.expires_at_unix_ms <= nowUnixMs
-                      ? 'expired'
-                      : hasLostPlacement(qualification)
-                        ? 'placement lost'
-                        : qualification.route_ready
-                        ? 'qualified'
-                        : qualification.rejected_reasons
-                            .map((reason) => reason.replaceAll('_', ' '))
-                            .join(', ')}
+                    {state(qualification) === 'not qualified' ? qualification.rejected_reasons.map((reason) => reason.replaceAll('_', ' ')).join(', ') || 'not qualified' : state(qualification)}
                   </td>
                 </tr>
               ))}
@@ -112,6 +114,7 @@ export function A5ReplicaTrackPanel({
                 <th>Memory</th>
                 <th>Cleanup</th>
                 <th>Link</th>
+                <th>Evidence state</th>
                 <th>Expiry</th>
               </tr>
             </thead>
@@ -119,23 +122,20 @@ export function A5ReplicaTrackPanel({
               {qualifications.map((qualification) => (
                 <tr key={qualification.qualification_id} data-qualification-id={qualification.qualification_id}>
                   <th scope="row">{qualification.placement_id}</th>
-                  <td>{qualification.parity_verified ? 'pass' : 'fail'}</td>
+                  <td>{proof(qualification, qualification.parity_verified)}</td>
                   <td>
-                    {qualification.startup_challenge_passed
-                      ? 'pass'
-                      : 'fail'}
+                    {proof(qualification, qualification.startup_challenge_passed)}
                   </td>
                   <td>
-                    {qualification.memory_within_bounds ? 'pass' : 'fail'}
+                    {proof(qualification, qualification.memory_within_bounds)}
                   </td>
                   <td>
-                    {qualification.cleanup_within_bounds ? 'pass' : 'fail'}
+                    {proof(qualification, qualification.cleanup_within_bounds)}
                   </td>
                   <td>
-                    {qualification.directed_link_qualified
-                      ? 'pass'
-                      : 'fail'}
+                    {proof(qualification, qualification.directed_link_qualified)}
                   </td>
+                  <td>{state(qualification)}</td>
                   <td>
                     {new Date(
                       qualification.expires_at_unix_ms,
@@ -154,8 +154,8 @@ export function A5ReplicaTrackPanel({
             <strong>
               {`${surviving.length} surviving qualified track${surviving.length === 1 ? '' : 's'} · ${degraded.length} degraded by placement loss`}
             </strong>
-            . New admission on a lost placement is rejected; the surviving
-            track remains usable at reduced capacity.
+            . New admission on a lost placement is rejected; only current surviving
+            tracks can remain eligible at reduced capacity.
           </p>
           <div className={styles.tableWrap}>
             <table>
@@ -170,13 +170,7 @@ export function A5ReplicaTrackPanel({
                   <tr key={qualification.qualification_id} data-qualification-id={qualification.qualification_id}>
                     <th scope="row">{qualification.placement_id}</th>
                     <td>
-                      {qualification.expires_at_unix_ms <= nowUnixMs
-                        ? 'expired'
-                        : hasLostPlacement(qualification)
-                          ? 'lost — new admission blocked'
-                          : qualification.route_ready
-                            ? 'surviving'
-                            : 'not qualified'}
+                      {state(qualification) === 'placement lost' ? 'lost — new admission blocked' : state(qualification) === 'qualified' ? 'surviving' : state(qualification)}
                     </td>
                   </tr>
                 ))}

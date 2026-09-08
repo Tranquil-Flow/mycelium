@@ -142,11 +142,13 @@ async function liveReplicaState() {
 }
 
 function expectedTrackState(qualification, losses) {
+  if (qualification.issued_at_unix_ms > Date.now()) return 'not yet valid';
+  if (qualification.expires_at_unix_ms <= Date.now()) return 'expired';
   if (qualification.placement_ids.some((placementId) => losses.has(placementId))) {
     return 'placement lost';
   }
   if (qualification.route_ready === true) return 'qualified';
-  return qualification.rejected_reasons.join(' ').replaceAll('_', ' ');
+  return qualification.rejected_reasons.map((reason) => reason.replaceAll('_', ' ')).join(', ') || 'not qualified';
 }
 
 async function verifyPlacementRequirements(page, replicaState) {
@@ -219,6 +221,7 @@ async function verifyPanel(page, hash, view, replicaState) {
       if (rowHeader !== expectedTrackId) fail(`track_identity_invalid_${hash}`);
       const expectedCells = [
         qualification.placement_id,
+        qualification.placement_ids.join(' → '),
         qualification.replica_group_id,
         String(qualification.qualifier_generation),
         expectedTrackState(qualification, replicaState.losses),
@@ -236,7 +239,11 @@ async function verifyPanel(page, hash, view, replicaState) {
         qualification.memory_within_bounds,
         qualification.cleanup_within_bounds,
         qualification.directed_link_qualified,
-      ].map((value) => value ? 'pass' : 'fail');
+      ].map((value) => expectedTrackState(qualification, replicaState.losses) === 'qualified'
+        ? value ? 'pass' : 'fail'
+        : value ? 'recorded pass — not current' : 'not proven');
+      const state = expectedTrackState(qualification, replicaState.losses);
+      expectedCells.push(qualification.route_ready || ['not yet valid', 'expired', 'placement lost'].includes(state) ? state : 'not qualified');
       expectedCells.push(new Date(qualification.expires_at_unix_ms).toISOString());
       if (JSON.stringify(cells) !== JSON.stringify(expectedCells)) {
         fail(`qualification_fields_invalid_${hash}`);
@@ -245,11 +252,10 @@ async function verifyPanel(page, hash, view, replicaState) {
       if (rowHeader !== qualification.placement_id) {
         fail(`loss_identity_invalid_${hash}`);
       }
-      const expected = qualification.placement_ids.some(
-        (placementId) => replicaState.losses.has(placementId),
-      )
-        ? 'lost — new admission blocked'
-        : 'surviving';
+      const state = expectedTrackState(qualification, replicaState.losses);
+      const expected = state === 'placement lost' ? 'lost — new admission blocked'
+        : state === 'qualified' ? 'surviving'
+        : ['expired', 'not yet valid'].includes(state) ? state : 'not qualified';
       if (cells.length !== 1 || cells[0] !== expected) {
         fail(`loss_state_invalid_${hash}`);
       }
