@@ -18,6 +18,18 @@ describe('decodeA5ReplicaTrackQualification', () => {
     expect(decoded.rejected_reasons).toEqual([]);
   });
 
+  it.each(['parity_verified', 'startup_challenge_passed', 'memory_within_bounds', 'cleanup_within_bounds', 'directed_link_qualified'])('rejects route-ready with failed %s', (field) => {
+    expect(() => decodeA5ReplicaTrackQualification(a5QualificationFixture({ [field]: false }))).toThrow(/route_ready/);
+  });
+
+  it('rejects route-ready with explicit rejection reasons', () => {
+    expect(() => decodeA5ReplicaTrackQualification(a5QualificationFixture({ rejected_reasons: ['parity_failed'] }))).toThrow(/route_ready/);
+  });
+
+  it('preserves a non-ready qualification with failed checks', () => {
+    expect(decodeA5ReplicaTrackQualification(a5QualificationFixture({ route_ready: false, parity_verified: false, rejected_reasons: ['parity_failed'] })).route_ready).toBe(false);
+  });
+
   it('rejects unknown fields', () => {
     expect(() =>
       decodeA5ReplicaTrackQualification(

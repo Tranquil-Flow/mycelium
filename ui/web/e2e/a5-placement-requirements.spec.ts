@@ -41,4 +41,9 @@ test('Device Lab reconstructs exact placement bindings without promoting stale e
   await verifyPlacementRequirements(page, { qualifications: [qualification], losses: new Set() });
   await expect(panel.getByText('Pass', { exact: true })).toHaveCount(0);
   await expect(panel.getByText('Current qualification', { exact: true })).toHaveCount(0);
+  // A contradictory public record is rejected at the real HTTP decoder boundary.
+  qualification = { ...current, parity_verified: false };
+  await expect(page.getByRole('region', { name: 'Concurrent execution and scoped liveness', exact: true }))
+    .toContainText('route_ready contradicts its proof results');
+  await expect(panel).toHaveCount(0);
 });

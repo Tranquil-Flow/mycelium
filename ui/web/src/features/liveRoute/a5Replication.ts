@@ -168,7 +168,7 @@ export function decodeA5ReplicaTrackQualification(
   if (!placementIds.includes(placementId)) {
     throw new TypeError('placement_ids must include placement_id');
   }
-  return Object.freeze({
+  const result: A5ReplicaTrackQualification = Object.freeze({
     protocol: A5_REPLICA_QUALIFICATION_PROTOCOL,
     qualification_id: digest(source.qualification_id, 'qualification_id'),
     qualification_digest: digest(
@@ -222,6 +222,14 @@ export function decodeA5ReplicaTrackQualification(
     rejected_reasons: identifierArray(source.rejected_reasons, 'rejected_reasons'),
     route_ready: boolean(source.route_ready, 'route_ready'),
   });
+  if (result.route_ready && (result.rejected_reasons.length > 0 || ![
+    result.parity_verified, result.startup_challenge_passed,
+    result.memory_within_bounds, result.cleanup_within_bounds,
+    result.directed_link_qualified,
+  ].every((value) => value))) {
+    throw new TypeError('a5_qualification route_ready contradicts its proof results');
+  }
+  return result;
 }
 
 export function decodeA5ReplicaTrackQualifications(
