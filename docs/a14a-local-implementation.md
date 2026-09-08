@@ -78,6 +78,9 @@ frontend build is served unchanged. Browser session credentials are random,
 memory-only, HttpOnly, and never printed. No model, fleet, SSH, geolocation or
 third-party service is contacted. Absent qualifier/legacy-observatory endpoints
 remain explicit 404/unavailable in their existing panels, not forged green badges.
+At 390px, the pre-existing logical-execution pipeline table below the explorer can
+extend the page width. The new explorer itself remains bounded and its table is
+keyboard-scrollable; no claim of a full-app mobile-layout cleanup is made.
 
 Run from `ui/web`, with an existing supported Chrome binary:
 

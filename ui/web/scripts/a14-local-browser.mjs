@@ -71,8 +71,18 @@ try {
  assert.equal(await explorer.evaluate(el=>el.getAnimations({subtree:true}).length),0);
  checks.push('pause_resume_reduced_motion_low_power_static');
  for(const route of ['nodes','plans','readiness','incidents','settings','lab','inference','network']) {
-  await page.goto(origin+'/#'+route);
-  await expect(page.getByRole('navigation')).toBeVisible();
+  const active=()=>page.locator(`nav a[href="#${route}"][aria-current="page"]`);
+  await page.goto(origin+'/#'+route);await expect(active()).toBeVisible();
+  await page.reload();await expect(active()).toBeVisible();
+  const away=route==='network'?'nodes':'network';
+  await page.locator(`nav a[href="#${away}"]`).click();
+  await expect(page.locator(`nav a[href="#${away}"][aria-current="page"]`)).toBeVisible();
+  await page.goBack();await expect(active()).toBeVisible();
+  await page.goForward();await expect(page.locator(`nav a[href="#${away}"][aria-current="page"]`)).toBeVisible();
+  await page.goBack();await expect(active()).toBeVisible();
+  const visibleText=await page.locator('body').innerText();
+  const inputValues=await page.locator('input,textarea').evaluateAll(es=>es.map(e=>e.value).join('\n'));
+  for(const canary of ['RAW-ENDPOINT-CANARY','192.0.2.23','node-a','node-b']) assert(!(visibleText+inputValues).includes(canary));
  }
  await expect(table).toBeVisible();assert.deepEqual(await equivalent(),initial);
  await page.reload();await expect(table).toBeVisible();assert.deepEqual(await equivalent(),initial);
@@ -91,6 +101,10 @@ try {
  await expect(table).toBeVisible();await page.screenshot({path:out+'/high-contrast-200-percent.png',fullPage:true});
  await page.evaluate(()=>document.documentElement.style.fontSize='');await page.emulateMedia({forcedColors:'none',reducedMotion:'reduce'});
  await page.setViewportSize({width:390,height:844});await expect(table).toBeVisible();
+ const scroller=page.getByRole('region',{name:'Scrollable route timeline',exact:true});
+ await scroller.focus();await page.keyboard.press('ArrowRight');
+ await expect.poll(()=>scroller.evaluate(el=>el.scrollLeft)).toBeGreaterThan(0);
+ await scroller.evaluate(el=>el.scrollLeft=0);
  const widths=await explorer.evaluate(el=>({width:el.getBoundingClientRect().width,viewport:innerWidth}));
  assert(widths.width<=widths.viewport);
  await page.screenshot({path:out+'/mobile-network.png',fullPage:true});
