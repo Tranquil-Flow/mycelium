@@ -499,6 +499,10 @@ class MLXRuntimePort:
       self._peak_kv_bytes = 0
       self._last_release_reason: str | None = None
       self._applied_operation_count = 0
+      self._placement_counters = {
+         placement_id: {"prefill_operation_count": 0, "decode_operation_count": 0}
+         for placement_id in self._bound
+      }
       self._prefill_operation_count = 0
       self._prefill_input_token_count = 0
       self._decode_operation_count = 0
@@ -976,6 +980,19 @@ class MLXRuntimePort:
             "states": states,
             "retained_result_count": len(self._replays),
             "applied_operation_count": self._applied_operation_count,
+            "placement_counters": {
+               placement_id: {
+                  **counts,
+                  "active_state_count": sum(
+                     state["placement_id"] == placement_id for state in states.values()
+                  ),
+                  "active_kv_bytes": sum(
+                     state["kv_bytes"] for state in states.values()
+                     if state["placement_id"] == placement_id
+                  ),
+               }
+               for placement_id, counts in sorted(self._placement_counters.items())
+            },
             "prefill_operation_count": self._prefill_operation_count,
             "prefill_input_token_count": self._prefill_input_token_count,
             "decode_operation_count": self._decode_operation_count,
@@ -1376,6 +1393,10 @@ class MLXRuntimePort:
          _reject("nonfinite_stage_output")
       result = self._runtime_result(stage, runtime, output)
       self._applied_operation_count += 1
+      phase_counter = (
+         "decode_operation_count" if item.phase == "DECODE" else "prefill_operation_count"
+      )
+      self._placement_counters[item.placement_id][phase_counter] += 1
       self._activation_output_bytes += len(result.payload or b"")
       if item.phase in {"PREFILL", "RECOVERY_PREFILL"}:
          self._prefill_operation_count += 1
@@ -1558,6 +1579,10 @@ class MLXRuntimePort:
          self._update_kv_watermark()
 
       self._applied_operation_count += 1
+      phase_counter = (
+         "decode_operation_count" if item.phase == "DECODE" else "prefill_operation_count"
+      )
+      self._placement_counters[item.placement_id][phase_counter] += 1
       self._activation_output_bytes += len(result.payload or b"")
       if item.phase in {"PREFILL", "PREFILL_CHUNK", "RECOVERY_PREFILL"}:
          self._prefill_operation_count += 1

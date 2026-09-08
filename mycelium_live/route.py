@@ -5110,6 +5110,28 @@ class PhysicalLiveRoute:
                     {
                         "node_id": node_id,
                         "placements": placements_by_node.get(node_id, []),
+                        "placement_counters": {
+                            placement["placement_id"]: {
+                                field: counts[field]
+                                for field in (
+                                    "prefill_operation_count", "decode_operation_count",
+                                    "active_state_count", "active_kv_bytes",
+                                )
+                            }
+                            for placement in placements_by_node.get(node_id, [])
+                            if isinstance(runtime.get("placement_counters"), Mapping)
+                            and isinstance(
+                                counts := runtime["placement_counters"].get(placement["placement_id"]),
+                                Mapping,
+                            )
+                            and all(
+                                type(counts.get(field)) is int and counts[field] >= 0
+                                for field in (
+                                    "prefill_operation_count", "decode_operation_count",
+                                    "active_state_count", "active_kv_bytes",
+                                )
+                            )
+                        },
                         **peer_counters[node_id],
                         "decode_mode": mode if isinstance(mode, str) else None,
                         "architecture": (

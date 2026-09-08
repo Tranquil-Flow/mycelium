@@ -28,6 +28,12 @@ export interface LiveRouteStage {
 }
 
 export interface LiveRoutePeer {
+  readonly placement_counters?: Readonly<Record<string, Readonly<{
+    prefill_operation_count: number;
+    decode_operation_count: number;
+    active_state_count: number;
+    active_kv_bytes: number;
+  }>>>;
   readonly node_id: string;
   readonly placements: readonly LiveRouteStage[];
   readonly frames_sent: number;
@@ -382,6 +388,8 @@ function stage(value: unknown, path: string): LiveRouteStage {
 }
 
 function peer(value: unknown, path: string): LiveRoutePeer {
+  const hasPlacementCounters = typeof value === 'object' && value !== null
+    && Object.hasOwn(value, 'placement_counters');
   const item = record(
     value,
     [
@@ -412,9 +420,29 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       'retained_result_count',
       'release_counts',
       'interruptibility',
+      ...(hasPlacementCounters ? ['placement_counters'] : []),
     ],
     path,
   );
+  const placements = array(item.placements, `${path}.placements`).map((candidate, index) =>
+    stage(candidate, `${path}.placements[${index}]`));
+  const placementCounters: Record<string, NonNullable<LiveRoutePeer['placement_counters']>[string]> = {};
+  if (hasPlacementCounters) {
+    if (typeof item.placement_counters !== 'object' || item.placement_counters === null
+      || Array.isArray(item.placement_counters)) throw new TypeError(`${path}.placement_counters is invalid`);
+    const entries = Object.entries(item.placement_counters);
+    if (entries.length > placements.length) throw new TypeError(`${path}.placement_counters is unbounded`);
+    for (const [id, raw] of entries) {
+      if (!placements.some((placement) => placement.placement_id === id)) throw new TypeError(`${path}.placement_counters is unbound`);
+      const counts = record(raw, ['prefill_operation_count', 'decode_operation_count', 'active_state_count', 'active_kv_bytes'], `${path}.placement_counters`);
+      placementCounters[id] = Object.freeze({
+        prefill_operation_count: integer(counts.prefill_operation_count, `${path}.prefill`),
+        decode_operation_count: integer(counts.decode_operation_count, `${path}.decode`),
+        active_state_count: integer(counts.active_state_count, `${path}.state_count`),
+        active_kv_bytes: integer(counts.active_kv_bytes, `${path}.kv_bytes`),
+      });
+    }
+  }
   const mode = item.decode_mode;
   if (mode !== null && (typeof mode !== 'string' || mode.length > 64)) {
     throw new TypeError(`${path}.decode_mode is invalid`);
@@ -485,6 +513,7 @@ function peer(value: unknown, path: string): LiveRoutePeer {
   );
   return Object.freeze({
     frames_sent: base.frames_sent,
+    placement_counters: Object.freeze(placementCounters),
     frames_received: base.frames_received,
     applied_operation_count: base.applied_operation_count,
     node_id: identifier(item.node_id, `${path}.node_id`),

@@ -7,6 +7,17 @@ import { a5QualificationFixture, liveRouteStatusFixture, m13PlacementFixture, m1
 import canonicalRuntimeStatus from '../../../../../contracts/compatibility-fixtures/live-route-status-v1.json';
 
 describe('live route status contract', () => {
+  it('decodes actual placement work separately from node totals', () => {
+    const fixture = liveRouteStatusFixture();
+    const id = fixture.stages[0].placement_id;
+
+    const counts = { prefill_operation_count: 1, decode_operation_count: 2, active_state_count: 1, active_kv_bytes: 64 };
+    const input = { ...fixture, peers: fixture.peers.map((peer, i) => i === 0
+      ? { ...peer, placements: [fixture.stages[0]], placement_counters: { [id]: counts } } : peer) };
+    expect(decodeLiveRouteStatus(input).peers[0].placement_counters).toEqual({ [id]: counts });
+    expect(() => decodeLiveRouteStatus({ ...input, peers: [{ ...input.peers[0], placement_counters: { unbound: counts } }] })).toThrow();
+    expect(() => decodeLiveRouteStatus({ ...input, peers: [{ ...input.peers[0], placement_counters: { [id]: { ...counts, prompt: 'forbidden' } } }] })).toThrow();
+  });
   it('decodes the bounded prompt-free physical projection', () => {
     const decoded = decodeLiveRouteStatus(structuredClone(liveRouteStatusFixture()));
     expect(decoded.model_id).toBe('Qwen/Qwen2.5-0.5B-Instruct');

@@ -452,6 +452,9 @@ def test_complete_context_qwen_uses_checkpointed_stage_execution(
     runtime._runtime_result = lambda *_args: RuntimeResult(success=True)
     runtime._remember_result = lambda *args: remembered.append(args)
     runtime._applied_operation_count = 0
+    runtime._placement_counters = {
+        "placement-checkpointed": {"prefill_operation_count": 0, "decode_operation_count": 0}
+    }
     runtime._activation_output_bytes = 0
     runtime._prefill_operation_count = 0
     runtime._prefill_input_token_count = 0
@@ -462,6 +465,7 @@ def test_complete_context_qwen_uses_checkpointed_stage_execution(
         token_index=-1,
         position=0,
         path_id="path-checkpointed",
+        placement_id="placement-checkpointed",
     )
 
     result = runtime._execute_complete_context(

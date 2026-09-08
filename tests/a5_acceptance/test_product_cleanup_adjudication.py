@@ -5,7 +5,7 @@ from scripts import run_a5_product_gate as gate
 from tests.a5_acceptance.test_replica_contracts import _qualification_payload
 
 
-def exercise(monkeypatch, *, final_kv=0, omit_final_peer=False):
+def exercise(monkeypatch, *, final_kv=0, omit_final_peer=False, missing_work=False):
     qualification = _qualification_payload()
     placements = ['primary', 'placement-fixture-replica', 'placement-fixture-stage-1']
     nodes = {p: f'node-{i}' for i, p in enumerate(placements)}
@@ -20,7 +20,11 @@ def exercise(monkeypatch, *, final_kv=0, omit_final_peer=False):
         return {'route_alive': True, 'deployment_id': 'deployment-fixture', 'topology_version': 1,
                 'replica_track_qualification': [qualification],
                 'peers': [{'node_id': n, 'frames_sent': work, 'frames_received': work,
-                           'applied_operation_count': work, 'active_kv_state_count': kv} for n in nodes.values()]}
+                           'applied_operation_count': work, 'active_kv_state_count': kv,
+                           'placement_counters': {p: {'prefill_operation_count': work, 'decode_operation_count': work,
+                               'active_state_count': kv, 'active_kv_bytes': kv * 64} for p, owner in nodes.items()
+                               if owner == n and not (missing_work and work and p == placements[1])}}
+                          for n in nodes.values()]}
     final = live(4, final_kv)
     if omit_final_peer:
         final['peers'].pop()
@@ -47,3 +51,8 @@ def test_clean_control(monkeypatch):
 def test_positive_gate_rejects_unproven_cleanup(monkeypatch, kwargs):
     with pytest.raises(gate.GateError, match='cleanup'):
         exercise(monkeypatch, **kwargs)
+
+
+def test_node_aggregate_work_cannot_substitute_for_placement_work(monkeypatch):
+    with pytest.raises(gate.GateError, match='placement_work'):
+        exercise(monkeypatch, missing_work=True)

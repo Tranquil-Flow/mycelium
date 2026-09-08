@@ -193,6 +193,7 @@ def _peer_snapshot(status: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "frames_received": item.get("frames_received", 0),
             "applied_operation_count": item.get("applied_operation_count", 0),
             "active_kv_state_count": item.get("active_kv_state_count", 0),
+            "placement_counters": item.get("placement_counters", {}),
         }
         for item in status["peers"]
     }
@@ -464,6 +465,34 @@ def run_gate(base_url: str, *, maximum_new_tokens: int) -> dict[str, Any]:
     if any(delta != 0 for delta in kv_deltas.values()):
         raise GateError("stage_local_kv_cleanup_unproven")
 
+    placement_work = {}
+    for placement_id in worked_placements:
+        node_id = placement_nodes.get(placement_id)
+        if not isinstance(node_id, str):
+            raise GateError("selected_placement_work_unproven")
+        samples = [
+            peers.get(node_id, {}).get("placement_counters", {}).get(placement_id)
+            for peers in (before_peers, overlap_peers, after_peers)
+        ]
+        fields = ("prefill_operation_count", "decode_operation_count", "active_state_count", "active_kv_bytes")
+        if any(
+            not isinstance(sample, dict)
+            or any(type(sample.get(field)) is not int or sample[field] < 0 for field in fields)
+            for sample in samples
+        ):
+            raise GateError("selected_placement_work_unproven")
+        before, during, after = samples
+        if any(during[field] <= before[field] for field in fields):
+            raise GateError("selected_placement_work_unproven")
+        if any(after[field] != before[field] for field in ("active_state_count", "active_kv_bytes")):
+            raise GateError("selected_placement_cleanup_unproven")
+        placement_work[placement_id] = {
+            "node_id": node_id,
+            "overlap_deltas": {field: during[field] - before[field] for field in fields},
+            "cleanup_state_delta": after["active_state_count"] - before["active_state_count"],
+            "cleanup_kv_bytes_delta": after["active_kv_bytes"] - before["active_kv_bytes"],
+        }
+
     final_requests = _request_map(after_runtime)
     if any(item["request_id"] not in final_requests for item in accepted):
         raise GateError("terminal_request_record_missing")
@@ -489,6 +518,7 @@ def run_gate(base_url: str, *, maximum_new_tokens: int) -> dict[str, Any]:
         },
         "replica_placement_ids": replica_placement_ids,
         "worked_placements": worked_placements,
+        "placement_work": placement_work,
         "overlap": {
             "active_request_ids": sorted(overlap["queue"]["active_request_ids"]),
             "maximum_active_requests": overlap["queue"]["maximum_active_requests"],
