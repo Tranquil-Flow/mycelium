@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -40,9 +41,9 @@ class GPT2Tokenizer:
     def __init__(
         self, encoder: dict[str, int], ranks: dict[tuple[str, str], int]
     ) -> None:
-        self._encoder = encoder
-        self._decoder = {index: token for token, index in encoder.items()}
-        self._ranks = ranks
+        self._encoder = dict(encoder)
+        self._decoder = {index: token for token, index in self._encoder.items()}
+        self._ranks = dict(ranks)
         self._byte_encoder = _byte_to_unicode()
         self._byte_decoder = {value: key for key, value in self._byte_encoder.items()}
         self._cache: dict[str, tuple[str, ...]] = {}
@@ -109,3 +110,32 @@ class GPT2Tokenizer:
         return bytearray(self._byte_decoder[char] for char in text).decode(
             "utf-8", errors="replace"
         )
+
+    def token_bytes(self, token_id: int) -> bytes:
+        """Return one vocabulary token's original bytes, rejecting unknown IDs."""
+
+        if type(token_id) is not int:
+            raise TypeError("invalid_token_id")
+        try:
+            token = self._decoder[token_id]
+            return bytes(self._byte_decoder[char] for char in token)
+        except (KeyError, TypeError) as exc:
+            raise ValueError("invalid_token_id") from exc
+
+    def evidence_digest(self) -> str:
+        """Digest the effective in-memory vocabulary and merge ranks."""
+
+        document = {
+            "model": "gpt2-byte-level-bpe",
+            "encoder": self._encoder,
+            "merges": [
+                [first, second, rank]
+                for (first, second), rank in sorted(
+                    self._ranks.items(), key=lambda item: (item[1], item[0])
+                )
+            ],
+        }
+        payload = json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
