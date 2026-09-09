@@ -32,6 +32,7 @@ describe('placement observations in the shipped Nodes workspace', () => {
   });
 
   it.each([
+    ['future-issued', 0, false, 'Not yet valid'],
     ['expired', 2_000_000_000_001, false, 'Expired'],
     ['downstream-loss', 20_000, true, 'Lost'],
   ] as const)('invalidates the track qualification on %s', (_case, nowUnixMs, loss, label) => {

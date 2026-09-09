@@ -24,7 +24,7 @@ export function A5PlacementPanel({ status, nowUnixMs }: {
           <td>{qualifications.length ? [...new Set(qualifications.map((item) => item.artifact_verification_digest))].join(', ') : 'Unknown'}</td>
           <td>{qualifications.length ? [...new Set(qualifications.map((item) => item.load_proof_digest))].join(', ') : 'Unknown'}</td>
           <td>{qualifications.length ? qualifications.map((item) => <div key={item.qualification_id}>
-            {item.qualification_id} · generation {item.qualifier_generation} · {item.expires_at_unix_ms <= nowUnixMs ? 'Expired' : item.placement_ids.some((id) => status.replica_loss_placement_ids.includes(id)) ? 'Lost' : !status.route_alive ? 'Unavailable' : item.route_ready ? 'Qualified' : 'Rejected'}
+            {item.qualification_id} · generation {item.qualifier_generation} · {item.issued_at_unix_ms > nowUnixMs ? 'Not yet valid' : item.expires_at_unix_ms <= nowUnixMs ? 'Expired' : item.placement_ids.some((id) => status.replica_loss_placement_ids.includes(id)) ? 'Lost' : !status.route_alive ? 'Unavailable' : item.route_ready ? 'Qualified' : 'Rejected'}
           </div>) : 'Unknown'}</td>
           <td data-counter="prefill_operation_count">{observation?.prefill_operation_count ?? 'Unknown'}</td>
           <td data-counter="decode_operation_count">{observation?.decode_operation_count ?? 'Unknown'}</td>

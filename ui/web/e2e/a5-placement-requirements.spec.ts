@@ -17,7 +17,11 @@ const verifyPanel = vm.runInContext('verifyPanel', context);
 test.skip(process.env.MYCELIUM_A5_LOCAL_UI !== '1', 'Requires an explicitly selected live-profile local fixture run');
 
 test('Device Lab reconstructs exact placement bindings without promoting stale evidence', async ({ page }) => {
-  const status = liveRouteStatusFixture();
+  const original = liveRouteStatusFixture();
+  const status = { ...original, peers: original.peers.map((peer, index) => index === 0
+    ? { ...peer, placements: [{ ...original.stages[0],
+      placement_id: original.replica_track_qualification[0].placement_id, node_id: peer.node_id }] }
+    : peer) };
   const current = { ...status.replica_track_qualification[0], issued_at_unix_ms: Date.now() - 1000,
     expires_at_unix_ms: Date.now() + 300_000 };
   let qualification = current;
@@ -55,6 +59,13 @@ test('Device Lab reconstructs exact placement bindings without promoting stale e
     await verifyPanel(page, workspace, view, { qualifications: [qualification], losses: new Set() });
     await expect(page.getByText('not yet valid', { exact: true })).toBeVisible();
   }
+  await page.goto('/#nodes');
+  const placementPanel = page.getByRole('region', { name: 'Placement work and qualification', exact: true });
+  await expect(placementPanel).toContainText('Not yet valid');
+  await expect(placementPanel.getByText(/· Qualified$/)).toHaveCount(0);
+  await page.reload();
+  await expect(placementPanel).toContainText('Not yet valid');
+  await page.screenshot({ path: test.info().outputPath('nodes-future-proof.png'), fullPage: true });
   await page.goto('/#lab');
   // A contradictory public record is rejected at the real HTTP decoder boundary.
   qualification = { ...current, parity_verified: false };
