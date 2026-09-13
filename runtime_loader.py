@@ -29,7 +29,11 @@ from typing import Any, BinaryIO, Mapping, NoReturn
 import numpy as np
 
 from layer_assignment import validate_assignment_identity
-from model_adapters import adapter_for_runtime
+from model_adapters import (
+    QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES,
+    QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES,
+    adapter_for_runtime,
+)
 from numpy_runtime import (
     NumpyRuntimeError,
     NumpyStageBackend,
@@ -82,6 +86,17 @@ _SUPPORTED_SOURCE_DTYPES = {
     "mlx.core.float16",
     "mlx.core.float32",
 }
+# Pre-quantized MLX affine sources (verified 27B route artifact,
+# ``mlx-community/Qwen3.8-27B-4bit``): linear ``.weight`` tensors are stored as
+# U32 words packing eight 4-bit values each, with ``.scales``/``.biases``
+# companions holding one float pair per 64-value group (the artifact's declared
+# ``quantization_config`` is ``{bits: 4, group_size: 64, mode: affine}`` and
+# ``value = quant * scale + bias``).  The loader materializes those sources as
+# float tensors; any other packing, group size, or companion layout fails
+# closed.
+_AFFINE4BIT_PACKED_VALUES_PER_WORD = 8
+_AFFINE4BIT_GROUP_SIZE = 64
+_AFFINE4BIT_DEQUANT_CHUNK_FLOAT_BYTES = 32 * 1024 * 1024
 
 
 class RuntimeLoadError(ValueError):
@@ -284,6 +299,8 @@ def _validate_range_and_prefixes(
         )
     if architecture == "gpt2":
         namespace = "transformer." if selected.startswith("transformer.") else ""
+    elif architecture == "qwen3_5":
+        namespace = "language_model.model."
     else:
         namespace = "model."
     return start, end, list(prefixes), namespace
@@ -307,11 +324,12 @@ def _resolve_aliases(
     for source, target in aliases.items():
         if source != "lm_head" or target != "input_embedding":
             raise _fail(f"unsupported component alias: {source} -> {target}")
-        expected_source = (
-            [f"{namespace}wte.weight"]
-            if architecture == "gpt2"
-            else ["model.embed_tokens.weight"]
-        )
+        if architecture == "gpt2":
+            expected_source = [f"{namespace}wte.weight"]
+        elif architecture == "qwen3_5":
+            expected_source = ["language_model.model.embed_tokens.weight"]
+        else:
+            expected_source = ["model.embed_tokens.weight"]
         if component_keys.get(source) != expected_source:
             raise _fail("tied gpt2 lm_head alias does not resolve to token embeddings")
         resolved[source] = {
@@ -326,6 +344,7 @@ def _validate_component_ownership(
     prefixes: list[str],
     namespace: str,
     architecture: str,
+    runtime_model_config: Mapping[str, Any] | None = None,
 ) -> tuple[list[str], dict[str, dict[str, Any]]]:
     components = assignment.get("components")
     if (
@@ -395,30 +414,66 @@ def _validate_component_ownership(
         adapter = adapter_for_runtime(architecture)
     except ValueError as exc:
         raise _fail("runtime architecture adapter unavailable") from exc
-    suffixes = adapter.decoder_tensor_suffixes
-    expected_decoder_keys = sorted(
-        prefix + suffix for prefix in prefixes for suffix in suffixes
-    )
+    suffixes_by_layer_type = dict(adapter.decoder_tensor_suffixes_by_layer_type)
+    if suffixes_by_layer_type:
+        layer_range = assignment.get("range")
+        start = layer_range.get("start_layer") if isinstance(layer_range, Mapping) else None
+        end = (
+            layer_range.get("end_layer_exclusive")
+            if isinstance(layer_range, Mapping)
+            else None
+        )
+        layer_types = (
+            runtime_model_config.get("layer_types")
+            if isinstance(runtime_model_config, Mapping)
+            else None
+        )
+        if not isinstance(layer_types, list) or not isinstance(start, int) or not isinstance(end, int) or len(layer_types) < end:
+            raise _fail(
+                f"{architecture} runtime layer_types are missing or incomplete"
+            )
+        expected_decoder_keys: list[str] = []
+        for index in range(start, end):
+            layer_type = layer_types[index]
+            suffixes = suffixes_by_layer_type.get(layer_type)
+            if not suffixes:
+                raise _fail(
+                    f"{architecture} unsupported layer type at layer {index}: {layer_type!r}"
+                )
+            prefix = prefixes[index - start]
+            expected_decoder_keys.extend(
+                prefix + suffix for suffix in suffixes
+            )
+        expected_decoder_keys = sorted(expected_decoder_keys)
+    else:
+        suffixes = adapter.decoder_tensor_suffixes
+        expected_decoder_keys = sorted(
+            prefix + suffix for prefix in prefixes for suffix in suffixes
+        )
     if decoder_keys != expected_decoder_keys:
         raise _fail(f"{architecture} decoder tensor ownership is missing, extra, or mismatched")
-    expected_static: dict[str, list[str]] = (
-        {
+    exact_static = dict(adapter.exact_static_component_keys)
+    if exact_static:
+        expected_static: dict[str, list[str]] = {
+            component: list(keys) for component, keys in exact_static.items()
+        }
+    elif architecture == "gpt2":
+        expected_static = {
             "input_embedding": sorted((f"{namespace}wpe.weight", f"{namespace}wte.weight")),
             "final_norm": sorted((f"{namespace}ln_f.bias", f"{namespace}ln_f.weight")),
         }
-        if architecture == "gpt2"
-        else {
+    else:
+        expected_static = {
             "input_embedding": ["model.embed_tokens.weight"],
             "final_norm": ["model.norm.weight"],
         }
-    )
     for component, keys in expected_static.items():
         if component in component_keys and component_keys[component] != keys:
             raise _fail(
                 f"{architecture} {component} tensor ownership is missing, extra, or mismatched"
             )
     if "lm_head" in component_keys and "lm_head" not in aliases:
-        if component_keys["lm_head"] != ["lm_head.weight"]:
+        if component_keys["lm_head"] != expected_static.get("lm_head", ["lm_head.weight"]):
             raise _fail(
                 f"{architecture} lm_head tensor ownership is missing, extra, or mismatched"
             )
@@ -484,7 +539,7 @@ def _validate_assignment(
         assignment, runtime["architecture"]
     )
     expected_keys, aliases = _validate_component_ownership(
-        assignment, prefixes, namespace, runtime["architecture"]
+        assignment, prefixes, namespace, runtime["architecture"], runtime["model_config"]
     )
     _validate_stage_boundaries(assignment, assignment["components"], runtime)
     return (
@@ -818,6 +873,152 @@ def _decode_float_payload(payload: bytes, source_dtype: str) -> np.ndarray:
     return np.frombuffer(payload, dtype=dtype)
 
 
+def _unpacked_affine4bit_words(words: np.ndarray) -> np.ndarray:
+    """Unpack MLX's 4-bit nibbles from packed little-endian uint32 words.
+
+    MLX affine packing stores eight consecutive input values per word, the
+    first value in the least significant nibble (verified against
+    ``mlx.core.quantize``/``mlx.core.dequantize`` group_size=64, bits=4).
+    """
+
+    shifts = np.arange(
+        _AFFINE4BIT_PACKED_VALUES_PER_WORD, dtype=np.uint32
+    ) * np.uint32(4)
+    unpacked = (words[..., None] >> shifts) & np.uint32(0xF)
+    return unpacked.reshape(
+        *words.shape[:-1],
+        words.shape[-1] * _AFFINE4BIT_PACKED_VALUES_PER_WORD,
+    ).astype(np.uint8)
+
+
+def _dequantize_affine4bit_rows(
+    words: np.ndarray,
+    scales: np.ndarray,
+    biases: np.ndarray,
+    *,
+    key: str,
+) -> np.ndarray:
+    """Materialize affine 4-bit rows as float32 (``quant * scale + bias``)."""
+
+    if words.ndim != 2:
+        raise _fail(f"invalid pre-quantized affine weight tensor shape: {key}")
+    rows, packed_columns = words.shape
+    if (
+        scales.ndim != 2
+        or biases.ndim != 2
+        or scales.shape != biases.shape
+        or scales.shape[0] != rows
+    ):
+        raise _fail(
+            f"mismatched pre-quantized affine companion shapes for tensor {key}"
+        )
+    in_features = packed_columns * _AFFINE4BIT_PACKED_VALUES_PER_WORD
+    groups = int(scales.shape[1])
+    if groups <= 0 or in_features % groups != 0:
+        raise _fail(f"invalid pre-quantized affine group layout for tensor {key}")
+    group_size = in_features // groups
+    if group_size != _AFFINE4BIT_GROUP_SIZE:
+        raise _fail(
+            "unsupported pre-quantized affine group size for tensor "
+            f"{key}: {group_size}"
+        )
+    quantized = _unpacked_affine4bit_words(words)
+    grouped = quantized.astype(np.float32).reshape(
+        rows, groups, _AFFINE4BIT_GROUP_SIZE
+    )
+    values = grouped * scales[:, :, None] + biases[:, :, None]
+    return values.reshape(rows, in_features)
+
+
+def _load_affine4bit_float_companion(
+    handle: BinaryIO,
+    *,
+    data_offset: int,
+    entry: Mapping[str, Any],
+    key: str,
+) -> np.ndarray:
+    """Load one ``.scales``/``.biases`` companion as a float32 matrix."""
+
+    source_dtype = entry["dtype"]
+    if source_dtype not in {"BF16", "F16", "F32"}:
+        raise _fail(
+            "unsupported pre-quantized affine companion dtype for tensor "
+            f"{key}: {source_dtype}"
+        )
+    start, end = entry["data_offsets"]
+    shape = tuple(int(dimension) for dimension in entry["shape"])
+    if len(shape) != 2:
+        raise _fail(f"invalid pre-quantized affine companion shape for tensor {key}")
+    handle.seek(data_offset + start)
+    payload = handle.read(end - start)
+    if len(payload) != end - start:
+        raise _fail(f"truncated Safetensors data for tensor {key}")
+    source = _decode_float_payload(payload, source_dtype)
+    return np.array(source.reshape(shape), dtype=np.float32, order="C", copy=True)
+
+
+def _load_affine4bit_weight(
+    handle: BinaryIO,
+    *,
+    data_offset: int,
+    start: int,
+    end: int,
+    source_dtype: str,
+    shape: tuple[int, ...],
+    key: str,
+    header: Mapping[str, Mapping[str, Any]],
+    selected: set[str],
+) -> np.ndarray:
+    """Materialize one pre-quantized U32-packed affine 4-bit weight tensor."""
+
+    if source_dtype != "U32" or len(shape) != 2 or not key.endswith(".weight"):
+        raise _fail(f"invalid pre-quantized affine weight tensor: {key}")
+    base = key[: -len(".weight")]
+    scales_key = f"{base}.scales"
+    biases_key = f"{base}.biases"
+    for companion_key in (scales_key, biases_key):
+        if companion_key not in selected or companion_key not in header:
+            raise _fail(
+                "pre-quantized affine weight is missing its assigned companion "
+                f"tensor {companion_key}"
+            )
+    rows, packed_columns = shape
+    if rows * packed_columns * _SAFE_DTYPE_BYTES["U32"] != end - start:
+        raise _fail(f"Safetensors byte length does not match tensor {key}")
+    scales = _load_affine4bit_float_companion(
+        handle, data_offset=data_offset, entry=header[scales_key], key=scales_key
+    )
+    biases = _load_affine4bit_float_companion(
+        handle, data_offset=data_offset, entry=header[biases_key], key=biases_key
+    )
+    if scales.shape != biases.shape or scales.shape[0] != rows:
+        raise _fail(
+            f"mismatched pre-quantized affine companion shapes for tensor {key}"
+        )
+    in_features = packed_columns * _AFFINE4BIT_PACKED_VALUES_PER_WORD
+    row_source_bytes = packed_columns * _SAFE_DTYPE_BYTES["U32"]
+    rows_per_chunk = max(
+        1,
+        _AFFINE4BIT_DEQUANT_CHUNK_FLOAT_BYTES // max(in_features * 4, 1),
+    )
+    values = np.empty((rows, in_features), dtype=np.float32)
+    for row_start in range(0, rows, rows_per_chunk):
+        row_end = min(rows, row_start + rows_per_chunk)
+        byte_count = (row_end - row_start) * row_source_bytes
+        handle.seek(data_offset + start + row_start * row_source_bytes)
+        payload = handle.read(byte_count)
+        if len(payload) != byte_count:
+            raise _fail(f"truncated Safetensors data for tensor {key}")
+        words = np.frombuffer(payload, dtype="<u4").reshape(
+            row_end - row_start, packed_columns
+        )
+        values[row_start:row_end] = _dequantize_affine4bit_rows(
+            words, scales[row_start:row_end], biases[row_start:row_end], key=key
+        )
+    values.flags.writeable = False
+    return values
+
+
 def _load_rowwise_int8_weight(
     handle: BinaryIO,
     *,
@@ -880,13 +1081,26 @@ def _load_numpy_safetensors(
     for key in sorted(selected):
         entry = header[key]
         source_dtype = entry["dtype"]
+        start, end = entry["data_offsets"]
+        shape = tuple(int(dimension) for dimension in entry["shape"])
+        if source_dtype == "U32":
+            loaded[key] = _load_affine4bit_weight(
+                handle,
+                data_offset=data_offset,
+                start=start,
+                end=end,
+                source_dtype=source_dtype,
+                shape=shape,
+                key=key,
+                header=header,
+                selected=selected,
+            )
+            continue
         if source_dtype not in {"BF16", "F16", "F32"}:
             raise _fail(
                 f"unverified or quantized source dtype for tensor {key}: "
                 f"{source_dtype}"
             )
-        start, end = entry["data_offsets"]
-        shape = tuple(int(dimension) for dimension in entry["shape"])
         if quantize_qwen and key.endswith(".weight") and len(shape) == 2:
             loaded[key] = _load_rowwise_int8_weight(
                 handle,
@@ -952,14 +1166,17 @@ def _load_exact_tensors(
             seen_inodes.add(inode)
             header, data_offset = _validate_safetensors_header(handle, path)
             selected = expected_set.intersection(header)
-            if runtime_backend == _MLX_RUNTIME_BACKEND and quantize_qwen:
+            if runtime_backend == _MLX_RUNTIME_BACKEND and (
+                quantize_qwen
+                or any(header[key]["dtype"] == "U32" for key in selected)
+            ):
                 numpy_tensors = _load_numpy_safetensors(
                     handle,
                     header,
                     data_offset,
                     selected,
                     np.dtype("float32"),
-                    quantize_qwen=True,
+                    quantize_qwen=quantize_qwen,
                 )
                 selected_tensors = {}
                 for key in sorted(selected):
@@ -1136,6 +1353,140 @@ def _validate_qwen2_shapes(
         _expect_shape(tensors, head_key, (config["vocab_size"], hidden))
 
 
+def _qwen3_5_layer_shapes(
+    config: Mapping[str, Any], layer_type: str
+) -> dict[str, tuple[int, ...]]:
+    """Exact per-layer-type tensor shapes for the verified qwen3_5 decoder.
+
+    Quantized projections always carry their affine-4-bit ``.scales``/
+    ``.biases`` companions (group size 64); ``conv1d``, ``A_log``,
+    ``dt_bias``, and norm tensors are plain floats.  Unsupported head or
+    group layouts fail closed.
+    """
+
+    hidden = int(config["n_embd"])
+    inner = int(config["n_inner"])
+    group = _AFFINE4BIT_GROUP_SIZE
+    shapes: dict[str, tuple[int, ...]] = {
+        "input_layernorm.weight": (hidden,),
+        "post_attention_layernorm.weight": (hidden,),
+    }
+
+    def grouped(prefix: str, rows: int, columns: int) -> None:
+        if columns % group:
+            raise _fail(
+                f"qwen3_5 group layout is unsupported for {prefix}: "
+                f"{columns} columns"
+            )
+        shapes[f"{prefix}.weight"] = (rows, columns)
+        shapes[f"{prefix}.scales"] = (rows, columns // group)
+        shapes[f"{prefix}.biases"] = (rows, columns // group)
+
+    if layer_type == "linear_attention":
+        num_k_heads = int(config["linear_num_key_heads"])
+        num_v_heads = int(config["linear_num_value_heads"])
+        key_head_dim = int(config["linear_key_head_dim"])
+        value_head_dim = int(config["linear_value_head_dim"])
+        conv_kernel = int(config["linear_conv_kernel_dim"])
+        if num_k_heads <= 0 or num_v_heads % num_k_heads:
+            raise _fail("qwen3_5 linear attention heads are incompatible")
+        key_dim = key_head_dim * num_k_heads
+        value_dim = value_head_dim * num_v_heads
+        conv_dim = 2 * key_dim + value_dim
+        shapes["linear_attn.A_log"] = (num_v_heads,)
+        shapes["linear_attn.dt_bias"] = (num_v_heads,)
+        shapes["linear_attn.norm.weight"] = (value_head_dim,)
+        shapes["linear_attn.conv1d.weight"] = (conv_dim, conv_kernel, 1)
+        grouped("linear_attn.in_proj_qkv", conv_dim, hidden)
+        grouped("linear_attn.in_proj_z", value_dim, hidden)
+        grouped("linear_attn.in_proj_a", num_v_heads, hidden)
+        grouped("linear_attn.in_proj_b", num_v_heads, hidden)
+        grouped("linear_attn.out_proj", hidden, value_dim)
+        expected = QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES
+    elif layer_type == "full_attention":
+        n_head = int(config["n_head"])
+        n_kv_head = int(config["n_kv_head"])
+        head_dim = int(config["head_dim"])
+        if n_kv_head <= 0 or n_head % n_kv_head:
+            raise _fail("qwen3_5 attention heads are incompatible")
+        shapes["self_attn.q_norm.weight"] = (head_dim,)
+        shapes["self_attn.k_norm.weight"] = (head_dim,)
+        grouped("self_attn.q_proj", 2 * n_head * head_dim, hidden)
+        grouped("self_attn.k_proj", n_kv_head * head_dim, hidden)
+        grouped("self_attn.v_proj", n_kv_head * head_dim, hidden)
+        grouped("self_attn.o_proj", hidden, n_head * head_dim)
+        expected = QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES
+    else:
+        raise _fail(f"unsupported qwen3_5 layer type: {layer_type!r}")
+    grouped("mlp.gate_proj", inner, hidden)
+    grouped("mlp.up_proj", inner, hidden)
+    grouped("mlp.down_proj", hidden, inner)
+    if set(shapes) != set(expected):
+        raise _fail("qwen3_5 decoder tensor contract mismatch")
+    return shapes
+
+
+def _validate_qwen3_5_shapes(
+    tensors: Mapping[str, Any],
+    runtime: dict[str, Any],
+    start: int,
+    end: int,
+    components: list[str],
+    aliases: Mapping[str, dict[str, Any]],
+) -> None:
+    """Fail-closed shape validation for the hybrid qwen3_5 decoder stages."""
+
+    config = runtime["model_config"]
+    hidden = int(config["n_embd"])
+    vocabulary = int(config["vocab_size"])
+    group = _AFFINE4BIT_GROUP_SIZE
+    if hidden % group:
+        raise _fail("qwen3_5 hidden size is incompatible with the group layout")
+    n_head = int(config["n_head"])
+    n_kv_head = int(config["n_kv_head"])
+    head_dim = int(config["head_dim"])
+    if n_kv_head <= 0 or n_head % n_kv_head:
+        raise _fail("qwen3_5 attention heads are incompatible")
+    rotary_dim = int(head_dim * float(config["partial_rotary_factor"]))
+    if rotary_dim < 2 or rotary_dim % 2 or rotary_dim > head_dim:
+        raise _fail("qwen3_5 partial rotary factor is unsupported")
+    if "input_embedding" in components:
+        _expect_shape(
+            tensors,
+            "language_model.model.embed_tokens.weight",
+            (vocabulary, hidden),
+        )
+        _expect_shape(
+            tensors,
+            "language_model.model.embed_tokens.scales",
+            (vocabulary, hidden // group),
+        )
+        _expect_shape(
+            tensors,
+            "language_model.model.embed_tokens.biases",
+            (vocabulary, hidden // group),
+        )
+    layer_types = config["layer_types"]
+    for layer in range(start, end):
+        prefix = f"language_model.model.layers.{layer}."
+        for suffix, shape in _qwen3_5_layer_shapes(
+            config, layer_types[layer]
+        ).items():
+            _expect_shape(tensors, prefix + suffix, shape)
+    if "final_norm" in components:
+        _expect_shape(tensors, "language_model.model.norm.weight", (hidden,))
+    if "lm_head" in components:
+        head_key = aliases.get("lm_head", {}).get(
+            "tensor_keys", ["language_model.lm_head.weight"]
+        )[0]
+        if not isinstance(head_key, str) or not head_key.endswith(".weight"):
+            raise _fail("invalid_loaded_stage_aliases")
+        base = head_key[: -len(".weight")]
+        _expect_shape(tensors, head_key, (vocabulary, hidden))
+        _expect_shape(tensors, f"{base}.scales", (vocabulary, hidden // group))
+        _expect_shape(tensors, base + ".biases", (vocabulary, hidden // group))
+
+
 def _layer_norm(
     hidden: Any,
     weight: Any,
@@ -1260,6 +1611,258 @@ def _qwen2_rope(query: Any, key: Any, theta: float, mx: Any) -> tuple[Any, Any]:
     return (
         query * cosine + rotate_half(query) * sine,
         key * cosine + rotate_half(key) * sine,
+    )
+
+
+# --- Qwen3.5 hybrid decoder reference execution (MLX) ------------------------
+#
+# The verified qwen3_5 route artifact is a hybrid decoder: ``linear_attention``
+# layers are gated delta-net recurrent mixers (quantized projections with
+# first-class ``.scales``/``.biases`` companions, materialized to dense floats
+# by this loader), ``full_attention`` layers are gated self-attention (q/k RMS
+# norms on the head dimension, partial rotary embeddings, sigmoid output
+# gate).  These reference paths mirror the artifact's native runtime semantics
+# (mlx_lm ``qwen3_5`` / transformers ``modeling_qwen3_5``): recurrent (not
+# chunked) gated delta rule, explicit causal depthwise convolution, no cache.
+# Correctness first; speed is deliberately not a goal of this path.
+
+
+def _qwen3_5_rope(
+    query: Any, key: Any, theta: float, rotary_dim: int, mx: Any
+) -> tuple[Any, Any]:
+    """Partial rotary embedding (rotate_half style) over the first dims."""
+
+    if rotary_dim < 2 or rotary_dim % 2 or rotary_dim > int(query.shape[-1]):
+        raise _fail("unsupported qwen3_5 rotary dimension")
+    sequence = int(query.shape[2])
+    exponent = mx.arange(0, rotary_dim, 2, dtype=mx.float32) / rotary_dim
+    inv_freq = 1.0 / mx.power(mx.array(theta, dtype=mx.float32), exponent)
+    frequencies = mx.arange(sequence, dtype=mx.float32).reshape(-1, 1) * inv_freq.reshape(
+        1, -1
+    )
+    embedding = mx.concatenate((frequencies, frequencies), axis=-1)
+    cosine = mx.cos(embedding)[None, None, :, :]
+    sine = mx.sin(embedding)[None, None, :, :]
+
+    def rotate_half(value: Any) -> Any:
+        first, second = mx.split(value, 2, axis=-1)
+        return mx.concatenate((-second, first), axis=-1)
+
+    query_rotary = query[..., :rotary_dim]
+    key_rotary = key[..., :rotary_dim]
+    return (
+        mx.concatenate(
+            (
+                query_rotary * cosine + rotate_half(query_rotary) * sine,
+                query[..., rotary_dim:],
+            ),
+            axis=-1,
+        ),
+        mx.concatenate(
+            (
+                key_rotary * cosine + rotate_half(key_rotary) * sine,
+                key[..., rotary_dim:],
+            ),
+            axis=-1,
+        ),
+    )
+
+
+def _qwen3_5_full_attention(
+    hidden: Any,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+    mx: Any,
+) -> Any:
+    """Gated full attention: q/k RMS norms, partial rotary, sigmoid gate."""
+
+    n_head = int(config["n_head"])
+    n_kv_head = int(config["n_kv_head"])
+    head_dim = int(config["head_dim"])
+    epsilon = float(config["rms_norm_epsilon"])
+    batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
+    q_out = _qwen2_linear(hidden, tensors[prefix + "self_attn.q_proj.weight"], mx)
+    q_out = q_out.reshape(batch, sequence, n_head, 2 * head_dim)
+    query, gate = mx.split(q_out, 2, axis=-1)
+    gate = gate.reshape(batch, sequence, n_head * head_dim)
+    key = _qwen2_linear(
+        hidden, tensors[prefix + "self_attn.k_proj.weight"], mx
+    ).reshape(batch, sequence, n_kv_head, head_dim)
+    value = _qwen2_linear(
+        hidden, tensors[prefix + "self_attn.v_proj.weight"], mx
+    ).reshape(batch, sequence, n_kv_head, head_dim)
+    query = _rms_norm(
+        query, tensors[prefix + "self_attn.q_norm.weight"], epsilon, mx
+    ).transpose(0, 2, 1, 3)
+    key = _rms_norm(
+        key, tensors[prefix + "self_attn.k_norm.weight"], epsilon, mx
+    ).transpose(0, 2, 1, 3)
+    value = value.transpose(0, 2, 1, 3)
+    query, key = _qwen3_5_rope(
+        query,
+        key,
+        float(config["rope_theta"]),
+        int(head_dim * float(config["partial_rotary_factor"])),
+        mx,
+    )
+    repeats = n_head // n_kv_head
+    if repeats > 1:
+        key = mx.repeat(key, repeats, axis=1)
+        value = mx.repeat(value, repeats, axis=1)
+    scores = mx.matmul(query, key.transpose(0, 1, 3, 2)) / math.sqrt(head_dim)
+    positions = mx.arange(sequence)
+    causal = positions[:, None] >= positions[None, :]
+    probabilities = mx.softmax(
+        mx.where(
+            causal[None, None, :, :],
+            scores,
+            mx.array(-math.inf, dtype=scores.dtype),
+        ),
+        axis=-1,
+    )
+    attended = mx.matmul(probabilities, value)
+    attended = attended.transpose(0, 2, 1, 3).reshape(
+        batch, sequence, n_head * head_dim
+    )
+    attended = attended * mx.sigmoid(gate)
+    return _qwen2_linear(attended, tensors[prefix + "self_attn.o_proj.weight"], mx)
+
+
+def _qwen3_5_gated_delta_net(
+    hidden: Any,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+    mx: Any,
+) -> Any:
+    """Gated delta-net recurrent mixer (reference implementation, no cache)."""
+
+    num_k_heads = int(config["linear_num_key_heads"])
+    num_v_heads = int(config["linear_num_value_heads"])
+    key_head_dim = int(config["linear_key_head_dim"])
+    value_head_dim = int(config["linear_value_head_dim"])
+    conv_kernel = int(config["linear_conv_kernel_dim"])
+    epsilon = float(config["rms_norm_epsilon"])
+    key_dim = key_head_dim * num_k_heads
+    value_dim = value_head_dim * num_v_heads
+    conv_dim = 2 * key_dim + value_dim
+    batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
+
+    mixed = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_qkv.weight"], mx)
+    z = _qwen2_linear(
+        hidden, tensors[prefix + "linear_attn.in_proj_z.weight"], mx
+    ).reshape(batch, sequence, num_v_heads, value_head_dim)
+    a = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_a.weight"], mx)
+    b = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_b.weight"], mx)
+
+    conv_weight = tensors[prefix + "linear_attn.conv1d.weight"].reshape(
+        conv_dim, conv_kernel
+    )
+    padded = mx.concatenate(
+        (
+            mx.zeros((batch, conv_kernel - 1, conv_dim), dtype=mixed.dtype),
+            mixed,
+        ),
+        axis=1,
+    )
+    convolved = mx.zeros_like(mixed)
+    for tap in range(conv_kernel):
+        convolved = convolved + padded[
+            :, tap : tap + sequence, :
+        ] * conv_weight[None, None, :, tap]
+    mixed = convolved * mx.sigmoid(convolved)
+
+    query = mixed[:, :, :key_dim].reshape(batch, sequence, num_k_heads, key_head_dim)
+    key = mixed[:, :, key_dim : 2 * key_dim].reshape(
+        batch, sequence, num_k_heads, key_head_dim
+    )
+    value = mixed[:, :, 2 * key_dim :].reshape(
+        batch, sequence, num_v_heads, value_head_dim
+    )
+
+    beta = mx.sigmoid(b)
+    activation = a.astype(mx.float32) + tensors[
+        prefix + "linear_attn.dt_bias"
+    ].astype(mx.float32)
+    decay = -mx.exp(tensors[prefix + "linear_attn.A_log"].astype(mx.float32)) * mx.logaddexp(
+        activation, mx.zeros_like(activation)
+    )
+
+    repeats = num_v_heads // num_k_heads
+    if repeats > 1:
+        query = mx.repeat(query, repeats, axis=2)
+        key = mx.repeat(key, repeats, axis=2)
+    query = query.transpose(0, 2, 1, 3)
+    key = key.transpose(0, 2, 1, 3)
+    value = value.transpose(0, 2, 1, 3)
+
+    # q/k are RMS-normalized on the head dimension; mlx_lm's qwen3_5 folds the
+    # delta-rule scale 1/sqrt(d_k) into q as (inv_scale**2) * rms_norm(q).
+    def rms_normalize(value: Any) -> Any:
+        compute = value.astype(mx.float32)
+        return compute * mx.rsqrt(
+            mx.mean(mx.square(compute), axis=-1, keepdims=True) + 1e-6
+        )
+
+    inv_scale = key_head_dim**-0.5
+    query = (inv_scale**2) * rms_normalize(query)
+    key = inv_scale * rms_normalize(key)
+    decay = decay.transpose(0, 2, 1)
+    beta = beta.transpose(0, 2, 1)
+
+    state = mx.zeros(
+        (batch, num_v_heads, key_head_dim, value_head_dim), dtype=mx.float32
+    )
+    outputs = []
+    for step in range(sequence):
+        step_decay = mx.exp(decay[:, :, step])[:, :, None, None]
+        state = state * step_decay
+        key_step = key[:, :, step]
+        value_step = value[:, :, step]
+        kv_memory = mx.sum(state * key_step[:, :, :, None], axis=-2)
+        delta = (value_step - kv_memory) * beta[:, :, step, None]
+        state = state + key_step[:, :, :, None] * delta[:, :, None, :]
+        outputs.append(mx.sum(state * query[:, :, step, :, None], axis=-2))
+    core = mx.stack(outputs, axis=2).transpose(0, 2, 1, 3).reshape(
+        batch * sequence * num_v_heads, value_head_dim
+    )
+    z_rows = z.reshape(batch * sequence * num_v_heads, value_head_dim)
+    gated = _rms_norm(
+        core, tensors[prefix + "linear_attn.norm.weight"], epsilon, mx
+    ) * (z_rows * mx.sigmoid(z_rows))
+    output = gated.reshape(batch, sequence, value_dim)
+    return _qwen2_linear(output, tensors[prefix + "linear_attn.out_proj.weight"], mx)
+
+
+def _qwen3_5_block(
+    hidden: Any,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+    mx: Any,
+    layer_type: str,
+) -> Any:
+    """Execute one qwen3_5 hybrid decoder layer with the reference path."""
+
+    epsilon = float(config["rms_norm_epsilon"])
+    residual = hidden
+    normalized = _rms_norm(hidden, tensors[prefix + "input_layernorm.weight"], epsilon, mx)
+    if layer_type == "linear_attention":
+        attended = _qwen3_5_gated_delta_net(normalized, tensors, prefix, config, mx)
+    elif layer_type == "full_attention":
+        attended = _qwen3_5_full_attention(normalized, tensors, prefix, config, mx)
+    else:
+        raise _fail(f"unsupported qwen3_5 layer type: {layer_type!r}")
+    hidden = residual + attended
+    residual = hidden
+    normalized = _rms_norm(
+        hidden, tensors[prefix + "post_attention_layernorm.weight"], epsilon, mx
+    )
+    gate = _qwen2_linear(normalized, tensors[prefix + "mlp.gate_proj.weight"], mx)
+    up = _qwen2_linear(normalized, tensors[prefix + "mlp.up_proj.weight"], mx)
+    return residual + _qwen2_linear(
+        gate * mx.sigmoid(gate) * up, tensors[prefix + "mlp.down_proj.weight"], mx
     )
 
 
@@ -1473,6 +2076,59 @@ def _run_qwen2_probe(
     return hidden
 
 
+def _run_qwen3_5_probe(
+    tensors: Mapping[str, Any],
+    runtime: dict[str, Any],
+    start: int,
+    end: int,
+    components: list[str],
+    aliases: Mapping[str, dict[str, Any]],
+) -> Any:
+    """Deterministic hybrid linear/full attention probe for qwen3_5 stages."""
+
+    mx = _mlx_module()
+    config = runtime["model_config"]
+    if "input_embedding" in components:
+        hidden = tensors["language_model.model.embed_tokens.weight"][
+            mx.array([[0, 1, 2]], dtype=mx.int32)
+        ]
+    else:
+        positions = mx.arange(1, 4, dtype=mx.float32).reshape(1, 3, 1)
+        channels = mx.arange(1, config["n_embd"] + 1, dtype=mx.float32).reshape(
+            1, 1, config["n_embd"]
+        )
+        hidden = (
+            mx.sin(positions * channels)
+            + positions * mx.square(channels) / (config["n_embd"] ** 2)
+        ).astype(_runtime_dtypes()[runtime["dtype"]])
+    layer_types = config["layer_types"]
+    for layer in range(start, end):
+        hidden = _qwen3_5_block(
+            hidden,
+            tensors,
+            f"language_model.model.layers.{layer}.",
+            config,
+            mx,
+            layer_types[layer],
+        )
+    if "final_norm" in components:
+        hidden = _rms_norm(
+            hidden,
+            tensors["language_model.model.norm.weight"],
+            float(config["rms_norm_epsilon"]),
+            mx,
+        )
+    if "lm_head" in components:
+        head_key = aliases.get("lm_head", {}).get(
+            "tensor_keys", ["language_model.lm_head.weight"]
+        )[0]
+        hidden = _qwen2_linear(hidden, tensors[head_key], mx)
+    mx.eval(hidden)
+    if not bool(mx.all(mx.isfinite(hidden)).item()):
+        raise _fail("deterministic functional probe produced non-finite output")
+    return hidden
+
+
 def execute_loaded_stage(
     loaded_stage: LoadedStage,
     *,
@@ -1571,8 +2227,11 @@ def execute_loaded_stage(
     transformer_key = f"transformer.h.{start}.ln_1.weight"
     plain_key = f"h.{start}.ln_1.weight"
     qwen_key = f"model.layers.{start}.input_layernorm.weight"
+    qwen3_5_key = f"language_model.model.layers.{start}.input_layernorm.weight"
     if runtime["architecture"] in {"qwen2", "qwen3"} and qwen_key in tensors:
         namespace = "model."
+    elif runtime["architecture"] == "qwen3_5" and qwen3_5_key in tensors:
+        namespace = "language_model.model."
     elif transformer_key in tensors and plain_key not in tensors:
         namespace = "transformer."
     elif plain_key in tensors and transformer_key not in tensors:
@@ -1632,6 +2291,8 @@ def execute_loaded_stage(
             hidden = _qwen2_embedding(
                 tensors["model.embed_tokens.weight"], token_ids, mx
             )
+        elif runtime["architecture"] == "qwen3_5":
+            hidden = tensors["language_model.model.embed_tokens.weight"][token_ids]
         else:
             positions = mx.arange(sequence, dtype=mx.int32)
             hidden = (
@@ -1669,6 +2330,15 @@ def execute_loaded_stage(
                 mx,
                 runtime["architecture"],
             )
+        elif runtime["architecture"] == "qwen3_5":
+            hidden = _qwen3_5_block(
+                hidden,
+                tensors,
+                f"language_model.model.layers.{layer}.",
+                config,
+                mx,
+                config["layer_types"][layer],
+            )
         else:
             hidden = _gpt2_block(
                 hidden,
@@ -1683,6 +2353,13 @@ def execute_loaded_stage(
             hidden = _rms_norm(
                 hidden,
                 tensors["model.norm.weight"],
+                float(config["rms_norm_epsilon"]),
+                mx,
+            )
+        elif runtime["architecture"] == "qwen3_5":
+            hidden = _rms_norm(
+                hidden,
+                tensors["language_model.model.norm.weight"],
                 float(config["rms_norm_epsilon"]),
                 mx,
             )
@@ -1701,7 +2378,12 @@ def execute_loaded_stage(
         alias = aliases.get("lm_head", {})
         if not isinstance(alias, Mapping):
             reject("invalid_loaded_stage_aliases")
-        head_keys = alias.get("tensor_keys", ["lm_head.weight"])
+        default_head_key = (
+            "language_model.lm_head.weight"
+            if runtime["architecture"] == "qwen3_5"
+            else "lm_head.weight"
+        )
+        head_keys = alias.get("tensor_keys", [default_head_key])
         if (
             not isinstance(head_keys, (list, tuple))
             or len(head_keys) != 1
@@ -1710,7 +2392,7 @@ def execute_loaded_stage(
             reject("invalid_loaded_stage_aliases")
         hidden = (
             _qwen2_linear(hidden, tensors[head_keys[0]], mx)
-            if runtime["architecture"] in {"qwen2", "qwen3"}
+            if runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5"}
             else mx.matmul(hidden, tensors[head_keys[0]].transpose(1, 0))
         )
     mx.eval(hidden)
@@ -1788,7 +2470,10 @@ def _digest_probe_output(array: Any, runtime: Mapping[str, Any]) -> str:
     every probe position instead of raw floating-point bytes.
     """
 
-    if runtime["architecture"] not in {"qwen2", "qwen3"} or runtime["backend"] != "numpy":
+    if (
+        runtime["architecture"] not in {"qwen2", "qwen3", "qwen3_5"}
+        or runtime["backend"] != "numpy"
+    ):
         return _digest_array(array)
     values = np.asarray(array)
     top_count = min(8, values.shape[-1])
@@ -1939,6 +2624,13 @@ def load_assignment_stage(
             _validate_qwen2_shapes(
                 tensors, runtime, start, end, components, aliases
             )
+        elif runtime["architecture"] == "qwen3_5":
+            # Pre-quantized MLX affine 4-bit sources are materialized by
+            # _load_exact_tensors; the hybrid linear_attn/full_attn reference
+            # kernels validate and execute the exact per-layer-type tensor
+            # contract instead of misrouting qwen3_5 tensors through the GPT-2
+            # shape validator.
+            _validate_qwen3_5_shapes(tensors, runtime, start, end, components, aliases)
         else:
             _validate_gpt2_shapes(
                 tensors, runtime, start, end, namespace, components, aliases
@@ -1976,6 +2668,10 @@ def load_assignment_stage(
         if runtime["backend"] == _MLX_RUNTIME_BACKEND:
             if runtime["architecture"] in {"qwen2", "qwen3"}:
                 probe_output = _run_qwen2_probe(
+                    tensors, runtime, start, end, components, aliases
+                )
+            elif runtime["architecture"] == "qwen3_5":
+                probe_output = _run_qwen3_5_probe(
                     tensors, runtime, start, end, components, aliases
                 )
             else:

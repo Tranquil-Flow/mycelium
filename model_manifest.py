@@ -14,6 +14,7 @@ from runtime_contracts import (
    normalize_gpt2_model_config,
    normalize_qwen2_model_config,
    normalize_qwen3_model_config,
+   normalize_qwen3_5_model_config,
 )
 
 
@@ -80,7 +81,7 @@ def _is_causal_lm(config: dict[str, Any]) -> bool:
    return isinstance(architectures, list) and any(
       isinstance(name, str) and (
          name.endswith("ForCausalLM")
-         or name in {"GPT2LMHeadModel"}
+         or name in {"GPT2LMHeadModel", "Qwen3_5ForConditionalGeneration"}
       )
       for name in architectures
    )
@@ -180,7 +181,12 @@ def compile_model_manifest(
       for keys in component_tensor_keys.values()
       for key in keys
    )
-   unowned_tensor_keys = sorted(set(weight_map) - recognized_tensor_keys)
+   excluded_prefixes = tuple(adapter.excluded_tensor_prefixes)
+   unowned_tensor_keys = sorted(
+      key
+      for key in set(weight_map) - recognized_tensor_keys
+      if not (excluded_prefixes and key.startswith(excluded_prefixes))
+   )
    if unowned_tensor_keys:
       preview = ", ".join(unowned_tensor_keys[:5])
       suffix = "" if len(unowned_tensor_keys) <= 5 else f" (+{len(unowned_tensor_keys) - 5} more)"
@@ -225,6 +231,13 @@ def compile_model_manifest(
       runtime_model = {
          "architecture": "qwen3",
          "model_config": normalize_qwen3_model_config(
+            config, expected_layers=num_layers
+         ),
+      }
+   elif adapter.architecture == "qwen3_5" and _is_causal_lm(config):
+      runtime_model = {
+         "architecture": "qwen3_5",
+         "model_config": normalize_qwen3_5_model_config(
             config, expected_layers=num_layers
          ),
       }

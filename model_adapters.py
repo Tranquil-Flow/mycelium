@@ -48,6 +48,94 @@ QWEN3_DECODER_TENSOR_SUFFIXES = (
    "mlp.down_proj.weight",
 )
 
+# Qwen3.5 (Qwen3.8-27B) hybrid decoder tensors, captured from the verified
+# mlx-community/Qwen3.8-27B-4bit checkpoint index
+# (revision 3e6447f082e89cc7f0bc6e5441afd38dfce760ff).  The representation is
+# bound to that exact MLX 4-bit affine artifact: quantized linear weights carry
+# their `.scales`/`.biases` companions as first-class tensors.  Layers alternate
+# `linear_attention` (gated delta-net style: A_log/conv1d/dt_bias/projections)
+# and `full_attention` (gated self-attention with q/k norms).  These suffix
+# tuples are the exact-match ownership sets for their layer type; consumers must
+# select by layer type, never by the flat union.
+QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "linear_attn.A_log",
+   "linear_attn.conv1d.weight",
+   "linear_attn.dt_bias",
+   "linear_attn.in_proj_a.biases",
+   "linear_attn.in_proj_a.scales",
+   "linear_attn.in_proj_a.weight",
+   "linear_attn.in_proj_b.biases",
+   "linear_attn.in_proj_b.scales",
+   "linear_attn.in_proj_b.weight",
+   "linear_attn.in_proj_qkv.biases",
+   "linear_attn.in_proj_qkv.scales",
+   "linear_attn.in_proj_qkv.weight",
+   "linear_attn.in_proj_z.biases",
+   "linear_attn.in_proj_z.scales",
+   "linear_attn.in_proj_z.weight",
+   "linear_attn.norm.weight",
+   "linear_attn.out_proj.biases",
+   "linear_attn.out_proj.scales",
+   "linear_attn.out_proj.weight",
+   "mlp.down_proj.biases",
+   "mlp.down_proj.scales",
+   "mlp.down_proj.weight",
+   "mlp.gate_proj.biases",
+   "mlp.gate_proj.scales",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.biases",
+   "mlp.up_proj.scales",
+   "mlp.up_proj.weight",
+   "post_attention_layernorm.weight",
+)
+QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES = (
+   "input_layernorm.weight",
+   "mlp.down_proj.biases",
+   "mlp.down_proj.scales",
+   "mlp.down_proj.weight",
+   "mlp.gate_proj.biases",
+   "mlp.gate_proj.scales",
+   "mlp.gate_proj.weight",
+   "mlp.up_proj.biases",
+   "mlp.up_proj.scales",
+   "mlp.up_proj.weight",
+   "post_attention_layernorm.weight",
+   "self_attn.k_norm.weight",
+   "self_attn.k_proj.biases",
+   "self_attn.k_proj.scales",
+   "self_attn.k_proj.weight",
+   "self_attn.o_proj.biases",
+   "self_attn.o_proj.scales",
+   "self_attn.o_proj.weight",
+   "self_attn.q_norm.weight",
+   "self_attn.q_proj.biases",
+   "self_attn.q_proj.scales",
+   "self_attn.q_proj.weight",
+   "self_attn.v_proj.biases",
+   "self_attn.v_proj.scales",
+   "self_attn.v_proj.weight",
+)
+# Capability marker only (non-empty keeps `runtime_supported` true); ownership
+# checks must use the per-layer-type sets above when they are declared.
+QWEN3_5_DECODER_TENSOR_SUFFIXES = tuple(
+   sorted(
+      set(QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES)
+      | set(QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES)
+   )
+)
+QWEN3_5_EMBEDDING_TENSOR_KEYS = (
+   "language_model.model.embed_tokens.biases",
+   "language_model.model.embed_tokens.scales",
+   "language_model.model.embed_tokens.weight",
+)
+QWEN3_5_FINAL_NORM_TENSOR_KEYS = ("language_model.model.norm.weight",)
+QWEN3_5_LM_HEAD_TENSOR_KEYS = (
+   "language_model.lm_head.biases",
+   "language_model.lm_head.scales",
+   "language_model.lm_head.weight",
+)
+
 
 @dataclass(frozen=True)
 class ModelAdapter:
@@ -60,6 +148,18 @@ class ModelAdapter:
    supported_architectures: tuple[str, ...] = ()
    decoder_tensor_suffixes: tuple[str, ...] = ()
    runtime_backends: tuple[str, ...] = ()
+   # Per-layer-type exact suffix sets; when declared, ownership checks must use
+   # these instead of `decoder_tensor_suffixes` (hybrid architectures).
+   decoder_tensor_suffixes_by_layer_type: tuple[
+      tuple[str, tuple[str, ...]], ...
+   ] = ()
+   # Checkpoint tensor prefixes intentionally outside route ownership (e.g.
+   # optional vision towers on a language-model-only route).  Dropped from the
+   # manifest's "unowned tensor keys" fail-closed check only.
+   excluded_tensor_prefixes: tuple[str, ...] = ()
+   # Exact static component tensor keys for representation-bound artifacts;
+   # empty means consumers keep their legacy per-architecture expectations.
+   exact_static_component_keys: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
    @property
    def runtime_supported(self) -> bool:
@@ -198,6 +298,34 @@ ADAPTERS = {
       tied_lm_head_source=("model.embed_tokens.",),
       supported_architectures=("Qwen3ForCausalLM",),
       decoder_tensor_suffixes=QWEN3_DECODER_TENSOR_SUFFIXES,
+      runtime_backends=("mlx", "numpy"),
+   ),
+   "qwen3_5": ModelAdapter(
+      architecture="qwen3_5",
+      layer_count_fields=("text_config.num_hidden_layers", "num_hidden_layers"),
+      block_prefix_template="language_model.model.layers.{layer}.",
+      components={
+         "input_embedding": ("language_model.model.embed_tokens.",),
+         "decoder": ("language_model.model.layers.{layer}.",),
+         "final_norm": ("language_model.model.norm.",),
+         "lm_head": ("language_model.lm_head.",),
+      },
+      tied_lm_head_source=("language_model.model.embed_tokens.",),
+      supported_architectures=(
+         "Qwen3_5ForConditionalGeneration",
+         "Qwen3_5ForCausalLM",
+      ),
+      decoder_tensor_suffixes=QWEN3_5_DECODER_TENSOR_SUFFIXES,
+      decoder_tensor_suffixes_by_layer_type=(
+         ("linear_attention", QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES),
+         ("full_attention", QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES),
+      ),
+      excluded_tensor_prefixes=("vision_tower.",),
+      exact_static_component_keys=(
+         ("input_embedding", QWEN3_5_EMBEDDING_TENSOR_KEYS),
+         ("final_norm", QWEN3_5_FINAL_NORM_TENSOR_KEYS),
+         ("lm_head", QWEN3_5_LM_HEAD_TENSOR_KEYS),
+      ),
       runtime_backends=("mlx", "numpy"),
    ),
 }

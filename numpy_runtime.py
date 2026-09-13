@@ -13,6 +13,10 @@ from typing import Any, Callable, Mapping, NoReturn
 
 import numpy as np
 
+from model_adapters import (
+    QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES,
+    QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES,
+)
 from runtime_contracts import (
     GPT2_DECODER_TENSOR_SUFFIXES,
     QWEN2_DECODER_TENSOR_SUFFIXES,
@@ -320,6 +324,336 @@ def _qwen2_rope_at_position(
     return (
         query * cosine + rotate_half(query) * sine,
         key * cosine + rotate_half(key) * sine,
+    )
+
+
+# --- Qwen3.5 hybrid decoder reference execution ------------------------------
+#
+# The verified qwen3_5 route artifact (mlx-community/Qwen3.8-27B-4bit) is a
+# hybrid decoder.  ``linear_attention`` layers are gated delta-net recurrent
+# mixers whose quantized projections carry first-class ``.scales``/``.biases``
+# companions (materialized to dense floats by the loader); ``full_attention``
+# layers are gated self-attention (q/k RMS norms on the head dimension,
+# partial rotary embeddings, sigmoid output gate).  These reference paths
+# mirror the artifact's native runtime semantics (mlx_lm ``qwen3_5`` /
+# transformers ``modeling_qwen3_5``): recurrent (not chunked) gated delta
+# rule, explicit causal depthwise convolution, no KV cache.  Correctness
+# first; speed is deliberately not a goal of this path.
+
+_QWEN3_5_AFFINE4BIT_GROUP_SIZE = 64
+
+
+def _sigmoid(hidden: np.ndarray) -> np.ndarray:
+    dtype = hidden.dtype
+    compute = hidden.astype(np.float32)
+    return np.exp(-np.logaddexp(np.zeros_like(compute), -compute)).astype(dtype)
+
+
+def _qwen3_5_layer_tensor_shapes(
+    config: Mapping[str, Any], layer_type: str
+) -> dict[str, tuple[int, ...]]:
+    """Exact per-layer-type tensor shapes for the qwen3_5 hybrid decoder.
+
+    The quantized projections always carry their ``.scales``/``.biases``
+    companion tensors (affine 4-bit, group size 64); ``conv1d``, ``A_log``,
+    ``dt_bias``, norms, and the embedding/lm_head companions are validated by
+    their own entries.  Unsupported head/group layouts fail closed.
+    """
+
+    hidden = int(config["n_embd"])
+    inner = int(config["n_inner"])
+    group = _QWEN3_5_AFFINE4BIT_GROUP_SIZE
+
+    def grouped(
+        prefix: str, rows: int, columns: int
+    ) -> None:
+        if columns % group:
+            _reject("unsupported_qwen3_5_group_layout")
+        shapes[f"{prefix}.weight"] = (rows, columns)
+        shapes[f"{prefix}.scales"] = (rows, columns // group)
+        shapes[f"{prefix}.biases"] = (rows, columns // group)
+
+    shapes: dict[str, tuple[int, ...]] = {
+        "input_layernorm.weight": (hidden,),
+        "post_attention_layernorm.weight": (hidden,),
+    }
+    if layer_type == "linear_attention":
+        nk = int(config["linear_num_key_heads"])
+        nv = int(config["linear_num_value_heads"])
+        kd = int(config["linear_key_head_dim"])
+        dv = int(config["linear_value_head_dim"])
+        conv_kernel = int(config["linear_conv_kernel_dim"])
+        if nk <= 0 or nv % nk:
+            _reject("unsupported_qwen3_5_linear_heads")
+        key_dim = kd * nk
+        value_dim = dv * nv
+        conv_dim = 2 * key_dim + value_dim
+        shapes["linear_attn.A_log"] = (nv,)
+        shapes["linear_attn.dt_bias"] = (nv,)
+        shapes["linear_attn.norm.weight"] = (dv,)
+        shapes["linear_attn.conv1d.weight"] = (conv_dim, conv_kernel, 1)
+        grouped("linear_attn.in_proj_qkv", conv_dim, hidden)
+        grouped("linear_attn.in_proj_z", value_dim, hidden)
+        grouped("linear_attn.in_proj_a", nv, hidden)
+        grouped("linear_attn.in_proj_b", nv, hidden)
+        grouped("linear_attn.out_proj", hidden, value_dim)
+        expected = QWEN3_5_LINEAR_ATTENTION_TENSOR_SUFFIXES
+    elif layer_type == "full_attention":
+        n_head = int(config["n_head"])
+        n_kv_head = int(config["n_kv_head"])
+        head_dim = int(config["head_dim"])
+        if n_kv_head <= 0 or n_head % n_kv_head:
+            _reject("unsupported_qwen3_5_attention_heads")
+        shapes["self_attn.q_norm.weight"] = (head_dim,)
+        shapes["self_attn.k_norm.weight"] = (head_dim,)
+        grouped("self_attn.q_proj", 2 * n_head * head_dim, hidden)
+        grouped("self_attn.k_proj", n_kv_head * head_dim, hidden)
+        grouped("self_attn.v_proj", n_kv_head * head_dim, hidden)
+        grouped("self_attn.o_proj", hidden, n_head * head_dim)
+        expected = QWEN3_5_FULL_ATTENTION_TENSOR_SUFFIXES
+    else:
+        _reject("unsupported_qwen3_5_layer_type")
+    grouped("mlp.gate_proj", inner, hidden)
+    grouped("mlp.up_proj", inner, hidden)
+    grouped("mlp.down_proj", hidden, inner)
+    if set(shapes) != set(expected):
+        _reject("internal_decoder_tensor_contract_mismatch")
+    return shapes
+
+
+def _qwen3_5_rope(
+    query: np.ndarray,
+    key: np.ndarray,
+    *,
+    theta: float,
+    rotary_dim: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Partial rotary embedding (rotate_half style) over the first ``rotary_dim`` dims."""
+
+    if rotary_dim < 2 or rotary_dim % 2 or rotary_dim > int(query.shape[-1]):
+        _reject("unsupported_qwen3_5_rotary_dim")
+    sequence = int(query.shape[2])
+    inv_freq = 1.0 / (
+        theta ** (np.arange(0, rotary_dim, 2, dtype=np.float32) / rotary_dim)
+    )
+    frequencies = np.outer(np.arange(sequence, dtype=np.float32), inv_freq)
+    embedding = np.concatenate((frequencies, frequencies), axis=-1)
+    cosine = np.cos(embedding)[None, None, :, :]
+    sine = np.sin(embedding)[None, None, :, :]
+
+    def rotate_half(value: np.ndarray) -> np.ndarray:
+        first, second = np.split(value, 2, axis=-1)
+        return np.concatenate((-second, first), axis=-1)
+
+    query_rotary = query[..., :rotary_dim]
+    key_rotary = key[..., :rotary_dim]
+    return (
+        np.concatenate(
+            (
+                query_rotary * cosine + rotate_half(query_rotary) * sine,
+                query[..., rotary_dim:],
+            ),
+            axis=-1,
+        ),
+        np.concatenate(
+            (
+                key_rotary * cosine + rotate_half(key_rotary) * sine,
+                key[..., rotary_dim:],
+            ),
+            axis=-1,
+        ),
+    )
+
+
+def _qwen3_5_full_attention(
+    hidden: np.ndarray,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+) -> np.ndarray:
+    """Gated full attention: q/k RMS norms, partial rotary, sigmoid output gate."""
+
+    n_head = int(config["n_head"])
+    n_kv_head = int(config["n_kv_head"])
+    head_dim = int(config["head_dim"])
+    epsilon = float(config["rms_norm_epsilon"])
+    batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
+    q_out = _qwen2_linear(hidden, tensors[prefix + "self_attn.q_proj.weight"])
+    q_out = q_out.reshape(batch, sequence, n_head, 2 * head_dim)
+    query, gate = np.split(q_out, 2, axis=-1)
+    gate = gate.reshape(batch, sequence, n_head * head_dim)
+    key = _qwen2_linear(
+        hidden, tensors[prefix + "self_attn.k_proj.weight"]
+    ).reshape(batch, sequence, n_kv_head, head_dim)
+    value = _qwen2_linear(
+        hidden, tensors[prefix + "self_attn.v_proj.weight"]
+    ).reshape(batch, sequence, n_kv_head, head_dim)
+    query = _rms_norm(
+        query, tensors[prefix + "self_attn.q_norm.weight"], epsilon
+    ).transpose(0, 2, 1, 3)
+    key = _rms_norm(
+        key, tensors[prefix + "self_attn.k_norm.weight"], epsilon
+    ).transpose(0, 2, 1, 3)
+    value = value.transpose(0, 2, 1, 3)
+    query, key = _qwen3_5_rope(
+        query,
+        key,
+        theta=float(config["rope_theta"]),
+        rotary_dim=int(head_dim * float(config["partial_rotary_factor"])),
+    )
+    repeats = n_head // n_kv_head
+    if repeats > 1:
+        key = np.repeat(key, repeats, axis=1)
+        value = np.repeat(value, repeats, axis=1)
+    scores = np.matmul(query, key.transpose(0, 1, 3, 2)) / math.sqrt(head_dim)
+    positions = np.arange(sequence)
+    causal = positions[:, None] >= positions[None, :]
+    scores = np.where(
+        causal[None, None, :, :], scores, np.float32("-inf")
+    )
+    probabilities = _softmax(scores, axis=-1)
+    attended = (
+        np.matmul(probabilities, value)
+        .transpose(0, 2, 1, 3)
+        .reshape(batch, sequence, n_head * head_dim)
+    )
+    attended = attended * _sigmoid(gate)
+    return _qwen2_linear(attended, tensors[prefix + "self_attn.o_proj.weight"])
+
+
+def _qwen3_5_gated_delta_net(
+    hidden: np.ndarray,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+) -> np.ndarray:
+    """Gated delta-net recurrent mixer (reference implementation, no KV cache)."""
+
+    num_k_heads = int(config["linear_num_key_heads"])
+    num_v_heads = int(config["linear_num_value_heads"])
+    key_head_dim = int(config["linear_key_head_dim"])
+    value_head_dim = int(config["linear_value_head_dim"])
+    conv_kernel = int(config["linear_conv_kernel_dim"])
+    epsilon = float(config["rms_norm_epsilon"])
+    key_dim = key_head_dim * num_k_heads
+    value_dim = value_head_dim * num_v_heads
+    conv_dim = 2 * key_dim + value_dim
+    batch, sequence = int(hidden.shape[0]), int(hidden.shape[1])
+
+    mixed = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_qkv.weight"])
+    z = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_z.weight"]).reshape(
+        batch, sequence, num_v_heads, value_head_dim
+    )
+    a = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_a.weight"])
+    b = _qwen2_linear(hidden, tensors[prefix + "linear_attn.in_proj_b.weight"])
+
+    conv_weight = tensors[prefix + "linear_attn.conv1d.weight"].reshape(
+        conv_dim, conv_kernel
+    )
+    padded = np.concatenate(
+        (
+            np.zeros((batch, conv_kernel - 1, conv_dim), dtype=mixed.dtype),
+            mixed,
+        ),
+        axis=1,
+    )
+    convolved = np.zeros_like(mixed)
+    for tap in range(conv_kernel):
+        convolved = convolved + padded[
+            :, tap : tap + sequence, :
+        ] * conv_weight[None, None, :, tap]
+    mixed = _silu(convolved)
+
+    query = mixed[:, :, :key_dim].reshape(batch, sequence, num_k_heads, key_head_dim)
+    key = mixed[:, :, key_dim : 2 * key_dim].reshape(
+        batch, sequence, num_k_heads, key_head_dim
+    )
+    value = mixed[:, :, 2 * key_dim :].reshape(
+        batch, sequence, num_v_heads, value_head_dim
+    )
+
+    beta = _sigmoid(b)
+    activation = a.astype(np.float32) + tensors[
+        prefix + "linear_attn.dt_bias"
+    ].astype(np.float32)
+    decay = -np.exp(tensors[prefix + "linear_attn.A_log"].astype(np.float32)) * np.logaddexp(
+        activation, np.zeros_like(activation)
+    )
+
+    repeats = num_v_heads // num_k_heads
+    if repeats > 1:
+        query = np.repeat(query, repeats, axis=2)
+        key = np.repeat(key, repeats, axis=2)
+    query = query.transpose(0, 2, 1, 3)
+    key = key.transpose(0, 2, 1, 3)
+    value = value.transpose(0, 2, 1, 3)
+
+    # q/k are RMS-normalized on the head dimension; mlx_lm's qwen3_5 folds the
+    # delta-rule scale 1/sqrt(d_k) into q as (inv_scale**2) * rms_norm(q).
+    def rms_normalize(value: np.ndarray) -> np.ndarray:
+        compute = value.astype(np.float32)
+        return compute * np.reciprocal(
+            np.sqrt(
+                np.mean(np.square(compute), axis=-1, keepdims=True)
+                + np.float32(1e-6)
+            )
+        )
+
+    inv_scale = key_head_dim**-0.5
+    query = (inv_scale**2) * rms_normalize(query)
+    key = inv_scale * rms_normalize(key)
+    decay = decay.transpose(0, 2, 1)
+    beta = beta.transpose(0, 2, 1)
+
+    state = np.zeros((batch, num_v_heads, key_head_dim, value_head_dim), dtype=np.float32)
+    outputs = []
+    for step in range(sequence):
+        step_decay = np.exp(decay[:, :, step])[:, :, None, None]
+        state = state * step_decay
+        key_step = key[:, :, step]
+        value_step = value[:, :, step]
+        kv_memory = np.sum(state * key_step[:, :, :, None], axis=-2)
+        delta = (value_step - kv_memory) * beta[:, :, step, None]
+        state = state + key_step[:, :, :, None] * delta[:, :, None, :]
+        outputs.append(np.sum(state * query[:, :, step, :, None], axis=-2))
+    core = np.stack(outputs, axis=2).transpose(0, 2, 1, 3).reshape(
+        batch * sequence * num_v_heads, value_head_dim
+    )
+    z_rows = z.reshape(batch * sequence * num_v_heads, value_head_dim)
+    gated = _rms_norm(
+        core, tensors[prefix + "linear_attn.norm.weight"], epsilon
+    ) * (z_rows * _sigmoid(z_rows))
+    output = gated.reshape(batch, sequence, value_dim)
+    return _qwen2_linear(output, tensors[prefix + "linear_attn.out_proj.weight"])
+
+
+def _qwen3_5_block(
+    hidden: np.ndarray,
+    tensors: Mapping[str, Any],
+    prefix: str,
+    config: Mapping[str, Any],
+    layer_type: str,
+) -> np.ndarray:
+    """Execute one qwen3_5 hybrid decoder layer with the reference path."""
+
+    epsilon = float(config["rms_norm_epsilon"])
+    residual = hidden
+    normalized = _rms_norm(hidden, tensors[prefix + "input_layernorm.weight"], epsilon)
+    if layer_type == "linear_attention":
+        attended = _qwen3_5_gated_delta_net(normalized, tensors, prefix, config)
+    elif layer_type == "full_attention":
+        attended = _qwen3_5_full_attention(normalized, tensors, prefix, config)
+    else:
+        _reject("unsupported_qwen3_5_layer_type")
+    hidden = residual + attended
+    residual = hidden
+    normalized = _rms_norm(
+        hidden, tensors[prefix + "post_attention_layernorm.weight"], epsilon
+    )
+    gate = _qwen2_linear(normalized, tensors[prefix + "mlp.gate_proj.weight"])
+    up = _qwen2_linear(normalized, tensors[prefix + "mlp.up_proj.weight"])
+    return residual + _qwen2_linear(
+        (gate * _sigmoid(gate)) * up, tensors[prefix + "mlp.down_proj.weight"]
     )
 
 
@@ -906,6 +1240,10 @@ def _stage_namespace(
         if f"model.layers.{start}.input_layernorm.weight" in tensors:
             return "model."
         _reject("invalid_loaded_stage_namespace")
+    if architecture == "qwen3_5":
+        if f"language_model.model.layers.{start}.input_layernorm.weight" in tensors:
+            return "language_model.model."
+        _reject("invalid_loaded_stage_namespace")
     transformer_key = f"transformer.h.{start}.ln_1.weight"
     plain_key = f"h.{start}.ln_1.weight"
     if transformer_key in tensors and plain_key not in tensors:
@@ -951,6 +1289,51 @@ def _stage_shapes(
                 else "lm_head.weight"
             )
             shapes[head_key] = (int(config["vocab_size"]), int(config["n_embd"]))
+        return shapes
+    if architecture == "qwen3_5":
+        group = _QWEN3_5_AFFINE4BIT_GROUP_SIZE
+        hidden = int(config["n_embd"])
+        vocabulary = int(config["vocab_size"])
+        if hidden % group:
+            _reject("unsupported_qwen3_5_group_layout")
+        shapes = {}
+        if "input_embedding" in components:
+            for suffix, shape in (
+                ("weight", (vocabulary, hidden)),
+                ("scales", (vocabulary, hidden // group)),
+                ("biases", (vocabulary, hidden // group)),
+            ):
+                shapes[f"language_model.model.embed_tokens.{suffix}"] = shape
+        layer_types = config["layer_types"]
+        for layer in range(start, end):
+            prefix = f"language_model.model.layers.{layer}."
+            for suffix, shape in _qwen3_5_layer_tensor_shapes(
+                config, layer_types[layer]
+            ).items():
+                shapes[prefix + suffix] = shape
+        if "final_norm" in components:
+            shapes["language_model.model.norm.weight"] = (hidden,)
+        if "lm_head" in components:
+            alias = aliases.get("lm_head")
+            if alias is None:
+                head_key = "language_model.lm_head.weight"
+            else:
+                if not isinstance(alias, Mapping):
+                    _reject("invalid_loaded_stage_aliases")
+                head_keys = alias.get("tensor_keys")
+                if (
+                    not isinstance(head_keys, (list, tuple))
+                    or len(head_keys) != 1
+                    or not isinstance(head_keys[0], str)
+                ):
+                    _reject("invalid_loaded_stage_aliases")
+                head_key = head_keys[0]
+            if not head_key.endswith(".weight"):
+                _reject("invalid_loaded_stage_aliases")
+            base = head_key[: -len(".weight")]
+            shapes[head_key] = (vocabulary, hidden)
+            shapes[f"{base}.scales"] = (vocabulary, hidden // group)
+            shapes[base + ".biases"] = (vocabulary, hidden // group)
         return shapes
     hidden = int(config["n_embd"])
     all_shapes = _expected_shapes(config)
@@ -1223,6 +1606,10 @@ def execute_loaded_stage(
             hidden = _qwen2_embedding(
                 tensors["model.embed_tokens.weight"], ids
             ).astype(dtype, copy=False)
+        elif runtime["architecture"] == "qwen3_5":
+            hidden = tensors["language_model.model.embed_tokens.weight"][
+                ids
+            ].astype(dtype, copy=False)
         else:
             positions = np.arange(ids.shape[1], dtype=np.int64)
             hidden = (
@@ -1243,6 +1630,14 @@ def execute_loaded_stage(
                 config,
                 runtime["architecture"],
             )
+        elif runtime["architecture"] == "qwen3_5":
+            hidden = _qwen3_5_block(
+                hidden,
+                tensors,
+                f"language_model.model.layers.{layer}.",
+                config,
+                config["layer_types"][layer],
+            )
         else:
             hidden = _gpt2_block(
                 hidden,
@@ -1258,6 +1653,12 @@ def execute_loaded_stage(
                 tensors["model.norm.weight"],
                 float(config["rms_norm_epsilon"]),
             )
+        elif runtime["architecture"] == "qwen3_5":
+            hidden = _rms_norm(
+                hidden,
+                tensors["language_model.model.norm.weight"],
+                float(config["rms_norm_epsilon"]),
+            )
         else:
             hidden = _layer_norm(
                 hidden,
@@ -1267,14 +1668,15 @@ def execute_loaded_stage(
             )
     if "lm_head" in components:
         alias = aliases.get("lm_head")
-        head_key = (
-            alias["tensor_keys"][0]
-            if isinstance(alias, Mapping)
-            else "lm_head.weight"
-        )
+        if isinstance(alias, Mapping):
+            head_key = alias["tensor_keys"][0]
+        elif runtime["architecture"] == "qwen3_5":
+            head_key = "language_model.lm_head.weight"
+        else:
+            head_key = "lm_head.weight"
         hidden = (
             _qwen2_linear(hidden, tensors[head_key])
-            if runtime["architecture"] in {"qwen2", "qwen3"}
+            if runtime["architecture"] in {"qwen2", "qwen3", "qwen3_5"}
             else np.matmul(hidden, tensors[head_key].transpose(1, 0))
         )
     if not np.isfinite(hidden).all():

@@ -51,6 +51,19 @@ QWEN2_MODEL_CONFIG_FIELDS = frozenset(
     }
 )
 QWEN3_MODEL_CONFIG_FIELDS = QWEN2_MODEL_CONFIG_FIELDS
+QWEN3_5_MODEL_CONFIG_FIELDS = frozenset(
+    {
+        *QWEN2_MODEL_CONFIG_FIELDS,
+        "partial_rotary_factor",
+        "layer_types",
+        "linear_conv_kernel_dim",
+        "linear_key_head_dim",
+        "linear_num_key_heads",
+        "linear_value_head_dim",
+        "linear_num_value_heads",
+    }
+)
+_QWEN3_5_LAYER_TYPES = frozenset({"linear_attention", "full_attention"})
 _SUPPORTED_MLX_DTYPES = frozenset({"float16", "bfloat16", "float32"})
 SUPPORTED_NUMPY_DTYPES = frozenset({"float32"})
 _RUNTIME_IDENTITY_FIELDS = frozenset(
@@ -237,6 +250,115 @@ def normalize_qwen3_model_config(
     return normalized
 
 
+def normalize_qwen3_5_model_config(
+    config: Mapping[str, Any], *, expected_layers: int
+) -> dict[str, Any]:
+    """Extract the exact Qwen3.5 hybrid (linear + full attention) decoder subset.
+
+    The verified route artifact is the multimodal ``qwen3_5`` checkpoint whose
+    language tower lives under ``text_config``; a plain text config is accepted
+    too.  Unlike Qwen2/Qwen3, gated attention means ``head_dim`` need not equal
+    ``hidden_size // num_attention_heads`` (Qwen3.8-27B: 24x256 vs 5120), so the
+    Qwen2 head-shape identity is deliberately not enforced here.
+    """
+
+    if not isinstance(config, Mapping):
+        raise ValueError("runtime model_config source must be an object")
+    source: Mapping[str, Any] = config
+    nested = config.get("text_config")
+    if isinstance(nested, Mapping):
+        source = nested
+    view = dict(source)
+    rope_parameters = view.get("rope_parameters")
+    if "rope_theta" not in view and isinstance(rope_parameters, Mapping):
+        view["rope_theta"] = rope_parameters.get("rope_theta")
+
+    n_layer = _positive_int(view.get("num_hidden_layers", view.get("n_layer")), "n_layer")
+    if n_layer != expected_layers:
+        raise ValueError("runtime model_config n_layer does not match manifest layer count")
+    n_embd = _positive_int(view.get("hidden_size", view.get("n_embd")), "n_embd")
+    n_head = _positive_int(view.get("num_attention_heads", view.get("n_head")), "n_head")
+    n_kv_head = _positive_int(view.get("num_key_value_heads", view.get("n_kv_head")), "n_kv_head")
+    head_dim = _positive_int(view.get("head_dim", n_embd // n_head), "head_dim")
+    if n_head % n_kv_head != 0:
+        raise ValueError("runtime model_config has incompatible attention heads")
+    n_inner = _positive_int(view.get("intermediate_size", view.get("n_inner")), "n_inner")
+    vocab_size = _positive_int(view.get("vocab_size"), "vocab_size")
+    n_positions = _positive_int(
+        view.get("max_position_embeddings", view.get("n_positions")),
+        "n_positions",
+    )
+    epsilon = view.get("rms_norm_eps", view.get("rms_norm_epsilon"))
+    rope_theta = view.get("rope_theta")
+    for value, field in ((epsilon, "rms_norm_epsilon"), (rope_theta, "rope_theta")):
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or float(value) <= 0
+        ):
+            raise ValueError(f"runtime model_config {field} must be positive and finite")
+    activation = view.get("hidden_act", view.get("activation_function"))
+    if activation != "silu":
+        raise ValueError("runtime model_config activation_function must be silu")
+    tied = view.get("tie_word_embeddings")
+    if not isinstance(tied, bool):
+        raise ValueError("runtime model_config tie_word_embeddings must be boolean")
+
+    layer_types = view.get("layer_types")
+    if (
+        not isinstance(layer_types, list)
+        or len(layer_types) != n_layer
+        or not all(
+            isinstance(value, str) and value in _QWEN3_5_LAYER_TYPES
+            for value in layer_types
+        )
+    ):
+        raise ValueError(
+            "runtime qwen3_5 layer_types must list "
+            f"{n_layer} entries of {'/'.join(sorted(_QWEN3_5_LAYER_TYPES))}"
+        )
+    partial_rotary_factor = view.get("partial_rotary_factor")
+    if (
+        not isinstance(partial_rotary_factor, (int, float))
+        or isinstance(partial_rotary_factor, bool)
+        or not math.isfinite(float(partial_rotary_factor))
+        or not 0 < float(partial_rotary_factor) <= 1
+    ):
+        raise ValueError(
+            "runtime model_config partial_rotary_factor must be in (0, 1]"
+        )
+    linear_fields = (
+        "linear_conv_kernel_dim",
+        "linear_key_head_dim",
+        "linear_num_key_heads",
+        "linear_value_head_dim",
+        "linear_num_value_heads",
+    )
+    linear_values = {
+        field: _positive_int(view.get(field), field) for field in linear_fields
+    }
+    normalized = {
+        "n_layer": n_layer,
+        "n_embd": n_embd,
+        "n_head": n_head,
+        "n_kv_head": n_kv_head,
+        "n_inner": n_inner,
+        "vocab_size": vocab_size,
+        "n_positions": n_positions,
+        "rms_norm_epsilon": float(epsilon),
+        "rope_theta": float(rope_theta),
+        "head_dim": head_dim,
+        "activation_function": "silu",
+        "tie_word_embeddings": tied,
+        "partial_rotary_factor": float(partial_rotary_factor),
+        "layer_types": list(layer_types),
+        **linear_values,
+    }
+    json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return normalized
+
+
 def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     architecture = runtime.get("architecture")
     model_config = runtime.get("model_config")
@@ -267,7 +389,18 @@ def _normalize_architecture_runtime(runtime: Mapping[str, Any]) -> tuple[str, di
             model_config,
             expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
         )
-    raise ValueError("unsupported runtime architecture; expected gpt2, qwen2, or qwen3")
+    if architecture == "qwen3_5":
+        if set(model_config) != QWEN3_5_MODEL_CONFIG_FIELDS:
+            raise ValueError(
+                "qwen3_5 architecture model_config fields do not match the normalized runtime contract"
+            )
+        return architecture, normalize_qwen3_5_model_config(
+            model_config,
+            expected_layers=_positive_int(model_config.get("n_layer"), "n_layer"),
+        )
+    raise ValueError(
+        "unsupported runtime architecture; expected gpt2, qwen2, qwen3, or qwen3_5"
+    )
 
 
 def validate_normalized_mlx_runtime(runtime: Any) -> dict[str, Any]:
