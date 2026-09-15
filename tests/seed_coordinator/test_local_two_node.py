@@ -470,6 +470,42 @@ def _verified_observation(
     return observation
 
 
+# Reviewed allow-list for the key universe `_bounded_trace_identity` may emit.
+#
+# This set is deliberately hand-maintained (every field that can appear in a delivery
+# trace is reviewed rather than trusted), but it must track the canonical producer
+# `mycelium_router.transports.iroh._bounded_trace_identity`.  Commit `4ee5fb6`
+# ("fix(a5): retain bounded placement and path attribution in delivery traces")
+# added four bounded fields for a `HopHeader` source:
+#   * `destination_placement_id`, `path_id`, `source_placement_id` - each admitted
+#     only when the value is a `str` with
+#     `len(value.encode("utf-8")) <= _TRACE_ID_BYTES == 128`;
+#   * `path_attempt` - admitted only when `type(value) is int and 0 <= value < 2**63`;
+# and each is admitted only while the rendered identity still fits the per-entry
+# budget `_TRACE_ENTRY_BYTES == 512` (which is also the entry bound asserted below).
+# Overlong attribution is dropped, never truncated, and never displaces the delivery
+# receipt id.  The producer-derived class invariant that keeps this set honest is
+# `tests/seed_coordinator/test_trace_identity_key_set_invariant.py`.
+PERMITTED_REMOTE_TRACE_IDENTITY_KEYS = frozenset(
+    {
+        "delivery_message_id",
+        "deployment_epoch",
+        "deployment_id",
+        "destination_placement_id",  # 4ee5fb6 (bounded, <= _TRACE_ID_BYTES)
+        "generation_config_digest",
+        "path_attempt",  # 4ee5fb6 (int in [0, 2**63))
+        "path_id",  # 4ee5fb6 (bounded, <= _TRACE_ID_BYTES)
+        "phase",
+        "planner_stage_cuts_sha256",
+        "request_id",
+        "request_id_sha256",
+        "request_input_sha256",
+        "source_placement_id",  # 4ee5fb6 (bounded, <= _TRACE_ID_BYTES)
+        "token_index",
+    }
+)
+
+
 def _assert_request_route_evidence(
     frame_deltas: dict[str, tuple[int, int]],
     traces: dict[str, list[str]],
@@ -488,18 +524,7 @@ def _assert_request_route_evidence(
             identity = json.loads(payload)
             if prefix.startswith("DeliveryReceipt->"):
                 continue
-            assert set(identity) <= {
-                "delivery_message_id",
-                "deployment_epoch",
-                "deployment_id",
-                "generation_config_digest",
-                "phase",
-                "planner_stage_cuts_sha256",
-                "request_id",
-                "request_id_sha256",
-                "request_input_sha256",
-                "token_index",
-            }
+            assert set(identity) <= PERMITTED_REMOTE_TRACE_IDENTITY_KEYS
             if identity.get("request_id") == request_id:
                 observed.append(prefix.split("->", 1)[0])
         assert tuple(observed) == expected
