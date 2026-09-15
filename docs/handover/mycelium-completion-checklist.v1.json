@@ -1,7 +1,7 @@
 {
   "protocol": "mycelium.completion_checklist.v1",
   "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
-  "updated_on": "2026-08-30",
+  "updated_on": "2026-09-15",
   "primary_gate": "A6",
   "workspace_ids": [
     "inference",
@@ -843,7 +843,7 @@
           "protocol": "mycelium.executed_requirement_evidence.v1",
           "requirement": "architecture_handover",
           "artifact_reference": "docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md",
-          "artifact_digest": "sha256:9aa26a09cf33d3d09169fb71bebddb721fbc551210305694a91ad162bf17f4d7",
+          "artifact_digest": "sha256:2f51a9fde07c5b43a4390a03fafe2dc3b9600f477287cd1f853cae41d471eec4",
           "provenance": "source",
           "subject": "A5:architecture_handover",
           "observed_at": "2026-08-30T23:00:00Z",
@@ -901,7 +901,7 @@
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a6-full-context-replay-recovery.md",
       "state": "design_only",
       "blockers": [
-        "A6 implementation has not started",
+        "A6 full-context replay implementation is committed as candidate 7ddd74d (1 commit on f156ba0; 172 passed / 4 skipped), but it is not integrated on the pilot branch",
         "qualified successor replay path has not been executed"
       ],
       "completed_requirements": [
@@ -1571,7 +1571,8 @@
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md",
       "state": "design_only",
       "blockers": [
-        "dependency A12 atomic completion",
+        "the A13 Mac-first slice is uncommitted in the owner's lane and is being finished to C5 successful terminal plus a portable export (program plan D8); it no longer waits on A12 atomic completion",
+        "the cross-platform half of A13 remains specification-only and Windows x86_64 evidence is deferred (program plan D10)",
         "platform signing and clean-device test inventory"
       ],
       "completed_requirements": [
