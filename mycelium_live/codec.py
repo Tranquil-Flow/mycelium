@@ -1,11 +1,67 @@
 """Architecture-selected tokenizers bound to the gateway PromptCodec seam."""
 from __future__ import annotations
 
+import codecs
+import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from mycelium_tokenizer import GPT2Tokenizer
+from mycelium_tokenizer.gpt2_bpe import _byte_to_unicode
+
+
+_UNICODE_POLICY = "utf-8:incremental:errors=replace:flush=finish:v1"
+_GPT2_PROTOCOL = "mycelium.prompt_codec.gpt2_byte_bpe.incremental_utf8.v1"
+_QWEN_PROTOCOL = "mycelium.prompt_codec.qwen_byte_bpe.instruct.incremental_utf8.v1"
+_QWEN_TEMPLATE = (
+    "<|im_start|>system\n{system}<|im_end|>\n"
+    "<|im_start|>user\n{prompt}<|im_end|>\n"
+    "<|im_start|>assistant\n"
+)
+
+
+def _digest(document: object) -> str:
+    payload = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+class IncrementalTokenDecoder:
+    """Per-request token decoder with incremental UTF-8 replacement semantics."""
+
+    def __init__(
+        self,
+        token_bytes: Callable[[int], bytes],
+        stop_token_ids: frozenset[int] = frozenset(),
+    ) -> None:
+        self._token_bytes = token_bytes
+        self._stop_token_ids = stop_token_ids
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._finished = False
+
+    def push(self, token_id: int) -> str:
+        """Consume one native token ID and return newly completed Unicode text."""
+
+        if self._finished:
+            raise RuntimeError("decoder_finished")
+        if type(token_id) is not int:
+            raise TypeError("invalid_token_id")
+        if token_id in self._stop_token_ids:
+            return ""
+        token_bytes = self._token_bytes(token_id)
+        if not isinstance(token_bytes, bytes):
+            raise RuntimeError("invalid_token_bytes")
+        return self._decoder.decode(token_bytes, final=False)
+
+    def finish(self) -> str:
+        """Flush a final replacement for any incomplete UTF-8 and close the decoder."""
+
+        if self._finished:
+            return ""
+        self._finished = True
+        return self._decoder.decode(b"", final=True)
 
 
 class GPT2PromptCodec:
@@ -28,6 +84,22 @@ class GPT2PromptCodec:
 
     def decode_token(self, token_id: int) -> str:
         return self._tokenizer.decode([token_id])
+
+    def new_decoder(self) -> IncrementalTokenDecoder:
+        """Create isolated incremental decode state for one request."""
+
+        return IncrementalTokenDecoder(self._tokenizer.token_bytes)
+
+    def evidence_identity(self) -> dict[str, object]:
+        """Return the closed, sanitized identity of the effective codec."""
+
+        return {
+            "codec_protocol": _GPT2_PROTOCOL,
+            "tokenizer_digest": self._tokenizer.evidence_digest(),
+            "template_digest": _digest({"template": "{prompt}", "system": None}),
+            "unicode_policy": _UNICODE_POLICY,
+            "stop_token_ids": [],
+        }
 
 
 class Qwen2PromptCodec:
@@ -62,11 +134,7 @@ class Qwen2PromptCodec:
         return self._stop_token_ids
 
     def encode(self, prompt: str) -> tuple[int, ...]:
-        chat = (
-            f"<|im_start|>system\n{self._SYSTEM}<|im_end|>\n"
-            f"<|im_start|>user\n{prompt}<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
+        chat = _QWEN_TEMPLATE.format(system=self._SYSTEM, prompt=prompt)
         return tuple(
             self._tokenizer.encode(chat, add_special_tokens=False).ids
         )
@@ -94,6 +162,63 @@ class Qwen2PromptCodec:
             return ""
         return self._tokenizer.decode([token_id], skip_special_tokens=False)
 
+    def _byte_level_document(self) -> dict[str, Any]:
+        try:
+            document = json.loads(self._tokenizer.to_str())
+            model = document["model"]
+            decoder = document["decoder"]
+        except (AttributeError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("unsupported_qwen_byte_level_tokenizer") from exc
+        if (
+            not isinstance(model, dict)
+            or model.get("type") != "BPE"
+            or not isinstance(decoder, dict)
+            or decoder.get("type") != "ByteLevel"
+        ):
+            raise RuntimeError("unsupported_qwen_byte_level_tokenizer")
+        return document
+
+    def _token_bytes_reader(
+        self, document: dict[str, Any]
+    ) -> Callable[[int], bytes]:
+        byte_decoder = {value: key for key, value in _byte_to_unicode().items()}
+
+        def token_bytes(token_id: int) -> bytes:
+            token = self._tokenizer.id_to_token(token_id)
+            if token is None:
+                raise ValueError("invalid_token_id")
+            # Tokenizers ByteLevel maps each token to bytes, then decodes the
+            # concatenation. Added Unicode tokens follow the same rule; calling
+            # decode([id]) here would prematurely replace pending fragments.
+            try:
+                return bytes(byte_decoder[char] for char in token)
+            except KeyError:
+                return token.encode("utf-8")
+
+        return token_bytes
+
+    def new_decoder(self) -> IncrementalTokenDecoder:
+        """Create isolated incremental decode state for one request."""
+
+        document = self._byte_level_document()
+        return IncrementalTokenDecoder(
+            self._token_bytes_reader(document), self._stop_token_ids
+        )
+
+    def evidence_identity(self) -> dict[str, object]:
+        """Return byte-level Qwen evidence or fail closed for another algorithm."""
+
+        document = self._byte_level_document()
+        return {
+            "codec_protocol": _QWEN_PROTOCOL,
+            "tokenizer_digest": _digest(document),
+            "template_digest": _digest(
+                {"template": _QWEN_TEMPLATE, "system": self._SYSTEM}
+            ),
+            "unicode_policy": _UNICODE_POLICY,
+            "stop_token_ids": sorted(self._stop_token_ids),
+        }
+
 
 def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
     """Select the tokenizer from the pinned deployment config."""
@@ -111,4 +236,9 @@ def prompt_codec_from_deployment(deployment_dir: Path) -> Any:
     raise RuntimeError(f"unsupported_prompt_codec:{model_type!r}")
 
 
-__all__ = ["GPT2PromptCodec", "Qwen2PromptCodec", "prompt_codec_from_deployment"]
+__all__ = [
+    "GPT2PromptCodec",
+    "IncrementalTokenDecoder",
+    "Qwen2PromptCodec",
+    "prompt_codec_from_deployment",
+]
