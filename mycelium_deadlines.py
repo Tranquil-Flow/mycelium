@@ -73,6 +73,7 @@ __all__ = [
     "NODE_SESSION_TIMEOUT_SECONDS",
     "NON_BINDING_DEADLINES",
     "PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS",
+    "PEER_CONNECT_DEADLINE_SECONDS",
     "PENDING_BINDINGS",
     "PENDING_CONTRACT_PINNED_BINDINGS",
     "PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS",
@@ -259,6 +260,19 @@ QUALIFICATION_MAX_AGE_SECONDS: Final[float] = 3_600.0
 #: Invariant: ``QUALIFICATION_MAX_AGE_SECONDS > REQUALIFICATION_INTERVAL_SECONDS``
 #: - the freshness bound must not expire before the refresher renews it.
 REQUALIFICATION_INTERVAL_SECONDS: Final[float] = 3_300.0
+
+#: Packet ``wp2-6`` (new value: no shipped literal is replaced).  How long a
+#: **declared connect** waits for a peer's first proof of reachability in a
+#: session before it fails with the named reason
+#: ``peer_connect_deadline_exceeded`` (``SidecarClient.connect_peer``, or an
+#: explicit ``connect_deadline`` on a confirmed send).
+#:
+#: The authoritative statement of the value is the record's ``derivation``
+#: below; the single fact consumers rely on is that it is strictly smaller than
+#: ``route_cleanup_fanout_window_seconds``, so one vanished peer can never
+#: consume the window the route needs to fan cancellation out to the peers that
+#: are still alive.
+PEER_CONNECT_DEADLINE_SECONDS: Final[float] = 1.0
 
 
 DEADLINES: Final[tuple[Deadline, ...]] = (
@@ -684,6 +698,62 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         ),
         source="mycelium_live.health.LIVE_QUALIFICATION_REFRESH_AFTER_MS",
     ),
+    Deadline(
+        name="peer_connect_deadline_seconds",
+        value=PEER_CONNECT_DEADLINE_SECONDS,
+        unit="seconds",
+        owner=(
+            "mycelium_iroh_sidecar/client.py:28,473,614 (and the Rust dial bound "
+            "PEER_CONNECT_TIMEOUT in native/iroh_transport/src/sidecar.rs)"
+        ),
+        derivation=(
+            "Bound on a declared peer connect: how long "
+            "mycelium_iroh_sidecar.client.SidecarClient.connect_peer (or a "
+            "confirmed send given an explicit connect_deadline) waits for a "
+            "peer that has not yet proved reachable in this session before "
+            "failing with the named reason "
+            "peer_connect_deadline_exceeded. RCA wp2-iroh-delivery defect 2: "
+            "iroh 1.0.2 has no connect timeout, so a vanished peer used to "
+            "consume the hop's whole latency budget (the 5 s Python delivery "
+            "deadline, or the sidecar's 60 s STREAM_IO_TIMEOUT) and surface "
+            "only as delivery_deadline_exceeded, with no transport cause. "
+            "1.0 s is two thirds of the route's cleanup fanout window: "
+            "1.5 s = cancel_and_cleanup_budget_seconds (2.0 s) - "
+            "cleanup_fallback_reserve_seconds (0.5 s). It is STRICTLY SMALLER "
+            "than that window by construction, which is the invariant this "
+            "record exists for: one dead peer must never eat the window the "
+            "route needs to fan cancellation out to the peers that are still "
+            "alive; the remaining 0.5 s of the window is what the inline "
+            "receipt grace and the single bounded snapshot attempt "
+            "(cleanup_snapshot_attempt_seconds = 0.5 s) are sized against. It "
+            "is also 5x smaller than the shipped Python delivery deadline "
+            "(mycelium_router/transports/iroh.py delivery_timeout_seconds = "
+            "5.0 s) and 60x smaller than the sidecar STREAM_IO_TIMEOUT, so a "
+            "dead peer fails before either budget expires instead of after. "
+            "Scope: only a DECLARED connect bounds anything, and only until the "
+            "first proof per (endpoint_id, generation) - a peer that already "
+            "answered keeps the caller's whole delivery budget, a send that "
+            "declares nothing keeps the shipped TimeoutError semantics "
+            "byte-for-byte, and a send whose caller budget is tighter keeps the "
+            "caller's expiry. That split is deliberate: the neighbouring "
+            "regression suite proved that bounding every first *delivery* by "
+            "this value renames legitimate slow first deliveries (a 16 MiB "
+            "confirmed frame, a peer that answers only after it is configured), "
+            "so the deadline is opt-in per connect instead. Adoption: the lane "
+            "that owns mycelium_router/transports/iroh.py should call "
+            "connect_peer (or pass connect_deadline) for a hop's first frame at "
+            "iroh.py:1325; that file is outside packet wp2-6's write set. Open "
+            "risk recorded in wp2-6: a cold "
+            "cross-network relay dial can legitimately exceed 1.0 s, so the "
+            "different-network trial (PLAN exit criterion 4) must decide by "
+            "measurement whether this value is raised - within the fanout "
+            "window - rather than by guessing here."
+        ),
+        source=(
+            "registry-defined, wp2-6 (no shipped literal replaced; consumer "
+            "mycelium_iroh_sidecar.client.PEER_CONNECT_DEADLINE_SECONDS)"
+        ),
+    ),
 )
 
 DEADLINES_BY_NAME: Final[Mapping[str, Deadline]] = MappingProxyType(
@@ -897,8 +967,15 @@ def check_composition(
 #: ``(dotted path of the consumer constant, registry name)``.
 #:
 #: Bound by this packet - ``mycelium_live/member_transport.py`` and
-#: ``mycelium_node/process.py``.
+#: ``mycelium_node/process.py``.  ``wp2-6`` bound
+#: ``mycelium_iroh_sidecar/client.py`` to this registry (its
+#: ``mycelium_router.wire`` import already makes it a first-party import, so
+#: the stdlib-only registry adds no cycle).
 BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "mycelium_iroh_sidecar.client.PEER_CONNECT_DEADLINE_SECONDS",
+        "peer_connect_deadline_seconds",
+    ),
     (
         "mycelium_live.member_transport._AVAILABILITY_RECONCILE_MAX_SECONDS",
         "availability_reconcile_max_seconds",

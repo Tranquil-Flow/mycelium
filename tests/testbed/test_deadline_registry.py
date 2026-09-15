@@ -76,12 +76,18 @@ HISTORICAL_LITERALS: dict[str, float | int] = {
     "stage_pack_max_authority_ttl_ms": 21_600_000,
     "qualification_max_age_seconds": 3_600.0,
     "requalification_interval_seconds": 3_300.0,
+    # wp2-6 addition (a new registered value, not a shipped literal): the
+    # connect-phase bound of one peer delivery. Pinned here on purpose - the
+    # registry must not tune it silently, and it must stay strictly inside the
+    # route's cleanup fanout window.
+    "peer_connect_deadline_seconds": 1.0,
 }
 
 #: Constants this packet bound to the registry, by file. Each must be assigned
 #: from ``mycelium_deadlines.<NAME>`` (module level, so monkeypatching the name
 #: on the module still replaces exactly what the call sites read).
 BOUND_SOURCES: dict[str, tuple[str, ...]] = {
+    "mycelium_iroh_sidecar/client.py": ("PEER_CONNECT_DEADLINE_SECONDS",),
     "mycelium_live/member_transport.py": (
         "_GRANT_TTL_MS",
         "_AVAILABILITY_RECONCILE_MIN_SECONDS",
@@ -277,6 +283,31 @@ def test_derived_quantities_are_the_published_symbols() -> None:
 # --------------------------------------------------------------------------- #
 # Registry hygiene.
 # --------------------------------------------------------------------------- #
+
+
+def test_peer_connect_deadline_sits_strictly_inside_the_route_fanout_window() -> None:
+    """wp2-6: one vanished peer must not consume the route's fanout window.
+
+    The RCA (`rca/wp2-iroh-delivery.md`, defect 2) requires a bounded, *named*
+    connect failure; the packet requires its bound to stay strictly below the
+    route's 1.5 s cleanup fanout window so a dead peer cannot eat the budget the
+    route needs to fan cancellation out to the peers that are still alive.
+    """
+
+    record = deadlines.deadline("peer_connect_deadline_seconds")
+    value = record.value
+
+    assert record.unit == "seconds"
+    assert value == 1.0
+    assert 0 < value < deadlines.route_cleanup_fanout_window_seconds == 1.5
+    # The window it must fit inside is itself derived, not asserted by hand.
+    assert deadlines.route_cleanup_fanout_window_seconds == (
+        deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+        - deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS
+    )
+    # And it is smaller than the shipped Python delivery budget it protects:
+    # a dead peer must fail before the hop expires, not after it.
+    assert value < 5.0
 
 
 def test_every_registry_entry_is_complete_and_typed() -> None:
