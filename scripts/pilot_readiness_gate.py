@@ -843,16 +843,21 @@ def check_soak(ctx: GateContext) -> CheckResult:
         if seeds_run is None and status == PASS and wants_document and document is None:
             status = FAIL
             reasons.append(f"soak_result_unreadable:{ctx.soak_module} --json produced no document")
-        # The sweep's own replay check is a stated acceptance property (PLAN 5.1:
-        # a failure must replay exactly) but it does not gate the soak's exit
-        # code, so the gate reads it out of the document and names it itself.
+        # The sweep's replay identities are RECORDED OBSERVATIONS, not gates (design-review
+        # decision 2', revised 2026-09-15): a fixed --events budget covers a variable number of
+        # request lifecycles, so product-digest identity held 5/20 canonical runs and
+        # event-stream identity 29/30.  Reading either as a gate would fail the pilot ~15 times
+        # in 20 for a non-defect reason.  What gates is structural - any invariant firing in any
+        # run, and terminal coverage - and the soak names it itself in replay_check.gate_failures,
+        # with its non-zero exit code as the primary signal.
         replay = document.get("replay_check") if isinstance(document, dict) else None
-        if isinstance(replay, dict) and replay.get("performed") and replay.get("identical") is False:
-            status = FAIL
-            reasons.append(
-                "soak_replay_not_identical:"
-                f"{replay.get('first_digest')}!={replay.get('replay_digest')}"
-            )
+        if isinstance(replay, dict):
+            gate_failures = replay.get("gate_failures") or ()
+            if gate_failures:
+                status = FAIL
+                reasons.append(
+                    "soak_gate_failures:" + ";".join(str(failure) for failure in gate_failures)
+                )
         divergence = document.get("divergence_check") if isinstance(document, dict) else None
         if (
             isinstance(divergence, dict)

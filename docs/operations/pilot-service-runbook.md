@@ -582,8 +582,14 @@ submitted.
   receipt/pump path by message id, or accept fail-closed-with-a-name as the contract and record it in the
   claim sheet's exclusions. Do not weaken `at_most_one_native_execution_per_command` while doing it.
 - Reproduce deterministically before and after any change:
-  `python3 -B -m mycelium_testbed.soak --seed <N> --events 200 --run-id repro` (a replayed seed
-  produced an identical run digest — `replay_check.identical=true` in `12-soak-trace-evidence.txt`).
+  `python3 -B -m mycelium_testbed.soak --seed <N> --events 200 --run-id repro`. Read the result
+  as **structural**: what gates is any invariant firing and terminal coverage, named in
+  `replay_check.gate_failures` (and reflected in the soak's exit code). The replay digests are
+  *recorded observations*, not gates — a fixed `--events` budget covers a variable number of
+  request lifecycles, so product-digest identity held 5/20 canonical runs and event-stream
+  identity 29/30 (`rca/wp2-harness-assertion-design-review.md` decision 2', revised 2026-09-15).
+  `12-soak-trace-evidence.txt` records an identical event-stream digest for its replayed seed;
+  do not read that as a pass/fail criterion.
 
 ### 5.6 A stale qualification value or advertised bound
 

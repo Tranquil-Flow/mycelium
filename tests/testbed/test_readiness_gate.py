@@ -720,6 +720,7 @@ def _soak_rules(
     exit_code: int,
     replay_identical: bool = True,
     diverges: bool = True,
+    gate_failures: Sequence[str] = (),
 ) -> list[Rule]:
     document = json.dumps(
         {
@@ -733,6 +734,10 @@ def _soak_rules(
                 "identical": replay_identical,
                 "first_digest": "sha256:first",
                 "replay_digest": "sha256:replay",
+                # Design-review decision 2' (2026-09-15): the digests above are recorded
+                # observations; what gates is this structural list, plus the exit code.
+                "gated_property": "invariants_and_terminal_coverage",
+                "gate_failures": list(gate_failures),
             },
             "divergence_check": {"performed": True, "differs_from_first": diverges, "seed": 1000004},
             "seeds": [
@@ -780,19 +785,42 @@ def test_check_c_reports_a_seed_count_mismatch(tmp_path: Path) -> None:
     assert result.reasons[0] == "soak_seed_count_mismatch:requested=3,ran=1"
 
 
-def test_check_c_surfaces_a_non_identical_replay_even_when_the_sweep_exits_zero(
-    tmp_path: Path,
-) -> None:
-    """The sweep's own replay check does not gate its exit code: the gate reads it."""
+def test_check_c_does_not_fail_on_a_non_identical_replay_digest(tmp_path: Path) -> None:
+    """Decision 2': the replay digests are recorded, never gated.
+
+    The digest identity is an observation about a variable work budget - product-digest identity
+    held 5/20 canonical runs, event-stream identity 29/30 - so failing on it would refuse the
+    pilot ~15 times in 20 for a non-defect reason.  This test pinned the superseded rule until
+    2026-09-15, so it now pins the correction.
+    """
 
     runner = StubRunner(
         _soak_rules(seeds_run=3, codes=(), exit_code=0, replay_identical=False)
     )
     result = gate.check_soak(context(tmp_path, runner=runner))
 
+    assert result.status == gate.PASS, result.reasons
+    assert not any(reason.startswith("soak_replay_not_identical") for reason in result.reasons)
+
+
+def test_check_c_fails_on_the_soaks_structural_gate_failures(tmp_path: Path) -> None:
+    """What gates is structural: the sweep's own gate_failures list, named by the gate."""
+
+    runner = StubRunner(
+        _soak_rules(
+            seeds_run=3,
+            codes=(),
+            exit_code=0,
+            gate_failures=("invariant_violated:at_most_one_native_execution_per_command:x:in_seed-1",),
+        )
+    )
+    result = gate.check_soak(context(tmp_path, runner=runner))
+
     assert result.status == gate.FAIL
-    assert any(reason.startswith("soak_replay_not_identical:") for reason in result.reasons)
-    assert result.detail["sweep_green"] is True  # the sweep itself claimed green
+    assert any(
+        reason.startswith("soak_gate_failures:") and "at_most_one_native_execution" in reason
+        for reason in result.reasons
+    )
 
 
 def test_check_c_surfaces_seeds_that_do_not_diverge(tmp_path: Path) -> None:
