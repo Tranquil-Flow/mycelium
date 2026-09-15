@@ -1,0 +1,1059 @@
+"""Single source of truth for every request/control-path timing budget.
+
+Packet ``wp2-1`` (``PLAN.md`` 5.2 item 1).  Every timeout, deadline, reserve,
+lease, TTL and poll interval that the request/control path consumes is recorded
+here exactly once, together with its unit, the owning module, the reason the
+value is what it is, and the constant/symbol it replaces.
+
+Rules this module obeys:
+
+* **Values never change behaviour.**  Every value below is byte-identical to the
+  shipped literal it replaces.  This module single-sources values; it never
+  tunes them.  A value that looks wrong is reported, not edited.
+* **No product imports.**  The module is stdlib-only, so any layer (including
+  ``physical_inference_node`` at import time) can bind to it without a cycle.
+* **Derived quantities are explicit.**  ``route_cleanup_fanout_window_seconds``
+  and ``advertised_maximum_total_cleanup_ms`` are the symbols the composition
+  invariants are written in (PLAN D9: the route owns the end-to-end budget; a
+  peer's advertised cleanup bound must fit inside the route's fanout window).
+* **Invariant checkers return a stable named reason code, never a bare
+  ``False``.**  ``None`` means "satisfied"; a non-empty string is the violated
+  code.  ``check_composition()`` returns the list of violated codes.
+* **Everything existing stays importable and monkeypatchable.**  Consumer
+  modules keep their module-level names (``mycelium_live.route.
+  _CLEANUP_INLINE_RECEIPT_GRACE_SECONDS`` and friends) as plain attributes
+  assigned from this registry, so ``monkeypatch.setattr("<dotted path>", ...)``
+  keeps working (see ``tests/live/test_a4_ownership.py``).
+
+Binding status (packet wp2-1 requirement 3): ``CONSUMER_BINDINGS`` lists every
+consumer constant that must read this registry.  Constants in modules whose
+bytes are hash-pinned by ``contracts/contract-manifest.v1.json`` cannot be
+rebound by this packet without drifting the canonical contract audit, so they
+are registered here and *test-enforced* by ``tests/testbed/
+test_deadline_registry.py`` until a lane with ``contracts/**`` write scope
+refreshes the pins; ``PENDING_BINDINGS`` names them with the reason.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Final, Mapping
+
+__all__ = [
+    "ARTIFACT_REQUEST_CLOCK_SKEW_MS",
+    "AVAILABILITY_RECONCILE_MAX_SECONDS",
+    "AVAILABILITY_RECONCILE_MIN_SECONDS",
+    "CANCEL_AND_CLEANUP_BUDGET_SECONDS",
+    "CLEANUP_FALLBACK_RESERVE_SECONDS",
+    "CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
+    "CLEANUP_RECEIPT_POLL_SECONDS",
+    "CLEANUP_RECONCILIATION_HORIZON_SECONDS",
+    "CLEANUP_RECONCILIATION_WORKERS",
+    "CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+    "COMMAND_DEFAULT_COOPERATIVE_STEP_MS",
+    "COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS",
+    "COMPOSITION_INVARIANTS",
+    "CONSUMER_BINDINGS",
+    "DEADLINES",
+    "DEADLINES_BY_NAME",
+    "Deadline",
+    "GATEWAY_SESSION_EVICTION_GRACE_SECONDS",
+    "GATEWAY_SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
+    "GATEWAY_PRODUCER_STALL_POLL_SECONDS",
+    "GATEWAY_SSE_DISCONNECT_POLL_SECONDS",
+    "IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
+    "LIVENESS_ACTIVE_FAILURE_DETECTION_MS",
+    "LIVENESS_IDLE_KEEPALIVE_MS",
+    "LIVENESS_QUARANTINE_STALE_MS",
+    "MEMBER_TRANSPORT_GRANT_TTL_MS",
+    "NODE_IDENTITY_CREATE_RETRIES",
+    "NODE_IDENTITY_CREATE_RETRY_SECONDS",
+    "NODE_COMMAND_TIMEOUT_SECONDS",
+    "NODE_LAUNCH_HANDSHAKE_SECONDS",
+    "NODE_SESSION_TIMEOUT_SECONDS",
+    "NON_BINDING_DEADLINES",
+    "PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS",
+    "PENDING_BINDINGS",
+    "PENDING_CONTRACT_PINNED_BINDINGS",
+    "PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS",
+    "PENDING_OUT_OF_SCOPE_BINDINGS",
+    "QUALIFICATION_MAX_AGE_SECONDS",
+    "REASON_COOPERATIVE_STEP_EXCEEDS_INTERRUPTION_AND_CLEANUP",
+    "REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW",
+    "REASON_QUALIFICATION_MAX_AGE_NOT_GREATER_THAN_REQUALIFICATION_INTERVAL",
+    "REQUALIFICATION_INTERVAL_SECONDS",
+    "ROUTE_HEALTH_PROBE_DEADLINE_SECONDS",
+    "STAGE_PACK_MAX_AUTHORITY_TTL_MS",
+    "STAGE_PACK_MIN_AUTHORITY_TTL_MS",
+    "UNITS",
+    "advertised_maximum_total_cleanup_ms",
+    "check_composition",
+    "check_cooperative_step_bound",
+    "check_peer_advertised_cleanup_bound",
+    "check_qualification_age_bound",
+    "deadline",
+    "derive_route_cleanup_fanout_window_ms",
+    "derive_route_cleanup_fanout_window_seconds",
+    "route_cleanup_fanout_window_ms",
+    "route_cleanup_fanout_window_seconds",
+]
+
+#: Units a :class:`Deadline` may carry.  ``count`` is for bounded attempt /
+#: worker / retry budgets that are consumed with the same authority as a clock.
+UNITS: Final[frozenset[str]] = frozenset({"seconds", "milliseconds", "count"})
+
+
+@dataclass(frozen=True, slots=True)
+class Deadline:
+    """One frozen deadline/budget record.
+
+    ``name``       registry name; ``name.upper()`` is the public constant that
+                   carries the same value in this module.
+    ``value``      byte-identical to the shipped literal.
+    ``unit``       one of :data:`UNITS`.
+    ``owner``      module that consumes the value (``path:line``).
+    ``derivation`` why the value is what it is, and how it relates to the other
+                   records (the composition invariants are written here).
+    ``source``     the constant/symbol (or inline literal) this record replaces.
+    """
+
+    name: str
+    value: float | int
+    unit: str
+    owner: str
+    derivation: str
+    source: str
+
+    def __post_init__(self) -> None:
+        if self.unit not in UNITS:
+            raise ValueError("deadline_unit_unknown")
+        if not self.name or not self.derivation or not self.owner or not self.source:
+            raise ValueError("deadline_record_incomplete")
+        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
+            raise ValueError("deadline_value_invalid")
+        if self.value <= 0:
+            raise ValueError("deadline_value_not_positive")
+
+
+# --------------------------------------------------------------------------- #
+# Values.  One literal per deadline, byte-identical to the shipped constant.
+# --------------------------------------------------------------------------- #
+
+#: End-to-end owner budget for cancellation + request-scoped cleanup.  Every
+#: other cleanup record below is a partition of this budget, never an extension
+#: of it (PLAN D9: "do not raise the 2 s total").
+CANCEL_AND_CLEANUP_BUDGET_SECONDS: Final[float] = 2.0
+
+#: The final interval of the budget held back for exactly one bounded
+#: request-scoped snapshot fallback; equal to the snapshot attempt by
+#: construction.
+CLEANUP_FALLBACK_RESERVE_SECONDS: Final[float] = 0.5
+
+#: One bounded request-scoped snapshot round (probe a missing node's cleanup
+#: proof) inside the budget.
+CLEANUP_SNAPSHOT_ATTEMPT_SECONDS: Final[float] = 0.5
+
+#: One bounded grace for the inline cancellation receipt to arrive before
+#: bounded snapshot rounds are allowed to race the delayed response.
+CLEANUP_INLINE_RECEIPT_GRACE_SECONDS: Final[float] = 0.5
+
+#: Cadence at which the parent re-reads cleanup receipts, so the node control
+#: lane stays available to a concurrently cancelling owner.
+CLEANUP_RECEIPT_POLL_SECONDS: Final[float] = 0.1
+
+#: Lifetime of the post-authority cleanup reconciliation scheduler.
+CLEANUP_RECONCILIATION_HORIZON_SECONDS: Final[float] = 60.0
+
+#: Worker threads the cleanup reconciliation scheduler may use.
+CLEANUP_RECONCILIATION_WORKERS: Final[int] = 4
+
+#: Bound on one idle-keepalive probe of a node whose liveness is being
+#: re-observed.
+IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS: Final[float] = 0.5
+
+#: What a physical node advertises as its total cleanup bound.
+PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS: Final[int] = 2_000
+
+#: Ceiling a command plan may request for interruption + cleanup.
+COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS: Final[int] = 2_000
+
+#: Cadence at which the SSE listener wakes to notice a client disconnect while
+#: awaiting the next buffered event.
+GATEWAY_SSE_DISCONNECT_POLL_SECONDS: Final[float] = 0.1
+
+#: Cadence at which a buffer-blocked producer re-checks the silent-subscriber
+#: stall budget before parking again.
+GATEWAY_PRODUCER_STALL_POLL_SECONDS: Final[float] = 0.05
+
+#: Bound on one health probe issued by the route's active liveness sweep.
+ROUTE_HEALTH_PROBE_DEADLINE_SECONDS: Final[float] = 0.5
+
+#: Cooperative step a command plan gets by default.
+COMMAND_DEFAULT_COOPERATIVE_STEP_MS: Final[int] = 100
+
+#: Grace covering the submit->subscribe window of a legitimate fresh request
+#: before an abandoned session may be evicted.
+GATEWAY_SESSION_EVICTION_GRACE_SECONDS: Final[float] = 0.05
+
+#: Backstop a buffer-blocked producer grants an attached but non-acknowledging
+#: consumer before the slot is reclaimed.
+GATEWAY_SESSION_SILENT_SUBSCRIBER_STALL_SECONDS: Final[float] = 0.25
+
+#: Liveness: budget in which an active subject must produce an observation.
+LIVENESS_ACTIVE_FAILURE_DETECTION_MS: Final[int] = 2_000
+
+#: Liveness: keepalive cadence for an idle subject.
+LIVENESS_IDLE_KEEPALIVE_MS: Final[int] = 5_000
+
+#: Liveness: staleness after which a quarantined observation is retired.
+LIVENESS_QUARANTINE_STALE_MS: Final[int] = 15_000
+
+#: Member artifact-transport grant TTL.
+MEMBER_TRANSPORT_GRANT_TTL_MS: Final[int] = 900_000
+
+#: Availability reconcile: floor of the size-scaled source reconciliation
+#: timeout.
+AVAILABILITY_RECONCILE_MIN_SECONDS: Final[float] = 30.0
+
+#: Availability reconcile: ceiling of the size-scaled source reconciliation
+#: timeout.
+AVAILABILITY_RECONCILE_MAX_SECONDS: Final[float] = 1_800.0
+
+#: Launch handshake budget for one physical node process.
+NODE_LAUNCH_HANDSHAKE_SECONDS: Final[float] = 2.0
+
+#: Qualification driver: timeout for one command sent to a physical node.
+NODE_COMMAND_TIMEOUT_SECONDS: Final[float] = 900.0
+
+#: Qualification driver: timeout for one node control session.  Slightly larger
+#: than the per-command timeout so a session outlives its last command.
+NODE_SESSION_TIMEOUT_SECONDS: Final[float] = 930.0
+
+#: Identity creation: bounded attempts while a concurrent creator publishes the
+#: key file.
+NODE_IDENTITY_CREATE_RETRIES: Final[int] = 100
+
+#: Identity creation: sleep between those attempts.
+NODE_IDENTITY_CREATE_RETRY_SECONDS: Final[float] = 0.005
+
+#: Accepted clock skew on an assignment-bound artifact request.
+ARTIFACT_REQUEST_CLOCK_SKEW_MS: Final[int] = 5_000
+
+#: Stage-pack authority TTL floor: the shortest grant that still covers one
+#: measured transfer of the assignment bytes.
+STAGE_PACK_MIN_AUTHORITY_TTL_MS: Final[int] = 900_000
+
+#: Stage-pack authority TTL ceiling: a grant above this fails closed
+#: (``artifact_transfer_exceeds_maximum_lease``).
+STAGE_PACK_MAX_AUTHORITY_TTL_MS: Final[int] = 21_600_000
+
+#: How long a qualification projection may be used before it is stale.  There is
+#: no named constant for this today: it is the inline ``3_600_000`` ms literal at
+#: ``mycelium_live/route.py:3950`` and ``mycelium_live/router_port.py:217``.
+#: This symbol is registry-defined (no runtime consumer invented); binding it is
+#: a follow-up for the lane that owns those call sites.
+QUALIFICATION_MAX_AGE_SECONDS: Final[float] = 3_600.0
+
+#: How often a live qualification is proactively refreshed, from
+#: ``mycelium_live/health.LIVE_QUALIFICATION_REFRESH_AFTER_MS`` (55 minutes).
+#: Invariant: ``QUALIFICATION_MAX_AGE_SECONDS > REQUALIFICATION_INTERVAL_SECONDS``
+#: - the freshness bound must not expire before the refresher renews it.
+REQUALIFICATION_INTERVAL_SECONDS: Final[float] = 3_300.0
+
+
+DEADLINES: Final[tuple[Deadline, ...]] = (
+    Deadline(
+        name="cancel_and_cleanup_budget_seconds",
+        value=CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+        unit="seconds",
+        owner="mycelium_request_gateway/service.py:28,382,385,677",
+        derivation=(
+            "End-to-end owner budget for cancellation plus request-scoped "
+            "cleanup. The gateway stamps it at cancellation start and reports "
+            "cancellation_within_bound against it. It partitions, and is never "
+            "extended by, the cleanup records below: route fanout window = "
+            "cancel_and_cleanup_budget_seconds - cleanup_fallback_reserve_seconds."
+        ),
+        source="mycelium_request_gateway.service._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_fallback_reserve_seconds",
+        value=CLEANUP_FALLBACK_RESERVE_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:70,3245,3246",
+        derivation=(
+            "Final interval of the budget held back so a complete response "
+            "delayed in the control transport still leaves authority for one "
+            "bounded request-scoped snapshot fallback. Equal to "
+            "cleanup_snapshot_attempt_seconds by construction; it is subtracted "
+            "from the budget to form the fanout window."
+        ),
+        source="mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_snapshot_attempt_seconds",
+        value=CLEANUP_SNAPSHOT_ATTEMPT_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:69,2722",
+        derivation=(
+            "One bounded request-scoped snapshot round against a node whose "
+            "cleanup proof is still missing. Sized as the reserve it is: a "
+            "single attempt inside the held-back interval, so the budget is "
+            "never over-committed."
+        ),
+        source="mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_inline_receipt_grace_seconds",
+        value=CLEANUP_INLINE_RECEIPT_GRACE_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:71,2669",
+        derivation=(
+            "Grace given to the inline cancellation receipt (fanout and "
+            "lifecycle receipt) before bounded snapshots may race a delayed "
+            "response. Bounded so one delayed leaf cannot monopolize the whole "
+            "budget; monotonic receipt storage makes the race safe."
+        ),
+        source="mycelium_live.route._CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_receipt_poll_seconds",
+        value=CLEANUP_RECEIPT_POLL_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:68,2701,2770,3033",
+        derivation=(
+            "Cadence at which the parent re-reads cleanup receipts while "
+            "waiting, so the node control lane still serves other concurrently "
+            "cancelling owners instead of queuing stale proof commands. Must "
+            "stay well below cleanup_snapshot_attempt_seconds or a single "
+            "attempt cannot complete."
+        ),
+        source="mycelium_live.route._CLEANUP_RECEIPT_POLL_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_reconciliation_horizon_seconds",
+        value=CLEANUP_RECONCILIATION_HORIZON_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:72,2907",
+        derivation=(
+            "Lifetime of the post-authority cleanup reconciliation scheduler: "
+            "how long the route keeps trying to seal a cleanup receipt after the "
+            "request budget (cancel_and_cleanup_budget_seconds) is gone. "
+            "Deliberately much larger than the per-request budget because it is "
+            "a background retirement bound, not a request-path deadline."
+        ),
+        source="mycelium_live.route._CLEANUP_RECONCILIATION_HORIZON_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_reconciliation_workers",
+        value=CLEANUP_RECONCILIATION_WORKERS,
+        unit="count",
+        owner="mycelium_live/route.py:73,1068,2951",
+        derivation=(
+            "Worker threads the cleanup reconciliation scheduler may use. Sized "
+            "so a handful of request-scoped reconciliations proceed in parallel "
+            "without letting the scheduler starve the shared node control lane."
+        ),
+        source="mycelium_live.route._CLEANUP_RECONCILIATION_WORKERS",
+    ),
+    Deadline(
+        name="idle_keepalive_probe_deadline_seconds",
+        value=IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:67,2161",
+        derivation=(
+            "Bound on one keepalive probe of a node that is being re-observed. "
+            "Intentionally the shortest control-path probe: a node that cannot "
+            "answer it within this interval is treated as unobserved rather than "
+            "as a slow-but-alive peer."
+        ),
+        source="mycelium_live.route._IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
+    ),
+    Deadline(
+        name="peer_advertised_maximum_total_cleanup_ms",
+        value=PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS,
+        unit="milliseconds",
+        owner="physical_inference_node.py:2202",
+        derivation=(
+            "The total cleanup bound a physical node advertises in its "
+            "concurrency/liveness projection; the canonical contract producer "
+            "pins the same literal at scripts/generate_contract_fixtures.py:1603 "
+            "and the UI reads it. PLAN D9 makes this the validated side: it must "
+            "fit inside the route's fanout window "
+            "(advertised <= route_cleanup_fanout_window_ms), fail closed at "
+            "startup qualification, never mid-request."
+        ),
+        source='physical_inference_node payload key "maximum_total_cleanup_ms"',
+    ),
+    Deadline(
+        name="command_interruption_and_cleanup_max_ms",
+        value=COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
+        unit="milliseconds",
+        owner="mycelium_live/command_controller.py:19,293,321",
+        derivation=(
+            "Ceiling a command plan may request for interruption + cleanup; the "
+            "controller refuses a larger interruption_and_cleanup_ms. Same 2 s "
+            "authority as cancel_and_cleanup_budget_seconds, expressed in ms for "
+            "the node protocol. Invariant: cooperative step <= interruption + "
+            "cleanup."
+        ),
+        source="mycelium_live.command_controller.MAX_INTERRUPTION_AND_CLEANUP_MS",
+    ),
+    Deadline(
+        name="gateway_sse_disconnect_poll_seconds",
+        value=GATEWAY_SSE_DISCONNECT_POLL_SECONDS,
+        unit="seconds",
+        owner="mycelium_request_gateway/asgi.py:321",
+        derivation=(
+            "SSE listener wake-up cadence: the stream coroutine polls the "
+            "subscription every 0.1 s so a client disconnect is noticed without "
+            "blocking the event loop. Registry-defined (the call site is an "
+            "inline literal, not a named constant); it must stay below the "
+            "gateway's session stall bound so a stalled consumer is observed."
+        ),
+        source="inline literal mycelium_request_gateway/asgi.py:321 (no named constant)",
+    ),
+    Deadline(
+        name="gateway_producer_stall_poll_seconds",
+        value=GATEWAY_PRODUCER_STALL_POLL_SECONDS,
+        unit="seconds",
+        owner="mycelium_request_gateway/service.py:630",
+        derivation=(
+            "Cadence at which a buffer-blocked producer re-checks the "
+            "silent-subscriber stall budget before parking again, so a consumer "
+            "that starts acking is picked up promptly. Registry-defined (the "
+            "call site is an inline literal, not a named constant)."
+        ),
+        source="inline literal mycelium_request_gateway/service.py:630 (no named constant)",
+    ),
+    Deadline(
+        name="route_health_probe_deadline_seconds",
+        value=ROUTE_HEALTH_PROBE_DEADLINE_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:1974",
+        derivation=(
+            "Bound on one health probe issued by the route's active liveness "
+            "sweep. Same value as idle_keepalive_probe_deadline_seconds but a "
+            "separate call site with its own inline literal; registered so the "
+            "duplicate is visible rather than hidden."
+        ),
+        source="inline literal mycelium_live/route.py:1974 (no named constant)",
+    ),
+    Deadline(
+        name="command_default_cooperative_step_ms",
+        value=COMMAND_DEFAULT_COOPERATIVE_STEP_MS,
+        unit="milliseconds",
+        owner="mycelium_live/command_controller.py:20,292",
+        derivation=(
+            "Default cooperative step: the largest slice of work a node promises "
+            "to finish before it can honour an interruption. The cooperative "
+            "invariant is cooperative_step_ms <= interruption_and_cleanup_ms "
+            "(100 ms inside 2000 ms today); it is the step, not the cleanup, "
+            "that decides whether interruption can land inside the budget."
+        ),
+        source="mycelium_live.command_controller.DEFAULT_COOPERATIVE_STEP_MS",
+    ),
+    Deadline(
+        name="gateway_session_eviction_grace_seconds",
+        value=GATEWAY_SESSION_EVICTION_GRACE_SECONDS,
+        unit="seconds",
+        owner="mycelium_request_gateway/service.py:157,929",
+        derivation=(
+            "Grace covering the submit->subscribe window: before it, a new "
+            "submission is rejected (gateway_capacity_exhausted) rather than "
+            "cancelling a fresh in-flight request that has not subscribed yet. "
+            "Far below the cancellation budget on purpose - it protects a fresh "
+            "request, it does not wait for cleanup."
+        ),
+        source="mycelium_request_gateway.service.RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS",
+    ),
+    Deadline(
+        name="gateway_session_silent_subscriber_stall_seconds",
+        value=GATEWAY_SESSION_SILENT_SUBSCRIBER_STALL_SECONDS,
+        unit="seconds",
+        owner="mycelium_request_gateway/service.py:166,618",
+        derivation=(
+            "Backstop a buffer-blocked producer grants an attached but "
+            "non-acknowledging consumer before the slot is reclaimed. Consulted "
+            "only on the full-buffer block, so it never delays the ordinary "
+            "streaming path."
+        ),
+        source="mycelium_request_gateway.service.RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
+    ),
+    Deadline(
+        name="liveness_active_failure_detection_ms",
+        value=LIVENESS_ACTIVE_FAILURE_DETECTION_MS,
+        unit="milliseconds",
+        owner="mycelium_live/liveness.py:16",
+        derivation=(
+            "Budget in which an actively probed subject must produce an "
+            "observation before it is suspected. The route's "
+            "idle_keepalive_probe_deadline_seconds (500 ms) sits inside it, so "
+            "the prober retires before the detector declares a failure."
+        ),
+        source="mycelium_live.liveness.ACTIVE_FAILURE_DETECTION_MS",
+    ),
+    Deadline(
+        name="liveness_idle_keepalive_ms",
+        value=LIVENESS_IDLE_KEEPALIVE_MS,
+        unit="milliseconds",
+        owner="mycelium_live/liveness.py:17",
+        derivation=(
+            "Keepalive cadence for an idle subject: the interval at which the "
+            "detector expects traffic to be generated for a subject with no "
+            "request-scoped work."
+        ),
+        source="mycelium_live.liveness.IDLE_KEEPALIVE_MS",
+    ),
+    Deadline(
+        name="liveness_quarantine_stale_ms",
+        value=LIVENESS_QUARANTINE_STALE_MS,
+        unit="milliseconds",
+        owner="mycelium_live/liveness.py:20",
+        derivation=(
+            "Staleness at which a quarantined observation is retired. Larger "
+            "than the active detection bound so quarantine outlives a transient "
+            "failure without killing the loop (PLAN 5.3 liveness rules)."
+        ),
+        source="mycelium_live.liveness.QUARANTINE_STALE_MS",
+    ),
+    Deadline(
+        name="member_transport_grant_ttl_ms",
+        value=MEMBER_TRANSPORT_GRANT_TTL_MS,
+        unit="milliseconds",
+        owner="mycelium_live/member_transport.py:77,1007",
+        derivation=(
+            "Grant TTL for a member artifact-transport plan, clamped against the "
+            "frozen manifest expiry. Must stay >= the stage-pack authority TTL "
+            "floor it authorises work under (both 15 minutes today)."
+        ),
+        source="mycelium_live.member_transport._GRANT_TTL_MS",
+    ),
+    Deadline(
+        name="availability_reconcile_min_seconds",
+        value=AVAILABILITY_RECONCILE_MIN_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/member_transport.py:78,344,345",
+        derivation=(
+            "Floor of the size-scaled source reconciliation timeout: even a tiny "
+            "assignment gets a full 30 s to be reverified. Also the intercept of "
+            "the size scaling, so the timeout is monotone in assignment bytes."
+        ),
+        source="mycelium_live.member_transport._AVAILABILITY_RECONCILE_MIN_SECONDS",
+    ),
+    Deadline(
+        name="availability_reconcile_max_seconds",
+        value=AVAILABILITY_RECONCILE_MAX_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/member_transport.py:79,342",
+        derivation=(
+            "Ceiling of the size-scaled source reconciliation timeout (30 min). "
+            "Must exceed availability_reconcile_min_seconds; today the ceiling "
+            "is 60x the floor, so the scaling window is meaningful."
+        ),
+        source="mycelium_live.member_transport._AVAILABILITY_RECONCILE_MAX_SECONDS",
+    ),
+    Deadline(
+        name="node_launch_handshake_seconds",
+        value=NODE_LAUNCH_HANDSHAKE_SECONDS,
+        unit="seconds",
+        owner="mycelium_node/process.py:52,1486",
+        derivation=(
+            "Launch handshake budget for one physical node process (ready "
+            "handshake, release, exec status). Bounded so a wedged child fails "
+            "closed as node_process_start_failed instead of hanging the caller."
+        ),
+        source="mycelium_node.process._LAUNCH_HANDSHAKE_SECONDS",
+    ),
+    Deadline(
+        name="node_command_timeout_seconds",
+        value=NODE_COMMAND_TIMEOUT_SECONDS,
+        unit="seconds",
+        owner=(
+            "physical_inference_qualification.py:77,1816,2069, "
+            "mycelium_live/route.py:1722"
+        ),
+        derivation=(
+            "Timeout for one command sent to a physical node by the "
+            "qualification driver; the live route reuses the same symbol when "
+            "it drives node commands. Orders of magnitude above the request "
+            "budget on purpose: it bounds a harness-level command, not a "
+            "user-visible request."
+        ),
+        source="physical_inference_qualification.NODE_COMMAND_TIMEOUT_SECONDS",
+    ),
+    Deadline(
+        name="node_session_timeout_seconds",
+        value=NODE_SESSION_TIMEOUT_SECONDS,
+        unit="seconds",
+        owner=(
+            "physical_inference_qualification.py:78,1825,2079, "
+            "mycelium_live/route.py:1775"
+        ),
+        derivation=(
+            "Timeout for one node control session; must exceed "
+            "node_command_timeout_seconds so the session outlives its last "
+            "command (930 s vs 900 s today, a 30 s margin)."
+        ),
+        source="physical_inference_qualification.NODE_SESSION_TIMEOUT_SECONDS",
+    ),
+    Deadline(
+        name="node_identity_create_retries",
+        value=NODE_IDENTITY_CREATE_RETRIES,
+        unit="count",
+        owner="mycelium_node/identity.py:23,272",
+        derivation=(
+            "Bounded attempts while a concurrent creator publishes the identity "
+            "key file. Worst-case wait is retries x retry_seconds = 0.5 s, which "
+            "is deliberately inside node_launch_handshake_seconds."
+        ),
+        source="mycelium_node.identity._CREATE_RETRIES",
+    ),
+    Deadline(
+        name="node_identity_create_retry_seconds",
+        value=NODE_IDENTITY_CREATE_RETRY_SECONDS,
+        unit="seconds",
+        owner="mycelium_node/identity.py:24,280",
+        derivation=(
+            "Sleep between identity-creation attempts. Tiny on purpose: identity "
+            "creation is a local atomic file race, not a network operation."
+        ),
+        source="mycelium_node.identity._CREATE_RETRY_SECONDS",
+    ),
+    Deadline(
+        name="artifact_request_clock_skew_ms",
+        value=ARTIFACT_REQUEST_CLOCK_SKEW_MS,
+        unit="milliseconds",
+        owner="mycelium_live/artifact_transport.py:42,547",
+        derivation=(
+            "Accepted clock skew on an assignment-bound artifact request "
+            "(issued-at clamp). Bounded so a stale request cannot be replayed "
+            "indefinitely, while tolerating host clock disagreement."
+        ),
+        source="mycelium_live.artifact_transport._REQUEST_CLOCK_SKEW_MS",
+    ),
+    Deadline(
+        name="stage_pack_min_authority_ttl_ms",
+        value=STAGE_PACK_MIN_AUTHORITY_TTL_MS,
+        unit="milliseconds",
+        owner="mycelium_live/local_preparer.py:37,1144,1145,1300,1439",
+        derivation=(
+            "Stage-pack authority TTL floor: the shortest grant that still "
+            "covers one measured transfer of the assignment bytes. Equal to "
+            "member_transport_grant_ttl_ms by construction (15 minutes)."
+        ),
+        source="mycelium_live.local_preparer._STAGE_PACK_MIN_AUTHORITY_TTL_MS",
+    ),
+    Deadline(
+        name="stage_pack_max_authority_ttl_ms",
+        value=STAGE_PACK_MAX_AUTHORITY_TTL_MS,
+        unit="milliseconds",
+        owner="mycelium_live/local_preparer.py:38,1147",
+        derivation=(
+            "Stage-pack authority TTL ceiling (6 hours). A size-scaled TTL above "
+            "it fails closed with artifact_transfer_exceeds_maximum_lease, so "
+            "the scaling can never mint an unbounded lease."
+        ),
+        source="mycelium_live.local_preparer._STAGE_PACK_MAX_AUTHORITY_TTL_MS",
+    ),
+    Deadline(
+        name="qualification_max_age_seconds",
+        value=QUALIFICATION_MAX_AGE_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:3950, mycelium_live/router_port.py:217",
+        derivation=(
+            "Registry-defined symbol: the freshness bound of a qualification "
+            "projection (today the inline 3_600_000 ms literal at route.py:3950 "
+            "and router_port.py:217 claim an absolute deadline / browser "
+            "freshness one hour ahead). No runtime consumer is invented here; "
+            "the invariant qualification_max_age_seconds > "
+            "requalification_interval_seconds is what makes the pair meaningful."
+        ),
+        source="registry-defined (no named constant today; inline 3_600_000 ms literals)",
+    ),
+    Deadline(
+        name="requalification_interval_seconds",
+        value=REQUALIFICATION_INTERVAL_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/health.py:11,56, mycelium_live/registry.py:297",
+        derivation=(
+            "How often a live qualification is proactively refreshed (55 min). "
+            "Must be strictly below qualification_max_age_seconds (3600 s) so "
+            "the refresher renews the projection before freshness admission "
+            "fails closed; today the margin is 300 s."
+        ),
+        source="mycelium_live.health.LIVE_QUALIFICATION_REFRESH_AFTER_MS",
+    ),
+)
+
+DEADLINES_BY_NAME: Final[Mapping[str, Deadline]] = MappingProxyType(
+    {record.name: record for record in DEADLINES}
+)
+
+
+def deadline(name: str) -> Deadline:
+    """Return the frozen record for ``name``; fail closed if unknown."""
+
+    record = DEADLINES_BY_NAME.get(name)
+    if record is None:
+        raise KeyError("unknown_deadline")
+    return record
+
+
+# --------------------------------------------------------------------------- #
+# Derived quantities (PLAN 5.2 item 1 / D9).
+# --------------------------------------------------------------------------- #
+
+def derive_route_cleanup_fanout_window_seconds(
+    *,
+    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
+) -> float:
+    """The interval the route actually has to fan cancellation out to peers."""
+
+    return float(budget_seconds) - float(fallback_reserve_seconds)
+
+
+def derive_route_cleanup_fanout_window_ms(
+    *,
+    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
+) -> int:
+    """Same window in milliseconds, exact for whole-millisecond inputs."""
+
+    seconds = derive_route_cleanup_fanout_window_seconds(
+        budget_seconds=budget_seconds,
+        fallback_reserve_seconds=fallback_reserve_seconds,
+    )
+    scaled = seconds * 1_000
+    if scaled != int(scaled):
+        raise ValueError("fanout_window_not_whole_milliseconds")
+    return int(scaled)
+
+
+#: The route's cleanup fanout window: 2.0 s budget - 0.5 s fallback reserve.
+route_cleanup_fanout_window_seconds: Final[float] = (
+    derive_route_cleanup_fanout_window_seconds()
+)
+
+#: Same window in milliseconds (1500 ms today).
+route_cleanup_fanout_window_ms: Final[int] = derive_route_cleanup_fanout_window_ms()
+
+#: What the node advertises today: 2000 ms, i.e. larger than the window above.
+advertised_maximum_total_cleanup_ms: Final[int] = (
+    PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS
+)
+
+
+# --------------------------------------------------------------------------- #
+# Composition invariants.  Each checker returns a stable named reason code (or
+# None when satisfied); never a bare False.
+# --------------------------------------------------------------------------- #
+
+#: PLAN D9, round-50 defect: the peer advertises a cleanup bound the route's
+#: fanout window cannot contain (2000 ms advertised vs 1500 ms window today).
+REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW: Final[str] = (
+    "peer_advertised_cleanup_bound_exceeds_route_fanout_window"
+)
+
+#: A cooperative step larger than the interruption+cleanup budget can never be
+#: interrupted inside the budget.
+REASON_COOPERATIVE_STEP_EXCEEDS_INTERRUPTION_AND_CLEANUP: Final[str] = (
+    "cooperative_step_exceeds_interruption_and_cleanup"
+)
+
+#: A qualification that goes stale before it is refreshed cannot be refreshed.
+REASON_QUALIFICATION_MAX_AGE_NOT_GREATER_THAN_REQUALIFICATION_INTERVAL: Final[str] = (
+    "qualification_max_age_not_greater_than_requalification_interval"
+)
+
+COMPOSITION_INVARIANTS: Final[tuple[str, ...]] = (
+    REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW,
+    REASON_COOPERATIVE_STEP_EXCEEDS_INTERRUPTION_AND_CLEANUP,
+    REASON_QUALIFICATION_MAX_AGE_NOT_GREATER_THAN_REQUALIFICATION_INTERVAL,
+)
+
+
+def _number(value: float | int, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"invalid_composition_value|{label}")
+    return float(value)
+
+
+def check_peer_advertised_cleanup_bound(
+    *,
+    advertised_cleanup_ms: float | int,
+    fanout_window_ms: float | int,
+) -> str | None:
+    """``peer_advertised_cleanup_ms <= route_cleanup_fanout_window_ms``."""
+
+    advertised = _number(advertised_cleanup_ms, "advertised_cleanup_ms")
+    window = _number(fanout_window_ms, "fanout_window_ms")
+    if advertised > window:
+        return REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW
+    return None
+
+
+def check_cooperative_step_bound(
+    *,
+    cooperative_step_ms: float | int,
+    interruption_and_cleanup_ms: float | int,
+) -> str | None:
+    """``cooperative_step_ms <= interruption_ms + cleanup_ms``."""
+
+    step = _number(cooperative_step_ms, "cooperative_step_ms")
+    budget = _number(interruption_and_cleanup_ms, "interruption_and_cleanup_ms")
+    if step > budget:
+        return REASON_COOPERATIVE_STEP_EXCEEDS_INTERRUPTION_AND_CLEANUP
+    return None
+
+
+def check_qualification_age_bound(
+    *,
+    qualification_max_age_seconds: float | int,
+    requalification_interval_seconds: float | int,
+) -> str | None:
+    """``qualification_max_age_seconds > requalification_interval_seconds``."""
+
+    max_age = _number(qualification_max_age_seconds, "qualification_max_age_seconds")
+    interval = _number(
+        requalification_interval_seconds, "requalification_interval_seconds"
+    )
+    if max_age <= interval:
+        return (
+            REASON_QUALIFICATION_MAX_AGE_NOT_GREATER_THAN_REQUALIFICATION_INTERVAL
+        )
+    return None
+
+
+def check_composition(
+    *,
+    advertised_cleanup_ms: float | int | None = None,
+    total_budget_seconds: float | int | None = None,
+    fallback_reserve_seconds: float | int | None = None,
+    fanout_window_ms: float | int | None = None,
+    cooperative_step_ms: float | int | None = None,
+    interruption_and_cleanup_ms: float | int | None = None,
+    qualification_max_age_seconds: float | int | None = None,
+    requalification_interval_seconds: float | int | None = None,
+) -> list[str]:
+    """Return the violated composition reason codes for one budget composition.
+
+    Every argument defaults to the shipped registry value, so a bare
+    ``check_composition()`` answers "does today's shipped composition hold?".
+    The fanout window is taken from ``fanout_window_ms`` when given, otherwise
+    derived from ``total_budget_seconds`` / ``fallback_reserve_seconds`` - which
+    is how a historical composition (e.g. the round-50 preview values) is
+    replayed without touching the registry.
+    """
+
+    if advertised_cleanup_ms is None:
+        advertised_cleanup_ms = advertised_maximum_total_cleanup_ms
+    if fanout_window_ms is None:
+        budget = (
+            CANCEL_AND_CLEANUP_BUDGET_SECONDS
+            if total_budget_seconds is None
+            else _number(total_budget_seconds, "total_budget_seconds")
+        )
+        reserve = (
+            CLEANUP_FALLBACK_RESERVE_SECONDS
+            if fallback_reserve_seconds is None
+            else _number(fallback_reserve_seconds, "fallback_reserve_seconds")
+        )
+        fanout_window_ms = derive_route_cleanup_fanout_window_ms(
+            budget_seconds=budget,
+            fallback_reserve_seconds=reserve,
+        )
+    if cooperative_step_ms is None:
+        cooperative_step_ms = COMMAND_DEFAULT_COOPERATIVE_STEP_MS
+    if interruption_and_cleanup_ms is None:
+        interruption_and_cleanup_ms = COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+    if qualification_max_age_seconds is None:
+        qualification_max_age_seconds = QUALIFICATION_MAX_AGE_SECONDS
+    if requalification_interval_seconds is None:
+        requalification_interval_seconds = REQUALIFICATION_INTERVAL_SECONDS
+
+    verdicts = (
+        check_peer_advertised_cleanup_bound(
+            advertised_cleanup_ms=advertised_cleanup_ms,
+            fanout_window_ms=fanout_window_ms,
+        ),
+        check_cooperative_step_bound(
+            cooperative_step_ms=cooperative_step_ms,
+            interruption_and_cleanup_ms=interruption_and_cleanup_ms,
+        ),
+        check_qualification_age_bound(
+            qualification_max_age_seconds=qualification_max_age_seconds,
+            requalification_interval_seconds=requalification_interval_seconds,
+        ),
+    )
+    return [code for code in verdicts if code is not None]
+
+
+# --------------------------------------------------------------------------- #
+# Consumer bindings: which module-level constant must read this registry.
+# --------------------------------------------------------------------------- #
+
+#: ``(dotted path of the consumer constant, registry name)``.
+#:
+#: Bound by this packet - ``mycelium_live/member_transport.py`` and
+#: ``mycelium_node/process.py``.
+BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "mycelium_live.member_transport._AVAILABILITY_RECONCILE_MAX_SECONDS",
+        "availability_reconcile_max_seconds",
+    ),
+    (
+        "mycelium_live.member_transport._AVAILABILITY_RECONCILE_MIN_SECONDS",
+        "availability_reconcile_min_seconds",
+    ),
+    ("mycelium_live.member_transport._GRANT_TTL_MS", "member_transport_grant_ttl_ms"),
+    ("mycelium_node.process._LAUNCH_HANDSHAKE_SECONDS", "node_launch_handshake_seconds"),
+)
+
+#: ``(dotted path, registry name)`` for consumers whose module belongs to the
+#: **closed member-runtime bundle**
+#: (``mycelium_member_runtime.RUNTIME_PATHS``: the least-authority file set that
+#: is delivered to a member host and import-probed from a private directory).
+#: Binding them would make ``mycelium_live/artifact_transport.py`` and
+#: ``mycelium_node/identity.py`` import ``mycelium_deadlines``, which is not in
+#: that closure, so the bundle's import probe fails
+#: (``MemberRuntimeError("member_runtime_import_probe_failed")``, caught by
+#: ``tests/live/test_member_runtime.py``).  Extending the closure is a
+#: least-authority decision owned by the lane that owns
+#: ``mycelium_member_runtime.py``; the exact patch (closure entry + bindings) is
+#: recorded in the wp2-1 run directory.  Until it lands, the values are
+#: test-enforced from here.
+PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "mycelium_live.artifact_transport._REQUEST_CLOCK_SKEW_MS",
+        "artifact_request_clock_skew_ms",
+    ),
+    ("mycelium_node.identity._CREATE_RETRIES", "node_identity_create_retries"),
+    (
+        "mycelium_node.identity._CREATE_RETRY_SECONDS",
+        "node_identity_create_retry_seconds",
+    ),
+)
+
+#: ``(dotted path, registry name)`` for consumers inside this packet's write set
+#: whose module bytes are hash-pinned by ``contracts/contract-manifest.v1.json``
+#: (``mycelium_live/route.py`` 5 specs, ``mycelium_request_gateway/service.py``
+#: 2, ``mycelium_live/local_preparer.py`` 1, ``physical_inference_node.py`` 1).
+#: Rebinding them is a one-line assignment each, but it must land in the same
+#: change as a canonical manifest owner-source pin refresh
+#: (``scripts/generate_contract_fixtures.py``), and this packet may not write
+#: ``contracts/**``.  Until then the registry value is enforced by
+#: ``tests/testbed/test_deadline_registry.py``.
+PENDING_CONTRACT_PINNED_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS",
+        "cleanup_fallback_reserve_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
+        "cleanup_inline_receipt_grace_seconds",
+    ),
+    ("mycelium_live.route._CLEANUP_RECEIPT_POLL_SECONDS", "cleanup_receipt_poll_seconds"),
+    (
+        "mycelium_live.route._CLEANUP_RECONCILIATION_HORIZON_SECONDS",
+        "cleanup_reconciliation_horizon_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_RECONCILIATION_WORKERS",
+        "cleanup_reconciliation_workers",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+        "cleanup_snapshot_attempt_seconds",
+    ),
+    (
+        "mycelium_live.route._IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
+        "idle_keepalive_probe_deadline_seconds",
+    ),
+    (
+        "mycelium_live.local_preparer._STAGE_PACK_MAX_AUTHORITY_TTL_MS",
+        "stage_pack_max_authority_ttl_ms",
+    ),
+    (
+        "mycelium_live.local_preparer._STAGE_PACK_MIN_AUTHORITY_TTL_MS",
+        "stage_pack_min_authority_ttl_ms",
+    ),
+    (
+        "mycelium_request_gateway.service.RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS",
+        "gateway_session_eviction_grace_seconds",
+    ),
+    (
+        "mycelium_request_gateway.service.RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
+        "gateway_session_silent_subscriber_stall_seconds",
+    ),
+    (
+        "mycelium_request_gateway.service._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+        "cancel_and_cleanup_budget_seconds",
+    ),
+)
+
+#: ``(dotted path, registry name)`` for consumers this packet registers and
+#: test-enforces but may not rebind at all: these modules are outside packet
+#: wp2-1's allowed write set (``mycelium_live/command_controller.py``,
+#: ``mycelium_live/liveness.py``, ``mycelium_live/health.py``).  Their values are
+#: pinned here by test, so a value edit in any of them fails the suite.
+PENDING_OUT_OF_SCOPE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
+    (
+        "mycelium_live.command_controller.DEFAULT_COOPERATIVE_STEP_MS",
+        "command_default_cooperative_step_ms",
+    ),
+    (
+        "mycelium_live.command_controller.MAX_INTERRUPTION_AND_CLEANUP_MS",
+        "command_interruption_and_cleanup_max_ms",
+    ),
+    (
+        "mycelium_live.health.LIVE_QUALIFICATION_REFRESH_AFTER_MS",
+        "requalification_interval_seconds",
+    ),
+    ("mycelium_live.liveness.ACTIVE_FAILURE_DETECTION_MS", "liveness_active_failure_detection_ms"),
+    ("mycelium_live.liveness.IDLE_KEEPALIVE_MS", "liveness_idle_keepalive_ms"),
+    ("mycelium_live.liveness.QUARANTINE_STALE_MS", "liveness_quarantine_stale_ms"),
+    (
+        "physical_inference_qualification.NODE_COMMAND_TIMEOUT_SECONDS",
+        "node_command_timeout_seconds",
+    ),
+    (
+        "physical_inference_qualification.NODE_SESSION_TIMEOUT_SECONDS",
+        "node_session_timeout_seconds",
+    ),
+)
+
+#: Every consumer constant the registry single-sources.
+CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = tuple(
+    sorted(
+        BOUND_CONSUMER_BINDINGS
+        + PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS
+        + PENDING_CONTRACT_PINNED_BINDINGS
+        + PENDING_OUT_OF_SCOPE_BINDINGS
+    )
+)
+
+#: Consumers registered but not rebound by this packet, with the reason.
+PENDING_BINDINGS: Final[tuple[tuple[str, str], ...]] = tuple(
+    sorted(
+        PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS
+        + PENDING_CONTRACT_PINNED_BINDINGS
+        + PENDING_OUT_OF_SCOPE_BINDINGS
+    )
+)
+
+#: Records with no named module-level consumer symbol: their value is consumed
+#: as an inline literal or as a payload key, so they are guarded by value-level
+#: tests (canonical producer pin / AST / literal drift) instead of a constant
+#: binding.  Naming those call sites is a follow-up owned by the module that
+#: holds them.
+NON_BINDING_DEADLINES: Final[frozenset[str]] = frozenset(
+    {
+        "gateway_producer_stall_poll_seconds",
+        "gateway_sse_disconnect_poll_seconds",
+        "peer_advertised_maximum_total_cleanup_ms",
+        "qualification_max_age_seconds",
+        "route_health_probe_deadline_seconds",
+    }
+)

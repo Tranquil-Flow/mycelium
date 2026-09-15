@@ -25,6 +25,7 @@ import time
 from typing import Any, Iterator
 import uuid
 
+import mycelium_deadlines
 from mycelium_qualification.evidence import canonical_json_bytes
 
 
@@ -49,7 +50,7 @@ _CWD_LEASE_LOCK = threading.RLock()
 _CWD_LEASE_STACK: list[_WorkingDirectoryToken] = []
 _CWD_RESTORE_ATTEMPTS = 3
 _CWD_RESTORATION_ERROR = "working directory restoration failed"
-_LAUNCH_HANDSHAKE_SECONDS = 2.0
+_LAUNCH_HANDSHAKE_SECONDS = mycelium_deadlines.NODE_LAUNCH_HANDSHAKE_SECONDS
 _LAUNCH_READY = b"R"
 _LAUNCH_RELEASE = b"G"
 _LAUNCHER_SOURCE = """import os

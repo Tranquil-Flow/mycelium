@@ -18,6 +18,7 @@ from typing import Any
 from urllib.parse import urlsplit
 import uuid
 
+import mycelium_deadlines
 from mycelium_node.identity import NodeIdentityError, load_node_signer
 from mycelium_qualification.signing import build_ed25519_verifier
 from mycelium_swarm_artifacts import (
@@ -74,9 +75,13 @@ _RECIPIENT_FIELDS = frozenset(
         "runtime_manifest_file",
     }
 )
-_GRANT_TTL_MS = 15 * 60 * 1_000
-_AVAILABILITY_RECONCILE_MIN_SECONDS = 30.0
-_AVAILABILITY_RECONCILE_MAX_SECONDS = 30.0 * 60.0
+_GRANT_TTL_MS = mycelium_deadlines.MEMBER_TRANSPORT_GRANT_TTL_MS
+_AVAILABILITY_RECONCILE_MIN_SECONDS = (
+    mycelium_deadlines.AVAILABILITY_RECONCILE_MIN_SECONDS
+)
+_AVAILABILITY_RECONCILE_MAX_SECONDS = (
+    mycelium_deadlines.AVAILABILITY_RECONCILE_MAX_SECONDS
+)
 _AVAILABILITY_RECONCILE_BYTES_PER_SECOND = 4 * 1024 * 1024
 _PUBLIC_REASON = re.compile(r"[a-z][a-z0-9_]{0,127}\Z")
 _SSH_TARGET = re.compile(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\Z")
