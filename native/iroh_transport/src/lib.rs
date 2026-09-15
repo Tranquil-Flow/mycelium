@@ -3,5 +3,6 @@
 
 pub mod local;
 pub mod protocol;
+pub mod ready_address;
 pub mod remote;
 pub mod sidecar;

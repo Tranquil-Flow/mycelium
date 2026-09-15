@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use iroh::Watcher as _;
 use iroh::endpoint::{RecvStream, SendStream, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,9 @@ use crate::local::{
     ServerHello, SessionKeys, decode_record, derive_session_keys, encode_record,
 };
 use crate::protocol::{WireError, decode_frame};
+use crate::ready_address::{
+    READY_ADDRESS_WINDOW, StdoutSink, await_advertised_address, republish_address_changes,
+};
 use crate::remote::{REMOTE_MAX_FRAME_BYTES, RemoteKind, decode_remote_frame, encode_remote_frame};
 
 pub const IROH_ALPN: &[u8] = b"mycelium.iroh.sidecar.v1";
@@ -39,6 +43,18 @@ pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 pub const RECEIVE_POLL_WAIT: Duration = Duration::from_millis(250);
 
 const STREAM_IO_TIMEOUT: Duration = Duration::from_secs(60);
+/// Bound on one outbound **dial** attempt (wp2-6 defect 2).
+///
+/// iroh 1.0.2 has no connect timeout of its own: the pinned `connect()` stays
+/// pending for as long as the caller lets it (`research/research-iroh.md` §4.1
+/// and §6 check 6).  Before this bound the dial inherited the generic 60 s
+/// stream-IO budget, so one vanished peer could burn twelve times the hop's
+/// whole 5 s Python delivery budget inside a single attempt and surface only as
+/// `delivery_deadline_exceeded`.  Five seconds is exactly that hop budget, so a
+/// dial can never outlive the caller's own deadline; the caller-visible,
+/// registered bound is `mycelium_deadlines.peer_connect_deadline_seconds`
+/// (1.0 s), which the Python client applies and names.
+const PEER_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCAL_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
 const INITIAL_RETRY_DELAY: Duration = Duration::from_millis(100);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -233,7 +249,22 @@ pub async fn run_sidecar(
         config.endpoint_secret.as_deref(),
     )
     .await?;
-    let endpoint_addr = endpoint.addr();
+    // The advertised address is a live value, not the bind-time snapshot the
+    // WP2 probe caught with `relay_addrs=0` (wp2-6 defect 1): it is read from a
+    // watcher, waited for until it is usable, and re-advertised on change.
+    let (address_sender, mut addresses) = watch::channel(endpoint.addr());
+    tokio::spawn(publish_address_updates(endpoint.clone(), address_sender));
+    let (endpoint_addr, address_readiness) = await_advertised_address(
+        &mut addresses,
+        !config.local_only,
+        endpoint.online(),
+        READY_ADDRESS_WINDOW,
+    )
+    .await;
+    log_event(address_readiness.event());
+    // What the ready event is about to advertise; everything that differs from
+    // it afterwards is re-advertised as it happens.
+    let advertised_at_ready = endpoint_addr.clone();
     let endpoint_id = endpoint.id().to_string();
 
     let state = RuntimeState::new(config.queue_capacity.get(), config.local_only);
@@ -253,6 +284,12 @@ pub async fn run_sidecar(
         writeln!(stdout, "{ready_json}").map_err(|_| SidecarError::ReadyOutput)?;
         stdout.flush().map_err(|_| SidecarError::ReadyOutput)?;
     }
+    tokio::spawn(republish_address_changes(
+        endpoint_id.clone(),
+        addresses,
+        advertised_at_ready,
+        StdoutSink,
+    ));
 
     let secret = Arc::new(secret);
     let sessions = Arc::new(Semaphore::new(MAX_LOCAL_SESSIONS));
@@ -310,6 +347,26 @@ pub async fn run_sidecar(
     outbound_task.abort();
     incoming_task.abort();
     listener_result
+}
+
+/// Publish the endpoint's own address changes into a watch channel.
+///
+/// `Endpoint::addr()` is a bind-time snapshot; `Endpoint::watch_addr()` is the
+/// live value.  Bridging it into a channel is what lets the readiness gate and
+/// the republisher be driven deterministically in tests (packet wp2-6).
+async fn publish_address_updates(endpoint: Endpoint, addresses: watch::Sender<EndpointAddr>) {
+    let mut watcher = endpoint.watch_addr();
+    loop {
+        let current = watcher.get();
+        if *addresses.borrow() != current {
+            if addresses.send(current).is_err() {
+                return;
+            }
+        }
+        if watcher.updated().await.is_err() {
+            return;
+        }
+    }
 }
 
 async fn bind_endpoint(
@@ -1281,13 +1338,29 @@ impl RuntimeState {
         if let Some(connection) = self.outbound_connections.lock().await.get(&key) {
             return Ok(connection.clone());
         }
-        let connection = timeout(
-            STREAM_IO_TIMEOUT,
+        let connection = match timeout(
+            PEER_CONNECT_TIMEOUT,
             endpoint.connect(peer.address.clone(), IROH_ALPN),
         )
         .await
-        .map_err(|_| ())?
-        .map_err(|_| ())?;
+        {
+            Ok(Ok(connection)) => connection,
+            Ok(Err(_)) => return Err(()),
+            Err(_elapsed) => {
+                // iroh 1.0.2 has no connect timeout of its own, so the cause of
+                // a dial that never completes has to be named here; otherwise
+                // the only visible symptom is the caller's own deadline
+                // (wp2-6 defect 2).  The outbound item stays pending and keeps
+                // retrying with bounded backoff, exactly as the sidecar
+                // contract requires.
+                log_transport_event(
+                    "peer_connect_deadline_exceeded",
+                    peer.address.id,
+                    peer.generation,
+                );
+                return Err(());
+            }
+        };
         if connection.remote_id() != peer.address.id {
             connection.close(REJECT_CODE, b"identity");
             return Err(());

@@ -1775,8 +1775,8 @@
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",
-          "sha256": "25dbc9fd4ab9d426270a5761b8cce974895927f43383ad748babb75508c64fa9",
-          "size_bytes": 92525
+          "sha256": "a9dae89803aab46c5a8d6f22f255d75521629034fe60a05c885a06df381bb670",
+          "size_bytes": 95872
         }
       ],
       "protocol": "mycelium.transport_path_observation.v1"

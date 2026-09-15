@@ -15,10 +15,22 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any, Optional, Tuple
 
+import mycelium_deadlines
 from mycelium_router.wire import WireError, decode_frame
 
 LOCAL_PROTOCOL = "mycelium.iroh_sidecar.local.v1"
 OPERATIONAL_MAX_FRAME_BYTES = 16 * 1024 * 1024
+
+#: How long a confirmed delivery waits for a peer's **first** proof of
+#: reachability in this session (packet wp2-6).  Single-sourced from
+#: ``mycelium_deadlines``: the value, its derivation and its relation to the
+#: route's cleanup fanout window live in the registry, never here.
+PEER_CONNECT_DEADLINE_SECONDS = mycelium_deadlines.PEER_CONNECT_DEADLINE_SECONDS
+
+#: Stable reason code carried by :class:`PeerConnectDeadlineExceeded`.  This is
+#: the named transport cause the hop budget expiring could never express.
+PEER_CONNECT_DEADLINE_REASON = "peer_connect_deadline_exceeded"
+
 _CONFIRMED_GENERATION_BYTES = 8
 _ENDPOINT_ID_BYTES = 32
 _LOCAL_MAX_PAYLOAD_BYTES = (
@@ -79,6 +91,22 @@ class QueueFull(SidecarError):
     """Sidecar queue admission failed because its fixed capacity is full."""
 
 
+class PeerConnectDeadlineExceeded(SidecarError):
+    """The peer never proved reachable inside the registered connect deadline.
+
+    iroh 1.0.2 has no connect timeout of its own, so before this reason existed
+    a vanished peer simply consumed the hop's whole latency budget and surfaced
+    as the route's ``delivery_deadline_exceeded`` - a wedge-shaped failure with
+    no transport cause (`rca/wp2-iroh-delivery.md`, defect 2).  The sidecar
+    keeps the message pending and retrying, as its contract requires; what ends
+    here is the *caller's* wait for a first proof of reachability.
+    """
+
+    def __init__(self, detail: str = "") -> None:
+        self.detail = detail
+        super().__init__(PEER_CONNECT_DEADLINE_REASON)
+
+
 class SidecarClient:
     """One authenticated request/response session over a Unix-domain socket.
 
@@ -109,6 +137,10 @@ class SidecarClient:
         self._lock = threading.Lock()
         self.endpoint_id: Optional[str] = None
         self._peer_generation = 0
+        self._peer_endpoint_id: Optional[str] = None
+        #: ``(endpoint_id, generation)`` pairs that answered a confirmed
+        #: delivery in this session.  Only an unproven pair is a *connect*.
+        self._proven_peers: set[Tuple[str, int]] = set()
 
     @property
     def connected(self) -> bool:
@@ -172,6 +204,9 @@ class SidecarClient:
             self._send_sequence = 0
             self._receive_sequence = 0
             self.endpoint_id = endpoint_id
+            # A new session has proved nothing yet: the first confirmed delivery
+            # to each peer is a connect again.
+            self._proven_peers.clear()
 
     def interrupt(self) -> None:
         """Interrupt blocked socket I/O without waiting for the request lock."""
@@ -195,6 +230,8 @@ class SidecarClient:
             self._send_key = None
             self._receive_key = None
             self.endpoint_id = None
+            self._peer_endpoint_id = None
+            self._proven_peers.clear()
 
     def __enter__(self) -> "SidecarClient":
         self.connect()
@@ -247,6 +284,12 @@ class SidecarClient:
             message_id,
         )
         self._peer_generation = selected_generation
+        self._peer_endpoint_id = endpoint_id
+        # Re-binding a peer is a fresh dial for it: whatever it proved under an
+        # earlier generation does not carry over.
+        self._proven_peers = {
+            key for key in self._proven_peers if key[0] != endpoint_id
+        }
 
     def configure_peers(
         self,
@@ -313,6 +356,11 @@ class SidecarClient:
         # The primary binding drives generation-fenced sends, mirroring the
         # single-peer path so send_confirmed keeps authenticating correctly.
         self._peer_generation = documents[0]["generation"]
+        self._peer_endpoint_id = documents[0]["endpoint_id"]
+        configured = {document["endpoint_id"] for document in documents}
+        self._proven_peers = {
+            key for key in self._proven_peers if key[0] not in configured
+        }
 
     def send(self, frame: bytes, message_id: Optional[bytes] = None) -> bytes:
         if not isinstance(frame, bytes):
@@ -337,6 +385,7 @@ class SidecarClient:
         timeout: Optional[float] = None,
         expected_generation: Optional[int] = None,
         source_generation: Optional[int] = None,
+        connect_deadline: Optional[float] = None,
     ) -> bytes:
         """Wait for authenticated remote Router-dispatch acknowledgement.
 
@@ -346,6 +395,13 @@ class SidecarClient:
         bound source generation lets asymmetric membership generations authenticate
         correctly at the remote peer. Confirmation remains process-lifetime state;
         no sidecar disk spool exists.
+
+        The default wait is the caller's ``timeout``, unchanged.  A caller that
+        needs the *connect* phase bounded (see :meth:`connect_peer`) passes
+        ``connect_deadline``: the wait for a peer that has not yet answered in
+        this session is then capped at that deadline and, when it expires,
+        fails with ``peer_connect_deadline_exceeded`` instead of consuming the
+        rest of the hop's budget with no transport cause (packet wp2-6).
         """
         if not isinstance(frame, bytes):
             raise TypeError("Router frame must be bytes")
@@ -390,19 +446,79 @@ class SidecarClient:
             )
             + frame
         )
-        deadline = time.monotonic() + selected_timeout
+        peer_endpoint_id = self._peer_endpoint_id
+        wait, connect_phase = self._connect_wait(
+            peer_endpoint_id, selected_generation, selected_timeout, connect_deadline
+        )
+        deadline = time.monotonic() + wait
         try:
             response = self._request(
                 _SEND_CONFIRMED,
                 message_id,
                 transport_payload,
-                socket_timeout=selected_timeout,
+                socket_timeout=wait,
                 deadline=deadline,
             )
         except socket.timeout as error:
+            if connect_phase:
+                raise PeerConnectDeadlineExceeded(
+                    f"wait={wait!r}s peer_generation={selected_generation}"
+                ) from error
             raise TimeoutError("confirmed delivery deadline") from error
         self._expect_ack(*response, message_id)
+        if peer_endpoint_id is not None:
+            self._proven_peers.add((peer_endpoint_id, selected_generation))
         return message_id
+
+    def connect_peer(
+        self,
+        endpoint_id: str,
+        endpoint_addr: dict[str, Any],
+        frame: bytes,
+        message_id: Optional[bytes] = None,
+        *,
+        generation: Optional[int] = None,
+        source_generation: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> bytes:
+        """Install a peer binding and prove the dial inside the registered deadline.
+
+        A *connect* is explicit here rather than implicit in every delivery: the
+        caller commits the hop's first frame as the proof.  The binding is
+        installed, then the frame is confirmed, and the whole wait - bind plus
+        first authenticated answer - is bounded by
+        ``PEER_CONNECT_DEADLINE_SECONDS`` (or the caller's ``timeout`` when that
+        is tighter, never wider).  A peer that answers in time is recorded as
+        proven, so the rest of the hop uses the ordinary delivery budget; a peer
+        that never answers fails with :class:`PeerConnectDeadlineExceeded`
+        (``peer_connect_deadline_exceeded``) instead of letting the hop's
+        deadline expire and report no transport cause (RCA defect 2).
+
+        The sidecar keeps the message pending and retries it with bounded
+        backoff, exactly as its contract requires: this call ends the *caller's*
+        wait, never the sidecar's obligation.
+        """
+
+        budget = PEER_CONNECT_DEADLINE_SECONDS if timeout is None else timeout
+        if isinstance(budget, bool) or not isinstance(budget, (int, float)):
+            raise ValueError("timeout must be a number of seconds")
+        if budget <= 0:
+            raise ValueError("timeout must be positive")
+        connect_budget = float(min(float(budget), PEER_CONNECT_DEADLINE_SECONDS))
+        self.configure_peer(
+            endpoint_id,
+            endpoint_addr,
+            generation=generation,
+            timeout=connect_budget,
+        )
+        return self.send_confirmed(
+            frame,
+            message_id,
+            timeout=connect_budget,
+            expected_generation=self._peer_generation,
+            source_generation=source_generation,
+            connect_deadline=connect_budget,
+        )
 
     def send_routed(
         self,
@@ -413,6 +529,7 @@ class SidecarClient:
         timeout: Optional[float] = None,
         expected_generation: Optional[int] = None,
         source_generation: Optional[int] = None,
+        connect_deadline: Optional[float] = None,
     ) -> bytes:
         """Dispatch a frame to a named peer in the configured routing set.
 
@@ -420,7 +537,7 @@ class SidecarClient:
         binding, this addresses one member of the set installed by
         ``configure_peers``.  A destination absent from that set fails closed
         with ``peer_rotated`` rather than falling back to the primary.
-        Confirmation semantics match ``send_confirmed``.
+        Confirmation and connect-deadline semantics match ``send_confirmed``.
         """
         if not isinstance(destination_endpoint_id, str):
             raise TypeError("destination_endpoint_id must be a string")
@@ -472,19 +589,63 @@ class SidecarClient:
             + selected_source_generation.to_bytes(_CONFIRMED_GENERATION_BYTES, "big")
             + frame
         )
-        deadline = time.monotonic() + selected_timeout
+        wait, connect_phase = self._connect_wait(
+            destination_endpoint_id, selected_generation, selected_timeout, connect_deadline
+        )
+        deadline = time.monotonic() + wait
         try:
             response = self._request(
                 _SEND_ROUTED,
                 message_id,
                 transport_payload,
-                socket_timeout=selected_timeout,
+                socket_timeout=wait,
                 deadline=deadline,
             )
         except socket.timeout as error:
+            if connect_phase:
+                raise PeerConnectDeadlineExceeded(
+                    f"wait={wait!r}s peer_generation={selected_generation}"
+                ) from error
             raise TimeoutError("confirmed delivery deadline") from error
         self._expect_ack(*response, message_id)
+        self._proven_peers.add((destination_endpoint_id, selected_generation))
         return message_id
+
+    def _connect_wait(
+        self,
+        peer_endpoint_id: Optional[str],
+        peer_generation: int,
+        caller_timeout: float,
+        connect_deadline: Optional[float],
+    ) -> Tuple[float, bool]:
+        """Bound the wait for one peer's first proof of reachability.
+
+        Returns ``(wait_seconds, is_connect_phase)``.  A peer that already
+        answered in this session - and any send whose caller budget is tighter
+        than the registered connect deadline - keeps the caller's semantics:
+        the connect deadline is reported only when it is the binding
+        constraint, so this never renames a caller's own expiry.
+        """
+
+        if connect_deadline is not None:
+            if isinstance(connect_deadline, bool) or not isinstance(
+                connect_deadline, (int, float)
+            ):
+                raise ValueError("connect_deadline must be a number of seconds")
+            if connect_deadline <= 0:
+                raise ValueError("connect_deadline must be positive")
+        if connect_deadline is None:
+            # Not a declared connect: the caller keeps today's semantics exactly.
+            return caller_timeout, False
+        if peer_endpoint_id is None or (
+            peer_endpoint_id,
+            peer_generation,
+        ) in self._proven_peers:
+            return caller_timeout, False
+        budget = float(connect_deadline)
+        if budget <= caller_timeout:
+            return min(caller_timeout, budget), True
+        return caller_timeout, False
 
     def recv(self, *, timeout: Optional[float] = None) -> Tuple[bytes, bytes]:
         message_id, _generation, payload = self.recv_with_generation(timeout=timeout)
@@ -834,6 +995,7 @@ class SidecarClient:
         self._send_key = None
         self._receive_key = None
         self.endpoint_id = None
+        self._proven_peers.clear()
 
 
 def _derive_session_keys(
