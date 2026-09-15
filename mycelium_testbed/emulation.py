@@ -69,6 +69,7 @@ import os
 from pathlib import Path
 import queue
 import random
+import resource
 import socket
 import ssl
 from threading import Event as ThreadEvent
@@ -119,21 +120,30 @@ from mycelium_testbed.trace import (  # noqa: E402
 )
 
 __all__ = [
+    "A3_LAYER_SPLIT",
     "CHATML_SYSTEM",
     "CLEANUP_RECEIPT_TIMEOUT",
     "DETERMINISTIC_MEMORY_CHECKS",
     "DRIVER_HOST",
     "EmulationError",
     "EmulationResult",
+    "KERNELS_RUNTIME_LOADER",
+    "KERNELS_TESTBED",
     "LAYER_SPLIT",
     "LOAD_SENSITIVE_CHECKS",
     "MODEL_ID",
+    "MODEL_PROFILES",
     "MODEL_REVISION",
+    "ModelProfile",
     "PROMPT",
+    "REPRESENTATION_ROWWISE_INT8",
+    "REPRESENTATION_SOURCE",
     "RSS_RECLAIM_TOLERANCE",
     "RSS_SAMPLING_METHOD",
     "STAGE_ACCOUNTING_BASIS",
     "TOKEN_STEPS",
+    "USEFUL_MODEL_ID",
+    "USEFUL_MODEL_REVISION",
     "WORKER_HOSTS",
     "WorkerMemoryVerdict",
     "build_model_root",
@@ -142,10 +152,13 @@ __all__ = [
     "local_model_root",
     "main",
     "model_present",
+    "pilot_profile",
     "placement_expected_bytes",
     "read_safetensors_tensor_bytes",
+    "read_safetensors_tensor_meta",
     "run_emulation",
     "snapshot_memory_facts",
+    "useful_model_profile",
     "worker_main",
 ]
 
@@ -160,6 +173,10 @@ class EmulationError(RuntimeError):
 
 MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 MODEL_REVISION = "7ae557604adf67be50417f59c2c2f167def9a775"
+#: The D1 useful model (WP7).  Same on-disk local cache, same repo kernels, but the
+#: ``mycelium.rowwise_symmetric_int8.v1`` representation and the A3 route split.
+USEFUL_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
+USEFUL_MODEL_REVISION = "a09a35458c702b33eeacc393d103063234e8bc28"
 #: The prompt the existing iroh e2e harness uses (``tests/e2e_request_iroh/harness.py``).
 PROMPT = "deterministic local moonlight"
 CHATML_SYSTEM = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant."
@@ -168,6 +185,20 @@ LAYER_SPLIT: tuple[tuple[str, int, int], ...] = (
     ("worker-a", 0, 12),
     ("worker-c", 12, 24),
 )
+#: The split the executed A3 route used for the D1 useful model: layers [0, 21) on the
+#: first placement, [21, 28) plus the final norm and the output projection on the last.
+A3_LAYER_SPLIT: tuple[tuple[str, int, int], ...] = (
+    ("worker-a", 0, 21),
+    ("worker-c", 21, 28),
+)
+#: Representation labels.  ``rowwise_symmetric_int8`` is the repository's own weight
+#: codec (``runtime_loader._quantize_qwen2_mlx_tensor``) - never an ``mlx-lm``
+#: quantisation, and never a second quantiser invented here.
+REPRESENTATION_SOURCE = "source-artifact-native-dtype"
+REPRESENTATION_ROWWISE_INT8 = "mycelium.rowwise_symmetric_int8.v1"
+#: Which Qwen2 block kernel executes a placement's range.
+KERNELS_TESTBED = "mycelium_testbed.qwen_stage_mlx"
+KERNELS_RUNTIME_LOADER = "runtime_loader._qwen2_block"
 #: Tokens the successful request streams; enough to prove the pipeline runs per token.
 TOKEN_STEPS = 8
 #: Tokens the negative case streams before the cancellation arrives.
@@ -184,6 +215,90 @@ CLEANUP_RECEIPT_TIMEOUT = "route_cancellation_cleanup_timeout"
 #: The two tensors the two placements share or close out.
 EMBED_TOKENS_TENSOR = "model.embed_tokens.weight"
 FINAL_NORM_TENSOR = "model.norm.weight"
+#: The untied output projection.  ``Qwen2.5-7B-Instruct`` ships one; the 0.5B ties.
+LM_HEAD_TENSOR = "lm_head.weight"
+
+
+def _repo_model_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    """The snapshot config in the shape ``runtime_loader._qwen2_block`` expects."""
+
+    heads = int(config["num_attention_heads"])
+    hidden = int(config["hidden_size"])
+    head_dim = config.get("head_dim")
+    if not isinstance(head_dim, int) or head_dim <= 0:
+        head_dim = hidden // heads
+    return {
+        "n_layer": int(config["num_hidden_layers"]),
+        "n_embd": hidden,
+        "n_head": heads,
+        "n_kv_head": int(config["num_key_value_heads"]),
+        "n_inner": int(config["intermediate_size"]),
+        "vocab_size": int(config["vocab_size"]),
+        "rms_norm_epsilon": float(config["rms_norm_eps"]),
+        "rope_theta": float(config["rope_theta"]),
+        "head_dim": head_dim,
+        "activation_function": "silu",
+        "tie_word_embeddings": bool(config.get("tie_word_embeddings", False)),
+        "source_dtype": str(config.get("torch_dtype") or config.get("dtype")),
+    }
+
+
+def _resident_bytes_of(value: Any) -> int:
+    """The bytes one loaded tensor occupies, in whichever representation it is.
+
+    An ``Int8RowwiseWeight`` is the int8 codes plus one float32 scale per output
+    row - the accounting the A3 record's ``resident_weight_bytes`` uses.
+    """
+
+    if hasattr(value, "values") and hasattr(value, "scales"):
+        return int(value.values.size) + int(value.scales.size) * 4
+    return int(value.size) * int(value.itemsize)
+
+
+def _representation_dtype_label(value: Any, fallback: str) -> str:
+    if hasattr(value, "values") and hasattr(value, "scales"):
+        return "int8+float32-scale"
+    return str(value.dtype)
+
+
+def _representation_tensor_bytes(
+    dtype: str, shape: Sequence[int], name: str, representation: str
+) -> int:
+    """The bytes a tensor occupies in ``representation``, from header metadata only.
+
+    Independent of what any stage loaded: this is the checkpoint's own statement of
+    the tensor's shape and dtype, put through the codec's arithmetic.
+    """
+
+    elements = 1
+    for dimension in shape:
+        elements *= int(dimension)
+    if representation == REPRESENTATION_ROWWISE_INT8:
+        if name.endswith(".weight") and len(shape) == 2:
+            # int8 codes, one per element, plus one float32 scale per output row
+            return elements + int(shape[0]) * 4
+        return elements * 4
+    return elements * _SOURCE_DTYPE_BYTES.get(str(dtype), 0)
+
+
+#: Element size of the source dtypes the snapshots use, for header-only arithmetic.
+_SOURCE_DTYPE_BYTES: dict[str, int] = {
+    "BOOL": 1,
+    "U8": 1,
+    "I8": 1,
+    "F8_E4M3": 1,
+    "F8_E5M2": 1,
+    "I16": 2,
+    "U16": 2,
+    "F16": 2,
+    "BF16": 2,
+    "I32": 4,
+    "U32": 4,
+    "F32": 4,
+    "I64": 8,
+    "U64": 8,
+    "F64": 8,
+}
 
 # --------------------------------------------------------------------------- #
 # the memory envelope: accounting (deterministic) vs observation (sampled)
@@ -213,13 +328,121 @@ DETERMINISTIC_MEMORY_CHECKS: tuple[str, ...] = (
 )
 
 
-def local_model_root() -> Path:
-    """The exact on-disk snapshot: no download path exists in this module."""
+def snapshot_root(model_id: str, revision: str) -> Path:
+    """The exact on-disk snapshot for ``model_id`` at ``revision``."""
 
     hub = (
         Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
     )
-    return hub / f"models--{MODEL_ID.replace('/', '--')}" / "snapshots" / MODEL_REVISION
+    return hub / f"models--{model_id.replace('/', '--')}" / "snapshots" / revision
+
+
+@dataclass(frozen=True)
+class ModelProfile:
+    """One model + representation + split the emulation can run.
+
+    The default profile is the pilot's 0.5B chain and is byte-for-byte the behaviour
+    this module had before WP7-2: the tests in ``tests/testbed`` pin it.  The
+    useful-model profile is additive - it selects the D1 model, the repository's
+    rowwise-symmetric-int8 codec and the A3 route split.
+    """
+
+    name: str
+    model_id: str
+    revision: str
+    layer_split: tuple[tuple[str, int, int], ...]
+    expected_layers: int
+    representation: str
+    kernels: str
+    runtime_dtype: str
+    owned_components: tuple[str, ...]
+    sharded: bool
+
+    @property
+    def node_ids(self) -> tuple[str, ...]:
+        return tuple(node for node, _start, _end in self.layer_split)
+
+    @property
+    def int8(self) -> bool:
+        return self.representation == REPRESENTATION_ROWWISE_INT8
+
+    @property
+    def cacheless(self) -> bool:
+        """The repo block kernel has no KV-cache interface, so it re-runs the range.
+
+        ``runtime_loader._qwen2_block`` builds its own causal mask over the whole
+        sequence and ``execute_loaded_stage`` documents the contract: "There is
+        intentionally no KV-cache interface, so callers must pass the complete
+        sequence on every invocation."  A placement executed with those kernels
+        therefore reprocesses the running sequence each step.
+        """
+
+        return self.kernels == KERNELS_RUNTIME_LOADER
+
+    def model_root(self) -> Path:
+        return snapshot_root(self.model_id, self.revision)
+
+    def owns_head(self, end_layer: int) -> bool:
+        return end_layer == self.expected_layers
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "model_id": self.model_id,
+            "revision": self.revision,
+            "representation": self.representation,
+            "kernels": self.kernels,
+            "runtime_dtype": self.runtime_dtype,
+            "layer_split": [list(item) for item in self.layer_split],
+            "expected_layers": self.expected_layers,
+            "owned_components": list(self.owned_components),
+            "cacheless": self.cacheless,
+            "sharded": self.sharded,
+        }
+
+
+def pilot_profile() -> ModelProfile:
+    return ModelProfile(
+        name="pilot-0.5b",
+        model_id=MODEL_ID,
+        revision=MODEL_REVISION,
+        layer_split=LAYER_SPLIT,
+        expected_layers=24,
+        representation=REPRESENTATION_SOURCE,
+        kernels=KERNELS_TESTBED,
+        runtime_dtype="bfloat16",
+        owned_components=("input_embedding", "decoder", "final_norm", "lm_head"),
+        sharded=False,
+    )
+
+
+def useful_model_profile() -> ModelProfile:
+    """The D1 useful model over the A3 split, in the repository's int8 path."""
+
+    return ModelProfile(
+        name="a3-useful-7b-rowwise-int8",
+        model_id=USEFUL_MODEL_ID,
+        revision=USEFUL_MODEL_REVISION,
+        layer_split=A3_LAYER_SPLIT,
+        expected_layers=28,
+        representation=REPRESENTATION_ROWWISE_INT8,
+        kernels=KERNELS_RUNTIME_LOADER,
+        runtime_dtype="float32",
+        owned_components=("input_embedding", "decoder", "final_norm", "lm_head"),
+        sharded=True,
+    )
+
+
+MODEL_PROFILES = {
+    "pilot": pilot_profile,
+    "useful": useful_model_profile,
+}
+
+
+def local_model_root() -> Path:
+    """The exact on-disk snapshot: no download path exists in this module."""
+
+    return snapshot_root(MODEL_ID, MODEL_REVISION)
 
 
 def build_model_root(home: Path | str) -> Path:
@@ -234,19 +457,28 @@ def build_model_root(home: Path | str) -> Path:
     )
 
 
-def model_present(model_root: Path) -> bool:
-    return (model_root / "model.safetensors").is_file() and (
-        model_root / "tokenizer.json"
-    ).is_file()
+def model_present(model_root: Path, *, sharded: bool = False) -> bool:
+    root = Path(model_root)
+    if not (root / "tokenizer.json").is_file():
+        return False
+    if sharded:
+        index = root / "model.safetensors.index.json"
+        if not index.is_file():
+            return False
+        weight_map = json.loads(index.read_text(encoding="utf-8")).get("weight_map")
+        if not isinstance(weight_map, dict) or not weight_map:
+            return False
+        return all((root / name).is_file() for name in set(weight_map.values()))
+    return (root / "model.safetensors").is_file()
 
 
-def _require_model(model_root: Path) -> Path:
-    if not model_present(model_root):
+def _require_model(model_root: Path, *, sharded: bool = False) -> Path:
+    if not model_present(model_root, sharded=sharded):
         raise EmulationError(
             f"pilot_model_missing:{model_root}:expected {MODEL_ID} at revision "
             f"{MODEL_REVISION} already on disk (this harness never downloads)"
         )
-    return model_root
+    return Path(model_root)
 
 
 # --------------------------------------------------------------------------- #
@@ -794,11 +1026,23 @@ class QwenStageError(RuntimeError):
 
 
 class QwenStage:
-    """A real layer range of Qwen2.5-0.5B-Instruct, executed with MLX.
+    """A real layer range of a Qwen2.5 snapshot, executed with MLX.
 
     ``owns_embed`` builds the input embedding; ``owns_head`` applies the final norm
-    and the tied output projection and returns a token id instead of a hidden
-    state.  Weights are loaded straight from the snapshot's ``model.safetensors``.
+    and the output projection and returns a token id instead of a hidden state.
+
+    Two execution kernels and two weight representations are supported, selected by
+    :class:`ModelProfile`:
+
+    * ``kernels=KERNELS_TESTBED`` (default) - this module's own per-head MLX block
+      with a KV cache, reading the snapshot's native dtype straight out of
+      ``model.safetensors``.  That is the pilot 0.5B path and is unchanged.
+    * ``kernels=KERNELS_RUNTIME_LOADER`` - the repository's own Qwen2 block
+      (``runtime_loader._qwen2_block`` / ``_qwen2_embedding`` / ``_qwen2_linear`` /
+      ``_rms_norm``) with the repository's own rowwise-symmetric-int8 codec
+      (``runtime_loader._quantize_qwen2_mlx_tensor``).  This path has no KV cache,
+      exactly like ``runtime_loader.execute_loaded_stage``, so it reprocesses the
+      running sequence on every step.
     """
 
     def __init__(
@@ -810,6 +1054,12 @@ class QwenStage:
         end_layer: int,
         owns_embed: bool,
         owns_head: bool,
+        model_id: str = MODEL_ID,
+        model_revision: str = MODEL_REVISION,
+        representation: str = REPRESENTATION_SOURCE,
+        kernels: str = KERNELS_TESTBED,
+        expected_layers: int | None = None,
+        sharded: bool = False,
     ) -> None:
         self.model_root = Path(model_root)
         self.node_id = node_id
@@ -817,59 +1067,181 @@ class QwenStage:
         self.end_layer = end_layer
         self.owns_embed = owns_embed
         self.owns_head = owns_head
+        self.model_id = model_id
+        self.model_revision = model_revision
+        self.representation = representation
+        self.kernels = kernels
+        self.expected_layers = expected_layers
+        self.sharded = sharded
         self._weights: dict[str, Any] = {}
         self._config: dict[str, Any] = {}
+        self._repo_config: dict[str, Any] = {}
         self._kv: dict[int, tuple[Any, Any]] = {}
+        self._sequence_seen = 0
         self.resident_bytes = 0
         self.bytes_by_dtype: dict[str, int] = {}
         self.tensor_count = 0
         self.head_tied_to_embeddings = False
+        self.head_tensor = ""
+
+    @property
+    def int8(self) -> bool:
+        return self.representation == REPRESENTATION_ROWWISE_INT8
+
+    @property
+    def cacheless(self) -> bool:
+        return self.kernels == KERNELS_RUNTIME_LOADER
 
     # -- loading ------------------------------------------------------------ #
+
+    def _layer_prefixes(self) -> tuple[str, ...]:
+        return tuple(
+            f"model.layers.{index}."
+            for index in range(self.start_layer, self.end_layer)
+        )
+
+    def _head_key(self) -> str:
+        """The output projection's tensor key, tied or not.
+
+        ``Qwen/Qwen2.5-0.5B-Instruct`` ties its embeddings, so its head *is*
+        ``model.embed_tokens.weight``.  ``Qwen/Qwen2.5-7B-Instruct`` does not
+        (``tie_word_embeddings: false``) and ships a distinct ``lm_head.weight``;
+        the two are not byte-identical in this snapshot, so the head is loaded
+        explicitly rather than assumed tied.
+        """
+
+        if bool(self._config.get("tie_word_embeddings")):
+            return EMBED_TOKENS_TENSOR
+        if not (self.model_root / "config.json").is_file():  # pragma: no cover
+            raise QwenStageError("untied_head_without_config")
+        return LM_HEAD_TENSOR
+
+    def _wanted_names(self, available: Mapping[str, Any]) -> list[str]:
+        prefixes = self._layer_prefixes()
+        wanted = [
+            name
+            for name in available
+            if any(name.startswith(prefix) for prefix in prefixes)
+        ]
+        if self.owns_embed:
+            wanted.append(EMBED_TOKENS_TENSOR)
+        if self.owns_head:
+            wanted.append(FINAL_NORM_TENSOR)
+            head = self._head_key()
+            if head not in available:
+                raise QwenStageError(f"head_tensor_missing:{head}")
+            if head not in wanted:
+                wanted.append(head)
+        return sorted(wanted)
+
+    def _convert(self, name: str, value: Any, mx: Any) -> Any:
+        """One tensor, in the stage's representation - the repository's own codec."""
+
+        if self.int8 and name.endswith(".weight") and len(value.shape) == 2:
+            from runtime_loader import _quantize_qwen2_mlx_tensor
+
+            # the repo codec: scale = max|row| / 127, round-half-away-from-zero,
+            # clipped to [-127, 127], applied per output row.  Not an mlx-lm
+            # quantisation and not a second quantiser.
+            return _quantize_qwen2_mlx_tensor(name, value, mx)
+        dtype = mx.bfloat16 if self.kernels == KERNELS_TESTBED else mx.float32
+        converted = value.astype(dtype)
+        mx.eval(converted)
+        return converted
+
+    def _read_snapshot(self, mx: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Load exactly this placement's tensors, shard by shard when needed."""
+
+        if not self.sharded:
+            weights_path = self.model_root / "model.safetensors"
+            if not weights_path.is_file():
+                raise EmulationError(f"qwen_snapshot_incomplete:{self.model_root}")
+            blob = dict(mx.load(str(weights_path)))
+            wanted = self._wanted_names(blob)
+            tensors = {name: self._convert(name, blob[name], mx) for name in wanted}
+            records = [
+                {
+                    "file": weights_path.name,
+                    "tensors": len(tensors),
+                    "bytes": weights_path.stat().st_size,
+                }
+            ]
+            del blob
+            mx.clear_cache()
+            return tensors, records
+
+        index_path = self.model_root / "model.safetensors.index.json"
+        if not index_path.is_file():
+            raise EmulationError(f"qwen_snapshot_index_missing:{self.model_root}")
+        weight_map = json.loads(index_path.read_text(encoding="utf-8"))["weight_map"]
+        wanted = self._wanted_names(weight_map)
+        by_shard: dict[str, list[str]] = {}
+        for name in wanted:
+            by_shard.setdefault(weight_map[name], []).append(name)
+        tensors: dict[str, Any] = {}
+        records: list[dict[str, Any]] = []
+        for shard in sorted(by_shard):
+            path = self.model_root / shard
+            if not path.is_file():
+                raise EmulationError(f"qwen_shard_missing:{path}")
+            started = time.time()
+            blob = dict(mx.load(str(path)))
+            quantized = 0
+            for name in by_shard[shard]:
+                if name not in blob:
+                    raise EmulationError(f"qwen_shard_tensor_missing:{shard}:{name}")
+                tensors[name] = self._convert(name, blob[name], mx)
+                if self.int8 and name.endswith(".weight") and blob[name].ndim == 2:
+                    quantized += 1
+            del blob
+            mx.clear_cache()
+            records.append(
+                {
+                    "file": shard,
+                    "tensors": len(by_shard[shard]),
+                    "quantized": quantized,
+                    "bytes": path.stat().st_size,
+                    "seconds": round(time.time() - started, 2),
+                }
+            )
+        return tensors, records
 
     def load(self) -> dict[str, Any]:
         import mlx.core as mx
 
         config_path = self.model_root / "config.json"
-        weights_path = self.model_root / "model.safetensors"
-        if not config_path.is_file() or not weights_path.is_file():
+        if not config_path.is_file():
             raise EmulationError(f"qwen_snapshot_incomplete:{self.model_root}")
         self._config = json.loads(config_path.read_text(encoding="utf-8"))
-        raw = dict(mx.load(str(weights_path)))
-        wanted: dict[str, Any] = {}
-        for index in range(self.start_layer, self.end_layer):
-            prefix = f"model.layers.{index}."
-            wanted.update(
-                {key: value for key, value in raw.items() if key.startswith(prefix)}
-            )
-        if self.owns_embed:
-            wanted["model.embed_tokens.weight"] = raw["model.embed_tokens.weight"]
-        if self.owns_head:
-            wanted["model.norm.weight"] = raw["model.norm.weight"]
-            tied = bool(self._config.get("tie_word_embeddings"))
-            if not tied:
-                raise QwenStageError(
-                    "untied_lm_head_not_supported:this_snapshot_ties_embeddings"
-                )
-            # With tied embeddings the output projection IS the embedding matrix,
-            # so the last placement legitimately holds it too.
-            wanted["model.embed_tokens.weight"] = raw["model.embed_tokens.weight"]
-            self.head_tied_to_embeddings = True
-        self._weights = wanted
-        self.tensor_count = len(wanted)
+        self._repo_config = _repo_model_config(self._config)
+        self.head_tied_to_embeddings = bool(
+            self._config.get("tie_word_embeddings")
+        ) and self.owns_head
+        self.head_tensor = self._head_key() if self.owns_head else ""
+        self._weights, shard_records = self._read_snapshot(mx)
+        self.tensor_count = len(self._weights)
         resident = 0
         bytes_by_dtype: dict[str, int] = {}
-        for value in wanted.values():
-            mx.eval(value)
-            tensor_bytes = int(value.size) * int(value.itemsize)
+        for name, value in self._weights.items():
+            mx.eval(value.values if self.int8 and hasattr(value, "values") else value)
+            tensor_bytes = _resident_bytes_of(value)
             resident += tensor_bytes
-            dtype = str(value.dtype)
+            dtype = _representation_dtype_label(
+                value, "int8" if self.int8 else self.kernels
+            )
             bytes_by_dtype[dtype] = bytes_by_dtype.get(dtype, 0) + tensor_bytes
         self.resident_bytes = resident
         self.bytes_by_dtype = bytes_by_dtype
         expected = self._config.get("num_hidden_layers")
-        if not isinstance(expected, int) or expected != 24:
+        if not isinstance(expected, int):
             raise QwenStageError(f"unexpected_num_hidden_layers:{expected}")
+        if self.expected_layers is None:
+            if expected != 24:
+                raise QwenStageError(f"unexpected_num_hidden_layers:{expected}")
+        elif expected != self.expected_layers:
+            raise QwenStageError(
+                f"unexpected_num_hidden_layers:{expected}!={self.expected_layers}"
+            )
         return {
             "node_id": self.node_id,
             "layers": [self.start_layer, self.end_layer],
@@ -882,8 +1254,17 @@ class QwenStage:
             "owns_embed": self.owns_embed,
             "owns_head": self.owns_head,
             "head_tied_to_embeddings": self.head_tied_to_embeddings,
-            "model_id": MODEL_ID,
-            "model_revision": MODEL_REVISION,
+            "head_tensor": self.head_tensor,
+            "representation": self.representation,
+            "kernels": self.kernels,
+            "runtime_dtype": (
+                "bfloat16" if self.kernels == KERNELS_TESTBED else "float32"
+            ),
+            "cacheless": self.cacheless,
+            "shards": shard_records,
+            "model_id": self.model_id,
+            "model_revision": self.model_revision,
+            "num_hidden_layers": expected,
             "config_digest": "sha256:"
             + hashlib.sha256(
                 json.dumps(self._config, sort_keys=True).encode("utf-8")
@@ -894,14 +1275,20 @@ class QwenStage:
 
     def reset(self) -> None:
         self._kv.clear()
+        self._sequence_seen = 0
 
     @property
     def kv_len(self) -> int:
-        """Positions currently cached: the sequence axis, not the head axis."""
+        """Positions currently cached: the sequence axis, not the head axis.
 
-        if not self._kv:
-            return 0
-        return int(self._kv[self.start_layer][0].shape[0])
+        Always zero on the cacheless repo-kernel path, which keeps no cross-step
+        state; there the reported figure is the sequence the stage last processed,
+        so the counter still means "positions this placement has run forward".
+        """
+
+        if self._kv:
+            return int(self._kv[self.start_layer][0].shape[0])
+        return int(self._sequence_seen)
 
     def _rms(self, x: Any, weight: Any) -> Any:
         import mlx.core as mx
@@ -1097,6 +1484,76 @@ class QwenStage:
         # same quantised-high bucket choice the router makes on every host.
         return int(quantized_greedy_token_id(row.tolist()))
 
+    # -- the repository's own Qwen2 kernels ---------------------------------- #
+    #
+    # ``runtime_loader._qwen2_block`` builds its own causal mask over the whole
+    # sequence and ``execute_loaded_stage`` documents the contract plainly: "There
+    # is intentionally no KV-cache interface, so callers must pass the complete
+    # sequence on every invocation."  These two entry points honour it - the entry
+    # placement takes the running token sequence, the continuation placement takes
+    # the whole hidden sequence - so every step is a real two-hop pipeline of real
+    # activations through the repo kernel over the shaped relay path.
+
+    @staticmethod
+    def _runtime_loader() -> Any:
+        import runtime_loader
+
+        return runtime_loader
+
+    def _repo_forward(self, hidden: Any, mx: Any) -> Any:
+        loader = self._runtime_loader()
+        for index in range(self.start_layer, self.end_layer):
+            hidden = loader._qwen2_block(
+                hidden,
+                self._weights,
+                f"model.layers.{index}.",
+                self._repo_config,
+                mx,
+                "qwen2",
+            )
+        return hidden
+
+    def _repo_finish(self, hidden: Any, mx: Any) -> Any:
+        loader = self._runtime_loader()
+        if not self.owns_head:
+            widened = hidden.astype(mx.float32)
+            mx.eval(widened)
+            return np.asarray(widened, dtype=np.float32).tobytes()
+        normed = loader._rms_norm(
+            hidden,
+            self._weights[FINAL_NORM_TENSOR],
+            float(self._repo_config["rms_norm_epsilon"]),
+            mx,
+        )
+        logits = loader._qwen2_linear(normed, self._weights[self.head_tensor], mx)
+        row = logits.reshape(-1, logits.shape[-1])[-1]
+        mx.eval(row)
+        return int(quantized_greedy_token_id(row.tolist()))
+
+    def run_entry(self, token_ids: Sequence[int]) -> bytes | int:
+        """The entry placement over the full running sequence (repo kernels)."""
+
+        import mlx.core as mx
+
+        tokens = mx.array(np.asarray(list(token_ids), dtype=np.int32))[None, :]
+        self._sequence_seen = len(token_ids)
+        hidden = self._runtime_loader()._qwen2_embedding(
+            self._weights[EMBED_TOKENS_TENSOR], tokens, mx
+        )
+        return self._repo_finish(self._repo_forward(hidden, mx), mx)
+
+    def run_continuation(self, hidden: Any) -> bytes | int:
+        """The continuation placement over the full hidden sequence (repo kernels)."""
+
+        import mlx.core as mx
+
+        array = hidden if isinstance(hidden, mx.array) else mx.array(hidden)
+        if array.ndim == 2:
+            array = array[None, :, :]
+        array = array.astype(mx.float32)
+        self._sequence_seen = int(array.shape[1])
+        return self._repo_finish(self._repo_forward(array, mx), mx)
+
 
 # --------------------------------------------------------------------------- #
 # wire framing between the driver and a worker
@@ -1156,6 +1613,12 @@ class WorkerState:
         monotonic_offset_ns: int,
         wall_offset_ns: int,
         placement_id: str,
+        model_id: str = MODEL_ID,
+        model_revision: str = MODEL_REVISION,
+        representation: str = REPRESENTATION_SOURCE,
+        kernels: str = KERNELS_TESTBED,
+        expected_layers: int | None = None,
+        sharded: bool = False,
     ) -> None:
         self.node_id = node_id
         self.home = home
@@ -1168,6 +1631,12 @@ class WorkerState:
             end_layer=end_layer,
             owns_embed=owns_embed,
             owns_head=owns_head,
+            model_id=model_id,
+            model_revision=model_revision,
+            representation=representation,
+            kernels=kernels,
+            expected_layers=expected_layers,
+            sharded=sharded,
         )
         self.stage_document = self.stage.load()
         self.cleanup_latency_ms = cleanup_latency_ms
@@ -1260,8 +1729,18 @@ class WorkerState:
         if operation == "cleanup":
             return self._cleanup(header)
         if operation == "counters":
+            counters = dict(self.counters)
+            # The worker's own high-water mark, reported beside the driver's external
+            # sampler rather than instead of it.  The sampler only starts once both
+            # placements have finished loading, so on a model this size it misses the
+            # load peak; ``ru_maxrss`` is a lifetime high-water mark and therefore
+            # includes it.  A self-report is not a verdict - the deterministic checks
+            # stay on the stage's own load accounting - so it is labelled as one.
+            counters["self_reported_peak_rss_bytes"], counters[
+                "self_reported_peak_rss_unit"
+            ] = _self_reported_peak_rss()
             return (
-                {"op": "counters", "ok": True, "counters": dict(self.counters)},
+                {"op": "counters", "ok": True, "counters": counters},
                 b"",
             )
         return (
@@ -1302,7 +1781,20 @@ class WorkerState:
         )
         started = time.perf_counter()
         try:
-            if phase == "prefill":
+            if self.stage.cacheless:
+                # The repo kernel's contract: the whole sequence every time, no
+                # cross-step state, so the entry placement is driven by the running
+                # token sequence and the continuation by the running hidden sequence.
+                if self.stage.owns_embed:
+                    output = self.stage.run_entry(list(header["token_ids"]))
+                else:
+                    import mlx.core as mx
+
+                    hidden = np.frombuffer(payload, dtype=np.float32).reshape(
+                        int(header["sequence"]), int(header["hidden"])
+                    )
+                    output = self.stage.run_continuation(mx.array(hidden))
+            elif phase == "prefill":
                 if not self.stage.owns_embed:
                     hidden = np.frombuffer(payload, dtype=np.float32).reshape(
                         int(header["sequence"]), int(header["hidden"])
@@ -1451,6 +1943,12 @@ def worker_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--monotonic-offset-ns", type=int, default=0)
     parser.add_argument("--wall-offset-ns", type=int, default=0)
     parser.add_argument("--listen-host", default="127.0.0.1")
+    parser.add_argument("--model-id", default=MODEL_ID)
+    parser.add_argument("--model-revision", default=MODEL_REVISION)
+    parser.add_argument("--representation", default=REPRESENTATION_SOURCE)
+    parser.add_argument("--kernels", default=KERNELS_TESTBED)
+    parser.add_argument("--expected-layers", type=int, default=None)
+    parser.add_argument("--sharded", action="store_true")
     args = parser.parse_args(argv)
 
     state = WorkerState(
@@ -1466,6 +1964,12 @@ def worker_main(argv: Sequence[str] | None = None) -> int:
         monotonic_offset_ns=args.monotonic_offset_ns,
         wall_offset_ns=args.wall_offset_ns,
         placement_id=args.placement_id,
+        model_id=args.model_id,
+        model_revision=args.model_revision,
+        representation=args.representation,
+        kernels=args.kernels,
+        expected_layers=args.expected_layers,
+        sharded=args.sharded,
     )
 
     async def handle(
@@ -1658,6 +2162,30 @@ def clean_subprocess_environment() -> dict[str, str]:
     return environment
 
 
+def _self_reported_peak_rss() -> tuple[int, str]:
+    """``(value, unit)`` for this process's own peak RSS high-water mark."""
+
+    value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    return value, "bytes" if sys.platform == "darwin" else "kibibytes"
+
+
+def _host_available_bytes() -> int | None:
+    """``hw.memsize`` on this host, read only, or ``None`` when unavailable."""
+
+    try:
+        completed = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    raw = completed.stdout.strip()
+    return int(raw) if raw.isdigit() else None
+
+
 def _read_rss_bytes(pid: int) -> int | None:
     """Resident set size of one process, in bytes, or ``None`` if it is gone."""
 
@@ -1717,12 +2245,110 @@ def read_safetensors_tensor_bytes(path: Path) -> dict[str, int]:
     return sizes
 
 
-def snapshot_memory_facts(model_root: Path) -> tuple[dict[str, Any], dict[str, int]]:
-    """``(document facts, bytes per tensor)`` for the snapshot, from its header."""
+def read_safetensors_tensor_meta(path: Path) -> dict[str, dict[str, Any]]:
+    """Per-tensor ``{bytes, dtype, shape}``, read from a safetensors header only.
 
-    weights = Path(model_root) / "model.safetensors"
+    No tensor is loaded and no RSS is consulted: this is the file's own metadata.
+    """
+
+    weights = Path(path)
+    with weights.open("rb") as handle:
+        prefix = handle.read(8)
+        if len(prefix) != 8:
+            raise EmulationError(f"safetensors_header_truncated:{weights}")
+        header_bytes = int.from_bytes(prefix, "little")
+        raw = handle.read(header_bytes)
+        if len(raw) != header_bytes:
+            raise EmulationError(f"safetensors_header_truncated:{weights}")
+    try:
+        header = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise EmulationError(f"safetensors_header_unreadable:{weights}") from error
+    if not isinstance(header, dict):
+        raise EmulationError(f"safetensors_header_not_an_object:{weights}")
+    meta: dict[str, dict[str, Any]] = {}
+    for name, entry in header.items():
+        if name == "__metadata__":
+            continue
+        offsets = entry.get("data_offsets") if isinstance(entry, dict) else None
+        shape = entry.get("shape") if isinstance(entry, dict) else None
+        if not (isinstance(offsets, list) and len(offsets) == 2):
+            raise EmulationError(f"safetensors_header_entry_invalid:{weights}:{name}")
+        if not (isinstance(shape, list) and shape):
+            raise EmulationError(f"safetensors_header_shape_invalid:{weights}:{name}")
+        meta[str(name)] = {
+            "bytes": int(offsets[1]) - int(offsets[0]),
+            "dtype": str(entry.get("dtype")),
+            "shape": [int(value) for value in shape],
+        }
+    return meta
+
+
+def snapshot_memory_facts(
+    model_root: Path,
+    *,
+    representation: str = REPRESENTATION_SOURCE,
+    sharded: bool = False,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """``(document facts, bytes per tensor in ``representation``)`` for the snapshot.
+
+    For the source dtype the bytes are the header's own ``data_offsets``; for the
+    repository's int8 representation they are the codec's arithmetic over the same
+    header (int8 code per element + one float32 scale per output row), so the
+    number the stage accounts for can be checked against the checkpoint without
+    either side consulting RSS.
+    """
+
+    root = Path(model_root)
+    if sharded:
+        index_path = root / "model.safetensors.index.json"
+        if not index_path.is_file():
+            raise EmulationError(f"safetensors_index_missing:{index_path}")
+        weight_map = json.loads(index_path.read_text(encoding="utf-8"))["weight_map"]
+        shards = sorted(set(weight_map.values()))
+        meta: dict[str, dict[str, Any]] = {}
+        payload = 0
+        for shard in shards:
+            path = root / shard
+            payload += path.stat().st_size
+            meta.update(read_safetensors_tensor_meta(path))
+        sizes = {
+            name: _representation_tensor_bytes(
+                entry["dtype"], entry["shape"], name, representation
+            )
+            for name, entry in meta.items()
+        }
+        tied = bool(
+            json.loads((root / "config.json").read_text(encoding="utf-8")).get(
+                "tie_word_embeddings", False
+            )
+        )
+        facts: dict[str, Any] = {
+            "path": str(index_path),
+            "shards": [str(root / shard) for shard in shards],
+            "shard_count": len(shards),
+            "payload_bytes": payload,
+            "source": (
+                "safetensors shard headers via the snapshot's model.safetensors."
+                "index.json (file metadata only; no tensors read, no RSS involved)"
+            ),
+            "tensors": len(meta),
+            "representation": representation,
+            "representation_basis": (
+                "int8 code per element plus one float32 scale per output row for "
+                "every 2-D .weight, float32 for the rest (mycelium.rowwise_"
+                "symmetric_int8.v1); source dtype elsewhere"
+            ),
+            "source_payload_bytes": sum(entry["bytes"] for entry in meta.values()),
+            "tie_word_embeddings": tied,
+            "tied_embedding_bytes": sizes.get(EMBED_TOKENS_TENSOR, 0) if tied else 0,
+            "tied_embedding_tensor": EMBED_TOKENS_TENSOR,
+        }
+        return facts, sizes
+
+    weights = root / "model.safetensors"
     sizes = read_safetensors_tensor_bytes(weights)
-    facts: dict[str, Any] = {
+    facts = {
         "path": str(weights),
         "payload_bytes": sum(sizes.values()),
         "source": (
@@ -1744,12 +2370,14 @@ def placement_expected_bytes(
     owns_embed: bool,
     owns_head: bool,
     head_tied_to_embeddings: bool,
+    head_tensor: str | None = None,
 ) -> tuple[int, int]:
     """``(tensors, bytes)`` a placement must hold, per the snapshot's own header.
 
     The selection mirrors ``QwenStage.load`` against the file's metadata, which keeps
     the two accountings independent: the stage counts what it loaded, this counts
-    what the checkpoint says those tensors are.
+    what the checkpoint says those tensors are.  An untied snapshot's head is a
+    tensor of its own (``lm_head.weight``), so it is named rather than assumed.
     """
 
     names: set[str] = set()
@@ -1766,6 +2394,11 @@ def placement_expected_bytes(
         if FINAL_NORM_TENSOR not in tensor_bytes:
             raise EmulationError(f"snapshot_missing_tensor:{FINAL_NORM_TENSOR}")
         names.add(FINAL_NORM_TENSOR)
+        if not head_tied_to_embeddings:
+            key = head_tensor or LM_HEAD_TENSOR
+            if key not in tensor_bytes:
+                raise EmulationError(f"snapshot_missing_tensor:{key}")
+            names.add(key)
     return len(names), sum(tensor_bytes[name] for name in sorted(names))
 
 
@@ -1938,6 +2571,7 @@ class Emulation:
         python: str | None = None,
         fsync: bool = True,
         token_steps: int = TOKEN_STEPS,
+        profile: ModelProfile | None = None,
     ) -> None:
         self.run_dir = Path(run_dir)
         self.model_root = Path(model_root)
@@ -1946,6 +2580,11 @@ class Emulation:
         self.python = python or sys.executable
         self.fsync = fsync
         self.token_steps = int(token_steps)
+        self.profile = profile or pilot_profile()
+        if tuple(self.profile.node_ids) != WORKER_HOSTS:
+            raise EmulationError(
+                f"profile_node_ids_not_supported:{self.profile.node_ids}"
+            )
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.homes_dir = self.run_dir / "homes"
         self.tls_dir = self.run_dir / "tls"
@@ -1979,6 +2618,30 @@ class Emulation:
                 return leg
         raise EmulationError(f"no_such_leg:{name}")
 
+    @property
+    def entry_cacheless(self) -> bool:
+        """Whether the entry placement's kernel needs the whole sequence each step."""
+
+        entry = self.workers.get(WORKER_HOSTS[0])
+        return bool((entry.stage if entry is not None else {}).get("cacheless"))
+
+    def entry_sequence_argument(
+        self, prompt_ids: Sequence[int], generated: Sequence[int]
+    ) -> dict[str, Any]:
+        """The running token sequence, only for a cacheless entry placement.
+
+        The pilot path's stage keeps a KV cache and needs just the new token, so
+        its frames are unchanged; the repo-kernel path has no cache and is driven
+        with the full sequence, as ``runtime_loader.execute_loaded_stage`` requires.
+        """
+
+        if not self.entry_cacheless:
+            return {}
+        sequence = [int(value) for value in prompt_ids] + [
+            int(value) for value in generated
+        ]
+        return {"token_ids": sequence, "sequence": len(sequence)}
+
     def open_run(self) -> TraceRunDirectory:
         product_roots = (
             "mycelium_router",
@@ -1996,8 +2659,12 @@ class Emulation:
             notes=(
                 "PLAN 5.2 item 3 single-host two-worker C4->C5 emulation: two worker "
                 "processes with separate homes and identities, the real "
-                f"{MODEL_ID}@{MODEL_REVISION} from disk, a TLS https origin on "
-                "loopback, and the promoted seeded fault proxy on every leg"
+                f"{self.profile.model_id}@{self.profile.revision} from disk in the "
+                f"{self.profile.representation} representation over the "
+                f"{self.profile.kernels} kernels, split "
+                f"{[list(item[1:]) for item in self.profile.layer_split]}, a TLS "
+                "https origin on loopback, and the promoted seeded fault proxy on "
+                "every leg"
             ),
         )
         self.driver_recorder = TraceRecorder(
@@ -2029,7 +2696,7 @@ class Emulation:
 
         emulation_path = str(Path(__file__).resolve())
         environment = clean_subprocess_environment()
-        for node_id, start_layer, end_layer in LAYER_SPLIT:
+        for node_id, start_layer, end_layer in self.profile.layer_split:
             home = self.homes_dir / node_id
             log_path = self.logs_dir / f"{node_id}.log"
             placement_id = f"{node_id}-placement"
@@ -2054,11 +2721,23 @@ class Emulation:
                 "60",
                 "--run-dir",
                 str(self.run_dir),
+                "--model-id",
+                self.profile.model_id,
+                "--model-revision",
+                self.profile.revision,
+                "--representation",
+                self.profile.representation,
+                "--kernels",
+                self.profile.kernels,
+                "--expected-layers",
+                str(self.profile.expected_layers),
             ]
             if start_layer == 0:
                 arguments.append("--owns-embed")
-            if end_layer == 24:
+            if self.profile.owns_head(end_layer):
                 arguments.append("--owns-head")
+            if self.profile.sharded:
+                arguments.append("--sharded")
             # worker-c runs on a deliberately wrong clock: the trace must correct it
             # rather than silently align it (mycelium_testbed/DESIGN_NOTES.md §3).
             if node_id == "worker-c":
@@ -2254,7 +2933,12 @@ class Emulation:
                 "placements": [
                     self.workers[node].placement_id for node in WORKER_HOSTS
                 ],
-                "model": {"id": MODEL_ID, "revision": MODEL_REVISION},
+                "model": {
+                    "id": self.profile.model_id,
+                    "revision": self.profile.revision,
+                    "representation": self.profile.representation,
+                    "kernels": self.profile.kernels,
+                },
             },
         )
         prompt_text = self.tokenizer.decode(prompt_ids)
@@ -2386,7 +3070,11 @@ class Emulation:
                 first,
                 phase="decode",
                 token_index=step + 1,
-                extra={"token_id": next_token, "position": len(prompt_ids) + step},
+                extra={
+                    "token_id": next_token,
+                    "position": len(prompt_ids) + step,
+                    **self.entry_sequence_argument(prompt_ids, tokens),
+                },
             )
             token_reply, _token_payload, _ = await send(
                 second,
@@ -2395,6 +3083,9 @@ class Emulation:
                 extra={
                     "hidden": hidden_reply["hidden"],
                     "position": len(prompt_ids) + step,
+                    # the sequence the entry placement just ran forward, so a
+                    # cacheless continuation placement shapes its hidden payload
+                    "sequence": len(prompt_ids) + step + 1,
                 },
                 payload=hidden_payload,
             )
@@ -2770,6 +3461,7 @@ class Emulation:
                     "token_index": step + 1,
                     "token_id": next_token,
                     "position": len(prompt_ids) + step,
+                    **self.entry_sequence_argument(prompt_ids, tokens),
                 },
             )
             token_reply, _payload, _ = await self.call(
@@ -2783,6 +3475,7 @@ class Emulation:
                     "token_index": step + 1,
                     "hidden": hidden_reply["hidden"],
                     "position": len(prompt_ids) + step,
+                    "sequence": len(prompt_ids) + step + 1,
                 },
                 hidden_payload,
             )
@@ -2893,7 +3586,10 @@ async def _run_async(
     python: str | None,
     fsync: bool,
     token_steps: int,
+    profile: ModelProfile | None = None,
 ) -> EmulationResult:
+    resolved_profile = profile or pilot_profile()
+    started_wall = time.monotonic()
     emulation = Emulation(
         run_dir=run_dir,
         model_root=model_root,
@@ -2902,6 +3598,7 @@ async def _run_async(
         python=python,
         fsync=fsync,
         token_steps=token_steps,
+        profile=resolved_profile,
     )
     run = emulation.open_run()
     emulation.load_tokenizer()
@@ -2983,7 +3680,11 @@ async def _run_async(
     # What the checkpoint itself says the placements must hold, read from the
     # safetensors header: deterministic, and independent of both the stage's
     # accounting and the sampled RSS.
-    snapshot_facts, snapshot_tensor_bytes = snapshot_memory_facts(model_root)
+    snapshot_facts, snapshot_tensor_bytes = snapshot_memory_facts(
+        model_root,
+        representation=resolved_profile.representation,
+        sharded=resolved_profile.sharded,
+    )
     worker_documents: dict[str, dict[str, Any]] = {}
     for node_id in WORKER_HOSTS:
         entry = emulation.workers[node_id].to_document()
@@ -2996,6 +3697,7 @@ async def _run_async(
             owns_embed=bool(stage.get("owns_embed")),
             owns_head=bool(stage.get("owns_head")),
             head_tied_to_embeddings=bool(stage.get("head_tied_to_embeddings")),
+            head_tensor=str(stage.get("head_tensor") or "") or None,
         )
         entry["placement_expectation"] = {
             "resident_bytes": expected_bytes,
@@ -3009,11 +3711,17 @@ async def _run_async(
     document: dict[str, Any] = {
         "protocol": "mycelium.testbed.emulation.v1",
         "seed": seed,
+        "profile": resolved_profile.to_document(),
         "model": {
-            "id": MODEL_ID,
-            "revision": MODEL_REVISION,
+            "id": resolved_profile.model_id,
+            "revision": resolved_profile.revision,
             "root": str(model_root),
             "source": "local HuggingFace cache; no download performed",
+            "representation": resolved_profile.representation,
+            "kernels": resolved_profile.kernels,
+            "runtime_dtype": resolved_profile.runtime_dtype,
+            "layer_split": [list(item) for item in resolved_profile.layer_split],
+            "cacheless_placements": resolved_profile.cacheless,
             "safetensors": snapshot_facts,
         },
         "origin": {
@@ -3092,6 +3800,52 @@ async def _run_async(
             ),
             "negative_receipts_missing": negative["cleanup"]["missing"],
         },
+    }
+    document["measured"] = {
+        "split": [list(item) for item in resolved_profile.layer_split],
+        "wall_clock_s": round(time.monotonic() - started_wall, 4),
+        "stage_accounted_bytes": {
+            node_id: worker_documents[node_id]["memory"]["accounted"]["resident_bytes"]
+            for node_id in WORKER_HOSTS
+        },
+        "stage_accounted_bytes_total": sum(
+            worker_documents[node_id]["memory"]["accounted"]["resident_bytes"]
+            for node_id in WORKER_HOSTS
+        ),
+        "worker_peak_rss_bytes": {
+            node_id: worker_documents[node_id]["memory"]["observation"][
+                "peak_rss_bytes"
+            ]
+            for node_id in WORKER_HOSTS
+        },
+        "worker_peak_rss_bytes_max": max(
+            worker_documents[node_id]["memory"]["observation"]["peak_rss_bytes"]
+            for node_id in WORKER_HOSTS
+        ),
+        "accounting_basis": STAGE_ACCOUNTING_BASIS,
+        "rss_sampling_method": RSS_SAMPLING_METHOD,
+        "worker_peak_rss_method": (
+            "harness external sampler (ps -o rss= every 0.1s, started after both "
+            "placements finished loading, so it covers the request phase only)"
+        ),
+        "worker_self_reported_peak_rss_bytes": {
+            node_id: int(
+                (requests.get(ok_request, {}).get("worker_counters", {}) or {}).get(
+                    node_id, {}
+                ).get("self_reported_peak_rss_bytes")
+                or 0
+            )
+            for node_id in WORKER_HOSTS
+        },
+        "worker_self_reported_peak_rss_unit": "bytes",
+        "worker_self_reported_peak_rss_method": (
+            "the placement's own resource.getrusage(RUSAGE_SELF).ru_maxrss, a "
+            "lifetime high-water mark that includes the load phase; reported "
+            "beside the external sampler, never used as a verdict"
+        ),
+        "host_available_bytes": _host_available_bytes(),
+        "cacheless_placements": resolved_profile.cacheless,
+        "token_steps": token_steps,
     }
     (run_dir / "faults.json").write_text(
         json.dumps(
@@ -3188,11 +3942,14 @@ def run_emulation(
     python: str | None = None,
     fsync: bool = True,
     token_steps: int = TOKEN_STEPS,
+    profile: ModelProfile | None = None,
 ) -> EmulationResult:
     """Run the emulation once.  Raises :class:`EmulationError` on a stop condition."""
 
+    resolved_profile = profile or pilot_profile()
     resolved_root = _require_model(
-        Path(model_root) if model_root else local_model_root()
+        Path(model_root) if model_root else resolved_profile.model_root(),
+        sharded=resolved_profile.sharded,
     )
     return asyncio.run(
         _run_async(
@@ -3203,6 +3960,7 @@ def run_emulation(
             python=python,
             fsync=fsync,
             token_steps=token_steps,
+            profile=resolved_profile,
         )
     )
 
@@ -3235,6 +3993,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     worker.add_argument("--monotonic-offset-ns", type=int, default=0)
     worker.add_argument("--wall-offset-ns", type=int, default=0)
     worker.add_argument("--listen-host", default="127.0.0.1")
+    worker.add_argument("--model-id", default=MODEL_ID)
+    worker.add_argument("--model-revision", default=MODEL_REVISION)
+    worker.add_argument("--representation", default=REPRESENTATION_SOURCE)
+    worker.add_argument("--kernels", default=KERNELS_TESTBED)
+    worker.add_argument("--expected-layers", type=int, default=None)
+    worker.add_argument("--sharded", action="store_true")
 
     run = sub.add_parser("run", help="run the whole emulation")
     run.add_argument("--run-dir", type=Path, required=True)
@@ -3242,6 +4006,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--seed", type=int, default=20260915)
     run.add_argument("--receipt-hold-ms", type=float, default=1700.0)
     run.add_argument("--token-steps", type=int, default=TOKEN_STEPS)
+    run.add_argument("--profile", choices=sorted(MODEL_PROFILES), default="pilot")
     args = parser.parse_args(argv)
 
     if args.command == "worker":
@@ -3270,6 +4035,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 str(args.wall_offset_ns),
                 "--listen-host",
                 args.listen_host,
+                "--model-id",
+                args.model_id,
+                "--model-revision",
+                args.model_revision,
+                "--representation",
+                args.representation,
+                "--kernels",
+                args.kernels,
+                *(
+                    ["--expected-layers", str(args.expected_layers)]
+                    if args.expected_layers is not None
+                    else []
+                ),
+                *(["--sharded"] if args.sharded else []),
             ]
         )
     result = run_emulation(
@@ -3278,6 +4057,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.seed,
         receipt_hold_ms=args.receipt_hold_ms,
         token_steps=args.token_steps,
+        profile=MODEL_PROFILES[args.profile](),
     )
     print(json.dumps(result.to_document(), sort_keys=True))
     return 0
