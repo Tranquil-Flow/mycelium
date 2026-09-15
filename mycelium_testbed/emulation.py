@@ -121,21 +121,31 @@ from mycelium_testbed.trace import (  # noqa: E402
 __all__ = [
     "CHATML_SYSTEM",
     "CLEANUP_RECEIPT_TIMEOUT",
+    "DETERMINISTIC_MEMORY_CHECKS",
     "DRIVER_HOST",
     "EmulationError",
     "EmulationResult",
     "LAYER_SPLIT",
+    "LOAD_SENSITIVE_CHECKS",
     "MODEL_ID",
     "MODEL_REVISION",
     "PROMPT",
+    "RSS_RECLAIM_TOLERANCE",
+    "RSS_SAMPLING_METHOD",
+    "STAGE_ACCOUNTING_BASIS",
     "TOKEN_STEPS",
     "WORKER_HOSTS",
+    "WorkerMemoryVerdict",
     "build_model_root",
     "emulation_document",
+    "evaluate_worker_memory_envelope",
     "local_model_root",
     "main",
     "model_present",
+    "placement_expected_bytes",
+    "read_safetensors_tensor_bytes",
     "run_emulation",
+    "snapshot_memory_facts",
     "worker_main",
 ]
 
@@ -170,6 +180,37 @@ WORKER_HOSTS: tuple[str, ...] = ("worker-a", "worker-c")
 #: ``mycelium_live/route.py:2696/2757/2767``:
 #: ``route_cancellation_cleanup_timeout|<blockers>``.
 CLEANUP_RECEIPT_TIMEOUT = "route_cancellation_cleanup_timeout"
+
+#: The two tensors the two placements share or close out.
+EMBED_TOKENS_TENSOR = "model.embed_tokens.weight"
+FINAL_NORM_TENSOR = "model.norm.weight"
+
+# --------------------------------------------------------------------------- #
+# the memory envelope: accounting (deterministic) vs observation (sampled)
+# --------------------------------------------------------------------------- #
+#: What the stage's resident bytes *are*: its own load accounting, summed over the
+#: tensors it checked in.  Deterministic, and the only basis a check may use.
+STAGE_ACCOUNTING_BASIS = "stage_load_accounting:sum_of_loaded_tensor_bytes"
+#: How the driver observes worker memory.  The quantity is sampled from outside the
+#: worker, so it is an observation of the OS and of machine load, not of the stage.
+RSS_SAMPLING_METHOD = (
+    "ps -o rss= -p <pid> every 0.1s while the requests ran, peak kept "
+    "(external sampler; sampled OS quantity, so it is load-sensitive)"
+)
+#: Under memory pressure macOS reclaims and compresses pages, so a sampled peak may
+#: legitimately land well below the bytes the stage loaded.  The tolerance is
+#: therefore *stated* in the evidence and never required: an RSS bound is a sanity
+#: observation, not a verdict, and it must never decide the suite's colour.
+RSS_RECLAIM_TOLERANCE = 0.5
+#: The checks that read a sampled quantity.  Advisory by construction.
+LOAD_SENSITIVE_CHECKS: tuple[str, ...] = ("rss_sanity_bound",)
+#: The checks that read only what the stage (and the snapshot header) account for.
+DETERMINISTIC_MEMORY_CHECKS: tuple[str, ...] = (
+    "accounted_resident_bytes_positive",
+    "resident_bytes_equal_tensor_byte_sum",
+    "accounted_bytes_match_snapshot_header",
+    "accounted_tensors_match_snapshot_header",
+)
 
 
 def local_model_root() -> Path:
@@ -780,6 +821,7 @@ class QwenStage:
         self._config: dict[str, Any] = {}
         self._kv: dict[int, tuple[Any, Any]] = {}
         self.resident_bytes = 0
+        self.bytes_by_dtype: dict[str, int] = {}
         self.tensor_count = 0
         self.head_tied_to_embeddings = False
 
@@ -816,10 +858,15 @@ class QwenStage:
         self._weights = wanted
         self.tensor_count = len(wanted)
         resident = 0
+        bytes_by_dtype: dict[str, int] = {}
         for value in wanted.values():
             mx.eval(value)
-            resident += int(value.size) * int(value.itemsize)
+            tensor_bytes = int(value.size) * int(value.itemsize)
+            resident += tensor_bytes
+            dtype = str(value.dtype)
+            bytes_by_dtype[dtype] = bytes_by_dtype.get(dtype, 0) + tensor_bytes
         self.resident_bytes = resident
+        self.bytes_by_dtype = bytes_by_dtype
         expected = self._config.get("num_hidden_layers")
         if not isinstance(expected, int) or expected != 24:
             raise QwenStageError(f"unexpected_num_hidden_layers:{expected}")
@@ -829,6 +876,9 @@ class QwenStage:
             "layer_count": self.end_layer - self.start_layer,
             "tensors": self.tensor_count,
             "resident_bytes": self.resident_bytes,
+            # the accounting this number comes from, so a reader can check it
+            "accounting": STAGE_ACCOUNTING_BASIS,
+            "resident_bytes_by_dtype": dict(sorted(bytes_by_dtype.items())),
             "owns_embed": self.owns_embed,
             "owns_head": self.owns_head,
             "head_tied_to_embeddings": self.head_tied_to_embeddings,
@@ -1627,6 +1677,254 @@ def _read_rss_bytes(pid: int) -> int | None:
     return int(raw) * 1024  # ps reports kibibytes
 
 
+# --------------------------------------------------------------------------- #
+# the memory envelope: what the stage accounts for, beside what the OS reported
+# --------------------------------------------------------------------------- #
+
+
+def read_safetensors_tensor_bytes(path: Path) -> dict[str, int]:
+    """Bytes per tensor, read from a safetensors *header* only.
+
+    No tensor is loaded and no RSS is consulted: this is the file's own metadata, so
+    it is the deterministic side of the memory check - the checkpoint's statement of
+    what the placement's tensors are, against the stage's accounting of what it put
+    in memory.
+    """
+
+    weights = Path(path)
+    with weights.open("rb") as handle:
+        prefix = handle.read(8)
+        if len(prefix) != 8:
+            raise EmulationError(f"safetensors_header_truncated:{weights}")
+        header_bytes = int.from_bytes(prefix, "little")
+        raw = handle.read(header_bytes)
+        if len(raw) != header_bytes:
+            raise EmulationError(f"safetensors_header_truncated:{weights}")
+    try:
+        header = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise EmulationError(f"safetensors_header_unreadable:{weights}") from error
+    if not isinstance(header, dict):
+        raise EmulationError(f"safetensors_header_not_an_object:{weights}")
+    sizes: dict[str, int] = {}
+    for name, entry in header.items():
+        if name == "__metadata__":
+            continue
+        offsets = entry.get("data_offsets") if isinstance(entry, dict) else None
+        if not (isinstance(offsets, list) and len(offsets) == 2):
+            raise EmulationError(f"safetensors_header_entry_invalid:{weights}:{name}")
+        sizes[str(name)] = int(offsets[1]) - int(offsets[0])
+    return sizes
+
+
+def snapshot_memory_facts(model_root: Path) -> tuple[dict[str, Any], dict[str, int]]:
+    """``(document facts, bytes per tensor)`` for the snapshot, from its header."""
+
+    weights = Path(model_root) / "model.safetensors"
+    sizes = read_safetensors_tensor_bytes(weights)
+    facts: dict[str, Any] = {
+        "path": str(weights),
+        "payload_bytes": sum(sizes.values()),
+        "source": (
+            "model.safetensors header data_offsets (file metadata only; no tensors "
+            "read, no RSS involved)"
+        ),
+        "tensors": len(sizes),
+        "tied_embedding_bytes": sizes.get(EMBED_TOKENS_TENSOR, 0),
+        "tied_embedding_tensor": EMBED_TOKENS_TENSOR,
+    }
+    return facts, sizes
+
+
+def placement_expected_bytes(
+    tensor_bytes: Mapping[str, int],
+    *,
+    start_layer: int,
+    end_layer: int,
+    owns_embed: bool,
+    owns_head: bool,
+    head_tied_to_embeddings: bool,
+) -> tuple[int, int]:
+    """``(tensors, bytes)`` a placement must hold, per the snapshot's own header.
+
+    The selection mirrors ``QwenStage.load`` against the file's metadata, which keeps
+    the two accountings independent: the stage counts what it loaded, this counts
+    what the checkpoint says those tensors are.
+    """
+
+    names: set[str] = set()
+    for index in range(start_layer, end_layer):
+        prefix = f"model.layers.{index}."
+        names.update(name for name in tensor_bytes if name.startswith(prefix))
+    if owns_embed or (owns_head and head_tied_to_embeddings):
+        # Qwen2.5-0.5B ties its embeddings, so the placement that owns the head
+        # legitimately holds the embedding matrix as the output projection too.
+        if EMBED_TOKENS_TENSOR not in tensor_bytes:
+            raise EmulationError(f"snapshot_missing_tensor:{EMBED_TOKENS_TENSOR}")
+        names.add(EMBED_TOKENS_TENSOR)
+    if owns_head:
+        if FINAL_NORM_TENSOR not in tensor_bytes:
+            raise EmulationError(f"snapshot_missing_tensor:{FINAL_NORM_TENSOR}")
+        names.add(FINAL_NORM_TENSOR)
+    return len(names), sum(tensor_bytes[name] for name in sorted(names))
+
+
+@dataclass(frozen=True)
+class WorkerMemoryVerdict:
+    """One placement's memory envelope: the accounting, and the observation beside it.
+
+    The two are kept apart on purpose.  ``accounted_*`` is the stage's own load
+    accounting and is deterministic; ``observed_*`` is a sampled OS quantity that a
+    loaded machine may honestly under-report.  Only the accounting can produce a
+    violation, so a machine's load cannot decide whether the suite is green.
+    """
+
+    node_id: str
+    accounted_resident_bytes: int
+    accounted_tensors: int
+    accounted_bytes_by_dtype: dict[str, int]
+    accounting_basis: str
+    expected_resident_bytes: int | None
+    expected_tensors: int | None
+    expectation_source: str | None
+    deterministic_checks: tuple[str, ...]
+    deterministic_violations: tuple[str, ...]
+    observed_peak_rss_bytes: int
+    rss_samples: int
+    sampling_method: str
+    reclaim_tolerance: float
+    rss_sanity_bound_bytes: int
+    rss_sanity_satisfied: bool
+    load_sensitive_checks: tuple[str, ...] = LOAD_SENSITIVE_CHECKS
+
+    @property
+    def deterministic_ok(self) -> bool:
+        return not self.deterministic_violations
+
+    def to_document(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "accounted": {
+                "basis": self.accounting_basis,
+                "bytes_by_dtype": dict(self.accounted_bytes_by_dtype),
+                "deterministic": True,
+                "resident_bytes": self.accounted_resident_bytes,
+                "tensors": self.accounted_tensors,
+            },
+            "deterministic_checks": list(self.deterministic_checks),
+            "deterministic_violations": list(self.deterministic_violations),
+            "expected_from_snapshot": (
+                None
+                if self.expected_resident_bytes is None
+                else {
+                    "resident_bytes": self.expected_resident_bytes,
+                    "source": self.expectation_source,
+                    "tensors": self.expected_tensors,
+                }
+            ),
+            "load_sensitive_checks": list(self.load_sensitive_checks),
+            "note": (
+                "accounted_* is the stage's own load accounting (deterministic, the "
+                "only basis for a violation); the RSS figures are a sampled "
+                "observation of the OS, recorded with their method and never a "
+                "verdict - under memory pressure a reclaim can land them below the "
+                "bytes the stage loaded, which says nothing about the stage"
+            ),
+            "observation": {
+                "load_sensitive": True,
+                "method": self.sampling_method,
+                "peak_rss_bytes": self.observed_peak_rss_bytes,
+                "quantity": "peak_resident_set_size_sampled",
+                "samples": self.rss_samples,
+            },
+            "rss_sanity": {
+                "bound_bytes": self.rss_sanity_bound_bytes,
+                "observed_over_accounted": (
+                    round(self.observed_peak_rss_bytes / self.accounted_resident_bytes, 4)
+                    if self.accounted_resident_bytes
+                    else None
+                ),
+                "reclaim_tolerance": self.reclaim_tolerance,
+                "role": "recorded only: never counted as a violation",
+                "satisfied": self.rss_sanity_satisfied,
+            },
+        }
+
+
+def evaluate_worker_memory_envelope(worker: Mapping[str, Any]) -> WorkerMemoryVerdict:
+    """Judge one worker's memory envelope from what its stage accounted for.
+
+    Every deterministic check reads the stage's own load accounting and, when the
+    driver recorded it, the snapshot header the placement was expected to cover.  The
+    sampled peak RSS is carried into the verdict as an observation with its sampling
+    method and its stated reclaim tolerance, and is deliberately excluded from
+    ``deterministic_violations``.
+    """
+
+    node_id = str(worker.get("node_id") or "unknown")
+    stage = worker.get("stage") or {}
+    accounted_resident_bytes = int(stage.get("resident_bytes") or 0)
+    accounted_tensors = int(stage.get("tensors") or 0)
+    bytes_by_dtype = {
+        str(dtype): int(value)
+        for dtype, value in dict(stage.get("resident_bytes_by_dtype") or {}).items()
+    }
+    expectation = dict(worker.get("placement_expectation") or {})
+    expected_bytes = expectation.get("resident_bytes")
+    expected_tensors = expectation.get("tensors")
+    expectation_source = expectation.get("source")
+
+    checks: list[str] = ["accounted_resident_bytes_positive"]
+    violations: list[str] = []
+    if accounted_resident_bytes <= 0:
+        violations.append(f"accounted_resident_bytes_not_positive:{node_id}")
+
+    if bytes_by_dtype:
+        checks.append("resident_bytes_equal_tensor_byte_sum")
+        if sum(bytes_by_dtype.values()) != accounted_resident_bytes:
+            violations.append(f"resident_bytes_do_not_match_tensor_byte_sum:{node_id}")
+
+    if isinstance(expected_bytes, int) and isinstance(expected_tensors, int):
+        checks.append("accounted_bytes_match_snapshot_header")
+        if accounted_resident_bytes != expected_bytes:
+            violations.append(
+                "accounted_bytes_do_not_match_snapshot_header:"
+                f"{node_id}:{accounted_resident_bytes}!={expected_bytes}"
+            )
+        checks.append("accounted_tensors_match_snapshot_header")
+        if accounted_tensors != expected_tensors:
+            violations.append(
+                "accounted_tensors_do_not_match_snapshot_header:"
+                f"{node_id}:{accounted_tensors}!={expected_tensors}"
+            )
+
+    observed_peak_rss_bytes = int(worker.get("peak_rss_bytes") or 0)
+    rss_sanity_bound_bytes = int(
+        accounted_resident_bytes * (1.0 - RSS_RECLAIM_TOLERANCE)
+    )
+    return WorkerMemoryVerdict(
+        node_id=node_id,
+        accounted_resident_bytes=accounted_resident_bytes,
+        accounted_tensors=accounted_tensors,
+        accounted_bytes_by_dtype=bytes_by_dtype,
+        accounting_basis=str(stage.get("accounting") or STAGE_ACCOUNTING_BASIS),
+        expected_resident_bytes=(
+            expected_bytes if isinstance(expected_bytes, int) else None
+        ),
+        expected_tensors=expected_tensors if isinstance(expected_tensors, int) else None,
+        expectation_source=str(expectation_source) if expectation_source else None,
+        deterministic_checks=tuple(checks),
+        deterministic_violations=tuple(violations),
+        observed_peak_rss_bytes=observed_peak_rss_bytes,
+        rss_samples=int(worker.get("rss_samples") or 0),
+        sampling_method=RSS_SAMPLING_METHOD,
+        reclaim_tolerance=RSS_RECLAIM_TOLERANCE,
+        rss_sanity_bound_bytes=rss_sanity_bound_bytes,
+        rss_sanity_satisfied=observed_peak_rss_bytes >= rss_sanity_bound_bytes,
+        load_sensitive_checks=LOAD_SENSITIVE_CHECKS,
+    )
+
+
 class Emulation:
     """The driver: gateway + route + fanout + terminal frame, over two workers."""
 
@@ -1846,9 +2144,11 @@ class Emulation:
     async def sample_worker_memory(self, *, interval_s: float = 0.1) -> None:
         """Sample each worker's RSS with ``ps`` while the requests run.
 
-        The peak is what a reader needs for the single-host memory envelope, and it
-        is observed from outside the worker rather than reported by the worker
-        about itself.
+        The peak is what a reader needs for the single-host memory envelope, and it is
+        observed from outside the worker rather than reported by the worker about
+        itself (``RSS_SAMPLING_METHOD``).  It stays an *observation*: it is recorded
+        with its method and never asserted, because under memory pressure the OS can
+        reclaim and compress pages and report a peak below what the stage loaded.
         """
 
         self._sampling = True
@@ -2157,7 +2457,11 @@ class Emulation:
                     ],
                     "placement_work": list(work.values()),
                     "acknowledged_cursor": len(tokens),
-                    "route_ready": True,
+                    # Deliberately nothing readiness-shaped.  A readiness claim is
+                    # the qualification authority's to mint, not a harness's: the
+                    # frame carries what this run can account for (the cursor, the
+                    # receipts, the placement work) and no claim at all.  See
+                    # tests/testbed/test_harness_claim_boundary.py.
                 },
             )
         )
@@ -2676,6 +2980,32 @@ async def _run_async(
         fanout_window_ms=route_cleanup_fanout_window_ms,
     )
     negative = requests[negative_request]
+    # What the checkpoint itself says the placements must hold, read from the
+    # safetensors header: deterministic, and independent of both the stage's
+    # accounting and the sampled RSS.
+    snapshot_facts, snapshot_tensor_bytes = snapshot_memory_facts(model_root)
+    worker_documents: dict[str, dict[str, Any]] = {}
+    for node_id in WORKER_HOSTS:
+        entry = emulation.workers[node_id].to_document()
+        stage = dict(entry.get("stage") or {})
+        layers = [int(value) for value in (stage.get("layers") or (0, 0))]
+        expected_tensors, expected_bytes = placement_expected_bytes(
+            snapshot_tensor_bytes,
+            start_layer=layers[0],
+            end_layer=layers[1],
+            owns_embed=bool(stage.get("owns_embed")),
+            owns_head=bool(stage.get("owns_head")),
+            head_tied_to_embeddings=bool(stage.get("head_tied_to_embeddings")),
+        )
+        entry["placement_expectation"] = {
+            "resident_bytes": expected_bytes,
+            "source": snapshot_facts["source"],
+            "tensors": expected_tensors,
+        }
+        # the verdict a reader (or the readiness gate) can check without re-deriving
+        # anything: the accounting is deterministic, the RSS is an observation
+        entry["memory"] = evaluate_worker_memory_envelope(entry).to_document()
+        worker_documents[node_id] = entry
     document: dict[str, Any] = {
         "protocol": "mycelium.testbed.emulation.v1",
         "seed": seed,
@@ -2684,6 +3014,7 @@ async def _run_async(
             "revision": MODEL_REVISION,
             "root": str(model_root),
             "source": "local HuggingFace cache; no download performed",
+            "safetensors": snapshot_facts,
         },
         "origin": {
             "url": f"https://127.0.0.1:{emulation.origin.port}/stream",
@@ -2692,10 +3023,7 @@ async def _run_async(
             "tls_dir": str(emulation.tls_dir),
             "reused": list(_reuse_notes()),
         },
-        "workers": {
-            node_id: emulation.workers[node_id].to_document()
-            for node_id in WORKER_HOSTS
-        },
+        "workers": worker_documents,
         "home_digests": {
             node_id: _directory_digest(emulation.workers[node_id].home)
             for node_id in WORKER_HOSTS
