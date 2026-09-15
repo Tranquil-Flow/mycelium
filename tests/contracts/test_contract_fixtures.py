@@ -60,6 +60,7 @@ from weight_provisioning import artifact_report_errors, provisioning_audit_error
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "contracts" / "compatibility-fixtures"
 EXPECTED_PROTOCOLS = {
+    "route-explorer-v1.json": "mycelium.route_explorer.v1",
     "route-plan-v2.json": "mycelium.route_plan.v2",
     "manual-provisioning-route-v1.json": "mycelium.manual_provisioning_route.v1",
     "layer-assignment-v2.json": "mycelium.layer_assignment.v2",

@@ -201,6 +201,7 @@ export class LiveProductEvidenceSource {
     if (this.state !== null) listener(this.state);
     void this.loadInitial().then(() => this.schedulePoll(0)).catch(() => {
       this.disconnect('product_snapshot_unavailable');
+      this.schedulePoll(this.pollIntervalMs);
     });
     return () => {
       this.listeners.delete(listener);
@@ -237,7 +238,11 @@ export class LiveProductEvidenceSource {
     if (this.pollActive || this.listeners.size === 0) return;
     this.pollActive = true;
     try {
-      const cursor = this.state?.cursor ?? null;
+      if (this.state === null) {
+        await this.fetchSnapshot(true);
+        return;
+      }
+      const cursor = this.state.cursor;
       const headers: Record<string, string> = { Accept: 'text/event-stream' };
       if (cursor !== null) headers['Last-Event-ID'] = String(cursor);
       const response = await this.fetcher(this.eventsUrl, {
@@ -323,10 +328,12 @@ export class LiveProductEvidenceSource {
 
   private markConnected(): void {
     if (this.state === null) return;
+    const aged = this.now() - this.state.snapshot.publication.published_at_unix_ms > this.staleAfterMs;
     this.state = Object.freeze({
       ...this.state,
       status: 'connected',
-      reason_code: this.state.freshness === 'stale' ? 'product_snapshot_stale' : null,
+      freshness: freshness(this.state.snapshot, aged),
+      reason_code: aged ? 'product_snapshot_stale' : null,
     });
     this.notify();
   }

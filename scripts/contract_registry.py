@@ -14,6 +14,11 @@ class ContractSpec:
 
 CONTRACT_SPECS = (
     ContractSpec(
+        "route-explorer-v1.json",
+        "mycelium.route_explorer.v1",
+        ("mycelium_product_spine/route_explorer.py",),
+    ),
+    ContractSpec(
         "route-plan-v2.json",
         "mycelium.route_plan.v2",
         (

@@ -1,3 +1,4 @@
+import { decodeRouteExplorer, type RouteExplorer } from '../routeExplorer/contracts';
 import { deepFreeze } from '../../model/runtime';
 import type {
   InternetActivationObservation,
@@ -119,6 +120,7 @@ export interface ProductSnapshot {
   readonly readiness: readonly ProductReadinessRecord[];
   readonly notices: readonly ProductNotice[];
   readonly internet_native: InternetNativeSnapshot;
+  readonly route_explorer?: RouteExplorer;
   readonly provenance: {
     readonly projector: string;
     readonly projector_version: string;
@@ -828,7 +830,7 @@ function decodeEntity(value: unknown, index: number): ProductEntity {
 export function decodeProductSnapshot(value: unknown): ProductSnapshot {
   const candidate = exact(
     value,
-    ['protocol', 'publication', 'supported_entity_kinds', 'source_states', 'entities', 'relations', 'readiness', 'notices', 'internet_native', 'provenance'],
+    ['protocol', 'publication', 'supported_entity_kinds', 'source_states', 'entities', 'relations', 'readiness', 'notices', 'internet_native', 'provenance', ...(typeof value === 'object' && value !== null && Object.hasOwn(value, 'route_explorer') ? ['route_explorer'] : [])],
     'snapshot',
   );
   if (own(candidate, 'protocol', 'snapshot.protocol') !== PRODUCT_SNAPSHOT_PROTOCOL) {
@@ -941,6 +943,7 @@ export function decodeProductSnapshot(value: unknown): ProductSnapshot {
     readiness,
     notices,
     internet_native: internetNative,
+    ...(Object.hasOwn(candidate, 'route_explorer') ? { route_explorer: decodeRouteExplorer(candidate.route_explorer, integer(publication.generation, 'generation', 1), mode) } : {}),
     provenance: {
       projector: label(own(provenance, 'projector', 'snapshot.provenance'), 'snapshot.provenance.projector'),
       projector_version: text(own(provenance, 'projector_version', 'snapshot.provenance'), 'snapshot.provenance.projector_version'),

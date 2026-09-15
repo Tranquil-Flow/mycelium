@@ -1,0 +1,26 @@
+.route-explorer { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.route-explorer button, .route-explorer select, .route-explorer summary { min-height: 44px; font: inherit; }
+.route-explorer button, .route-explorer select { color: inherit; background: var(--panel, #142322); border: 1px solid currentColor; border-radius: .35rem; padding: .5rem .75rem; }
+.route-explorer button:disabled { opacity: .55; }
+.route-explorer :focus-visible { outline: 3px solid #f8dc8b; outline-offset: 3px; }
+.route-controls, .route-filters { display: flex; flex-wrap: wrap; gap: .8rem; align-items: center; margin-block: 1rem; }
+.route-filters label { display: grid; gap: .4rem; }
+.route-filters { border: 1px solid currentColor; padding: 1rem; }
+.route-boundary { border-left: .3rem solid currentColor; padding: .7rem; font-weight: bold; }
+.route-table-scroll { max-width: 100%; overflow: auto; }
+.route-explorer table { width: 100%; min-width: 64rem; table-layout: fixed; border-collapse: collapse; font-size: .9rem; }
+.route-explorer table th, .route-explorer table td { white-space: normal; overflow-wrap: anywhere; }
+section.panel.route-explorer { padding: 1rem; }
+.route-explorer th, .route-explorer td { padding: .75rem; border: 1px solid currentColor; vertical-align: top; text-align: left; min-width: 8rem; }
+.route-explorer caption { text-align: left; padding: .7rem 0; }
+.route-explorer dd { margin: 0 0 .5rem; }
+.route-explorer dt { font-weight: bold; }
+.route-explorer [aria-pressed=true] { outline: 3px solid currentColor; outline-offset: -4px; font-weight: bold; }
+.route-graph { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,24rem),1fr)); gap: 1rem; padding-left: 1.5rem; }
+.route-graph button { width: 100%; text-align: left; }
+.route-vertex { display: inline-block; border: 1px solid currentColor; border-radius: .4rem; padding: .4rem; }
+.route-graph small { display: block; margin-top: .6rem; font-size: 1em; }
+.route-peers { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,18rem),1fr)); gap: .7rem; }
+.route-explorer details { max-width: 36rem; }
+.route-explorer *, .route-explorer *::before, .route-explorer *::after { animation: none !important; transition: none !important; }
+@media (forced-colors: active) { .route-explorer button, .route-explorer select { color: ButtonText; background: ButtonFace; } .route-explorer :focus-visible { outline-color: Highlight; } }

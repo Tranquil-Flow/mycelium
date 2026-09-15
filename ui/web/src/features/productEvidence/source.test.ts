@@ -149,3 +149,35 @@ describe('live product evidence source', () => {
     expect(source.getState()?.reason_code).toBeNull();
   });
 });
+
+// Regression: a connected transport is not evidence freshness.
+it('ages retained publication on empty event polls', async () => {
+  const scheduled: Array<() => void> = [];
+  let now = fixture.publication.published_at_unix_ms;
+  const source = new LiveProductEvidenceSource({
+    fetcher: async url => url.endsWith('/snapshot') ? response(fixture) : response('', 'text/event-stream'),
+    now: () => now, staleAfterMs: 10,
+    schedule: cb => { scheduled.push(cb); return scheduled.length; }, cancelSchedule: () => undefined,
+  });
+  const stop = source.subscribe(() => undefined);
+  await source.loadInitial(); await Promise.resolve();
+  now += 11; scheduled.shift()?.();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(source.getState()?.freshness).toBe('stale');
+  stop();
+});
+it('retries an initial unavailable snapshot without a page reload', async () => {
+  const scheduled: Array<() => void> = [];
+  let available = false;
+  const source = new LiveProductEvidenceSource({
+    fetcher: async url => !available ? response('', 'application/json', 503) : url.endsWith('/snapshot') ? response(fixture) : response('', 'text/event-stream'),
+    now: () => fixture.publication.published_at_unix_ms,
+    schedule: cb => { scheduled.push(cb); return scheduled.length; }, cancelSchedule: () => undefined,
+  });
+  const stop = source.subscribe(() => undefined);
+  await source.loadInitial().catch(() => undefined); await Promise.resolve();
+  available = true; scheduled.shift()?.();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(source.getState()?.status).toBe('connected');
+  stop();
+});
