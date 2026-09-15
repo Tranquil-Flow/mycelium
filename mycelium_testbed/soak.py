@@ -82,19 +82,41 @@ mapping:
 ``at_most_one_native_execution_per_command`` needs no deadline: its bound is the
 count ``1``, which is the invariant itself.
 
-Determinism (requirement 1)
----------------------------
+Determinism (requirement 1): structural properties gate, digests are recorded
+---------------------------------------------------------------------------
 
-``run_digest`` covers only *soak-determined* material: the seed, the event
-count, the weight digest, the schedule digest, the bound digest, the forced-fault
-list, the fault-application counts and the violations.  Wall-clock and monotonic
-stamps, pids, arrival counts and per-command execution counts are recorded in the
-per-seed record and the trace (so a failure is diagnosable) but are **excluded
-from the digest by design** - those are the things under test, and a digest that
-included them could not be reproduced.  ``product_digest`` is the mirror image:
-it digests the *observed product* material (execution counts, terminal classes)
-and is reported next to the run digest so a same-seed behavioural difference is
-visible even though it does not change the replay identity.
+The sweep computes two independent replay identities and **gates neither**
+(``rca/wp2-harness-assertion-design-review.md`` decision 2', revised 2026-09-15 after
+measurement contradicted the original decision):
+
+* ``product_digest`` - the *observed product* material (execution counts, terminal
+  classes, restart kinds, named rejection codes, dropped-observation kinds);
+* ``run_digest`` - the whole-run (event-stream) identity: soak-determined material
+  (schedule, bounds, weights, fault application counts, violations).
+
+Both are observations about a **variable work budget**: a fixed ``--events`` budget
+covers a different number of request lifecycles from run to run, so identity drifts with
+how much work fitted rather than with whether the product behaved correctly.  Measured on
+20 canonical runs: product-digest identity held 5/20, event-stream identity 29/30.
+Gating either would refuse the pilot ~15 times in 20 for a non-defect reason, so each is
+**recorded** with its seed and exact replay command, and a mismatch records
+``product_digest_difference`` naming the fields that differed.  What gates instead is
+structural: any invariant firing in any run, and terminal coverage.  The honest statement
+of replay is therefore "the soak reproduces its own determined material and records how
+far a data-dependent episode got", never "the run reproduced".
+
+``replay_check.gated_property`` names which identity gated the run, and
+``replay_check["event_stream_identity"]`` carries the recorded observation
+(``gated: false``).  ``SweepResult.gate_failures()`` lists the reasons a sweep
+refused to exit zero; ``replay_check["gate_failures"]`` repeats them in the
+document.  A violation observed in *any* run of the sweep - the configured seeds,
+the replay, the divergence seed - is a gate failure, because a red run that is
+hidden behind a green one is the dishonesty this split exists to remove.
+
+Wall-clock and monotonic stamps, pids, arrival counts and per-command execution
+counts are recorded in the per-seed record and the trace (so a failure is
+diagnosable) but are **excluded from the run digest by design** - those are the
+things under test, and a digest that included them could not be reproduced.
 
 Falsification (requirement 3)
 -----------------------------
@@ -174,6 +196,18 @@ INVARIANT_CODES: tuple[str, ...] = (
 #: One native execution per command identity is the invariant itself, not a
 #: deadline: the only bound the soak states in its own words.
 MAXIMUM_NATIVE_EXECUTIONS_PER_COMMAND = 1
+
+#: How many observed sequence numbers a row keeps.  A bounded ring: enough to audit
+#: a judgement, never a per-event transcript (the trace is that).
+MAXIMUM_OBSERVED_SEQUENCES = 16
+
+#: How many lifecycle transitions a request's recorded evidence keeps.
+MAXIMUM_LIFECYCLE_EVENTS = 64
+
+#: Label prefix of the observer gap recorded when a retirement *would* have been
+#: declared from a sampling that never saw the row present.  Stable string: a report
+#: or a test names it.
+RETIREMENT_WITHOUT_MEMBERSHIP_EVIDENCE = "retirement_without_membership_evidence"
 
 DEFAULT_RUNS_DIR = (
     Path(os.environ["MYCELIUM_RUNS_DIR"])
@@ -640,6 +674,24 @@ class RowRecord:
     scope: str = "mailbox"
     bound_origin: str = "last_progress"
     last_sequence: int = -1
+    #: Where ``last_sequence`` came from: ``session_table`` (a gateway session's own
+    #: event sequence), ``trace`` (the trace recorder's sequence for a row whose
+    #: lifecycle is a trace), or ``none`` (nothing was ever sampled).
+    sequence_source: str = "none"
+    #: The observed sequence numbers, most recent last (bounded ring).
+    observed_sequences: list[int] = field(default_factory=list)
+    sequence_samples: int = 0
+    #: How often the observer sampled the product's session table for this row, and
+    #: how often the row was actually in it.  ``present_samples == 0`` means the
+    #: table this row was judged absent from never held it: an absence that is not
+    #: evidence of a product retirement.
+    membership_samples: int = 0
+    present_samples: int = 0
+    first_present_at: float | None = None
+    last_present_at: float | None = None
+    #: The product itself minted this row (its own 202 + request id + session token),
+    #: so the row's existence is accounted for even before the first table sample.
+    admitted_by_product: bool = False
     terminal_kind: str | None = None
     terminal_code: str | None = None
     terminal_at: float | None = None
@@ -652,10 +704,41 @@ class RowRecord:
     closed_by_soak_at: float | None = None
     closed_by_soak_note: str = ""
 
+    def observe_sequence(self, sequence: int) -> None:
+        """Record one observed sequence number (progress bookkeeping is separate)."""
+
+        self.sequence_samples += 1
+        self.observed_sequences.append(int(sequence))
+        if len(self.observed_sequences) > MAXIMUM_OBSERVED_SEQUENCES:
+            del self.observed_sequences[0]
+
     def observe(self, *, at: float, sequence: int) -> None:
+        self.observe_sequence(sequence)
         if sequence > self.last_sequence:
             self.last_sequence = sequence
             self.last_progress_at = at
+
+    def observe_membership(self, *, at: float, present: bool) -> None:
+        """One sample of whether the product's session table held this row."""
+
+        self.membership_samples += 1
+        if present:
+            self.present_samples += 1
+            if self.first_present_at is None:
+                self.first_present_at = at
+            self.last_present_at = at
+
+    def evidence_summary(self) -> str:
+        """The evidence a judgement on this row was made on - never a narrative."""
+
+        return (
+            f"sequence_source={self.sequence_source} "
+            f"sequence_samples={self.sequence_samples} "
+            f"observed_sequences={self.observed_sequences[-8:]} "
+            f"membership_samples={self.membership_samples} "
+            f"present_samples={self.present_samples} "
+            f"admitted_by_product={'yes' if self.admitted_by_product else 'no'}"
+        )
 
     def observe_terminal(self, *, at: float, kind: str, code: str | None) -> None:
         if self.terminal_kind is None:
@@ -722,6 +805,12 @@ class Ledger:
     restarts: list[str] = field(default_factory=list)
     dropped_observations: list[str] = field(default_factory=list)
     named_rejections: list[str] = field(default_factory=list)
+    #: Samplings the observer refused to judge on (see
+    #: :data:`RETIREMENT_WITHOUT_MEMBERSHIP_EVIDENCE`).  Recorded loudly, never silent.
+    observation_gaps: list[str] = field(default_factory=list)
+    #: Observed request lifecycles, keyed by request id (see
+    #: :meth:`Ledger.record_request_lifecycle`).
+    lifecycles: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     started_at: float = field(default_factory=time.monotonic)
 
     # -- recording ------------------------------------------------------- #
@@ -740,6 +829,7 @@ class Ledger:
         bound_seconds: float,
         scope: str = "mailbox",
         bound_origin: str = "last_progress",
+        admitted_by_product: bool = False,
     ) -> None:
         self.requests_admitted.append(request_id)
         row = self.rows.get(request_id)
@@ -752,6 +842,7 @@ class Ledger:
                 bound_seconds=bound_seconds,
                 scope=scope,
                 bound_origin=bound_origin,
+                admitted_by_product=admitted_by_product,
             )
             self.rows[request_id] = row
         if scope == "mailbox":
@@ -794,7 +885,84 @@ class Ledger:
     def observe_row_progress(self, request_id: str, sequence: int) -> None:
         row = self.rows.get(request_id)
         if row is not None:
+            row.sequence_source = "session_table"
             row.observe(at=self.elapsed(), sequence=sequence)
+
+    def observe_row_trace_sequences(
+        self, request_id: str, sequences: Sequence[int]
+    ) -> None:
+        """Record the trace sequence numbers observed for a traced request row.
+
+        A request driven through the trace adapter has the trace recorder's own
+        sequence, not a gateway session's event sequence; the row says which of the
+        two it holds so a judgement never mixes them up.
+        """
+
+        row = self.rows.get(request_id)
+        if row is None:
+            return
+        row.sequence_source = "trace"
+        for sequence in sequences:
+            row.observe_sequence(int(sequence))
+        if sequences:
+            # The watermark follows the observed trace sequence; ``last_progress_at``
+            # deliberately does not, because a trace sequence is not the gateway
+            # session's progress signal that a mailbox budget is measured against.
+            row.last_sequence = max(row.last_sequence, max(int(item) for item in sequences))
+
+    def observe_row_membership(self, request_id: str, *, present: bool) -> None:
+        """One sample of the product's own session table: did it hold this row?"""
+
+        row = self.rows.get(request_id)
+        if row is not None:
+            row.observe_membership(at=self.elapsed(), present=present)
+
+    def record_request_lifecycle(
+        self, request_id: str, events: Sequence[Mapping[str, Any]]
+    ) -> None:
+        """The observed lifecycle of one request, as the trace/observer recorded it.
+
+        Bounded to the last :data:`MAXIMUM_LIFECYCLE_EVENTS` transitions; the trace
+        file is the unbounded record, this is the copy the seed record carries so a
+        judgement on the row can be read next to the lifecycle it is about.
+        """
+
+        self.lifecycles[request_id] = [
+            {
+                "kind": str(event.get("kind")),
+                "sequence": int(event["sequence"]),
+                "status": str(event.get("status", "ok")),
+                "host_id": str(event.get("host_id", "unknown")),
+                "detail": dict(event.get("detail") or {}),
+            }
+            for event in events
+        ][-MAXIMUM_LIFECYCLE_EVENTS:]
+
+    def lifecycle_evidence(self, request_id: str) -> dict[str, Any]:
+        """What the harness observed of one request: stages, sequences, terminal."""
+
+        row = self.rows.get(request_id)
+        events = list(self.lifecycles.get(request_id, ()))
+        terminals = [
+            event for event in events if event["kind"] == str(EventKind.TERMINAL)
+        ]
+        return {
+            "request_id": request_id,
+            "events": events,
+            "event_kinds": [event["kind"] for event in events],
+            "sequence_source": row.sequence_source if row is not None else "none",
+            "observed_sequences": list(row.observed_sequences) if row is not None else [],
+            "terminal_seen": bool(terminals)
+            or (row is not None and row.terminal_kind is not None),
+            "terminal_status": terminals[-1]["status"] if terminals else None,
+            "recorded_terminal_kind": None if row is None else row.terminal_kind,
+            "evidence_summary": "" if row is None else row.evidence_summary(),
+        }
+
+    def record_observation_gap(self, label: str) -> None:
+        """A sampling the observer refused to judge on (never a silent green)."""
+
+        self.observation_gaps.append(label)
 
     def observe_row_terminal(self, request_id: str, *, kind: str, code: str | None) -> None:
         row = self.rows.get(request_id)
@@ -913,6 +1081,7 @@ class Ledger:
                         detail=(
                             f"retired_without_terminal_after_s={age:.6f} "
                             f"last_sequence={row.last_sequence} "
+                            f"{row.evidence_summary()} "
                             f"note={row.retirement_note!r}"
                         ),
                         bound_name="cancel_and_cleanup_budget_seconds",
@@ -1062,6 +1231,7 @@ class Ledger:
             "requests_admitted": sorted(self.requests_admitted),
             "named_rejections": sorted(self.named_rejections),
             "dropped_observations": sorted(self.dropped_observations),
+            "observation_gaps": sorted(self.observation_gaps),
             "restarts": sorted(self.restarts),
             "transport_application_counts": {
                 key: value
@@ -1394,6 +1564,11 @@ class SeedResult:
     replayed: bool
     wall_seconds: float
     detail: Mapping[str, Any] = field(default_factory=dict)
+    #: The digested product material (what ``product_digest`` covers).  Carried so a
+    #: replay can name the fields that differed instead of only reporting a mismatch.
+    product_material: Mapping[str, Any] = field(default_factory=dict)
+    #: Samplings the observer refused to judge on - recorded, never silent.
+    observer_gaps: tuple[str, ...] = ()
 
     @property
     def invariant_codes_fired(self) -> tuple[str, ...]:
@@ -1429,6 +1604,7 @@ class SeedResult:
             "replayed": self.replayed,
             "wall_seconds": round(self.wall_seconds, 6),
             "replay_command": self.replay_command(),
+            "observer_gaps": list(self.observer_gaps),
             "detail": dict(self.detail),
         }
 
@@ -1474,14 +1650,53 @@ def _terminal_from_trace(
 def _terminal_from_run_dir(run_dir: Path, request_id: str) -> tuple[str, str | None] | None:
     """Re-read the trace after a driver raise: the terminal is still on disk."""
 
+    events = _trace_events_from_run_dir(run_dir)
+    if not events:
+        return None
+    return _terminal_from_trace(events, request_id)
+
+
+def _trace_events_from_run_dir(run_dir: Path) -> tuple[Any, ...]:
+    """Every traced event on disk, even when the driver raised before returning."""
+
     header = Path(run_dir) / "run.json"
     if not header.is_file():
-        return None
+        return ()
     try:
-        loaded = load_run(run_dir)
+        return tuple(load_run(run_dir).events)
     except TraceError:  # pragma: no cover - unreadable trace guard
-        return None
-    return _terminal_from_trace(loaded.events, request_id)
+        return ()
+
+
+def _record_request_lifecycle(
+    session: SoakSession, request_id: str, events: Sequence[Any]
+) -> None:
+    """Feed one request's *observed* lifecycle into the ledger.
+
+    Evidence, never a verdict: this is the answer to "what did the harness see for
+    this request, and at which sequence numbers" that the wp2-5 red artifact could
+    not give (its detail carried only ``last_sequence=-1``).  Bounded per request;
+    the trace file remains the unbounded record.
+    """
+
+    rows: list[dict[str, Any]] = []
+    sequences: list[int] = []
+    for event in events:
+        if getattr(event, "request_id", None) not in (None, request_id):
+            continue
+        sequence = int(getattr(event, "sequence"))
+        sequences.append(sequence)
+        rows.append(
+            {
+                "kind": str(getattr(event, "kind")),
+                "sequence": sequence,
+                "status": str(getattr(event, "status", "ok")),
+                "host_id": str(getattr(event, "host_id", "unknown")),
+                "detail": dict(getattr(event, "detail", {}) or {}),
+            }
+        )
+    session.ledger.record_request_lifecycle(request_id, rows)
+    session.ledger.observe_row_trace_sequences(request_id, sequences)
 
 
 def _run_real_request(
@@ -1515,6 +1730,15 @@ def _run_real_request(
         session.ledger.record_dropped_observation(f"real_request_raised:{raised}")
     elapsed = time.monotonic() - started
     terminal: tuple[str, str | None] | None = None
+    # The observed lifecycle is recorded whatever happened to the driver: a raise
+    # still leaves the trace on disk, and the judgement must be readable next to the
+    # evidence it was made on.
+    if traced is not None:
+        _record_request_lifecycle(session, request_id, traced.events)
+    else:
+        _record_request_lifecycle(
+            session, request_id, _trace_events_from_run_dir(run_dir)
+        )
     if traced is not None:
         terminal = _terminal_from_trace(traced.events, request_id)
     if terminal is None:
@@ -1540,6 +1764,7 @@ def _run_real_request(
         "wall_seconds": round(elapsed, 6),
         "terminal": list(terminal) if terminal else None,
     }
+    evidence["lifecycle"] = session.ledger.lifecycle_evidence(request_id)
     if raised is not None:
         evidence["raised"] = raised
     if traced is not None:
@@ -1694,6 +1919,7 @@ class MailboxEpisode:
             bound_seconds=self.bounds.request_terminal_cancelled_seconds,
             scope="mailbox",
             bound_origin="last_progress",
+            admitted_by_product=True,
         )
         if self.recorder is not None:
             self.recorder.event(
@@ -2008,6 +2234,14 @@ class MailboxEpisode:
         request episode) is never "retired" because it is missing from a table
         that never held it.  The current row is the one whose table membership is
         evidence about the product.
+
+        The membership sample is *recorded* for every mailbox row, and a retirement
+        is only declared when the observer has positive evidence that this table did
+        hold the row (``present_samples > 0``).  An absence observed from a sampling
+        that never saw the row present cannot be told apart from a table that never
+        held it at all - the signature of the wp2-5 red artifact - so it is recorded
+        as an observer gap and the row is carried as a *lost* row, judged by the
+        terminal-frame invariant rather than by an unevidenced retirement claim.
         """
 
         service = self.service
@@ -2019,15 +2253,29 @@ class MailboxEpisode:
             if row.scope != "mailbox":
                 continue
             session = table.get(request_id)
+            self.session.ledger.observe_row_membership(
+                request_id, present=session is not None
+            )
             if session is None:
                 if (
                     request_id == self.request_id
                     and row.retired_at is None
                     and row.terminal_kind is None
                 ):
-                    self.session.ledger.retire_row(
-                        request_id, note="absent_from_session_table"
-                    )
+                    if row.present_samples == 0:
+                        self.session.ledger.record_observation_gap(
+                            f"{RETIREMENT_WITHOUT_MEMBERSHIP_EVIDENCE}:{request_id}"
+                            f":present_samples=0:membership_samples={row.membership_samples}"
+                            f":admitted_by_product={row.admitted_by_product}"
+                        )
+                        self.session.ledger.mark_row_stall(
+                            request_id,
+                            note="observed_absent_without_membership_evidence",
+                        )
+                    else:
+                        self.session.ledger.retire_row(
+                            request_id, note="absent_from_session_table"
+                        )
                 continue
             if row.terminal_kind is not None or row.closed_by_soak_at is not None:
                 continue
@@ -2227,6 +2475,8 @@ def run_seed(
         replayed=replayed,
         wall_seconds=time.monotonic() - started,
         detail=detail,
+        product_material=product_material,
+        observer_gaps=tuple(session.ledger.observation_gaps),
     )
     document = dict(result.as_document())
     document["bounds"] = bounds.limits()
@@ -2252,6 +2502,12 @@ def run_seed(
                 "bound_name": row.bound_name,
                 "bound_seconds": row.bound_seconds,
                 "last_sequence": row.last_sequence,
+                "sequence_source": row.sequence_source,
+                "observed_sequences": list(row.observed_sequences),
+                "sequence_samples": row.sequence_samples,
+                "membership_samples": row.membership_samples,
+                "present_samples": row.present_samples,
+                "admitted_by_product": row.admitted_by_product,
                 "terminal_kind": row.terminal_kind,
                 "terminal_code": row.terminal_code,
                 "retired_at_s": None if row.retired_at is None else round(row.retired_at, 6),
@@ -2299,6 +2555,10 @@ def run_seed(
         "they are what the soak tests, not what identifies the run."
     )
     document["observations"] = session.ledger.product_material()
+    document["lifecycles"] = {
+        request_id: session.ledger.lifecycle_evidence(request_id)
+        for request_id in sorted(session.ledger.lifecycles)
+    }
     (seed_dir / "seed.json").write_text(
         json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -2335,10 +2595,61 @@ class SweepResult:
     replay_check: Mapping[str, Any]
     divergence_check: Mapping[str, Any]
     wall_seconds: float
+    replay: SeedResult | None = None
+    divergence: SeedResult | None = None
+
+    def all_runs(self) -> tuple[SeedResult, ...]:
+        """Every run of the sweep: the configured seeds, the replay, the divergence run."""
+
+        extra = tuple(result for result in (self.replay, self.divergence) if result is not None)
+        return (*self.seeds, *extra)
 
     @property
     def green(self) -> bool:
-        return all(result.green for result in self.seeds)
+        """No invariant fired in *any* run of the sweep, not just the seeds asked for.
+
+        A replay or divergence run that fires an invariant is a finding; hiding it
+        behind a green configured seed would be the same silence the rest of this
+        split exists to remove.
+        """
+
+        return all(result.green for result in self.all_runs())
+
+    @property
+    def product_digest_identical(self) -> bool | None:
+        """The gated replay property; ``None`` when no replay was performed."""
+
+        if not self.replay_check.get("performed"):
+            return None
+        return bool(self.replay_check.get("product_digest_identical"))
+
+    @property
+    def event_stream_identical(self) -> bool | None:
+        """The recorded observation (load-sensitive by construction, never gated)."""
+
+        if not self.replay_check.get("performed"):
+            return None
+        return bool(self.replay_check.get("identical"))
+
+    def gate_failures(self) -> tuple[str, ...]:
+        """Why this sweep must not exit zero: **structural** properties only.
+
+        Design-review decision 2' (2026-09-15): a property may gate only if it is a statement about what the
+        product is required to do, independent of how much work fitted a fixed event budget. Invariants are
+        such a statement. Neither digest is: product-digest identity held 5/20 canonical and 4/10 heavy runs
+        while event-stream identity held 29/30, because `product_digest_difference` is
+        `{execution_counts, terminal_classes}` - a fixed 200-event budget covers a different number of request
+        lifecycles from run to run. Gating either digest would refuse the pilot ~15 times in 20 for a
+        non-defect reason, so both are recorded as observations with their seed and replay command.
+        """
+
+        failures: list[str] = []
+        for result in self.all_runs():
+            for violation in result.violations:
+                failures.append(
+                    f"invariant_violated:{violation.code}:{violation.subject}:in_{result.label}"
+                )
+        return tuple(failures)
 
     def as_document(self) -> dict[str, Any]:
         return {
@@ -2355,6 +2666,22 @@ class SweepResult:
         }
 
 
+def _material_diff(first: Mapping[str, Any], replay: Mapping[str, Any]) -> dict[str, Any]:
+    """Which digested product fields differed, with both values.
+
+    A digest mismatch says "the product differed"; this says *where*, so a reader can
+    tell a product change from the event budget having covered a different number of
+    request lifecycles (which is what the measurement in ``runs/wp2-8`` found).
+    """
+
+    difference: dict[str, Any] = {}
+    for key in sorted(set(first) | set(replay)):
+        left, right = first.get(key), replay.get(key)
+        if left != right:
+            difference[key] = {"first": left, "replay": right}
+    return difference
+
+
 def run_sweep(config: SoakConfig) -> SweepResult:
     """Run every configured seed, then prove the replay and divergence claims."""
 
@@ -2362,33 +2689,74 @@ def run_sweep(config: SoakConfig) -> SweepResult:
     results = [run_seed(config, seed) for seed in config.seeds]
     replay_check: dict[str, Any] = {"performed": False}
     divergence_check: dict[str, Any] = {"performed": False}
+    replay_result: SeedResult | None = None
+    divergence_result: SeedResult | None = None
     if results:
         first = results[0]
-        replay = run_seed(config, first.seed, label="replay", replayed=True)
+        replay_result = run_seed(config, first.seed, label="replay", replayed=True)
+        event_stream_identical = first.run_digest == replay_result.run_digest
+        product_digest_identical = first.product_digest == replay_result.product_digest
         replay_check = {
             "performed": True,
             "seed": first.seed,
+            # --- the gated property (design review decision 2', 2026-09-15) ---
+            # Structural only: invariants + terminal coverage.  A digest over a variable-count event
+            # budget is an observation, not a verdict - see SweepResult.gate_failures().
+            "gated_property": "invariants_and_terminal_coverage",
+            "product_digest_identical": product_digest_identical,
+            "product_digest_first": first.product_digest,
+            "product_digest_replay": replay_result.product_digest,
+            "replay_violation_codes": sorted(
+                {violation.code for violation in replay_result.violations}
+            ),
+            # --- the recorded observation: load-sensitive by construction ---
+            "event_stream_identity": {
+                "gated": False,
+                "identical": event_stream_identical,
+                "first_digest": first.run_digest,
+                "replay_digest": replay_result.run_digest,
+                "seed": first.seed,
+                "replay_command": replay_result.replay_command(),
+                "note": (
+                    "whole-run identity over soak-determined material (schedule, bounds, "
+                    "weights, fault application counts, violations).  How far a "
+                    "data-dependent episode gets, and whether a violation is observed at "
+                    "all, depend on the machine: recorded, never gated."
+                ),
+            },
+            # --- aliases for readers of the pre-split document ---
+            "identical": event_stream_identical,
             "first_digest": first.run_digest,
-            "replay_digest": replay.run_digest,
-            "identical": first.run_digest == replay.run_digest,
-            "product_digest_identical": first.product_digest == replay.product_digest,
-            "replay_command": replay.replay_command(),
+            "replay_digest": replay_result.run_digest,
+            "replay_command": replay_result.replay_command(),
         }
+        if not product_digest_identical:
+            replay_check["product_digest_difference"] = _material_diff(
+                first.product_material, replay_result.product_material
+            )
         other_seed = first.seed + 1_000_003
-        other = run_seed(config, other_seed, label="divergence", replayed=True)
+        divergence_result = run_seed(config, other_seed, label="divergence", replayed=True)
         divergence_check = {
             "performed": True,
             "seed": other_seed,
-            "digest": other.run_digest,
-            "differs_from_first": other.run_digest != first.run_digest,
+            "digest": divergence_result.run_digest,
+            "differs_from_first": divergence_result.run_digest != first.run_digest,
+            "violation_codes": sorted(
+                {violation.code for violation in divergence_result.violations}
+            ),
         }
-    return SweepResult(
+    sweep = SweepResult(
         config=config,
         seeds=tuple(results),
         replay_check=replay_check,
         divergence_check=divergence_check,
         wall_seconds=time.monotonic() - started,
+        replay=replay_result,
+        divergence=divergence_result,
     )
+    if replay_check.get("performed"):
+        replay_check["gate_failures"] = list(sweep.gate_failures())
+    return sweep
 
 
 # --------------------------------------------------------------------------- #
@@ -2499,6 +2867,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         json.dumps(sweep.as_document(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    failures = sweep.gate_failures()
     report = [
         f"soak {SOAK_SCHEMA_VERSION} run_id={config.run_id}",
         f"seeds_run={len(sweep.seeds)} events_per_seed={config.events} "
@@ -2507,6 +2876,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"bounds_digest={config.resolved_bounds().digest()}",
         f"replay_check={json.dumps(sweep.replay_check, sort_keys=True)}",
         f"divergence_check={json.dumps(sweep.divergence_check, sort_keys=True)}",
+        # The claim, split the way the design review requires: the gated property on
+        # its own line, the recorded observation labelled as such, then the verdict.
+        f"observed_product_digest_identical={sweep.product_digest_identical}",
+        f"observed_event_stream_identical={sweep.event_stream_identical} "
+        "(recorded, not gated)",
+        f"gate={'PASS' if not failures else 'FAIL'} failures={list(failures)}",
     ]
     for result in sweep.seeds:
         report.append(
@@ -2520,13 +2895,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"bound={violation.bound_name}={violation.bound_value} "
                 f"detail={violation.detail}"
             )
+        for gap in result.observer_gaps:
+            report.append(f"  observer_gap {gap}")
+    for role, extra in (("replay", sweep.replay), ("divergence", sweep.divergence)):
+        if extra is None:
+            continue
+        for violation in extra.violations:
+            report.append(
+                f"  violation[{role}] {violation.code} subject={violation.subject} "
+                f"bound={violation.bound_name}={violation.bound_value} "
+                f"detail={violation.detail}"
+            )
+        for gap in extra.observer_gaps:
+            report.append(f"  observer_gap[{role}] {gap}")
     report.append(f"run_root={run_root}")
     text = "\n".join(report) + "\n"
     (run_root / "report.txt").write_text(text, encoding="utf-8")
     print(text)
     if args.json:
         print(json.dumps(sweep.as_document(), sort_keys=True))
-    return 0 if sweep.green else 1
+    return 0 if not failures else 1
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
