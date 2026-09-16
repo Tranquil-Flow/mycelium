@@ -5,7 +5,7 @@ bounded C5 attempt for nothing.  Measured 2026-09-15: the peer resolved its
 reconnect once, then its rotated origin went unreachable and it claimed nothing at
 all for the rest of the run -- 114/114 laptop `health` commands and the final
 `stop` expired unclaimed against 117/117 `completed` on the local node.  So
-`peer_owner_read` in `outputs/a13-macos-evidence/round14_bootstrap_compile.py`
+`peer_owner_read` in `scripts/a13_operator/round14_bootstrap_compile.py`
 gates the chain on bounded, repeated, non-mutating peer->owner reads.
 
 This is a *pin*, not a RED: the guard already exists.  Its teeth are proven by
@@ -34,8 +34,8 @@ import types
 
 import pytest
 
-LANE = pathlib.Path(__file__).resolve().parents[2]
-TOOL = LANE / "outputs" / "a13-macos-evidence" / "round14_bootstrap_compile.py"
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+TOOL = ROOT / "scripts" / "a13_operator" / "round14_bootstrap_compile.py"
 PRODUCT_READ = "/api/staging/check"
 
 
@@ -46,6 +46,7 @@ def _load(tmp_path: pathlib.Path):
     setattr(stub, "owner", lambda *args, **kwargs: {})
     setattr(stub, "target", lambda *args, **kwargs: {})
     setattr(stub, "PRIVATE", tmp_path)
+    setattr(stub, "REMOTE", "/nonexistent/a13-remote-root")
     saved = sys.modules.get("round14_rpc")
     sys.modules["round14_rpc"] = stub
     try:

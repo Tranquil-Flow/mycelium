@@ -1,0 +1,217 @@
+"""Execute the consented two-Mac bootstrap via actual application APIs.
+
+Relay reachability is the one step here that can fail for a reason that is NOT a
+product defect, and both measured modes are absorbed in operator tooling rather
+than by weakening the product's signed card check:
+
+1. **A freshly created quick-tunnel hostname is not published immediately.** The
+   laptop's system resolver returns `gaierror` for `*.trycloudflare.com` names
+   (measured 2026-09-15), so the product's DoH fallback is on the critical path
+   for every request; until Cloudflare publishes the new name the DoH answer is
+   NXDOMAIN and the peer reports `seed_http_unreachable`. Four attempts over
+   ~12 s was not enough. Reach failures are now retried for a bounded time
+   *inside the card's signed validity*.
+
+2. **A rotation while a previous reconnect failed leaves the peer behind.** The
+   card must describe the transition THAT PEER made, but `relocate_authority`
+   mints `previous_origin` from the owner's own record. A peer one rotation
+   behind then rejects every card with `endpoint_recovery_invalid`, hidden behind
+   a generic `action_not_completed`. When a rotation is required the card is
+   re-minted through the existing `/api/network/recovery-card` `previous_origin`
+   parameter (already supported by the endpoint-recovery API, no schema change).
+
+By default the already-published origin is reused, which needs no rotation, no
+extra publication window, and keeps the peer's stored origin inside the card.
+
+The peer's stored origin is read over the operator SSH channel only for the
+rotation path. It is not a swarm credential, the peer's public onboarding
+projection deliberately omits the seed origin, and the product path never needs
+it -- the open integration item is for the peer to supply this itself (round41
+recommendation 1).
+"""
+from pathlib import Path
+import json,time,uuid,sys,os,subprocess
+from datetime import datetime,timezone
+from round14_rpc import owner,target,PRIVATE,REMOTE
+
+# Codes that mean "the relay is not reachable yet" rather than "the product
+# refused this work". Everything else fails closed and is reported as-is.
+TRANSIENT_REACH=('seed_http_unreachable','peer_transport_unreachable','seed_http_remote_error')
+# The card is signed for 300 s; stay well inside it while a new origin publishes.
+RECONNECT_BUDGET_SECONDS=180.0
+
+def save(name,value):
+    p=PRIVATE/name;p.write_text(json.dumps(value));p.chmod(0o600)
+
+def peer_seed_origin():
+    """Operator-side read of the peer's own stored seed origin (rotation path only)."""
+    script=('import json;print(json.load(open(%r))["seed_url"])' % (REMOTE+'/target/target/membership.state.json'))
+    try:
+        out=subprocess.run(['ssh','-o','BatchMode=yes','mycelium-laptop','/usr/bin/python3','-c',script],
+            capture_output=True,text=True,timeout=30)
+    except Exception:
+        return None
+    value=out.stdout.strip()
+    return value if out.returncode==0 and value.startswith('https://') else None
+
+def bootstrap_relay(observations):
+    """Reach the owner's seed at a published origin; rotate only when asked."""
+    if os.environ.get('A13_ROTATE_RELAY')=='1':
+        result=owner('/api/network/restart',{'relay_acknowledged':True,'max_seconds':1800})
+        origin=peer_seed_origin()
+        if origin is not None:
+            minted=owner('/api/network/recovery-card',{'relay_acknowledged':True,'previous_origin':origin})
+            result={**result,'recovery_card':minted['recovery_card']}
+        # A missing peer origin is not fatal: the owner-minted card still works
+        # whenever the peer's stored origin is the owner's previous origin.
+        observations.append({'event':'relay_rotated','peer_origin_known':origin is not None})
+        return result
+    minted=owner('/api/network/recovery-card',{'relay_acknowledged':True})
+    observations.append({'event':'published_origin_reused','rotation':False})
+    return {'network':owner('/api/status').get('network'),'recovery_card':minted['recovery_card']}
+
+def reconnect_target(card,observations):
+    """Bounded retry while the relay origin publishes, inside the card's validity."""
+    started=time.monotonic();attempts=0;delay=2.0
+    while True:
+        attempts+=1
+        try:
+            target('/api/network/reconnect',{'card':card,'relay_acknowledged':True})
+            observations.append({'attempt':attempts,'outcome':'connected',
+                'elapsed_seconds':round(time.monotonic()-started,3)})
+            return
+        except RuntimeError as error:
+            text=str(error)
+            codes=[code for code in TRANSIENT_REACH if code in text]
+            observations.append({'attempt':attempts,'outcome':'failed','transient':bool(codes),
+                'codes':codes,'elapsed_seconds':round(time.monotonic()-started,3)})
+            if not codes or time.monotonic()-started>=RECONNECT_BUDGET_SECONDS:
+                raise
+            time.sleep(delay);delay=min(15.0,delay*1.6)
+
+
+# Idempotent reads that change nothing (staging status/cleanup reads) are safe to
+# repeat, and the relay origin can briefly stop answering for ANY of them -- not
+# only during publication.  Measured 2026-09-15: the final cleanup read of an
+# otherwise complete run failed with `relay_dns_unavailable` on a tunnel that was
+# provably healthy seconds later.  The product now retries a negative DoH answer
+# inside the connection; this is the operator-side backstop for a longer window.
+IDEMPOTENT_READ_BUDGET_SECONDS=45.0
+
+def idempotent_read(call,observations,*,label):
+    started=time.monotonic();attempts=0;delay=2.0
+    while True:
+        attempts+=1
+        try:
+            value=call()
+            if attempts>1:
+                observations.append({'event':'idempotent_read_retried','label':label,
+                    'attempts':attempts,'elapsed_seconds':round(time.monotonic()-started,3)})
+            return value
+        except RuntimeError as error:
+            text=str(error)
+            transient=any(code in text for code in TRANSIENT_REACH) or 'unreachable' in text
+            if not transient or time.monotonic()-started>=IDEMPOTENT_READ_BUDGET_SECONDS:
+                raise
+            time.sleep(delay);delay=min(10.0,delay*1.6)
+
+
+# The peer's control channel is the thing a C4/C5 run actually needs, and it is
+# NOT proven by the owner's own local health.  Measured 2026-09-15: the peer
+# resolved its reconnect once, then its post-rotation origin went unreachable and
+# it claimed nothing at all for the rest of the run -- 114/114 laptop `health`
+# commands and the final `stop` expired unclaimed against 117/117 `completed` on
+# the local node.  A run that dies there has spent its one bounded attempt for
+# nothing, so the peer's own read of the owner is gated before the chain is
+# driven.
+#
+# The instrument must be the PRODUCT's read over its own DoH path, never `curl`:
+# this laptop cannot resolve `*.trycloudflare.com` through system DNS at all
+# (20/20 probes returned `000`), and the product uses Cloudflare HTTPS DNS for
+# exactly that reason.  `/api/staging/check` is that read: a non-mutating peer
+# request that fetches this peer's stage offer from the owner's seed, issued over
+# the same relay/DoH path the control pump uses afterwards.
+REACHABILITY_GATE_CONSECUTIVE=2
+REACHABILITY_GATE_INTERVAL_SECONDS=3.0
+REACHABILITY_GATE_BUDGET_SECONDS=120.0
+
+def peer_owner_read(observations,*,label):
+    """Require bounded, repeated non-mutating peer->owner reads to succeed."""
+    started=time.monotonic();streak=0;attempts=0;delay=REACHABILITY_GATE_INTERVAL_SECONDS
+    while True:
+        attempts+=1
+        try:
+            value=target('/api/staging/check',{})
+            streak+=1
+            observations.append({'event':'reachability_gate_read','label':label,
+                'attempt':attempts,'streak':streak,'outcome':'ok',
+                'elapsed_seconds':round(time.monotonic()-started,3)})
+            if streak>=REACHABILITY_GATE_CONSECUTIVE:
+                return value
+        except RuntimeError as error:
+            text=str(error)
+            streak=0
+            transient=any(code in text for code in TRANSIENT_REACH) or 'unreachable' in text
+            observations.append({'event':'reachability_gate_read','label':label,
+                'attempt':attempts,'streak':0,'outcome':'failed','transient':transient,
+                'detail':text[-200:],'elapsed_seconds':round(time.monotonic()-started,3)})
+            if not transient or time.monotonic()-started>=REACHABILITY_GATE_BUDGET_SECONDS:
+                raise RuntimeError('peer_reachability_gate_failed:'+label+':'+text[-200:])
+        time.sleep(delay)
+
+def main():
+    observations=[]
+    result=bootstrap_relay(observations)
+    save('current-recovery.json',result['recovery_card'])
+    try:
+        reconnect_target(result['recovery_card'],observations)
+    finally:
+        save('relay-reconnect-observations.json',{'observations':observations,
+            'reconnect_budget_seconds':RECONNECT_BUDGET_SECONDS})
+    owner('/api/local-contributor/start',{})
+    for rpc in (owner,target):
+        s=rpc('/api/status')
+        if s['acquisition']['state']!='prepared':
+            rpc('/api/model/download',{'consent':{'download_acknowledged':True,
+                'max_download_bytes':999604126,'storage_limit_bytes':s['resource_policy']['storage_bytes']}})
+    until=time.monotonic()+120
+    while True:
+        states=[rpc('/api/status')['acquisition']['state'] for rpc in (owner,target)]
+        if states==['prepared','prepared']:break
+        if any(s in ('failed','cancelled') for s in states) or time.monotonic()>until:
+            raise RuntimeError('source_preparation_not_ready:'+str(states))
+        time.sleep(1)
+    scope={'run_id':'a13-qwen-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'),
+        'deployment_id':str(uuid.uuid4())}
+    save('current-scope.json',scope)
+    cards=[rpc('/api/installation/descriptor',{**scope,'disclosure_acknowledged':True}) for rpc in (owner,target)]
+    print(owner('/api/serving/observe/prepare',{**scope,'descriptors':cards,'bootstrap_acknowledged':True}),flush=True)
+    # The peer's own read of the owner must be proven before the chain is driven:
+    # everything below mutates peer state (stage accept, native start, compile),
+    # and a peer that cannot reach the rotated origin claims nothing at all.
+    peer_owner_read(observations,label='post-prepare:peer-staging-read')
+    for label,rpc in [('owner',owner),('target',target)]:
+        offer=idempotent_read(lambda rpc=rpc:rpc('/api/staging/check',{}),observations,
+            label='staging/check:'+label)['offer']
+        intent={'offer_id':offer['offer_id'],'archive_digest':offer['archive_digest']}
+        print(label,'stage',rpc('/api/staging/accept',{**intent,'stage_acknowledged':True}),flush=True)
+        print(label,'native',rpc('/api/control/start',{**intent,'control_acknowledged':True}),flush=True)
+    observation=owner('/api/serving/observe/collect',{'observe_acknowledged':True})
+    save('current-observations.json',observation)
+    print('OBSERVED',observation,flush=True)
+    for label,rpc in [('owner',owner),('target',target)]:
+        rpc('/api/control/stop',{})
+        offer=idempotent_read(lambda rpc=rpc:rpc('/api/staging/cleanup/check',{}),observations,
+            label='cleanup/check:'+label)['offer']
+        assert offer is not None
+        rpc('/api/staging/cleanup/accept',{'offer_id':offer['offer_id'],'archive_digest':offer['archive_digest'],'cleanup_acknowledged':True})
+    save('relay-reconnect-observations.json',{'observations':observations,
+        'reconnect_budget_seconds':RECONNECT_BUDGET_SECONDS,
+        'idempotent_read_budget_seconds':IDEMPOTENT_READ_BUDGET_SECONDS})
+    print('COMPILE',owner('/api/serving/compile',{'model_preparation_acknowledged':True}),flush=True)
+    # Second gate immediately before the chain leaves step 1: the peer's read must
+    # still succeed here, so a channel that died after prepare cannot be mistaken
+    # for a step-2 problem.
+    peer_owner_read(observations,label='pre-compile:peer-staging-read')
+
+if __name__=='__main__':main()
