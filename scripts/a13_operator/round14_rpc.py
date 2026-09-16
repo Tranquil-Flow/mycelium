@@ -13,7 +13,7 @@ absence means "the app is not running" - never "bad credentials". Without this g
 `surface_lost:<owner|target>:<state>:daemon=<evidence>`.
 """
 from pathlib import Path
-import json,os,socket,subprocess,shlex,time,uuid,sys
+import json,os,socket,subprocess,shlex,time,urllib.error,uuid,sys
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from app_rpc import AppClient
@@ -40,6 +40,23 @@ PRIVATE=OWNER/ROUND;PRIVATE.mkdir(mode=0o700,parents=True,exist_ok=True)
 _TARGET_SURFACE_CHECKED=[]
 _AWAKE=[]
 _TARGET_HANDSHAKE_MARKERS=('Timed out','timed out','TimeoutError','socket.timeout')
+_TIMEOUT_MARKERS=('timed out','Timed out','TimeoutError','socket.timeout')
+
+def _busy_reason(exc):
+    """Return a short reason string when `exc` means 'the app is ALIVE but BUSY', else None.
+
+    The 63r2 shape, read off the real traceback (`round63r2-attempt.log`): `app_rpc.py:15`'s
+    `timeout=10` expired inside `urllib.request.do_open` at `r=h.getresponse()` and surfaced as a
+    bare `TimeoutError`. urllib wraps ONLY a failed `h.request()` SEND in `URLError`, so a
+    send-phase timeout arrives as `URLError(<timeout>)` - accepted here too, because the app is
+    just as busy either way. Nothing else is accepted: a missing surface, a refused connection or
+    a bad credential must still fail closed rather than be retried for the whole deadline.
+    """
+    if isinstance(exc,(TimeoutError,socket.timeout)):
+        return repr(exc)
+    if isinstance(exc,urllib.error.URLError) and any(m in str(exc.reason) for m in _TIMEOUT_MARKERS):
+        return repr(exc)
+    return None
 
 
 class HandshakeTimeout(RuntimeError):
@@ -66,11 +83,14 @@ def _client(root):
     while True:
         try:
             return AppClient(root)
-        except (TimeoutError,socket.timeout) as exc:
+        except Exception as exc:
+            reason=_busy_reason(exc)
+            if reason is None:
+                raise
             attempts += 1
             if time.monotonic() >= deadline:
-                raise HandshakeTimeout('handshake_timeout:%s:attempts=%d:%r'%(root,attempts,exc)) from None
-            print('handshake_retry root=%s attempt=%d %r'%(root,attempts,exc),flush=True)
+                raise HandshakeTimeout('handshake_timeout:%s:attempts=%d:%s'%(root,attempts,reason)) from None
+            print('handshake_retry root=%s attempt=%d %s'%(root,attempts,reason),flush=True)
             time.sleep(sleep_s)
 
 

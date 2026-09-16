@@ -100,3 +100,43 @@ def test_remote_timeout_is_its_own_class_and_other_errors_are_not(rpc, monkeypat
     assert not isinstance(excinfo.value, rpc.HandshakeTimeout), (
         "a real API failure must not be retried as if it were a handshake timeout"
     )
+
+
+def test_send_phase_urlerror_timeout_is_also_retried(rpc, monkeypatch):
+    """urllib wraps a SEND-phase timeout in URLError: the app is just as busy either way."""
+    import urllib.error
+
+    _surface(rpc.OWNER)
+    seen = {"n": 0}
+
+    class SendPhaseFlaky:
+        def __init__(self, root):
+            seen["n"] += 1
+            if seen["n"] < 2:
+                raise urllib.error.URLError(TimeoutError("timed out"))
+            self.root = root
+
+        def call(self, path, body=None):
+            return {"ok": path}
+
+    monkeypatch.setattr(rpc, "AppClient", SendPhaseFlaky)
+    assert rpc.owner("/api/serving/status") == {"ok": "/api/serving/status"}
+    assert seen["n"] == 2
+
+
+def test_refused_connection_is_not_retried(rpc, monkeypatch):
+    """A dead socket is not a busy app: it must fail closed immediately, by its own name."""
+    import urllib.error
+
+    _surface(rpc.OWNER)
+    seen = {"n": 0}
+
+    class Refused:
+        def __init__(self, root):
+            seen["n"] += 1
+            raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+    monkeypatch.setattr(rpc, "AppClient", Refused)
+    with pytest.raises(urllib.error.URLError):
+        rpc.owner("/api/serving/status")
+    assert seen["n"] == 1, "a refused connection must not be retried as a busy handshake"
