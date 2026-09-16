@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from urllib.parse import quote
 
+import mycelium_deadlines
 from mycelium_internet.activation import (
     ConnectionEvidence,
     PathClass,
@@ -66,8 +67,16 @@ from mycelium_live.liveness import (
 
 _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = 0.5
 _CLEANUP_RECEIPT_POLL_SECONDS = 0.1
-_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS = 0.5
-_CLEANUP_FALLBACK_RESERVE_SECONDS = _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
+# The cleanup fanout window's constants are bound to the deadline registry
+# (packet wp5-d9): the window is
+# ``cancel_and_cleanup_budget_seconds - cleanup_fallback_reserve_seconds`` and
+# the registry owns both inputs, so a peer's advertised cleanup bound
+# (``mycelium_deadlines.advertised_maximum_total_cleanup_ms``) can never exceed
+# the window this module actually applies at the fanout deadline below.
+# Module-level assignments on purpose: the existing suites monkeypatch
+# ``mycelium_live.route.<NAME>`` by dotted string.
+_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS = mycelium_deadlines.CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
+_CLEANUP_FALLBACK_RESERVE_SECONDS = mycelium_deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS
 _CLEANUP_INLINE_RECEIPT_GRACE_SECONDS = 0.5
 _CLEANUP_RECONCILIATION_HORIZON_SECONDS = 60.0
 _CLEANUP_RECONCILIATION_WORKERS = 4

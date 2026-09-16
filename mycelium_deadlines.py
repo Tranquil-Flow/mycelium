@@ -8,8 +8,14 @@ value is what it is, and the constant/symbol it replaces.
 Rules this module obeys:
 
 * **Values never change behaviour.**  Every value below is byte-identical to the
-  shipped literal it replaces.  This module single-sources values; it never
-  tunes them.  A value that looks wrong is reported, not edited.
+  shipped literal it replaces, with one deliberate exception: the peer's
+  advertised cleanup bound (``peer_advertised_maximum_total_cleanup_ms``).
+  Packet ``wp5-d9`` corrects that value from the shipped 2_000 ms literal to the
+  route's fanout window (1_500 ms) because the shipped value violated the
+  composition invariant this module exists to enforce (the round-50 defect:
+  advertised bound > route fanout window).  Its ``derivation`` field carries the
+  measurement the corrected value is justified by.  Every other value stays
+  byte-identical; a value that looks wrong is reported, not edited.
 * **No product imports.**  The module is stdlib-only, so any layer (including
   ``physical_inference_node`` at import time) can bind to it without a cycle.
 * **Derived quantities are explicit.**  ``route_cleanup_fanout_window_seconds``
@@ -28,10 +34,14 @@ Rules this module obeys:
 Binding status (packet wp2-1 requirement 3): ``CONSUMER_BINDINGS`` lists every
 consumer constant that must read this registry.  Constants in modules whose
 bytes are hash-pinned by ``contracts/contract-manifest.v1.json`` cannot be
-rebound by this packet without drifting the canonical contract audit, so they
-are registered here and *test-enforced* by ``tests/testbed/
-test_deadline_registry.py`` until a lane with ``contracts/**`` write scope
-refreshes the pins; ``PENDING_BINDINGS`` names them with the reason.
+rebound without the canonical manifest pin refresh landing in the same change,
+so they are registered here and *test-enforced* by ``tests/testbed/
+test_deadline_registry.py`` until a lane that owns ``contracts/**`` does both;
+``PENDING_BINDINGS`` names them with the reason.  Packet ``wp5-d9`` is such a
+lane for the two ``mycelium_live/route.py`` constants that form the cleanup
+fanout window (``_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS`` and
+``_CLEANUP_FALLBACK_RESERVE_SECONDS``) and for the node's advertised bound: all
+three are bound now (``BOUND_CONSUMER_BINDINGS`` plus that lane's pin refresh).
 """
 from __future__ import annotations
 
@@ -93,6 +103,7 @@ __all__ = [
     "check_peer_advertised_cleanup_bound",
     "check_qualification_age_bound",
     "deadline",
+    "derive_advertised_maximum_total_cleanup_ms",
     "derive_route_cleanup_fanout_window_ms",
     "derive_route_cleanup_fanout_window_seconds",
     "route_cleanup_fanout_window_ms",
@@ -171,9 +182,6 @@ CLEANUP_RECONCILIATION_WORKERS: Final[int] = 4
 #: Bound on one idle-keepalive probe of a node whose liveness is being
 #: re-observed.
 IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS: Final[float] = 0.5
-
-#: What a physical node advertises as its total cleanup bound.
-PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS: Final[int] = 2_000
 
 #: Ceiling a command plan may request for interruption + cleanup.
 COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS: Final[int] = 2_000
@@ -273,6 +281,92 @@ REQUALIFICATION_INTERVAL_SECONDS: Final[float] = 3_300.0
 #: consume the window the route needs to fan cancellation out to the peers that
 #: are still alive.
 PEER_CONNECT_DEADLINE_SECONDS: Final[float] = 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Derived quantities (PLAN 5.2 item 1 / D9).  Declared before the records so a
+# record's value can be the derived quantity itself: the composition
+# invariants below are written in these symbols, not in copied numbers.
+# --------------------------------------------------------------------------- #
+
+def derive_route_cleanup_fanout_window_seconds(
+    *,
+    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
+) -> float:
+    """The interval the route actually has to fan cancellation out to peers."""
+
+    return float(budget_seconds) - float(fallback_reserve_seconds)
+
+
+def derive_route_cleanup_fanout_window_ms(
+    *,
+    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
+) -> int:
+    """Same window in milliseconds, exact for whole-millisecond inputs."""
+
+    seconds = derive_route_cleanup_fanout_window_seconds(
+        budget_seconds=budget_seconds,
+        fallback_reserve_seconds=fallback_reserve_seconds,
+    )
+    scaled = seconds * 1_000
+    if scaled != int(scaled):
+        raise ValueError("fanout_window_not_whole_milliseconds")
+    return int(scaled)
+
+
+def derive_advertised_maximum_total_cleanup_ms(
+    *,
+    fanout_window_ms: float | int | None = None,
+    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
+) -> int:
+    """The cleanup bound a peer may advertise: the route's fanout window.
+
+    ``advertised <= route_cleanup_fanout_window_ms`` (PLAN D9) admits the
+    window itself as the largest value, and the window is the only number the
+    composition supplies, so the advertised bound *is* the window - one owner,
+    no second constant that can drift.  ``fanout_window_ms`` supports deriving
+    the advertised value for a different window (the drift property test).
+    """
+
+    if fanout_window_ms is None:
+        return derive_route_cleanup_fanout_window_ms(
+            budget_seconds=budget_seconds,
+            fallback_reserve_seconds=fallback_reserve_seconds,
+        )
+    if isinstance(fanout_window_ms, bool) or not isinstance(
+        fanout_window_ms, (int, float)
+    ):
+        raise ValueError("invalid_composition_value|fanout_window_ms")
+    value = float(fanout_window_ms)
+    if value <= 0 or value != int(value):
+        raise ValueError("advertised_cleanup_bound_not_whole_milliseconds")
+    return int(value)
+
+
+#: The route's cleanup fanout window: 2.0 s budget - 0.5 s fallback reserve.
+route_cleanup_fanout_window_seconds: Final[float] = (
+    derive_route_cleanup_fanout_window_seconds()
+)
+
+#: Same window in milliseconds (1500 ms today).
+route_cleanup_fanout_window_ms: Final[int] = derive_route_cleanup_fanout_window_ms()
+
+#: What a physical node advertises as its total cleanup bound (packet wp5-d9 /
+#: PLAN D9).  Derived from the route's fanout window, never a second literal:
+#: the shipped 2_000 ms literal exceeded the window and produced the round-50
+#: shape (the request stalls past the budget and the route has no time left to
+#: fan cancellation out).
+PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS: Final[int] = (
+    derive_advertised_maximum_total_cleanup_ms()
+)
+
+#: The same value under the name the node's payload and the gate probe read.
+advertised_maximum_total_cleanup_ms: Final[int] = (
+    PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS
+)
 
 
 DEADLINES: Final[tuple[Deadline, ...]] = (
@@ -387,17 +481,30 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="peer_advertised_maximum_total_cleanup_ms",
         value=PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS,
         unit="milliseconds",
-        owner="physical_inference_node.py:2202",
+        owner="physical_inference_node.py:2208",
         derivation=(
             "The total cleanup bound a physical node advertises in its "
-            "concurrency/liveness projection; the canonical contract producer "
-            "pins the same literal at scripts/generate_contract_fixtures.py:1603 "
-            "and the UI reads it. PLAN D9 makes this the validated side: it must "
-            "fit inside the route's fanout window "
+            "concurrency/liveness projection. PLAN D9 makes this the validated "
+            "side: it must fit inside the route's fanout window "
             "(advertised <= route_cleanup_fanout_window_ms), fail closed at "
-            "startup qualification, never mid-request."
+            "startup qualification, never mid-request. Packet wp5-d9 closed the "
+            "round-50 defect by deriving the value from the window itself "
+            "(2.0 s cancel_and_cleanup_budget_seconds - 0.5 s "
+            "cleanup_fallback_reserve_seconds = 1500 ms) instead of the shipped "
+            "2_000 ms literal that exceeded the window; the node's payload and "
+            "the canonical contract producer both read this registry symbol, so "
+            "a second copy cannot drift. The bound is a measured-safe bound, not "
+            "a restated constant: the verified round-64 run measured the whole "
+            "cleanup wait as ``infer_cancel_wait`` 0.000 s on the owner and "
+            "0.001 s on the laptop (runs/a13-macos-demo-export/"
+            "round64-c5-met-per-placement-work-on-both-macs.md) - three orders "
+            "of magnitude inside the window - so the advertised bound never "
+            "consumes the cancellation fanout window."
         ),
-        source='physical_inference_node payload key "maximum_total_cleanup_ms"',
+        source=(
+            'physical_inference_node payload key "maximum_total_cleanup_ms" '
+            "(value = mycelium_deadlines.advertised_maximum_total_cleanup_ms)"
+        ),
     ),
     Deadline(
         name="command_interruption_and_cleanup_max_ms",
@@ -770,49 +877,8 @@ def deadline(name: str) -> Deadline:
     return record
 
 
-# --------------------------------------------------------------------------- #
-# Derived quantities (PLAN 5.2 item 1 / D9).
-# --------------------------------------------------------------------------- #
-
-def derive_route_cleanup_fanout_window_seconds(
-    *,
-    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
-    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
-) -> float:
-    """The interval the route actually has to fan cancellation out to peers."""
-
-    return float(budget_seconds) - float(fallback_reserve_seconds)
-
-
-def derive_route_cleanup_fanout_window_ms(
-    *,
-    budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
-    fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
-) -> int:
-    """Same window in milliseconds, exact for whole-millisecond inputs."""
-
-    seconds = derive_route_cleanup_fanout_window_seconds(
-        budget_seconds=budget_seconds,
-        fallback_reserve_seconds=fallback_reserve_seconds,
-    )
-    scaled = seconds * 1_000
-    if scaled != int(scaled):
-        raise ValueError("fanout_window_not_whole_milliseconds")
-    return int(scaled)
-
-
-#: The route's cleanup fanout window: 2.0 s budget - 0.5 s fallback reserve.
-route_cleanup_fanout_window_seconds: Final[float] = (
-    derive_route_cleanup_fanout_window_seconds()
-)
-
-#: Same window in milliseconds (1500 ms today).
-route_cleanup_fanout_window_ms: Final[int] = derive_route_cleanup_fanout_window_ms()
-
-#: What the node advertises today: 2000 ms, i.e. larger than the window above.
-advertised_maximum_total_cleanup_ms: Final[int] = (
-    PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS
-)
+# (Derived quantities are declared above the records, next to the constants
+# they are derived from.)
 
 
 # --------------------------------------------------------------------------- #
@@ -985,6 +1051,14 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
         "availability_reconcile_min_seconds",
     ),
     ("mycelium_live.member_transport._GRANT_TTL_MS", "member_transport_grant_ttl_ms"),
+    (
+        "mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS",
+        "cleanup_fallback_reserve_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+        "cleanup_snapshot_attempt_seconds",
+    ),
     ("mycelium_node.process._LAUNCH_HANDSHAKE_SECONDS", "node_launch_handshake_seconds"),
 )
 
@@ -1013,20 +1087,17 @@ PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     ),
 )
 
-#: ``(dotted path, registry name)`` for consumers inside this packet's write set
-#: whose module bytes are hash-pinned by ``contracts/contract-manifest.v1.json``
+#: ``(dotted path, registry name)`` for consumers whose module bytes are
+#: hash-pinned by ``contracts/contract-manifest.v1.json``
 #: (``mycelium_live/route.py`` 5 specs, ``mycelium_request_gateway/service.py``
-#: 2, ``mycelium_live/local_preparer.py`` 1, ``physical_inference_node.py`` 1).
-#: Rebinding them is a one-line assignment each, but it must land in the same
-#: change as a canonical manifest owner-source pin refresh
-#: (``scripts/generate_contract_fixtures.py``), and this packet may not write
-#: ``contracts/**``.  Until then the registry value is enforced by
-#: ``tests/testbed/test_deadline_registry.py``.
+#: 2, ``mycelium_live/local_preparer.py`` 1).  Rebinding one is a one-line
+#: assignment, but it must land in the same change as a canonical manifest
+#: owner-source pin refresh (``scripts/generate_contract_manifest.py``).
+#: Packet ``wp5-d9`` owned ``mycelium_live/route.py`` and that refresh, so the
+#: two constants that form the cleanup fanout window are bound now (see
+#: ``BOUND_CONSUMER_BINDINGS``); the rest stay registered here and test-enforced
+#: until their lanes make the same change.
 PENDING_CONTRACT_PINNED_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
-    (
-        "mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS",
-        "cleanup_fallback_reserve_seconds",
-    ),
     (
         "mycelium_live.route._CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
         "cleanup_inline_receipt_grace_seconds",
@@ -1039,10 +1110,6 @@ PENDING_CONTRACT_PINNED_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "mycelium_live.route._CLEANUP_RECONCILIATION_WORKERS",
         "cleanup_reconciliation_workers",
-    ),
-    (
-        "mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
-        "cleanup_snapshot_attempt_seconds",
     ),
     (
         "mycelium_live.route._IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
@@ -1124,7 +1191,12 @@ PENDING_BINDINGS: Final[tuple[tuple[str, str], ...]] = tuple(
 #: as an inline literal or as a payload key, so they are guarded by value-level
 #: tests (canonical producer pin / AST / literal drift) instead of a constant
 #: binding.  Naming those call sites is a follow-up owned by the module that
-#: holds them.
+#: holds them.  ``peer_advertised_maximum_total_cleanup_ms`` is the packet
+#: wp5-d9 case: the node payload no longer holds a copy - it reads
+#: ``advertised_maximum_total_cleanup_ms`` at construction time - but there is
+#: still no named node-side constant to resolve by dotted path, so the
+#: executed-payload test in ``tests/testbed/test_deadline_registry.py`` is its
+#: guard, together with the canonical producer pin.
 NON_BINDING_DEADLINES: Final[frozenset[str]] = frozenset(
     {
         "gateway_producer_stall_poll_seconds",

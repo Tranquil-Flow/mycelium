@@ -32,6 +32,7 @@ import traceback
 from typing import Any, Callable, Mapping
 import uuid
 
+import mycelium_deadlines
 from mycelium_iroh_sidecar import SidecarClient
 from mycelium_node.identity import load_node_signer
 from mycelium_physical_runner.remote_probe import derive_local_run_scoped_identity
@@ -2199,7 +2200,12 @@ class PhysicalNodeService:
                 "observed_work_unit_count": details["runtime"].get(
                     "observed_work_unit_count", 0
                 ),
-                "maximum_total_cleanup_ms": 2_000,
+                # wp5-d9 (PLAN D9): the advertised cleanup bound is read from the
+                # deadline registry at payload time, never copied. It must fit
+                # inside the route's cleanup fanout window
+                # (advertised <= route_cleanup_fanout_window_ms), fail closed at
+                # startup qualification, never mid-request.
+                "maximum_total_cleanup_ms": mycelium_deadlines.advertised_maximum_total_cleanup_ms,
                 "physical_proof_required": True,
                 "backend_candidate": details["runtime"].get("mode") == "stage_local_kv",
                 "cooperative_bound_candidate": (

@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import model_manifest as mm
+from mycelium_deadlines import advertised_maximum_total_cleanup_ms
 from mycelium_evidence import sealed_evidence_projection, validate_evidence_projection
 from layer_assignment import compile_layer_assignments
 from mycelium_capacity_profiles import (
@@ -1601,7 +1602,11 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
                     "work_unit": "transformer_layer",
                     "maximum_observed_work_unit_ms": 125.0,
                     "observed_work_unit_count": 24,
-                    "maximum_total_cleanup_ms": 2_000,
+                    # wp5-d9: the advertised cleanup bound is the registry's
+                    # derived value (the route's fanout window), never a
+                    # literal - regenerating this fixture cannot reintroduce
+                    # the round-50 mismatch.
+                    "maximum_total_cleanup_ms": advertised_maximum_total_cleanup_ms,
                     "physical_proof_required": True,
                     "backend_candidate": True,
                     "cooperative_bound_candidate": True,

@@ -9,6 +9,11 @@ export const LIVE_ROUTE_STATUS_PROTOCOL = 'mycelium.live_route_status.v1' as con
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:~\/-]{0,255}$/;
 const MAX_ITEMS = 256;
+// wp5-d9: the peer's advertised cleanup bound, as the canonical live route
+// status fixture carries it (a peer may never advertise more cleanup time than
+// the route's 1_500 ms cleanup fanout window). One spot, so the validator and
+// the normalized projection cannot disagree.
+const PEER_MAXIMUM_TOTAL_CLEANUP_MS = 1_500;
 
 export interface LiveRouteCounters {
   readonly frames_sent: number;
@@ -66,7 +71,7 @@ export interface LiveRoutePeer {
     work_unit: 'transformer_layer';
     maximum_observed_work_unit_ms: number | null;
     observed_work_unit_count: number;
-    maximum_total_cleanup_ms: 2000;
+    maximum_total_cleanup_ms: typeof PEER_MAXIMUM_TOTAL_CLEANUP_MS;
     physical_proof_required: true;
     backend_candidate: boolean;
     cooperative_bound_candidate: boolean;
@@ -487,7 +492,7 @@ function peer(value: unknown, path: string): LiveRoutePeer {
     ], `${path}.interruptibility`);
     if (
       control.work_unit !== 'transformer_layer'
-      || control.maximum_total_cleanup_ms !== 2_000
+      || control.maximum_total_cleanup_ms !== PEER_MAXIMUM_TOTAL_CLEANUP_MS
       || control.physical_proof_required !== true
       || typeof control.backend_candidate !== 'boolean'
       || typeof control.cooperative_bound_candidate !== 'boolean'
@@ -497,7 +502,7 @@ function peer(value: unknown, path: string): LiveRoutePeer {
       decode_mode: control.decode_mode === null ? null : identifier(control.decode_mode, `${path}.interruptibility.decode_mode`),
       maximum_observed_work_unit_ms: optionalFinite(control.maximum_observed_work_unit_ms, `${path}.interruptibility.maximum_observed_work_unit_ms`),
       observed_work_unit_count: integer(control.observed_work_unit_count, `${path}.interruptibility.observed_work_unit_count`),
-      work_unit: 'transformer_layer', maximum_total_cleanup_ms: 2_000,
+      work_unit: 'transformer_layer', maximum_total_cleanup_ms: PEER_MAXIMUM_TOTAL_CLEANUP_MS,
       physical_proof_required: true, backend_candidate: control.backend_candidate,
       cooperative_bound_candidate: control.cooperative_bound_candidate,
     });

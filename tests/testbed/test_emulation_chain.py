@@ -22,7 +22,6 @@ import pytest
 
 from mycelium_deadlines import (
     CANCEL_AND_CLEANUP_BUDGET_SECONDS,
-    REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW,
     advertised_maximum_total_cleanup_ms,
     route_cleanup_fanout_window_ms,
 )
@@ -453,19 +452,27 @@ def test_the_route_receipt_grid_reproduces_the_research_sample(
     assert "cannot claim a p95" in grid["note"]
 
 
-def test_the_round50_mismatch_is_named_by_the_deadline_registry(
+def test_the_round50_composition_now_holds_in_the_emulated_chain(
     emulation_document: dict,
 ) -> None:
-    assert (
-        emulation_document["round50_shaping"]["d9_verdict"]
-        == REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW
-    )
+    """Packet wp5-d9 closed the round-50 mismatch the shaping used to name.
+
+    The emulation's D9 verdict is the registry's own answer for the shipped
+    composition: with the advertised bound moved onto the route's fanout window
+    it is the ok form, naming both numbers, never the violation reason.
+    """
+
     shaping = emulation_document["round50_shaping"]
+    assert shaping["d9_verdict"] == (
+        f"ok:{advertised_maximum_total_cleanup_ms}<="
+        f" {route_cleanup_fanout_window_ms}"
+    )
     assert shaping["peer_advertised_cleanup_ms"] == (
         advertised_maximum_total_cleanup_ms
     )
     assert shaping["route_fanout_window_ms"] == route_cleanup_fanout_window_ms
-    assert shaping["peer_advertised_cleanup_ms"] > shaping["route_fanout_window_ms"]
+    assert shaping["peer_advertised_cleanup_ms"] <= shaping["route_fanout_window_ms"]
+    assert shaping["peer_advertised_cleanup_ms"] == 1_500
     assert shaping["cancel_and_cleanup_budget_ms"] == pytest.approx(2000.0)
     assert shaping["measured"]
     assert shaping["unmeasured"]

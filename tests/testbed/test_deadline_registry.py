@@ -6,10 +6,15 @@ Covers (PLAN 5.2 item 1):
   2000 ms, snapshot attempt / fallback reserve 500 ms, total budget 2000 ms ->
   route fanout window 1500 ms) must be reported as exactly
   ``peer_advertised_cleanup_bound_exceeds_route_fanout_window``;
+* the **wp5-d9 closure** of that defect: the shipped advertised bound is the
+  route's fanout window (1500 ms), ``check_composition()`` reports nothing, the
+  node payload reads the registry symbol at construction time (no copy), and
+  the canonical fixture/producer carry the same registry value;
 * an honest, **deliberately pinned** statement of today's shipped composition;
 * registry hygiene (derivation, units, names);
 * a **no-drift** guard: the registry values equal the historical literals that
-  shipped in the consumer modules (written as literals below on purpose);
+  shipped in the consumer modules (written as literals below on purpose; the
+  one value corrected on purpose - the advertised bound - carries its own note);
 * the consumer constants stay importable **and monkeypatchable by dotted string
   path**, and the bound ones actually read the registry.
 """
@@ -17,7 +22,9 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -27,18 +34,11 @@ import mycelium_deadlines as deadlines
 
 ROOT = Path(__file__).resolve().parents[2]
 
-#: The violation set shipped today. The round-50 defect (PLAN D9) is real and
-#: unfixed: the node advertises a 2000 ms cleanup bound while the route's fanout
-#: window is only 1500 ms (2000 ms budget - 500 ms fallback reserve).
-#:
-#: THIS IS A DELIBERATE PIN. When WP5/A13 fixes the shipping composition (D9:
-#: validate the advertised bound against the fanout window and derive the
-#: advertised value from measured delivery+execution+receipt latency) this test
-#: MUST go RED. That red is the signal that the defect is gone - update this
-#: pinned set deliberately in the same change, never by loosening the checker.
-PINNED_SHIPPED_VIOLATED_CODES = frozenset(
-    {deadlines.REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW}
-)
+#: The violation set shipped today: none. The round-50 defect (PLAN D9) was
+#: closed by packet wp5-d9 - the node advertises the route's fanout window
+#: (1500 ms = 2000 ms budget - 500 ms fallback reserve) instead of the shipped
+#: 2000 ms literal. Any violation appearing here again is a regression.
+PINNED_SHIPPED_VIOLATED_CODES: frozenset[str] = frozenset()
 
 #: Historical literals as they shipped, transcribed by hand from the consumer
 #: modules (file:line cited in the registry's ``derivation``). Deliberately NOT
@@ -52,7 +52,11 @@ HISTORICAL_LITERALS: dict[str, float | int] = {
     "cleanup_reconciliation_horizon_seconds": 60.0,
     "cleanup_reconciliation_workers": 4,
     "idle_keepalive_probe_deadline_seconds": 0.5,
-    "peer_advertised_maximum_total_cleanup_ms": 2_000,
+    # One value corrected on purpose (packet wp5-d9): the shipped literal was
+    # 2_000 ms and exceeded the 1_500 ms route fanout window (the round-50
+    # defect). The corrected value is the window itself - the maximum the
+    # composition admits - and the registry derives it, so it cannot drift.
+    "peer_advertised_maximum_total_cleanup_ms": 1_500,
     "gateway_sse_disconnect_poll_seconds": 0.1,
     "gateway_producer_stall_poll_seconds": 0.05,
     "route_health_probe_deadline_seconds": 0.5,
@@ -92,6 +96,11 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
         "_GRANT_TTL_MS",
         "_AVAILABILITY_RECONCILE_MIN_SECONDS",
         "_AVAILABILITY_RECONCILE_MAX_SECONDS",
+    ),
+    # wp5-d9: the two constants that form the route's cleanup fanout window.
+    "mycelium_live/route.py": (
+        "_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+        "_CLEANUP_FALLBACK_RESERVE_SECONDS",
     ),
     "mycelium_node/process.py": ("_LAUNCH_HANDSHAKE_SECONDS",),
 }
@@ -170,23 +179,23 @@ def test_round_50_preview_50_composition_is_red() -> None:
 
 
 def test_shipped_composition_violation_set_is_pinned() -> None:
-    """Today's shipped values violate exactly the pinned set (D9, unfixed).
+    """Today's shipped values satisfy the whole composition (D9, closed).
 
-    This asserts the violation; it never fails *because* of the violation.
+    Packet wp5-d9 closed the round-50 defect, so the pinned violation set is
+    empty; the numbers below restate the shipped composition so the pin is
+    self-evident, and a reappearing violation fails this test.
     """
 
     shipped = deadlines.check_composition()
-    assert set(shipped) == PINNED_SHIPPED_VIOLATED_CODES
-    assert shipped == [
-        deadlines.REASON_PEER_ADVERTISED_CLEANUP_BOUND_EXCEEDS_ROUTE_FANOUT_WINDOW
-    ]
+    assert set(shipped) == PINNED_SHIPPED_VIOLATED_CODES == set()
+    assert shipped == []
 
     # Restate the shipped composition in numbers so the pin is self-evident.
-    assert deadlines.advertised_maximum_total_cleanup_ms == 2_000
+    assert deadlines.advertised_maximum_total_cleanup_ms == 1_500
     assert deadlines.route_cleanup_fanout_window_ms == 1_500
     assert (
         deadlines.advertised_maximum_total_cleanup_ms
-        > deadlines.route_cleanup_fanout_window_ms
+        <= deadlines.route_cleanup_fanout_window_ms
     )
 
 
@@ -268,7 +277,11 @@ def test_invalid_composition_values_fail_closed() -> None:
 def test_derived_quantities_are_the_published_symbols() -> None:
     assert deadlines.route_cleanup_fanout_window_seconds == 1.5
     assert deadlines.route_cleanup_fanout_window_ms == 1_500
-    assert deadlines.advertised_maximum_total_cleanup_ms == 2_000
+    # wp5-d9: the advertised bound is derived from the window, not a literal.
+    assert deadlines.advertised_maximum_total_cleanup_ms == 1_500
+    assert deadlines.advertised_maximum_total_cleanup_ms == (
+        deadlines.derive_advertised_maximum_total_cleanup_ms()
+    )
     assert deadlines.derive_route_cleanup_fanout_window_seconds() == (
         deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
         - deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS
@@ -277,6 +290,18 @@ def test_derived_quantities_are_the_published_symbols() -> None:
         deadlines.derive_route_cleanup_fanout_window_ms(
             budget_seconds=2.0,
             fallback_reserve_seconds=0.3333,
+        )
+    with pytest.raises(ValueError):
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            fanout_window_ms=0.0,
+        )
+    with pytest.raises(ValueError):
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            fanout_window_ms=1_500.5,
+        )
+    with pytest.raises(ValueError):
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            fanout_window_ms="1500",  # type: ignore[arg-type]
         )
 
 
@@ -391,15 +416,14 @@ def test_bound_constants_are_assigned_from_the_registry() -> None:
 
 
 def test_advertised_bound_is_the_registry_value_and_matches_the_canonical_producer() -> None:
-    """PLAN D9's validated side: the node advertises the registry value.
+    """PLAN D9's validated side: the node advertises the registry symbol.
 
-    ``physical_inference_node.py`` and ``scripts/generate_contract_fixtures.py``
-    are hash-pinned by ``contracts/contract-manifest.v1.json``, so this packet
-    registers the advertised bound but does not rewrite those two files to read
-    the registry symbol. This test is the drift guard in the meantime: it fails
-    if the node's advertised number and the registry value ever disagree, and it
-    keeps enforcing the registry symbol once the pin refresh lands and the
-    payload is bound.
+    Packet wp5-d9 bound the payload (``physical_inference_node.py``) and the
+    canonical producer (``scripts/generate_contract_fixtures.py``) to
+    ``mycelium_deadlines.advertised_maximum_total_cleanup_ms`` and refreshed the
+    manifest pins in the same change. This AST check keeps the binding textual -
+    a literal reappearing in either file fails here - while the executed-payload
+    and fixture checks above prove the value actually flows from the registry.
     """
 
     tree = ast.parse((ROOT / "physical_inference_node.py").read_text(encoding="utf-8"))
@@ -421,13 +445,16 @@ def test_advertised_bound_is_the_registry_value_and_matches_the_canonical_produc
             deadlines.advertised_maximum_total_cleanup_ms
         ), expression
 
-    # The canonical fixture producer pins the same number (never hand-edited).
+    # The canonical fixture producer reads the same registry symbol (never a
+    # hand-edited number), and the registry value is the 1500 ms D9 window.
     producer = (ROOT / "scripts" / "generate_contract_fixtures.py").read_text(
         encoding="utf-8"
     )
-    pinned = re.findall(r'"maximum_total_cleanup_ms":\s*([0-9_]+)', producer)
-    assert pinned == ["2_000"], pinned
-    assert deadlines.advertised_maximum_total_cleanup_ms == 2_000
+    pinned = re.findall(
+        r'"maximum_total_cleanup_ms":\s*([A-Za-z_][A-Za-z0-9_.]*)', producer
+    )
+    assert pinned == ["advertised_maximum_total_cleanup_ms"], pinned
+    assert deadlines.advertised_maximum_total_cleanup_ms == 1_500
 
 
 def test_registry_only_inline_literals_still_hold_their_registry_values() -> None:
@@ -501,6 +528,153 @@ def test_route_cleanup_names_are_importable_module_globals() -> None:
         ("_CLEANUP_RECONCILIATION_WORKERS", "cleanup_reconciliation_workers"),
     ):
         assert getattr(route, attribute) == deadlines.deadline(registry_name).value
+
+
+# --------------------------------------------------------------------------- #
+# wp5-d9: the advertised cleanup bound is read from the registry (round-50 closed)
+# --------------------------------------------------------------------------- #
+
+ADVERTISED_CLEANUP_PAYLOAD_KEY = "maximum_total_cleanup_ms"
+
+
+def _node_interruptibility_projection() -> dict[str, Any]:
+    """Build the physical node's real ``interruptibility`` projection offline.
+
+    ``PhysicalNodeService._snapshot`` is the exact code path that produces the
+    advertised ``maximum_total_cleanup_ms`` payload key - the value the route's
+    status projection and the UI read - so the wp5-d9 anti-drift assertions are
+    made against executed node code, not against its source text.  The service
+    object is built with ``object.__new__``: no host, model, sidecar or
+    subprocess is touched, and the signing call is replaced with a passthrough
+    that keeps the details verbatim.
+    """
+
+    import physical_inference_node
+
+    class _FakeRuntime:
+        def kv_snapshot(self) -> dict[str, Any]:
+            return {
+                "mode": "stage_local_kv",
+                "backend": "numpy",
+                "states": {},
+                "active_state_count": 0,
+                "active_kv_bytes": 0,
+                "maximum_observed_work_unit_ms": 125.0,
+                "observed_work_unit_count": 24,
+            }
+
+    with tempfile.TemporaryDirectory() as scratch:
+        service = object.__new__(physical_inference_node.PhysicalNodeService)
+        service.state = "CONFIGURED"
+        service.runtime = _FakeRuntime()
+        service.capacity = None
+        service.transport = None
+        service.sidecar = None
+        service.runtime_identity = {
+            "backend": "numpy",
+            "dtype": "float32",
+            "quantization": "none",
+        }
+        service.artifact_root = Path(scratch)
+        service._last_cancellation = None
+        service._signed_result = lambda event, details=None: {
+            "event": event,
+            "details": details,
+        }
+        result = service._snapshot({})
+    interruptibility = result["details"]["interruptibility"]
+    assert ADVERTISED_CLEANUP_PAYLOAD_KEY in interruptibility, interruptibility
+    return interruptibility
+
+
+def test_advertised_cleanup_bound_fits_inside_the_route_fanout_window() -> None:
+    """wp5-d9 (PLAN D9): the round-50 advertised-bound defect is closed.
+
+    A peer may never advertise more cleanup time than the route has to fan
+    cancellation out: ``advertised <= route_cleanup_fanout_window_ms``, and the
+    measured cleanup cost (``infer_cancel_wait`` 0.000 s owner / 0.001 s laptop,
+    ``runs/a13-macos-demo-export/round64-c5-met-per-placement-work-on-both-macs.md``)
+    is three orders of magnitude below the bound.
+    """
+
+    advertised = deadlines.advertised_maximum_total_cleanup_ms
+    window = deadlines.route_cleanup_fanout_window_ms
+    assert advertised <= window, f"advertised {advertised} ms > window {window} ms"
+    # The D9 composition: 2.0 s budget - 0.5 s fallback reserve = 1.5 s window;
+    # the advertised bound is the window, the largest admissible value.
+    assert advertised == window == 1_500
+    assert (
+        deadlines.check_peer_advertised_cleanup_bound(
+            advertised_cleanup_ms=advertised,
+            fanout_window_ms=window,
+        )
+        is None
+    )
+    assert deadlines.check_composition() == []
+
+
+def test_node_payload_reads_the_registry_symbol_and_follows_a_registry_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The node holds no second copy: the registry symbol moves the payload."""
+
+    projection = _node_interruptibility_projection()
+    assert projection[ADVERTISED_CLEANUP_PAYLOAD_KEY] == (
+        deadlines.advertised_maximum_total_cleanup_ms
+    )
+
+    monkeypatch.setattr(deadlines, "advertised_maximum_total_cleanup_ms", 1_234)
+    mutated = _node_interruptibility_projection()
+    assert mutated[ADVERTISED_CLEANUP_PAYLOAD_KEY] == 1_234
+
+
+def test_advertised_bound_is_derived_from_the_window_and_pinned_in_the_canonical_artifacts() -> None:
+    """The advertised bound is derived from the window, and the produced
+    artifacts (canonical fixture + canonical producer) carry that value."""
+
+    assert deadlines.advertised_maximum_total_cleanup_ms == (
+        deadlines.derive_advertised_maximum_total_cleanup_ms()
+    )
+    assert (
+        deadlines.derive_advertised_maximum_total_cleanup_ms(fanout_window_ms=1_750)
+        == 1_750
+    )
+    assert (
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            budget_seconds=3.0,
+            fallback_reserve_seconds=0.5,
+        )
+        == 2_500
+    )
+
+    fixture = json.loads(
+        (
+            ROOT / "contracts" / "compatibility-fixtures" / "live-route-status-v1.json"
+        ).read_text(encoding="utf-8")
+    )
+    observed: list[Any] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == ADVERTISED_CLEANUP_PAYLOAD_KEY:
+                    observed.append(item)
+                collect(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    collect(fixture)
+    assert observed, "the canonical live route status fixture lost the advertised bound"
+    assert set(observed) == {deadlines.advertised_maximum_total_cleanup_ms}, observed
+
+    producer = (ROOT / "scripts" / "generate_contract_fixtures.py").read_text(
+        encoding="utf-8"
+    )
+    pinned = re.findall(
+        r'"maximum_total_cleanup_ms":\s*([A-Za-z_][A-Za-z0-9_.]*)', producer
+    )
+    assert pinned == ["advertised_maximum_total_cleanup_ms"], pinned
 
 
 # --------------------------------------------------------------------------- #
