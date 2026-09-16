@@ -5,7 +5,10 @@ runs with its heavyweight stages replaced by inert module-attribute seams (the
 same monkeypatch pattern as tests/live/test_qwen_route_builder.py) plus a real
 topology document and a real admitted managed-hello observations file. The
 seams prove dispatch/threading only: they are NOT model load proof. The
-existing SSH/local build behavior is pinned by a characterization test.
+existing SSH/local build behavior is pinned by a characterization test. The
+stage-shard emission flag (`--emit-stage-shards`: durable destination,
+refuse-if-exists, temporary-directory default unchanged) is pinned on the same
+inert seam, including the emitted path it records in `stage_sharding`.
 """
 
 from __future__ import annotations
@@ -572,3 +575,239 @@ def test_main_rejects_managed_transport_without_observations(
     with pytest.raises(RuntimeError, match="managed_peer_observations_missing"):
         builder.main()
     assert build_called["value"] is False
+
+
+def _record_stage_shard_destination(
+    monkeypatch: pytest.MonkeyPatch, captured: dict
+) -> None:
+    """Record (and materialize) the destination the stage-shard branch selected."""
+
+    def record(source_root, destination_root, **_kwargs):
+        destination = Path(destination_root)
+        captured["destination"] = destination
+        destination.mkdir(parents=True, exist_ok=True)
+        return {
+            "protocol": "mycelium.stage_sharded_checkpoint.v1",
+            "layer_ranges": [
+                {"start_layer": 0, "end_layer_exclusive": 12, "layer_count": 12},
+                {"start_layer": 12, "end_layer_exclusive": 24, "layer_count": 12},
+            ],
+        }
+
+    monkeypatch.setattr(builder, "shard_qwen2_checkpoint", record)
+
+
+def _stage_shard_args(
+    tmp_path: Path,
+    topology: Path,
+    observations: Path,
+    **extra,
+) -> SimpleNamespace:
+    return _build_args(tmp_path, topology, observations, managed_transport=True, **extra)
+
+
+def test_main_accepts_emit_stage_shards_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _topology_path(tmp_path, [_managed_node(0), _managed_node(1)])
+    observations = _write_observations(
+        tmp_path / "observations.json", _observations_document()
+    )
+    emit_root = tmp_path / "emitted"
+    captured: dict = {}
+
+    def fake_build(namespace):
+        captured["namespace"] = namespace
+        return {"operator_plan": str(tmp_path / "plan.json"), "route_ready": False}
+
+    monkeypatch.setattr(builder, "build", fake_build)
+    base_argv = [
+        "--template-plan", str(template),
+        "--model-root", str(tmp_path / "model"),
+        "--output-root", str(tmp_path / "candidate"),
+        "--route-label", "macdemo",
+        "--topology", str(topology),
+        "--managed-transport",
+        "--managed-hello-observations", str(observations),
+        "--stage-sharded",
+    ]
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "build_qwen_live_route.py",
+            *base_argv,
+            "--emit-stage-shards",
+            str(emit_root),
+        ],
+    )
+    assert builder.main() == 0
+    assert isinstance(captured["namespace"].emit_stage_shards, Path)
+    assert captured["namespace"].emit_stage_shards == emit_root
+
+    monkeypatch.setattr("sys.argv", ["build_qwen_live_route.py", *base_argv])
+    assert builder.main() == 0
+    assert captured["namespace"].emit_stage_shards is None
+
+
+def test_stage_sharded_emission_uses_durable_root_and_records_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _topology_path(tmp_path, [_managed_node(0), _managed_node(1)])
+    observations = _write_observations(
+        tmp_path / "observations.json", _observations_document()
+    )
+    emit_root = tmp_path / "emitted"
+    args = _stage_shard_args(
+        tmp_path,
+        topology,
+        observations,
+        stage_sharded=True,
+        emit_stage_shards=emit_root,
+    )
+    _inert_prepare(monkeypatch)
+    _fixed_clock(monkeypatch)
+    captured: dict = {}
+    _record_stage_shard_destination(monkeypatch, captured)
+
+    report = builder.build(args)
+
+    destination = captured["destination"]
+    assert destination == emit_root / "model"
+    assert destination.is_dir()
+    assert emit_root.is_dir()
+    assert report["stage_sharding"]["emitted_root"] == str(destination)
+    checkpoint = json.loads(
+        (args.output_root / "local-challenge-checkpoint.json").read_text("utf-8")
+    )
+    assert checkpoint["stage_sharding"]["emitted_root"] == str(destination)
+
+
+def test_stage_shards_reuse_emission_writes_durable_repartition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _topology_path(tmp_path, [_managed_node(0), _managed_node(1)])
+    observations = _write_observations(
+        tmp_path / "observations.json", _observations_document()
+    )
+    reusable_root = tmp_path / "reusable"
+    reusable_root.mkdir(mode=0o700)
+    emit_root = tmp_path / "emitted"
+    args = _stage_shard_args(
+        tmp_path,
+        topology,
+        observations,
+        stage_sharded=False,
+        reuse_stage_sharded_root=reusable_root,
+        emit_stage_shards=emit_root,
+    )
+    _inert_prepare(monkeypatch)
+    _fixed_clock(monkeypatch)
+    captured: dict = {}
+    _record_stage_shard_destination(monkeypatch, captured)
+
+    report = builder.build(args)
+
+    destination = captured["destination"]
+    assert destination == emit_root / "model"
+    assert destination.is_dir()
+    assert report["stage_sharding"]["protocol"] == "mycelium.stage_sharding_reuse.v2"
+    assert report["stage_sharding"]["emitted_root"] == str(destination)
+
+
+def test_emit_stage_shards_refuses_existing_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _topology_path(tmp_path, [_managed_node(0), _managed_node(1)])
+    observations = _write_observations(
+        tmp_path / "observations.json", _observations_document()
+    )
+    emit_root = tmp_path / "emitted"
+    existing = emit_root / "model"
+    existing.mkdir(parents=True)
+    sentinel = existing / "prior-emission.safetensors"
+    sentinel.write_bytes(b"prior emission")
+    args = _stage_shard_args(
+        tmp_path,
+        topology,
+        observations,
+        stage_sharded=True,
+        emit_stage_shards=emit_root,
+    )
+    _inert_prepare(monkeypatch)
+    _fixed_clock(monkeypatch)
+    calls = {"count": 0}
+
+    def fail_loud(*_args: object, **_kwargs: object) -> dict:
+        calls["count"] += 1
+        raise AssertionError("stage sharding must not run over an existing emission")
+
+    monkeypatch.setattr(builder, "shard_qwen2_checkpoint", fail_loud)
+
+    with pytest.raises(RuntimeError, match="^emit_stage_shards_already_exists$"):
+        builder.build(args)
+
+    assert calls["count"] == 0
+    assert sentinel.read_bytes() == b"prior emission"
+
+
+@pytest.mark.parametrize("stage_sharded", [True, False])
+def test_stage_shards_default_still_uses_temporary_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage_sharded: bool
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _topology_path(tmp_path, [_managed_node(0), _managed_node(1)])
+    observations = _write_observations(
+        tmp_path / "observations.json", _observations_document()
+    )
+    extra: dict = {"stage_sharded": stage_sharded}
+    if not stage_sharded:
+        reusable_root = tmp_path / "reusable"
+        reusable_root.mkdir(mode=0o700)
+        extra["reuse_stage_sharded_root"] = reusable_root
+    args = _stage_shard_args(tmp_path, topology, observations, **extra)
+    _inert_prepare(monkeypatch)
+    _fixed_clock(monkeypatch)
+    captured: dict = {}
+    _record_stage_shard_destination(monkeypatch, captured)
+
+    report = builder.build(args)
+
+    destination = captured["destination"]
+    assert destination.name == "model"
+    assert "stage-shards" in destination.parent.name
+    assert not destination.exists()
+    assert "emitted_root" not in report["stage_sharding"]
+
+
+def test_emit_stage_shards_requires_a_stage_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = tmp_path / "template.json"
+    template.write_text(json.dumps(_template()), encoding="utf-8")
+    topology = _topology_path(tmp_path, [_managed_node(0), _managed_node(1)])
+    observations = _write_observations(
+        tmp_path / "observations.json", _observations_document()
+    )
+    emit_root = tmp_path / "emitted"
+    args = _stage_shard_args(
+        tmp_path,
+        topology,
+        observations,
+        emit_stage_shards=emit_root,
+    )
+    _inert_prepare(monkeypatch)
+    _fixed_clock(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="^emit_stage_shards_requires_stage_branch$"):
+        builder.build(args)
+    assert not emit_root.exists()

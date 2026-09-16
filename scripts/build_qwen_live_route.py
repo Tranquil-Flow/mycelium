@@ -6,7 +6,8 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+import contextlib
 import copy
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -150,6 +151,35 @@ def _private_temporary_root(path: Path | None) -> Path | None:
     ):
         raise RuntimeError("model_preparation_temporary_root_unsafe")
     return candidate.resolve(strict=True)
+
+
+@contextlib.contextmanager
+def _stage_shard_destination(
+    emit_root: Path | None,
+    temporary_root: Path | None,
+    *,
+    prefix: str,
+) -> Iterator[Path]:
+    """Yield the destination for the derived stage-sharded representation.
+
+    With ``--emit-stage-shards`` the representation is written to the exact
+    durable ``<emit_root>/model`` path, and an existing target is refused so a
+    prior emission is never silently reused; otherwise today's temporary
+    directory is kept.
+    """
+
+    if emit_root is None:
+        with tempfile.TemporaryDirectory(
+            prefix=prefix,
+            dir=_private_temporary_root(temporary_root),
+        ) as temporary:
+            yield Path(temporary) / "model"
+        return
+    sharded_root = Path(emit_root) / "model"
+    if sharded_root.exists():
+        raise RuntimeError("emit_stage_shards_already_exists")
+    sharded_root.parent.mkdir(parents=True, exist_ok=True)
+    yield sharded_root
 
 
 def _m18_runtime_kv_bytes(
@@ -1439,8 +1469,13 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
 
     stage_sharding = None
     reusable_stage_root = getattr(args, "reuse_stage_sharded_root", None)
+    emit_stage_shards = getattr(args, "emit_stage_shards", None)
     if getattr(args, "stage_sharded", False) and reusable_stage_root is not None:
         raise RuntimeError("stage_sharding_source_conflict")
+    if emit_stage_shards is not None and not (
+        getattr(args, "stage_sharded", False) or reusable_stage_root is not None
+    ):
+        raise RuntimeError("emit_stage_shards_requires_stage_branch")
     if reusable_stage_root is not None:
         candidate = Path(reusable_stage_root)
         try:
@@ -1455,11 +1490,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         # peers. Repartition the already-created representation to the exact
         # current ranges before assignment compilation; this does not read the
         # source checkpoint or perform another quantization.
-        with tempfile.TemporaryDirectory(
+        with _stage_shard_destination(
+            emit_stage_shards,
+            getattr(args, "temporary_root", None),
             prefix="mycelium-reused-stage-shards-",
-            dir=_private_temporary_root(getattr(args, "temporary_root", None)),
-        ) as temporary:
-            sharded_root = Path(temporary) / "model"
+        ) as sharded_root:
             repartition = shard_qwen2_checkpoint(
                 reusable_root,
                 sharded_root,
@@ -1479,12 +1514,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "source_requantized": False,
             "verified_by_builder": True,
         }
+        if emit_stage_shards is not None:
+            stage_sharding["emitted_root"] = str(sharded_root)
     elif getattr(args, "stage_sharded", False):
-        with tempfile.TemporaryDirectory(
+        with _stage_shard_destination(
+            emit_stage_shards,
+            getattr(args, "temporary_root", None),
             prefix="mycelium-stage-shards-",
-            dir=_private_temporary_root(getattr(args, "temporary_root", None)),
-        ) as temporary:
-            sharded_root = Path(temporary) / "model"
+        ) as sharded_root:
             stage_sharding = shard_qwen2_checkpoint(
                 args.model_root,
                 sharded_root,
@@ -1493,6 +1530,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 max_file_bytes=_MAX_STAGED_MODEL_FILE_BYTES,
             )
             prepared = prepare(sharded_root)
+        if emit_stage_shards is not None:
+            stage_sharding["emitted_root"] = str(sharded_root)
     else:
         prepared = prepare(args.model_root)
 
@@ -2175,6 +2214,14 @@ def main() -> int:
         help=(
             "reuse a fully verified prior stage-sharded deployment as the local "
             "source; the builder revalidates every file and emits a new candidate"
+        ),
+    )
+    parser.add_argument(
+        "--emit-stage-shards",
+        type=Path,
+        help=(
+            "write the derived stage-sharded representation to this durable "
+            "directory instead of a temporary one; an existing target is refused"
         ),
     )
     parser.add_argument("--output-root", type=Path, required=True)
