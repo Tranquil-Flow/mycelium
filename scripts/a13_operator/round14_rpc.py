@@ -13,7 +13,7 @@ absence means "the app is not running" - never "bad credentials". Without this g
 `surface_lost:<owner|target>:<state>:daemon=<evidence>`.
 """
 from pathlib import Path
-import json,os,subprocess,shlex,uuid,sys
+import json,os,socket,subprocess,shlex,time,uuid,sys
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from app_rpc import AppClient
@@ -37,21 +37,59 @@ REMOTE_HOST=os.environ.get('A13_REMOTE_HOST','mycelium-laptop')
 PREVIEW=_required_tag('A13_TARGET_PREVIEW')
 ROUND=_required_tag('A13_RPC_ROUND')
 PRIVATE=OWNER/ROUND;PRIVATE.mkdir(mode=0o700,parents=True,exist_ok=True)
+_TARGET_SURFACE_CHECKED=[]
+_AWAKE=[]
+_TARGET_HANDSHAKE_MARKERS=('Timed out','timed out','TimeoutError','socket.timeout')
+
+
+class HandshakeTimeout(RuntimeError):
+    """The app's private surface exists but did not answer the native-session handshake in time.
+
+    Distinct from `surface_lost` (the app is not running): here the app IS running and simply
+    needs longer than `app_rpc.py`'s fixed 10 s handshake timeout - which cannot be raised,
+    because that file is pinned byte-identical to the read-only lane source.
+    """
+
+
+def _client(root):
+    """Build an AppClient, tolerating a BUSY-BUT-ALIVE app.
+
+    Run 63r2 (2026-09-16): the 7B compile wrote its plan at 18:18:26Z, chain step 2's first call
+    hit `app_rpc.py:15`'s `timeout=10` at 18:18:26 and died at 18:18:36 - while the app answered
+    /api/quit normally seconds later and both daemons exited 0. The HANDSHAKE is therefore
+    retried, bounded and logged. The API call itself is NEVER retried: a POST may be
+    non-idempotent, and the failure mode being handled happens before any API call is made.
+    """
+    deadline = time.monotonic() + float(os.environ.get('A13_HANDSHAKE_DEADLINE_S','180'))
+    sleep_s = float(os.environ.get('A13_HANDSHAKE_RETRY_SLEEP_S','2'))
+    attempts = 0
+    while True:
+        try:
+            return AppClient(root)
+        except (TimeoutError,socket.timeout) as exc:
+            attempts += 1
+            if time.monotonic() >= deadline:
+                raise HandshakeTimeout('handshake_timeout:%s:attempts=%d:%r'%(root,attempts,exc)) from None
+            print('handshake_retry root=%s attempt=%d %r'%(root,attempts,exc),flush=True)
+            time.sleep(sleep_s)
+
+
 def owner(path,body=None):
     require_local(OWNER)
-    return AppClient(OWNER).call(path,body)
+    return _client(OWNER).call(path,body)
 
-_TARGET_SURFACE_CHECKED=[]
-def target(path,body=None):
-    # Probe the remote surface once per process, before the first target RPC. It costs one
-    # extra ssh round trip, and it must not land inside a timing-sensitive stage window.
-    if not _TARGET_SURFACE_CHECKED:
-        require_remote(REMOTE,REMOTE_HOST)
-        _TARGET_SURFACE_CHECKED.append(True)
+def _target_once(path,body=None):
+    """One remote RPC over the canonical ssh/scp pattern (semantics unchanged)."""
     token=uuid.uuid4().hex;local=PRIVATE/(token+'.json');remote=REMOTE+'/target/'+ROUND
     def run(args):
         x=subprocess.run(args,capture_output=True,text=True,timeout=330)
-        if x.returncode:raise RuntimeError(x.stderr[-1200:] or x.stdout[-1200:])
+        if x.returncode:
+            text=x.stderr[-1200:] or x.stdout[-1200:]
+            # A handshake timeout is a BUSY app, not a dead one: report it as its own class so
+            # the caller can retry it (and never retry an actual API failure).
+            if any(m in text for m in _TARGET_HANDSHAKE_MARKERS):
+                raise HandshakeTimeout('remote_handshake_timeout:'+path+':'+text[-300:])
+            raise RuntimeError(text)
         return x
     run(['ssh','-o','BatchMode=yes',REMOTE_HOST,shlex.join(['/bin/mkdir','-p','-m','700',remote])])
     args=['/usr/bin/python3',REMOTE+'/'+PREVIEW+'/app_rpc.py','--root',REMOTE+'/target','--path',path,'--output',remote+'/'+token+'-out.json']
@@ -62,3 +100,29 @@ def target(path,body=None):
     run(['ssh','-o','BatchMode=yes',REMOTE_HOST,shlex.join(args)])
     run(['scp',REMOTE_HOST+':'+remote+'/'+token+'-out.json',str(local)])
     return json.loads(local.read_text())
+
+
+def target(path,body=None):
+    # 1. Surface first: a missing control file fails closed as `surface_lost` (the 63r1 class).
+    if not _TARGET_SURFACE_CHECKED:
+        require_remote(REMOTE,REMOTE_HOST)
+        _TARGET_SURFACE_CHECKED.append(True)
+    # 2. Then ONE bounded, READ-ONLY wake-up probe per process, so a busy-but-alive laptop app is
+    #    retried rather than failing the round (the 63r2 class). Read-only on purpose: it is safe
+    #    to repeat, and it happens before any state-changing call is made.
+    if not _AWAKE:
+        deadline=time.monotonic()+float(os.environ.get('A13_HANDSHAKE_DEADLINE_S','180'))
+        sleep_s=float(os.environ.get('A13_HANDSHAKE_RETRY_SLEEP_S','2'))
+        attempts=0
+        while True:
+            try:
+                _target_once('/api/status')
+                break
+            except HandshakeTimeout as exc:
+                attempts+=1
+                if time.monotonic()>=deadline:
+                    raise
+                print('handshake_retry root=target attempt=%d %r'%(attempts,exc),flush=True)
+                time.sleep(sleep_s)
+        _AWAKE.append(True)
+    return _target_once(path,body)
