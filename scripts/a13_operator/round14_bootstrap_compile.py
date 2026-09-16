@@ -185,6 +185,12 @@ def main():
         'deployment_id':str(uuid.uuid4())}
     save('current-scope.json',scope)
     cards=[rpc('/api/installation/descriptor',{**scope,'disclosure_acknowledged':True}) for rpc in (owner,target)]
+    # v2 (2026-09-16): the canonical compile order is lexicographic node id
+    # (build_qwen_live_route.py:847-851; placement_order_authority=m14_measured_cycle is the
+    # only override and is not used here). The (owner,target) fetch order is not canonical when
+    # the node ids reverse-sort, and the app inserts facts in descriptor order
+    # (chain_observation.py:43-50), so sort by statement.target_node_id before prepare.
+    cards=sorted(cards,key=lambda card:card['statement']['target_node_id'])
     print(owner('/api/serving/observe/prepare',{**scope,'descriptors':cards,'bootstrap_acknowledged':True}),flush=True)
     # The peer's own read of the owner must be proven before the chain is driven:
     # everything below mutates peer state (stage accept, native start, compile),
