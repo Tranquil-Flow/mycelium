@@ -4,6 +4,7 @@ from .authority import _atomic_private_json
 from mycelium_internet.bootstrap import canonical_https_origin
 from mycelium_qualification.evidence import canonical_json_bytes
 from mycelium_qualification.signing import build_ed25519_verifier
+from mycelium_seed.http import SeedHTTPError
 
 _PROTOCOL='mycelium.a13.endpoint_recovery.v1'
 _FIELDS={'protocol','swarm_id','seed_node_id','seed_key_digest','previous_origin','public_origin','issued_at','expires_at'}
@@ -66,7 +67,18 @@ def reconnect_peer(peer,*,card,acknowledged):
         if membership is None:raise ValueError('endpoint_recovery_requires_membership')
         new=verify_endpoint_card(card,membership=membership,now=peer._clock())
         client=peer._make_client(membership={**membership,'seed_url':new})
-        identity=client.identity(now=peer._clock)
+        try:identity=client.identity(now=peer._clock)
+        except SeedHTTPError as error:
+            # identity() raises before returning the rejected statement, so the
+            # envelope is unrecoverable from the caller's side. Persist the
+            # evidence beside the card: on 2026-09-16 65r1 this failure had to be
+            # diagnosed by reading source after the fact because the run kept
+            # only the bare code.
+            _atomic_private_json(peer.state_root/'endpoint-recovery-diagnostic.json',
+                {'protocol':'mycelium.a13.endpoint_recovery_diagnostic.v1',
+                 'code':error.code,'public_origin':new,'peer_now':peer._clock(),
+                 'window':getattr(error,'window',None)})
+            raise
         if (identity.get('seed_url')!=new or identity.get('swarm_id')!=membership['swarm_id']
             or identity.get('seed_node_id')!=membership['seed_node_id']):raise ValueError('endpoint_seed_identity_mismatch')
         peer.stop()

@@ -33,10 +33,13 @@ from pathlib import Path
 import json,time,uuid,sys,os,subprocess
 from datetime import datetime,timezone
 from round14_rpc import owner,target,PRIVATE,REMOTE
-
-# Codes that mean "the relay is not reachable yet" rather than "the product
-# refused this work". Everything else fails closed and is reported as-is.
-TRANSIENT_REACH=('seed_http_unreachable','peer_transport_unreachable','seed_http_remote_error')
+# This module is also loaded by file path: tests/a13_macos/test_reachability_gate.py
+# stubs round14_rpc and never adds scripts/a13_operator to sys.path. Make the sibling
+# policy importable either way rather than assuming script invocation.
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+# Retry policy lives in round14_retry_policy so it is testable without this
+# module's ssh/rpc imports; TRANSIENT_REACH is re-exported for existing callers.
+from round14_retry_policy import RETRYABLE,TRANSIENT_REACH,is_retryable,matching_codes
 # The card is signed for 300 s; stay well inside it while a new origin publishes.
 RECONNECT_BUDGET_SECONDS=180.0
 
@@ -82,10 +85,10 @@ def reconnect_target(card,observations):
             return
         except RuntimeError as error:
             text=str(error)
-            codes=[code for code in TRANSIENT_REACH if code in text]
+            codes=matching_codes(text)
             observations.append({'attempt':attempts,'outcome':'failed','transient':bool(codes),
-                'codes':codes,'elapsed_seconds':round(time.monotonic()-started,3)})
-            if not codes or time.monotonic()-started>=RECONNECT_BUDGET_SECONDS:
+                'codes':codes,'error':text[:400],'elapsed_seconds':round(time.monotonic()-started,3)})
+            if not is_retryable(text,budget_exhausted=time.monotonic()-started>=RECONNECT_BUDGET_SECONDS):
                 raise
             time.sleep(delay);delay=min(15.0,delay*1.6)
 

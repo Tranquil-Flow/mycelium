@@ -990,8 +990,8 @@
         },
         {
           "path": "mycelium_seed/http.py",
-          "sha256": "e8b213bb5253dc92c660a4e0989d3120b204b65d9fa6ab5259be8c1af112fc16",
-          "size_bytes": 41831
+          "sha256": "341c88b290e86457376870bad3c27275f05e29f7c572e366781df1630f8a283b",
+          "size_bytes": 43413
         }
       ],
       "protocol": "mycelium.membership.resume_request.v1"

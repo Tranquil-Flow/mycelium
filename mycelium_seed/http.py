@@ -212,7 +212,41 @@ class SeedHTTPError(RuntimeError):
     def __init__(self, code: str, *, status: int | None = None) -> None:
         self.code = code
         self.status = status
+        # Evidence for a `seed_http_seed_time_invalid` rejection: which window
+        # bound failed and by how much. None for every other code.
+        self.window: dict[str, Any] | None = None
         super().__init__(code)
+
+
+def _number_or_none(value: Any) -> float | None:
+    """A finite float for evidence, or None when the field is not a number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _seed_time_invalid(*, now: Any, issued: Any, expires: Any) -> SeedHTTPError:
+    """The rejection, carrying the numbers that explain WHICH bound failed.
+
+    `identity()` raises before returning the rejected envelope, so the caller
+    cannot see it: without this, the only evidence left on the next occurrence
+    is the bare code -- which is exactly how the 2026-09-16 65r1
+    `seed_http_seed_time_invalid` had to be diagnosed by reading source after
+    the fact, with the failing statement unrecoverable. The raise CONDITION is
+    unchanged; this only attaches the window numbers.
+    """
+    error = SeedHTTPError("seed_http_seed_time_invalid")
+    numbers: dict[str, Any] = {
+        "now": _number_or_none(now),
+        "issued_at": _number_or_none(issued),
+        "expires_at": _number_or_none(expires),
+    }
+    if None not in numbers.values():
+        numbers["seconds_before_issued"] = numbers["issued_at"] - numbers["now"]
+        numbers["seconds_after_expires"] = numbers["now"] - numbers["expires_at"]
+    error.window = numbers
+    return error
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -924,7 +958,7 @@ class SeedHTTPClient:
             or float(now) < float(issued)
             or float(now) > float(expires)
         ):
-            raise SeedHTTPError("seed_http_seed_time_invalid")
+            raise _seed_time_invalid(now=now, issued=issued, expires=expires)
         return dict(statement)
 
     def _seed_digest_accepted(self, digest: object, *, now: float) -> bool:
