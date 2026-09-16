@@ -180,8 +180,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "8d404b1ec5bbc7b953bd4f0fc235a7335547397eb858696ed0caf27ad38bde2b",
-          "size_bytes": 114621
+          "sha256": "33ef6ef41981ba5bd3aa561e2a2ec706935e4371ad1f14cdedc9c68bbe2f5b64",
+          "size_bytes": 115366
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -220,8 +220,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "8d404b1ec5bbc7b953bd4f0fc235a7335547397eb858696ed0caf27ad38bde2b",
-          "size_bytes": 114621
+          "sha256": "33ef6ef41981ba5bd3aa561e2a2ec706935e4371ad1f14cdedc9c68bbe2f5b64",
+          "size_bytes": 115366
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -255,8 +255,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "8d404b1ec5bbc7b953bd4f0fc235a7335547397eb858696ed0caf27ad38bde2b",
-          "size_bytes": 114621
+          "sha256": "33ef6ef41981ba5bd3aa561e2a2ec706935e4371ad1f14cdedc9c68bbe2f5b64",
+          "size_bytes": 115366
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -290,8 +290,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "8d404b1ec5bbc7b953bd4f0fc235a7335547397eb858696ed0caf27ad38bde2b",
-          "size_bytes": 114621
+          "sha256": "33ef6ef41981ba5bd3aa561e2a2ec706935e4371ad1f14cdedc9c68bbe2f5b64",
+          "size_bytes": 115366
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -420,8 +420,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "8d404b1ec5bbc7b953bd4f0fc235a7335547397eb858696ed0caf27ad38bde2b",
-          "size_bytes": 114621
+          "sha256": "33ef6ef41981ba5bd3aa561e2a2ec706935e4371ad1f14cdedc9c68bbe2f5b64",
+          "size_bytes": 115366
         },
         {
           "path": "ui/web/src/features/governance/governanceReadiness.ts",
