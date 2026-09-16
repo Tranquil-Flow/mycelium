@@ -294,8 +294,61 @@ def _session_stderr_tail(sessions: Mapping[str, Any]) -> str | None:
     return "\n\n".join(parts)
 
 
-def _reject(code: str) -> NoReturn:
-    raise ControllerError(code)
+def _reject(code: str, *, diagnostic: str | None = None) -> NoReturn:
+    raise ControllerError(code, diagnostic=diagnostic)
+
+
+def _hello_diagnostic(**fields: Any) -> str:
+    """A bounded, self-describing reason for a hello-identity rejection.
+
+    One public code covers several distinct conditions, so the code alone cannot be
+    root-caused from disk. Run 69r1 (2026-09-16) refused its only deployment with
+    `node_hello_identity_invalid` and the serve diagnostic could not say whether the boot
+    identity had moved, the closed field set had changed, or the node no longer looked
+    fresh (state / peer_generation). Naming the condition and its observed values costs
+    nothing and turns another round of archaeology into one read. Diagnostic only: it is
+    attached to the refusal and never consulted when deciding to refuse.
+    """
+    return "; ".join("%s=%r" % (key, value) for key, value in sorted(fields.items()))[:512]
+
+
+def _hello_failures(
+    identity: Mapping[str, Any],
+    expected_fields: set[str],
+    *,
+    peer: Any,
+    run_id: str,
+    deployment_id: str,
+) -> list[str]:
+    """Which closed-shape/freshness checks failed, named with observed values.
+
+    Mirrors the reject condition exactly, so the report cannot disagree with the verdict.
+    """
+    failed: list[str] = []
+    if set(identity) != expected_fields:
+        missing = ",".join(sorted(expected_fields - set(identity))) or "-"
+        extra = ",".join(sorted(set(identity) - expected_fields)) or "-"
+        failed.append("fields:missing=%s;extra=%s" % (missing, extra))
+    for name, expected in (
+        ("protocol", _NODE_CONTROL_PROTOCOL),
+        ("run_id", run_id),
+        ("deployment_id", deployment_id),
+        ("node_id", peer.node_id),
+        ("host_id", peer.host_id),
+        ("peer_generation", 0),
+        ("state", "NEW"),
+    ):
+        observed = identity.get(name)
+        if observed != expected:
+            failed.append("%s=%r (expected %r)" % (name, observed, expected))
+    if identity.get("route_ready") is not False:
+        failed.append("route_ready=%r (expected False)" % (identity.get("route_ready"),))
+    process_id = identity.get("process_id")
+    if isinstance(process_id, bool) or not isinstance(process_id, int) or process_id <= 0:
+        failed.append("process_id=%r" % (process_id,))
+    if identity.get("endpoint_id") is not None:
+        failed.append("endpoint_id=%r (expected None)" % (identity.get("endpoint_id"),))
+    return failed
 
 
 def _segment(value: Any, code: str) -> str:
@@ -1665,7 +1718,14 @@ class QualificationController:
         if peer.process_transport == "managed_https" or "boot_id" in identity:
             expected_fields.add("boot_id")
             if identity.get("boot_id") != peer.boot_id:
-                _reject("node_hello_identity_invalid")
+                _reject(
+                    "node_hello_identity_invalid",
+                    diagnostic=_hello_diagnostic(
+                        kind="boot_id_mismatch",
+                        peer_boot_id=peer.boot_id,
+                        observed_boot_id=identity.get("boot_id"),
+                    ),
+                )
         if (
             set(identity) != expected_fields
             or identity.get("protocol") != _NODE_CONTROL_PROTOCOL
@@ -1681,7 +1741,19 @@ class QualificationController:
             or identity.get("state") != "NEW"
             or identity.get("route_ready") is not False
         ):
-            _reject("node_hello_identity_invalid")
+            _reject(
+                "node_hello_identity_invalid",
+                diagnostic=_hello_diagnostic(
+                    kind="shape_or_freshness",
+                    failures=_hello_failures(
+                        identity,
+                        expected_fields,
+                        peer=peer,
+                        run_id=run_id,
+                        deployment_id=deployment_id,
+                    ),
+                ),
+            )
         return identity
 
     def _verified_observation(
