@@ -2182,6 +2182,32 @@ def _emit_serve_diagnostic(exc: BaseException, *, stage: str) -> None:
     print(_json_bytes(document).decode("utf-8"), flush=True)
 
 
+def _record_unavailable_deployment(
+    deployment: Any, exc: Exception, *, unavailable: list[UnavailableDeployment]
+) -> None:
+    """Record a plan whose runtime could not be built, and SAY WHY.
+
+    Run 63r3 (2026-09-16): the registry could not build a runtime for its only deployment, and
+    the bounded reason code computed here was then DROPPED - the persisted registry state
+    carried health "unavailable" with no cause, so that failure had to be root-caused by
+    elimination instead of read off disk. The stage diagnostic is emitted BEFORE the append so
+    the serve log keeps the rejecting node's own stderr on the registry path, exactly as the
+    single-server path already does via stage="route_open".
+    """
+    _emit_serve_diagnostic(exc, stage="qualified_runtime")
+    unavailable.append(
+        UnavailableDeployment(
+            deployment_id=deployment.deployment_id,
+            model_id=deployment.model_id,
+            model_revision=deployment.model_revision,
+            quantization=deployment.quantization,
+            topology_size=deployment.topology_size,
+            reason_code=_startup_reason(exc),
+            observed_at_unix_ms=int(time.time() * 1_000),
+        )
+    )
+
+
 def run_registry_server(
     *,
     operator_plans: Sequence[Path],
@@ -2257,17 +2283,7 @@ def run_registry_server(
                     )
                 )
             except Exception as exc:
-                unavailable.append(
-                    UnavailableDeployment(
-                        deployment_id=deployment.deployment_id,
-                        model_id=deployment.model_id,
-                        model_revision=deployment.model_revision,
-                        quantization=deployment.quantization,
-                        topology_size=deployment.topology_size,
-                        reason_code=_startup_reason(exc),
-                        observed_at_unix_ms=int(time.time() * 1_000),
-                    )
-                )
+                _record_unavailable_deployment(deployment, exc, unavailable=unavailable)
         registry = LiveDeploymentRegistry(
             runtimes,
             unavailable_deployments=tuple(unavailable),
