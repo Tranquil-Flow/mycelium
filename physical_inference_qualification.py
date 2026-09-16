@@ -71,7 +71,11 @@ _ALLOWED_CREDENTIAL_LIKE_SOURCE_MODULES = frozenset(
     {PurePosixPath("mycelium_invite/token.py")}
 )
 _MAX_DOCUMENT_BYTES = 1_048_576
-_MAX_TRANSFER_BYTES = 2 * 1024 * 1024 * 1024
+# Per-file sanity bound for one transferred artifact.  8 GiB clears the largest
+# single 7B shard (3,945,441,440 B in the wp8-02 bundle) with >2x headroom and
+# stays a fail-closed sanity limit rather than a model-size limit; the 2 GiB it
+# replaces was sized for the 0.5B's only shard (988,097,824 B).
+_MAX_TRANSFER_BYTES = 8 * 1024 * 1024 * 1024
 _MAX_RUNNER_OUTPUT_BYTES = 1_048_576
 _MAX_RUNNER_TIMEOUT_SECONDS = 6 * 60 * 60.0
 NODE_COMMAND_TIMEOUT_SECONDS = 900.0
