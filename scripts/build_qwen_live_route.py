@@ -9,6 +9,7 @@ import argparse
 from collections.abc import Mapping
 import copy
 from dataclasses import asdict
+from datetime import datetime, timezone
 import gc
 import hashlib
 import json
@@ -123,6 +124,12 @@ _PREPARATION_AUTHORIZATION_PROTOCOL = "mycelium.model_preparation_authorization.
 _LEGACY_PREPARATION_AUTHORIZATION_PROTOCOL = (
     "mycelium.model_preparation_authorization.v1"
 )
+_MANAGED_HELLO_OBSERVATIONS_PROTOCOL = "mycelium.managed_hello_observations.v1"
+# Identities the native worker derives are run-scoped digests, never host
+# aliases. Admission accepts only that measured shape.
+_MANAGED_IDENTITY_RE = re.compile(r"^(host|boot)-[0-9a-f]{32}$")
+_MANAGED_OBSERVATIONS_MAX_AGE_SECONDS = 10 * 60
+_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS = 60
 
 
 def _private_temporary_root(path: Path | None) -> Path | None:
@@ -654,30 +661,48 @@ def _target_proof(
     return proof
 
 
-def _copy_runtime_closure(repo: Path, bundle: Path, template: dict[str, Any]) -> None:
-    paths = {
-        record["path"]
-        for record in template["controller"]["transfer_manifest"]["files"]
-        if not record["path"].startswith(("control/", "deployment/"))
-    }
-    paths.add("weight_quantization.py")
-    paths.update(_RUNTIME_MODULE_CLOSURE)
+def runtime_source_paths(repo: Path) -> tuple[str, ...]:
+    """Derive project Python closure without importing or executing that source."""
+    import ast
+    repo=Path(repo).resolve()
+    selected=set(_RUNTIME_MODULE_CLOSURE)|{'physical_inference_node.py','weight_quantization.py'}
     for package in _RUNTIME_PACKAGE_CLOSURE:
-        package_root = repo / package
-        if not package_root.is_dir():
-            raise RuntimeError(f"runtime_closure_package_missing:{package}")
-        paths.update(
-            str(path.relative_to(repo))
-            for path in package_root.rglob("*.py")
-            if path.is_file()
-        )
+        folder=repo/package
+        if not folder.is_dir():raise RuntimeError(f'runtime_closure_package_missing:{package}')
+        selected.update(str(p.relative_to(repo)) for p in folder.rglob('*.py') if p.is_file())
+    inspected=set()
+    while selected-inspected:
+        relative=min(selected-inspected);source=repo/relative
+        if not source.is_file() or not source.resolve().is_relative_to(repo):
+            raise RuntimeError(f'runtime_closure_file_missing:{relative}')
+        tree=ast.parse(source.read_text(encoding='utf-8'),filename=relative)
+        inspected.add(relative)
+        modules=[]
+        for node in ast.walk(tree):
+            if isinstance(node,ast.Import):modules.extend(alias.name for alias in node.names)
+            elif isinstance(node,ast.ImportFrom) and node.level==0 and node.module:
+                modules.append(node.module)
+        for module in modules:
+            head=module.split('.')[0]
+            if head=='tests' or head.startswith('test_'):continue
+            path=repo/(head+'.py');folder=repo/head
+            if path.is_file():selected.add(str(path.relative_to(repo)))
+            elif folder.is_dir():
+                selected.update(str(p.relative_to(repo)) for p in folder.rglob('*.py') if p.is_file() and '__pycache__' not in p.parts)
+    return tuple(sorted(selected))
+
+
+def _copy_runtime_closure(repo: Path, bundle: Path, template: dict[str, Any]) -> None:
+    paths=set(runtime_source_paths(repo))
+    paths.update(record['path'] for record in template['controller']['transfer_manifest']['files']
+        if not record['path'].startswith(('control/','deployment/')))
     for relative in sorted(paths):
-        source = repo / relative
-        if not source.is_file():
-            raise RuntimeError(f"runtime_closure_file_missing:{relative}")
-        target = bundle / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, target)
+        source=repo/relative
+        if Path(relative).is_absolute() or '..' in Path(relative).parts or not source.resolve().is_relative_to(repo.resolve()):
+            raise RuntimeError('runtime_closure_path_invalid')
+        if not source.is_file():raise RuntimeError(f'runtime_closure_file_missing:{relative}')
+        target=bundle/relative;target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(source,target)
 
 
 def _transfer_manifest(bundle: Path) -> dict[str, Any]:
@@ -758,7 +783,10 @@ def _membership_generations(template: dict[str, Any]) -> dict[str, int]:
 
 
 def _topology_nodes(
-    template: dict[str, Any], topology_path: Path | None
+    template: dict[str, Any],
+    topology_path: Path | None,
+    *,
+    managed_transport: bool = False,
 ) -> list[dict[str, Any]]:
     """Return a validated ordered physical topology.
 
@@ -766,6 +794,11 @@ def _topology_nodes(
     behavior. A topology document is the durable extension seam for a third or
     later peer; it intentionally contains public endpoint IDs and paths, never
     endpoint secret material.
+
+    Managed preparation is an explicit opt-in: with ``managed_transport`` the
+    document may express an all-managed ``managed_https`` peer set carrying no
+    SSH target or identity, matching PeerIdentity's managed authority rules.
+    Without the opt-in the accepted transport set is unchanged.
     """
 
     if topology_path is None:
@@ -832,10 +865,31 @@ def _topology_nodes(
     backends = [node["runtime_backend"] for node in nodes]
     if any(backend not in {"mlx", "numpy"} for backend in backends):
         raise RuntimeError("topology_runtime_backend_unsupported")
-    if any(node["process_transport"] not in {"local", "ssh"} for node in nodes):
+    transports = [node["process_transport"] for node in nodes]
+    if managed_transport:
+        # The managed plan is all-managed, mirroring the runner's peer rule:
+        # mixing managed control with unmanaged process authority is rejected.
+        if any(transport != "managed_https" for transport in transports):
+            raise RuntimeError("topology_managed_transport_mixed")
+        for node in nodes:
+            if (
+                node["ssh_target"] is not None
+                or node["ssh_identity_file"] is not None
+            ):
+                raise RuntimeError("managed_peer_ssh_authority_invalid")
+    else:
+        if any(transport not in {"local", "ssh"} for transport in transports):
+            raise RuntimeError("topology_process_transport_invalid")
+    if any(
+        node["process_transport"] not in {"local", "ssh", "managed_https"}
+        for node in nodes
+    ):
         raise RuntimeError("topology_process_transport_invalid")
     local_count = sum(node["process_transport"] == "local" for node in nodes)
-    if local_count != 1:
+    if local_count != 1 and not (
+        managed_transport
+        and all(node["process_transport"] == "managed_https" for node in nodes)
+    ):
         raise RuntimeError("topology_requires_one_local_node")
     return copy.deepcopy(nodes)
 
@@ -890,19 +944,88 @@ print(json.dumps(['host-'+host_digest[:32],'boot-'+boot_digest[:32]]))
 """.format(run_id=run_id)
 
 
+def _managed_hello_observations(document, node_ids, *, deployment_id):
+    """Validate caller-admitted observation metadata; NOT signature/host proof.
+
+    The application must authenticate native replies and membership before this
+    source-preparation helper. A JSON file alone is never physical evidence.
+    """
+    fields={'protocol','deployment_id','run_id','captured_at_unix_ms','observations'}
+    if not isinstance(document,dict) or document.get('protocol')!=_MANAGED_HELLO_OBSERVATIONS_PROTOCOL:
+        raise RuntimeError('managed_observation_protocol_invalid')
+    if set(document)!=fields:raise RuntimeError('managed_observation_fields_invalid')
+    if document['deployment_id']!=deployment_id:raise RuntimeError('managed_observation_deployment_mismatch')
+    captured=document['captured_at_unix_ms']; now=time.time()
+    if type(captured) is not int or not -_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS<=now-captured/1000<=_MANAGED_OBSERVATIONS_MAX_AGE_SECONDS:
+        raise RuntimeError('managed_observation_stale')
+    run_id=document['run_id']
+    if not isinstance(run_id,str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,80}-qwen-[0-9]{8}T[0-9]{6}Z',run_id):
+        raise RuntimeError('managed_observation_run_id_invalid')
+    try:started=datetime.strptime(run_id.rsplit('-qwen-',1)[1],'%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:raise RuntimeError('managed_observation_run_id_invalid') from None
+    if not -_MANAGED_OBSERVATIONS_MAX_SKEW_SECONDS<=now-started<=_MANAGED_OBSERVATIONS_MAX_AGE_SECONDS:
+        raise RuntimeError('managed_observation_run_id_stale')
+    observations=document['observations']
+    if not isinstance(observations,list) or len(observations)!=len(node_ids):
+        raise RuntimeError('managed_observation_node_mismatch')
+    result={}
+    for item in observations:
+        if not isinstance(item,dict) or set(item)!={'node_id','host_id','boot_id'}:
+            raise RuntimeError('managed_observation_fields_invalid')
+        node=item['node_id']
+        if not isinstance(node,str) or node not in node_ids or node in result:
+            raise RuntimeError('managed_observation_node_mismatch')
+        host,boot=item['host_id'],item['boot_id']
+        if (not isinstance(host,str) or not isinstance(boot,str)
+            or re.fullmatch(r'host-[0-9a-f]{32}',host) is None
+            or re.fullmatch(r'boot-[0-9a-f]{32}',boot) is None):
+            raise RuntimeError('managed_observation_identity_synthetic')
+        result[node]=(host,boot)
+    if len({value[0] for value in result.values()})!=len(result):
+        raise RuntimeError('managed_observation_hosts_not_distinct')
+    return run_id,result
+
+
+def _startup_challenge_request(route_label,prompt,output):
+    return {
+        'request_id':f'request-{route_label}-qwen-startup',
+        'prompt_token_ids':list(prompt),'max_new_tokens':len(output),
+        'expected_new_tokens':len(output),'qos_class':'interactive','admitted_at':0.0,
+        'target_ttft_ms':120_000.0,'target_tpot_ms':120_000.0,'target_tokens_per_second':0.001,
+        'sampling_seed':0,'generation_config_digest':_digest(_bytes({'max_new_tokens':len(output),'sampling_seed':0})),
+    }
+
+
 def refresh_peer_identities(
     peers: list[dict[str, Any]],
     run_id: str,
     *,
     python_executables_by_node: dict[str, str] | None = None,
+    managed_observations: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Measure and bind the run-scoped host identities used by node hello."""
+    """Measure and bind the run-scoped host identities used by node hello.
+
+    Managed peers never execute remote SSH: their run-scoped identities are
+    bound only from externally admitted fresh native hello observations.
+    """
 
     remote_program = _remote_identity_program(run_id)
     refreshed = copy.deepcopy(peers)
     for peer in refreshed:
         if peer["process_transport"] == "local":
             host_id, boot_id = derive_local_run_scoped_identity(run_id)
+        elif peer["process_transport"] == "managed_https":
+            if managed_observations is None:
+                raise RuntimeError("managed_peer_observations_missing")
+            admitted = managed_observations.get(peer["node_id"])
+            if admitted is None:
+                raise RuntimeError("managed_peer_observations_missing")
+            host_id, boot_id = admitted
+            if (
+                _MANAGED_IDENTITY_RE.fullmatch(str(host_id)) is None
+                or _MANAGED_IDENTITY_RE.fullmatch(str(boot_id)) is None
+            ):
+                raise RuntimeError("managed_observation_identity_synthetic")
         else:
             command = ["ssh"]
             identity = peer.get("ssh_identity_file")
@@ -934,10 +1057,14 @@ def refresh_peer_identities(
 
 
 def preflight_remote_peers(topology: list[dict[str, Any]]) -> None:
-    """Reject an unavailable required SSH peer before expensive local preparation."""
+    """Reject an unavailable required SSH peer before expensive local preparation.
+
+    Managed peers are controlled by the owning application's canonical
+    transport, never by this builder's SSH authority: skip them.
+    """
 
     for peer in topology:
-        if peer["process_transport"] == "local":
+        if peer["process_transport"] in {"local", "managed_https"}:
             continue
         command = ["ssh"]
         identity = peer.get("ssh_identity_file")
@@ -1170,20 +1297,51 @@ def _streaming_challenge(
 
 
 def build(args: argparse.Namespace) -> dict[str, Any]:
-    repo = Path(__file__).resolve().parents[1]
+    repo = ((Path(sys._MEIPASS)/'a13-runtime-source').resolve()
+            if getattr(sys,'frozen',False) else Path(__file__).resolve().parents[1])
     route_label = _route_label(args)
     model_id, resolved_commit, model_slug = _model_identity(args)
     template = json.loads(args.template_plan.read_text("utf-8"))
     output_root = args.output_root.resolve()
     if output_root.exists():
         raise RuntimeError("output_root_already_exists")
-    topology = _topology_nodes(template, args.topology)
+    topology = _topology_nodes(
+        template,
+        args.topology,
+        managed_transport=bool(getattr(args, "managed_transport", False)),
+    )
+    node_ids = tuple(node["node_id"] for node in topology)
+    runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
+    deployment_id = getattr(args, "deployment_id", None) or str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            "mycelium:" + ":".join((route_label, model_id, resolved_commit, *node_ids)),
+        )
+    )
+    try:
+        if str(uuid.UUID(deployment_id)) != deployment_id:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError("deployment_id_invalid") from exc
+    managed_observations = None
+    managed_run_id = None
+    if getattr(args, "managed_transport", False):
+        observations_path = getattr(args, "managed_hello_observations", None)
+        if observations_path is None:
+            raise RuntimeError("managed_peer_observations_missing")
+        try:
+            observations_document = json.loads(
+                Path(observations_path).read_text("utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("managed_observations_invalid") from exc
+        managed_run_id, managed_observations = _managed_hello_observations(
+            observations_document, node_ids, deployment_id=deployment_id
+        )
     preflight_remote_peers(topology)
     bundle = output_root / "transfer-bundle"
     deployment_root = bundle / "deployment"
     deployment_root.mkdir(parents=True)
-    node_ids = tuple(node["node_id"] for node in topology)
-    runtime_backends = {node["node_id"]: node["runtime_backend"] for node in topology}
     preparation_authorization, preparation_ranges = _preparation_authorization(
         getattr(args, "model_preparation_authorization", None),
         model_id=model_id,
@@ -1200,17 +1358,6 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         if preparation_authorization is None
         else preparation_authorization["serving_quantization"]
     )
-    deployment_id = getattr(args, "deployment_id", None) or str(
-        uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            "mycelium:" + ":".join((route_label, model_id, resolved_commit, *node_ids)),
-        )
-    )
-    try:
-        if str(uuid.UUID(deployment_id)) != deployment_id:
-            raise ValueError
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise RuntimeError("deployment_id_invalid") from exc
     m13_document, planned_ranges = _m13_control_plane(
         getattr(args, "m18_control_plane", None)
         or getattr(args, "m14_control_plane", None)
@@ -1814,21 +1961,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             preparation_authorization=preparation_authorization,
         ),
     )
-    request = {
-        "request_id": f"request-{route_label}-qwen-startup",
-        "prompt_token_ids": list(challenge_prompt),
-        "max_new_tokens": len(challenge_output),
-        "expected_new_tokens": len(challenge_output),
-        "qos_class": "interactive",
-        "admitted_at": 0.0,
-        "target_ttft_ms": 120_000.0,
-        "target_tpot_ms": 120_000.0,
-        "target_tokens_per_second": 0.001,
-        "sampling_seed": 17,
-        "generation_config_digest": _digest(
-            _bytes({"max_new_tokens": len(challenge_output), "sampling_seed": 17})
-        ),
-    }
+    request = _startup_challenge_request(route_label,challenge_prompt,challenge_output)
     topology_by_node = {node["node_id"]: node for node in topology}
     nodes = []
     for index, assignment in enumerate(assignments):
@@ -1851,13 +1984,18 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 },
             }
         )
-    run_id = f"{route_label}-qwen-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+    run_id = (
+        managed_run_id
+        if managed_run_id is not None
+        else f"{route_label}-qwen-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now))
+    )
     peers = refresh_peer_identities(
         peers,
         run_id,
         python_executables_by_node={
             node["node_id"]: node["python_executable"] for node in topology
         },
+        managed_observations=managed_observations,
     )
     run_plan = {
         "protocol": "mycelium.controller_run_plan.v1",
@@ -2076,16 +2214,43 @@ def main() -> int:
         help="fresh local-only model feasibility authorization used as layer authority",
     )
     parser.add_argument(
+        "--managed-transport",
+        action="store_true",
+        help=(
+            "build for an all-managed_https topology whose peers are controlled "
+            "by the owning application's canonical transport, never this "
+            "builder's SSH authority"
+        ),
+    )
+    parser.add_argument(
+        "--managed-hello-observations",
+        type=Path,
+        help=(
+            "fresh admitted managed hello observations binding each peer's "
+            "run-scoped host/boot identity for this deployment (required with "
+            "--managed-transport)"
+        ),
+    )
+    parser.add_argument(
         "--refresh-runtime-closure-only",
         action="store_true",
         help="refresh code and repin manifests in an existing output root",
     )
     args = parser.parse_args()
-    result = (
-        refresh_runtime_closure(args)
-        if args.refresh_runtime_closure_only
-        else build(args)
-    )
+    if args.refresh_runtime_closure_only:
+        result = refresh_runtime_closure(args)
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if (
+        args.managed_hello_observations is not None
+        and not args.managed_transport
+    ):
+        raise RuntimeError("managed_observations_require_managed_transport")
+    if args.managed_transport and args.topology is None:
+        raise RuntimeError("managed_transport_requires_topology")
+    if args.managed_transport and args.managed_hello_observations is None:
+        raise RuntimeError("managed_peer_observations_missing")
+    result = build(args)
     print(json.dumps(result, sort_keys=True))
     return 0
 

@@ -3163,6 +3163,30 @@ class IrohTransport:
             "duplicate_frames": self._duplicate_frames,
         }
 
+    def prefill_hop_diagnostic(self) -> dict[str, Any]:
+        """Bounded local verdict for a stalled distributed-prefill hop.
+
+        The prefill wait observes only ``fatal_error``, while a hop that fails
+        inside the deferred forward path is recorded as a scoped, per-path,
+        *non-fatal* event.  That is why a hop failure reaches the operator as
+        the generic ``prefill_completion_timeout`` instead of its real cause.
+        Return the transport's own local verdict so the cause stays inspectable.
+
+        Deliberately never queries the sidecar, for the same reason
+        ``counter_snapshot`` exists: this runs on the failure path under a
+        bounded command budget.  Nothing address-shaped, key-shaped or payload
+        bytes are returned -- only counters and a status token.
+        """
+
+        with self._state_lock:
+            counts = self._counter_snapshot_locked()
+            scoped_failure_code: str | None = None
+            for item in reversed(self._scoped_events):
+                if item.event == "failure":
+                    scoped_failure_code = item.code
+                    break
+        return {"scoped_failure_code": scoped_failure_code, **counts}
+
     def close(self) -> None:
         with self._lifecycle_lock:
             self._close()

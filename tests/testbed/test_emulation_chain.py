@@ -22,6 +22,7 @@ import pytest
 
 from mycelium_deadlines import (
     CANCEL_AND_CLEANUP_BUDGET_SECONDS,
+    PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS,
     advertised_maximum_total_cleanup_ms,
     route_cleanup_fanout_window_ms,
 )
@@ -455,11 +456,13 @@ def test_the_route_receipt_grid_reproduces_the_research_sample(
 def test_the_round50_composition_now_holds_in_the_emulated_chain(
     emulation_document: dict,
 ) -> None:
-    """Packet wp5-d9 closed the round-50 mismatch the shaping used to name.
+    """Packet wp5-d9 closed the round-50 mismatch; a13-resolve fixed its value.
 
     The emulation's D9 verdict is the registry's own answer for the shipped
-    composition: with the advertised bound moved onto the route's fanout window
-    it is the ok form, naming both numbers, never the violation reason.
+    composition: with the advertised bound derived as ``window - transport
+    margin - slack`` it is the ok form, naming both numbers, never the violation
+    reason - and it sits below the ceiling the route's own admission predicate
+    applies (``window - margin``), so the shipped node cannot refuse itself.
     """
 
     shaping = emulation_document["round50_shaping"]
@@ -472,7 +475,10 @@ def test_the_round50_composition_now_holds_in_the_emulated_chain(
     )
     assert shaping["route_fanout_window_ms"] == route_cleanup_fanout_window_ms
     assert shaping["peer_advertised_cleanup_ms"] <= shaping["route_fanout_window_ms"]
-    assert shaping["peer_advertised_cleanup_ms"] == 1_500
+    assert shaping["peer_advertised_cleanup_ms"] == 1_200
+    assert shaping["peer_advertised_cleanup_ms"] <= (
+        shaping["route_fanout_window_ms"] - PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+    )
     assert shaping["cancel_and_cleanup_budget_ms"] == pytest.approx(2000.0)
     assert shaping["measured"]
     assert shaping["unmeasured"]

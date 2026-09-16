@@ -10,12 +10,18 @@ Rules this module obeys:
 * **Values never change behaviour.**  Every value below is byte-identical to the
   shipped literal it replaces, with one deliberate exception: the peer's
   advertised cleanup bound (``peer_advertised_maximum_total_cleanup_ms``).
-  Packet ``wp5-d9`` corrects that value from the shipped 2_000 ms literal to the
-  route's fanout window (1_500 ms) because the shipped value violated the
-  composition invariant this module exists to enforce (the round-50 defect:
-  advertised bound > route fanout window).  Its ``derivation`` field carries the
-  measurement the corrected value is justified by.  Every other value stays
-  byte-identical; a value that looks wrong is reported, not edited.
+  Packet ``wp5-d9`` corrected that value away from the shipped 2_000 ms literal,
+  which exceeded the route's fanout window and violated the composition
+  invariant this module exists to enforce (the round-50 defect: advertised
+  bound > route fanout window).  Merge ``a13-resolve`` then corrected the
+  *derivation* from the window itself (1_500 ms) to ``window - transport margin
+  - slack`` (1_200 ms): the route's own admission predicate admits at most
+  ``window - margin`` (1_300 ms), so advertising the window would have shipped a
+  node that refuses its own advertisement at startup.  Both halves cite the
+  measurement they are justified by (0.875-1.066 s relayed snapshot round trips;
+  the two-Mac peer's 1.83 s / 3.18 s end-to-end cleanup against a 1.5 s window).
+  Every other value stays byte-identical; a value that looks wrong is reported,
+  not edited.
 * **No product imports.**  The module is stdlib-only, so any layer (including
   ``physical_inference_node`` at import time) can bind to it without a cycle.
 * **Derived quantities are explicit.**  ``route_cleanup_fanout_window_seconds``
@@ -61,6 +67,7 @@ __all__ = [
     "CLEANUP_RECONCILIATION_HORIZON_SECONDS",
     "CLEANUP_RECONCILIATION_WORKERS",
     "CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+    "CLEANUP_SNAPSHOT_SLICE_SECONDS",
     "COMMAND_DEFAULT_COOPERATIVE_STEP_MS",
     "COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS",
     "COMPOSITION_INVARIANTS",
@@ -83,7 +90,9 @@ __all__ = [
     "NODE_LAUNCH_HANDSHAKE_SECONDS",
     "NODE_SESSION_TIMEOUT_SECONDS",
     "NON_BINDING_DEADLINES",
+    "PEER_ADVERTISED_CLEANUP_BOUND_SLACK_MS",
     "PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS",
+    "PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS",
     "PEER_CONNECT_DEADLINE_SECONDS",
     "PENDING_BINDINGS",
     "PENDING_CONTRACT_PINNED_BINDINGS",
@@ -165,6 +174,17 @@ CLEANUP_FALLBACK_RESERVE_SECONDS: Final[float] = 0.5
 #: One bounded request-scoped snapshot round (probe a missing node's cleanup
 #: proof) inside the budget.
 CLEANUP_SNAPSHOT_ATTEMPT_SECONDS: Final[float] = 0.5
+
+#: The slice handed to one request-scoped fallback snapshot attempt at the point
+#: the route resumes it, capped by the owner's immutable deadline.  Measured on
+#: the two-Mac route: successful snapshot round trips to the relayed laptop were
+#: 0.875-1.066 s, and the previous 0.5 s slice was never even claimed before it
+#: expired, so the attempt always missed the window it was meant to recover
+#: into.  1.1 s covers the measured maximum with margin and still fits the
+#: owner's immutable budget after the inline receipt grace (0.5 + 1.1 <= 2.0).
+#: A slice shorter than one real round trip is not a recovery path, it is a
+#: second way to miss.
+CLEANUP_SNAPSHOT_SLICE_SECONDS: Final[float] = 1.1
 
 #: One bounded grace for the inline cancellation receipt to arrive before
 #: bounded snapshot rounds are allowed to race the delayed response.
@@ -283,6 +303,23 @@ REQUALIFICATION_INTERVAL_SECONDS: Final[float] = 3_300.0
 #: are still alive.
 PEER_CONNECT_DEADLINE_SECONDS: Final[float] = 1.0
 
+#: Command delivery plus receipt return: the interval of the owner's cleanup
+#: fanout window that is transport, not cleanup, and that a peer's advertised
+#: cleanup bound therefore may not claim.  Measured on the two-Mac route: the
+#: relayed peer's end-to-end cleanup returned at 1.83 s / 3.18 s against a
+#: 1.5 s window, i.e. it did not fit - so the route's admission predicate
+#: (``mycelium_live.route.admit_peer_cleanup_bound``) refuses such a bound by
+#: name at startup instead of discovering it mid-request.  200 ms is also the
+#: margin the route's own advertised bound keeps below the window.
+PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS: Final[int] = 200
+
+#: The headroom the advertised cleanup bound keeps inside the admitted maximum
+#: (``window - transport margin``): the a13 lane's measured 1_200 ms bound
+#: against the 1_300 ms the route's predicate admits.  Registry-defined
+#: composition term: it makes the advertisement strictly admissible by the
+#: route's own predicate instead of sitting flush against the boundary.
+PEER_ADVERTISED_CLEANUP_BOUND_SLACK_MS: Final[int] = 100
+
 
 # --------------------------------------------------------------------------- #
 # Derived quantities (PLAN 5.2 item 1 / D9).  Declared before the records so a
@@ -322,29 +359,51 @@ def derive_advertised_maximum_total_cleanup_ms(
     fanout_window_ms: float | int | None = None,
     budget_seconds: float = CANCEL_AND_CLEANUP_BUDGET_SECONDS,
     fallback_reserve_seconds: float = CLEANUP_FALLBACK_RESERVE_SECONDS,
+    transport_margin_ms: int = PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS,
+    slack_ms: int = PEER_ADVERTISED_CLEANUP_BOUND_SLACK_MS,
 ) -> int:
-    """The cleanup bound a peer may advertise: the route's fanout window.
+    """The cleanup bound a peer may advertise: window - margin - slack.
 
-    ``advertised <= route_cleanup_fanout_window_ms`` (PLAN D9) admits the
-    window itself as the largest value, and the window is the only number the
-    composition supplies, so the advertised bound *is* the window - one owner,
-    no second constant that can drift.  ``fanout_window_ms`` supports deriving
-    the advertised value for a different window (the drift property test).
+    PLAN D9 requires ``advertised <= route_cleanup_fanout_window_ms``, and the
+    route's admission predicate
+    (``mycelium_live.route.admit_peer_cleanup_bound``) requires the tighter
+    ``advertised <= window - transport margin``.  Deriving the bound as the
+    window itself therefore ships a node that refuses its own advertisement at
+    startup (1_500 ms > 1_300 ms admitted), which is why the derivation moves
+    the *reason* - not just the number - here: 2_000 ms budget - 500 ms fallback
+    reserve = 1_500 ms window, - 200 ms transport margin = 1_300 ms admitted,
+    - 100 ms slack = 1_200 ms advertised.  Every term is a registry record, so
+    one owner decides the reserve, the margin, the slack and the bound together
+    and the predicate and the advertisement cannot drift apart.  The window and
+    the margin / slack inputs stay overridable for the drift property tests.
     """
 
     if fanout_window_ms is None:
-        return derive_route_cleanup_fanout_window_ms(
+        window_ms = derive_route_cleanup_fanout_window_ms(
             budget_seconds=budget_seconds,
             fallback_reserve_seconds=fallback_reserve_seconds,
         )
-    if isinstance(fanout_window_ms, bool) or not isinstance(
-        fanout_window_ms, (int, float)
+    else:
+        if isinstance(fanout_window_ms, bool) or not isinstance(
+            fanout_window_ms, (int, float)
+        ):
+            raise ValueError("invalid_composition_value|fanout_window_ms")
+        value = float(fanout_window_ms)
+        if value <= 0 or value != int(value):
+            raise ValueError("advertised_cleanup_bound_not_whole_milliseconds")
+        window_ms = int(value)
+    for label, candidate in (
+        ("transport_margin_ms", transport_margin_ms),
+        ("slack_ms", slack_ms),
     ):
-        raise ValueError("invalid_composition_value|fanout_window_ms")
-    value = float(fanout_window_ms)
-    if value <= 0 or value != int(value):
-        raise ValueError("advertised_cleanup_bound_not_whole_milliseconds")
-    return int(value)
+        if isinstance(candidate, bool) or not isinstance(candidate, int):
+            raise ValueError(f"invalid_composition_value|{label}")
+        if candidate < 0:
+            raise ValueError(f"invalid_composition_value|{label}")
+    advertised = window_ms - int(transport_margin_ms) - int(slack_ms)
+    if advertised <= 0:
+        raise ValueError("advertised_cleanup_bound_not_positive")
+    return advertised
 
 
 #: The route's cleanup fanout window: 2.0 s budget - 0.5 s fallback reserve.
@@ -356,10 +415,16 @@ route_cleanup_fanout_window_seconds: Final[float] = (
 route_cleanup_fanout_window_ms: Final[int] = derive_route_cleanup_fanout_window_ms()
 
 #: What a physical node advertises as its total cleanup bound (packet wp5-d9 /
-#: PLAN D9).  Derived from the route's fanout window, never a second literal:
+#: PLAN D9, corrected by merge a13-resolve).  Derived, never a second literal:
 #: the shipped 2_000 ms literal exceeded the window and produced the round-50
 #: shape (the request stalls past the budget and the route has no time left to
-#: fan cancellation out).
+#: fan cancellation out), and the window itself (1_500 ms) sits above the
+#: 1_300 ms the route's admission predicate admits.  The a13 lane measured the
+#: honest side of that question - the two-Mac peer's end-to-end cleanup was
+#: 1.83 s / 3.18 s against a 1.5 s window, and successful relayed snapshot round
+#: trips were 0.875-1.066 s - so the shipped advertised bound is the admitted
+#: maximum less one measured-safe slack, and both the predicate that admits it
+#: and this derivation read the same registry records.
 PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS: Final[int] = (
     derive_advertised_maximum_total_cleanup_ms()
 )
@@ -408,9 +473,35 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
             "One bounded request-scoped snapshot round against a node whose "
             "cleanup proof is still missing. Sized as the reserve it is: a "
             "single attempt inside the held-back interval, so the budget is "
-            "never over-committed."
+            "never over-committed. This record is the interval held back at the "
+            "fanout deadline; the slice an attempt is actually handed when the "
+            "route resumes it is cleanup_snapshot_slice_seconds (1.1 s, "
+            "measured against real relayed round trips), and the two numbers "
+            "must not be collapsed into one another."
         ),
         source="mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+    ),
+    Deadline(
+        name="cleanup_snapshot_slice_seconds",
+        value=CLEANUP_SNAPSHOT_SLICE_SECONDS,
+        unit="seconds",
+        owner="mycelium_live/route.py:99,2834",
+        derivation=(
+            "The slice handed to one request-scoped fallback snapshot attempt at "
+            "the point the route resumes it (after the inline receipt grace), "
+            "capped by the owner's immutable deadline. Measured by the a13 lane "
+            "on the two-Mac route: successful snapshot round trips to the "
+            "relayed laptop were 0.875-1.066 s and the first fallback attempt's "
+            "0.5 s slice was never even claimed before it expired - a slice "
+            "shorter than one real round trip is not a recovery path, it is a "
+            "second way to miss. 1.1 s covers the measured maximum with margin "
+            "and still fits the owner's budget after the inline grace "
+            "(0.5 s + 1.1 s <= 2.0 s cancel_and_cleanup_budget_seconds)."
+        ),
+        source=(
+            "mycelium_live.route._CLEANUP_SNAPSHOT_SLICE_SECONDS "
+            "(a13 lane; merged and bound to this registry by a13-resolve)"
+        ),
     ),
     Deadline(
         name="cleanup_inline_receipt_grace_seconds",
@@ -482,29 +573,91 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="peer_advertised_maximum_total_cleanup_ms",
         value=PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS,
         unit="milliseconds",
-        owner="physical_inference_node.py:2208",
+        owner="physical_inference_node.py:93,2404",
         derivation=(
             "The total cleanup bound a physical node advertises in its "
             "concurrency/liveness projection. PLAN D9 makes this the validated "
             "side: it must fit inside the route's fanout window "
             "(advertised <= route_cleanup_fanout_window_ms), fail closed at "
             "startup qualification, never mid-request. Packet wp5-d9 closed the "
-            "round-50 defect by deriving the value from the window itself "
-            "(2.0 s cancel_and_cleanup_budget_seconds - 0.5 s "
-            "cleanup_fallback_reserve_seconds = 1500 ms) instead of the shipped "
-            "2_000 ms literal that exceeded the window; the node's payload and "
-            "the canonical contract producer both read this registry symbol, so "
-            "a second copy cannot drift. The bound is a measured-safe bound, not "
-            "a restated constant: the verified round-64 run measured the whole "
-            "cleanup wait as ``infer_cancel_wait`` 0.000 s on the owner and "
-            "0.001 s on the laptop (runs/a13-macos-demo-export/"
+            "round-50 defect by deriving the value instead of shipping the "
+            "2_000 ms literal that exceeded the window; merge a13-resolve then "
+            "corrected the derivation from the window itself (1_500 ms) to "
+            "window - transport margin - slack, because the a13 lane's "
+            "admission predicate (mycelium_live.route."
+            "admit_peer_cleanup_bound) admits at most window - margin: 2_000 ms "
+            "cancel_and_cleanup_budget_seconds - 500 ms "
+            "cleanup_fallback_reserve_seconds = 1_500 ms window, - 200 ms "
+            "peer_cleanup_bound_transport_margin_ms = 1_300 ms admitted, "
+            "- 100 ms peer_advertised_cleanup_bound_slack_ms = 1_200 ms "
+            "advertised. Advertising the window itself would have shipped a "
+            "node its own route refuses at startup (1500 > admitted 1300); the "
+            "a13 lane measured the honest side of that boundary - relayed "
+            "snapshot round trips 0.875-1.066 s and the two-Mac peer's "
+            "end-to-end cleanup 1.83 s / 3.18 s against that 1.5 s window. The "
+            "bound is a measured-safe bound, not a restated constant: the "
+            "verified round-64 run measured the whole cleanup wait as "
+            "``infer_cancel_wait`` 0.000 s on the owner and 0.001 s on the "
+            "laptop (runs/a13-macos-demo-export/"
             "round64-c5-met-per-placement-work-on-both-macs.md) - three orders "
-            "of magnitude inside the window - so the advertised bound never "
-            "consumes the cancellation fanout window."
+            "of magnitude inside the window. Every term of the derivation is a "
+            "record in this registry, so one owner decides the reserve, the "
+            "margin, the slack and the bound together and the predicate and the "
+            "advertisement cannot drift apart."
         ),
         source=(
-            'physical_inference_node payload key "maximum_total_cleanup_ms" '
-            "(value = mycelium_deadlines.advertised_maximum_total_cleanup_ms)"
+            "physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS (a13 lane) and "
+            'the payload key "maximum_total_cleanup_ms" - both assigned from '
+            "mycelium_deadlines.advertised_maximum_total_cleanup_ms"
+        ),
+    ),
+    Deadline(
+        name="peer_cleanup_bound_transport_margin_ms",
+        value=PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS,
+        unit="milliseconds",
+        owner="mycelium_live/route.py:121,161",
+        derivation=(
+            "Command delivery plus receipt return: the part of the route's "
+            "cleanup fanout window that is transport rather than cleanup, and "
+            "which a peer's advertised cleanup bound therefore may not claim. "
+            "Measured by the a13 lane on the two-Mac route: the relayed peer's "
+            "end-to-end cleanup returned at 1.83 s / 3.18 s against the 1.5 s "
+            "window, i.e. it does not fit - the exact case "
+            "mycelium_live.route.admit_peer_cleanup_bound refuses by name at "
+            "startup instead of discovering mid-request. It is also the term "
+            "that keeps the shipped advertisement (window - margin - slack = "
+            "1_200 ms) strictly inside the admitted maximum (window - margin = "
+            "1_300 ms) the same predicate applies to it."
+        ),
+        source=(
+            "mycelium_live.route.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS "
+            "(a13 lane; merged and bound to this registry by a13-resolve)"
+        ),
+    ),
+    Deadline(
+        name="peer_advertised_cleanup_bound_slack_ms",
+        value=PEER_ADVERTISED_CLEANUP_BOUND_SLACK_MS,
+        unit="milliseconds",
+        owner=(
+            "mycelium_deadlines.py:403 (derive_advertised_maximum_total_"
+            "cleanup_ms; registry-internal, no runtime consumer)"
+        ),
+        derivation=(
+            "The headroom the advertised cleanup bound keeps inside the admitted "
+            "maximum: advertised = window - transport margin - slack = "
+            "1_500 ms - 200 ms - 100 ms = 1_200 ms, against the 1_300 ms "
+            "mycelium_live.route.admit_peer_cleanup_bound admits. Registry-"
+            "defined composition term (no runtime consumer), recorded rather "
+            "than left as an inline literal inside the derivation so this "
+            "number has one owner like every other term of the composition. It "
+            "is what makes the shipped advertisement strictly admissible by the "
+            "route's own predicate: the advertisement and the admission cannot "
+            "sit flush against a boundary the other side computes differently."
+        ),
+        source=(
+            "registry-defined (merge a13-resolve; the a13 lane's measured "
+            "1_200 ms bound leaves exactly this headroom below the predicate's "
+            "admitted 1_300 ms)"
         ),
     ),
     Deadline(
@@ -1046,6 +1199,10 @@ def check_composition(
 #: cleanup fanout window.  ``wp5-bind-residual`` bound the route's remaining
 #: cleanup/keepalive constants, the gateway's cancellation budget and session
 #: graces, and the stage-pack authority TTL floor/ceiling.
+#: Merge ``a13-resolve`` bound the a13 lane's measured cleanups - the fallback
+#: snapshot slice and the peer-bound transport margin - and the lane's named
+#: ``physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS``, so the imported lane
+#: has no second copy of any number this registry owns.
 BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "mycelium_iroh_sidecar.client.PEER_CONNECT_DEADLINE_SECONDS",
@@ -1093,12 +1250,24 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
         "cleanup_snapshot_attempt_seconds",
     ),
     (
+        "mycelium_live.route._CLEANUP_SNAPSHOT_SLICE_SECONDS",
+        "cleanup_snapshot_slice_seconds",
+    ),
+    (
+        "mycelium_live.route.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS",
+        "peer_cleanup_bound_transport_margin_ms",
+    ),
+    (
         "mycelium_live.route._IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
         "idle_keepalive_probe_deadline_seconds",
     ),
     (
         "mycelium_node.process._LAUNCH_HANDSHAKE_SECONDS",
         "node_launch_handshake_seconds",
+    ),
+    (
+        "physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS",
+        "peer_advertised_maximum_total_cleanup_ms",
     ),
     (
         "mycelium_request_gateway.service.RequestGatewayService."
@@ -1213,20 +1382,21 @@ PENDING_BINDINGS: Final[tuple[tuple[str, str], ...]] = tuple(
 )
 
 #: Records with no named module-level consumer symbol: their value is consumed
-#: as an inline literal or as a payload key, so they are guarded by value-level
-#: tests (canonical producer pin / AST / literal drift) instead of a constant
-#: binding.  Naming those call sites is a follow-up owned by the module that
-#: holds them.  ``peer_advertised_maximum_total_cleanup_ms`` is the packet
-#: wp5-d9 case: the node payload no longer holds a copy - it reads
-#: ``advertised_maximum_total_cleanup_ms`` at construction time - but there is
-#: still no named node-side constant to resolve by dotted path, so the
-#: executed-payload test in ``tests/testbed/test_deadline_registry.py`` is its
-#: guard, together with the canonical producer pin.
+#: as an inline literal, as a payload key, or (for
+#: ``peer_advertised_cleanup_bound_slack_ms``) by this module's own derivation,
+#: so they are guarded by value-level tests (canonical producer pin / AST /
+#: literal drift) instead of a constant binding.  Naming those call sites is a
+#: follow-up owned by the module that holds them.  The a13 lane's named
+#: ``physical_inference_node.MAXIMUM_TOTAL_CLEANUP_MS`` moved
+#: ``peer_advertised_maximum_total_cleanup_ms`` out of this group when merge
+#: a13-resolve bound it; the executed-payload test in
+#: ``tests/testbed/test_deadline_registry.py`` stays its behavioural guard,
+#: together with the canonical producer pin.
 NON_BINDING_DEADLINES: Final[frozenset[str]] = frozenset(
     {
         "gateway_producer_stall_poll_seconds",
         "gateway_sse_disconnect_poll_seconds",
-        "peer_advertised_maximum_total_cleanup_ms",
+        "peer_advertised_cleanup_bound_slack_ms",
         "qualification_max_age_seconds",
         "route_health_probe_deadline_seconds",
     }

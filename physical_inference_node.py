@@ -67,6 +67,30 @@ from physical_sqlite_capacity import SQLiteQualificationCapacityPort
 
 NODE_CONTROL_PROTOCOL = "mycelium.physical_node_control.v1"
 NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
+
+# Declared upper bound on this node's per-request cleanup, published in the
+# health observation's `interruptibility` block.
+#
+# It must fit inside the OWNER's cleanup fanout window, because that window is
+# what the owner actually enforces: the immutable cancellation budget is 2_000 ms
+# and the owner reserves `_CLEANUP_FALLBACK_RESERVE_SECONDS` (= one bounded
+# snapshot attempt, 500 ms) for its receipt-recovery path, leaving 1_500 ms.
+# The previous literal 2_000 ms was structurally unhonourable — no owner could
+# ever wait that long, so a cleanup landing in the top of the declared range
+# could only ever return `command_deadline_exceeded`, leaving
+# `pending.cleanup_receipt` unset and blocking the terminal CAS. The remaining
+# margin below the window covers command delivery plus receipt return.
+#
+# `tests/live/test_cleanup_bound_contract.py` asserts this constant still fits
+# the owner's window, so the two numbers cannot drift apart again.
+#
+# The value itself is the deadline registry's published symbol
+# (``mycelium_deadlines.PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS``, derived as
+# window - transport margin - slack = 1500 - 200 - 100 = 1200 ms) assigned to
+# this name rather than restated: this lane's measured 1200 ms and wp5-d9's
+# derivation are one number with one owner, so the advertisement, the route's
+# admission predicate and the registry cannot disagree.
+MAXIMUM_TOTAL_CLEANUP_MS = mycelium_deadlines.PEER_ADVERTISED_MAXIMUM_TOTAL_CLEANUP_MS
 CLEANUP_CONTROL_FRAME_PREFIX = b"MYCELIUM_CLEANUP_RESPONSE_V1 "
 MAX_COMMAND_BYTES = 4 * 1024 * 1024
 MAXIMUM_PHYSICAL_CLOCK_SKEW_SECONDS = 5.0
@@ -79,6 +103,63 @@ _CANCEL_RECEIPT_POLL_SECONDS = 0.05
 # route can perform exactly one fresh fallback proof without extending the
 # deadline or racing duplicate work for the whole interval.
 _CANCEL_RECEIPT_FALLBACK_RESERVE_SECONDS = 0.5
+# Round-54 measurement need.  Seven physical runs put this node's
+# ``infer_cancel_wait`` at 1.622-1.713 s against a transmitted
+# ``deadline_budget_ms`` of 1499 -- a 91 ms spread, i.e. deadline-shaped rather
+# than work-shaped -- while the transport cancellation itself measures
+# 0.09-2.74 ms on its first attempt (``round54_cancel_roundtrip.py``) and the two
+# retry loops provably return within one 50 ms poll of the moment their
+# predicates hold (``round54_handler_phases.py``).  The unnamed span is therefore
+# the three operations inside ``_apply_generation_fenced_cancellation``:
+# ``runtime.cancel``, the transport fence, and ``router.cancel_local``.  They are
+# timed into a bounded, payload-free append-only diagnostic so the next physical
+# attempt can name the span instead of inferring it.
+#
+# Off unless an operator points the variable at a private path.  The diagnostic is
+# deliberately NOT a new field on a validated command response and NOT a widening
+# of an error contract: it never raises, writes at most 512 bytes per entry, and
+# records no request id, path, task text or credential.
+_CANCEL_PHASE_DIAGNOSTIC_ENV = "MYCELIUM_CANCEL_PHASE_DIAGNOSTIC_LOG"
+_CANCEL_PHASE_DIAGNOSTIC_LINE_BYTES = 512
+
+
+def _cancel_phase_diagnostic(
+    phase: str,
+    elapsed_ms: float,
+    *,
+    call_index: int,
+    code: str = "",
+) -> None:
+    """Append one bounded, payload-free phase line; never raises, never blocks work."""
+
+    try:
+        destination = os.environ.get(_CANCEL_PHASE_DIAGNOSTIC_ENV)
+        if not destination:
+            return
+        line = json.dumps(
+            {
+                "protocol": "mycelium.cancel_phase_diagnostic.v1",
+                "phase": phase,
+                "elapsed_ms": round(float(elapsed_ms), 3),
+                "call_index": int(call_index),
+                "code": str(code)[:96],
+                "thread": threading.current_thread().name[:32],
+            },
+            sort_keys=True,
+        )
+        if len(line.encode("utf-8")) > _CANCEL_PHASE_DIAGNOSTIC_LINE_BYTES:
+            return
+        descriptor = os.open(
+            destination,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            os.write(descriptor, (line + "\n").encode("utf-8"))
+        finally:
+            os.close(descriptor)
+    except BaseException:
+        return
 _COMMAND_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
 )
@@ -238,6 +319,63 @@ class NodeCommandError(RuntimeError):
 def _require(condition: bool, code: str) -> None:
     if not condition:
         raise NodeCommandError(code)
+
+
+_PREFILL_DIAGNOSTIC_CODE = re.compile(r"[a-z][a-z0-9_]{0,60}\Z")
+_PREFILL_DIAGNOSTIC_COUNTERS = (
+    "remote_frames_sent",
+    "remote_frames_received",
+    "router_frames_dispatched",
+    "duplicate_frames",
+)
+
+
+def _emit_prefill_transport_diagnostic(transport: Any) -> None:
+    """Print the transport's own bounded verdict for a stalled prefill hop.
+
+    The wait that raises ``prefill_completion_timeout`` observes only
+    ``transport.fatal_error``.  A hop that fails inside the transport's
+    deferred forward path is recorded there as a scoped, per-path, *non-fatal*
+    event, so that loop cannot see it and the operator is told the generic
+    symptom instead of the real cause.  Emit the transport's local verdict in
+    one fixed, allowlisted form on stderr so the managed worker's bounded
+    diagnostic capture can recover it from the ``native-failure`` record.
+
+    Diagnostics must never change control flow: every lookup is guarded and a
+    failure to report is swallowed, so the raised code stays exactly
+    ``prefill_completion_timeout``.  Only bounded counters and one allowlisted
+    status token are printed -- never addresses, endpoint ids, keys, prompts,
+    payloads or raw exception messages.
+    """
+
+    try:
+        diagnostic = transport.prefill_hop_diagnostic()
+    except BaseException:
+        return
+    if not isinstance(diagnostic, Mapping):
+        return
+    status = diagnostic.get("scoped_failure_code")
+    if status is None:
+        status = "none"
+    if (
+        not isinstance(status, str)
+        or _PREFILL_DIAGNOSTIC_CODE.fullmatch(status) is None
+    ):
+        status = "none"
+    fields = [f"scoped_failure_code={status}"]
+    for name in _PREFILL_DIAGNOSTIC_COUNTERS:
+        value = diagnostic.get(name)
+        if type(value) is not int or value < 0 or value > 10**12:
+            value = 0
+        fields.append(f"{name}={value}")
+    try:
+        print(
+            "MYCELIUM-TRANSPORT-DIAG " + " ".join(fields),
+            file=sys.stderr,
+            flush=True,
+        )
+    except BaseException:
+        pass
 
 
 def _validated_endpoint_secret_file(value: Path | None) -> Path | None:
@@ -915,6 +1053,7 @@ class PhysicalNodeService:
         endpoint_secret_file: Path | None = None,
         requested_decode_mode: str | None = None,
         sidecar_force_relay: bool = False,
+        capacity_root: Path | None = None,
     ) -> None:
         for value, code in (
             (run_id, "invalid_run_id"),
@@ -940,6 +1079,14 @@ class PhysicalNodeService:
         self.node_id = node_id
         self.artifact_root = artifact_root.resolve(strict=True)
         self.socket_root = socket_root
+        if capacity_root is not None:
+            _require(capacity_root.is_absolute()
+                     and capacity_root.resolve(strict=True) == capacity_root
+                     and capacity_root.is_dir()
+                     and capacity_root.stat().st_uid == os.getuid()
+                     and stat.S_IMODE(capacity_root.stat().st_mode) == 0o700,
+                     "invalid_capacity_root")
+        self.capacity_root = socket_root.parent if capacity_root is None else capacity_root
         self.sidecar_binary = sidecar_binary.resolve(strict=False)
         self.sidecar_local_only = sidecar_local_only
         self.sidecar_force_relay = sidecar_force_relay
@@ -948,7 +1095,7 @@ class PhysicalNodeService:
             endpoint_secret_file
         )
         self.requested_decode_mode = requested_decode_mode
-        self.host_id, _boot_id = derive_local_run_scoped_identity(run_id)
+        self.host_id, self.boot_id = derive_local_run_scoped_identity(run_id)
         self.process_id = os.getpid()
         self.state = "NEW"
         self.stop_requested = False
@@ -1599,7 +1746,7 @@ class PhysicalNodeService:
         topology = PublishedTopologyProvider(graph)
         device_provider = PublishedDeviceStateProvider(topology, states)
         capacity = SQLiteQualificationCapacityPort(
-            self.socket_root.parent / f"{self.deployment_id}.capacity.sqlite3",
+            self.capacity_root / f"{self.deployment_id}.capacity.sqlite3",
             topology,
             {node: state.available_kv_bytes for node, state in states.items()},
             clock=self._clock,
@@ -2009,7 +2156,26 @@ class PhysicalNodeService:
             details,
         )
 
-    def _snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _snapshot(
+        self,
+        payload: dict[str, Any],
+        *,
+        allow_blocking_observations: bool = False,
+    ) -> dict[str, Any]:
+        """Project one bounded observation for a command or for cleanup sealing.
+
+        ``allow_blocking_observations`` is internal to the cancellation lifecycle
+        and is deliberately **not** a payload field, so the validated command
+        surface is unchanged.  Round 55 measured the reserved cleanup worker
+        proving this exact subject clean in 1.33 ms (owner) and 1.08 ms (peer)
+        with the blocking probes, and then burning its whole 1499 ms inline
+        budget because the *nonblocking* probes needed a free lock to confirm the
+        same fact.  The worker's own proof must therefore be able to seal its
+        receipt; the route's fallback snapshots keep the nonblocking behaviour
+        exactly as before, and the receipt still requires the same predicates plus
+        the same cancellation-generation control proof.
+        """
+
         _require(
             set(payload)
             in (
@@ -2091,6 +2257,11 @@ class PhysicalNodeService:
                     "_request_cleanup_receipt_counters",
                     {},
                 ).get(cleanup_subject["request_id"])
+                stored_runtime = getattr(
+                    self,
+                    "_request_cleanup_receipt_runtime",
+                    {},
+                ).get(cleanup_subject["request_id"])
             if stored_cleanup is not None:
                 _require(
                     all(
@@ -2111,6 +2282,16 @@ class PhysicalNodeService:
                     details["transport_counters"] = _plain_json(
                         self.transport.counter_snapshot()
                     )
+                # The route reads per-placement work from the *observed* counters
+                # (mycelium_live/route.py:_peer_counters -> _last_snapshots /
+                # _last_health) and maps a missing runtime block to
+                # applied_operation_count = 0.  A sealed-receipt response without
+                # this projection therefore reports zero peer work after every
+                # served request, whatever the peer actually did.  The projection
+                # is co-committed at seal time, so projecting it reacquires
+                # nothing.
+                if isinstance(stored_runtime, Mapping):
+                    details["runtime"] = dict(stored_runtime)
                 return self._signed_result("snapshot", details)
         runtime_observation_complete = True
         runtime_subject_clean: bool | None = None
@@ -2127,11 +2308,10 @@ class PhysicalNodeService:
             nonblocking_snapshot = getattr(
                 self.runtime, "kv_snapshot_nonblocking", None
             )
-            runtime_snapshot = (
-                nonblocking_snapshot()
-                if callable(nonblocking_snapshot)
-                else self.runtime.kv_snapshot()
-            )
+            if allow_blocking_observations or not callable(nonblocking_snapshot):
+                runtime_snapshot = self.runtime.kv_snapshot()
+            else:
+                runtime_snapshot = nonblocking_snapshot()
             if runtime_snapshot is None:
                 runtime_observation_complete = False
                 runtime_snapshot = {
@@ -2158,7 +2338,20 @@ class PhysicalNodeService:
                 "cancellation_cleanup_observation_nonblocking",
                 None,
             )
-            if callable(nonblocking_transport_observation):
+            if allow_blocking_observations and cleanup_subject is not None:
+                # The lifecycle worker owns teardown and has already proven this
+                # exact subject clean, so take the same exact-subject projection
+                # with the blocking probe rather than reporting an incomplete
+                # receipt because a lock happened to be busy.
+                transport_receipt_observation = (
+                    self.transport.counter_snapshot(),
+                    self.transport.cancellation_cleanup_state(
+                        cleanup_subject["request_id"],
+                        cleanup_subject["path_id"],
+                        cleanup_subject["path_attempt"],
+                    ),
+                )
+            elif callable(nonblocking_transport_observation):
                 transport_receipt_observation = nonblocking_transport_observation(
                     cleanup_subject["request_id"],
                     cleanup_subject["path_id"],
@@ -2204,7 +2397,10 @@ class PhysicalNodeService:
                 # deadline registry at payload time, never copied. It must fit
                 # inside the route's cleanup fanout window
                 # (advertised <= route_cleanup_fanout_window_ms), fail closed at
-                # startup qualification, never mid-request.
+                # startup qualification, never mid-request.  The named constant
+                # below is this same registry symbol under the name this module
+                # and tests/live/test_cleanup_bound_contract.py resolve, so
+                # there is still exactly one owner of the number.
                 "maximum_total_cleanup_ms": mycelium_deadlines.advertised_maximum_total_cleanup_ms,
                 "physical_proof_required": True,
                 "backend_candidate": details["runtime"].get("mode") == "stage_local_kv",
@@ -2441,6 +2637,11 @@ class PhysicalNodeService:
                                 "_request_cleanup_receipt_counters",
                                 {},
                             ).pop(oldest_request_id, None)
+                            getattr(
+                                self,
+                                "_request_cleanup_receipt_runtime",
+                                {},
+                            ).pop(oldest_request_id, None)
                         self._request_cleanup_receipts[
                             cleanup_subject["request_id"]
                         ] = receipt
@@ -2461,6 +2662,21 @@ class PhysicalNodeService:
                                 for key, value in transport_counters.items()
                                 if type(value) is int
                             }
+                        observed_runtime = details.get("runtime")
+                        if isinstance(observed_runtime, Mapping):
+                            receipt_runtime = getattr(
+                                self,
+                                "_request_cleanup_receipt_runtime",
+                                None,
+                            )
+                            if receipt_runtime is None:
+                                receipt_runtime = {}
+                                self._request_cleanup_receipt_runtime = (
+                                    receipt_runtime
+                                )
+                            receipt_runtime[cleanup_subject["request_id"]] = (
+                                _plain_json(dict(observed_runtime))
+                            )
                         self._request_controls.pop(cleanup_subject["request_id"], None)
                         self._pending_cancellations.pop(
                             cleanup_subject["request_id"], None
@@ -2802,6 +3018,12 @@ class PhysicalNodeService:
                 raise NodeCommandError(self.transport.fatal_error.code)
             time.sleep(0.01)
             status = self.router.request_status(request_id)
+        if status in {"PREFILL", "LOCKED"}:
+            # The wait above observes only transport.fatal_error, so a hop that
+            # failed in the deferred forward path leaves no visible cause here.
+            # Report the transport's own bounded verdict before raising the
+            # generic symptom.
+            _emit_prefill_transport_diagnostic(self.transport)
         _require(status not in {"PREFILL", "LOCKED"}, "prefill_completion_timeout")
         if getattr(self.runtime, "decode_mode", None) == "stage_local_kv":
             # PrefillChunkCompleted and the first TokenEvent are separately
@@ -3023,6 +3245,17 @@ class PhysicalNodeService:
                     raise NodeCommandError(self.transport.fatal_error.code)
                 time.sleep(0.01)
                 status = self.router.request_status(data["request_id"])
+            if not (
+                len(sink.token_ids) > output_count
+                or status in {"COMPLETED", "CANCELLED", "FAILED"}
+            ):
+                # The wait above observes only transport.fatal_error, exactly like
+                # the prefill wait -- so a token hop that failed in the deferred
+                # forward path leaves no visible cause before the generic raise
+                # below.  Report the transport's own bounded verdict first.  This
+                # is the stage that stalled for the whole native budget in round37
+                # while the owner recorded an opaque reconciliation_required.
+                _emit_prefill_transport_diagnostic(self.transport)
             _require(
                 len(sink.token_ids) > output_count
                 or status in {"COMPLETED", "CANCELLED", "FAILED"},
@@ -3113,8 +3346,29 @@ class PhysicalNodeService:
         # so active MLX/NumPy work exits at its next per-layer checkpoint.
         # Repeating runtime.cancel later through relay release is idempotent.
         runtime_cancel = getattr(getattr(self, "runtime", None), "cancel", None)
+        request_key = str(data["request_id"])
+        call_index = 1
+        try:
+            with self._control_lock:
+                counts = getattr(self, "_cancel_phase_counts", None)
+                if counts is None:
+                    counts = {}
+                    self._cancel_phase_counts = counts
+                call_index = counts.get(request_key, 0) + 1
+                counts[request_key] = call_index
+        except BaseException:
+            call_index = 1
+        call_started = time.monotonic()
+        phase_started = call_started
         if callable(runtime_cancel):
             runtime_cancel(data["path_id"])
+        phase_now = time.monotonic()
+        _cancel_phase_diagnostic(
+            "runtime_marker",
+            (phase_now - phase_started) * 1_000.0,
+            call_index=call_index,
+        )
+        phase_started = phase_now
         controlled_cancellation = PathCancellation(
             request_id=data["request_id"],
             path_id=data["path_id"],
@@ -3140,14 +3394,32 @@ class PhysicalNodeService:
                     cleanup_deadline_monotonic_s=cleanup_deadline_monotonic_s,
                 )
             )
+        phase_now = time.monotonic()
+        _cancel_phase_diagnostic(
+            "transport_fence",
+            (phase_now - phase_started) * 1_000.0,
+            call_index=call_index,
+        )
+        phase_started = phase_now
         cancel_local = getattr(self.router, "cancel_local", None)
         if callable(cancel_local):
             router_cancelled = bool(cancel_local(data["request_id"]))
             cancelled = transport_cancelled or router_cancelled
         else:
             cancelled = bool(self.router.cancel(data["request_id"]))
+        phase_now = time.monotonic()
+        _cancel_phase_diagnostic(
+            "router_cancel_local",
+            (phase_now - phase_started) * 1_000.0,
+            call_index=call_index,
+        )
         if not cancelled and transport is not None:
             transport.send_path_cancellation_if_entry(controlled_cancellation)
+        _cancel_phase_diagnostic(
+            "total",
+            (time.monotonic() - call_started) * 1_000.0,
+            call_index=call_index,
+        )
 
     @staticmethod
     def _cancellation_worker_error_code(error: BaseException) -> str:
@@ -3288,21 +3560,70 @@ class PhysicalNodeService:
                     {
                         "cleanup_subject": cleanup_subject,
                         "receipt_only": True,
-                    }
+                    },
+                    # This worker has already proven the exact subject clean; its
+                    # own sealing must not wait for a nonblocking probe to find a
+                    # free lock (round 55: teardown 1.33 ms, seal 1499 ms).
+                    allow_blocking_observations=True,
                 )
-            except Exception:
+            except Exception as error:
                 # Snapshot validation remains fail closed.  A transient
                 # nonblocking observation can be retried only inside the
                 # immutable owner deadline; the route's independent observer
                 # retains the same authority and diagnostic surface.
                 observation = None
+                _cancel_phase_diagnostic(
+                    "seal_poll_error",
+                    0.0,
+                    call_index=0,
+                    code=(
+                        getattr(error, "code", None)
+                        or type(error).__name__
+                    ),
+                )
             details = (
                 observation.get("details") if isinstance(observation, Mapping) else None
             )
             receipt = (
                 details.get("request_cleanup") if isinstance(details, Mapping) else None
             )
-            if isinstance(receipt, Mapping) and receipt.get("complete") is True:
+            # ``_snapshot`` returns a *signed envelope* in production
+            # (``result.observation.details.request_cleanup``), while the
+            # documented unit doubles flatten it to ``details.request_cleanup``.
+            # Reading only the flattened shape made this loop blind on real
+            # hardware: it observed "no receipt" forever, slept one poll cadence
+            # and ran out the whole inline budget -- measured 2026-09-15 as a
+            # deterministic 1.5 s stall on both nodes (owner handler 1.62-1.71 s
+            # against a 1499 ms budget) even though the receipt was already
+            # committed and complete.  The lifecycle worker therefore reads the
+            # receipt it just caused to be committed, which is exactly what its
+            # caller checks, and which cannot depend on an envelope shape.
+            with self._control_lock:
+                committed = self._request_cleanup_receipts.get(
+                    cleanup_subject["request_id"]
+                )
+            committed_complete = (
+                isinstance(committed, Mapping)
+                and committed.get("complete") is True
+                and all(
+                    committed.get(field) == value
+                    for field, value in cleanup_subject.items()
+                )
+            )
+            _cancel_phase_diagnostic(
+                "seal_poll",
+                0.0,
+                call_index=0,
+                code=(
+                    "committed_complete"
+                    if committed_complete
+                    else "committed_pending"
+                    if isinstance(committed, Mapping)
+                    else "envelope_"
+                    + ("complete" if receipt is None else str(receipt.get("complete")))
+                ),
+            )
+            if committed_complete:
                 return
             remaining = deadline_monotonic_s - time.monotonic()
             if remaining <= 0:
@@ -3686,7 +4007,10 @@ class PhysicalNodeService:
 
     def _hello(self, payload: dict[str, Any]) -> dict[str, Any]:
         _exact_fields(payload, set(), "invalid_hello_fields")
-        return {**self._identity(), "protocol": NODE_CONTROL_PROTOCOL}
+        # Discovery needs both run-scoped identities; do not broaden the signed
+        # event/snapshot identity schemas or expose the underlying host material.
+        return {**self._identity(), "protocol": NODE_CONTROL_PROTOCOL,
+                "boot_id": self.boot_id}
 
 
 @contextmanager
@@ -3794,6 +4118,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--node-id", required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--socket-root", type=Path, required=True)
+    parser.add_argument("--capacity-root", type=Path)
     parser.add_argument("--sidecar-binary", type=Path, required=True)
     network_mode = parser.add_mutually_exclusive_group()
     network_mode.add_argument("--sidecar-local-only", action="store_true")
@@ -3816,6 +4141,7 @@ def main() -> int:
             node_id=args.node_id,
             artifact_root=args.artifact_root,
             socket_root=args.socket_root,
+            capacity_root=args.capacity_root,
             sidecar_binary=args.sidecar_binary,
             sidecar_local_only=args.sidecar_local_only,
             sidecar_force_relay=args.sidecar_force_relay,

@@ -172,7 +172,7 @@ def test_cancel_wait_keeps_generation_fenced_teardown_in_reserved_worker() -> No
         }
 
     service._infer_cancel = cancel
-    service._snapshot = lambda payload: {
+    service._snapshot = lambda payload, **_kwargs: {
         "event": "snapshot",
         "details": {
             "request_cleanup": {
@@ -357,7 +357,7 @@ def test_cancel_wait_budget_starts_before_inline_teardown(monkeypatch) -> None:
         }
 
     service._infer_cancel = cancel
-    service._snapshot = lambda payload: {
+    service._snapshot = lambda payload, **_kwargs: {
         "event": "snapshot",
         "details": {
             "request_cleanup": {
@@ -445,7 +445,14 @@ def test_cancel_wait_retains_receipt_seal_window_after_contended_teardown(
             },
         }
 
-    def snapshot(_payload):
+    def snapshot(payload, *, allow_blocking_observations: bool = False):
+        # Round 55: the lifecycle worker's own seal now asks for a blocking
+        # observation because it has already proven this subject clean.  The
+        # retry contract asserted below is unchanged: the first observation is
+        # incomplete, so the worker must keep enough of the transmitted budget to
+        # poll once more.
+        assert allow_blocking_observations is True
+        del payload
         nonlocal snapshot_count
         snapshot_count += 1
         if snapshot_count == 1:
@@ -496,7 +503,7 @@ def test_cancel_wait_does_not_consume_parent_deadline_with_inline_poll(
         "event": "inference_cancelled",
         "details": {"status": "CANCELLING", "cleanup_pending": True},
     }
-    service._snapshot = lambda payload: {
+    service._snapshot = lambda payload, **_kwargs: {
         "event": "snapshot",
         "details": {
             "request_cleanup": {

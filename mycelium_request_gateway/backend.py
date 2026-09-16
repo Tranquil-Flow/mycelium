@@ -13,7 +13,7 @@ from mycelium_router.contracts import ExecutionGraph, RequestContext
 from mycelium_router.serialization import execution_graph_to_dict
 from mycelium_m16_runtime import M16AdmissionError
 
-from .contracts import AdmissionError, InferenceSubmission, qualification_binding
+from .contracts import AdmissionError, InferenceSubmission, TokenEmitter, qualification_binding
 from .qualification import QualificationSource
 
 
@@ -64,7 +64,7 @@ class _AdmissionDecision:
 
 
 class _GatewayTokenSink:
-    def __init__(self, codec: PromptCodec, emit_token: Callable[[int, str], None]) -> None:
+    def __init__(self, codec: PromptCodec, emit_token: TokenEmitter) -> None:
         self._codec = codec
         self._emit_token = emit_token
 
@@ -81,7 +81,7 @@ class _GatewayTokenSink:
         text = self._codec.decode_token(token_id)
         if not isinstance(text, str):
             raise AdmissionError("invalid_decoded_token")
-        self._emit_token(token_index, text)
+        self._emit_token(token_index, text, token_id)
 
 
 class RouterSessionBackend:
@@ -137,7 +137,7 @@ class RouterSessionBackend:
         self,
         request_id: str,
         submission: InferenceSubmission,
-        emit_token: Callable[[int, str], None],
+        emit_token: TokenEmitter,
         is_cancelled: Callable[[], bool],
     ) -> str:
         with self._lock:
@@ -174,7 +174,7 @@ class RouterSessionBackend:
         self,
         request_id: str,
         submission: InferenceSubmission,
-        emit_token: Callable[[int, str], None],
+        emit_token: TokenEmitter,
         is_cancelled: Callable[[], bool],
     ) -> str:
         if is_cancelled() or self._is_cancelled(request_id):

@@ -9,11 +9,13 @@ export const LIVE_ROUTE_STATUS_PROTOCOL = 'mycelium.live_route_status.v1' as con
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:~\/-]{0,255}$/;
 const MAX_ITEMS = 256;
-// wp5-d9: the peer's advertised cleanup bound, as the canonical live route
-// status fixture carries it (a peer may never advertise more cleanup time than
-// the route's 1_500 ms cleanup fanout window). One spot, so the validator and
-// the normalized projection cannot disagree.
-const PEER_MAXIMUM_TOTAL_CLEANUP_MS = 1_500;
+// wp5-d9 + a13-resolve: the peer's advertised cleanup bound, as the canonical
+// live route status fixture carries it (a peer may never advertise more cleanup
+// time than the route's 1_500 ms cleanup fanout window, and the route's own
+// admission predicate admits at most window - 200 ms transport margin, so the
+// registry derives 1_200 ms). One spot, so the validator and the normalized
+// projection cannot disagree.
+const PEER_MAXIMUM_TOTAL_CLEANUP_MS = 1_200;
 
 export interface LiveRouteCounters {
   readonly frames_sent: number;

@@ -125,6 +125,12 @@ def test_main_passes_exact_endpoint_secret_path_to_service(
         node_id="node-a",
         artifact_root=tmp_path,
         socket_root=tmp_path / "socket",
+        # `_parse_args` gained `--capacity-root` (optional, default None) in the
+        # a13 import and `main()` forwards it, so this hand-built Namespace
+        # mirrors the omitted-flag default. Without it the test raised
+        # AttributeError on the imported node code instead of exercising the
+        # exact endpoint-secret path it exists to pin.
+        capacity_root=None,
         sidecar_binary=Path("/bin/false"),
         sidecar_local_only=True,
         sidecar_force_relay=False,

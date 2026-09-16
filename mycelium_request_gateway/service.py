@@ -15,6 +15,7 @@ from .contracts import (
     InferenceSubmission,
     REQUEST_EVENT_PROTOCOL,
     REQUEST_EVENT_PROTOCOL_V2,
+    TokenEmitter,
     REQUEST_GATEWAY_PROTOCOL_V2,
     StreamEvent,
     is_valid_request_id,
@@ -46,7 +47,7 @@ class InferenceBackend(Protocol):
         self,
         request_id: str,
         submission: InferenceSubmission,
-        emit_token: Callable[[int, str], None],
+        emit_token: TokenEmitter,
         is_cancelled: Callable[[], bool],
     ) -> str: ...
 
@@ -482,10 +483,11 @@ class RequestGatewayService:
             outcome = self._backend.run(
                 session.request_id,
                 submission,
-                lambda token_index, token_text: self._accept_token(
+                lambda token_index, token_text, token_id=None: self._accept_token(
                     session,
                     token_index,
                     token_text,
+                    token_id,
                 ),
                 session.stop.is_set,
             )
@@ -546,13 +548,16 @@ class RequestGatewayService:
                 session.condition.notify_all()
             self._admission_slots.release()
 
-    def _accept_token(self, session: _Session, token_index: int, token_text: str) -> None:
+    def _accept_token(
+        self, session: _Session, token_index: int, token_text: str, token_id: int | None = None
+    ) -> None:
         if (
             not isinstance(token_index, int)
             or isinstance(token_index, bool)
             or token_index < 0
             or not isinstance(token_text, str)
             or len(token_text) > _MAX_BACKEND_TOKEN_TEXT_BYTES
+            or (token_id is not None and (type(token_id) is not int or token_id < 0))
         ):
             raise AdmissionError("invalid_backend_token")
         try:
@@ -561,7 +566,10 @@ class RequestGatewayService:
             raise AdmissionError("invalid_backend_token") from exc
         if len(token_bytes) > _MAX_BACKEND_TOKEN_TEXT_BYTES:
             raise AdmissionError("invalid_backend_token")
-        token_digest = hashlib.sha256(token_bytes).digest()
+        # Equal decoded text need not mean the same token. Bind replay to both.
+        token_digest = hashlib.sha256(
+            (str(token_id) + ":").encode("ascii") + token_bytes
+        ).digest()
         del token_bytes
 
         if token_index == 0:
@@ -602,6 +610,7 @@ class RequestGatewayService:
                         kind="token",
                         token_index=token_index,
                         text=token_text,
+                        token_id=token_id if session.event_protocol == REQUEST_EVENT_PROTOCOL_V2 else None,
                         protocol=session.event_protocol,
                     )
                     self._append_event_locked(session, event)

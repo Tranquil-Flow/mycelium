@@ -102,7 +102,11 @@ def test_active_member_revocation_fences_and_closes_the_physical_route(
     route._graph = SimpleNamespace(
         stages=(SimpleNamespace(placements=(SimpleNamespace(node_id="node-a"),)),)
     )
-    route._plan = {"deployment_id": "deployment-a"}
+    # `_command_id` mints the durable command identity from
+    # ``(run_id, deployment_id, node, operation, sequence)`` after the a13
+    # import, and ``close()`` swallows a send failure - so a fixture without
+    # ``run_id`` silently loses the "stop" command instead of asserting it.
+    route._plan = {"run_id": "run-a", "deployment_id": "deployment-a"}
     route._sessions = {"node-a": Session()}
     route._open = True
     route._closed = False

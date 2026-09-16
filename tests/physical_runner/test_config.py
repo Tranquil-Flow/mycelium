@@ -39,6 +39,25 @@ def test_valid_plan_parses_into_a_frozen_config(workspace: Path) -> None:
         config.run_id = "other"  # type: ignore[misc]
 
 
+def test_managed_plan_is_explicit_and_has_no_ssh_authority(workspace: Path) -> None:
+    payload = _plan(workspace)
+    for peer in payload["controller"]["peers"]:
+        peer.update(process_transport="managed_https", ssh_target=None, ssh_identity_file=None)
+    parsed = parse_operator_plan(payload)
+    assert all(peer["process_transport"] == "managed_https" for peer in parsed.controller["peers"])
+    payload["controller"]["peers"][1]["ssh_target"] = "user@host.invalid"
+    with pytest.raises(RunnerError):
+        parse_operator_plan(payload)
+
+
+def test_mixed_managed_and_legacy_plan_is_rejected(workspace: Path) -> None:
+    payload = _plan(workspace)
+    payload["controller"]["peers"][1].update(
+        process_transport="managed_https", ssh_target=None, ssh_identity_file=None)
+    with pytest.raises(RunnerError):
+        parse_operator_plan(payload)
+
+
 def test_callable_verifier_values_are_rejected(workspace: Path) -> None:
     payload = _plan(workspace)
     payload["verification_keys"] = {

@@ -4,13 +4,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from mycelium_qualification.contracts import (
     RouteQualificationV1,
     route_qualification_to_dict,
 )
 from mycelium_qualification.evidence import canonical_json_bytes, is_sha256_ref, sha256_bytes
+
+class TokenEmitter(Protocol):
+    def __call__(self, token_index: int, token_text: str, token_id: int | None = None) -> None: ...
+
 
 REQUEST_GATEWAY_PROTOCOL = "mycelium.request_gateway.v1"
 REQUEST_GATEWAY_PROTOCOL_V2 = "mycelium.request_gateway.v2"
@@ -276,6 +280,7 @@ class StreamEvent:
     phase: str | None = None
     publisher_generation: int = 0
     protocol: str = REQUEST_EVENT_PROTOCOL
+    token_id: int | None = None
 
     def __post_init__(self) -> None:
         _require(
@@ -299,6 +304,12 @@ class StreamEvent:
         if self.protocol == REQUEST_EVENT_PROTOCOL_V2:
             allowed_kinds.add("lifecycle")
         _require(self.kind in allowed_kinds, "invalid_stream_event")
+        if self.token_id is not None:
+            _require(
+                self.protocol == REQUEST_EVENT_PROTOCOL_V2 and self.kind == "token"
+                and type(self.token_id) is int and self.token_id >= 0,
+                "invalid_stream_event",
+            )
         if self.kind == "token":
             _require(
                 isinstance(self.token_index, int)
@@ -357,6 +368,8 @@ class StreamEvent:
         if self.kind == "token":
             document["token_index"] = self.token_index
             document["text"] = self.text
+            if self.token_id is not None:
+                document["token_id"] = self.token_id
         elif self.kind == "failed":
             document["code"] = self.code
         elif self.kind == "lifecycle":
@@ -366,7 +379,7 @@ class StreamEvent:
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> "StreamEvent":
         _require(isinstance(document, Mapping), "invalid_stream_event")
-        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "text", "code", "phase", "publisher_generation"}
+        allowed = {"protocol", "request_id", "sequence", "type", "token_index", "token_id", "text", "code", "phase", "publisher_generation"}
         _require(set(document).issubset(allowed), "invalid_stream_event")
         _require(
             document.get("protocol") in {REQUEST_EVENT_PROTOCOL, REQUEST_EVENT_PROTOCOL_V2},
@@ -378,6 +391,13 @@ class StreamEvent:
         required = {"protocol", "request_id", "sequence", "type", "publisher_generation"}
         if kind == "token":
             required.update({"token_index", "text"})
+            if "token_id" in document:
+                _require(
+                    document["protocol"] == REQUEST_EVENT_PROTOCOL_V2
+                    and type(document["token_id"]) is int and document["token_id"] >= 0,
+                    "invalid_stream_event",
+                )
+                required.add("token_id")
         elif kind == "failed":
             required.add("code")
         elif kind == "lifecycle":
@@ -388,6 +408,7 @@ class StreamEvent:
             sequence=document["sequence"],
             kind=kind,
             token_index=document.get("token_index"),
+            token_id=document.get("token_id"),
             text=document.get("text"),
             code=document.get("code"),
             phase=document.get("phase"),

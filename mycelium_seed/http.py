@@ -14,7 +14,7 @@ import socket
 import threading
 import time
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -1004,8 +1004,10 @@ class SeedHTTPClient:
 
         return self._request(method, path, body)
 
-    def identity(self, *, now: float) -> dict[str, Any]:
+    def identity(self, *, now: float | Callable[[], float]) -> dict[str, Any]:
         envelope = self._request("GET", "/seed/identity")
+        # Live callers sample their own clock after receiving the response.
+        now = now() if callable(now) else now
         return self._verify_seed_envelope(
             envelope,
             expected_protocol=SEED_IDENTITY_PROTOCOL,
@@ -1048,7 +1050,7 @@ class SeedHTTPClient:
         self,
         envelope: Mapping[str, Any],
         *,
-        now: float,
+        now: float | Callable[[], float],
     ) -> dict[str, Any]:
         message = envelope.get("message")
         if not isinstance(message, Mapping):
@@ -1064,6 +1066,7 @@ class SeedHTTPClient:
                 "envelope": dict(envelope),
             },
         )
+        now = now() if callable(now) else now
         if message.get("protocol") == HEARTBEAT_PROTOCOL:
             try:
                 response_record = response.get("verification_key")

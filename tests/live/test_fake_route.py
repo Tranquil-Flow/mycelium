@@ -273,7 +273,8 @@ def test_single_physical_route_publishes_one_honest_qualified_model(monkeypatch)
             route_ready=True,
             issued_at_unix_ms=1234,
             qualification_id="sha256:" + "b" * 64,
-        )
+        ),
+        quantization="int8-weight-only",
     )
 
     status = route.registry_status()

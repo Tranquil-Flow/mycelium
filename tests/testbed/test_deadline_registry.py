@@ -6,10 +6,14 @@ Covers (PLAN 5.2 item 1):
   2000 ms, snapshot attempt / fallback reserve 500 ms, total budget 2000 ms ->
   route fanout window 1500 ms) must be reported as exactly
   ``peer_advertised_cleanup_bound_exceeds_route_fanout_window``;
-* the **wp5-d9 closure** of that defect: the shipped advertised bound is the
-  route's fanout window (1500 ms), ``check_composition()`` reports nothing, the
-  node payload reads the registry symbol at construction time (no copy), and
-  the canonical fixture/producer carry the same registry value;
+* the **wp5-d9 closure** of that defect, **derivation corrected by merge
+  a13-resolve**: the shipped advertised bound is ``window - transport margin -
+  slack`` (2_000 - 500 = 1_500 ms window, - 200 ms margin = 1_300 ms admitted,
+  - 100 ms slack = 1_200 ms advertised), ``check_composition()`` reports
+  nothing, the shipped advertisement is admitted by the route's own
+  ``admit_peer_cleanup_bound`` (the node must not refuse itself), the node
+  payload reads the registry symbol at construction time (no copy), and the
+  canonical fixture/producer carry the same registry value;
 * the **wp5-bind-residual closure** of the remaining pending contract-pinned
   bindings: every consumer in ``PENDING_CONTRACT_PINNED_BINDINGS`` is assigned
   from its registry symbol (route.py's other cleanup constants,
@@ -45,9 +49,12 @@ import mycelium_deadlines as deadlines
 ROOT = Path(__file__).resolve().parents[2]
 
 #: The violation set shipped today: none. The round-50 defect (PLAN D9) was
-#: closed by packet wp5-d9 - the node advertises the route's fanout window
-#: (1500 ms = 2000 ms budget - 500 ms fallback reserve) instead of the shipped
-#: 2000 ms literal. Any violation appearing here again is a regression.
+#: closed by packet wp5-d9, and its derivation corrected by merge a13-resolve:
+#: the node advertises the admitted maximum less one slack (1200 ms = 1500 ms
+#: window - 200 ms transport margin - 100 ms slack) instead of the shipped
+#: 2000 ms literal, and advertising the whole 1500 ms window would make the
+#: route's own admission predicate refuse the node at startup. Any violation
+#: appearing here again is a regression.
 PINNED_SHIPPED_VIOLATED_CODES: frozenset[str] = frozenset()
 
 #: Historical literals as they shipped, transcribed by hand from the consumer
@@ -62,11 +69,23 @@ HISTORICAL_LITERALS: dict[str, float | int] = {
     "cleanup_reconciliation_horizon_seconds": 60.0,
     "cleanup_reconciliation_workers": 4,
     "idle_keepalive_probe_deadline_seconds": 0.5,
-    # One value corrected on purpose (packet wp5-d9): the shipped literal was
-    # 2_000 ms and exceeded the 1_500 ms route fanout window (the round-50
-    # defect). The corrected value is the window itself - the maximum the
-    # composition admits - and the registry derives it, so it cannot drift.
-    "peer_advertised_maximum_total_cleanup_ms": 1_500,
+    # One value corrected on purpose (packet wp5-d9, derivation corrected by
+    # merge a13-resolve): the shipped literal was 2_000 ms and exceeded the
+    # 1_500 ms route fanout window (the round-50 defect); the window itself is
+    # still above the 1_300 ms the route's admission predicate admits, so the
+    # corrected value is window - transport margin - slack = 1_200 ms, derived
+    # here so it cannot drift.
+    "peer_advertised_maximum_total_cleanup_ms": 1_200,
+    # a13-resolve additions: the a13 lane's MEASURED cleanups, registered so
+    # the imported lane carries no second copy of a number this registry owns.
+    # The slice covers a real relayed snapshot round trip (0.875-1.066 s
+    # measured, and the previous 0.5 s slice expired unclaimed); the margin is
+    # command delivery plus receipt return, the part of the window that is
+    # transport and not cleanup; the slack is the headroom the advertised bound
+    # keeps below the predicate's admitted maximum.
+    "cleanup_snapshot_slice_seconds": 1.1,
+    "peer_cleanup_bound_transport_margin_ms": 200,
+    "peer_advertised_cleanup_bound_slack_ms": 100,
     "gateway_sse_disconnect_poll_seconds": 0.1,
     "gateway_producer_stall_poll_seconds": 0.05,
     "route_health_probe_deadline_seconds": 0.5,
@@ -110,14 +129,18 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
     ),
     # wp5-d9: the two constants that form the route's cleanup fanout window.
     # wp5-bind-residual: the route's remaining cleanup / keepalive constants.
+    # a13-resolve: the a13 lane's measured snapshot slice and peer-bound
+    # transport margin, re-bound from route-local literals to the registry.
     "mycelium_live/route.py": (
         "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
         "_CLEANUP_RECEIPT_POLL_SECONDS",
         "_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+        "_CLEANUP_SNAPSHOT_SLICE_SECONDS",
         "_CLEANUP_FALLBACK_RESERVE_SECONDS",
         "_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
         "_CLEANUP_RECONCILIATION_HORIZON_SECONDS",
         "_CLEANUP_RECONCILIATION_WORKERS",
+        "PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS",
     ),
     # wp5-bind-residual: the stage-pack authority TTL bounds.
     "mycelium_live/local_preparer.py": (
@@ -132,6 +155,9 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
         "RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
     ),
     "mycelium_node/process.py": ("_LAUNCH_HANDSHAKE_SECONDS",),
+    # a13-resolve: the a13 lane's NAMED cleanup bound, assigned from the same
+    # registry symbol the node payload below reads.
+    "physical_inference_node.py": ("MAXIMUM_TOTAL_CLEANUP_MS",),
 }
 
 #: Packet wp5-bind-residual: the consumers that were listed in
@@ -146,6 +172,16 @@ RESIDUAL_ANTI_DRIFT_CONSUMERS: tuple[tuple[str, str, str], ...] = (
         "mycelium_live/route.py",
         "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
         "idle_keepalive_probe_deadline_seconds",
+    ),
+    (
+        "mycelium_live/route.py",
+        "_CLEANUP_SNAPSHOT_SLICE_SECONDS",
+        "cleanup_snapshot_slice_seconds",
+    ),
+    (
+        "mycelium_live/route.py",
+        "PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS",
+        "peer_cleanup_bound_transport_margin_ms",
     ),
     (
         "mycelium_live/route.py",
@@ -191,6 +227,11 @@ RESIDUAL_ANTI_DRIFT_CONSUMERS: tuple[tuple[str, str, str], ...] = (
         "mycelium_request_gateway/service.py",
         "RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
         "gateway_session_silent_subscriber_stall_seconds",
+    ),
+    (
+        "physical_inference_node.py",
+        "MAXIMUM_TOTAL_CLEANUP_MS",
+        "peer_advertised_maximum_total_cleanup_ms",
     ),
 )
 
@@ -296,7 +337,7 @@ def test_shipped_composition_violation_set_is_pinned() -> None:
     assert shipped == []
 
     # Restate the shipped composition in numbers so the pin is self-evident.
-    assert deadlines.advertised_maximum_total_cleanup_ms == 1_500
+    assert deadlines.advertised_maximum_total_cleanup_ms == 1_200
     assert deadlines.route_cleanup_fanout_window_ms == 1_500
     assert (
         deadlines.advertised_maximum_total_cleanup_ms
@@ -383,9 +424,17 @@ def test_derived_quantities_are_the_published_symbols() -> None:
     assert deadlines.route_cleanup_fanout_window_seconds == 1.5
     assert deadlines.route_cleanup_fanout_window_ms == 1_500
     # wp5-d9: the advertised bound is derived from the window, not a literal.
-    assert deadlines.advertised_maximum_total_cleanup_ms == 1_500
+    assert deadlines.advertised_maximum_total_cleanup_ms == 1_200
     assert deadlines.advertised_maximum_total_cleanup_ms == (
         deadlines.derive_advertised_maximum_total_cleanup_ms()
+    )
+    # a13-resolve: the derivation keeps the advertised bound inside the admitted
+    # maximum the route's admission predicate applies (window - margin), with
+    # one explicit slack on top.
+    assert deadlines.advertised_maximum_total_cleanup_ms == (
+        deadlines.route_cleanup_fanout_window_ms
+        - deadlines.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+        - deadlines.PEER_ADVERTISED_CLEANUP_BOUND_SLACK_MS
     )
     assert deadlines.derive_route_cleanup_fanout_window_seconds() == (
         deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
@@ -407,6 +456,17 @@ def test_derived_quantities_are_the_published_symbols() -> None:
     with pytest.raises(ValueError):
         deadlines.derive_advertised_maximum_total_cleanup_ms(
             fanout_window_ms="1500",  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError):
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            fanout_window_ms=1_500,
+            transport_margin_ms=-1,
+        )
+    with pytest.raises(ValueError):
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            fanout_window_ms=200,
+            transport_margin_ms=200,
+            slack_ms=100,
         )
 
 
@@ -680,7 +740,7 @@ def test_advertised_bound_is_the_registry_value_and_matches_the_canonical_produc
         r'"maximum_total_cleanup_ms":\s*([A-Za-z_][A-Za-z0-9_.]*)', producer
     )
     assert pinned == ["advertised_maximum_total_cleanup_ms"], pinned
-    assert deadlines.advertised_maximum_total_cleanup_ms == 1_500
+    assert deadlines.advertised_maximum_total_cleanup_ms == 1_200
 
 
 def test_registry_only_inline_literals_still_hold_their_registry_values() -> None:
@@ -826,9 +886,11 @@ def test_advertised_cleanup_bound_fits_inside_the_route_fanout_window() -> None:
     advertised = deadlines.advertised_maximum_total_cleanup_ms
     window = deadlines.route_cleanup_fanout_window_ms
     assert advertised <= window, f"advertised {advertised} ms > window {window} ms"
-    # The D9 composition: 2.0 s budget - 0.5 s fallback reserve = 1.5 s window;
-    # the advertised bound is the window, the largest admissible value.
-    assert advertised == window == 1_500
+    # The D9 composition: 2.0 s budget - 0.5 s fallback reserve = 1.5 s window,
+    # and the advertised bound is the admitted maximum less one slack
+    # (a13-resolve): 1_500 - 200 - 100 = 1_200 ms.
+    assert advertised == 1_200
+    assert window == 1_500
     assert (
         deadlines.check_peer_advertised_cleanup_bound(
             advertised_cleanup_ms=advertised,
@@ -837,6 +899,36 @@ def test_advertised_cleanup_bound_fits_inside_the_route_fanout_window() -> None:
         is None
     )
     assert deadlines.check_composition() == []
+
+
+def test_shipped_advertised_bound_is_admitted_by_the_routes_own_predicate() -> None:
+    """Merge a13-resolve: the shipped node must not refuse its own advertisement.
+
+    The a13 lane's route-side predicate
+    (``mycelium_live.route.admit_peer_cleanup_bound``) refuses any advertised
+    bound above ``window - transport margin``; the registry derives the shipped
+    bound as ``window - margin - slack``, so the shipped advertisement is
+    strictly admissible (1_200 ms <= 1_300 ms admitted).  Both sides of the
+    comparison read the same registry records, so the predicate and the
+    advertisement cannot drift apart - and if either number moves alone, this
+    test fails instead of the node refusing itself at startup.
+    """
+
+    route = importlib.import_module("mycelium_live.route")
+    advertised = deadlines.advertised_maximum_total_cleanup_ms
+    assert route.admit_peer_cleanup_bound(advertised, node_id="self") == advertised
+    assert advertised <= (
+        deadlines.route_cleanup_fanout_window_ms
+        - deadlines.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+    )
+    # And the route's own bound constants are the registry's records, so the
+    # predicate cannot be reading a second copy of the margin or the reserve.
+    assert route.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS == (
+        deadlines.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+    )
+    assert route._CLEANUP_FALLBACK_RESERVE_SECONDS == (
+        deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS
+    )
 
 
 def test_node_payload_reads_the_registry_symbol_and_follows_a_registry_mutation(
@@ -863,14 +955,24 @@ def test_advertised_bound_is_derived_from_the_window_and_pinned_in_the_canonical
     )
     assert (
         deadlines.derive_advertised_maximum_total_cleanup_ms(fanout_window_ms=1_750)
-        == 1_750
+        == 1_450
     )
     assert (
         deadlines.derive_advertised_maximum_total_cleanup_ms(
             budget_seconds=3.0,
             fallback_reserve_seconds=0.5,
         )
-        == 2_500
+        == 2_200
+    )
+    # The window itself is the largest value only when nothing is held back for
+    # transport: the three terms stay separable.
+    assert (
+        deadlines.derive_advertised_maximum_total_cleanup_ms(
+            fanout_window_ms=1_500,
+            transport_margin_ms=0,
+            slack_ms=0,
+        )
+        == 1_500
     )
 
     fixture = json.loads(
