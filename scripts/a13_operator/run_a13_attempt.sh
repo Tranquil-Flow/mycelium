@@ -10,10 +10,25 @@
 # still write a fresh log, so the label can be set independently of the preview tag.
 # This driver REFUSES to run when the attempt log already exists (exit 4): re-running
 # the same version would truncate the earlier round's only copy of the chain log.
+# It also REFUSES to run outside the detached supervisor (exit 5) — see the guard below.
 # Usage: run_a13_attempt.sh <version>     e.g. run_a13_attempt.sh 34
 set -o pipefail
 cd "$(dirname "$0")/../.." || exit 1
 REPO="$(pwd)"
+# A physical round must own its own session. On 2026-09-16 (attempt 63r1) this driver ran as a
+# background child of an interactive chat session; when that session was torn down (provider
+# exhaustion -> context length exceeded -> interrupt) SIGTERM took the round's daemons with it
+# and the attempt was lost mid-compile. Post-mortem: runs/wp8-02-useful-two-mac/ERRATA-1.md.
+# The supported entry point (which detaches: macOS has no setsid(1), so it uses
+# start_new_session=True) is:
+#   python3 -B scripts/a13_operator/round15_supervisor.py <version>
+# A13_ALLOW_ATTACHED=1 is the documented escape hatch for a deliberate tooling-only retry.
+if [ "${A13_ROUND_SUPERVISED:-0}" != "1" ] && [ "${A13_ALLOW_ATTACHED:-0}" != "1" ]; then
+  echo "ROUND_NOT_SUPERVISED pid=$$ — refusing to spend a physical attempt outside the detached" >&2
+  echo "supervisor: an interactive session's teardown would SIGTERM the round (63r1, ERRATA-1)." >&2
+  echo "Run: python3 -B scripts/a13_operator/round15_supervisor.py <version>   (or A13_ALLOW_ATTACHED=1)" >&2
+  exit 5
+fi
 VERSION="${1:?usage: run_a13_attempt.sh <version>}"
 export A13_TARGET_PREVIEW="preview${VERSION}"
 export A13_RPC_ROUND="rpc-round${VERSION}"

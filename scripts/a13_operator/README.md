@@ -39,6 +39,8 @@ de-laning edits listed in the ledger below, and nothing more.
 | `A13_ROTATE_RELAY` | kept as-is | `1` → rotate the relay origin during bootstrap (else the already-published origin is reused) |
 | `A13_LOG_LABEL` | kept as-is | Attempt-log label, independent of the preview tag (tooling-only retries on the same preview) |
 | `A13_PYTHON` | optional | Interpreter for the chain driver · default `python3` |
+| `A13_OWNER_DAEMON_LOG` / `A13_TARGET_DAEMON_LOG` | optional | That app's daemon log. Quoted as evidence inside `surface_lost:…:daemon=…`, and set by `round15_supervisor.py` for its own runs · default unset |
+| `A13_ROUND_SUPERVISED` / `A13_ALLOW_ATTACHED` | optional | The driver's detachment guard: `run_a13_attempt.sh` refuses to spend a physical attempt unless `A13_ROUND_SUPERVISED=1` (set by `round15_supervisor.py`); `A13_ALLOW_ATTACHED=1` is the explicit escape hatch for a deliberate tooling-only run · default `0` |
 | `MYCELIUM_CANCEL_PHASE_DIAGNOSTIC_LOG` | kept as-is | Passed to the **remote** node only, via the `env …` prefix in `packaged_target_daemon.py` |
 
 A missing **required** variable fails closed with
@@ -67,6 +69,9 @@ version-independent in shape.
 | 4 · observe qualification | `round14_stream.py` (reads `/api/v1/bootstrap` + `/api/v1/qualification/current` through the real gateway validators, asserts `route_ready` + `evidence_class == physical_qualification`) |
 | 5 · submit the frozen request | `round14_stream.py` (`InferenceSubmission('The capital of Germany is', max_new_tokens=8)`, SSE continuity validation, exactly one `completed` terminal, `token_events > 0`) |
 | 6 · stop cleanly | `round15_quit.py` (`/api/quit` on the target, then the owner) |
+| 0 · **the round itself (mandatory entry point)** | `round15_supervisor.py` — detaches into its own session, starts both daemons, waits for **both control surfaces by name**, runs the chain, then always quits both apps and sweeps both Macs. The driver refuses to spend a physical attempt from anywhere else (exit 5) |
+| any step · control-surface liveness | `round14_surface.py` — `require_local` / `require_remote` raise the named `surface_lost:<label>:<state>:daemon=<evidence>`; `round14_rpc.py` calls them on every RPC, so a dead app can no longer be reported as a compile problem |
+| after any round · strays on BOTH Macs | `round15_strays.py` — each root's control-surface state + `resume_ready` + strays on both Macs (a daemon behind `ssh` outlives the local ssh client) |
 | transport for every step | `round14_rpc.py` (owner RPC in-process via `app_rpc.py`; laptop RPC over the canonical `ssh`/`scp` pattern) |
 
 Per-round (private) evidence lands in `A13_OWNER_ROOT/<A13_RPC_ROUND>/` — never in this
@@ -76,6 +81,10 @@ The chain driver refuses to start when `round<label>-attempt.log` already exists
 (exit 4) — re-running the same version would truncate the earlier round's only log
 copy. Chain exit codes are unchanged: `1` bootstrap_compile, `2` start_and_activate,
 `3` stream, and `CHAIN_COMPLETE` is printed only on a full chain.
+
+From 2026-09-16 the driver **also refuses to run outside the detached supervisor**
+(`exit 5`, `ROUND_NOT_SUPERVISED`) unless `A13_ALLOW_ATTACHED=1` is set deliberately —
+see "Detached rounds are mandatory" below.
 
 The build + packaged-smoke wrapper (`build_preview_and_smoke.py`) is **not** part of
 this tracked set: it builds from the owner Mac's `.venv` and its dependencies
@@ -97,6 +106,8 @@ Byte-identical under every other character (each diff saved in the run evidence)
 | `round15_status.py` | imports `REMOTE_HOST` from `round14_rpc` and uses it in `_remote_control_present` instead of the literal. Everything else unchanged (including the `/tmp/round15-status.json` write). |
 | `run_a13_attempt.sh` | `cd "$(dirname "$0")/../.."`; interpreter `${A13_PYTHON:-python3}`; log dir `${A13_EVIDENCE_DIR:-<repo>/outputs/a13-macos-evidence}`; **refuses to run when the attempt log exists** (exit 4); chain paths point at `scripts/a13_operator/…`. Exit codes 1/2/3 and the `CHAIN_COMPLETE` line unchanged. |
 | `app_rpc.py`, `round14_start_and_activate.py`, `round14_stream.py`, `packaged_app_daemon.py`, `round15_quit.py` | **unchanged, byte-identical to the lane source.** `round14_stream.py` keeps `Path(__file__).resolve().parents[2]` — from `scripts/a13_operator/` that still resolves to the repo root, which is what it inserts on `sys.path`. |
+| `round14_rpc.py` (second edit, 2026-09-16) | Also carries the control-surface contract: `owner()` calls `require_local(OWNER)`; `target()` probes `require_remote(REMOTE, REMOTE_HOST)` once per process (one extra ssh round trip, deliberately outside any timing-sensitive stage window). Every chain step therefore fails closed with `surface_lost:…` instead of a bare `FileNotFoundError` from `app_rpc`. This is the lifecycle fix for attempt 63r1 and it could **not** live in the chain script, which must stay byte-identical to the lane source. |
+| `round14_surface.py`, `round15_strays.py`, `round15_supervisor.py` | **New files, added 2026-09-16 after attempt 63r1** (surface liveness · both-Mac stray sweep · detached round supervisor). Not lane source and not de-laning edits; see `mycelium-core-program/runs/wp8-02-useful-two-mac/ERRATA-1.md`. |
 
 ## Laptop-side Python 3.9 constraint
 
@@ -106,6 +117,30 @@ byte-identical to the lane source in this directory. All other tools run on the 
 Mac under the project interpreter. Do not add a third laptop-side helper without
 re-checking this constraint (`RUNNER_SPEC.md` §4).
 
+## Detached rounds are mandatory (from 2026-09-16)
+
+On attempt **63r1** the two app daemons were background children of an interactive chat
+session. That session was torn down mid-round (provider exhaustion `402`/`429`, then
+`Context length exceeded`, then an interrupt), the session's process group was SIGTERMed,
+the round died **mid-compile**, and chain step 2 reported the misleading
+`compiler_not_ready` because the app's control surface had simply gone away. Post-mortem:
+`mycelium-core-program/runs/wp8-02-useful-two-mac/ERRATA-1.md`.
+
+How the toolchain now prevents it:
+
+* **`round15_supervisor.py` is the only supported way to spend an attempt.** It re-execs
+  itself into its own session (macOS has **no `setsid(1)`**, so detachment uses
+  `start_new_session=True`), starts both daemons detached with their own logs, waits for
+  both control surfaces by name, runs the chain, and then always quits and sweeps.
+* **`run_a13_attempt.sh` refuses** to run unless it was started by that supervisor
+  (`exit 5`). Set `A13_ALLOW_ATTACHED=1` only for a deliberate tooling-only round.
+* **A lost surface is a named failure**: `surface_lost:owner|target:{…}:daemon={…}`
+  instead of a bare `FileNotFoundError`. `native-control.json` is unlinked by the app on
+  shutdown (`app.py:771`), so its absence means "the app is not running".
+* **Sweep both Macs afterwards** (`round15_strays.py`): a daemon behind `ssh` survives the
+  local ssh client dying, and a stray blocks the next `--resume` (the daemon helper asserts
+  the control file is absent at launch).
+
 ## Running it
 
 ```bash
@@ -114,7 +149,10 @@ export A13_OWNER_ROOT="$HOME/mycelium-pilot/round-<id>/owner-lhr"
 export A13_REMOTE_ROOT="/Users/evinova/mycelium-pilot/round-<id>"
 export A13_TARGET_PREVIEW="preview<V>"
 export A13_RPC_ROUND="rpc-round<V>"
-bash scripts/a13_operator/run_a13_attempt.sh <V>          # the bounded attempt only
+# the only supported way to run the round: detaches, owns both daemons, sweeps afterwards
+python3 -B scripts/a13_operator/round15_supervisor.py <V>
+# deliberately attached, tooling-only retry of the same chain (no physical spend intended):
+A13_ALLOW_ATTACHED=1 bash scripts/a13_operator/run_a13_attempt.sh <V>
 ```
 
 The full cycle (build → smoke → deploy → sha256 equality → attempt → collect) is
