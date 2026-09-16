@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable, Mapping
 import uuid
 
+import mycelium_deadlines
 from mycelium_model_catalog import scan_huggingface_cache
 from mycelium_swarm_artifacts import (
     POLICY_PROTOCOL,
@@ -34,8 +35,11 @@ from .preparation import AUTHORIZATION_PROTOCOL, LEGACY_AUTHORIZATION_PROTOCOL
 from .stage_pack_builder import StagePackBuildError, build_stage_pack_source
 
 
-_STAGE_PACK_MIN_AUTHORITY_TTL_MS = 15 * 60 * 1_000
-_STAGE_PACK_MAX_AUTHORITY_TTL_MS = 6 * 60 * 60 * 1_000
+# Bound to the deadline registry (packet wp5-bind-residual): the stage-pack
+# authority TTL bounds have one owner, so a lease minted here can never grant
+# more (or less) authority than the registry records.
+_STAGE_PACK_MIN_AUTHORITY_TTL_MS = mycelium_deadlines.STAGE_PACK_MIN_AUTHORITY_TTL_MS
+_STAGE_PACK_MAX_AUTHORITY_TTL_MS = mycelium_deadlines.STAGE_PACK_MAX_AUTHORITY_TTL_MS
 _STAGE_PACK_BASE_CHUNK_BYTES = 4 * 1024 * 1024
 _STAGE_PACK_MAX_CHUNK_BYTES = 64 * 1024 * 1024
 _STAGE_PACK_TARGET_MAX_CHUNKS = 1_024

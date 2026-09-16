@@ -65,21 +65,24 @@ from mycelium_live.liveness import (
 )
 
 
-_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = 0.5
-_CLEANUP_RECEIPT_POLL_SECONDS = 0.1
-# The cleanup fanout window's constants are bound to the deadline registry
-# (packet wp5-d9): the window is
+# Every lifecycle/keepalive timing in this block is bound to the deadline
+# registry (packets wp5-d9 and wp5-bind-residual): one owner per number, no
+# second copy that can drift.  The cleanup fanout window is
 # ``cancel_and_cleanup_budget_seconds - cleanup_fallback_reserve_seconds`` and
-# the registry owns both inputs, so a peer's advertised cleanup bound
+# the registry owns both inputs and the receipt-poll / inline-receipt-grace /
+# reconciliation horizon / worker count / idle-keepalive probe records, so a
+# peer's advertised cleanup bound
 # (``mycelium_deadlines.advertised_maximum_total_cleanup_ms``) can never exceed
 # the window this module actually applies at the fanout deadline below.
 # Module-level assignments on purpose: the existing suites monkeypatch
 # ``mycelium_live.route.<NAME>`` by dotted string.
+_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = mycelium_deadlines.IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
+_CLEANUP_RECEIPT_POLL_SECONDS = mycelium_deadlines.CLEANUP_RECEIPT_POLL_SECONDS
 _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS = mycelium_deadlines.CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
 _CLEANUP_FALLBACK_RESERVE_SECONDS = mycelium_deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS
-_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS = 0.5
-_CLEANUP_RECONCILIATION_HORIZON_SECONDS = 60.0
-_CLEANUP_RECONCILIATION_WORKERS = 4
+_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS = mycelium_deadlines.CLEANUP_INLINE_RECEIPT_GRACE_SECONDS
+_CLEANUP_RECONCILIATION_HORIZON_SECONDS = mycelium_deadlines.CLEANUP_RECONCILIATION_HORIZON_SECONDS
+_CLEANUP_RECONCILIATION_WORKERS = mycelium_deadlines.CLEANUP_RECONCILIATION_WORKERS
 _NODE_RESPONSE_READER_FAILURE_CODES = frozenset(
     {
         "invalid_node_response",

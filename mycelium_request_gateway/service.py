@@ -23,9 +23,14 @@ from .contracts import (
 from .observability import GatewayMetrics
 from .qualification import CapturedQualification, QualificationGate, QualificationSource
 
+import mycelium_deadlines
+
 
 _MAX_BACKEND_TOKEN_TEXT_BYTES = 1 << 20
-_MAX_CANCELLATION_AND_CLEANUP_SECONDS = 2.0
+# Bound to the deadline registry (packet wp5-bind-residual): the cancellation +
+# cleanup budget has one owner, so the gateway stamp cannot drift from the
+# route's fanout window derivation (cancel_and_cleanup_budget_seconds).
+_MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
 
 
 class InferenceBackend(Protocol):
@@ -154,7 +159,8 @@ class RequestGatewayService:
     # request that is still expected to subscribe. After the grace, a
     # genuinely stuck session is evicted normally. See spec A4 §5 and
     # the `test_fresh_request_is_protected_from_immediate_eviction` gate.
-    SESSION_EVICTION_GRACE_SECONDS = 0.05
+    # Bound to the deadline registry (packet wp5-bind-residual).
+    SESSION_EVICTION_GRACE_SECONDS = mycelium_deadlines.GATEWAY_SESSION_EVICTION_GRACE_SECONDS
 
     # Bounded budget a buffer-blocked producer grants an attached but
     # non-acknowledging consumer before the slot is reclaimed (spec A4 §5).
@@ -163,7 +169,8 @@ class RequestGatewayService:
     # healthy consumer acks continuously while draining, so the budget is
     # never consulted on the ordinary path. It is a backstop, not a timer:
     # the decision point is the full-buffer block in _accept_token.
-    SESSION_SILENT_SUBSCRIBER_STALL_SECONDS = 0.25
+    # Bound to the deadline registry (packet wp5-bind-residual).
+    SESSION_SILENT_SUBSCRIBER_STALL_SECONDS = mycelium_deadlines.GATEWAY_SESSION_SILENT_SUBSCRIBER_STALL_SECONDS
 
     def __init__(
         self,

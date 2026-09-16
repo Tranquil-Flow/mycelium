@@ -10,6 +10,12 @@ Covers (PLAN 5.2 item 1):
   route's fanout window (1500 ms), ``check_composition()`` reports nothing, the
   node payload reads the registry symbol at construction time (no copy), and
   the canonical fixture/producer carry the same registry value;
+* the **wp5-bind-residual closure** of the remaining pending contract-pinned
+  bindings: every consumer in ``PENDING_CONTRACT_PINNED_BINDINGS`` is assigned
+  from its registry symbol (route.py's other cleanup constants,
+  ``mycelium_request_gateway/service.py``, ``mycelium_live/local_preparer.py``),
+  so mutating the registry symbol is followed by the consumer instead of
+  leaving a second copy behind;
 * an honest, **deliberately pinned** statement of today's shipped composition;
 * registry hygiene (derivation, units, names);
 * a **no-drift** guard: the registry values equal the historical literals that
@@ -24,7 +30,11 @@ import ast
 import importlib
 import json
 import re
+import sys
 import tempfile
+import types
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -87,9 +97,10 @@ HISTORICAL_LITERALS: dict[str, float | int] = {
     "peer_connect_deadline_seconds": 1.0,
 }
 
-#: Constants this packet bound to the registry, by file. Each must be assigned
-#: from ``mycelium_deadlines.<NAME>`` (module level, so monkeypatching the name
-#: on the module still replaces exactly what the call sites read).
+#: Constants the deadline bindings packets bound to the registry, by file. Each
+#: must be assigned from ``mycelium_deadlines.<NAME>`` (module level, and for
+#: class attributes in the class body, so monkeypatching the name on the module
+#: or the class still replaces exactly what the call sites read).
 BOUND_SOURCES: dict[str, tuple[str, ...]] = {
     "mycelium_iroh_sidecar/client.py": ("PEER_CONNECT_DEADLINE_SECONDS",),
     "mycelium_live/member_transport.py": (
@@ -98,12 +109,90 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
         "_AVAILABILITY_RECONCILE_MAX_SECONDS",
     ),
     # wp5-d9: the two constants that form the route's cleanup fanout window.
+    # wp5-bind-residual: the route's remaining cleanup / keepalive constants.
     "mycelium_live/route.py": (
+        "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
+        "_CLEANUP_RECEIPT_POLL_SECONDS",
         "_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
         "_CLEANUP_FALLBACK_RESERVE_SECONDS",
+        "_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
+        "_CLEANUP_RECONCILIATION_HORIZON_SECONDS",
+        "_CLEANUP_RECONCILIATION_WORKERS",
+    ),
+    # wp5-bind-residual: the stage-pack authority TTL bounds.
+    "mycelium_live/local_preparer.py": (
+        "_STAGE_PACK_MIN_AUTHORITY_TTL_MS",
+        "_STAGE_PACK_MAX_AUTHORITY_TTL_MS",
+    ),
+    # wp5-bind-residual: the gateway's cancellation budget and the two bounded
+    # session graces (class attributes on ``RequestGatewayService``).
+    "mycelium_request_gateway/service.py": (
+        "_MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+        "RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS",
+        "RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
     ),
     "mycelium_node/process.py": ("_LAUNCH_HANDSHAKE_SECONDS",),
 }
+
+#: Packet wp5-bind-residual: the consumers that were listed in
+#: ``PENDING_CONTRACT_PINNED_BINDINGS`` and are now bound.  ``(source path,
+#: attribute path, registry record name)`` - the record name resolves through
+#: ``deadlines.deadline()`` and its uppercase symbol is the registry symbol the
+#: consumer must be assigned from.  The anti-drift test below executes the real
+#: module source under a registry symbol mutated to a sentinel and asserts the
+#: consumer follows it - the exact property a stale copy cannot satisfy.
+RESIDUAL_ANTI_DRIFT_CONSUMERS: tuple[tuple[str, str, str], ...] = (
+    (
+        "mycelium_live/route.py",
+        "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
+        "idle_keepalive_probe_deadline_seconds",
+    ),
+    (
+        "mycelium_live/route.py",
+        "_CLEANUP_RECEIPT_POLL_SECONDS",
+        "cleanup_receipt_poll_seconds",
+    ),
+    (
+        "mycelium_live/route.py",
+        "_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
+        "cleanup_inline_receipt_grace_seconds",
+    ),
+    (
+        "mycelium_live/route.py",
+        "_CLEANUP_RECONCILIATION_HORIZON_SECONDS",
+        "cleanup_reconciliation_horizon_seconds",
+    ),
+    (
+        "mycelium_live/route.py",
+        "_CLEANUP_RECONCILIATION_WORKERS",
+        "cleanup_reconciliation_workers",
+    ),
+    (
+        "mycelium_live/local_preparer.py",
+        "_STAGE_PACK_MIN_AUTHORITY_TTL_MS",
+        "stage_pack_min_authority_ttl_ms",
+    ),
+    (
+        "mycelium_live/local_preparer.py",
+        "_STAGE_PACK_MAX_AUTHORITY_TTL_MS",
+        "stage_pack_max_authority_ttl_ms",
+    ),
+    (
+        "mycelium_request_gateway/service.py",
+        "_MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+        "cancel_and_cleanup_budget_seconds",
+    ),
+    (
+        "mycelium_request_gateway/service.py",
+        "RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS",
+        "gateway_session_eviction_grace_seconds",
+    ),
+    (
+        "mycelium_request_gateway/service.py",
+        "RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
+        "gateway_session_silent_subscriber_stall_seconds",
+    ),
+)
 
 #: Dotted names the existing suites patch by string
 #: (``tests/live/test_a4_ownership.py:594,667,942``). They must keep working.
@@ -137,15 +226,31 @@ def _resolve(dotted: str) -> Any:
 
 
 def _module_level_assignments(relative_path: str) -> dict[str, str]:
+    """Assignments a reader can patch: module level, plus class attributes.
+
+    A module-level ``NAME = value`` assignment is recorded under ``NAME``; an
+    assignment in a class body is recorded as ``ClassName.NAME`` so a bound
+    class attribute (``RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS``)
+    is asserted textually exactly like a module global.
+    """
+
     tree = ast.parse((ROOT / relative_path).read_text(encoding="utf-8"))
     assigned: dict[str, str] = {}
+
+    def record(items: list[ast.stmt], prefix: str) -> None:
+        for node in items:
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+            ):
+                assigned[f"{prefix}{node.targets[0].id}"] = ast.unparse(node.value)
+
     for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            assigned[node.targets[0].id] = ast.unparse(node.value)
+        if isinstance(node, ast.ClassDef):
+            record(node.body, f"{node.name}.")
+            continue
+        record([node], "")
     return assigned
 
 
@@ -413,6 +518,127 @@ def test_bound_constants_are_assigned_from_the_registry() -> None:
             assert re.fullmatch(
                 r"mycelium_deadlines\.[A-Z0-9_]+", expression
             ), expression
+
+
+# --------------------------------------------------------------------------- #
+# wp5-bind-residual: the remaining contract-pinned consumers follow the registry
+# --------------------------------------------------------------------------- #
+
+
+def _resolve_attribute(root: Any, attribute_path: str) -> Any:
+    resolved = root
+    for attribute in attribute_path.split("."):
+        resolved = getattr(resolved, attribute)
+    return resolved
+
+
+@contextmanager
+def _registry_symbol_mutated(name: str, value: float | int) -> Iterator[None]:
+    """Temporarily set a registry symbol to ``value`` (restored afterwards)."""
+
+    original = getattr(deadlines, name)
+    setattr(deadlines, name, value)
+    try:
+        yield
+    finally:
+        setattr(deadlines, name, original)
+
+
+@contextmanager
+def _executed_consumer_module(
+    relative_path: str, *, source: str | None = None
+) -> Iterator[Any]:
+    """Execute a consumer module's real source under a synthetic module name.
+
+    This is what ``import mycelium_live.route`` runs, minus the ``sys.modules``
+    cache: the module body executes against the *live* registry, so a bound
+    constant reads the registry symbol at execution time and a stale literal
+    does not.  Relative imports in the executed module keep resolving through
+    its real package (``__package__`` is set to the source file's package).
+    """
+
+    text = (
+        source
+        if source is not None
+        else (ROOT / relative_path).read_text(encoding="utf-8")
+    )
+    dotted = Path(relative_path).with_suffix("").as_posix().replace("/", ".")
+    package = dotted.rsplit(".", 1)[0]
+    stem = Path(relative_path).stem
+    synthetic_name = f"{package}._wp5_bind_residual_probe_{stem}"
+    module = types.ModuleType(synthetic_name)
+    module.__package__ = package
+    module.__file__ = str(ROOT / relative_path)
+    previous = sys.modules.get(synthetic_name)
+    sys.modules[synthetic_name] = module
+    try:
+        exec(compile(text, module.__file__, "exec"), module.__dict__)  # noqa: S102
+        yield module
+    finally:
+        if previous is None:
+            sys.modules.pop(synthetic_name, None)
+        else:
+            sys.modules[synthetic_name] = previous
+
+
+@pytest.mark.parametrize(
+    "relative_path, attribute_path, registry_name",
+    RESIDUAL_ANTI_DRIFT_CONSUMERS,
+    ids=[f"{path}:{attribute}" for path, attribute, _ in RESIDUAL_ANTI_DRIFT_CONSUMERS],
+)
+def test_residual_bound_consumer_follows_a_registry_mutation(
+    relative_path: str, attribute_path: str, registry_name: str
+) -> None:
+    """wp5-bind-residual anti-drift: the consumer reads the registry symbol.
+
+    The registry symbol is mutated to a sentinel *before* the consumer's source
+    executes, and the consumer must report the sentinel.  A consumer that keeps
+    its own copy reports the shipped value instead and fails here.
+    """
+
+    shipped = deadlines.deadline(registry_name).value
+    sentinel = shipped * 3 + 1
+    assert sentinel != shipped
+
+    with _registry_symbol_mutated(registry_name.upper(), sentinel):
+        with _executed_consumer_module(relative_path) as module:
+            observed = _resolve_attribute(module, attribute_path)
+
+    assert observed == sentinel, (
+        f"{relative_path}:{attribute_path} did not follow "
+        f"mycelium_deadlines.{registry_name.upper()} "
+        f"(observed {observed!r}, sentinel {sentinel!r}, shipped {shipped!r})"
+    )
+    # The registry is the owner: the shipped value equals the record's value.
+    assert getattr(deadlines, registry_name.upper()) == shipped
+
+
+def test_residual_antidrift_assertions_detect_a_stale_copy() -> None:
+    """Assertion liveness: a reverted literal is detected, so the guard is live.
+
+    For every residual consumer the binding expression is replaced by the
+    historical literal it replaced and executed under a mutated registry; the
+    same follow-check then observes the literal (not the sentinel) - which is
+    exactly how it fails when a second copy reappears.
+    """
+
+    for relative_path, attribute_path, registry_name in RESIDUAL_ANTI_DRIFT_CONSUMERS:
+        shipped_source = (ROOT / relative_path).read_text(encoding="utf-8")
+        attribute_name = attribute_path.split(".")[-1]
+        symbol = registry_name.upper()
+        literal = HISTORICAL_LITERALS[registry_name]
+        binding = f"{attribute_name} = mycelium_deadlines.{symbol}"
+        assert binding in shipped_source, (relative_path, binding)
+        stale_source = shipped_source.replace(binding, f"{attribute_name} = {literal!r}")
+
+        sentinel = literal * 3 + 1
+        with _registry_symbol_mutated(symbol, sentinel):
+            with _executed_consumer_module(
+                relative_path, source=stale_source
+            ) as module:
+                observed = _resolve_attribute(module, attribute_path)
+        assert observed == literal, (relative_path, attribute_path, observed)
+        assert observed != sentinel, (relative_path, attribute_path, observed)
 
 
 def test_advertised_bound_is_the_registry_value_and_matches_the_canonical_producer() -> None:

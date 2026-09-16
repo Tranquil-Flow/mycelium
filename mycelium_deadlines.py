@@ -35,13 +35,14 @@ Binding status (packet wp2-1 requirement 3): ``CONSUMER_BINDINGS`` lists every
 consumer constant that must read this registry.  Constants in modules whose
 bytes are hash-pinned by ``contracts/contract-manifest.v1.json`` cannot be
 rebound without the canonical manifest pin refresh landing in the same change,
-so they are registered here and *test-enforced* by ``tests/testbed/
-test_deadline_registry.py`` until a lane that owns ``contracts/**`` does both;
-``PENDING_BINDINGS`` names them with the reason.  Packet ``wp5-d9`` is such a
-lane for the two ``mycelium_live/route.py`` constants that form the cleanup
-fanout window (``_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS`` and
-``_CLEANUP_FALLBACK_RESERVE_SECONDS``) and for the node's advertised bound: all
-three are bound now (``BOUND_CONSUMER_BINDINGS`` plus that lane's pin refresh).
+so they were registered here and *test-enforced* by ``tests/testbed/
+test_deadline_registry.py`` until a lane that owns ``contracts/**`` does both.
+Packets ``wp5-d9`` and ``wp5-bind-residual`` were such lanes: every consumer
+that was pending under a contract-pinned module is bound now (see
+``BOUND_CONSUMER_BINDINGS``), so ``PENDING_CONTRACT_PINNED_BINDINGS`` is empty.
+``PENDING_BINDINGS`` still names the consumers this registry cannot bind alone -
+the closed member-runtime bundle and the modules outside the binding packets'
+write sets - each with its reason below.
 """
 from __future__ import annotations
 
@@ -374,7 +375,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cancel_and_cleanup_budget_seconds",
         value=CANCEL_AND_CLEANUP_BUDGET_SECONDS,
         unit="seconds",
-        owner="mycelium_request_gateway/service.py:28,382,385,677",
+        owner="mycelium_request_gateway/service.py:33,389,392,684",
         derivation=(
             "End-to-end owner budget for cancellation plus request-scoped "
             "cleanup. The gateway stamps it at cancellation start and reports "
@@ -388,7 +389,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_fallback_reserve_seconds",
         value=CLEANUP_FALLBACK_RESERVE_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:70,3245,3246",
+        owner="mycelium_live/route.py:82,3257,3258",
         derivation=(
             "Final interval of the budget held back so a complete response "
             "delayed in the control transport still leaves authority for one "
@@ -402,7 +403,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_snapshot_attempt_seconds",
         value=CLEANUP_SNAPSHOT_ATTEMPT_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:69,2722",
+        owner="mycelium_live/route.py:81,2734",
         derivation=(
             "One bounded request-scoped snapshot round against a node whose "
             "cleanup proof is still missing. Sized as the reserve it is: a "
@@ -415,7 +416,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_inline_receipt_grace_seconds",
         value=CLEANUP_INLINE_RECEIPT_GRACE_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:71,2669",
+        owner="mycelium_live/route.py:83,2681",
         derivation=(
             "Grace given to the inline cancellation receipt (fanout and "
             "lifecycle receipt) before bounded snapshots may race a delayed "
@@ -428,7 +429,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_receipt_poll_seconds",
         value=CLEANUP_RECEIPT_POLL_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:68,2701,2770,3033",
+        owner="mycelium_live/route.py:80,2713,2782,3045",
         derivation=(
             "Cadence at which the parent re-reads cleanup receipts while "
             "waiting, so the node control lane still serves other concurrently "
@@ -442,7 +443,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_reconciliation_horizon_seconds",
         value=CLEANUP_RECONCILIATION_HORIZON_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:72,2907",
+        owner="mycelium_live/route.py:84,2919",
         derivation=(
             "Lifetime of the post-authority cleanup reconciliation scheduler: "
             "how long the route keeps trying to seal a cleanup receipt after the "
@@ -456,7 +457,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_reconciliation_workers",
         value=CLEANUP_RECONCILIATION_WORKERS,
         unit="count",
-        owner="mycelium_live/route.py:73,1068,2951",
+        owner="mycelium_live/route.py:85,1080,2963",
         derivation=(
             "Worker threads the cleanup reconciliation scheduler may use. Sized "
             "so a handful of request-scoped reconciliations proceed in parallel "
@@ -468,7 +469,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="idle_keepalive_probe_deadline_seconds",
         value=IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:67,2161",
+        owner="mycelium_live/route.py:79,2173",
         derivation=(
             "Bound on one keepalive probe of a node that is being re-observed. "
             "Intentionally the shortest control-path probe: a node that cannot "
@@ -578,7 +579,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="gateway_session_eviction_grace_seconds",
         value=GATEWAY_SESSION_EVICTION_GRACE_SECONDS,
         unit="seconds",
-        owner="mycelium_request_gateway/service.py:157,929",
+        owner="mycelium_request_gateway/service.py:163,936",
         derivation=(
             "Grace covering the submit->subscribe window: before it, a new "
             "submission is rejected (gateway_capacity_exhausted) rather than "
@@ -592,7 +593,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="gateway_session_silent_subscriber_stall_seconds",
         value=GATEWAY_SESSION_SILENT_SUBSCRIBER_STALL_SECONDS,
         unit="seconds",
-        owner="mycelium_request_gateway/service.py:166,618",
+        owner="mycelium_request_gateway/service.py:173,625",
         derivation=(
             "Backstop a buffer-blocked producer grants an attached but "
             "non-acknowledging consumer before the slot is reclaimed. Consulted "
@@ -757,7 +758,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="stage_pack_min_authority_ttl_ms",
         value=STAGE_PACK_MIN_AUTHORITY_TTL_MS,
         unit="milliseconds",
-        owner="mycelium_live/local_preparer.py:37,1144,1145,1300,1439",
+        owner="mycelium_live/local_preparer.py:41,1148,1149,1304,1443",
         derivation=(
             "Stage-pack authority TTL floor: the shortest grant that still "
             "covers one measured transfer of the assignment bytes. Equal to "
@@ -769,7 +770,7 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="stage_pack_max_authority_ttl_ms",
         value=STAGE_PACK_MAX_AUTHORITY_TTL_MS,
         unit="milliseconds",
-        owner="mycelium_live/local_preparer.py:38,1147",
+        owner="mycelium_live/local_preparer.py:42,1151",
         derivation=(
             "Stage-pack authority TTL ceiling (6 hours). A size-scaled TTL above "
             "it fails closed with artifact_transfer_exceeds_maximum_lease, so "
@@ -1030,13 +1031,21 @@ def check_composition(
 # Consumer bindings: which module-level constant must read this registry.
 # --------------------------------------------------------------------------- #
 
-#: ``(dotted path of the consumer constant, registry name)``.
+#: ``(dotted path of the consumer constant, registry name)``.  Every consumer
+#: here is assigned from ``mycelium_deadlines.<NAME>`` at its definition site
+#: (module level, or the class body for the gateway's session graces), so the
+#: registry owns the number; ``tests/testbed/test_deadline_registry.py`` keeps
+#: a second copy from reappearing (AST binding check plus an executed-source
+#: anti-drift check per consumer).
 #:
-#: Bound by this packet - ``mycelium_live/member_transport.py`` and
-#: ``mycelium_node/process.py``.  ``wp2-6`` bound
-#: ``mycelium_iroh_sidecar/client.py`` to this registry (its
+#: ``wp2-6`` bound ``mycelium_iroh_sidecar/client.py`` to this registry (its
 #: ``mycelium_router.wire`` import already makes it a first-party import, so
-#: the stdlib-only registry adds no cycle).
+#: the stdlib-only registry adds no cycle).  ``wp2-1`` bound
+#: ``mycelium_live/member_transport.py`` and ``mycelium_node/process.py``.
+#: ``wp5-d9`` bound the two ``mycelium_live/route.py`` constants that form the
+#: cleanup fanout window.  ``wp5-bind-residual`` bound the route's remaining
+#: cleanup/keepalive constants, the gateway's cancellation budget and session
+#: graces, and the stage-pack authority TTL floor/ceiling.
 BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "mycelium_iroh_sidecar.client.PEER_CONNECT_DEADLINE_SECONDS",
@@ -1052,14 +1061,59 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     ),
     ("mycelium_live.member_transport._GRANT_TTL_MS", "member_transport_grant_ttl_ms"),
     (
+        "mycelium_live.local_preparer._STAGE_PACK_MAX_AUTHORITY_TTL_MS",
+        "stage_pack_max_authority_ttl_ms",
+    ),
+    (
+        "mycelium_live.local_preparer._STAGE_PACK_MIN_AUTHORITY_TTL_MS",
+        "stage_pack_min_authority_ttl_ms",
+    ),
+    (
         "mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS",
         "cleanup_fallback_reserve_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
+        "cleanup_inline_receipt_grace_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_RECEIPT_POLL_SECONDS",
+        "cleanup_receipt_poll_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_RECONCILIATION_HORIZON_SECONDS",
+        "cleanup_reconciliation_horizon_seconds",
+    ),
+    (
+        "mycelium_live.route._CLEANUP_RECONCILIATION_WORKERS",
+        "cleanup_reconciliation_workers",
     ),
     (
         "mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
         "cleanup_snapshot_attempt_seconds",
     ),
-    ("mycelium_node.process._LAUNCH_HANDSHAKE_SECONDS", "node_launch_handshake_seconds"),
+    (
+        "mycelium_live.route._IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
+        "idle_keepalive_probe_deadline_seconds",
+    ),
+    (
+        "mycelium_node.process._LAUNCH_HANDSHAKE_SECONDS",
+        "node_launch_handshake_seconds",
+    ),
+    (
+        "mycelium_request_gateway.service.RequestGatewayService."
+        "SESSION_EVICTION_GRACE_SECONDS",
+        "gateway_session_eviction_grace_seconds",
+    ),
+    (
+        "mycelium_request_gateway.service.RequestGatewayService."
+        "SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
+        "gateway_session_silent_subscriber_stall_seconds",
+    ),
+    (
+        "mycelium_request_gateway.service._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+        "cancel_and_cleanup_budget_seconds",
+    ),
 )
 
 #: ``(dotted path, registry name)`` for consumers whose module belongs to the
@@ -1074,7 +1128,9 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
 #: least-authority decision owned by the lane that owns
 #: ``mycelium_member_runtime.py``; the exact patch (closure entry + bindings) is
 #: recorded in the wp2-1 run directory.  Until it lands, the values are
-#: test-enforced from here.
+#: test-enforced from here.  Packet ``wp5-bind-residual`` left these three rows
+#: pending for exactly this reason: the binding cannot land without the closure
+#: decision, and ``mycelium_deadlines.py`` is still not a member of the closure.
 PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "mycelium_live.artifact_transport._REQUEST_CLOCK_SKEW_MS",
@@ -1093,55 +1149,24 @@ PENDING_MEMBER_RUNTIME_CLOSURE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
 #: 2, ``mycelium_live/local_preparer.py`` 1).  Rebinding one is a one-line
 #: assignment, but it must land in the same change as a canonical manifest
 #: owner-source pin refresh (``scripts/generate_contract_manifest.py``).
-#: Packet ``wp5-d9`` owned ``mycelium_live/route.py`` and that refresh, so the
-#: two constants that form the cleanup fanout window are bound now (see
-#: ``BOUND_CONSUMER_BINDINGS``); the rest stay registered here and test-enforced
-#: until their lanes make the same change.
-PENDING_CONTRACT_PINNED_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
-    (
-        "mycelium_live.route._CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
-        "cleanup_inline_receipt_grace_seconds",
-    ),
-    ("mycelium_live.route._CLEANUP_RECEIPT_POLL_SECONDS", "cleanup_receipt_poll_seconds"),
-    (
-        "mycelium_live.route._CLEANUP_RECONCILIATION_HORIZON_SECONDS",
-        "cleanup_reconciliation_horizon_seconds",
-    ),
-    (
-        "mycelium_live.route._CLEANUP_RECONCILIATION_WORKERS",
-        "cleanup_reconciliation_workers",
-    ),
-    (
-        "mycelium_live.route._IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
-        "idle_keepalive_probe_deadline_seconds",
-    ),
-    (
-        "mycelium_live.local_preparer._STAGE_PACK_MAX_AUTHORITY_TTL_MS",
-        "stage_pack_max_authority_ttl_ms",
-    ),
-    (
-        "mycelium_live.local_preparer._STAGE_PACK_MIN_AUTHORITY_TTL_MS",
-        "stage_pack_min_authority_ttl_ms",
-    ),
-    (
-        "mycelium_request_gateway.service.RequestGatewayService.SESSION_EVICTION_GRACE_SECONDS",
-        "gateway_session_eviction_grace_seconds",
-    ),
-    (
-        "mycelium_request_gateway.service.RequestGatewayService.SESSION_SILENT_SUBSCRIBER_STALL_SECONDS",
-        "gateway_session_silent_subscriber_stall_seconds",
-    ),
-    (
-        "mycelium_request_gateway.service._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
-        "cancel_and_cleanup_budget_seconds",
-    ),
-)
+#: Packet ``wp5-d9`` owned ``mycelium_live/route.py`` and that refresh for the
+#: two constants that form the cleanup fanout window; packet
+#: ``wp5-bind-residual`` owned the same for the remaining route constants, the
+#: gateway's cancellation budget + session graces, and the stage-pack authority
+#: TTLs.  All of them are bound now (``BOUND_CONSUMER_BINDINGS``), so this
+#: group is empty - a new entry here means a new contract-pinned consumer was
+#: registered and still needs its binding + pin refresh.
+PENDING_CONTRACT_PINNED_BINDINGS: Final[tuple[tuple[str, str], ...]] = ()
 
-#: ``(dotted path, registry name)`` for consumers this packet registers and
-#: test-enforces but may not rebind at all: these modules are outside packet
-#: wp2-1's allowed write set (``mycelium_live/command_controller.py``,
-#: ``mycelium_live/liveness.py``, ``mycelium_live/health.py``).  Their values are
-#: pinned here by test, so a value edit in any of them fails the suite.
+#: ``(dotted path, registry name)`` for consumers the registry registers and
+#: test-enforces but does not rebind: these modules are outside the binding
+#: packets' write sets (``mycelium_live/command_controller.py``,
+#: ``mycelium_live/liveness.py``, ``mycelium_live/health.py``,
+#: ``physical_inference_qualification.py``).  Their values are pinned here by
+#: test, so a value edit in any of them fails the suite.  Packet
+#: ``wp5-bind-residual`` left these eight rows pending for lane-ownership
+#: reasons: binding them is mechanically possible but out of that packet's
+#: named write scope (route.py, request-gateway service, local_preparer).
 PENDING_OUT_OF_SCOPE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "mycelium_live.command_controller.DEFAULT_COOPERATIVE_STEP_MS",
