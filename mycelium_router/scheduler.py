@@ -69,6 +69,40 @@ class HopScheduler:
    def pop_next(self, *, now: float) -> HopWorkItem:
       return self.pop_batch(now=now, maximum_items=1).items[0]
 
+   def take(self, item: HopWorkItem) -> HopWorkItem | None:
+      """Pop exactly the item one dispatch enqueued, if it is still queued.
+
+      A synchronous dispatch may only execute the work it enqueued.  Popping the
+      queue's global priority anchor can hand a caller *another* command
+      identity's item to execute (and leave the caller's own item queued for a
+      later pop), which is how one command identity came to execute twice.
+      """
+
+      for offset, queued in enumerate(self._queue):
+         if queued is item or queued.idempotency_key == item.idempotency_key:
+            self._queue.pop(offset)
+            self._queued_payload_bytes -= self._payload_size(queued.payload)
+            return queued
+      return None
+
+   def withdraw(self, item: HopWorkItem) -> bool:
+      """Remove a rejected dispatch's item so no later pop can execute it.
+
+      A dispatch rejected *after* its enqueue used to leave its item in the
+      shared queue.  The item outlives the cancelled path, and the next pop -
+      another hop, another request - executed it: a second native execution of a
+      command identity that is already gone.  Withdrawing is exact bookkeeping,
+      not a timed window: the item exists only while its own dispatch owns it.
+      """
+
+      for offset, queued in enumerate(self._queue):
+         if queued is item or queued.idempotency_key == item.idempotency_key:
+            self._queue.pop(offset)
+            self._queued_payload_bytes -= self._payload_size(queued.payload)
+            self._seen_keys.pop(item.idempotency_key, None)
+            return True
+      return False
+
    def batch_candidates(self, *, now: float) -> tuple[HopWorkItem, ...]:
       """Return priority-ordered work compatible with the next anchor."""
       if not self._queue:

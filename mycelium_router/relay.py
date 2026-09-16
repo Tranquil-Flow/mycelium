@@ -712,8 +712,14 @@ class RelayEngine:
             build.path_attempt,
             generation,
          ):
+            self.scheduler.withdraw(work)
             return ProgressivePrefillResult("REJECTED", "cancelled_path")
-      selected = self.scheduler.pop_next(now=now)
+      selected = self.scheduler.take(work)
+      if selected is None:
+         # This identity's item is not this dispatch's to execute any more (it was
+         # withdrawn with a release, or claimed elsewhere): never execute work this
+         # call does not own.
+         return ProgressivePrefillResult("QUEUED", "duplicate_pending")
       state.transition("ACCEPTED", path_attempt=header.path_attempt)
       state.transition("EXECUTING", path_attempt=header.path_attempt)
       with self._path_lock:
@@ -1092,8 +1098,14 @@ class RelayEngine:
             header.path_attempt,
             generation,
          ):
+            self.scheduler.withdraw(work)
             return HopReceiveResult("REJECTED", "path_cancelled")
-      selected = self.scheduler.pop_next(now=now)
+      selected = self.scheduler.take(work)
+      if selected is None:
+         # The item this dispatch enqueued is gone (withdrawn with a release, or
+         # claimed elsewhere): never execute another identity's work, and never
+         # execute this one twice.
+         return HopReceiveResult("QUEUED", "duplicate_pending")
       state.transition("ACCEPTED", path_attempt=header.path_attempt)
       state.transition("EXECUTING", path_attempt=header.path_attempt)
       with self._path_lock:
@@ -1869,12 +1881,17 @@ class RelayEngine:
                manifest.path_attempt,
                generation,
             ):
+               self.scheduler.withdraw(work)
                return self._path_cancelled_outcome(
                   request,
                   manifest,
                   token_index,
                )
-         selected = self.scheduler.pop_next(now=self.clock.now())
+         selected = self.scheduler.take(work)
+         if selected is None:
+            # The item is no longer this dispatch's to execute: fail closed by
+            # name instead of executing whatever the queue would hand out.
+            return self._path_cancelled_outcome(request, manifest, token_index)
          result = self._execute_runtime(selected)
          with self._path_lock:
             if not self._path_is_current_locked(
