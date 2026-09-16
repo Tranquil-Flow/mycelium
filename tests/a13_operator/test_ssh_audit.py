@@ -71,3 +71,42 @@ def test_the_shim_is_executable_and_first_on_path(tmp_path):
     assert shim.exists()
     assert os.access(shim, os.X_OK)
     assert env['PATH'].split(os.pathsep)[0] == str(shim_dir)
+
+
+def test_a_multiline_command_counts_as_one_invocation(tmp_path):
+    """Measured 2026-09-16: the sweep's 2 ssh calls logged as 10 lines and read as 10 calls."""
+    env, log, shim_dir = _shimmed(tmp_path)
+    subprocess.run(['ssh', 'some-host', 'line one\nline two\nline three'],
+                   env=env, capture_output=True, text=True)
+    assert ssh_audit.report(log)['ssh_calls'] == 1
+    # And the log itself is one physical line per invocation.
+    assert len(ssh_audit.calls(log)) == 1
+
+
+def test_an_already_written_inflated_log_still_reports_the_true_count(tmp_path):
+    """A log collected before the fix must still be readable honestly, without a re-run."""
+    log = tmp_path / 'old.log'
+    log.write_text(
+        '2026-09-16T23:21:00Z -T -o BatchMode=yes mycelium-laptop /bin/sh -c "ps -Ao pid=,args="\n'
+        'from pathlib import Path\n'
+        'p=Path(sys.argv[1])\n'
+        "printf('%s')\n"
+        '2026-09-16T23:21:01Z -T mycelium-laptop /usr/bin/python3 -c \'import json\'\n'
+        'more continuation\n'
+    )
+    # The point is the RELATION, not a hand-counted fixture total: the old log carries more
+    # physical lines than invocations, and the report must see through that.
+    assert len(ssh_audit.calls(log)) > ssh_audit.report(log)['ssh_calls']
+    assert ssh_audit.report(log)['ssh_calls'] == 2       # the truthful invocation count
+    assert ssh_audit.report(log)['verdict'] == 'SSH_USED'
+    # Every counted entry is a real invocation line, not a continuation.
+    for entry in ssh_audit.invocations(log):
+        assert ssh_audit._is_invocation(entry)
+
+
+def test_an_empty_log_is_no_ssh_but_a_whitespace_log_is_not(tmp_path):
+    log = tmp_path / 'ws.log'
+    log.write_text('\n   \n')
+    assert ssh_audit.report(log)['verdict'] == 'NO_SSH'
+    log.write_text('\n2026-09-16T23:21:00Z -T host true\n')
+    assert ssh_audit.report(log)['verdict'] == 'SSH_USED'

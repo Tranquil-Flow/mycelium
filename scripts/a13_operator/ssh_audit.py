@@ -27,9 +27,29 @@ _SHIM_BODY = """#!/bin/sh
 # Counted by scripts/a13_operator/ssh_audit.py: log the call, then behave as ssh.
 log="${A13_SSH_LOG:-%s}"
 mkdir -p "$(dirname "$log")" 2>/dev/null
-printf '%%s %%s\\n' "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" "$*" >> "$log" 2>/dev/null
+# ONE line per invocation: a command argument containing newlines must not pose as several
+# calls. Measured 2026-09-16: the pre-launch sweep's 2 ssh calls logged as 10 lines, which
+# would have read as 10 calls. Command whitespace is normalised to single spaces for the log.
+cmd=$(printf '%%s' "$*" | tr '\\n' ' ')
+printf '%%s %%s\\n' "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" "$cmd" >> "$log" 2>/dev/null
 exec "${%s:-/usr/bin/ssh}" "$@"
 """ % (DEFAULT_LOG, REAL_SSH_ENV)
+# Log lines are written as "<ISO8601Z> <command>"; a continuation line never starts with one.
+def _is_invocation(line):
+    """True when a raw log line starts with our ISO8601Z stamp.
+
+    Deliberately arithmetic rather than a regex: the pattern was written through
+    a patch layer that doubled its backslashes, so it silently matched nothing and
+    every count read as zero. A check with no escaping to get wrong is worth more
+    here than a compact one.
+    """
+    head = line[:20]
+    if len(head) < 20 or head[10] != 'T' or head[19] != 'Z':
+        return False
+    digits = (head[:4] + head[5:7] + head[8:10] + head[11:13]
+              + head[14:16] + head[17:19])
+    return (digits.isdigit() and head[4] == '-' and head[7] == '-'
+            and head[13] == ':' and head[16] == ':')
 
 
 def install(shim_dir=SHIM_DIR, log=DEFAULT_LOG):
@@ -53,13 +73,23 @@ def calls(log=DEFAULT_LOG):
 
 def report(log=DEFAULT_LOG):
     """The audit verdict for a finished run."""
-    found = calls(log)
+    found = invocations(log)
     return {
         'ssh_calls': len(found),
         'log': str(log),
         'calls': found,
         'verdict': 'NO_SSH' if not found else 'SSH_USED',
     }
+
+
+def invocations(log=DEFAULT_LOG):
+    """One entry per ssh invocation.
+
+    Counts timestamp-prefixed lines only. That makes the count correct for logs written
+    before the shim normalised newlines (measured 2026-09-16: 2 real calls logged as 10
+    lines), so an already-collected log does not need re-running to be read honestly.
+    """
+    return [line for line in calls(log) if _is_invocation(line)]
 
 
 def reset(log=DEFAULT_LOG):
