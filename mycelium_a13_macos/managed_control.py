@@ -106,6 +106,11 @@ _MAX_PENDING_COMMANDS = 128
 _MEMBER_STATES = frozenset(
     {"NEW", "CONFIGURED", "RUNNING", "DRAINING", "STOPPING", "STOPPED"}
 )
+# The states that may still RUN work -- deliberately NOT the set above, which also admits
+# STOPPING and STOPPED because a stopped member still carries a verifiable binding.  A
+# revocation is defined as an advance to STOPPED (DemoAuthority.revoke), so this set is what
+# tells a benign re-admission from a revocation when both advance the generation.
+_LIVE_MEMBER_STATES = frozenset({"NEW", "CONFIGURED", "RUNNING"})
 _COMMAND_FIELDS = frozenset(
     {"protocol", "command_id", "run_id", "deployment_id", "command", "payload"}
 )
@@ -483,6 +488,21 @@ def _binding_advanced(previous: Mapping[str, Any], current: Mapping[str, Any]) -
     before = previous.get("membership_generation")
     after = current.get("membership_generation")
     return type(before) is int and type(after) is int and after > before
+
+
+def _member_live(member: Mapping[str, Any]) -> bool:
+    """True when a member record is still eligible to run work.
+
+    Needed to tell a RE-ADMISSION from a REVOCATION, which are otherwise identical in the
+    binding: both advance the generation and the incarnation.  `DemoAuthority.revoke`
+    advances the generation with `lifecycle_state="STOPPED"`, so 64r1's own re-admission
+    (which comes back RUNNING) and a revocation are distinguishable only by that state.
+    The product already treats {NEW, CONFIGURED, RUNNING} as the states that may run work
+    (authority.py:689, managed_provisioning.py:449), so reusing that set keeps revocation
+    fail-closed.  Note `_MEMBER_STATES` is NOT this set: it includes STOPPED, because it
+    bounds which lifecycle states carry a verifiable binding.
+    """
+    return isinstance(member, Mapping) and member.get("lifecycle_state") in _LIVE_MEMBER_STATES
 
 
 def _validate_binding(statement: Mapping[str, Any]) -> None:

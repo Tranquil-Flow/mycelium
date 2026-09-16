@@ -23,7 +23,7 @@ from physical_inference_qualification import ControllerError
 from .authority import _private_directory, _atomic_private_json, _load_private_json
 from .managed_control import (
     ManagedControlClient, ManagedControlError, CONTROL_COMMAND_PROTOCOL,
-    _binding_from_member, _document_digest, validate_native_command, request_deadline,
+    _binding_from_member, _binding_advanced, _member_live, _document_digest, validate_native_command, request_deadline,
 )
 
 from .durable_requests import prepare, replay
@@ -331,7 +331,15 @@ class ManagedControlOwner:
             self._guard()
             target, binding = self._target(session.node_id, session.run_id, session.deployment_id)
             if binding != session.binding:
-                raise ControllerError('managed_control_member_stale')
+                # Relay rotation re-admits the SAME member with a newer incarnation, and that
+                # is not staleness.  The signed intent below is built from the FRESHLY resolved
+                # binding, never from session.binding, so adopting it moves no signed byte --
+                # while refusing it failed the command outright (round 64r1).  A REVOCATION
+                # also advances the generation, so it is excluded by requiring the member to be
+                # live: revocation is an advance to STOPPED.
+                if not (_binding_advanced(session.binding, binding) and _member_live(target)):
+                    raise ControllerError('managed_control_member_stale')
+                session.binding = binding
             _remaining(deadline, interruption)
             intent = {'binding': binding, 'digest': _document_digest(command)}
             previous = self._state['commands'].get(command['command_id'])
@@ -449,7 +457,12 @@ class ManagedControlOwner:
                 self._guard()
                 target, binding = self._target(session.node_id, session.run_id, session.deployment_id)
                 if binding != session.binding:
-                    raise ControllerError('managed_control_member_stale')
+                    # A re-admission of the same live member is adopted, never refused: the
+                    # result lookup would otherwise be abandoned mid-wait on every rotation.
+                    # A stopped member is a revocation and still fails closed.
+                    if not (_binding_advanced(session.binding, binding) and _member_live(target)):
+                        raise ControllerError('managed_control_member_stale')
+                    session.binding = binding
                 try:
                     result = self._request(self.client.result, target, command, deadline=deadline, interruption=interruption)
                 except ManagedControlError as error:
@@ -464,9 +477,15 @@ class ManagedControlOwner:
                 # The HTTP receipt can race a local authority revocation.
                 with _locked_before(self._lock, deadline, interruption):
                     self._guard()
-                    _, current = self._target(session.node_id, session.run_id, session.deployment_id)
+                    member, current = self._target(session.node_id, session.run_id, session.deployment_id)
                     if current != session.binding:
-                        raise ControllerError('managed_control_member_stale')
+                        # Still fail closed on a revocation or a different member -- this check
+                        # exists because the HTTP receipt can race a local revocation -- but a
+                        # live re-admission is adopted so the receipt is not discarded on
+                        # rotation.  Both are advances, so liveness is what separates them.
+                        if not (_binding_advanced(session.binding, current) and _member_live(member)):
+                            raise ControllerError('managed_control_member_stale')
+                        session.binding = current
                     _remaining(deadline, interruption)
                 return result['native_response']
             if result['state'] in {'expired', 'reconciliation_required'}:
