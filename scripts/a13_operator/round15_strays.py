@@ -19,7 +19,11 @@ from round14_rpc import OWNER, REMOTE, REMOTE_HOST
 from round14_surface import local_state, remote_state
 
 PATTERNS = ("packaged_app_daemon", "packaged_owner_daemon", "packaged_target_daemon", "Mycelium A13 Demo")
-LOCAL_PS = "ps -Ao pid=,comm=,args= | grep -Ei '%s' | grep -v grep || true" % "|".join(PATTERNS)
+# The sweep must never look like a stray: its own command line carries PATTERNS, and the first
+# version of this tool reported 2 phantom strays on the laptop because an `sh -c` wrapper and a
+# `grep` matched their own pattern. So: plain `ps`, filter in Python, and exclude ourselves.
+SELF_MARKERS = ("round15_strays", "grep -Ei", "ps -Ao")
+PS_CMD = "ps -Ao pid=,args="
 
 
 def _strays(text):
@@ -28,48 +32,67 @@ def _strays(text):
         line = line.strip()
         if not line:
             continue
-        pid = line.split(None, 1)[0]
-        if pid.isdigit():
-            rows.append({"pid": int(pid), "cmd": line[:200]})
+        pid, _sep, _rest = line.partition(" ")
+        if not pid.isdigit():
+            continue
+        low = line.lower()
+        if any(marker.lower() in low for marker in SELF_MARKERS):
+            continue
+        if not any(pattern.lower() in low for pattern in PATTERNS):
+            continue
+        rows.append({"pid": int(pid), "cmd": line[:200]})
     return rows
 
 
 def local_sweep():
-    done = subprocess.run(["/bin/sh", "-c", LOCAL_PS], capture_output=True, text=True, timeout=60)
-    return _strays(done.stdout)
+    """Returns (rows, transport_error)."""
+    done = subprocess.run(["/bin/sh", "-c", PS_CMD], capture_output=True, text=True, timeout=60)
+    return _strays(done.stdout), None
 
 
 def remote_sweep():
-    cmd = ["ssh", "-T", "-o", "BatchMode=yes", REMOTE_HOST, "/bin/sh -c " + json.dumps(LOCAL_PS)]
+    """Returns (rows, transport_error).
+
+    Both sweeps must return the SAME shape. The first version returned a dict here and a list
+    there, so `stray_count` counted the dict's two keys and every report of a clean laptop
+    showed `strays=2` - a false alarm in the very evidence the round's hygiene is judged on.
+    """
+    cmd = ["ssh", "-T", "-o", "BatchMode=yes", REMOTE_HOST, "/bin/sh -c " + json.dumps(PS_CMD)]
     try:
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
-        return {"error": "ssh_timeout", "strays": []}
+        return [], "ssh_timeout"
     if done.returncode:
-        return {"error": (done.stderr or done.stdout)[-300:].strip(), "strays": []}
-    return {"error": None, "strays": _strays(done.stdout)}
+        return [], (done.stderr or done.stdout)[-300:].strip()
+    return _strays(done.stdout), None
 
 
 def sweep():
     """Both Macs, both surfaces. `resume_ready` is the precondition for --resume."""
-    report = {
-        "owner": {"root": str(OWNER), "surface": local_state(OWNER), "strays": local_sweep()},
-        "target": {
-            "root": str(REMOTE) + "/target",
-            "host": REMOTE_HOST,
-            "surface": remote_state(REMOTE, REMOTE_HOST),
-            "strays": remote_sweep(),
-        },
+    owner_rows, owner_err = local_sweep()
+    target_rows, target_err = remote_sweep()
+    report: dict = {
+        "owner": {"root": str(OWNER), "surface": local_state(OWNER), "strays": owner_rows,
+                  "sweep_error": owner_err},
+        "target": {"root": str(REMOTE) + "/target", "host": REMOTE_HOST,
+                   "surface": remote_state(REMOTE, REMOTE_HOST), "strays": target_rows,
+                   "sweep_error": target_err},
     }
-    report["stray_count"] = len(report["owner"]["strays"]) + len(report["target"]["strays"])
+    report["stray_count"] = len(owner_rows) + len(target_rows)
+    report["sweep_errors"] = {
+        label: report[label]["sweep_error"]
+        for label in ("owner", "target")
+        if report[label]["sweep_error"]
+    }
     report["resume_ready"] = {
         label: report[label]["surface"].get("present") is False for label in ("owner", "target")
     }
     for label in ("owner", "target"):
         part = report[label]
         print(
-            "%s root=%s surface_present=%s strays=%d"
-            % (label.upper(), part["root"], part["surface"].get("present"), len(part["strays"])),
+            "%s root=%s surface_present=%s strays=%d%s"
+            % (label.upper(), part["root"], part["surface"].get("present"), len(part["strays"]),
+               "" if not part["sweep_error"] else " SWEEP_ERROR=" + part["sweep_error"]),
             flush=True,
         )
     return report
