@@ -11,6 +11,8 @@ import pytest
 
 from playwright.sync_api import sync_playwright, expect
 
+from mycelium_a13_macos.serving import CANDIDATE_MODEL
+
 
 def test_packaged_canonical_staging_in_clean_directory(tmp_path):
     from test_managed_staging import bundle
@@ -65,8 +67,9 @@ def test_packaged_native_app_in_clean_working_directory(tmp_path,role):
         assert first, 'packaged_launcher_failed_before_start'
         started=json.loads(first)
         assert started['event']=='launcher_started'
-        assert started['model_contract']['model_id']=='Qwen/Qwen2.5-0.5B-Instruct'
-        assert started['model_contract']['resolved_commit']=='7ae557604adf67be50417f59c2c2f167def9a775'
+        assert started['model_contract']['model_id']=='Qwen/Qwen2.5-7B-Instruct'
+        assert started['model_contract']['model_id']==CANDIDATE_MODEL.model_id
+        assert started['model_contract']['resolved_commit']=='a09a35458c702b33eeacc393d103063234e8bc28'
         assert started['model_contract']['runtime_quantization']=='int8-weight-only'
         assert started['model_contract']['sampling_seed']==0
         with sync_playwright() as p:

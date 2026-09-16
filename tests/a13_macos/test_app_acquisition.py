@@ -92,3 +92,20 @@ def test_revoked_authority_cannot_start_new_download(owned):
     assert request(a,'/api/revoke-self','POST',{'confirm':True},h)[0]==200
     assert start(a,h)[0]==400
     assert acq.starts==[]
+
+
+def test_storage_policy_ceiling_covers_the_seeded_7b_budget():
+    """G2 (D-1): the policy must be able to express the 7B seeded-path storage.
+
+    Derived (runs/wp8-02-g1/g2-derivation.json): laptop seeded 7B snapshot
+    15,242,807,270 B + [0,14)+embedding stage copy 7,810,167,792 B =
+    23,052,975,062 B == serving.RESOURCE_PROPOSAL.additional_disk_bytes.
+    """
+
+    from mycelium_a13_macos.app import consent_valid
+
+    policy={'peer_visibility':True,'power':'ac_only','network':'unmetered_only',
+            'background':False,'diagnostics':False,'thermal':'stop_on_serious'}
+    assert consent_valid({**policy,'storage_bytes':24_854_140_006})
+    assert not consent_valid({**policy,'storage_bytes':24_854_140_007})
+    assert not consent_valid({**policy,'storage_bytes':99_999_999})

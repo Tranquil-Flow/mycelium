@@ -19,7 +19,7 @@ import threading
 import time
 import urllib.parse
 from dataclasses import asdict
-from .serving import CANDIDATE_MODEL
+from .serving import CANDIDATE_MODEL, RESOURCE_PROPOSAL
 
 MAX_BODY = 65536
 
@@ -73,9 +73,16 @@ def private_write(path, raw):
 
 
 def consent_valid(c):
+    # G2 (D-1, 2026-09-16): the storage ceiling is derived from the selected
+    # contract's own resource proposal (serving.RESOURCE_PROPOSAL.
+    # additional_disk_bytes = the largest per-host requirement: the laptop's
+    # seeded 7B snapshot 15,242,807,270 B + its [0,14)+embedding stage copy
+    # 7,810,167,792 B = 23,052,975,062 B).  It must be expressible, because the
+    # seeded-path policy also bounds the acquisition's storage grant and the
+    # worker's staging disk.  See runs/wp8-02-g1/.
     return (isinstance(c, dict) and set(c) == {'peer_visibility','power','storage_bytes','network','background','diagnostics','thermal'}
             and c['peer_visibility'] is True and c['power'] in {'ac_only','battery_allowed'}
-            and type(c['storage_bytes']) is int and 100_000_000 <= c['storage_bytes'] <= 10_000_000_000
+            and type(c['storage_bytes']) is int and 100_000_000 <= c['storage_bytes'] <= RESOURCE_PROPOSAL.additional_disk_bytes
             and c['network'] in {'unmetered_only','metered_allowed'}
             and c['background'] is False and c['diagnostics'] is False
             and c['thermal'] == 'stop_on_serious')

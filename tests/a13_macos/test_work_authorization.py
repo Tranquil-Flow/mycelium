@@ -199,9 +199,10 @@ class TestMetadataPins:
             "configure", "infer_decode", "infer_start", "rotate", "start")
 
     def test_pinned_candidate_model_unchanged(self):
-        assert CANDIDATE_MODEL.model_id == "Qwen/Qwen2.5-0.5B-Instruct"
+        # wp8-02 G1 (2026-09-16): the owner-directed 7B useful-model composition.
+        assert CANDIDATE_MODEL.model_id == "Qwen/Qwen2.5-7B-Instruct"
         assert CANDIDATE_MODEL.resolved_commit == \
-            "7ae557604adf67be50417f59c2c2f167def9a775"
+            "a09a35458c702b33eeacc393d103063234e8bc28"
         assert CANDIDATE_MODEL.sampling_seed == 0
         assert (CANDIDATE_MODEL.runtime_backend, CANDIDATE_MODEL.runtime_dtype,
                 CANDIDATE_MODEL.runtime_quantization) == \

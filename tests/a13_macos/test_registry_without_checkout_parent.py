@@ -8,8 +8,8 @@ def test_registry_can_explicitly_omit_source_governance(tmp_path,monkeypatch):
     def no_model(*args,**kwargs):raise RuntimeError('test_route_unavailable')
     monkeypatch.setattr(s,'_qualified_runtime',no_model)
     monkeypatch.setattr(s,'native_deployment_projection',lambda plan:NS(
-        deployment_id='a13-no-model',model_id='Qwen/Qwen2.5-0.5B-Instruct',
-        model_revision='7ae557604adf67be50417f59c2c2f167def9a775',quantization='int8-weight-only',topology_size=2))
+        deployment_id='a13-no-model',model_id='Qwen/Qwen2.5-7B-Instruct',
+        model_revision='a09a35458c702b33eeacc393d103063234e8bc28',quantization='int8-weight-only',topology_size=2))
     def forbidden(*args,**kwargs):raise AssertionError('source_checkout_must_not_be_read')
     monkeypatch.setattr(s,'governance_readiness',forbidden)
     (tmp_path/'private-state').mkdir(mode=0o700)

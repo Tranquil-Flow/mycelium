@@ -382,7 +382,9 @@ def test_invalid_run_profile_creates_no_admission(enrolled_pair, mutation, tmp_p
     if mutation == "wrong_run_mode":
         overrides["run_mode"] = "shell_tunnel"
     elif mutation == "wrong_model_id":
-        overrides["expected_model_id"] = "Qwen/Qwen2.5-7B-Instruct"
+        # The 7B is the current candidate, so the "wrong" id must be a
+        # different repository entirely (wp8-02 G1 swap).
+        overrides["expected_model_id"] = "Qwen/Qwen2.5-0.5B-Instruct"
     elif mutation == "wrong_resolved_commit":
         overrides["expected_resolved_commit"] = "0" * 40
     elif mutation == "wrong_manifest_digest":

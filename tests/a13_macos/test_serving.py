@@ -136,17 +136,22 @@ def _compiled_manifest(model: ModelContract) -> dict[str, object]:
 
 
 def test_owner_contract_matches_hosted_instruct_int8() -> None:
-    assert CANDIDATE_MODEL.model_id == "Qwen/Qwen2.5-0.5B-Instruct"
-    assert CANDIDATE_MODEL.resolved_commit == "7ae557604adf67be50417f59c2c2f167def9a775"
+    # wp8-02 G1 (2026-09-16): the owner-directed useful-model composition.  The
+    # pinned snapshot is the local HF cache entry a09a35458c... (14 files,
+    # 15,242,807,270 B, 28 decoder layers) that the WP7/A3 records qualified.
+    assert CANDIDATE_MODEL.model_id == "Qwen/Qwen2.5-7B-Instruct"
+    assert CANDIDATE_MODEL.resolved_commit == "a09a35458c702b33eeacc393d103063234e8bc28"
     assert CANDIDATE_MODEL.source_representation == "bfloat16-safetensors"
     assert CANDIDATE_MODEL.runtime_backend == "mlx"
     assert CANDIDATE_MODEL.runtime_dtype == "float32"
     assert CANDIDATE_MODEL.runtime_quantization == "int8-weight-only"
     assert CANDIDATE_MODEL.decoding == "quantized_greedy_token_id"
     assert CANDIDATE_MODEL.sampling_seed == 0
+    # The checked-in native end-to-end evidence is still the 0.5B wp8-01 round;
+    # it deliberately no longer equals the selected candidate.
     assert EXECUTED_NATIVE_MODEL.model_id == "Qwen/Qwen2.5-0.5B-Instruct"
     assert EXECUTED_NATIVE_MODEL.runtime_quantization == "int8-weight-only"
-    assert EXECUTED_NATIVE_MODEL == CANDIDATE_MODEL
+    assert EXECUTED_NATIVE_MODEL != CANDIDATE_MODEL
 
 
 def test_prepare_source_calls_real_compiler_seam_without_creating_runtime_state(
@@ -169,7 +174,7 @@ def test_prepare_source_calls_real_compiler_seam_without_creating_runtime_state(
     assert seen[0].model_id == CANDIDATE_MODEL.model_id
     assert seen[0].resolved_commit == CANDIDATE_MODEL.resolved_commit
     assert not runtime_root.exists()
-    assert prepared.resource_proposal.network_download_bytes == 999_604_126
+    assert prepared.resource_proposal.network_download_bytes == 11_535_382
     assert prepared.resource_proposal.execution_download_bytes == 0
     assert prepared.resource_proposal.run_count == 1
 

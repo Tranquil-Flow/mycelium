@@ -403,6 +403,107 @@ def test_real_local_http_download_compiles_native_prepared_source(tmp_path: Path
         acquisition.close()
 
 
+def _seed_stage(
+    tmp_path: Path, files: dict[str, bytes], *, omit: tuple[str, ...] = ()
+) -> Path:
+    """Materialise a LAN-seeded acquisition stage exactly as the 7B seed lands.
+
+    Mirrors the real seed shape (runs/wp8-01-two-mac-05b-terminal/round_setup.py
+    target_seed): regular files mode 0600 inside mode-0700 directories at
+    ``models--<id>/snapshots/.<commit>.acquiring``.
+    """
+
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700, exist_ok=True)
+    state.chmod(0o700)
+    model_root = state / ("models--" + CANDIDATE_MODEL.model_id.replace("/", "--"))
+    snapshots = model_root / "snapshots"
+    stage = snapshots / ("." + CANDIDATE_MODEL.resolved_commit + ".acquiring")
+    stage.mkdir(parents=True, mode=0o700)
+    for directory in (snapshots, stage):
+        directory.chmod(0o700)
+    for name, payload in files.items():
+        if name in omit:
+            continue
+        path = stage / name
+        path.write_bytes(payload)
+        path.chmod(0o600)
+    return stage
+
+
+def test_complete_seeded_stage_prepares_within_a_small_network_budget(tmp_path: Path) -> None:
+    """D-1: model bytes come from the seed; the network budget stays small.
+
+    A complete retained/seeded snapshot must reach ``prepared`` without fetching
+    anything, even when the granted download budget is far below the repository
+    total (the whole point of D-1: the app cannot download 15.2 GB of weights).
+    """
+
+    files = _repository_files()
+    total = sum(map(len, files.values()))
+    with _FixtureServer(tmp_path, files) as server:
+        _seed_stage(tmp_path, files)
+        acquisition = SelectedModelAcquisition(
+            tmp_path / "state", _transport=server.transport()
+        )
+        result = acquisition._run_blocking(
+            _consent(total, download=len(b"small-metadata-allowance"), storage=total)
+        )
+        assert result["state"] == "prepared"
+        assert result["downloaded_bytes"] == total
+        assert result["error_code"] is None
+        assert _file_requests(server) == []
+        prepared = acquisition.prepared_source()
+        assert prepared.model == CANDIDATE_MODEL
+        assert prepared.source_bytes == len(files["model.safetensors"])
+        acquisition.close()
+
+
+def test_partial_seed_fetches_only_the_missing_small_asset(tmp_path: Path) -> None:
+    """wp8-01's owner leg shape: the seed omits small text files only."""
+
+    files = {**_repository_files(), "README.md": b"readme-asset\n"}
+    total = sum(map(len, files.values()))
+    with _FixtureServer(tmp_path, files) as server:
+        _seed_stage(tmp_path, files, omit=("README.md",))
+        acquisition = SelectedModelAcquisition(
+            tmp_path / "state", _transport=server.transport()
+        )
+        result = acquisition._run_blocking(_consent(total, download=9_999, storage=total))
+        assert result["state"] == "prepared"
+        requested = _file_requests(server)
+        assert len(requested) == 1
+        assert "README.md" in requested[0][0]
+        acquisition.close()
+
+
+def test_seed_missing_model_bytes_refuses_without_fetching(tmp_path: Path) -> None:
+    """ERRATA-1 lesson, fail-closed: a missing weight file must refuse.
+
+    The granted budget is below the missing safetensors file (the fixture's
+    stand-in for the 7B's 3.5-3.9 GB shards vs the 11,535,382 B small-assets
+    allowance), so the acquisition must refuse before any byte is requested.
+    """
+
+    files = _repository_files()
+    total = sum(map(len, files.values()))
+    budget = 64
+    assert len(files["model.safetensors"]) > budget
+    assert total > budget
+    with _FixtureServer(tmp_path, files) as server:
+        _seed_stage(tmp_path, files, omit=("model.safetensors",))
+        acquisition = SelectedModelAcquisition(
+            tmp_path / "state", _transport=server.transport()
+        )
+        result = acquisition._run_blocking(
+            _consent(total, download=budget, storage=total)
+        )
+        assert result["state"] == "failed"
+        assert result["error_code"] == "download_limit_exceeded"
+        assert _file_requests(server) == []
+        acquisition.close()
+
+
 def test_real_local_https_uses_authenticated_context_and_pinned_paths(tmp_path: Path) -> None:
     files = _repository_files()
     total = sum(map(len, files.values()))

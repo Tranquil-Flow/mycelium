@@ -36,14 +36,41 @@ class ResourceProposal:
 
 
 RESOURCE_PROPOSAL = ResourceProposal(
-    # Pinned Instruct repository metadata: total 999,604,126 bytes (weights 988,097,824).
-    # This remains a proposal: no download is performed by this module.
-    network_download_bytes=999_604_126,
+    # D-1 (owner, 2026-09-16): model bytes are provisioned from the LAN seed /
+    # retained state and are NEVER fetched by the app.  The network allowance is
+    # therefore only the pinned 7B snapshot's non-weight metadata/text assets,
+    # 11,535,382 B = .gitattributes 1,519 + LICENSE 11,343 + README.md 6,240 +
+    # config.json 663 + generation_config.json 243 + merges.txt 1,671,839 +
+    # model.safetensors.index.json 27,752 + tokenizer.json 7,031,645 +
+    # tokenizer_config.json 7,305 + vocab.json 2,776,833.  The 15,231,271,888 B
+    # of bf16 safetensors shards must already be staged: with this budget a
+    # missing shard refuses (download_limit_exceeded) before any byte is
+    # requested, instead of silently downloading it (ERRATA-1).  Derivation:
+    # runs/wp8-02-g1/g2-derivation.json.
+    network_download_bytes=11_535_382,
     # Both native compiler/provisioner paths are local-files-only.
     execution_download_bytes=0,
-    # 8 GiB each for output/temporary closure and combined process RSS.
-    additional_disk_bytes=8_589_934_592,
-    max_combined_rss_bytes=8_589_934_592,
+    # Balanced-split additional disk.  Two binding quantities:
+    #   laptop storage grant: its seeded 7B source snapshot 15,242,807,270 B
+    #     (+ its [0,14)+input_embedding stage copy 7,810,167,792 B on disk);
+    #   m4pro worker stage: its [14,28)+final_norm+lm_head stage copy
+    #     11,285,830,448 B + non-weight deployment assets (~11,505,918 B proxy)
+    #     = 11,297,336,366 B.
+    # The runner derives each worker's disk limit as this value / 2, so the
+    # constant carries 10% headroom over the m4pro worker need:
+    #   2 x ceil(1.10 x 11,297,336,366) = 24,854,140,006 B.
+    # (The components-only 23,052,975,062 B left the runner-derived m4pro limit
+    # only ~229 MB / 2.0% slack - receipt section 8; raised 2026-09-16 before the
+    # first 7B round.  Covering file sets measured on the real 7B shard index;
+    # the same numbers Tranche B derived for the app route's balanced split.)
+    additional_disk_bytes=24_854_140_006,
+    # Load-peak bound, derived from the int8 stage accounting + headroom:
+    #   heaviest host stage load peak 4,692,854,784 B ([14,28)+final_norm+
+    #   lm_head = 3,811,704,832 B resident weights + 881,149,952 B streaming
+    #   transient) + 512 MiB workspace = 5,229,725,696 B; x2 (the runner divides
+    #   this proposal by two for the worker limits) = 10,459,451,392 B; +10%
+    #   headroom (the planner's memory_reserve_fraction) = 11,505,396,531 B.
+    max_combined_rss_bytes=11_505_396_531,
     max_wall_seconds=1_800,
     run_count=1,
 )
@@ -65,19 +92,23 @@ class ModelContract:
         return RESOURCE_PROPOSAL
 
 
-# Owner addendum: match hosted W6 identity/representation exactly. This is
-# the selected contract, not permission to reuse hosted artifacts or evidence.
+# Owner-directed useful-model composition (wp8-02 G1): the A13 app is now a
+# 7B vehicle.  Every field is locally evidenced: the pinned HF-cache snapshot
+# models--Qwen--Qwen2.5-7B-Instruct/snapshots/a09a35458c...(14 files, 15,242,807,270 B,
+# 28 decoder layers), the WP7-1/A3 records, and the Tranche B route derivation.
 CANDIDATE_MODEL = ModelContract(
-    model_id="Qwen/Qwen2.5-0.5B-Instruct",
-    resolved_commit="7ae557604adf67be50417f59c2c2f167def9a775",
+    model_id="Qwen/Qwen2.5-7B-Instruct",
+    resolved_commit="a09a35458c702b33eeacc393d103063234e8bc28",
     source_representation="bfloat16-safetensors",
     runtime_backend="mlx",
     runtime_dtype="float32",
     runtime_quantization="int8-weight-only",
 )
 
-# What the checked-in native end-to-end evidence actually exercised.  It is
-# now matches the owner-selected candidate; historic evidence is not fresh demo proof.
+# What the checked-in native end-to-end evidence actually exercised: the wp8-01
+# two-Mac round ran the 0.5B contract.  It no longer matches the selected
+# candidate — wp8-02's fresh 7B run is what will replace this record; historic
+# evidence is not fresh demo proof.
 EXECUTED_NATIVE_MODEL = ModelContract(
     model_id="Qwen/Qwen2.5-0.5B-Instruct",
     resolved_commit="7ae557604adf67be50417f59c2c2f167def9a775",

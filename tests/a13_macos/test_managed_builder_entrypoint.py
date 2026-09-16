@@ -478,7 +478,11 @@ def test_main_dispatches_managed_build_from_cli(
     namespace = captured["namespace"]
     assert namespace.managed_transport is True
     assert Path(namespace.managed_hello_observations) == observations
-    # Default model identity matches the pinned CANDIDATE_MODEL contract.
+    # The builder CLI's own default identity stays the historic 0.5B (that
+    # module is not part of the wp8-02 G1 composition change); the A13 app
+    # passes its selected 7B identity explicitly in the build() namespace
+    # (mycelium_a13_macos/chain_compile.py), so this default is inert for the
+    # app route.  Left as-is deliberately.
     assert namespace.model_id == builder.MODEL_ID == "Qwen/Qwen2.5-0.5B-Instruct"
     assert (
         namespace.resolved_commit

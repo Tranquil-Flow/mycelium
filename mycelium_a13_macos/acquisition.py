@@ -814,8 +814,7 @@ class SelectedModelAcquisition:
         manifest = self._resolve_manifest()
         total = manifest["total_bytes"]
         self._set_status(state="checking_capacity", total_bytes=total)
-        if total > consent["max_download_bytes"]:
-            _raise("download_limit_exceeded")
+        # Storage is a property of the stored snapshot, not of this attempt.
         if total > consent["storage_limit_bytes"]:
             _raise("storage_limit_exceeded")
         self._check_cancelled()
@@ -830,6 +829,16 @@ class SelectedModelAcquisition:
             downloaded = self._scan_stage(stage, manifest)
             self._set_status(downloaded_bytes=downloaded)
             remaining = total - downloaded
+            # D-1 (2026-09-16): the download budget bounds what this attempt
+            # would fetch over the network, not the repository total.  A
+            # retained/LAN-seeded snapshot therefore completes with a small
+            # allowance, while a seed missing model bytes refuses here — before
+            # any byte is requested — instead of silently downloading them
+            # (ERRATA-1).  ``downloaded`` counts only digest-verified staged
+            # files, and ``_write_chunk`` still bounds cumulative network bytes
+            # by the same budget during transfer.
+            if remaining > consent["max_download_bytes"]:
+                _raise("download_limit_exceeded")
             try:
                 free = self._disk_free(self.state_root)
             except BaseException as exc:
