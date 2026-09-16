@@ -15,7 +15,7 @@ import time
 
 from .authority import _private_directory, _atomic_private_json
 from .concurrent_pump import ConcurrentTargetControlPump
-from .managed_control import _binding_from_member
+from .managed_control import _binding_from_member, _binding_advanced
 from .managed_staging import TargetStaging, StagingError
 from .worker import ManagedWorker
 
@@ -46,6 +46,15 @@ def _bounded_control_reason(exc: BaseException) -> dict:
         if len(tokens) == 4:
             break
     return {'exception_type': type(exc).__name__[:64], 'tokens': tokens}
+
+
+def _current_binding(member, run_id, deployment_id):
+    """Binding of `member` for this run, or None when it cannot be derived."""
+
+    try:
+        return _binding_from_member(member, run_id, deployment_id)
+    except Exception:
+        return None
 
 
 class ManagedTargetRuntime:
@@ -103,9 +112,20 @@ class ManagedTargetRuntime:
         try:
             member=self._current_member()
             lease=member.get('lease_expires_at')
-            if (type(lease) not in (int,float) or not math.isfinite(lease) or time.time()>=lease
-                or _binding_from_member(member,self.run_id,self.deployment_id)!=self._binding):
+            if (type(lease) not in (int,float) or not math.isfinite(lease) or time.time()>=lease):
                 raise ValueError()
+            binding=_current_binding(member,self.run_id,self.deployment_id)
+            if binding!=self._binding:
+                # Relay rotation re-admits the SAME node with a newer incarnation and
+                # that must not read as stale.  Round 64r1 failed closed right here: the
+                # node's own re-admission made _membership_current() false, the worker's
+                # guard raised worker_membership_not_current, and the native worker
+                # closed for good one second before the run-level configure became
+                # unknowable.  Rebind and carry on; a different member, or a rewind,
+                # still fails closed.
+                if binding is None or not _binding_advanced(self._binding,binding):
+                    raise ValueError()
+                self._binding=binding
             return member
         except Exception: raise RuntimeErrorCode('runtime_member_stale') from None
 

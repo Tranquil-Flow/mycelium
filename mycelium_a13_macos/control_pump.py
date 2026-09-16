@@ -15,7 +15,7 @@ import threading
 from typing import Callable, Mapping, Any
 
 from .authority import _private_directory, _atomic_private_json, _load_private_json
-from .managed_control import ManagedControlClient, _binding_from_member
+from .managed_control import ManagedControlClient, _binding_from_member, _binding_advanced
 from .worker import ManagedWorker, WorkerError
 
 from .durable_requests import prepare, replay
@@ -148,7 +148,14 @@ class TargetControlPump:
                     pending['phase']='reconciliation_required'
             if set(value)!={'protocol','binding','sequence','pending','outbound'} or value['protocol']!=_PROTOCOL or type(value['sequence']) is not int or value['sequence']<0:
                 raise ControlPumpError('control_state_invalid')
-            if value['binding']!=self._binding:raise ControlPumpError('control_membership_changed')
+            if value['binding']!=self._binding:
+                # A resumed pump whose durable binding is an OLDER incarnation of the
+                # same member must rebind rather than refuse: relay rotation re-admits
+                # the node, and refusing here ends the run at the next restart.
+                if not _binding_advanced(value['binding'],self._binding):
+                    raise ControlPumpError('control_membership_changed')
+                value['binding']=self._binding
+                _atomic_private_json(self.path,value)
             if value['pending'] is not None and not isinstance(value['pending'],dict):raise ControlPumpError('control_state_invalid')
             if value['outbound'] is not None and not isinstance(value['outbound'],dict):raise ControlPumpError('control_state_invalid')
             self._state=value
@@ -173,8 +180,18 @@ class TargetControlPump:
 
     def _member(self):
         target=self.current_member()
-        if _binding_from_member(target,self.worker.run_id,self.worker.deployment_id)!=self._binding:
-            raise ControlPumpError('control_membership_changed')
+        binding=_binding_from_member(target,self.worker.run_id,self.worker.deployment_id)
+        if binding!=self._binding:
+            # Relay rotation re-admits the SAME node with a newer incarnation; the
+            # durable binding captured at construction then no longer matches and the
+            # pump used to raise here, which ended the control loop for the rest of the
+            # run (round 64r1).  Rebind and carry on.  A different member, or a rewind,
+            # still fails closed.
+            if not _binding_advanced(self._binding,binding):
+                raise ControlPumpError('control_membership_changed')
+            self._binding=binding
+            self._state['binding']=binding
+            self._save()
         return target
 
     def _replay(self,target):

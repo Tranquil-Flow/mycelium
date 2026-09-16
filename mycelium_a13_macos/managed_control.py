@@ -460,6 +460,31 @@ def _binding_from_member(target: Mapping[str, Any], run_id: str, deployment_id: 
     return binding
 
 
+def _binding_advanced(previous: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    """True when `current` is a NEWER incarnation of the SAME member.
+
+    Routine relay rotation re-admits the same node with a new generation and a new
+    incarnation, so a durable binding captured earlier no longer compares equal.
+    That is our own member coming back, not a different one, and callers rebind and
+    carry on.  Round 64r1 failed closed here instead: the node's own re-admission
+    killed its native worker and its control loop one second before the run-level
+    configure became unknowable.
+
+    Narrow on purpose.  A different node, endpoint, key, run or deployment is a
+    DIFFERENT member, and a rewind to an older generation is never an advance.
+    Both still fail closed.
+    """
+    if not isinstance(previous, Mapping) or not isinstance(current, Mapping):
+        return False
+    for field in ("target_node_id", "target_endpoint_id", "target_key_digest",
+                  "run_id", "deployment_id"):
+        if previous.get(field) != current.get(field):
+            return False
+    before = previous.get("membership_generation")
+    after = current.get("membership_generation")
+    return type(before) is int and type(after) is int and after > before
+
+
 def _validate_binding(statement: Mapping[str, Any]) -> None:
     for field in (
         "target_node_id",

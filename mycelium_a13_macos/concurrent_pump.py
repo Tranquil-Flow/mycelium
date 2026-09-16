@@ -12,7 +12,7 @@ import re
 from .control_pump import TargetControlPump, ControlPumpError, _OUTBOUND_EXPIRED, _outbound_outcome
 from .authority import _atomic_private_json, _load_private_json
 from .durable_requests import prepare
-from .managed_control import OWNER_COMMAND_PROTOCOL, _verify_signed, _binding_from_member, _document_digest
+from .managed_control import OWNER_COMMAND_PROTOCOL, _verify_signed, _binding_from_member, _document_digest, _binding_advanced
 
 _PROTOCOL = 'mycelium.a13.concurrent_claims.v1'
 
@@ -62,9 +62,17 @@ class ConcurrentTargetControlPump(TargetControlPump):
                 value = {'protocol': _PROTOCOL, 'binding': self._binding, 'claims': {}}
                 _atomic_private_json(self._claims_path, value)
             if (set(value) != {'protocol', 'binding', 'claims'} or value['protocol'] != _PROTOCOL
-                    or value['binding'] != self._binding or not isinstance(value['claims'], dict)
+                    or not isinstance(value['claims'], dict)
                     or len(value['claims']) > 3):
                 raise ControlPumpError('concurrent_state_invalid')
+            if value['binding'] != self._binding:
+                # An older incarnation of the SAME member is a re-admission, not an
+                # invalid state: rebind rather than refuse, or relay rotation ends the
+                # run at the next restart (round 64r1).  A different member still fails.
+                if not _binding_advanced(value['binding'], self._binding):
+                    raise ControlPumpError('concurrent_state_invalid')
+                value['binding'] = self._binding
+                _atomic_private_json(self._claims_path, value)
             for key, row in value['claims'].items():
                 if (not isinstance(row, dict) or set(row) != {'phase', 'reply', 'native_response', 'error_code'}
                         or row['phase'] not in _CLAIM_PHASES
