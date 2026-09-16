@@ -33,7 +33,12 @@ class _GuardStub:
 
 def test_process_exit_records_frames_and_never_raw_text(tmp_path):
     session = NS(returncode=1, stderr=STDERR)
-    worker = NS(capacity_root=tmp_path, run_id='fixture-run', node_id='fixture-node')
+    worker = NS(
+        capacity_root=tmp_path,
+        run_id='fixture-run',
+        node_id='fixture-node',
+        _error='worker_native_exited',
+    )
     ManagedWorker._record_native_exit(worker, session)
     path = tmp_path / 'native-exit.private.json'
     document = json.loads(path.read_text())
@@ -41,6 +46,8 @@ def test_process_exit_records_frames_and_never_raw_text(tmp_path):
     assert document['run_id'] == 'fixture-run'
     assert document['node_id'] == 'fixture-node'
     assert document['returncode'] == 1
+    # A real process exit and a guard trip must not read the same.
+    assert document['error_code'] == 'worker_native_exited'
     assert document['frames'] == [
         {'file': 'physical_inference_node.py', 'line': 2617, 'function': '_infer_start'},
         {'file': 'iroh.py', 'line': 88, 'function': 'send'},
@@ -81,4 +88,5 @@ def test_watch_records_the_exit_then_closes_the_worker(tmp_path):
     assert worker._error == 'worker_native_exited'
     document = json.loads((tmp_path / 'native-exit.private.json').read_text())
     assert document['returncode'] == 9
+    assert document['error_code'] == 'worker_native_exited'
     assert document['exception_types'] == ['IrohTransportError']

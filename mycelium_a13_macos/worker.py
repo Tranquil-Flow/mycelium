@@ -822,7 +822,13 @@ class ManagedWorker:
             'command':command,**_bounded_native_diagnostics(getattr(session,'stderr',b''))})
 
     def _record_native_exit(self, session):
-        """Bounded diagnostic for a native worker process exit.
+        """Bounded diagnostic for a worker guard trip.
+
+        NOT necessarily a process exit: ``_watch`` calls ``_check()`` and the
+        exit test inside one ``try``, and ``_check()`` raises for membership,
+        resource-policy, storage, memory and wall-limit refusals.  Since
+        ``self._session`` is never cleared, a null ``returncode`` with empty
+        frames means ``_check()`` raised and nothing exited.
 
         A process exit destroys the only chance to learn why the worker is
         gone, and the generic follow-on code hides it entirely.  Record the
@@ -835,6 +841,7 @@ class ManagedWorker:
         _atomic_private_json(self.capacity_root/'native-exit.private.json',{
             'protocol':'mycelium.a13.native_exit_diagnostic.v1',
             'run_id':self.run_id,'node_id':self.node_id,
+            'error_code':self._error,
             'returncode':getattr(session,'returncode',None),
             **_bounded_native_diagnostics(getattr(session,'stderr',b''))})
 
