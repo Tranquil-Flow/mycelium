@@ -64,7 +64,7 @@ remote('mkdir -p ' + shlex.quote(REMOTE + '/' + tag))
 run(['scp', '-q', '-O', str(zip_path), scp_dest(REMOTE + '/%s-package.zip' % tag)])
 remote('ditto -x -k ' + shlex.quote(REMOTE + '/%s-package.zip' % tag) + ' ' + shlex.quote(REMOTE + '/' + tag))
 for name in ('app_rpc.py', 'packaged_app_daemon.py'):
-    run(['scp', '-q', '-O', str(evidence / name), scp_dest(REMOTE + '/' + tag + '/' + name)])
+    run(['scp', '-q', '-O', str(Path(__file__).resolve().parent / name), scp_dest(REMOTE + '/' + tag + '/' + name)])
 
 remote_digest = remote('shasum -a 256 ' + shlex.quote(REMOTE + '/' + tag + '/' + EXE_REL)).stdout.split()[0]
 print('LOCAL  ' + local_digest, flush=True)
