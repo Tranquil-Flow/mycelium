@@ -966,7 +966,7 @@ def test_a_legacy_serial_poll_keeps_its_immediate_empty_receipt(tmp_path: Path) 
 
 
 def test_a_poll_that_owes_an_acknowledgement_is_never_held_open(tmp_path: Path) -> None:
-    """Trap C: never park a peer that still owes an acknowledgement.
+    """Trap C: never park a peer whose outstanding ack still has a live deadline.
 
     `active_claims` lists every claim the pump has not terminally acked, so a
     non-empty map means the peer still has native work to report.  Parking that
@@ -974,6 +974,13 @@ def test_a_poll_that_owes_an_acknowledgement_is_never_held_open(tmp_path: Path) 
     measured by `tests/a13_macos/test_owner_concurrency.py`, whose owner deadline
     of 1.0 s loses to an ungated 1.5 s park, and by the round-50/52 mailbox ledger,
     where a health claim was still outstanding when the cleanup cancel arrived.
+
+    wp5-cleanup-levers keeps this guard exactly where it protects a *live*
+    deadline (the claim's own `command_expires_at`, which the owner's waiter uses
+    as its deadline -- `control_session._send`: `ttl_seconds=min(60.0,
+    _remaining(deadline))`), and narrows it only for a claim whose deadline has
+    already passed; see
+    `test_a_poll_that_owes_an_expired_acknowledgement_is_held_open`.
     """
 
     with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0}) as world:
@@ -991,7 +998,137 @@ def test_a_poll_that_owes_an_acknowledgement_is_never_held_open(tmp_path: Path) 
         elapsed = time.monotonic() - started
         assert follow_up["delivery_kind"] == "empty"
         assert elapsed < 1.0, (
-            f"a poll that still owed an acknowledgement was parked for {elapsed:.3f}s"
+            f"a poll that still owed a live-deadline acknowledgement was parked for {elapsed:.3f}s"
+        )
+        # The claim really did still have a live owner deadline when it was
+        # refused a hold: the default command TTL is 60 s.
+        assert world["mailbox"]._outstanding_claim_deadline_is_live(
+            {delivery["command_id"]: delivery["claim_token"]}
+        )
+
+
+def test_a_poll_that_owes_an_expired_acknowledgement_is_held_open(tmp_path: Path) -> None:
+    """wp5-cleanup-levers: the hold reaches the case the ledger actually records.
+
+    The mailbox ledger records a health claim still outstanding when the cleanup
+    cancel arrived, i.e. the peer was "usually *not* idle" - so the shipped gate
+    made the hold inapplicable to the measured case and the relayed peer's
+    ~1.03 s claim latency survived (round 52 section 17: removing that wait
+    leaves ~return transit, ~0.4-0.5 s).
+
+    A claim whose own `command_expires_at` has passed cannot be observed by any
+    live waiter - that instant IS the waiter's deadline - so parking a poll that
+    owes only such acknowledgements cannot delay an observed ack past a deadline,
+    and the cancel enqueued during the hold is claimed in one re-attempt instead
+    of after a whole pump cycle.
+
+    RED before the widening: a non-empty `active_claims` map refused the hold
+    unconditionally, so this poll returned immediately and the assertion below
+    ("the empty poll was not held open") failed.
+    """
+
+    with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0}) as world:
+        enqueued = world["owner_client"].enqueue(
+            target=world["member"],
+            native_command=_command("expired-health-probe", operation="health"),
+            sequence=1,
+            nonce="owner-nonce-1",
+            request_id="owner-request-1",
+            ttl_seconds=0.2,
+        )
+        assert enqueued["state"] == "pending"
+        delivery = _concurrent_poll(world)
+        assert delivery["delivery_kind"] == "command"
+        assert delivery["command_id"] == "expired-health-probe"
+        active = {delivery["command_id"]: delivery["claim_token"]}
+        time.sleep(0.25)  # the owner's own deadline for that claim passes
+        assert not world["mailbox"]._outstanding_claim_deadline_is_live(active)
+
+        outcome: dict[str, Any] = {}
+
+        def held() -> None:
+            outcome["delivery"] = _concurrent_poll(
+                world,
+                sequence=2,
+                nonce="target-long-poll-nonce-2",
+                request_id="target-long-poll-request-2",
+                active_claims=active,
+            )
+
+        parked = threading.Thread(target=held, name="held-expired-ack-poll", daemon=True)
+        parked.start()
+        parked.join(0.5)
+        assert parked.is_alive(), (
+            "a poll whose only outstanding acknowledgement had already expired was "
+            "not held open; the measured relayed claim is not covered"
+        )
+
+        started = time.monotonic()
+        _enqueue(
+            world,
+            "cancel-during-expired-ack-hold",
+            sequence=3,
+            operation="cancel",
+            payload=_allowed_payload("cancel"),
+        )
+        parked.join(10.0)
+        assert not parked.is_alive(), "the held poll never returned after a command was enqueued"
+        claim_seconds = time.monotonic() - started
+
+        assert outcome["delivery"]["delivery_kind"] == "command"
+        assert outcome["delivery"]["command_id"] == "cancel-during-expired-ack-hold"
+        assert claim_seconds < 0.5, (
+            f"the held poll did not deliver promptly ({claim_seconds:.3f}s); the cycle the "
+            "hold exists to remove is the measured claim latency"
+        )
+
+
+def test_the_hold_is_refused_while_any_outstanding_claim_has_a_live_deadline(
+    tmp_path: Path,
+) -> None:
+    """The widening is bounded by the live-deadline rule, not by claim count.
+
+    One expired claim must not license a park while another claim the peer owes
+    still has a live owner deadline: the pump performs one HTTP operation per
+    ``step()``, so a held poll delays *every* outstanding acknowledgement, and a
+    live one is exactly the case ``test_owner_concurrency`` measured at 1.0 s
+    against an ungated 1.5 s park.
+    """
+
+    with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0}) as world:
+        world["owner_client"].enqueue(
+            target=world["member"],
+            native_command=_command("short-probe", operation="health"),
+            sequence=1,
+            nonce="owner-nonce-1",
+            request_id="owner-request-1",
+            ttl_seconds=0.2,
+        )
+        _enqueue(world, "long-ledger-claim", sequence=2)
+        first = _concurrent_poll(world)
+        assert first["delivery_kind"] == "command"
+        second = _concurrent_poll(
+            world, sequence=2, nonce="target-long-poll-nonce-2",
+            request_id="target-long-poll-request-2",
+            active_claims={first["command_id"]: first["claim_token"]},
+        )
+        assert second["delivery_kind"] == "command"
+        delivered = {
+            first["command_id"]: first["claim_token"],
+            second["command_id"]: second["claim_token"],
+        }
+        assert set(delivered) == {"short-probe", "long-ledger-claim"}
+
+        time.sleep(0.25)  # only the 0.2 s probe's deadline has passed
+        started = time.monotonic()
+        follow_up = _concurrent_poll(
+            world, sequence=3, nonce="target-long-poll-nonce-3",
+            request_id="target-long-poll-request-3", active_claims=delivered,
+        )
+        elapsed = time.monotonic() - started
+        assert follow_up["delivery_kind"] == "empty"
+        assert elapsed < 1.0, (
+            f"a live-deadline claim did not stop the park ({elapsed:.3f}s)"
         )
 
 

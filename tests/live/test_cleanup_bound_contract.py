@@ -16,10 +16,11 @@ cannot honour.
 """
 import pytest
 
+import mycelium_deadlines
 from mycelium_live.route import (
+    PhysicalLiveRoute,
     _CLEANUP_FALLBACK_RESERVE_SECONDS,
     _CLEANUP_INLINE_RECEIPT_GRACE_SECONDS,
-    _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS,
     _CLEANUP_SNAPSHOT_SLICE_SECONDS,
     admit_peer_cleanup_bound,
 )
@@ -52,9 +53,25 @@ def test_declared_bound_leaves_transport_margin_below_the_window() -> None:
 
 def test_fallback_reserve_still_covers_a_whole_snapshot_attempt() -> None:
     """The reserve is the receipt-recovery path; widening the window by starving it
-    would trade a measurable failure for an unmeasurable one."""
-    assert _CLEANUP_FALLBACK_RESERVE_SECONDS >= _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
+    would trade a measurable failure for an unmeasurable one.
+
+    wp5-cleanup-levers: the attempt interval is the registry's own record, not a
+    second route-local copy - ``_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS`` was bound in
+    ``mycelium_live.route`` with no consumer while the route's live slice is the
+    measured 1.1 s, so this guard now reads the record directly and the record
+    is explicitly non-binding (``NON_BINDING_DEADLINES``) rather than duplicated.
+    """
+    assert (
+        _CLEANUP_FALLBACK_RESERVE_SECONDS
+        >= mycelium_deadlines.CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
+    )
     assert 0 < _CLEANUP_FALLBACK_RESERVE_SECONDS < IMMUTABLE_OWNER_CLEANUP_BUDGET_MS / 1_000
+    # The two numbers must differ (the held-back interval vs the duration handed
+    # out), and the registry records say so explicitly.
+    attempt = mycelium_deadlines.deadline("cleanup_snapshot_attempt_seconds")
+    assert "cleanup_snapshot_slice_seconds" in attempt.derivation
+    assert "cleanup_fallback_reserve_seconds" in attempt.derivation
+    assert _CLEANUP_SNAPSHOT_SLICE_SECONDS > attempt.value
 
 
 def test_declared_bound_excludes_the_old_unhonourable_literal() -> None:
@@ -141,3 +158,63 @@ def test_absent_advertisement_is_not_silently_admitted() -> None:
     assert admit_peer_cleanup_bound(None, node_id="node-a") is None
     assert admit_peer_cleanup_bound("1200", node_id="node-a") is None
     assert admit_peer_cleanup_bound(True, node_id="node-a") is None
+
+
+def _qualification_route(advertised_ms: int) -> PhysicalLiveRoute:
+    """A route holding one peer's freshest signed snapshot observation.
+
+    Only the attributes ``live_attestation`` reads before its observation-window
+    check are populated; everything else is deliberately absent.
+    """
+
+    route = object.__new__(PhysicalLiveRoute)
+    route._request_outputs = {"request-a": (31,)}
+    route.is_alive = lambda: True  # type: ignore[method-assign]
+    route._sessions = {"remote-mac-e9fe": object()}
+    route._snapshot_all = lambda: None  # type: ignore[method-assign]
+    route._signed_observations = [
+        {
+            "observation": {
+                "node_id": "remote-mac-e9fe",
+                "event": "snapshot",
+                "details": {
+                    "interruptibility": {"maximum_total_cleanup_ms": advertised_ms}
+                },
+            }
+        }
+    ]
+    return route
+
+
+def test_the_route_refuses_an_over_reaching_peer_at_startup_qualification() -> None:
+    """wp5-cleanup-levers: the admission predicate is on the qualification path.
+
+    The arithmetic packet found ``admit_peer_cleanup_bound`` landed but wired
+    **nowhere** (no non-test call site), so the named refusal the whole
+    composition assumes was inert: a peer that advertises more cleanup than the
+    route can wait for was admitted at startup and failed mid-request instead.
+    The route's qualification-only evidence path
+    (``PhysicalLiveRoute.live_attestation``, driven by
+    ``mycelium_live.supervisor._qualify_open_route``) is the consumer that reads
+    each peer's advertised bound, so the refusal lives there - never mid-request.
+    """
+
+    for measured_ms in (1_830, 2_418, 3_180):
+        with pytest.raises(RuntimeError) as raised:
+            _qualification_route(measured_ms).live_attestation(request_id="request-a")
+        message = str(raised.value)
+        assert message.startswith(
+            "peer_cleanup_bound_exceeds_route_window:remote-mac-e9fe:"
+        ), message
+        assert f"advertised={measured_ms}" in message
+        assert "admitted=1300" in message
+        assert "window=1500" in message
+
+    # The shipped advertisement passes the same predicate on the same path, so
+    # the refusal discriminates the bound rather than the qualification wiring.
+    with pytest.raises(RuntimeError) as shipped:
+        _qualification_route(MAXIMUM_TOTAL_CLEANUP_MS).live_attestation(
+            request_id="request-a"
+        )
+    assert "peer_cleanup_bound_exceeds_route_window" not in str(shipped.value)
+    assert "live_attestation_observation_window_incomplete" in str(shipped.value)

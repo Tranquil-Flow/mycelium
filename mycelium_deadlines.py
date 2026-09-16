@@ -459,8 +459,12 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
             "Final interval of the budget held back so a complete response "
             "delayed in the control transport still leaves authority for one "
             "bounded request-scoped snapshot fallback. Equal to "
-            "cleanup_snapshot_attempt_seconds by construction; it is subtracted "
-            "from the budget to form the fanout window."
+            "cleanup_snapshot_attempt_seconds by construction (the reserve *is* "
+            "one attempt, so the budget is never over-committed); it is subtracted "
+            "from the budget to form the fanout window, and it is the number the "
+            "route applies. It is deliberately NOT the duration an attempt is "
+            "handed - that is cleanup_snapshot_slice_seconds (1.1 s, measured) - "
+            "and the two numbers must not be collapsed into one another."
         ),
         source="mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS",
     ),
@@ -468,18 +472,34 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         name="cleanup_snapshot_attempt_seconds",
         value=CLEANUP_SNAPSHOT_ATTEMPT_SECONDS,
         unit="seconds",
-        owner="mycelium_live/route.py:81,2734",
+        owner=(
+            "mycelium_deadlines.py (composition term; the route applies it as "
+            "cleanup_fallback_reserve_seconds, and this record has no "
+            "module-level consumer symbol of its own - see NON_BINDING_DEADLINES)"
+        ),
         derivation=(
             "One bounded request-scoped snapshot round against a node whose "
-            "cleanup proof is still missing. Sized as the reserve it is: a "
-            "single attempt inside the held-back interval, so the budget is "
-            "never over-committed. This record is the interval held back at the "
-            "fanout deadline; the slice an attempt is actually handed when the "
-            "route resumes it is cleanup_snapshot_slice_seconds (1.1 s, "
-            "measured against real relayed round trips), and the two numbers "
-            "must not be collapsed into one another."
+            "cleanup proof is still missing, i.e. the interval the budget holds "
+            "back for exactly one attempt: this record and "
+            "cleanup_fallback_reserve_seconds are the same number by "
+            "construction (the reserve *is* one attempt), and the route applies "
+            "it under that name (fanout_deadline = deadline - reserve).  It is "
+            "NOT the duration a resumed attempt is handed: that is "
+            "cleanup_snapshot_slice_seconds (1.1 s, measured against real "
+            "relayed round trips), and the two numbers must not be collapsed "
+            "into one another - the 0.5 s slice this record used to describe was "
+            "never even claimed before it expired on the relayed path.  Packet "
+            "wp5-cleanup-levers removed the route's bound-but-unread "
+            "`_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS` copy for exactly that reason, "
+            "so this record now has no module-level consumer symbol of its own "
+            "and is listed in NON_BINDING_DEADLINES."
         ),
-        source="mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
+        source=(
+            "registry-defined composition term (wp5-cleanup-levers; the applied "
+            "symbol is mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS, "
+            "and the handed-out duration is mycelium_live.route."
+            "_CLEANUP_SNAPSHOT_SLICE_SECONDS)"
+        ),
     ),
     Deadline(
         name="cleanup_snapshot_slice_seconds",
@@ -487,8 +507,8 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         unit="seconds",
         owner="mycelium_live/route.py:99,2834",
         derivation=(
-            "The slice handed to one request-scoped fallback snapshot attempt at "
-            "the point the route resumes it (after the inline receipt grace), "
+            "The duration handed to one request-scoped fallback snapshot attempt "
+            "at the point the route resumes it (after the inline receipt grace), "
             "capped by the owner's immutable deadline. Measured by the a13 lane "
             "on the two-Mac route: successful snapshot round trips to the "
             "relayed laptop were 0.875-1.066 s and the first fallback attempt's "
@@ -496,7 +516,14 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
             "shorter than one real round trip is not a recovery path, it is a "
             "second way to miss. 1.1 s covers the measured maximum with margin "
             "and still fits the owner's budget after the inline grace "
-            "(0.5 s + 1.1 s <= 2.0 s cancel_and_cleanup_budget_seconds)."
+            "(0.5 s + 1.1 s <= 2.0 s cancel_and_cleanup_budget_seconds). It is "
+            "this record - cleanup_snapshot_slice_seconds, not "
+            "cleanup_snapshot_attempt_seconds, the interval "
+            "held back - that names the duration actually spent, and the two "
+            "numbers must not be collapsed into one another: the held-back "
+            "interval (cleanup_fallback_reserve_seconds, sized by "
+            "cleanup_snapshot_attempt_seconds) sizes the fanout window, the slice "
+            "bounds the work done inside it."
         ),
         source=(
             "mycelium_live.route._CLEANUP_SNAPSHOT_SLICE_SECONDS "
@@ -1246,10 +1273,6 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
         "cleanup_reconciliation_workers",
     ),
     (
-        "mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
-        "cleanup_snapshot_attempt_seconds",
-    ),
-    (
         "mycelium_live.route._CLEANUP_SNAPSHOT_SLICE_SECONDS",
         "cleanup_snapshot_slice_seconds",
     ),
@@ -1392,8 +1415,24 @@ PENDING_BINDINGS: Final[tuple[tuple[str, str], ...]] = tuple(
 #: a13-resolve bound it; the executed-payload test in
 #: ``tests/testbed/test_deadline_registry.py`` stays its behavioural guard,
 #: together with the canonical producer pin.
+#:
+#: ``cleanup_snapshot_attempt_seconds`` joined this group in packet
+#: ``wp5-cleanup-levers``: merge a13-resolve bound it as
+#: ``mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS`` and consumed it
+#: nowhere, while the route's live fallback attempt is handed the *measured*
+#: ``cleanup_snapshot_slice_seconds`` (1.1 s) - a bound-but-unread copy is the
+#: exact drift the one-owner-per-number discipline exists to prevent, and the
+#: two numbers must differ (the interval held back vs the duration handed out).
+#: The interval the route applies is ``cleanup_fallback_reserve_seconds``, which
+#: this record sizes; ``tests/testbed/test_deadline_registry.py::
+#: test_cleanup_snapshot_attempt_record_has_no_consumerless_binding`` keeps the
+#: binding from reappearing, and
+#: ``tests/live/test_cleanup_bound_contract.py::
+#: test_fallback_reserve_still_covers_a_whole_snapshot_attempt`` keeps the
+#: reserve-vs-attempt relationship, with the records naming each other.
 NON_BINDING_DEADLINES: Final[frozenset[str]] = frozenset(
     {
+        "cleanup_snapshot_attempt_seconds",
         "gateway_producer_stall_poll_seconds",
         "gateway_sse_disconnect_poll_seconds",
         "peer_advertised_cleanup_bound_slack_ms",

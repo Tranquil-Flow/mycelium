@@ -1068,9 +1068,53 @@ class ManagedControlMailbox:
             and statement.get("protocol") == TARGET_POLL_PROTOCOL_V2
         )
 
-    @classmethod
-    def _may_hold(cls, envelope: Mapping[str, Any]) -> bool:
-        """True only for a concurrent poll whose pump owes no acknowledgement.
+    def _outstanding_claim_deadline_is_live(
+        self, active_claims: Mapping[str, Any]
+    ) -> bool:
+        """True while any claim the peer owes still has a live owner deadline.
+
+        ``active_claims`` lists every claim the target pump has not terminally
+        acked.  Each claim's own ``command_expires_at`` is the deadline the
+        owner's waiter uses (``control_session._send``:
+        ``ttl_seconds=min(60.0, _remaining(deadline))``), so one deadline per
+        outstanding claim is enough to decide whether parking the poll could
+        delay an acknowledgement somebody is still observing.
+
+        Fails closed: a claim this mailbox cannot resolve - a command id it does
+        not hold, or a row without a usable expiry - counts as live, so an
+        unknown claim can never license a hold.
+        """
+
+        command_ids = tuple(sorted(active_claims))
+        if not command_ids:
+            return False
+        placeholders = ", ".join("?" for _ in command_ids)
+        with self._lock:
+            connection = self._connect()
+            try:
+                rows = connection.execute(
+                    "SELECT command_id, command_expires_at FROM managed_commands "
+                    f"WHERE command_id IN ({placeholders})",
+                    command_ids,
+                ).fetchall()
+            finally:
+                connection.close()
+        observed = {
+            row["command_id"]: row["command_expires_at"] for row in rows
+        }
+        now = self._clock()
+        for command_id in command_ids:
+            expires_at = observed.get(command_id)
+            if not isinstance(expires_at, (int, float)) or isinstance(
+                expires_at, bool
+            ):
+                return True
+            if float(expires_at) >= now:
+                return True
+        return False
+
+    def _may_hold(self, envelope: Mapping[str, Any]) -> bool:
+        """True only for a concurrent poll no *live* deadline is waiting on.
 
         ``active_claims`` lists every claim the peer has not terminally acked, so a
         non-empty map means this peer still has native work to report and a parked
@@ -1082,14 +1126,35 @@ class ManagedControlMailbox:
         still outstanding when the cleanup cancel arrived, so the peer is usually
         *not* idle when a command lands.
 
-        A peer that owes nothing has nothing to lose from waiting, so this is the
-        only state in which holding the poll is free.
+        That second measurement is why the gate is now expressed as a *deadline*
+        rule rather than "the map is empty" (wp5-cleanup-levers).  Each claim's own
+        ``command_expires_at`` is the deadline its owner waiter uses
+        (``control_session._send`` bounds the enqueue TTL by the waiter's own
+        remaining time), so:
+
+        * a claim with a **live** deadline - the case the ungated hold broke -
+          refuses the hold outright: the park would delay an acknowledgement
+          somebody is still waiting for, and no bound derived from that deadline
+          can undo the delay, because the ack itself needs one pump ``step()``
+          plus its return transit *after* the park ends;
+        * a claim whose deadline has **already passed** cannot be observed by any
+          live waiter, so holding that poll delays nothing anyone is waiting on -
+          and it is exactly the measured round-50/52 shape (a health probe the
+          route had already stopped waiting for when the cancel landed), which is
+          the claim latency this hold exists to remove.
+
+        A peer that owes nothing is unchanged, and unknown claims fail closed in
+        ``_outstanding_claim_deadline_is_live``.
         """
 
-        if not cls._is_concurrent_poll(envelope):
+        if not self._is_concurrent_poll(envelope):
             return False
         active = envelope["statement"].get("active_claims")
-        return isinstance(active, Mapping) and not active
+        if not isinstance(active, Mapping):
+            return False
+        if not active:
+            return True
+        return not self._outstanding_claim_deadline_is_live(active)
 
     def poll(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         """Authenticate a target poll and claim at most one command atomically.
@@ -1110,8 +1175,8 @@ class ManagedControlMailbox:
         is the cancellation itself.
 
         Two narrower scopes, both deliberate (see `_may_hold`): a peer that still
-        owes an acknowledgement is never parked, and a legacy serial poll keeps
-        its immediate empty receipt.
+        owes an acknowledgement whose deadline is *live* is never parked, and a
+        legacy serial poll keeps its immediate empty receipt.
         """
 
         if self.long_poll_hold <= 0.0 or not self._may_hold(envelope):

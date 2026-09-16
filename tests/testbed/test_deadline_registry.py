@@ -131,10 +131,12 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
     # wp5-bind-residual: the route's remaining cleanup / keepalive constants.
     # a13-resolve: the a13 lane's measured snapshot slice and peer-bound
     # transport margin, re-bound from route-local literals to the registry.
+    # wp5-cleanup-levers: `_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS` is no longer here -
+    # it was bound and consumed nowhere while the live slice is 1.1 s, so the
+    # record is explicitly non-binding (see NON_BINDING_DEADLINES).
     "mycelium_live/route.py": (
         "_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS",
         "_CLEANUP_RECEIPT_POLL_SECONDS",
-        "_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS",
         "_CLEANUP_SNAPSHOT_SLICE_SECONDS",
         "_CLEANUP_FALLBACK_RESERVE_SECONDS",
         "_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS",
@@ -780,6 +782,63 @@ def test_registry_only_inline_literals_still_hold_their_registry_values() -> Non
 
 
 # --------------------------------------------------------------------------- #
+# wp5-cleanup-levers: one owner per number on the snapshot-attempt family
+# --------------------------------------------------------------------------- #
+
+
+def test_cleanup_snapshot_attempt_record_has_no_consumerless_binding() -> None:
+    """The merge drift at ``route.py:85`` is closed, explicitly and in one place.
+
+    Merge ``a13-resolve`` bound ``mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS``
+    to this registry and then consumed it **nowhere**, while the route's live
+    fallback slice is the measured 1.1 s ``_CLEANUP_SNAPSHOT_SLICE_SECONDS`` - so
+    the code and the registry disagreed about what one snapshot attempt is, and a
+    reader of ``route.py`` saw one attempt as 0.5 s against a route that hands out
+    1.1 s.
+
+    The interval the route actually applies is ``cleanup_fallback_reserve_seconds``
+    (subtracted at the fanout boundary); the duration it hands to a resumed
+    attempt is ``cleanup_snapshot_slice_seconds``.  The attempt record is the
+    composition term that keeps the reserve honest, so it stays registered, gains
+    an explicit statement of how it differs from the slice, and carries **no**
+    module-level consumer symbol instead of a second unread copy.
+    """
+
+    assert "cleanup_snapshot_attempt_seconds" in deadlines.NON_BINDING_DEADLINES
+    assert (
+        "mycelium_live.route._CLEANUP_SNAPSHOT_ATTEMPT_SECONDS"
+        not in dict(deadlines.CONSUMER_BINDINGS)
+    )
+    route = importlib.import_module("mycelium_live.route")
+    assert not hasattr(route, "_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS")
+    assert "_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS" not in BOUND_SOURCES[
+        "mycelium_live/route.py"
+    ]
+
+    attempt = deadlines.deadline("cleanup_snapshot_attempt_seconds")
+    slice_record = deadlines.deadline("cleanup_snapshot_slice_seconds")
+    # Same number as the reserve by construction, and strictly different from -
+    # smaller than - the duration one resumed attempt is actually handed.
+    assert attempt.value == deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS == 0.5
+    assert slice_record.value == deadlines.CLEANUP_SNAPSHOT_SLICE_SECONDS == 1.1
+    assert slice_record.value > attempt.value
+    # The records must say so explicitly, because the two values must differ.
+    for token in (
+        "cleanup_fallback_reserve_seconds",
+        "cleanup_snapshot_slice_seconds",
+        "must not be collapsed",
+    ):
+        assert token in attempt.derivation, (token, attempt.derivation)
+        assert token in slice_record.derivation, (token, slice_record.derivation)
+    # The applied interval still has exactly one owner: the reserve the route
+    # subtracts, which this record sizes.
+    assert (
+        "mycelium_live.route._CLEANUP_FALLBACK_RESERVE_SECONDS"
+        in dict(deadlines.CONSUMER_BINDINGS)
+    )
+
+
+# --------------------------------------------------------------------------- #
 # The existing suites' seam: names stay importable and monkeypatchable.
 # --------------------------------------------------------------------------- #
 
@@ -804,7 +863,6 @@ def test_route_cleanup_names_are_importable_module_globals() -> None:
     for attribute, registry_name in (
         ("_IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS", "idle_keepalive_probe_deadline_seconds"),
         ("_CLEANUP_RECEIPT_POLL_SECONDS", "cleanup_receipt_poll_seconds"),
-        ("_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS", "cleanup_snapshot_attempt_seconds"),
         ("_CLEANUP_FALLBACK_RESERVE_SECONDS", "cleanup_fallback_reserve_seconds"),
         ("_CLEANUP_INLINE_RECEIPT_GRACE_SECONDS", "cleanup_inline_receipt_grace_seconds"),
         (

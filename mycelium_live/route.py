@@ -82,7 +82,19 @@ from mycelium_live.liveness import (
 # ``mycelium_live.route.<NAME>`` by dotted string.
 _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = mycelium_deadlines.IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS
 _CLEANUP_RECEIPT_POLL_SECONDS = mycelium_deadlines.CLEANUP_RECEIPT_POLL_SECONDS
-_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS = mycelium_deadlines.CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
+# No `_CLEANUP_SNAPSHOT_ATTEMPT_SECONDS` binding here: wp5-cleanup-levers removed
+# it because nothing in this module consumed it and the route's live fallback
+# attempt is handed the *measured* slice below (1.1 s), not the pre-a13 0.5 s
+# attempt interval - so a bound-but-unread constant made the registry and the
+# code disagree about what one attempt is.  The two numbers stay separate records
+# on purpose, and `mycelium_deadlines` states the difference:
+# `cleanup_fallback_reserve_seconds` is the interval *held back* at the fanout
+# boundary and is the number this route applies (`_CLEANUP_FALLBACK_RESERVE_SECONDS`,
+# one owner), while `cleanup_snapshot_slice_seconds` is the duration an attempt is
+# *handed* once the route resumes it (measured 0.875-1.066 s relayed round trips,
+# so 0.5 s was a second way to miss).  The attempt record remains registered as
+# the composition term that keeps the reserve honest and is explicitly listed in
+# `mycelium_deadlines.NON_BINDING_DEADLINES`.
 # One request-scoped fallback snapshot must be able to complete on the real
 # relayed path, not merely be dispatched.  Measured on the two-Mac route
 # (round 50, request f35736e4-…; see
@@ -5695,6 +5707,66 @@ class PhysicalLiveRoute:
             self._product_activation_history.extend(merged["activation_history"])
             return merged
 
+    def _admit_observed_cleanup_bounds(
+        self, signed_observations: Sequence[Mapping[str, Any]]
+    ) -> None:
+        """Refuse a peer that advertises a cleanup bound this route cannot honour.
+
+        Reviewer decision 2 / PLAN D9: a peer may not advertise more cleanup time
+        than the route can wait for.  ``admit_peer_cleanup_bound`` mints the named
+        refusal (``peer_cleanup_bound_exceeds_route_window:<node>:advertised=<m>:
+        admitted=<m>:window=<m>``) for exactly that comparison, and until now it
+        was landed but wired **nowhere** - so a peer whose measured cleanup
+        exceeded the window was admitted at startup and failed mid-request
+        instead of being refused by name (`runs/wp5-cleanup-arithmetic/`: the
+        relayed peer's 1.83 s / 3.18 s against the 1.5 s window).
+
+        This is the qualification path's consumer of that advertisement:
+        ``live_attestation`` is qualification-only, refreshes one post-cleanup
+        snapshot per peer, and is the explicit consumer of ``interruptibility``
+        (which carries the advertised ``maximum_total_cleanup_ms``).  The refusal
+        therefore happens at start-up qualification - what the owner's standing
+        rule requires before a physical round is spent - and never mid-request:
+        one over-reaching peer fails the whole qualification closed, by name.
+
+        An absent bound is not refused here: ``admit_peer_cleanup_bound`` returns
+        ``None`` for it deliberately ("an absent assertion is not a passing one,
+        but it is also not this predicate's business to invent one"), and the
+        node's advertised bound is a closed, validated payload projection
+        (``physical_inference_node.py``); inventing a bound here would refuse a
+        peer for a fact this predicate cannot observe.
+        """
+
+        latest: dict[str, Mapping[str, Any]] = {}
+        for envelope in signed_observations:
+            observation = (
+                envelope.get("observation") if isinstance(envelope, Mapping) else None
+            )
+            if not isinstance(observation, Mapping):
+                continue
+            if observation.get("event") != "snapshot":
+                continue
+            node_id = observation.get("node_id")
+            if isinstance(node_id, str) and node_id:
+                latest[node_id] = observation
+        for node_id in sorted(latest):
+            details = latest[node_id].get("details")
+            interruptibility = (
+                details.get("interruptibility") if isinstance(details, Mapping) else None
+            )
+            advertised_ms = (
+                interruptibility.get("maximum_total_cleanup_ms")
+                if isinstance(interruptibility, Mapping)
+                else None
+            )
+            try:
+                admit_peer_cleanup_bound(advertised_ms, node_id=node_id)
+            except ValueError as error:
+                # Re-raise unchanged: the predicate's message *is* the named
+                # refusal, arithmetic included, and a wrapped code here would
+                # hide the numbers a reader needs to see.
+                raise RuntimeError(str(error)) from error
+
     def live_attestation(self, *, request_id: str) -> dict[str, Any]:
         if request_id not in self._request_outputs or not self.is_alive():
             raise RuntimeError("live_attestation_unavailable")
@@ -5710,6 +5782,7 @@ class PhysicalLiveRoute:
         # path is qualification-only and runs after the request's strict
         # cleanup deadline, so it cannot contend with receipt collection.
         self._snapshot_all()
+        self._admit_observed_cleanup_bounds(self._signed_observations)
         selected: dict[tuple[str, str], dict[str, Any]] = {}
         request_observations: list[dict[str, Any]] = []
         for envelope in self._signed_observations:
