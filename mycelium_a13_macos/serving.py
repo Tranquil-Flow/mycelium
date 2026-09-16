@@ -64,13 +64,20 @@ RESOURCE_PROPOSAL = ResourceProposal(
     # first 7B round.  Covering file sets measured on the real 7B shard index;
     # the same numbers Tranche B derived for the app route's balanced split.)
     additional_disk_bytes=24_854_140_006,
-    # Load-peak bound, derived from the int8 stage accounting + headroom:
-    #   heaviest host stage load peak 4,692,854,784 B ([14,28)+final_norm+
-    #   lm_head = 3,811,704,832 B resident weights + 881,149,952 B streaming
-    #   transient) + 512 MiB workspace = 5,229,725,696 B; x2 (the runner divides
-    #   this proposal by two for the worker limits) = 10,459,451,392 B; +10%
-    #   headroom (the planner's memory_reserve_fraction) = 11,505,396,531 B.
-    max_combined_rss_bytes=11_505_396_531,
+    # Load-peak bound.  The guard measures the worker process GROUP (app + worker),
+    # not the worker alone, so the bound must cover the group peak.
+    # Original derivation (worker-only, the modelling error): heaviest host stage
+    #   load peak 4,692,854,784 B ([14,28)+final_norm+lm_head = 3,811,704,832 B
+    #   resident weights + 881,149,952 B streaming transient) + 512 MiB workspace
+    #   = 5,229,725,696 B; x2 (the runner divides this proposal by two for the
+    #   worker limits) = 10,459,451,392 B; +10% = 11,505,396,531 B.
+    # MEASURED 2026-09-16 by the guard's own self-report (rounds 66r1/67r1): the
+    #   group peaked at 5,885,624,320 B against the runner-derived per-node limit
+    #   of 5,752,698,265 B -- over by only 132,926,055 B.  So the worker-only
+    #   estimate was short by ~625 MB, which is the app process's own resident
+    #   footprint during the load peak: real, bounded, and previously unmodelled.
+    # Rebuilt from the measurement: 2 x ceil(1.15 x 5,885,624,320) = 13,536,935,936 B.
+    max_combined_rss_bytes=13_536_935_936,
     max_wall_seconds=1_800,
     run_count=1,
 )
