@@ -440,7 +440,7 @@ def _ssh_identity_file_binding(value: str) -> _SshIdentityBinding:
 @dataclass(frozen=True)
 class PeerIdentity:
     node_id: str
-    ssh_target: str
+    ssh_target: str | None
     host_id: str
     boot_id: str
     staging_root: str
@@ -456,11 +456,14 @@ class PeerIdentity:
         _segment(self.node_id, "peer_node_id_invalid")
         _segment(self.host_id, "peer_host_id_invalid")
         _segment(self.boot_id, "peer_boot_id_invalid")
-        if not isinstance(self.ssh_target, str) or _SSH_TARGET_RE.fullmatch(
+        if self.process_transport == "managed_https":
+            if self.ssh_target is not None or self.ssh_identity_file is not None:
+                _reject("managed_peer_ssh_authority_invalid")
+        elif not isinstance(self.ssh_target, str) or _SSH_TARGET_RE.fullmatch(
             self.ssh_target
         ) is None:
             _reject("peer_ssh_target_invalid")
-        if any(character in self.ssh_target for character in " ;|&$`\\\n\r\t"):
+        if self.ssh_target is not None and any(character in self.ssh_target for character in " ;|&$`\\\n\r\t"):
             _reject("peer_ssh_target_invalid")
         if not isinstance(self.staging_root, str):
             _reject("peer_staging_root_invalid")
@@ -473,9 +476,9 @@ class PeerIdentity:
             or not any(part.startswith("mycelium") for part in path.parts)
         ):
             _reject("peer_staging_root_invalid")
-        if self.process_transport not in {"local", "ssh"}:
+        if self.process_transport not in {"local", "ssh", "managed_https"}:
             _reject("peer_process_transport_invalid")
-        if self.process_transport == "local":
+        if self.process_transport in {"local", "managed_https"}:
             if self.ssh_identity_file is not None:
                 _reject("peer_ssh_identity_file_invalid")
         elif (
@@ -499,6 +502,10 @@ def _peer_process_argv(
 ) -> tuple[str, ...]:
     if not command or not all(isinstance(value, str) and value for value in command):
         _reject("peer_process_command_invalid")
+    if peer.process_transport == "managed_https":
+        # No remote argv capability. Only an explicitly injected app-owned
+        # session factory can consume this; default subprocess factories reject it.
+        return ()
     if peer.process_transport == "local":
         return command
     assert peer.ssh_identity_file is not None
@@ -1063,6 +1070,7 @@ class QualificationController:
         run_plan: Mapping[str, Any] | None = None,
         session_factory: Callable[..., Any] | None = None,
         seal_adapter: Callable[..., Mapping[str, Any]] | None = None,
+        staging_adapter: Any | None = None,
     ):
         if mode not in MODES:
             _reject("controller_mode_invalid")
@@ -1122,6 +1130,11 @@ class QualificationController:
         self._runner = runner or SubprocessRunner()
         self._session_factory = session_factory or NodeProcessSession
         self._seal_adapter = seal_adapter
+        if staging_adapter is not None and not all(
+            callable(getattr(staging_adapter, method, None)) for method in ("prepare", "cleanup")
+        ):
+            _reject("controller_staging_adapter_invalid")
+        self._staging_adapter = staging_adapter
 
     def _validate_transfers(self) -> tuple[dict[str, Any], ...]:
         manifest = self._transfer_manifest
@@ -1512,10 +1525,12 @@ class QualificationController:
                 or any(part in {"", ".", ".."} for part in endpoint_secret_path.parts)
                 or any(character in endpoint_secret_file for character in "\n\r\t")
                 or endpoint_secret_path.parent.name not in {"identity", "identities"}
-                or not any(
-                    part.startswith("mycelium")
-                    for part in endpoint_secret_path.parts[:-2]
-                )
+                # Managed targets select/check their own identity file; this
+                # path is descriptive and is never executed by the controller.
+                or (node_id not in {p.node_id for p in self.peers
+                                   if p.process_transport == "managed_https"}
+                    and not any(part.startswith("mycelium")
+                                for part in endpoint_secret_path.parts[:-2]))
             ):
                 _reject("run_plan_endpoint_secret_file_invalid")
             configure = record.get("configure")
@@ -1640,6 +1655,13 @@ class QualificationController:
             "state",
             "route_ready",
         }
+        # Managed discovery obtains the boot identity from this response, not
+        # an SSH probe. Accept the legacy closed shape only for non-managed
+        # peers; never accept an extra or mismatched identity field.
+        if peer.process_transport == "managed_https" or "boot_id" in identity:
+            expected_fields.add("boot_id")
+            if identity.get("boot_id") != peer.boot_id:
+                _reject("node_hello_identity_invalid")
         if (
             set(identity) != expected_fields
             or identity.get("protocol") != _NODE_CONTROL_PROTOCOL
@@ -2478,22 +2500,22 @@ class QualificationController:
         archive_digest: str,
         preposition_digest: str | None = None,
     ) -> dict[str, Any]:
-        argv = _peer_process_argv(
-            peer,
-            (
-                "python3",
-                "-c",
-                _REMOTE_CLEANUP_SCRIPT,
-                peer.staging_root,
-                peer.node_id,
-                archive_digest,
-                preposition_digest or "-",
-            ),
-        )
-        capture = self._runner.run(
-            argv,
-            timeout_seconds=30.0,
-        )
+        if peer.process_transport == "managed_https":
+            if self._staging_adapter is None:
+                _reject("managed_staging_provider_required")
+            capture = self._staging_adapter.cleanup(peer=peer,
+                archive_digest=archive_digest, preposition_digest=preposition_digest,
+                timeout_seconds=30.0)
+        else:
+            argv = _peer_process_argv(
+                peer,
+                (
+                    "python3", "-c", _REMOTE_CLEANUP_SCRIPT,
+                    peer.staging_root, peer.node_id, archive_digest,
+                    preposition_digest or "-",
+                ),
+            )
+            capture = self._runner.run(argv, timeout_seconds=30.0)
         if capture.returncode != 0 or capture.stderr or not capture.stdout:
             _reject("remote_cleanup_failed")
         try:
@@ -2556,6 +2578,8 @@ class QualificationController:
         endpoints: Mapping[str, Mapping[str, Any]],
     ) -> dict[str, Any]:
         del transfers
+        if any(peer.process_transport == "managed_https" for peer in self.peers) and self._staging_adapter is None:
+            _reject("managed_staging_provider_required")
         actions: list[dict[str, Any]] = []
         attempted: list[tuple[PeerIdentity, str, str | None]] = []
         try:
@@ -2581,19 +2605,16 @@ class QualificationController:
                     stage_arguments.extend(
                         [preposition_digest, str(len(preposition_bytes))]
                     )
-                argv = _peer_process_argv(
-                    peer,
-                    tuple(stage_arguments),
-                )
-                capture = self._runner.run(
-                    argv,
-                    timeout_seconds=_stage_timeout_seconds(
-                        len(archive)
-                        + len(preposition_bytes)
-                        + preposition_artifact_bytes
-                    ),
-                    stdin_bytes=archive + preposition_bytes,
-                )
+                timeout = _stage_timeout_seconds(
+                    len(archive) + len(preposition_bytes) + preposition_artifact_bytes)
+                if peer.process_transport == "managed_https":
+                    capture = self._staging_adapter.prepare(peer=peer, archive=archive,
+                        archive_digest=archive_digest, preposition_bytes=preposition_bytes,
+                        preposition_digest=preposition_digest, timeout_seconds=timeout)
+                else:
+                    argv = _peer_process_argv(peer, tuple(stage_arguments))
+                    capture = self._runner.run(argv, timeout_seconds=timeout,
+                        stdin_bytes=archive + preposition_bytes)
                 ack = self._parse_stage_ack(
                     capture,
                     peer=peer,
@@ -2657,6 +2678,10 @@ class QualificationController:
     def execute(self, command: str) -> dict[str, Any]:
         if command not in COMMANDS:
             _reject("controller_command_invalid")
+        if self.mode == "physical" and self._staging_adapter is None and command in {"prepare", "cleanup"} and any(
+            peer.process_transport == "managed_https" for peer in self.peers
+        ):
+            _reject("managed_artifact_lifecycle_requires_target_owner")
         transfers = self._validate_transfers()
         endpoints = self._validate_membership()
         if self.mode == "physical":

@@ -48,6 +48,7 @@ from mycelium_router.serialization import execution_graph_to_dict
 from mycelium_topology_evidence import validate_transport_path_observation
 from physical_inference_node import execution_graph_from_document
 from physical_inference_qualification import (
+    ControllerError,
     NODE_COMMAND_TIMEOUT_SECONDS,
     NODE_SESSION_TIMEOUT_SECONDS,
     PeerIdentity,
@@ -67,8 +68,70 @@ from mycelium_live.liveness import (
 _IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS = 0.5
 _CLEANUP_RECEIPT_POLL_SECONDS = 0.1
 _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS = 0.5
+# One request-scoped fallback snapshot must be able to complete on the real
+# relayed path, not merely be dispatched.  Measured on the two-Mac route
+# (round 50, request f35736e4-…; see
+# `outputs/a13-macos-evidence/round52-cleanup-provable-within-window.md` §2):
+# successful snapshot round trips to the relayed laptop were 0.875-1.066 s and
+# the first fallback attempt's 0.5 s slice was never even claimed before it
+# expired.  A slice shorter than one real round trip is not a recovery path, it
+# is a second way to miss.  1.1 s covers the measured maximum with margin and
+# still fits the owner's immutable window after the inline grace interval
+# (`test_cleanup_snapshot_slice_covers_a_measured_peer_round_trip`).
+_CLEANUP_SNAPSHOT_SLICE_SECONDS = 1.1
+# Local, node-suffixed codes that mean "this attempt expired against the
+# deadline it was handed", as opposed to an authoritative proof failure.
+# `_snapshot_nodes_before` mints `<code>@<node_id>`, so both are matched as
+# substrings.  Malformed, unsigned, mismatched or explicitly incomplete proof
+# never appears here and stays fail-closed.
+_CLEANUP_RETRYABLE_ATTEMPT_CODES = (
+    "node_response_timeout@",
+    "command_deadline_exceeded@",
+)
 _CLEANUP_FALLBACK_RESERVE_SECONDS = _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS
 _CLEANUP_INLINE_RECEIPT_GRACE_SECONDS = 0.5
+# Reviewer decision 2: a peer may not advertise a cleanup bound the route cannot
+# honour.  The admitted maximum is the route's real wait for that advertisement
+# (the immutable 2 s budget minus the retry reserve) less a transport margin for
+# command delivery plus receipt return.  Measured against decision 3's
+# requirement, the two-Mac peer's end-to-end cleanup was **1.83 s / 3.18 s**
+# against a 1.5 s window (round52-…md §13), i.e. it does not fit — which is
+# exactly the case this predicate must name at startup instead of discovering
+# mid-request.
+PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS = 200
+
+
+def admit_peer_cleanup_bound(
+    advertised_ms: object,
+    *,
+    node_id: str = "unknown",
+    owner_budget_ms: int = 2_000,
+    reserve_ms: int | None = None,
+) -> int | None:
+    """Return the admitted cleanup bound, or raise a *named* refusal.
+
+    ``None`` means the peer published no bound: an absent assertion is not a
+    passing one, but it is also not this predicate's business to invent one, so
+    the caller decides.  A present bound must fit the route's fanout window with
+    the transport margin, otherwise the peer is refused by name rather than
+    allowed to fail closed on a real request.
+    """
+
+    if type(advertised_ms) is not int or isinstance(advertised_ms, bool):
+        return None
+    reserve = (
+        int(_CLEANUP_FALLBACK_RESERVE_SECONDS * 1_000)
+        if reserve_ms is None
+        else reserve_ms
+    )
+    window_ms = owner_budget_ms - reserve
+    admitted = window_ms - PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+    if advertised_ms > admitted:
+        raise ValueError(
+            f"peer_cleanup_bound_exceeds_route_window:{node_id}:"
+            f"advertised={advertised_ms}:admitted={admitted}:window={window_ms}"
+        )
+    return advertised_ms
 _CLEANUP_RECONCILIATION_HORIZON_SECONDS = 60.0
 _CLEANUP_RECONCILIATION_WORKERS = 4
 _NODE_RESPONSE_READER_FAILURE_CODES = frozenset(
@@ -1050,7 +1113,7 @@ class PhysicalLiveRoute:
         self._workload_comparison: dict[str, Any] | None = None
         self._model_operation: dict[str, Any] | None = None
         self._deployment_qualification: Any | None = None
-        self._deployment_quantization = "int8-weight-only"
+        self._deployment_quantization: str | None = None
         self._command_sequence = 0
         self._open = False
         self._closed = False
@@ -1256,6 +1319,7 @@ class PhysicalLiveRoute:
         *,
         seed_state_root: Path,
         force_relay: bool = False,
+        session_factory=None,
     ) -> "PhysicalLiveRoute":
         document = json.loads(Path(plan_path).read_text(encoding="utf-8"))
         controller_document = document["controller"]
@@ -1287,6 +1351,7 @@ class PhysicalLiveRoute:
                 membership_snapshot=membership_snapshot,
                 now=now,
                 run_plan=controller_document["run_plan"],
+                session_factory=session_factory,
             )
             controller._validate_physical_distinctness()
             endpoints = controller._validate_membership()
@@ -1298,6 +1363,7 @@ class PhysicalLiveRoute:
                 seed_authority=authority,
                 membership_snapshot=membership_snapshot,
                 force_relay=force_relay,
+                session_factory=session_factory or _ConcurrentNodeSession,
             )
         except BaseException:
             authority.close()
@@ -1306,7 +1372,12 @@ class PhysicalLiveRoute:
     def _command_id(self, node_id: str, operation: str) -> str:
         with self._lock:
             self._command_sequence += 1
-            return f"{node_id}-{operation}-{self._command_sequence}"
+            # Durable managed mailboxes outlive a route. Preserve deterministic
+            # retries within one run without colliding with a later deployment.
+            identity = [self._plan["run_id"], self._plan["deployment_id"],
+                        node_id, operation, self._command_sequence]
+            encoded = json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            return "cmd-" + hashlib.sha256(encoded).hexdigest()
 
     def _send_request_command(
         self,
@@ -1422,7 +1493,7 @@ class PhysicalLiveRoute:
         self,
         qualification: Any,
         *,
-        quantization: str = "int8-weight-only",
+        quantization: str,
     ) -> None:
         """Expose one qualified deployment through the same read model as a registry."""
 
@@ -1445,6 +1516,8 @@ class PhysicalLiveRoute:
             qualification = self._deployment_qualification
             if qualification is None:
                 raise RuntimeError("deployment_qualification_unavailable")
+            if self._deployment_quantization is None:
+                raise RuntimeError("deployment_representation_unavailable")
             qualified = self.is_alive() and qualification.route_ready is True
             return {
                 "protocol": "mycelium.live_deployment_registry.v1",
@@ -1697,6 +1770,10 @@ class PhysicalLiveRoute:
 
     def _node_command(self, node_id: str) -> tuple[str, ...]:
         peer = self._peers[node_id]
+        if peer.process_transport == "managed_https":
+            if self._session_factory is _ConcurrentNodeSession:
+                raise ControllerError("managed_session_provider_required")
+            return ()  # Target application owns startup; never construct remote argv.
         node_plan = self._plans_by_node[node_id]
         node_script = f"{peer.staging_root}/physical_inference_node.py"
         command = (
@@ -2719,7 +2796,7 @@ class PhysicalLiveRoute:
             try:
                 attempt_deadline = min(
                     deadline_monotonic_s,
-                    time.monotonic() + _CLEANUP_SNAPSHOT_ATTEMPT_SECONDS,
+                    time.monotonic() + _CLEANUP_SNAPSHOT_SLICE_SECONDS,
                 )
                 self._snapshot_nodes_before(
                     missing_node_ids,
@@ -2736,15 +2813,32 @@ class PhysicalLiveRoute:
                 if cleanup_complete():
                     return
                 # One delayed observer must not monopolize the owner's entire
-                # cleanup deadline.  Retry only transport-level response
-                # expiry in bounded rounds; malformed, unsigned, mismatched,
-                # or explicitly incomplete proof remains fail-closed below.
+                # cleanup deadline.  Retry any attempt that expired against the
+                # deadline it was handed (local slice guard or response
+                # channel), in bounded rounds, while owner time remains, as long
+                # as no proof has been committed; malformed, unsigned,
+                # mismatched, or explicitly incomplete proof remains
+                # fail-closed below.  `command_deadline_exceeded@<node>` is the
+                # local slice guard, not the owner deadline: measured on the
+                # two-Mac route it discarded 0.987 s of live owner window in
+                # which the peer's receipt was already provable (round 52 §3).
                 # Late command IDs stay retired by PhysicalNodeProcess, so a
                 # retry cannot be confused with the prior observation.
                 if (
-                    "node_response_timeout@" in str(error)
+                    any(
+                        code in str(error)
+                        for code in _CLEANUP_RETRYABLE_ATTEMPT_CODES
+                    )
                     and time.monotonic() < deadline_monotonic_s
                 ):
+                    # Bounded step-back: an attempt that fails without
+                    # consuming its slice must not spin the owner's worker.
+                    time.sleep(
+                        min(
+                            _CLEANUP_RECEIPT_POLL_SECONDS,
+                            max(0.0, deadline_monotonic_s - time.monotonic()),
+                        )
+                    )
                     continue
                 raise RuntimeError(
                     f"{str(error)[:128]}|"

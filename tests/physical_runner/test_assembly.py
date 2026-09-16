@@ -59,3 +59,24 @@ def test_production_assembly_preserves_local_and_ssh_process_transports(
     assert controller._prepositioned_artifacts == payload["controller"][
         "prepositioned_artifacts"
     ]
+
+
+def test_production_assembly_preserves_managed_authority_and_providers(workspace: Path) -> None:
+    payload=operator_plan_payload(workspace)
+    key=generate_ed25519_signer(endpoint_id='managed-assembly').public_key_record()
+    payload['verification_keys']={'gossip':[key],'load_proof':[key]}
+    for peer in payload['controller']['peers']:
+        peer.update(process_transport='managed_https',ssh_target=None,ssh_identity_file=None)
+    config=parse_operator_plan(payload)
+    # A configured plan must also construct without changing null into SSH authority.
+    runner=build_production_runner(config)
+    assert all(p.ssh_target is None for p in runner._controller._controller.peers)
+    class Stager:
+        def prepare(self,**kw):raise AssertionError('construction must not stage')
+        def cleanup(self,**kw):raise AssertionError('construction must not cleanup')
+    staging=Stager()
+    def sessions(**kw):raise AssertionError('construction must not execute native work')
+    runner=build_production_runner(config,session_factory=sessions,staging_adapter=staging)
+    assert runner._controller._controller._session_factory is sessions
+    assert runner._controller._controller._staging_adapter is staging
+

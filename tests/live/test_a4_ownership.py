@@ -1016,7 +1016,278 @@ def test_cleanup_snapshot_retries_response_timeout_inside_owner_deadline() -> No
 
     assert len(attempt_deadlines) == 2
     assert all(started < deadline <= owner_deadline for deadline in attempt_deadlines)
-    assert attempt_deadlines[0] <= started + 0.55
+    # The attempt slice is one *measured* peer round trip (~0.9-1.1 s on the
+    # relayed path), not a bare 0.5 s, and it is still bounded by the owner's
+    # absolute deadline.  The previous `<= started + 0.55` pin encoded the
+    # 0.5 s slice that round 50 showed cannot complete a snapshot round trip
+    # (round52-…md §2-§3); the upper bound is the load-bearing half.
+    assert started + 1.0 <= attempt_deadlines[0] <= owner_deadline
+
+
+def test_cleanup_snapshot_retries_its_own_slice_expiry_while_owner_time_remains() -> None:
+    """A slice-scoped expiry is not an owner-deadline expiry.
+
+    Measured (round 50, request ``f35736e4-…``; see
+    ``outputs/a13-macos-evidence/round52-cleanup-provable-within-window.md`` §3):
+    the first request-scoped fallback snapshot to the relayed peer expired
+    against its own 0.5 s slice and was classified as final, even though the
+    peer's cleanup receipt was provable inside the immutable two-second owner
+    window (laptop at t0+1.730 s against a t0+2.000 s deadline).  The attempt
+    handed the slice guard's code must be retried while owner time remains.
+    """
+
+    fanout_complete = threading.Event()
+    fanout_complete.set()
+    proof_complete = threading.Event()
+    attempts: list[tuple[float, float]] = []
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.RLock()
+    route._active_route_requests = {
+        "request-a": {
+            "cancellation_requested": True,
+            "cancellation_fanout_complete": fanout_complete,
+            "cancellation_started_at": time.monotonic(),
+        }
+    }
+    route._cleanup_blockers = lambda *_args, **_kwargs: "node-a=receipt_missing"
+    route._cancellation_cleanup_complete = lambda *_args, **_kwargs: (
+        proof_complete.is_set()
+    )
+
+    def snapshot(*_args, deadline_monotonic_s, **_kwargs) -> None:
+        attempts.append((time.monotonic(), deadline_monotonic_s))
+        if len(attempts) == 1:
+            # Exactly the observed shape: ``_snapshot_nodes_before`` mints
+            # ``<code>@<node_id>`` and the code here is the local slice guard.
+            raise RuntimeError("command_deadline_exceeded@node-a")
+        proof_complete.set()
+
+    route._snapshot_nodes_before = snapshot
+    started = time.monotonic()
+    owner_deadline = started + 2.0
+
+    route._wait_for_cancellation_cleanup(
+        frozenset({"node-a"}),
+        deadline_monotonic_s=owner_deadline,
+        cleanup_subject={"request_id": "request-a"},
+        receipt_only=True,
+    )
+
+    assert proof_complete.is_set()
+    assert len(attempts) == 2
+    assert attempts[1][0] > attempts[0][0]
+    assert all(started < deadline <= owner_deadline for _now, deadline in attempts)
+
+
+def test_cleanup_snapshot_slice_covers_a_measured_peer_round_trip() -> None:
+    """A slice shorter than one real round trip is a second way to miss.
+
+    Measured successful request-scoped snapshot round trips to the relayed
+    laptop were 0.875-1.066 s, and the first fallback attempt's 0.5 s slice was
+    never even claimed (round 52 §2).  The slice must cover one measured round
+    trip and still fit inside the owner's immutable window after the inline
+    grace interval.
+    """
+
+    fanout_complete = threading.Event()
+    fanout_complete.set()
+    proof_complete = threading.Event()
+    attempts: list[tuple[float, float]] = []
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.RLock()
+    route._active_route_requests = {
+        "request-a": {
+            "cancellation_requested": True,
+            "cancellation_fanout_complete": fanout_complete,
+            "cancellation_started_at": time.monotonic(),
+        }
+    }
+    route._cleanup_blockers = lambda *_args, **_kwargs: "node-a=receipt_missing"
+    route._cancellation_cleanup_complete = lambda *_args, **_kwargs: (
+        proof_complete.is_set()
+    )
+
+    def snapshot(*_args, deadline_monotonic_s, **_kwargs) -> None:
+        attempts.append((time.monotonic(), deadline_monotonic_s))
+        proof_complete.set()
+
+    route._snapshot_nodes_before = snapshot
+    owner_deadline = time.monotonic() + 2.0
+
+    route._wait_for_cancellation_cleanup(
+        frozenset({"node-a"}),
+        deadline_monotonic_s=owner_deadline,
+        cleanup_subject={"request_id": "request-a"},
+        receipt_only=True,
+    )
+
+    assert len(attempts) == 1
+    started_at, handed_deadline = attempts[0]
+    # One measured relayed round trip is ~1.0 s; a 0.5 s slice cannot complete it.
+    assert handed_deadline - started_at >= 1.0
+    # The attempt still observes the owner's absolute deadline, never a longer one.
+    assert handed_deadline <= owner_deadline
+
+
+def _round50_timeline_route(
+    *,
+    published: list[Mapping[str, Any]],
+) -> tuple[PhysicalLiveRoute, float]:
+    """Replay the measured round-50 cleanup timeline through the real wait.
+
+    Every number here is measured from the round-50 mailbox ledger for request
+    ``f35736e4-…`` (see
+    ``outputs/a13-macos-evidence/round52-cleanup-provable-within-window.md``
+    §1-§3), driven through the *real* ``_wait_for_cancellation_cleanup`` and
+    ``_snapshot_nodes_before``; only the peer's transport responses are modelled:
+
+    - ``node-a`` (owner node): request-scoped receipt complete at t0+0.2 s
+      (measured: complete at t0+0.736 s on the first fallback attempt).
+    - ``node-b`` (relayed laptop): receipt complete at t0+1.73 s
+      (measured: 1.730 s, 0.270 s inside the immutable 2.0 s deadline).
+    - The inline ``infer_cancel_wait`` fanout never lands inside its waiter
+      (measured overrun +0.278 s local / +1.437 s relayed), which is why the
+      fanout barrier here is never set.
+    """
+
+    cleanup_subject = {
+        "request_id": "request-a",
+        "request_attempt": 1,
+        "path_id": "path-a",
+        "path_attempt": 0,
+        "path_digest": "sha256:" + "a" * 64,
+        "deployment_id": "deployment-a",
+    }
+    fanout_complete = threading.Event()  # deliberately never set: the fanout lost
+    route = object.__new__(PhysicalLiveRoute)
+    route._lock = threading.RLock()
+    route._sessions = {"node-a": object(), "node-b": object()}
+    route._cleanup_snapshots_by_request = {}
+    route._request_cleanup_receipts = {}
+    route._last_snapshots = {}
+    t0 = time.monotonic()
+    route._active_route_requests = {
+        "request-a": {
+            "cancellation_requested": True,
+            "cancellation_fanout_complete": fanout_complete,
+            "cancellation_started_at": t0,
+            "deployment_id": "deployment-a",
+            "publish_cleanup_receipt": published.append,
+        }
+    }
+    route._cleanup_blockers = lambda *_args, **_kwargs: "node-b=receipt_missing"
+    ready_at = {"node-a": t0 + 0.2, "node-b": t0 + 1.73}
+    route._command_id = lambda node_id, operation: f"cmd-{operation}-{node_id}"
+
+    def send_before(
+        node_id: str,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> Mapping[str, Any]:
+        assert command == "snapshot", command
+        assert payload.get("request_cleanup") is None
+        if deadline_monotonic_s < ready_at[node_id]:
+            # Exactly the measured unclaimed expiry: the attempt's own slice is
+            # shorter than this peer needs, so it dies against its slice while
+            # the owner's window still has time in it.
+            time.sleep(max(0.0, deadline_monotonic_s - time.monotonic()))
+            raise TimeoutError("command_deadline_exceeded")
+        time.sleep(max(0.0, ready_at[node_id] - time.monotonic()))
+        return {"node_id": node_id}
+
+    def verify(
+        node_id: str,
+        response: Mapping[str, Any],
+        *,
+        event: str,
+        require_known_key: bool = True,
+    ):
+        return {
+            "node_id": node_id,
+            "details": {"request_cleanup": {**cleanup_subject, "complete": True}},
+        }
+
+    route._send_before = send_before
+    route._verify_observation = verify
+    route._ingest_transport_scoped_events = lambda *_args, **_kwargs: None
+    return route, t0
+
+
+def test_round50_timeline_was_final_on_the_preview51_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RED on the preview.51 values: this timeline ended in the incident.
+
+    The recorded reason for request ``f35736e4-…`` was
+    ``command_deadline_exceeded@<laptop>`` — a slice-scoped expiry that the
+    preview.51 classifier (``node_response_timeout@`` only) treated as final,
+    with 0.987 s of the owner's window still unspent.
+    """
+
+    published: list[Mapping[str, Any]] = []
+    route, _t0 = _round50_timeline_route(published=published)
+    monkeypatch.setattr(
+        route_module,
+        "_CLEANUP_RETRYABLE_ATTEMPT_CODES",
+        ("node_response_timeout@",),
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        route._wait_for_cancellation_cleanup(
+            frozenset({"node-a", "node-b"}),
+            deadline_monotonic_s=time.monotonic() + 2.0,
+            cleanup_subject={"request_id": "request-a"},
+            receipt_only=True,
+        )
+
+    assert "command_deadline_exceeded@node-b" in str(raised.value)
+    assert published == []
+    assert route.request_cleanup_receipt("request-a") is None
+
+
+def test_round50_timeline_reaches_proven_cleanup_within_the_owner_window() -> None:
+    """GREEN on the shipped classification: cleanup is proven inside 2 s.
+
+    This is the decision-4b replay: the measured round-50 command timeline,
+    driven through the real wait, must reach a proven request-scoped receipt —
+    the precondition ``_record_command_terminal`` requires before it can record
+    a terminal, and the exact thing whose absence withheld the SSE terminal.
+    """
+
+    published: list[Mapping[str, Any]] = []
+    route, _t0 = _round50_timeline_route(published=published)
+    # Drive the wait with the full identity subject, exactly as
+    # `_request_cleanup_subject` does in production: the sealed aggregate is a
+    # projection of this subject, and the predicate's owner-arm needs
+    # `deployment_id`.
+    subject = {
+        "request_id": "request-a",
+        "request_attempt": 1,
+        "path_id": "path-a",
+        "path_attempt": 0,
+        "path_digest": "sha256:" + "a" * 64,
+        "deployment_id": "deployment-a",
+    }
+
+    route._wait_for_cancellation_cleanup(
+        frozenset({"node-a", "node-b"}),
+        deadline_monotonic_s=time.monotonic() + 2.0,
+        cleanup_subject=subject,
+        receipt_only=True,
+    )
+
+    receipt = route.request_cleanup_receipt("request-a")
+    assert receipt is not None
+    assert set(receipt["node_ids"]) == {"node-a", "node-b"}
+    assert receipt["cleanup_owner_id"] == "physical-live-route:deployment-a"
+    assert len(published) == 1
+    assert route._cancellation_cleanup_complete(
+        frozenset({"node-a", "node-b"}),
+        cleanup_subject=subject,
+    )
 
 
 def test_cleanup_fallback_snapshots_only_nodes_missing_fanout_receipts() -> None:

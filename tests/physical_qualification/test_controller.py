@@ -2761,3 +2761,23 @@ def test_subprocess_runner_allows_bounded_large_archive_timeout() -> None:
             (sys.executable, "-c", "pass"),
             timeout_seconds=21_600.1,
         )
+
+
+@pytest.mark.parametrize('transport',['ssh','managed_https'])
+@pytest.mark.parametrize('parent',['identity','unowned'])
+def test_managed_identity_path_is_target_owned_not_a_shell_prefix(tmp_path,transport,parent):
+    from dataclasses import replace
+    peers=_peers(2,tmp_path)
+    if transport=='managed_https':
+        peers=tuple(replace(p,process_transport=transport,ssh_target=None,ssh_identity_file=None) for p in peers)
+    source,transfers=_transfers(tmp_path/'transfer')
+    root='/Users/test/Library/Application Support/Mycelium A13 Demo/state/'+parent
+    controller=QualificationController(mode='physical',peers=peers,source_root=source,
+        transfer_manifest=transfers,membership_snapshot=_snapshot(peers),now=NOW+1,
+        run_plan=_physical_run_plan(peers,identity_root=root))
+    # Metadata-only validation; never loads a key, model, or process.
+    if transport=='managed_https' and parent=='identity':
+        assert controller._validate_run_plan()['nodes'][0]['endpoint_secret_file'].startswith(root+'/')
+    else:
+        with pytest.raises(ControllerError,match='run_plan_endpoint_secret_file_invalid'):
+            controller._validate_run_plan()

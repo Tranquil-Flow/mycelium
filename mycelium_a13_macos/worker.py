@@ -1,0 +1,1052 @@
+"""App-owned native node process with bounded, fail-closed supervision.
+
+This is a local execution boundary, not membership authentication or a load
+permit producer.  The caller supplies current-membership and exact command
+load-grant checks.  The native process boundary owns correlated concurrent
+waiters and priority cleanup writes; this adapter never serializes a complete
+request/response exchange or manufactures a native response for a local
+admission refusal.
+
+Source tests exercise only real native hello/stop and pre-load semantic errors;
+model execution and physical qualification remain outside this module's tests.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+import math
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import threading
+import time
+from typing import Any, Callable, Mapping
+
+from mycelium_qualification.evidence import canonical_json_bytes
+
+from .resources import observe_policy, policy_violation
+
+_CLEANUP_RESERVE_SECONDS = 10
+_NATIVE_PROTOCOL = "mycelium.physical_node_control.v1"
+
+
+class WorkerError(RuntimeError):
+    """Stable local worker admission/supervision error."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+@dataclass(frozen=True)
+class WorkerLimits:
+    max_rss_bytes: int
+    max_disk_bytes: int
+    max_wall_seconds: int
+    max_commands: int
+
+    def __post_init__(self) -> None:
+        if any(type(value) is not int or value <= 0 for value in vars(self).values()):
+            raise WorkerError("worker_limits_invalid")
+        if (
+            not _CLEANUP_RESERVE_SECONDS < self.max_wall_seconds <= 3600
+            or self.max_commands > 10000
+        ):
+            raise WorkerError("worker_limits_invalid")
+
+
+_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+_OPERATION = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
+_CODE = re.compile(r"[a-z][a-z0-9_]{0,79}\Z")
+
+_NATIVE_DIAGNOSTIC_FRAME = re.compile(
+    r'File "([^"]+)", line ([0-9]{1,8}), in ([A-Za-z_][A-Za-z_0-9]*|<module>)'
+)
+_NATIVE_DIAGNOSTIC_EXCEPTIONS = frozenset(
+    {
+        "IrohTransportError",
+        "NodeCommandError",
+        "RuntimeError",
+        "ValueError",
+        "TypeError",
+        "TimeoutError",
+        "OSError",
+        "KeyError",
+        "AssertionError",
+    }
+)
+
+# Bounded, allowlisted prefill-hop diagnostic.  The native prefill wait only
+# observes ``transport.fatal_error``, so a hop that fails inside the deferred
+# forward path is recorded there as a scoped (non-fatal) event and the operator
+# sees only the generic ``prefill_completion_timeout``.  The native node prints
+# one fixed-shape line that this parser reduces to an allowed key set; anything
+# else in the tail (addresses, endpoint ids, keys, prompts, messages) is never
+# retained.
+_NATIVE_TRANSPORT_LINE = re.compile(r"^MYCELIUM-TRANSPORT-DIAG ([!-~ ]{1,400})$", re.M)
+_NATIVE_TRANSPORT_COUNTER_KEYS = (
+    "remote_frames_sent",
+    "remote_frames_received",
+    "router_frames_dispatched",
+    "duplicate_frames",
+)
+_NATIVE_TRANSPORT_KEYS = frozenset(
+    {"scoped_failure_code", *_NATIVE_TRANSPORT_COUNTER_KEYS}
+)
+_NATIVE_TRANSPORT_STATUS = re.compile(r"[a-z][a-z0-9_]{0,60}\Z")
+
+
+def _bounded_transport_diagnostic(text: str) -> dict[str, Any] | None:
+    """Reduce one ``MYCELIUM-TRANSPORT-DIAG`` line to an allowlisted verdict.
+
+    The generic ``prefill_completion_timeout`` is a symptom: the native wait
+    only polls ``transport.fatal_error``, while a hop that fails in the deferred
+    forward path is recorded as a scoped, per-path, non-fatal event.  This
+    recovers the transport's own verdict for that hop.
+
+    Fails closed: a line is accepted only when it carries *exactly* the allowed
+    key set with individually validated values.  Any malformed, oversized or
+    unexpected input yields ``None`` -- never a partial record, never a raise.
+    Only an allowlisted status token and bounded decimal counters can survive, so
+    addresses, endpoint ids, keys, prompts and raw messages cannot reach here.
+    """
+    for match in _NATIVE_TRANSPORT_LINE.finditer(text):
+        fields: dict[str, str] = {}
+        for token in match.group(1).split():
+            key, separator, value = token.partition("=")
+            if not separator or key in fields:
+                return None
+            fields[key] = value
+        if set(fields) != _NATIVE_TRANSPORT_KEYS:
+            return None
+        status = fields["scoped_failure_code"]
+        if status != "none" and _NATIVE_TRANSPORT_STATUS.fullmatch(status) is None:
+            return None
+        counters: dict[str, int] = {}
+        for name in _NATIVE_TRANSPORT_COUNTER_KEYS:
+            raw_value = fields[name]
+            if not raw_value.isdigit() or len(raw_value) > 12:
+                return None
+            counters[name] = int(raw_value)
+        return {
+            "protocol": "mycelium.a13.native_transport_diagnostic.v1",
+            "scoped_failure_code": status,
+            **counters,
+        }
+    return None
+
+
+def _bounded_native_diagnostics(raw: Any) -> dict[str, Any]:
+    """Derive allowlisted frames and exception classes from a stderr tail.
+
+    Never retains raw stderr, source lines, exception messages, prompts or
+    credentials.  Shared by the command-failure and process-exit recorders so
+    both boundaries report the same bounded shape.
+    """
+    text = raw[-10000:].decode("utf-8", "replace") if isinstance(raw, bytes) else ""
+    frames = []
+    for file, line, function in _NATIVE_DIAGNOSTIC_FRAME.findall(text):
+        name = Path(file).name
+        if re.fullmatch(r"[A-Za-z_][A-Za-z_0-9.]{0,80}[.]py", name):
+            frames.append({"file": name, "line": int(line), "function": function[:80]})
+    types = [
+        name
+        for name in re.findall(r"^([A-Za-z_][A-Za-z_0-9]*):", text, re.M)
+        if name in _NATIVE_DIAGNOSTIC_EXCEPTIONS
+    ]
+    result: dict[str, Any] = {
+        "frames": frames[-24:],
+        "exception_types": types[-8:],
+    }
+    transport = _bounded_transport_diagnostic(text)
+    if transport is not None:
+        result["transport"] = transport
+    return result
+
+
+def _unavailable_code(worker: Any) -> str:
+    """Precise bounded cause for a worker that cannot accept a command.
+
+    A worker that was started and then lost its native process must not be
+    reported as merely absent.  ``worker_native_exited`` is the actionable
+    cause; the generic code hides why the worker is gone, which is what let an
+    opaque fail-closed route stand in for a diagnosable defect.
+    """
+    recorded = getattr(worker, "_error", None)
+    if isinstance(recorded, str) and _CODE.fullmatch(recorded):
+        return recorded
+    return "worker_not_running"
+
+
+_NATIVE_RESPONSE_TRANSIT_MARGIN = 0.7
+"""Fraction of the owner's managed-control session cap one native command may use.
+
+The owner abandons a managed-control exchange at ``MAX_SESSION_TIMEOUT_SECONDS``
+(240 s), and the native node's own prefill wait is ``command_timeout * 0.8``.  If
+the native budget is pinned to the *same* 240 s constant, the native only answers
+at 192 s and just 48 s is left for that answer to travel back -- target poll,
+signing, envelope, owner processing.  round34 squeaked through at 193.1 s;
+round35 exceeded the window, the owner recorded ``managed_control_response_timeout``
+with ``resp_code: None``, and the native's real cause was discarded entirely.
+
+Deriving the native budget as a strict fraction of the session cap guarantees the
+native always answers *inside* the owner's window, so the real native code (a
+transport verdict, or ``prefill_completion_timeout``) is always observable instead
+of being masked by a control-plane timeout.  This is a proven budget invariant, not
+a tuning guess: it comes from the documented cap plus the observed race.
+"""
+
+
+def _native_budgets(limits: Any) -> tuple[float, float]:
+    """Native command and response budget derived from the approved wall limit.
+
+    The canonical route budgets ``NODE_COMMAND_TIMEOUT_SECONDS`` (900) and
+    ``NODE_SESSION_TIMEOUT_SECONDS`` (930), and the managed transport caps one
+    session at ``MAX_SESSION_TIMEOUT_SECONDS`` (240).  A hardcoded 5 s command
+    budget cannot cover the startup challenge's first *cold* distributed
+    prefill, which is why ``infer_start`` raised ``TimeoutError`` and exited the
+    native worker.  Derive the budget instead of inventing a number, never exceed
+    the managed session cap, and stay inside it by ``_NATIVE_RESPONSE_TRANSIT_MARGIN``
+    so the native's answer always reaches the owner before the owner gives up.
+    """
+    from .control_session import MAX_SESSION_TIMEOUT_SECONDS
+
+    budget = float(limits.max_wall_seconds) - _CLEANUP_RESERVE_SECONDS
+    capped = MAX_SESSION_TIMEOUT_SECONDS * _NATIVE_RESPONSE_TRANSIT_MARGIN
+    bounded = min(budget, capped)
+    if not 0 < bounded <= capped:
+        raise WorkerError("worker_limits_invalid")
+    return (bounded, bounded)
+
+
+_CANCEL_CONTROL_FIELDS = frozenset(
+    {
+        "request_id",
+        "deployment_id",
+        "deployment_epoch",
+        "qualification_digest",
+        "command_id",
+        "publisher_generation",
+        "absolute_deadline_ms",
+        "request_attempt",
+        "path_id",
+        "path_attempt",
+        "path_digest",
+        "topology_generation",
+        "cancellation_generation",
+        "deadline_budget_ms",
+    }
+)
+_OPERATION_PAYLOAD_FIELDS: dict[str, tuple[frozenset[str], ...]] = {
+    "hello": (frozenset(),),
+    "configure": (
+        frozenset(
+            {
+                "assignment_file",
+                "artifact_report_file",
+                "graph",
+                "device_states",
+                "load_generation",
+            }
+        ),
+        frozenset(
+            {
+                "assignment_file",
+                "manifest_file",
+                "stage_pack_file",
+                "graph",
+                "device_states",
+                "load_generation",
+            }
+        ),
+        frozenset(
+            {
+                "assignment_file",
+                "pixel_stage_pack_file",
+                "graph",
+                "device_states",
+                "load_generation",
+            }
+        ),
+    ),
+    "start": (
+        frozenset({"peer", "local_generation"}),
+        frozenset({"peer", "peers", "local_generation"}),
+    ),
+    "health": (frozenset(),),
+    "snapshot": (
+        frozenset(),
+        frozenset({"cleanup_subject"}),
+        frozenset({"cleanup_subject", "receipt_only"}),
+    ),
+    "cancel": (frozenset({"request_id"}),),
+    "bind_request_control": (frozenset({"request_id", "control"}),),
+    "update_request_control": (frozenset({"request_id", "control"}),),
+    "infer_start": (
+        frozenset({"request"}),
+        frozenset({"request", "excluded_placement_ids"}),
+        frozenset({"request", "control", "path_manifest"}),
+        frozenset(
+            {"request", "control", "path_manifest", "excluded_placement_ids"}
+        ),
+    ),
+    "infer_decode": (
+        frozenset({"request_id", "count"}),
+        frozenset({"request_id", "count", "control"}),
+    ),
+    "infer_cancel": (
+        frozenset({"request_id"}),
+        _CANCEL_CONTROL_FIELDS,
+    ),
+    "infer_cancel_wait": (_CANCEL_CONTROL_FIELDS,),
+    "rotate": (frozenset({"peer"}),),
+    "stop": (frozenset(),),
+}
+_ALLOWED = frozenset(_OPERATION_PAYLOAD_FIELDS)
+_EXACT_GRANT_COMMANDS = frozenset(
+    {"configure", "start", "infer_start", "infer_decode", "rotate"}
+)
+_REQUIRES_ADMITTED_LOAD = frozenset(
+    {
+        "start",
+        "bind_request_control",
+        "update_request_control",
+        "infer_start",
+        "infer_decode",
+        "infer_cancel",
+        "infer_cancel_wait",
+        "rotate",
+    }
+)
+_FORBIDDEN_EXECUTION_KEYS = frozenset(
+    {
+        "argv",
+        "cwd",
+        "exec",
+        "executable",
+        "executable_path",
+        "python",
+        "python_code",
+        "python_command",
+        "script",
+        "script_path",
+        "shell",
+        "shell_command",
+        "subprocess",
+        "working_directory",
+    }
+)
+
+
+def _reject_execution_inputs(value: Any) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise WorkerError("worker_command_invalid")
+            if key.lower().replace("-", "_") in _FORBIDDEN_EXECUTION_KEYS:
+                raise WorkerError("worker_command_invalid")
+            _reject_execution_inputs(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_execution_inputs(item)
+
+
+def _detached_json_object(
+    value: Mapping[str, Any], *, code: str = "worker_command_invalid"
+) -> dict[str, Any]:
+    try:
+        encoded = canonical_json_bytes(dict(value))
+        detached = json.loads(encoded)
+    except (TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise WorkerError(code) from exc
+    if not isinstance(detached, dict):
+        raise WorkerError(code)
+    return detached
+
+
+def _native_response(
+    *, node_id: str, command_id: str, ok: bool, value: Any
+) -> dict[str, Any]:
+    response = {
+        "protocol": _NATIVE_PROTOCOL,
+        "command_id": command_id,
+        "node_id": node_id,
+        "ok": ok,
+        "route_ready": False,
+    }
+    if ok:
+        response["result"] = value
+    else:
+        response["error"] = {"code": value}
+    return response
+
+
+class _ConcurrentNativeSession:
+    """Expose validated native envelopes over PhysicalNodeProcess demultiplexing."""
+
+    def __init__(
+        self,
+        *,
+        argv: tuple[str, ...],
+        node_id: str,
+        run_id: str,
+        deployment_id: str,
+        timeout_seconds: float,
+    ) -> None:
+        # Import the native owner lazily so importing the packaged launcher has
+        # no process side effect.  PhysicalNodeProcess is the existing hardened
+        # writer/reader boundary; do not add a second pipe reader here.
+        import mycelium_node.process as process_module
+
+        self._process_module = process_module
+        self._process = process_module.PhysicalNodeProcess(
+            command=argv,
+            node_id=node_id,
+            run_id=run_id,
+            deployment_id=deployment_id,
+            response_timeout_seconds=timeout_seconds,
+        )
+        self.node_id = node_id
+
+    @property
+    def pid(self) -> int:
+        return self._process.pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._process.returncode
+
+    @property
+    def stderr(self) -> bytes:
+        return self._process.stderr_tail.encode("utf-8", errors="replace")
+
+    def _send(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float | None,
+    ) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "terminate_on_timeout": False,
+            "command_id": command_id,
+        }
+        if deadline_monotonic_s is not None:
+            remaining = deadline_monotonic_s - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("command_deadline_exceeded")
+            options["timeout_seconds"] = remaining
+        try:
+            result = self._process.command(command, payload, **options)
+        except self._process_module._RemoteNodeError as exc:
+            # This private subclass is the native boundary's only distinction
+            # between an authenticated node rejection and local pipe/process
+            # failure.  Rebuild only the fixed envelope fields already verified
+            # by PhysicalNodeProcess; the error code itself is native-authored.
+            return _native_response(
+                node_id=self.node_id,
+                command_id=command_id,
+                ok=False,
+                value=exc.code,
+            )
+        return _native_response(
+            node_id=self.node_id,
+            command_id=command_id,
+            ok=True,
+            value=result,
+        )
+
+    def send(
+        self, *, command_id: str, command: str, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return self._send(
+            command_id=command_id,
+            command=command,
+            payload=payload,
+            deadline_monotonic_s=None,
+        )
+
+    def send_before(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> dict[str, Any]:
+        return self._send(
+            command_id=command_id,
+            command=command,
+            payload=payload,
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+
+    def interrupt_command(self, command_id: str, *, code: str) -> bool:
+        return self._process.interrupt_command(command_id, code=code)
+
+    def close(self) -> None:
+        self._process.close()
+
+
+class ManagedWorker:
+    def __init__(
+        self,
+        *,
+        node_id: str,
+        run_id: str,
+        deployment_id: str,
+        artifact_root: Path,
+        socket_root: Path,
+        sidecar_binary: Path,
+        resource_policy: Mapping[str, Any],
+        limits: WorkerLimits,
+        membership_current: Callable[[], bool],
+        authorize_load: Callable[[Mapping[str, Any]], bool] | None,
+        endpoint_secret_file: Path | None = None,
+        capacity_root: Path | None = None,
+        _test_observer: Callable[[], Mapping[str, str]] | None = None,
+    ) -> None:
+        if any(
+            not isinstance(value, str) or not _SEGMENT.fullmatch(value)
+            for value in (node_id, run_id, deployment_id)
+        ):
+            raise WorkerError("worker_identity_invalid")
+        if not isinstance(limits, WorkerLimits) or not callable(membership_current):
+            raise WorkerError("worker_configuration_invalid")
+        if authorize_load is not None and not callable(authorize_load):
+            raise WorkerError("worker_configuration_invalid")
+        self.node_id, self.run_id, self.deployment_id = (
+            node_id,
+            run_id,
+            deployment_id,
+        )
+        self.artifact_root = Path(artifact_root).absolute()
+        if self.artifact_root.is_symlink() or not self.artifact_root.is_dir():
+            raise WorkerError("worker_artifact_root_invalid")
+        root_info = self.artifact_root.lstat()
+        self._root_identity = (root_info.st_dev, root_info.st_ino)
+        self.socket_root = Path(socket_root).absolute()
+        self.sidecar_binary = Path(sidecar_binary).absolute()
+        self.capacity_root = None if capacity_root is None else Path(capacity_root)
+        if self.capacity_root is not None:
+            try:
+                info=self.capacity_root.stat()
+                if (not self.capacity_root.is_absolute()
+                    or self.capacity_root.resolve(strict=True)!=self.capacity_root
+                    or not self.capacity_root.is_dir() or info.st_uid!=os.getuid()
+                    or info.st_mode & 0o777 != 0o700):
+                    raise WorkerError("worker_capacity_root_invalid")
+            except OSError:
+                raise WorkerError("worker_capacity_root_invalid") from None
+        self.endpoint_secret_file = endpoint_secret_file
+        self.resource_policy = dict(resource_policy)
+        self.limits = limits
+        self._membership_current = membership_current
+        self._authorize_load = authorize_load
+        self._observe = _test_observer or observe_policy
+        self._session: Any = None
+        self.pid: int | None = None
+        self._group_owned = False
+        self._closed = threading.Event()
+        self._monitor: threading.Thread | None = None
+        self._deadline_timer: threading.Timer | None = None
+        self._started_at: float | None = None
+        self._error: str | None = None
+        self._command_count = 0
+        self._commands: set[str] = set()
+        self._pending_commands: set[str] = set()
+        self._load_admitted = False
+        self._account_lock = threading.RLock()
+        self._guard_lock = threading.Lock()
+        self._close_lock = threading.Lock()
+        self._last_observation: dict[str, str] | None = None
+
+    @staticmethod
+    def _deadline_check(deadline_monotonic_s: float | None) -> None:
+        if deadline_monotonic_s is not None and time.monotonic() >= deadline_monotonic_s:
+            raise TimeoutError("command_deadline_exceeded")
+
+    def _check(self, deadline_monotonic_s: float | None = None) -> None:
+        # Guard observations may be relatively expensive, but they serialize
+        # only with other guard observations—not with native response waits.
+        if deadline_monotonic_s is None:
+            self._guard_lock.acquire()
+        else:
+            remaining = deadline_monotonic_s - time.monotonic()
+            if remaining <= 0 or not self._guard_lock.acquire(timeout=remaining):
+                raise TimeoutError("command_deadline_exceeded")
+        try:
+            try:
+                current = self._membership_current()
+            except Exception:
+                current = False
+            self._deadline_check(deadline_monotonic_s)
+            if current is not True:
+                raise WorkerError("worker_membership_not_current")
+            try:
+                observation = dict(self._observe())
+            except Exception:
+                raise WorkerError("worker_resource_observation_failed") from None
+            self._deadline_check(deadline_monotonic_s)
+            self._last_observation = observation
+            violation = policy_violation(self.resource_policy, observation)
+            if violation:
+                raise WorkerError(violation)
+            if (
+                self._started_at is not None
+                and time.monotonic() - self._started_at
+                >= self.limits.max_wall_seconds - _CLEANUP_RESERVE_SECONDS
+            ):
+                raise WorkerError("worker_wall_limit_exceeded")
+            total = 0
+            count = 0
+            try:
+                info = self.artifact_root.lstat()
+                if (
+                    not stat.S_ISDIR(info.st_mode)
+                    or (info.st_dev, info.st_ino) != self._root_identity
+                ):
+                    raise WorkerError("worker_storage_observation_failed")
+                for root, dirs, files in os.walk(self.artifact_root, followlinks=False):
+                    for name in dirs + files:
+                        self._deadline_check(deadline_monotonic_s)
+                        entry = Path(root) / name
+                        info = entry.lstat()
+                        count += 1
+                        if count > 10000 or stat.S_ISLNK(info.st_mode):
+                            raise WorkerError("worker_storage_observation_failed")
+                        if stat.S_ISREG(info.st_mode):
+                            total += info.st_size
+                        elif not stat.S_ISDIR(info.st_mode):
+                            raise WorkerError("worker_storage_observation_failed")
+                        if total > self.limits.max_disk_bytes:
+                            raise WorkerError("worker_disk_limit_exceeded")
+            except OSError:
+                raise WorkerError("worker_storage_observation_failed") from None
+            if self._group_owned:
+                rss = self._group_rss(deadline_monotonic_s)
+                if rss > self.limits.max_rss_bytes:
+                    raise WorkerError("worker_memory_limit_exceeded")
+        finally:
+            self._guard_lock.release()
+
+    def _group_rss(self, deadline_monotonic_s: float | None = None) -> int:
+        # Numbers only: never collect other processes' argv or environment.
+        try:
+            timeout = 2.0
+            if deadline_monotonic_s is not None:
+                remaining = deadline_monotonic_s - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("command_deadline_exceeded")
+                timeout = min(timeout, remaining)
+            report = subprocess.run(
+                ["/bin/ps", "-axo", "pid=,pgid=,rss="],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=True,
+            )
+            total = 0
+            for line in report.stdout.splitlines():
+                self._deadline_check(deadline_monotonic_s)
+                fields = line.split()
+                if len(fields) != 3:
+                    raise ValueError()
+                _pid, pgid, kib = map(int, fields)
+                if pgid == self.pid:
+                    total += kib * 1024
+            return total
+        except TimeoutError:
+            raise
+        except subprocess.TimeoutExpired:
+            if deadline_monotonic_s is not None:
+                raise TimeoutError("command_deadline_exceeded") from None
+            raise WorkerError("worker_memory_observation_failed") from None
+        except Exception:
+            raise WorkerError("worker_memory_observation_failed") from None
+
+    def _native_argv(self) -> tuple[str, ...]:
+        """Exact native-node argv, with the derived command budget.
+
+        Extracted so the launched budget is inspectable without spawning a
+        process; the previous inline construction hardcoded 5 s.
+        """
+        command_timeout, _ = _native_budgets(self.limits)
+        args = (
+            "--node-id",
+            self.node_id,
+            "--run-id",
+            self.run_id,
+            "--deployment-id",
+            self.deployment_id,
+            "--artifact-root",
+            str(self.artifact_root),
+            "--socket-root",
+            str(self.socket_root),
+            "--sidecar-binary",
+            str(self.sidecar_binary),
+            "--command-timeout",
+            str(int(command_timeout)),
+        )
+        if self.capacity_root is not None:
+            args += ("--capacity-root", str(self.capacity_root))
+        if self.endpoint_secret_file is not None:
+            args += ("--endpoint-secret-file", str(self.endpoint_secret_file))
+        if getattr(sys, "frozen", False):
+            return (sys.executable, "--managed-node", *args)
+        return (sys.executable, "-B", "-m", "mycelium_a13_macos.worker", *args)
+
+    def start(self) -> dict[str, Any]:
+        if self._session is not None or self._closed.is_set():
+            raise WorkerError("worker_restart_requires_new_instance")
+        self._check()
+        self._started_at = time.monotonic()
+        argv = self._native_argv()
+        _, response_timeout = _native_budgets(self.limits)
+        try:
+            self._session = _ConcurrentNativeSession(
+                argv=argv,
+                node_id=self.node_id,
+                run_id=self.run_id,
+                deployment_id=self.deployment_id,
+                timeout_seconds=response_timeout,
+            )
+            self.pid = self._session.pid
+            remaining = (
+                self.limits.max_wall_seconds
+                - _CLEANUP_RESERVE_SECONDS
+                - (time.monotonic() - self._started_at)
+            )
+            self._deadline_timer = threading.Timer(max(0, remaining), self._expire)
+            self._deadline_timer.daemon = True
+            self._deadline_timer.start()
+            hello = self._session.send(
+                command_id="managed-hello", command="hello", payload={}
+            )
+            pid = self.pid
+            if hello.get("ok") is not True or pid is None or os.getpgid(pid) != pid:
+                raise WorkerError("worker_native_start_failed")
+            self._group_owned = True
+            self._check()
+            self._monitor = threading.Thread(
+                target=self._watch, name="a13-worker-guard", daemon=True
+            )
+            self._monitor.start()
+            return hello
+        except BaseException:
+            self.close()
+            raise
+
+    def _reserve_command(self, command_id: str) -> Any:
+        with self._account_lock:
+            if self._session is None or self._closed.is_set():
+                raise WorkerError(_unavailable_code(self))
+            if command_id in self._commands or command_id in self._pending_commands:
+                raise WorkerError("worker_command_reconciliation_required")
+            if (
+                self._command_count + len(self._pending_commands)
+                >= self.limits.max_commands
+            ):
+                raise WorkerError("worker_command_limit_exceeded")
+            self._pending_commands.add(command_id)
+            return self._session
+
+    def _retire_reservation(self, command_id: str) -> None:
+        with self._account_lock:
+            self._pending_commands.discard(command_id)
+
+    def _commit_command(self, command_id: str, session: Any) -> None:
+        with self._account_lock:
+            if (
+                self._session is not session
+                or self._closed.is_set()
+                or command_id not in self._pending_commands
+            ):
+                raise WorkerError(_unavailable_code(self))
+            self._pending_commands.remove(command_id)
+            self._commands.add(command_id)
+            self._command_count += 1
+
+    @staticmethod
+    def _validate_response(
+        response: Any, *, command_id: str, node_id: str
+    ) -> dict[str, Any]:
+        if not isinstance(response, Mapping):
+            raise WorkerError("worker_native_response_invalid")
+        detached = _detached_json_object(
+            response, code="worker_native_response_invalid"
+        )
+        common = {"protocol", "command_id", "node_id", "ok", "route_ready"}
+        expected = common | ({"result"} if detached.get("ok") is True else {"error"})
+        if (
+            set(detached) != expected
+            or detached.get("protocol") != _NATIVE_PROTOCOL
+            or detached.get("command_id") != command_id
+            or detached.get("node_id") != node_id
+            or detached.get("route_ready") is not False
+            or type(detached.get("ok")) is not bool
+        ):
+            raise WorkerError("worker_native_response_invalid")
+        if detached["ok"] is False:
+            error = detached.get("error")
+            if (
+                not isinstance(error, dict)
+                or set(error) != {"code"}
+                or not isinstance(error.get("code"), str)
+                or _OPERATION.fullmatch(error["code"]) is None
+            ):
+                raise WorkerError("worker_native_response_invalid")
+        return detached
+
+    def _authorize_exact(self, envelope: Mapping[str, Any]) -> None:
+        if self._authorize_load is None:
+            raise WorkerError("model_execution_not_authorized")
+        try:
+            authorized = self._authorize_load(_detached_json_object(envelope))
+        except Exception:
+            authorized = False
+        if authorized is not True:
+            raise WorkerError("model_execution_not_authorized")
+
+    def _record_native_failure(self, session, *, command_id, command, response):
+        """Bounded local diagnostics, never raw stderr or model/prompt values."""
+        if self.capacity_root is None:return
+        from .authority import _atomic_private_json
+        _atomic_private_json(self.capacity_root/'native-failure.private.json',{
+            'protocol':'mycelium.a13.native_failure_diagnostic.v1',
+            'run_id':self.run_id,'node_id':self.node_id,'command_id':command_id,
+            'command':command,**_bounded_native_diagnostics(getattr(session,'stderr',b''))})
+
+    def _record_native_exit(self, session):
+        """Bounded diagnostic for a native worker process exit.
+
+        A process exit destroys the only chance to learn why the worker is
+        gone, and the generic follow-on code hides it entirely.  Record the
+        bounded stderr-derived frames and exception classes so the cause stays
+        inspectable.  This is local diagnostics only: it is not native success
+        or failure evidence and never replaces the actual native result.
+        """
+        if self.capacity_root is None:return
+        from .authority import _atomic_private_json
+        _atomic_private_json(self.capacity_root/'native-exit.private.json',{
+            'protocol':'mycelium.a13.native_exit_diagnostic.v1',
+            'run_id':self.run_id,'node_id':self.node_id,
+            'returncode':getattr(session,'returncode',None),
+            **_bounded_native_diagnostics(getattr(session,'stderr',b''))})
+
+    def _send(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float | None,
+    ) -> dict[str, Any]:
+        if not isinstance(command, str) or command not in _ALLOWED:
+            raise WorkerError("worker_command_not_allowed")
+        if (
+            not isinstance(command_id, str)
+            or not _SEGMENT.fullmatch(command_id)
+            or not isinstance(payload, Mapping)
+        ):
+            raise WorkerError("worker_command_invalid")
+        if deadline_monotonic_s is not None and (
+            not isinstance(deadline_monotonic_s, (int, float))
+            or isinstance(deadline_monotonic_s, bool)
+            or not math.isfinite(float(deadline_monotonic_s))
+        ):
+            raise WorkerError("worker_command_invalid")
+        self._deadline_check(deadline_monotonic_s)
+        payload_document = _detached_json_object(payload)
+        _reject_execution_inputs(payload_document)
+        envelope = {
+            "protocol": _NATIVE_PROTOCOL,
+            "command_id": command_id,
+            "run_id": self.run_id,
+            "deployment_id": self.deployment_id,
+            "command": command,
+            "payload": payload_document,
+        }
+        session = self._reserve_command(command_id)
+        committed = False
+        try:
+            if command != "stop":
+                self._check(deadline_monotonic_s)
+            self._deadline_check(deadline_monotonic_s)
+            with self._account_lock:
+                load_admitted = self._load_admitted
+            if command in _REQUIRES_ADMITTED_LOAD and not load_admitted:
+                raise WorkerError("model_load_not_admitted")
+            if command in _EXACT_GRANT_COMMANDS:
+                self._authorize_exact(envelope)
+                self._deadline_check(deadline_monotonic_s)
+                self._check(deadline_monotonic_s)
+            if frozenset(payload_document) not in _OPERATION_PAYLOAD_FIELDS[command]:
+                raise WorkerError("worker_command_invalid")
+            self._deadline_check(deadline_monotonic_s)
+            self._commit_command(command_id, session)
+            committed = True
+            if deadline_monotonic_s is None:
+                response = session.send(
+                    command_id=command_id,
+                    command=command,
+                    payload=payload_document,
+                )
+            else:
+                response = session.send_before(
+                    command_id=command_id,
+                    command=command,
+                    payload=payload_document,
+                    deadline_monotonic_s=float(deadline_monotonic_s),
+                )
+            validated = self._validate_response(
+                response, command_id=command_id, node_id=self.node_id
+            )
+            if validated["ok"] is False and command in _EXACT_GRANT_COMMANDS:
+                try:
+                    self._record_native_failure(session,command_id=command_id,
+                        command=command,response=validated)
+                except Exception:
+                    pass  # Diagnostic I/O must never replace the actual native failure.
+            if command == "configure" and validated["ok"] is True:
+                with self._account_lock:
+                    if not self._closed.is_set() and self._session is session:
+                        self._load_admitted = True
+            return validated
+        except BaseException as exc:
+            if committed and getattr(session, "returncode", None) is not None:
+                with self._account_lock:
+                    self._error = getattr(exc, "code", "worker_native_exited")
+                self.close()
+            raise
+        finally:
+            if not committed:
+                self._retire_reservation(command_id)
+
+    def send(
+        self, *, command_id: str, command: str, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Send one closed native command without serializing its response wait."""
+
+        return self._send(
+            command_id=command_id,
+            command=command,
+            payload=payload,
+            deadline_monotonic_s=None,
+        )
+
+    def send_before(
+        self,
+        *,
+        command_id: str,
+        command: str,
+        payload: Mapping[str, Any],
+        deadline_monotonic_s: float,
+    ) -> dict[str, Any]:
+        """Send within the caller's one absolute deadline; never restart it."""
+
+        return self._send(
+            command_id=command_id,
+            command=command,
+            payload=payload,
+            deadline_monotonic_s=deadline_monotonic_s,
+        )
+
+    def interrupt_command(self, command_id: str, *, code: str) -> bool:
+        """Retire one native waiter; this does not undo an already-delivered effect."""
+
+        if (
+            not isinstance(command_id, str)
+            or _SEGMENT.fullmatch(command_id) is None
+            or not isinstance(code, str)
+            or _OPERATION.fullmatch(code) is None
+        ):
+            raise WorkerError("worker_command_invalid")
+        with self._account_lock:
+            session = self._session
+            if session is None or self._closed.is_set():
+                raise WorkerError("worker_not_running")
+        return bool(session.interrupt_command(command_id, code=code))
+
+    def _expire(self) -> None:
+        if not self._closed.is_set():
+            self._error = "worker_wall_limit_exceeded"
+            self.close()
+
+    def _watch(self) -> None:
+        while not self._closed.wait(0.25):
+            try:
+                self._check()
+                if self._session is None or self._session.returncode is not None:
+                    raise WorkerError("worker_native_exited")
+            except WorkerError as error:
+                self._error = str(error)
+                # Capture the bounded cause BEFORE closing: after close the
+                # stderr tail is the only surviving evidence of the exit.
+                try: self._record_native_exit(self._session)
+                except Exception: pass
+                self.close()
+                return
+            except Exception:
+                self._error = "worker_guard_failed"
+                self.close()
+                return
+
+    def process_group_present(self) -> bool:
+        if not self._group_owned or self.pid is None:
+            return False
+        try:
+            os.killpg(self.pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
+    def status(self) -> dict[str, Any]:
+        with self._account_lock:
+            session = self._session
+            running = session is not None and session.returncode is None
+            return {
+                "running": running,
+                "stopping": self._closed.is_set() and running,
+                "error_code": self._error,
+                "model_load_authorized": self._load_admitted,
+                "command_count": self._command_count,
+                "resource_observation": self._last_observation,
+                "route_ready": False,
+            }
+
+    def close(self) -> None:
+        with self._close_lock:
+            self._closed.set()
+            if self._deadline_timer is not None:
+                self._deadline_timer.cancel()
+            session = self._session
+            if session is not None:
+                try:
+                    session.close()
+                except Exception:
+                    self._error = self._error or "worker_cleanup_failed"
+            # PhysicalNodeProcess alone owns descriptor-, process-incarnation-,
+            # and process-group-bound termination.  If it cannot prove safe
+            # ownership, do not bypass that guard with an unverified killpg.
+        if self._monitor is not None and self._monitor is not threading.current_thread():
+            self._monitor.join(timeout=5)
+
+
+def native_main() -> int:
+    # PhysicalNodeProcess already launches this fixed entrypoint as a fresh
+    # session/process-group leader.  Retain compatibility with direct packaged
+    # invocation without attempting a second setsid() as an existing leader.
+    if os.getsid(0) != os.getpid():
+        os.setsid()
+    from physical_inference_node import main
+
+    return main()
+
+
+if __name__ == "__main__":
+    raise SystemExit(native_main())

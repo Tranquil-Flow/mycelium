@@ -174,6 +174,51 @@ def test_trusted_proxy_capability_loader_is_owner_private_and_exact(
         )
 
 
+@pytest.fixture
+def declared_representation(monkeypatch):
+    """Unit seam for tests already stubbing the physical route.
+
+    Real assignment/manifest authority is exercised in test_representation.py;
+    this fixture only lets relay/error/cleanup assertions reach their boundary.
+    """
+    from mycelium_live.representation import NativeDeploymentProjection
+    calls = []
+
+    def projection(plan):
+        calls.append(plan)
+        return NativeDeploymentProjection(
+            deployment_id="deployment", model_id="model", model_revision="commit",
+            topology_size=3, runtime_dtype="float32", quantization="int8-weight-only",
+        )
+
+    monkeypatch.setattr(supervisor_module, "native_deployment_projection", projection)
+    yield
+    assert calls, "declared representation seam must actually be reached"
+
+
+@pytest.mark.parametrize("entrypoint", ["single", "registry"])
+def test_missing_representation_authority_rejects_before_route_factory(tmp_path, monkeypatch, entrypoint):
+    from mycelium_live.representation import NativeRepresentationError
+    calls = []
+
+    def forbidden(*args, **kwargs):
+        calls.append(True)
+        raise AssertionError("route_factory_must_not_run_without_authority")
+
+    monkeypatch.setattr(supervisor_module.PhysicalLiveRoute, "from_operator_plan", forbidden)
+    kwargs = {"seed_state_root": tmp_path / "seed"}
+    with pytest.raises(NativeRepresentationError, match="native_operator_plan_authority_invalid"):
+        if entrypoint == "single":
+            supervisor_module.run_physical_server(
+                operator_plan=tmp_path / "missing-plan.json", host="127.0.0.1", port=0, **kwargs,
+            )
+        else:
+            supervisor_module._qualified_runtime(tmp_path / "missing-plan.json", **kwargs)
+    assert calls == []
+    assert not (tmp_path / "seed").exists()
+
+
+@pytest.mark.usefixtures("declared_representation")
 def test_force_relay_reaches_route_factory_in_single_and_registry_loaders(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -530,6 +575,7 @@ def _graph(node_ids: tuple[str, ...]):
     )
 
 
+@pytest.mark.usefixtures("declared_representation")
 def test_physical_server_surfaces_safe_startup_remote_code(monkeypatch) -> None:
     class RejectingRoute:
         execution_graph = _graph(("node-a", "node-b", "node-c"))
@@ -578,6 +624,7 @@ def test_physical_server_surfaces_safe_startup_remote_code(monkeypatch) -> None:
     assert route.cleaned is True
 
 
+@pytest.mark.usefixtures("declared_representation")
 def test_physical_server_surfaces_safe_open_remote_code(monkeypatch) -> None:
     class RejectingRoute:
         execution_graph = _graph(("node-a", "node-b", "node-c"))
@@ -618,6 +665,7 @@ def test_physical_server_surfaces_safe_open_remote_code(monkeypatch) -> None:
     assert route.cleaned is True
 
 
+@pytest.mark.usefixtures("declared_representation")
 def test_physical_server_logs_node_stderr_diagnostic_before_cleanup_mask(
     monkeypatch, capsys
 ) -> None:
@@ -678,6 +726,7 @@ def test_physical_server_logs_node_stderr_diagnostic_before_cleanup_mask(
     assert route.cleaned is True
 
 
+@pytest.mark.usefixtures("declared_representation")
 def test_physical_server_unmasks_cleanup_failure_and_logs_node_stderr(
     monkeypatch, capsys
 ) -> None:

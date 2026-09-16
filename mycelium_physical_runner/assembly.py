@@ -38,14 +38,14 @@ class _RunnerControllerAdapter:
         return self._controller.execute(command)
 
 
-def build_production_runner(config: RunnerConfig) -> PhysicalRunner:
+def build_production_runner(config: RunnerConfig, *, session_factory=None, staging_adapter=None) -> PhysicalRunner:
     controller_config = dict(config.controller)
     peers_raw = controller_config["peers"]
     try:
         peers = tuple(
             PeerIdentity(
                 node_id=str(peer["node_id"]),
-                ssh_target=str(peer["ssh_target"]),
+                ssh_target=None if peer["ssh_target"] is None else str(peer["ssh_target"]),
                 host_id=str(peer["host_id"]),
                 boot_id=str(peer["boot_id"]),
                 staging_root=str(peer["staging_root"]),
@@ -97,6 +97,8 @@ def build_production_runner(config: RunnerConfig) -> PhysicalRunner:
         now=float(controller_config["now"]),
         run_plan=dict(controller_config["run_plan"]),
         seal_adapter=seal_adapter,
+        session_factory=session_factory,
+        staging_adapter=staging_adapter,
     )
     authority = QualificationAuthority(clock_unix_ms=lambda: config.now_unix_ms)
     publisher = build_authority_publisher(

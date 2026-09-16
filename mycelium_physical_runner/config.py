@@ -292,10 +292,12 @@ def _controller(value: Any) -> Mapping[str, Any]:
         peers_by_node[node_id] = peer
         process_transport = peer.get("process_transport")
         _require(
-            process_transport in {"local", "ssh"},
+            process_transport in {"local", "ssh", "managed_https"},
             "plan_field_invalid",
             "controller.peers.process_transport",
         )
+        if process_transport == "managed_https":
+            _require(peer.get("ssh_target") is None, "plan_field_invalid", "controller.peers.ssh_target")
         ssh_identity_file = peer.get("ssh_identity_file")
         if process_transport == "ssh":
             _safe_private_file(
@@ -389,8 +391,9 @@ def _controller(value: Any) -> Mapping[str, Any]:
         "plan_field_invalid",
         "controller.run_plan.entry_node_id",
     )
+    managed = any(peer.get("process_transport") == "managed_https" for peer in peers_by_node.values())
     for node_id, peer in peers_by_node.items():
-        expected_transport = "local" if node_id == entry_node_id else "ssh"
+        expected_transport = "managed_https" if managed else ("local" if node_id == entry_node_id else "ssh")
         _require(
             peer.get("process_transport") == expected_transport,
             "plan_field_invalid",

@@ -36,7 +36,6 @@ from mycelium_request_gateway.contracts import (
     qualification_digest,
     safe_qualification_projection,
 )
-from mycelium_physical_runner import load_operator_plan
 from mycelium_m16_runtime import build_live_m16_runtime
 from mycelium_performance_budget import validate_performance_budget_v3
 from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
@@ -54,7 +53,6 @@ from mycelium_m22_release import validate_release_evidence
 from mycelium_m23_kv import validate_m23_kv_evidence
 from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
-from physical_inference_node import execution_graph_from_document
 
 from .activation import DeploymentActivationError, PreparedDeploymentActivation
 from .artifact_provisioner import ArtifactAcquisitionStore
@@ -69,6 +67,7 @@ from .model_capacity import (
 from .local_preparer import LocalCandidatePreparer
 from .member_transport import MemberArtifactTransport
 from .preparation import LocalModelPreparation, ModelPreparationError
+from .representation import native_deployment_projection
 from .registry import (
     DeploymentSelectionError,
     LiveDeploymentRegistry,
@@ -558,6 +557,9 @@ class LiveHTTPServer(ThreadingHTTPServer):
     app: Any
     route: LiveRoute
     static_root: Path
+    # Explicit API-only serving: static routes fail closed with a safe JSON
+    # error instead of serving UI files.  Default (False) keeps UI mode.
+    api_only: bool
     activation: PreparedDeploymentActivation | None
     capacity_refresh: ModelCapacityRefresh | None
     model_preparation: LocalModelPreparation | None
@@ -612,6 +614,13 @@ def _handler() -> type[BaseHTTPRequestHandler]:
             return self.rfile.read(length) if length else b""
 
         def _serve_static(self, path: str) -> None:
+            if getattr(self.server, "api_only", False):
+                self._send_bytes(
+                    404,
+                    _json_bytes({"error": "static_content_disabled"}),
+                    "application/json; charset=utf-8",
+                )
+                return
             root = self.server.static_root.resolve()
             relative = (
                 "index.html"
@@ -1581,16 +1590,20 @@ def create_server(
     artifact_acquisition_store: ArtifactAcquisitionStore | None = None,
     replica_operator_token: str | None = None,
     trusted_https_proxy: bool = False,
+    api_only: bool = False,
 ) -> LiveHTTPServer:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError("live_mvp_requires_loopback")
+    if type(api_only) is not bool:
+        raise ValueError("api_only_invalid")
     static_root = Path(static_root)
-    if not (static_root / "index.html").is_file():
+    if not api_only and not (static_root / "index.html").is_file():
         raise ValueError("live_ui_build_missing")
     server = LiveHTTPServer((host, port), _handler())
     server.app = app
     server.route = route
     server.static_root = static_root
+    server.api_only = api_only
     server.activation = activation
     server.capacity_refresh = capacity_refresh
     server.model_preparation = model_preparation
@@ -2032,26 +2045,38 @@ def _qualified_runtime(
     model_operation_file: Path | None = None,
     progress: Callable[[str], None] | None = None,
     force_relay: bool = False,
+    session_factory=None,
 ) -> QualifiedDeploymentRuntime:
+    deployment = native_deployment_projection(operator_plan)
     if progress is not None:
         progress("validating_plan")
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
         seed_state_root=seed_state_root,
         force_relay=force_relay,
+        **({"session_factory": session_factory} if session_factory is not None else {}),
     )
     try:
         if progress is not None:
             progress("opening_route")
         identity = route.open()
         _validate_route_identity(identity, route.execution_graph)
+        if (
+            identity.deployment_id != deployment.deployment_id
+            or identity.model_id != deployment.model_id
+            or identity.resolved_commit != deployment.model_revision
+        ):
+            raise RuntimeError("startup_representation_identity_mismatch")
         if progress is not None:
             progress("qualifying_route")
         qualification = _qualify_open_route(route)
         # The physical command path revalidates the exact qualifier-owned
         # digest at every mutation boundary. Registry-backed serving must bind
         # that authority just like the single-deployment server does.
-        route.set_deployment_qualification(qualification)
+        route.set_deployment_qualification(
+            qualification,
+            quantization=deployment.quantization,
+        )
         selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
         codec = prompt_codec_from_deployment(selected_deployment_dir)
         route.set_stop_token_ids(getattr(codec, "stop_token_ids", frozenset()))
@@ -2059,7 +2084,7 @@ def _qualified_runtime(
             deployment_id=identity.deployment_id,
             model_id=identity.model_id,
             model_revision=identity.resolved_commit,
-            quantization="int8-weight-only",
+            quantization=deployment.quantization,
             qualified_at_unix_ms=qualification.issued_at_unix_ms,
             route=route,
             graph=route.execution_graph,
@@ -2084,32 +2109,12 @@ def _qualified_runtime(
         raise
 
 
-def _configured_deployment(plan: Path) -> tuple[str, str, str, int]:
-    """Read one immutable graph identity before attempting physical startup."""
-
-    config = load_operator_plan(plan)
-    run_plan = config.controller.get("run_plan")
-    nodes = run_plan.get("nodes") if isinstance(run_plan, Mapping) else None
-    if not isinstance(nodes, list) or not nodes:
-        raise ValueError("configured_deployment_graph_unavailable")
-    first = nodes[0]
-    configure = first.get("configure") if isinstance(first, Mapping) else None
-    graph_document = (
-        configure.get("graph") if isinstance(configure, Mapping) else None
-    )
-    graph = execution_graph_from_document(graph_document)
-    return (
-        graph.deployment_id,
-        graph.model_id,
-        graph.resolved_commit,
-        len(graph.stages),
-    )
-
-
 def _startup_reason(exc: Exception) -> str:
     """Reduce a startup exception to one bounded non-sensitive public code."""
 
     code = getattr(exc, "remote_code", None) or getattr(exc, "code", None)
+    if not code and isinstance(exc.__cause__, ControllerError):
+        code = exc.__cause__.remote_code or exc.__cause__.code
     if not isinstance(code, str) or not code:
         code = str(exc).partition(":")[0]
     if (
@@ -2206,9 +2211,24 @@ def run_registry_server(
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
     force_relay: bool = False,
+    session_factory=None,
+    stop_event: threading.Event | None = None,
+    on_started=None,
+    api_only: bool = False,
+    governance_root: Path | None = ROOT,
 ) -> int:
-    """Open, qualify, and serve one or more immutable deployments."""
+    """Open, qualify, and serve one or more immutable deployments.
 
+    An explicitly supplied session provider owns managed target communication;
+    operator-plan bytes can never supply executable Python or credentials.
+    """
+
+    if stop_event is not None and not isinstance(stop_event, threading.Event):
+        raise ValueError("registry_stop_event_invalid")
+    if on_started is not None and not callable(on_started):
+        raise ValueError("registry_start_observer_invalid")
+    if type(api_only) is not bool:
+        raise ValueError("api_only_invalid")
     if not operator_plans:
         raise ValueError("deployment_registry_requires_one_or_more")
     runtimes: list[QualifiedDeploymentRuntime] = []
@@ -2225,9 +2245,7 @@ def run_registry_server(
             representation_authorization_file
         )
         for plan in operator_plans:
-            deployment_id, model_id, revision, topology_size = _configured_deployment(
-                plan
-            )
+            deployment = native_deployment_projection(plan)
             try:
                 runtimes.append(
                     _qualified_runtime(
@@ -2235,16 +2253,17 @@ def run_registry_server(
                         seed_state_root=seed_state_root,
                         model_operation_file=model_operation_file,
                         force_relay=force_relay,
+                        **({"session_factory": session_factory} if session_factory is not None else {}),
                     )
                 )
             except Exception as exc:
                 unavailable.append(
                     UnavailableDeployment(
-                        deployment_id=deployment_id,
-                        model_id=model_id,
-                        model_revision=revision,
-                        quantization="int8-weight-only",
-                        topology_size=topology_size,
+                        deployment_id=deployment.deployment_id,
+                        model_id=deployment.model_id,
+                        model_revision=deployment.model_revision,
+                        quantization=deployment.quantization,
+                        topology_size=deployment.topology_size,
                         reason_code=_startup_reason(exc),
                         observed_at_unix_ms=int(time.time() * 1_000),
                     )
@@ -2279,6 +2298,7 @@ def run_registry_server(
                     model_operation_file=model_operation_file,
                     progress=report,
                     force_relay=force_relay,
+                    **({"session_factory": session_factory} if session_factory is not None else {}),
                 ),
             )
         if model_cache_root is not None:
@@ -2360,36 +2380,37 @@ def run_registry_server(
             activation=activation,
             capacity_refresh=capacity_refresh,
             model_preparation=model_preparation,
-            governance_projection=governance_readiness(ROOT),
+            governance_projection=(None if governance_root is None else governance_readiness(governance_root)),
             evidence_registry=evidence_registry,
             artifact_acquisition_store=artifact_acquisition_store,
             trusted_https_proxy=trusted_https_proxy,
+            api_only=api_only,
         )
         startup_complete = True
-        stop = threading.Event()
+        stop = stop_event if stop_event is not None else threading.Event()
 
         def request_stop(_signum: int, _frame: Any) -> None:
             stop.set()
 
-        prior = {
+        # Embedded applications own cancellation, not process-global signals.
+        prior = {} if stop_event is not None else {
             signum: signal.signal(signum, request_stop)
             for signum in (signal.SIGINT, signal.SIGTERM)
         }
         server.timeout = 0.5
-        print(
-            _json_bytes(
-                {
-                    "protocol": "mycelium.live_registry_server_started.v1",
-                    "url": f"http://{host}:{port}/",
-                    "startup_qualification_complete": bool(runtimes),
-                    "simulated": False,
-                    "deployment_count": len(runtimes),
-                    "unavailable_deployment_count": len(unavailable),
-                }
-            ).decode("utf-8"),
-            flush=True,
-        )
+        observed = {
+            "protocol": "mycelium.live_registry_server_started.v1",
+            "url": f"http://{host}:{server.server_address[1]}/",
+            "startup_qualification_complete": bool(runtimes),
+            "simulated": False,
+            "api_only": api_only,
+            "deployment_count": len(runtimes),
+            "unavailable_deployment_count": len(unavailable),
+        }
         try:
+            if on_started is not None:
+                on_started(dict(observed))
+            print(_json_bytes(observed).decode("utf-8"), flush=True)
             while not stop.is_set():
                 server.handle_request()
         finally:
@@ -2444,6 +2465,7 @@ def run_physical_server(
     trusted_proxy_capability: bytes | None = None,
     force_relay: bool = False,
 ) -> int:
+    deployment = native_deployment_projection(operator_plan)
     route = PhysicalLiveRoute.from_operator_plan(
         operator_plan,
         seed_state_root=seed_state_root,
@@ -2473,9 +2495,18 @@ def run_physical_server(
                 f"startup_route_open_rejected:{_startup_reason(exc)}"
             ) from exc
         _validate_route_identity(identity, route.execution_graph)
+        if (
+            identity.deployment_id != deployment.deployment_id
+            or identity.model_id != deployment.model_id
+            or identity.resolved_commit != deployment.model_revision
+        ):
+            raise RuntimeError("startup_representation_identity_mismatch")
 
         qualification = _qualify_open_route(route)
-        route.set_deployment_qualification(qualification)
+        route.set_deployment_qualification(
+            qualification,
+            quantization=deployment.quantization,
+        )
         if save_live_qualification is not None:
             _save_live_qualification(qualification, save_live_qualification)
         if a4_evidence is not None:

@@ -1391,6 +1391,7 @@ class PhysicalNodeProcess:
         ):
             raise ValueError("expected_executables is invalid")
         command_identity = capture_executable_identity(self._command[0])
+        interpreter_shim_identity = None
         launch_command = self._command
         if (
             len(self._command) > 1
@@ -1408,10 +1409,17 @@ class PhysicalNodeProcess:
         except (OSError, RuntimeError, TypeError, ValueError):
             current_interpreter = None
         if launch_command == self._command and current_interpreter == command_identity:
-            if sys.platform == "darwin" and sys.prefix == sys.base_prefix:
+            if sys.platform == "darwin":
                 running_interpreter = _inventory_process(os.getpid()).executable
+                if sys.prefix != sys.base_prefix and command_identity != running_interpreter:
+                    # Homebrew's venv executable is a re-exec shim. Keep its path
+                    # (venv site configuration), but require the final observed
+                    # executable to be the exact running framework interpreter.
+                    interpreter_shim_identity = command_identity
+                    launch_command = (sys.executable, *self._command[1:])
+                else:
+                    launch_command = (running_interpreter.path, *self._command[1:])
                 command_identity = running_interpreter
-                launch_command = (running_interpreter.path, *self._command[1:])
             else:
                 launch_command = (sys.executable, *self._command[1:])
         elif launch_command == self._command:
@@ -1424,6 +1432,8 @@ class PhysicalNodeProcess:
         except (OSError, RuntimeError, TypeError, ValueError):
             launcher_identity = capture_executable_identity(sys.executable)
         identities = tuple(expected_executables)
+        if interpreter_shim_identity is not None and interpreter_shim_identity not in identities:
+            identities = (interpreter_shim_identity, *identities)
         if command_identity not in identities:
             identities = (command_identity, *identities)
         if not all(
@@ -1448,10 +1458,8 @@ class PhysicalNodeProcess:
             exec_write = _handshake_descriptor(handshake, "exec_write")
             launcher_command = (
                 launcher_identity.path,
-                "-I",
-                "-S",
-                "-c",
-                _LAUNCHER_SOURCE,
+                *(("--node-process-launcher",) if getattr(sys, "frozen", False)
+                  else ("-I", "-S", "-c", _LAUNCHER_SOURCE)),
                 str(ready_write),
                 str(release_read),
                 str(exec_write),
@@ -1509,7 +1517,29 @@ class PhysicalNodeProcess:
                 startup_deadline,
             )
             _close_handshake_descriptor(handshake, "exec_read")
-            launch = _inventory_process(self._process.pid)
+            while True:
+                try:
+                    launch = _inventory_process(self._process.pid)
+                    if interpreter_shim_identity is not None and launch.executable == interpreter_shim_identity:
+                        if not _identity_matches_pre_exec_ownership(
+                            launch, self._pre_exec_ownership, interpreter_shim_identity
+                        ):
+                            raise NodeProcessError("node_process_identity_invalid")
+                        # Only this exact pinned shim may be transient; never
+                        # wait through an unrelated executable/ownership change.
+                        remaining = _deadline_remaining(startup_deadline)
+                        time.sleep(min(0.01, remaining))
+                        continue
+                    break
+                except ProcessLookupError:
+                    # Darwin may observe the exec transition between the two
+                    # identity snapshots. Retry only the observation of this
+                    # unreaped owned child inside the ORIGINAL launch deadline.
+                    # All birth/session/executable checks below remain binding.
+                    if self._process.poll() is not None:
+                        raise
+                    remaining = _deadline_remaining(startup_deadline)
+                    time.sleep(min(0.01, remaining))
             if (
                 not _identity_matches_pre_exec_ownership(
                     launch,
@@ -1755,14 +1785,16 @@ class PhysicalNodeProcess:
                     )
                 else:
                     _deadline_remaining(deadline)
-                    if (
-                        isinstance(launch, _ProcessIdentity)
-                        and current != launch
-                        or not _identity_matches_pre_exec_ownership(
-                            current,
-                            ownership,
-                            target_executable,
-                        )
+                    # macOS framework Python can perform a second, legitimate
+                    # exec after the launch handshake: the captured target stub
+                    # becomes the already-pinned Python.app launcher binary.
+                    # Bind cleanup to the unchanged process incarnation and the
+                    # two pre-captured executables rather than one transient
+                    # post-handshake executable observation.
+                    if not _identity_matches_pre_exec_ownership(
+                        current,
+                        ownership,
+                        target_executable,
                     ):
                         return False
             if members is not None:
@@ -1841,14 +1873,10 @@ class PhysicalNodeProcess:
                     pass
                 else:
                     _deadline_remaining(deadline)
-                    if (
-                        isinstance(launch, _ProcessIdentity)
-                        and current != launch
-                        or not _identity_matches_pre_exec_ownership(
-                            current,
-                            ownership,
-                            target_executable,
-                        )
+                    if not _identity_matches_pre_exec_ownership(
+                        current,
+                        ownership,
+                        target_executable,
                     ):
                         return "unsafe"
             members = _inventory_process_group(ownership.process_group, deadline)

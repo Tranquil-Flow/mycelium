@@ -140,7 +140,7 @@ def test_exact_current_qualification_streams_prompt_through_router_only():
         backend.run(
             "physical-backend-ok",
             submission(record),
-            lambda i, t: emitted.append((i, t)),
+            lambda i, t, token_id: emitted.append((i, t, token_id)),
             lambda: False,
         )
         == "completed"
@@ -148,7 +148,7 @@ def test_exact_current_qualification_streams_prompt_through_router_only():
 
     assert router.admit_calls == 1
     assert codec.encoded == ["PROMPT-PRIVATE-3B4"]
-    assert emitted == [(0, "<101>"), (1, "<102>")]
+    assert emitted == [(0, "<101>", 101), (1, "<102>", 102)]
     assert len(capacity.release_calls) == 1
     assert len(runtime.cancel_calls) == 1
 
