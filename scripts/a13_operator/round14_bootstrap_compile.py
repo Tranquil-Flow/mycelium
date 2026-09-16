@@ -172,8 +172,10 @@ def main():
     for rpc in (owner,target):
         s=rpc('/api/status')
         if s['acquisition']['state']!='prepared':
+            # D-1 7B small-assets consent: bounds bytes fetched THIS attempt, so a complete
+            # seed completes and a missing seed refuses (runs/wp8-02-g1/RECEIPT.md section 3.2).
             rpc('/api/model/download',{'consent':{'download_acknowledged':True,
-                'max_download_bytes':999604126,'storage_limit_bytes':s['resource_policy']['storage_bytes']}})
+                'max_download_bytes':11_535_382,'storage_limit_bytes':s['resource_policy']['storage_bytes']}})
     until=time.monotonic()+120
     while True:
         states=[rpc('/api/status')['acquisition']['state'] for rpc in (owner,target)]
