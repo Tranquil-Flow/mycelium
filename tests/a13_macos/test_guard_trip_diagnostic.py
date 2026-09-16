@@ -75,3 +75,51 @@ def test_a_policy_trip_is_distinguishable_from_a_membership_trip(tmp_path, monke
 
     assert membership['error_code'] != policy['error_code']
     assert policy['error_code'] == 'worker_disk_limit_exceeded'
+
+
+def test_a_limit_trip_records_the_observed_value_and_the_bound(tmp_path, monkeypatch):
+    """66r1 tripped the memory guard and left NO numbers anywhere.
+
+    Run `a13-qwen-20260916T215111Z`: the record named `worker_memory_limit_exceeded`
+    (that much the code fix bought us) but not how far over the bound the group RSS
+    actually was -- and the gap size is exactly what decides whether the resource
+    policy is too small or the accounting is wrong. The guard measures the process
+    GROUP while the proposal was derived from the heaviest worker stage peak alone,
+    so the overshoot is the whole question. Pin that it is recorded.
+    """
+
+    capacity = tmp_path / 'capacity'
+    capacity.mkdir()
+    capacity.chmod(0o700)
+    w = worker(tmp_path, capacity_root=capacity)
+    w._session = types.SimpleNamespace(returncode=None, stderr=b'')
+
+    def trip(*_args, **_kwargs):
+        error = WorkerError('worker_memory_limit_exceeded')
+        error.limit_detail = {
+            'observed_group_rss_bytes': 6_000_000_000,
+            'max_rss_bytes': 5_752_698_265,
+            'overshoot_bytes': 247_301_735,
+        }
+        raise error
+
+    monkeypatch.setattr(w, '_check', trip)
+    try:
+        w._watch()
+        record = json.loads((w.capacity_root / 'native-exit.private.json').read_text())
+        assert record['error_code'] == 'worker_memory_limit_exceeded'
+        detail = record['error_detail']
+        assert detail['observed_group_rss_bytes'] == 6_000_000_000
+        assert detail['max_rss_bytes'] == 5_752_698_265
+        assert detail['overshoot_bytes'] > 0
+    finally:
+        w.close()
+
+
+def test_a_trip_without_detail_records_none(tmp_path, monkeypatch):
+    """A guard that has no numbers to give must not invent any."""
+    w, record = _tripped(tmp_path, monkeypatch, 'worker_membership_not_current')
+    try:
+        assert record['error_detail'] is None
+    finally:
+        w.close()

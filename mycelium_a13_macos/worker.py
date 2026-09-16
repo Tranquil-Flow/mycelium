@@ -38,6 +38,9 @@ class WorkerError(RuntimeError):
 
     def __init__(self, code: str) -> None:
         self.code = code
+        # Numbers behind a limit refusal, when the guard has them: the code alone
+        # cannot say whether the bound or the accounting is wrong.
+        self.limit_detail: dict[str, int] | None = None
         super().__init__(code)
 
 
@@ -556,6 +559,7 @@ class ManagedWorker:
         self._deadline_timer: threading.Timer | None = None
         self._started_at: float | None = None
         self._error: str | None = None
+        self._error_detail: dict[str, Any] | None = None
         self._command_count = 0
         self._commands: set[str] = set()
         self._pending_commands: set[str] = set()
@@ -630,7 +634,19 @@ class ManagedWorker:
             if self._group_owned:
                 rss = self._group_rss(deadline_monotonic_s)
                 if rss > self.limits.max_rss_bytes:
-                    raise WorkerError("worker_memory_limit_exceeded")
+                    error = WorkerError("worker_memory_limit_exceeded")
+                    # The guard measures the process GROUP, but the resource
+                    # proposal was derived from the heaviest worker stage peak
+                    # alone -- so the overshoot is the number that decides
+                    # whether the policy or the accounting is wrong.  Record it:
+                    # 66r1 (2026-09-16) tripped this guard with no RSS anywhere,
+                    # leaving the size of the gap unknowable after the fact.
+                    error.limit_detail = {
+                        "observed_group_rss_bytes": int(rss),
+                        "max_rss_bytes": int(self.limits.max_rss_bytes),
+                        "overshoot_bytes": int(rss - self.limits.max_rss_bytes),
+                    }
+                    raise error
         finally:
             self._guard_lock.release()
 
@@ -842,6 +858,7 @@ class ManagedWorker:
             'protocol':'mycelium.a13.native_exit_diagnostic.v1',
             'run_id':self.run_id,'node_id':self.node_id,
             'error_code':self._error,
+            'error_detail':getattr(self,'_error_detail',None),
             'returncode':getattr(session,'returncode',None),
             **_bounded_native_diagnostics(getattr(session,'stderr',b''))})
 
@@ -992,6 +1009,7 @@ class ManagedWorker:
                     raise WorkerError("worker_native_exited")
             except WorkerError as error:
                 self._error = str(error)
+                self._error_detail = getattr(error, "limit_detail", None)
                 # Capture the bounded cause BEFORE closing: after close the
                 # stderr tail is the only surviving evidence of the exit.
                 try: self._record_native_exit(self._session)
