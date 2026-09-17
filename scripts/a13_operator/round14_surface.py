@@ -87,7 +87,11 @@ def daemon_hint(label, log_path=None):
     path = log_path or os.environ.get(_LOG_ENV.get(label, ""), "")
     if not path:
         return {"log": None}
-    hint = {"log": path}
+    # Stringify: callers may pass a Path, and the hint is json.dumps'd into the
+    # surface_lost message. A Path here raised TypeError INSIDE the failure path,
+    # replacing the named `surface_lost` cause with an unhelpful serialization error
+    # (found by the wp8-03 offline rehearsal, 2026-09-17).
+    hint = {"log": str(path)}
     try:
         tail = Path(path).read_text(errors="replace")[-6000:]
     except OSError as exc:
