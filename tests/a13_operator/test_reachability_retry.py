@@ -108,3 +108,46 @@ def test_a_malformed_budget_falls_back_to_a_finite_default(monkeypatch, tmp_path
     module = _load(monkeypatch, tmp_path)
     monkeypatch.setenv('A13_RETRY_REACHABILITY_BUDGET_S', 'not-a-number')
     assert module._retry_budget_seconds() == 60.0
+
+
+def test_the_ssh_level_timeout_is_retried_when_the_link_blips():
+    """Round 75r1 (2026-09-17): the laptop's link blipped mid-round and the cleanup's own quit reported
+    `ssh: connect to host 100.126.111.123 port 22: Operation timed out`. The laptop answered ping and ssh
+    again minutes later (ping stddev 26 ms -- an unstable link, not a dead host). _target_once already
+    reports that shape as `remote_handshake_timeout`, so it must be retryable exactly like the other
+    reachability codes -- while staying opt-in per path, because retrying a non-idempotent POST would be
+    the sloppy version of this fix."""
+    import importlib.util
+    import pathlib
+    import sys
+    operator = pathlib.Path(__file__).resolve().parents[2] / 'scripts/a13_operator'
+    for key, value in (('A13_OWNER_ROOT', '/tmp/a13-retry-owner'),
+                       ('A13_REMOTE_ROOT', '/tmp/a13-retry-remote'),
+                       ('A13_TARGET_PREVIEW', 'preview70'),
+                       ('A13_RPC_ROUND', 'rpc-round70')):
+        os.environ.setdefault(key, value)
+    pathlib.Path('/tmp/a13-retry-owner').mkdir(parents=True, exist_ok=True)
+    spec = importlib.util.spec_from_file_location('round14_rpc_retry_test', operator / 'round14_rpc.py')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules['round14_rpc_retry_test'] = module
+    spec.loader.exec_module(module)
+
+    assert 'remote_handshake_timeout' in module.REACHABILITY_CODES
+    attempts = {'n': 0}
+
+    def flaky(path, body=None):
+        attempts['n'] += 1
+        if attempts['n'] < 3:
+            raise module.HandshakeTimeout('remote_handshake_timeout:%s:ssh timed out' % path)
+        return {'ok': True}
+
+    original = module._target_once
+    module._target_once = flaky
+    os.environ['A13_RETRY_REACHABILITY_PATHS'] = '/api/work/accept'
+    try:
+        result = module._target_once_reachability_retry('/api/work/accept', {})
+    finally:
+        module._target_once = original
+        os.environ.pop('A13_RETRY_REACHABILITY_PATHS', None)
+    assert result == {'ok': True}
+    assert attempts['n'] == 3          # it retried the blip and cleared

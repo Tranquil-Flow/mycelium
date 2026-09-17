@@ -170,7 +170,16 @@ def _attribute_call(path):
 # Reachability codes: the peer could not reach the owner THIS attempt. Retrying is only safe for
 # operations that re-derive from current state, which is why the retry is path-scoped and opt-in
 # rather than applied to every target() call (a POST may be non-idempotent).
-REACHABILITY_CODES=('managed_control_unreachable','seed_http_unreachable','peer_transport_unreachable')
+# The ssh-level class, added 2026-09-17. Round 75r1 died at the stream step while the laptop's link
+# blipped: the cleanup's own quit reported `ssh: connect to host 100.126.111.123 port 22: Operation
+# timed out`, and the laptop answered ping and ssh again minutes later (ping stddev 26 ms -- an unstable
+# link, not a dead host). _target_once already reports this shape as its own class
+# (`remote_handshake_timeout`), raised from the callers' own _TIMEOUT_MARKERS -- retrying it is exactly
+# what that class exists for. Without it, a transient blip killed a round that had already staged and
+# compiled. Retrying stays SAFE here only because the paths are opt-in (_retry_paths) and scoped to
+# operations that re-derive from current state.
+REACHABILITY_CODES=('managed_control_unreachable','seed_http_unreachable','peer_transport_unreachable',
+                    'remote_handshake_timeout')
 
 
 def _retry_paths():
