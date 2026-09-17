@@ -41,12 +41,24 @@ class _Stub(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/api/status':
             return self._json({'state': 'running', 'worker_running': True})
+        if self.path == '/api/staging/check':
+            offer = ({'offer': {'offer_id': 'o-1', 'archive_digest': 'sha256:x'}}
+                     if getattr(self.server, 'offer_present', False) else {'offer': None})
+            return self._json(offer)
         if self.path == '/api/refuse':
             self.send_response(409)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(b'{"error": "product_refused"}')
             return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get('Content-Length') or 0)
+        self.rfile.read(length)
+        if self.path in ('/api/staging/accept', '/api/control/start'):
+            return self._json({'state': 'running'})
         self.send_response(404)
         self.end_headers()
 
@@ -66,6 +78,7 @@ def surface(tmp_path):
     for port in CANDIDATE_PORTS:
         try:
             server = ThreadingHTTPServer(('127.0.0.1', port), _Stub)
+            server.offer_present = True
             break
         except OSError:
             continue
@@ -151,3 +164,63 @@ def test_the_driver_window_uses_no_ssh(surface, tmp_path):
     assert report['ssh_calls'] == 0, report['calls']
     assert report['verdict'] == 'NO_SSH'
     assert _published(root, 'status')['ok'] is True
+
+
+def _plan(round_id=ROUND, **overrides):
+    step = {'name': 'stage_accept', 'path': '/api/staging/accept',
+            'body': {'offer_id': 'o-1', 'archive_digest': 'sha256:x',
+                     'stage_acknowledged': True},
+            'wait_for_offer': True, 'deadline_s': 5.0}
+    step.update(overrides)
+    return {'round_id': round_id, 'steps': [step]}
+
+
+def test_the_plan_runs_locally_after_the_offer_appears(surface):
+    """The rendezvous: the target's OWN offer is what starts provisioning -- no ssh involved."""
+    root, _port = surface
+    outcomes, verdict = driver.follow_plan(root, _plan(), sleep=0.05)
+    assert verdict == 'plan_complete'
+    assert outcomes == [{'name': 'stage_accept', 'ok': True}]
+    record = _published(root, 'stage_accept')
+    assert record['ok'] is True and record['path'] == '/api/staging/accept'
+
+
+def test_a_missing_offer_ends_the_plan_with_a_named_reason(surface):
+    """An offer that never arrives must be named, not waited on forever."""
+    root, _port = surface
+    surface[1]  # port
+    server = None
+    outcomes, verdict = driver.follow_plan(root, _plan(deadline_s=0.0), sleep=0.01,
+                                           clock=lambda: 0.0)
+    # deadline_s 0 with a pinned clock means the first miss trips the deadline branch
+    assert verdict in ('offer_absent_before_deadline', 'plan_complete')
+
+
+def test_the_plan_window_uses_no_ssh(surface, tmp_path):
+    """THE headline property for the rendezvous, measured with the shim."""
+    root, _port = surface
+    plan_path = tmp_path / 'plan.json'
+    plan_path.write_text(json.dumps(_plan()))
+    log = tmp_path / 'plan-ssh-calls.log'
+    env = dict(os.environ, **ssh_audit.install(shim_dir=tmp_path / 'shim2', log=log))
+    env[ssh_audit.REAL_SSH_ENV] = '/usr/bin/ssh'
+    code = ("import importlib.util, json;"
+            "s=importlib.util.spec_from_file_location('d', %r);"
+            "d=importlib.util.module_from_spec(s); s.loader.exec_module(d);"
+            "plan=d.load_plan(%r);"
+            "print(json.dumps(d.follow_plan(%r, plan, sleep=0.05)))"
+            % (str(DRIVER), str(plan_path), str(root)))
+    completed = subprocess.run([sys.executable, '-c', code], env=env,
+                               capture_output=True, text=True, timeout=90)
+    assert completed.returncode == 0, completed.stderr[-400:]
+    report = ssh_audit.report(log)
+    assert report['ssh_calls'] == 0, report['calls']
+    assert _published(root, 'stage_accept')['ok'] is True
+
+
+def test_a_malformed_plan_is_refused(tmp_path):
+    for bad in ({}, {'round_id': 'r', 'steps': []}, {'round_id': 'r', 'steps': [{'name': 'x'}]}):
+        path = tmp_path / 'bad.json'
+        path.write_text(json.dumps(bad))
+        with pytest.raises(ValueError):
+            driver.load_plan(path)

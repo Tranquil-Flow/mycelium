@@ -24,6 +24,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -91,6 +92,68 @@ def drive(root, round_id, reads, timeout=60.0):
             {'protocol': PROTOCOL, 'round_id': round_id, 'name': name, 'path': path, **value},
         )))
     return published
+
+
+def load_plan(path):
+    """The run plan, deployed with the driver as disclosed provisioning (not mid-run ssh).
+
+    Shape: {"round_id": str, "steps": [{"name": ..., "path": ..., "body": {...}|null,
+    "wait_for_offer": bool, "deadline_s": float}]}. The acknowledgements in each body are the
+    SAME values the operator script already hardcodes -- this is a transport change, never a
+    consent change (recorded in WP8-03-item2-target-rpc-inventory.md).
+    """
+    plan = json.loads(Path(path).read_text())
+    steps = plan.get('steps')
+    if not isinstance(steps, list) or not steps:
+        raise ValueError('plan_steps_invalid')
+    for step in steps:
+        if not isinstance(step, dict) or not isinstance(step.get('name'), str) \
+                or not isinstance(step.get('path'), str) or not step['path'].startswith('/'):
+            raise ValueError('plan_step_invalid')
+    return plan
+
+
+def follow_plan(root, plan, *, sleep=1.0, clock=time.monotonic):
+    """Execute the plan locally: wait for the offer where asked, then act. No ssh, ever.
+
+    The offer's presence IS the reachability proof this path needs: the target's app pulled it
+    from the owner over the product channel, so a node that has an offer has demonstrably
+    reached the owner -- which is what the operator's ssh-driven gate was standing in for.
+    """
+    port = control_port(root)
+    round_id = plan['round_id']
+    outcomes = []
+    for step in plan['steps']:
+        name = step['name']
+        deadline = clock() + float(step.get('deadline_s', 120.0))
+        waited = None
+        if step.get('wait_for_offer'):
+            while True:
+                try:
+                    check = read(port, '/api/staging/check')
+                except Exception as exc:  # noqa: BLE001 - a refusal is data
+                    check = {'offer': None, 'error': type(exc).__name__}
+                if isinstance(check, dict) and check.get('offer'):
+                    break
+                if clock() >= deadline:
+                    publish(root, round_id, name,
+                            {'protocol': PROTOCOL, 'round_id': round_id, 'name': name,
+                             'ok': False, 'error': 'offer_absent_before_deadline'})
+                    return outcomes, 'offer_absent_before_deadline'
+                time.sleep(sleep)
+            waited = float(step.get('deadline_s', 120.0))
+        try:
+            result = read(port, step['path'], step.get('body'))
+            record = {'ok': True, 'result': result}
+        except Exception as exc:  # noqa: BLE001
+            record = {'ok': False, 'error': type(exc).__name__, 'detail': str(exc)[:200]}
+        publish(root, round_id, name,
+                {'protocol': PROTOCOL, 'round_id': round_id, 'name': name,
+                 'path': step['path'], 'waited_for_offer_seconds': waited, **record})
+        outcomes.append({'name': name, 'ok': record['ok']})
+        if not record['ok']:
+            return outcomes, 'step_failed:' + name
+    return outcomes, 'plan_complete'
 
 
 def _parse_read(spec):
