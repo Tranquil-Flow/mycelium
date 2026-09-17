@@ -94,9 +94,30 @@ def _client(root):
             time.sleep(sleep_s)
 
 
+# Measured 2026-09-17 from the three PASSING rounds (68r1/70r1/72r1): a legitimate single call on this
+# channel takes tens of seconds -- target WORK_ACCEPTED 79.4 / 78.6 / 104.1 s, previews 49.9-63.3 s,
+# owner calls 24.4-44.6 s. The handshake underneath is bounded by app_rpc.py:15's FIXED 10 s, a PINNED
+# file whose timeout cannot be raised, so a read can expire while the app is merely LOADING the model.
+# That is exactly how 74r1 died: STEP_FAILED stream, `TimeoutError: timed out` at
+# `self._sock.recv_into(b)`, immediately after ACTIVATION {'state': 'activation_requested'}.
+# So retry a timeout here, bounded -- using the SAME busy-vs-dead classification the handshake already
+# uses (_busy_reason). A timeout means BUSY and is retried; everything else still fails closed, because
+# a missing surface, a refused connection or a bad credential must never be retried into a deadline.
+_OWNER_CALL_BUDGET_S = 120.0     # 1.15 x the 104.123 s maximum actually observed (72r1), same rule the
+                                 # RSS bound was rebuilt under (66b756a): derive, do not pick.
+
 def owner(path,body=None):
     require_local(OWNER)
-    return _client(OWNER).call(path,body)
+    deadline=time.monotonic()+_OWNER_CALL_BUDGET_S
+    while True:
+        try:
+            return _client(OWNER).call(path,body)
+        except Exception as exc:
+            reason=_busy_reason(exc)
+            if reason is None or time.monotonic()>=deadline:
+                raise
+            print('owner_busy_retry path=%s reason=%s'%(path,reason[:120]),flush=True)
+            time.sleep(2.0)
 
 def _target_once(path,body=None):
     """One remote RPC over the canonical ssh/scp pattern (semantics unchanged)."""
