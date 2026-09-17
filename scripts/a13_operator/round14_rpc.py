@@ -146,6 +146,50 @@ def _attribute_call(path):
         pass
 
 
+# Reachability codes: the peer could not reach the owner THIS attempt. Retrying is only safe for
+# operations that re-derive from current state, which is why the retry is path-scoped and opt-in
+# rather than applied to every target() call (a POST may be non-idempotent).
+REACHABILITY_CODES=('managed_control_unreachable','seed_http_unreachable','peer_transport_unreachable')
+
+
+def _retry_paths():
+    raw=os.environ.get('A13_RETRY_REACHABILITY_PATHS','')
+    return frozenset(part.strip() for part in raw.split(',') if part.strip())
+
+
+def _retry_budget_seconds():
+    try:return float(os.environ.get('A13_RETRY_REACHABILITY_BUDGET_S','60'))
+    except ValueError:return 60.0
+
+
+def _target_once_reachability_retry(path,body):
+    """Bounded retry for a reachability refusal on a re-derivable operation.
+
+    Measured 2026-09-17 (round 71r1): a single 409 `managed_control_unreachable` from
+    `/api/work/accept` ended a round that had already passed staging, native start and both exact
+    previews. The operation is safe to repeat because `work_acceptance.accept_work` re-fetches the
+    offer, recomputes the preview and requires `current == preview` -- a retry either completes the
+    identical accept or fails closed as `work_preview_changed`. It cannot double-accept silently.
+
+    Env-gated and path-scoped on purpose: round14_start_and_activate.py is pinned byte-identical,
+    so the retry cannot live at its call site, and a blanket retry inside target() would re-issue
+    operations that are NOT re-derivable.
+    """
+    started=time.monotonic();attempts=0;delay=2.0
+    while True:
+        attempts+=1
+        try:
+            return _target_once(path,body)
+        except RuntimeError as error:
+            text=str(error)
+            if not any(code in text for code in REACHABILITY_CODES):
+                raise
+            if time.monotonic()-started>=_retry_budget_seconds():
+                raise
+            print('reachability_retry path=%s attempt=%d %s'%(path,attempts,text[-160:]),flush=True)
+            time.sleep(delay);delay=min(15.0,delay*1.6)
+
+
 def target(path,body=None):
     _attribute_call(path)
     # 1. Surface first: a missing control file fails closed as `surface_lost` (the 63r1 class).
@@ -170,4 +214,6 @@ def target(path,body=None):
                 print('handshake_retry root=target attempt=%d %r'%(attempts,exc),flush=True)
                 time.sleep(sleep_s)
         _AWAKE.append(True)
+    if path in _retry_paths():
+        return _target_once_reachability_retry(path,body)
     return _target_once(path,body)
