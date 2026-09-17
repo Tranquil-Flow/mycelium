@@ -122,7 +122,32 @@ def _target_once(path,body=None):
     return json.loads(local.read_text())
 
 
+def _attribute_call(path):
+    """Record WHICH site called the target, so item 2's inventory is measured, not hand-counted.
+
+    wp8-03 item 2 has to retire the target RPCs, and the receipt must list every replacement as
+    file:line. Attributing each call to its caller turns that list into data from a real run
+    instead of a grep someone re-does by eye -- and it shows where the cost actually sits (one
+    1 s poll loop accounted for most of the 33 calls in the rounds measured on 2026-09-16).
+
+    Opt-in via A13_TARGET_CALL_AUDIT and strictly best-effort: an audit must never break a round,
+    and it must never itself reach the network. Local file append only.
+    """
+    destination = os.environ.get('A13_TARGET_CALL_AUDIT')
+    if not destination:
+        return
+    try:
+        frame = sys._getframe(2)  # 0=_attribute_call, 1=target, 2=our caller
+        entry = {'path': path,
+                 'site': '%s:%d' % (Path(frame.f_code.co_filename).name, frame.f_lineno)}
+        with open(destination, 'a') as stream:
+            stream.write(json.dumps(entry, sort_keys=True) + '\n')
+    except Exception:  # noqa: BLE001 - diagnostics must never be the reason a round fails
+        pass
+
+
 def target(path,body=None):
+    _attribute_call(path)
     # 1. Surface first: a missing control file fails closed as `surface_lost` (the 63r1 class).
     if not _TARGET_SURFACE_CHECKED:
         require_remote(REMOTE,REMOTE_HOST)
