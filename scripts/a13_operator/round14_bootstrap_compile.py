@@ -138,6 +138,29 @@ REACHABILITY_GATE_CONSECUTIVE=2
 REACHABILITY_GATE_INTERVAL_SECONDS=3.0
 REACHABILITY_GATE_BUDGET_SECONDS=120.0
 
+def assert_retained_acquisition(status,*,where):
+    """ERRATA-1: a resumed round must PROVE the seeded total, not merely claim 'prepared'.
+
+    The 2026-09-16 lesson (runs/wp8-02-useful-two-mac/ERRATA-1.md): a partial or silently
+    re-fetched stage can reach the state name 'prepared' while the total is NOT present, and the
+    round then proceeds on an incomplete model -- a failure that costs a physical attempt and looks
+    like something else entirely. Assert the two quantities that make 'prepared' mean anything, and
+    fail loudly WITH THE NUMBERS so the next occurrence reads off disk.
+    """
+    acq=((status or {}).get('acquisition') or {})
+    state=acq.get('state')
+    downloaded=acq.get('downloaded_bytes')
+    total=acq.get('total_bytes')
+    if state!='prepared':
+        raise RuntimeError('retained_acquisition_not_prepared:%s:%s'%(where,state))
+    if not isinstance(downloaded,int) or isinstance(downloaded,bool) \
+        or not isinstance(total,int) or isinstance(total,bool) or total<=0:
+        raise RuntimeError('retained_acquisition_unmeasured:%s:%r/%r'%(where,downloaded,total))
+    if downloaded!=total:
+        raise RuntimeError('retained_acquisition_incomplete:%s:%d<%d'%(where,downloaded,total))
+    return acq
+
+
 def peer_owner_read(observations,*,label):
     """Require bounded, repeated non-mutating peer->owner reads to succeed."""
     started=time.monotonic();streak=0;attempts=0;delay=REACHABILITY_GATE_INTERVAL_SECONDS
@@ -182,7 +205,12 @@ def main():
     until=time.monotonic()+120
     while True:
         states=[rpc('/api/status')['acquisition']['state'] for rpc in (owner,target)]
-        if states==['prepared','prepared']:break
+        if states==['prepared','prepared']:
+            # Retained-state resume must be PROVEN, not assumed (ERRATA-1): a node reporting
+            # 'prepared' must also show the seeded total, not merely a state name.
+            for label,rpc in (('owner',owner),('target',target)):
+                assert_retained_acquisition(rpc('/api/status'),where='resume:'+label)
+            break
         if any(s in ('failed','cancelled') for s in states) or time.monotonic()>until:
             raise RuntimeError('source_preparation_not_ready:'+str(states))
         time.sleep(1)
