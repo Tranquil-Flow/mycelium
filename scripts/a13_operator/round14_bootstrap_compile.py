@@ -73,6 +73,29 @@ def bootstrap_relay(observations):
     observations.append({'event':'published_origin_reused','rotation':False})
     return {'network':owner('/api/status').get('network'),'recovery_card':minted['recovery_card']}
 
+def _dump_failed_attempts(observations, *, name='reconnect-attempts.json'):
+    """Persist retry observations BEFORE a budget-exhausted raise.
+
+    Measured 2026-09-18: the soak01 round exhausted the 180 s reconnect budget on
+    `local_api_http_409:seed_http_remote_error` from the TARGET's app (the laptop could not reach the seed
+    origin), and the observations -- attempts, elapsed_seconds, codes -- were LOST, because they are
+    persisted only on the success path. So the one failure whose DURATION matters most, the one that decides
+    whether the budget is right, left no record of how long the relay stayed unreachable. A failure that
+    cannot be measured cannot size its own budget.
+    """
+    try:
+        root = os.environ.get('A13_EVIDENCE_DIR') or os.environ.get('A13_OWNER_ROOT') or '.'
+        path = os.path.join(root, name)
+        with open(path, 'w') as handle:
+            json.dump({'protocol': 'mycelium.a13.reconnect_attempts.v1',
+                       'reconnect_budget_seconds': RECONNECT_BUDGET_SECONDS,
+                       'attempts': observations}, handle, indent=1)
+        print('reconnect_attempts_written %s attempts=%d' % (path, len(observations)), flush=True)
+    except BaseException as exc:
+        # never mask the reason the round died: this is evidence, not a control path
+        print('reconnect_attempts_dump_failed %r' % (exc,), flush=True)
+
+
 def reconnect_target(card,observations):
     """Bounded retry while the relay origin publishes, inside the card's validity."""
     started=time.monotonic();attempts=0;delay=2.0
@@ -89,6 +112,8 @@ def reconnect_target(card,observations):
             observations.append({'attempt':attempts,'outcome':'failed','transient':bool(codes),
                 'codes':codes,'error':text[:400],'elapsed_seconds':round(time.monotonic()-started,3)})
             if not is_retryable(text,budget_exhausted=time.monotonic()-started>=RECONNECT_BUDGET_SECONDS):
+                # persist the attempts BEFORE raising, so a budget exhaustion is measurable
+                _dump_failed_attempts(observations)
                 raise
             time.sleep(delay);delay=min(15.0,delay*1.6)
 
