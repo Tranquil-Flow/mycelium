@@ -34,6 +34,26 @@ _PROTOCOL = 'mycelium.a13.owner_control_journal.v3'
 _SEQUENCE_BLOCK = 64  # crash-safe reservation: sequences may be skipped, never reused
 
 
+
+def _intent_expired(row, now):
+    """True only when this unconfirmed intent's signed request is PROVABLY undeliverable.
+
+    durable_requests.prepare builds the statement with `issued_at`/`expires_at`, and replay() verifies the
+    envelope against the client clock -- which is why an expired request cannot be replayed. So expiry is
+    an ABSOLUTE fact about the intent, not an inference: an expired signed request can never be delivered.
+
+    Every uncertainty returns False -- a missing prepared request, a missing or malformed `expires_at`, a
+    non-numeric clock -- because this predicate exists to make a PROVABLY dead intent retireable, NOT to
+    weaken the fail-closed guard for a fresh or ambiguous one. Getting that wrong is how a real in-flight
+    enqueue would be discarded silently.
+    """
+    try:
+        statement = row['enqueue_request']['envelope']['statement']
+        expires_at = statement['expires_at']
+        return float(expires_at) <= float(now)
+    except Exception:
+        return False
+
 def _remaining(deadline, interruption=None):
     if interruption is not None and interruption.is_set():
         raise ControllerError(interruption.code)
@@ -384,9 +404,23 @@ class ManagedControlOwner:
                 #
                 # An unconfirmed intent for the CURRENT run still blocks: that is the
                 # fail-closed case this guard exists for.
+                # AND a third case, which the two original ones could not cover: an intent that is
+                # PROVABLY DEAD. The prepared statement carries an ABSOLUTE `expires_at`
+                # (durable_requests.prepare builds the statement with issued_at/expires_at, and replay()
+                # verifies the envelope against the client clock -- which is exactly why an expired
+                # request cannot be replayed). An expired signed request CAN NEVER BE DELIVERED: the TTL
+                # is the TTL. Failing closed on it therefore protects nothing, while wedging the owner
+                # forever -- the measured consequence when a SIGKILL (packaged_app_daemon.py:21 kills the
+                # app after a 15 s grace, exit_code -9) interrupts an enqueue and the stale intent
+                # matches the CURRENT run/deployment because the pilot reuses node and deployment
+                # identity across rounds. Same argument as the different-run case below: retiring cannot
+                # reuse a sequence, because the ceiling lives outside this map and is already ahead.
+                # The FRESH current-run case still blocks -- that is the fail-closed case this guard
+                # exists for, and _intent_expired returns False whenever it cannot prove expiry.
                 retired = [key for key in unresolved
                     if self._state['commands'][key]['binding'].get('run_id') != session.run_id
-                    or self._state['commands'][key]['binding'].get('deployment_id') != session.deployment_id]
+                    or self._state['commands'][key]['binding'].get('deployment_id') != session.deployment_id
+                    or _intent_expired(self._state['commands'][key], self.client._clock())]
                 if retired:
                     for key in retired:
                         self._state['commands'].pop(key, None)
