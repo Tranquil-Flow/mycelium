@@ -105,16 +105,41 @@ def _client(root):
 # a missing surface, a refused connection or a bad credential must never be retried into a deadline.
 _OWNER_CALL_BUDGET_S = 120.0     # 1.15 x the 104.123 s maximum actually observed (72r1), same rule the
                                  # RSS bound was rebuilt under (66b756a): derive, do not pick.
+# STARTUP GRACE (79r1, 2026-09-18). A refusal is NOT the same thing at startup as mid-run. 79r1 failed at
+# bootstrap_compile with `URLError: <urlopen error [Errno 61] Connection refused>` while the owner's
+# native-control.json already EXISTED (sweep, 76 bytes) -- the surface was written before the listener
+# bound, so require_local passed and the first call was refused. _busy_reason deliberately leaves a
+# refusal non-retryable, and that is RIGHT mid-run, where a refusal means the app died. So this tolerates
+# a refusal ONLY until the channel has answered once, and only inside a short grace; after that, a
+# refusal still fails closed on the first attempt exactly as before.
+_OWNER_STARTUP_GRACE_S = 20.0
+_OWNER_ANSWERED = []             # mutable: has this process ever got a reply from the owner?
+
+def _is_refused(exc):
+    """True for a refused connection, in either shape urllib surfaces it."""
+    if isinstance(exc, ConnectionRefusedError):
+        return True
+    return isinstance(exc, urllib.error.URLError) and 'refused' in str(getattr(exc, 'reason', exc)).lower()
 
 def owner(path,body=None):
     require_local(OWNER)
     deadline=time.monotonic()+_OWNER_CALL_BUDGET_S
+    grace=time.monotonic()+(_OWNER_STARTUP_GRACE_S if not _OWNER_ANSWERED else 0.0)
     while True:
         try:
-            return _client(OWNER).call(path,body)
+            value=_client(OWNER).call(path,body)
+            if not _OWNER_ANSWERED:
+                _OWNER_ANSWERED.append(True)
+            return value
         except Exception as exc:
             reason=_busy_reason(exc)
-            if reason is None or time.monotonic()>=deadline:
+            if reason is None:
+                if _is_refused(exc) and not _OWNER_ANSWERED and time.monotonic()<grace:
+                    print('owner_startup_grace path=%s reason=%s'%(path,repr(exc)[:110]),flush=True)
+                    time.sleep(1.0)
+                    continue
+                raise
+            if time.monotonic()>=deadline:
                 raise
             print('owner_busy_retry path=%s reason=%s'%(path,reason[:120]),flush=True)
             time.sleep(2.0)
