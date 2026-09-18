@@ -74,8 +74,14 @@ def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic):
     session = _json('/api/v1/bootstrap')['session']
     csrf = {session['csrf_header']: session['csrf_token']}
     qualification = _json('/api/v1/qualification/current')
-    submission = {'prompt': prompt, 'max_new_tokens': int(max_new_tokens),
-                  'qualification': qualification['binding']}
+    # USE THE PRODUCT'S OWN CONTRACT. 77r1 sent a hand-rolled dict and the gateway answered 400: the
+    # contract carries `protocol` (and validates it), and the pinned step builds the same object --
+    # `InferenceSubmission(prompt, max_new_tokens, QualificationBinding.from_dict(binding)).to_dict()`.
+    # Hand-rolling a payload that a validator defines is how a measurement harness stops measuring.
+    from mycelium_request_gateway.contracts import InferenceSubmission, QualificationBinding
+    submission = InferenceSubmission(
+        prompt=prompt, max_new_tokens=int(max_new_tokens),
+        qualification=QualificationBinding.from_dict(qualification['binding'])).to_dict()
     headers = {'Origin': origin, 'Accept': 'text/event-stream', **csrf}
     accepted = _json('/api/v1/inference', submission, extra=csrf)
     samples = []
