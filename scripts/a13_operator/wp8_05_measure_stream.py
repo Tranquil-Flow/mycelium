@@ -18,7 +18,9 @@ Both need tokens >= 2; a single-token stream reports tpot_s as None rather than 
 read as an impossibly fast measurement.
 """
 import argparse
+import http.cookiejar
 import json
+import os
 import sys
 import time
 import urllib.error
@@ -51,25 +53,34 @@ def summarize(samples):
 
 def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic):
     """Submit one request and time every event as it ARRIVES. Returns (samples, summary)."""
-    def _json(path, body=None):
+    # A COOKIE JAR IS REQUIRED, and 76r1 is the evidence: with plain urlopen the session cookie from
+    # /api/v1/bootstrap is dropped, so every later call came back `HTTP Error 401: Unauthorized` -- all
+    # three attempts. The pinned stream step (round14_stream.py:23) builds its opener with
+    # HTTPCookieProcessor for exactly this reason, and round76r1-measurements recorded the 401s.
+    origin = base.rstrip('/')
+    jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                         urllib.request.HTTPCookieProcessor(jar))
+
+    def _json(path, body=None, extra=None):
         request = urllib.request.Request(
-            base.rstrip('/') + path,
+            origin + path,
             data=None if body is None else json.dumps(body).encode(),
-            headers={'Origin': base.rstrip('/'), 'Content-Type': 'application/json',
-                     'Accept': 'application/json'})
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+            headers={'Origin': origin, 'Content-Type': 'application/json',
+                     'Accept': 'application/json', **(extra or {})})
+        with opener.open(request, timeout=timeout) as response:
             return json.load(response)
 
     session = _json('/api/v1/bootstrap')['session']
+    csrf = {session['csrf_header']: session['csrf_token']}
     qualification = _json('/api/v1/qualification/current')
     submission = {'prompt': prompt, 'max_new_tokens': int(max_new_tokens),
                   'qualification': qualification['binding']}
-    headers = {'Origin': base.rstrip('/'), 'Accept': 'text/event-stream',
-               session['csrf_header']: session['csrf_token']}
-    accepted = _json('/api/v1/inference', submission)
+    headers = {'Origin': origin, 'Accept': 'text/event-stream', **csrf}
+    accepted = _json('/api/v1/inference', submission, extra=csrf)
     samples = []
     event_request = urllib.request.Request(base.rstrip('/') + accepted['event_path'], headers=headers)
-    with urllib.request.urlopen(event_request, timeout=timeout) as response:
+    with opener.open(event_request, timeout=timeout) as response:
         for raw in response:
             if not raw.startswith(b'data: '):
                 continue
