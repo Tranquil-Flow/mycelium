@@ -51,7 +51,7 @@ def summarize(samples):
     return result
 
 
-def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic):
+def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic, cancel_after_s=None):
     """Submit one request and time every event as it ARRIVES. Returns (samples, summary)."""
     # A COOKIE JAR IS REQUIRED, and 76r1 is the evidence: with plain urlopen the session cookie from
     # /api/v1/bootstrap is dropped, so every later call came back `HTTP Error 401: Unauthorized` -- all
@@ -85,17 +85,32 @@ def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic):
     headers = {'Origin': origin, 'Accept': 'text/event-stream', **csrf}
     accepted = _json('/api/v1/inference', submission, extra=csrf)
     samples = []
+    cancel_requested = False
     event_request = urllib.request.Request(base.rstrip('/') + accepted['event_path'], headers=headers)
     with opener.open(event_request, timeout=timeout) as response:
+        _loop_start = clock()
         for raw in response:
             if not raw.startswith(b'data: '):
                 continue
             arrived = clock()
             event = json.loads(raw[6:])
             samples.append((event, arrived))
+            if cancel_after_s is not None and (arrived - _loop_start) >= cancel_after_s:
+                # CLOSE EARLY, WHICH IS THE PRODUCT'S OWN CANCEL TRIGGER. route.py:2520 refers to the
+                # INLINE infer_cancel_wait -- the owner cancels the inference when the requestor goes
+                # away -- so abandoning the stream here exercises the real path rather than a bespoke
+                # endpoint. This client records only that it ASKED; whether the product CONFIRMED the
+                # cancellation is read from the owner's and node's own evidence afterwards, because a
+                # cancellation that silently does nothing is exactly what criterion 5's soak exists to
+                # catch, and a client that assumes its own request succeeded would hide it.
+                cancel_requested = True
+                break
             if event.get('type') in ('completed', 'cancelled', 'failed'):
                 break
-    return samples, summarize(samples)
+    summary = summarize(samples)
+    if cancel_after_s is not None:
+        summary['cancelled_requested'] = bool(cancel_requested)
+    return samples, summary
 
 
 def main(argv=None):

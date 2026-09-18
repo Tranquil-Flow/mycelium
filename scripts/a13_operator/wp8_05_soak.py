@@ -99,7 +99,8 @@ def run_soak(base, *, requests=110, cancel_every=10, prompt='Describe the city o
             # closing the event stream early and observing the product's terminal, or by the product's own
             # cancel command (the mailbox vocabulary already carries `infer_cancel_wait`). Until then the
             # record marks the intent and does NOT claim confirmation.
-            result = _stream(base, prompt, max_new_tokens, timeout=timeout)
+            result = _stream(base, prompt, max_new_tokens, timeout=timeout,
+                             cancel_after_s=2.0 if do_cancel else None)
             record.update(result)
             if do_cancel:
                 record['cancelled_confirmed'] = False
