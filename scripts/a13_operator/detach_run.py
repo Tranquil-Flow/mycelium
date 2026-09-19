@@ -12,7 +12,14 @@ from pathlib import Path
 
 script = sys.argv[1]
 log = sys.argv[2] if len(sys.argv) > 2 else '/tmp/asm/detached.out'
+allow_append = '--allow-append' in sys.argv
 Path(log).parent.mkdir(parents=True, exist_ok=True)
+# A round log is evidence and is never overwritten or appended to: interleaved launches make the log
+# ambiguous about which launch produced which line.  Pass --allow-append deliberately to opt out.
+if Path(log).exists() and Path(log).stat().st_size > 0 and not allow_append:
+    print('REFUSING: %s already has content (%d bytes); pass --allow-append to opt out'
+          % (log, Path(log).stat().st_size))
+    raise SystemExit(4)
 handle = open(log, 'ab', buffering=0)
 process = subprocess.Popen(
     ['bash', script], stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT,

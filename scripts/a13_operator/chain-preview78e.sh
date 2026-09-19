@@ -33,9 +33,12 @@ cd "$REPO" || exit 1
 # CRITERION 3 AUDIT: a PATH shim records every ssh invocation (scripts/a13_operator/ssh_audit.py,
 # commits 7ae6678/74ef984). The acceptance window is measured as the DELTA across the timed
 # requests, so orchestration ssh cannot be mistaken for the acceptance itself.
-export A13_SSH_LOG=/tmp/asm/criterion3-ssh-calls.log
+export A13_SSH_LOG=$EV/criterion3-ssh-calls-p78r1.log
 rm -f "$A13_SSH_LOG"
-export PATH=/tmp/asm/ssh-shim:$PATH
+export PATH=$REPO/scripts/a13_operator/ssh-shim:$PATH
+# FAIL CLOSED: the audit is a claim-boundary instrument.  If the shim is missing the ssh calls simply
+# stop being recorded and criterion 3 reads clean for the wrong reason -- the silent-instrument trap.
+[ -x "$REPO/scripts/a13_operator/ssh-shim/ssh" ] || { echo "STOP: ssh shim missing, criterion 3 would be unaudited"; exit 6; }
 
 cleanup() {
   echo "=== CLEANUP (trap): quit both apps, then sweep both Macs ==="

@@ -7,7 +7,7 @@ set -u
 REPO=/Users/evinova-self/Documents/playground/mycelium-core-pilot
 RUN=/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-mac
 DIST=/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-g1/dist
-TOOLS=/Users/evinova-self/Documents/mycelium-core-program/tools
+TOOLS="$REPO/scripts/a13_operator"  # the ledger is tracked here (it lived outside the repo)
 VENV=/Users/evinova-self/Documents/playground/mycelium-a13-macos-demo/.venv/bin/python
 PY=/opt/homebrew/bin/python3
 NEW=0.1.0-preview.78
@@ -55,7 +55,7 @@ print('  sha256(self)  ', hashlib.sha256(open('$IDENT','rb').read()).hexdigest()
 echo "=== [4/6] PER-MODULE PYZ LEDGER ($NEW vs $OLD, control needle each) ==="
 "$PY" -B "$TOOLS/pyz_ledger.py" \
   --exe "$DIST/$NEW/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo" --label "$NEW" \
-  --baseline "$DIST/$OLD/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo" 2>&1 | tee /tmp/asm/pyz-ledger-pre78.txt | tail -14
+  --baseline "$DIST/$OLD/Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo" 2>&1 | tee "$RUN/pyz-ledger-pre78.txt" | tail -14
 
 echo "=== [5/6] DEPLOY $NEW ==="
 export A13_OWNER_ROOT=/Users/evinova-self/mycelium-wp8-02/owner-lhr A13_REMOTE_ROOT=/Users/evinova/mycelium-wp8-02
