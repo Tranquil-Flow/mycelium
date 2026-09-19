@@ -284,7 +284,7 @@
       "queue_maximum_bytes": {"default": 67108864, "minimum": 1048576, "maximum": 1073741824},
       "per_placement_maximum_commands": {"default": 2, "minimum": 1, "maximum": 64},
       "browser_event_buffer_items": {"default": 64, "minimum": 2, "maximum": 65536},
-      "request_scoped_interruption_and_cleanup_ms": {"default": 2000, "minimum": 1, "maximum": 2000},
+      "request_scoped_interruption_and_cleanup_ms": {"default": 8000, "minimum": 1, "maximum": 8000},
       "shutdown_join_ms": {"default": 4000, "minimum": 1, "maximum": 4000}
     },
     "configuration_scope": "future_request_generation_only",

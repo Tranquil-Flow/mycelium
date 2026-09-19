@@ -72,9 +72,12 @@ NODE_OBSERVATION_PROTOCOL = "mycelium.physical_node_observation.v1"
 # health observation's `interruptibility` block.
 #
 # It must fit inside the OWNER's cleanup fanout window, because that window is
-# what the owner actually enforces: the immutable cancellation budget is 2_000 ms
-# and the owner reserves `_CLEANUP_FALLBACK_RESERVE_SECONDS` (= one bounded
-# snapshot attempt, 500 ms) for its receipt-recovery path, leaving 1_500 ms.
+# what the owner actually enforces: the owner own cancellation-and-cleanup budget is
+# `mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS`, and the owner reserves
+# `_CLEANUP_FALLBACK_RESERVE_SECONDS` for its receipt-recovery path, so the window
+# this advertisement must fit is the registry s `route_cleanup_fanout_window_ms`
+# (re-derived 2026-09-20 from the measured peer cleanup; ERRATA-20).  Read the
+# registry instead of restating numbers here: these moved once already.
 # The previous literal 2_000 ms was structurally unhonourable — no owner could
 # ever wait that long, so a cleanup landing in the top of the declared range
 # could only ever return `command_deadline_exceeded`, leaving
@@ -293,7 +296,9 @@ def _age_cleanup_command_budget(
         return document
     payload = document["payload"]
     budget_ms = payload.get("deadline_budget_ms")
-    if type(budget_ms) is not int or not 1 <= budget_ms <= 2_000:
+    if type(budget_ms) is not int or not (
+        1 <= budget_ms <= mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+    ):
         return document
     queued_ms = max(0, int(queued_seconds * 1_000.0))
     aged = dict(document)
@@ -3679,7 +3684,8 @@ class PhysicalNodeService:
             _require(
                 cancel_control["cancellation_generation"] >= 1
                 and type(data["deadline_budget_ms"]) is int
-                and 1 <= data["deadline_budget_ms"] <= 2_000,
+                and 1 <= data["deadline_budget_ms"]
+                <= mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
                 "invalid_infer_cancel_control",
             )
             with self._control_lock:

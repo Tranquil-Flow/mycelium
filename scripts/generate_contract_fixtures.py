@@ -18,7 +18,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import model_manifest as mm
-from mycelium_deadlines import advertised_maximum_total_cleanup_ms
+from mycelium_deadlines import (
+    COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
+    advertised_maximum_total_cleanup_ms,
+)
 from mycelium_evidence import sealed_evidence_projection, validate_evidence_projection
 from layer_assignment import compile_layer_assignments
 from mycelium_capacity_profiles import (
@@ -1646,7 +1649,7 @@ def live_route_status(graph_document: dict[str, Any]) -> dict[str, Any]:
             "deployment_id": graph_document["deployment_id"],
             "qualification_digest": "sha256:" + "a" * 64,
             "maximum_concurrent_requests": 4,
-            "cancellation_and_cleanup_bound_ms": 2_000,
+            "cancellation_and_cleanup_bound_ms": COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
             "cooperative_interruption_proven": False,
             "request_scoped_cleanup_proven": False,
             "shared_process_termination_used": False,

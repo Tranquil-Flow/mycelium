@@ -12,6 +12,8 @@ from typing import Any, Mapping, Sequence
 
 from .contracts import ENTITY_KINDS, validate_product_snapshot
 
+import mycelium_deadlines
+
 
 _CODE = re.compile(r"[a-z][a-z0-9_]{0,63}\Z")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -614,9 +616,12 @@ class ProductProjector:
                         "route_alive": route_status.get("route_alive") is True,
                         "concurrency_eligible": concurrency_eligible,
                         "cancellation_cleanup_bound_ms": int(
-                            a4_status.get("cancellation_and_cleanup_bound_ms", 2_000)
+                            a4_status.get(
+                                "cancellation_and_cleanup_bound_ms",
+                                mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
+                            )
                             if a4_status is not None
-                            else 2_000
+                            else mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
                         ),
                         "publisher_generation_fenced": publisher_generation_fenced,
                         "scoped_liveness_proven": scoped_liveness_proven,

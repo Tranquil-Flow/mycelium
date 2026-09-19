@@ -173,7 +173,7 @@ WORKER_DEFAULTS = {
     "queue_maximum_bytes": (67_108_864, 1_048_576, 1_073_741_824),
     "per_placement_maximum_commands": (2, 1, 64),
     "browser_event_buffer_items": (64, 2, 65_536),
-    "request_scoped_interruption_and_cleanup_ms": (2_000, 1, 2_000),
+    "request_scoped_interruption_and_cleanup_ms": (8_000, 1, 8_000),
     "shutdown_join_ms": (4_000, 1, 4_000),
 }
 WORKER_OPERATIONS = {

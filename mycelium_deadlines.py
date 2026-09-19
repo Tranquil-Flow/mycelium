@@ -225,7 +225,13 @@ CLEANUP_RECONCILIATION_WORKERS: Final[int] = 4
 IDLE_KEEPALIVE_PROBE_DEADLINE_SECONDS: Final[float] = 0.5
 
 #: Ceiling a command plan may request for interruption + cleanup.
-COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS: Final[int] = 2_000
+#: The same authority as ``cancel_and_cleanup_budget_seconds``, expressed in ms for
+#: the node protocol -- DERIVED, never re-typed (2026-09-20 re-derivation, ERRATA-20:
+#: the node's command cap, the controller's ceiling and the qualification document
+#: all carry this one window, so a second literal here is a mid-request failure).
+COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS: Final[int] = int(
+    CANCEL_AND_CLEANUP_BUDGET_SECONDS * 1_000
+)
 
 #: Cadence at which the SSE listener wakes to notice a client disconnect while
 #: awaiting the next buffered event.
@@ -714,8 +720,9 @@ DEADLINES: Final[tuple[Deadline, ...]] = (
         owner="mycelium_live/command_controller.py:19,293,321",
         derivation=(
             "Ceiling a command plan may request for interruption + cleanup; the "
-            "controller refuses a larger interruption_and_cleanup_ms. Same 2 s "
-            "authority as cancel_and_cleanup_budget_seconds, expressed in ms for "
+            "controller refuses a larger interruption_and_cleanup_ms. Same "
+            "authority as cancel_and_cleanup_budget_seconds, and DERIVED from it "
+            "(2026-09-20 re-derivation, ERRATA-20), expressed in ms for "
             "the node protocol. Invariant: cooperative step <= interruption + "
             "cleanup."
         ),
@@ -1334,6 +1341,10 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
         "mycelium_live.router_port._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
         "cancel_and_cleanup_budget_seconds",
     ),
+    (
+        "mycelium_live.command_controller.MAX_INTERRUPTION_AND_CLEANUP_MS",
+        "command_interruption_and_cleanup_max_ms",
+    ),
 )
 
 #: ``(dotted path, registry name)`` for consumers whose module belongs to the
@@ -1384,6 +1395,10 @@ PENDING_CONTRACT_PINNED_BINDINGS: Final[tuple[tuple[str, str], ...]] = ()
 #: ``mycelium_live/liveness.py``, ``mycelium_live/health.py``,
 #: ``physical_inference_qualification.py``).  Their values are pinned here by
 #: test, so a value edit in any of them fails the suite.  Packet
+#: 2026-09-20 (ERRATA-20): ``MAX_INTERRUPTION_AND_CLEANUP_MS`` MOVED OUT of this
+#: group into ``BOUND_CONSUMER_BINDINGS`` -- the cleanup-budget re-derivation
+#: changed its value, and a test-enforced literal is exactly what cannot carry a
+#: change of authority.  Seven rows remain.
 #: ``wp5-bind-residual`` left these eight rows pending for lane-ownership
 #: reasons: binding them is mechanically possible but out of that packet's
 #: named write scope (route.py, request-gateway service, local_preparer).
@@ -1391,10 +1406,6 @@ PENDING_OUT_OF_SCOPE_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
     (
         "mycelium_live.command_controller.DEFAULT_COOPERATIVE_STEP_MS",
         "command_default_cooperative_step_ms",
-    ),
-    (
-        "mycelium_live.command_controller.MAX_INTERRUPTION_AND_CLEANUP_MS",
-        "command_interruption_and_cleanup_max_ms",
     ),
     (
         "mycelium_live.health.LIVE_QUALIFICATION_REFRESH_AFTER_MS",

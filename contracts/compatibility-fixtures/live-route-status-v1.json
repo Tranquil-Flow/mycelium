@@ -1,6 +1,6 @@
 {
   "concurrency_liveness_qualification": {
-    "cancellation_and_cleanup_bound_ms": 2000,
+    "cancellation_and_cleanup_bound_ms": 8000,
     "cooperative_interruption_proven": false,
     "deployment_id": "12345678-1234-5678-1234-567812345678",
     "eligible": false,

@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import mycelium_deadlines
 from mycelium_live.a4_contracts import validate_product_qualification
 from mycelium_qualification.evidence import canonical_json_bytes
 
@@ -158,7 +159,7 @@ def build_a4_qualification(
         "deployment_id": positive_observations[0]["deployment_id"],
         "qualification_digest": qualification_digest,
         "maximum_concurrent_requests": 4,
-        "cancellation_and_cleanup_bound_ms": 2000,
+        "cancellation_and_cleanup_bound_ms": mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
         "cooperative_interruption_proven": True,
         "request_scoped_cleanup_proven": True,
         "shared_process_termination_used": False,

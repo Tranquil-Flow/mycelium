@@ -89,7 +89,7 @@ HISTORICAL_LITERALS: dict[str, float | int] = {
     "gateway_sse_disconnect_poll_seconds": 0.1,
     "gateway_producer_stall_poll_seconds": 0.05,
     "route_health_probe_deadline_seconds": 0.5,
-    "command_interruption_and_cleanup_max_ms": 2_000,
+    "command_interruption_and_cleanup_max_ms": 8_000,
     "command_default_cooperative_step_ms": 100,
     "gateway_session_eviction_grace_seconds": 0.05,
     "gateway_session_silent_subscriber_stall_seconds": 0.25,
@@ -148,6 +148,9 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
         "_MAX_CANCELLATION_AND_CLEANUP_SECONDS",
     ),
     "mycelium_live/router_port.py": ("_MAX_CANCELLATION_AND_CLEANUP_SECONDS",),
+    # 2026-09-20: the controller ceiling is the same window, in ms for the node
+    # protocol, and it is what refuses a routed cleanup deadline mid-request.
+    "mycelium_live/command_controller.py": ("MAX_INTERRUPTION_AND_CLEANUP_MS",),
     # wp5-bind-residual: the stage-pack authority TTL bounds.
     "mycelium_live/local_preparer.py": (
         "_STAGE_PACK_MIN_AUTHORITY_TTL_MS",

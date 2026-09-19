@@ -3339,7 +3339,7 @@ class PhysicalLiveRoute:
                 "path_digest": active["path_digest"],
                 "topology_generation": active["topology_generation"],
                 "cancellation_generation": active["cancellation_generation"],
-                "deadline_budget_ms": min(2_000, remaining_ms),
+                "deadline_budget_ms": min(mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS, remaining_ms),
             }
             # Cancellation linearizes one immutable cleanup identity. Gateway
             # publication authority may advance independently while terminal
@@ -5404,7 +5404,7 @@ class PhysicalLiveRoute:
             "qualification_digest": "sha256:"
             + hashlib.sha256(b"a4-physical-proof-unavailable").hexdigest(),
             "maximum_concurrent_requests": 4,
-            "cancellation_and_cleanup_bound_ms": 2_000,
+            "cancellation_and_cleanup_bound_ms": mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
             "cooperative_interruption_proven": False,
             "request_scoped_cleanup_proven": False,
             "shared_process_termination_used": False,

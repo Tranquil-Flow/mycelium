@@ -6,6 +6,8 @@ from collections.abc import Mapping
 import json
 from typing import Any
 
+import mycelium_deadlines
+
 
 INTERRUPTIBLE_STAGE_COMMAND_PROTOCOL = "mycelium.interruptible_stage_command.v1"
 TRAFFIC_LIVENESS_PROTOCOL = "mycelium.traffic_liveness.v1"
@@ -121,7 +123,7 @@ def validate_interruptible_stage_command(document: Mapping[str, Any]) -> dict[st
         )
         or data["issued_at_ms"] >= data["absolute_deadline_ms"]
         or data["expected_terminal_revision"] != 0
-        or data["cooperative_step_ms"] > 2_000
+        or data["cooperative_step_ms"] > mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
         or data["maximum_request_bytes"] > 1 << 30
         or data["maximum_response_bytes"] > 1 << 34
     ):
@@ -296,7 +298,7 @@ def validate_product_qualification(document: Mapping[str, Any]) -> dict[str, Any
         data["shared_process_termination_used"] is False,
         data["publisher_generation_fencing_proven"] is True,
         data["scoped_liveness_proven"] is True,
-        data["cancellation_and_cleanup_bound_ms"] == 2_000,
+        data["cancellation_and_cleanup_bound_ms"] == mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
     )
     if (
         data["protocol"] != PRODUCT_QUALIFICATION_PROTOCOL
@@ -397,7 +399,7 @@ def compatibility_fixtures() -> dict[str, dict[str, Any]]:
                     "deployment_id": "deployment-fixture",
                     "qualification_digest": digest_a,
                     "maximum_concurrent_requests": 4,
-                    "cancellation_and_cleanup_bound_ms": 2_000,
+                    "cancellation_and_cleanup_bound_ms": mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS,
                     "cooperative_interruption_proven": True,
                     "request_scoped_cleanup_proven": True,
                     "shared_process_termination_used": False,

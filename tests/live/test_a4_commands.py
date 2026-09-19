@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import mycelium_deadlines
 from mycelium_live.command_controller import (
     CheckpointAction,
     CleanupResult,
@@ -145,7 +146,9 @@ def test_cancellation_advances_once_and_fences_the_old_generation() -> None:
     assert cancelled.snapshot is not None
     current = cancelled.snapshot.identity
     assert current.cancellation_generation == 1
-    assert cancelled.snapshot.cleanup_deadline_ms == 4_000
+    assert cancelled.snapshot.cleanup_deadline_ms == (
+        2_000 + mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+    )
     assert duplicate.accepted is True and duplicate.duplicate is True
 
     stale = controller.terminal_compare_and_swap(
@@ -209,11 +212,21 @@ def test_deadline_is_controller_owned_and_stops_future_work_units() -> None:
     assert at_deadline.snapshot is not None
     assert at_deadline.snapshot.terminal is not None
     assert at_deadline.snapshot.terminal.status is TerminalStatus.DEADLINE_EXCEEDED
-    assert at_deadline.snapshot.cleanup_deadline_ms == 3_250
+    assert at_deadline.snapshot.cleanup_deadline_ms == (
+        1_250 + mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+    )
 
 
-def test_interruption_and_cleanup_share_one_total_two_second_bound() -> None:
-    controller = CommandController(interruption_and_cleanup_ms=2_000)
+def test_interruption_and_cleanup_share_one_total_bound() -> None:
+    """Interruption and cleanup spend ONE total bound, whatever that bound is.
+
+    The bound is the registry's ``command_interruption_and_cleanup_max_ms`` since the
+    2026-09-20 re-derivation (ERRATA-20): this test pins the SHARING -- a cleanup
+    inside the deadline is within budget, one millisecond past it is not -- rather
+    than the historical 2 s value.
+    """
+
+    controller = CommandController(interruption_and_cleanup_ms=mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS)
     envelope = _envelope(deadline_ms=20_000)
     controller.register(envelope)
     cancelled = controller.cancel(
@@ -232,7 +245,7 @@ def test_interruption_and_cleanup_share_one_total_two_second_bound() -> None:
     )
     assert cleanup.accepted is True
     assert cleanup.snapshot is not None
-    assert cleanup.snapshot.cleanup_deadline_ms == 7_000
+    assert cleanup.snapshot.cleanup_deadline_ms == 5_000 + mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
     assert cleanup.snapshot.cleanup_within_interruption_budget is True
     terminal = controller.terminal_compare_and_swap(
         _terminal(
@@ -258,7 +271,7 @@ def test_interruption_and_cleanup_share_one_total_two_second_bound() -> None:
         late_identity,
         owner_id="placement-owner-a",
         result=_cleanup(),
-        observed_at_ms=7_001,
+        observed_at_ms=5_000 + mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS + 1,
     )
     assert late.accepted is True
     assert late.snapshot is not None
@@ -267,7 +280,7 @@ def test_interruption_and_cleanup_share_one_total_two_second_bound() -> None:
         _terminal(
             late_identity,
             status=TerminalStatus.CANCELLED,
-            observed_at_ms=7_001,
+            observed_at_ms=5_000 + mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS + 1,
         ),
         expected_terminal_revision=0,
     )

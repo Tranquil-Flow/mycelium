@@ -15,8 +15,16 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
 
+import mycelium_deadlines
 
-MAX_INTERRUPTION_AND_CLEANUP_MS = 2_000
+
+# Bound from the registry record the node protocol cap and the qualification
+# document also read (BOUND_CONSUMER_BINDINGS enforces the assignment).  A local
+# 2.0 s here outlives the re-derivation and turns a routed cleanup deadline into a
+# mid-request ValueError -- the D9 failure this file's ceiling exists to prevent.
+MAX_INTERRUPTION_AND_CLEANUP_MS = (
+    mycelium_deadlines.COMMAND_INTERRUPTION_AND_CLEANUP_MAX_MS
+)
 DEFAULT_COOPERATIVE_STEP_MS = 100
 DEFAULT_MAXIMUM_REQUESTS = 4_096
 DEFAULT_MAXIMUM_COMMANDS_PER_REQUEST = 64
@@ -319,7 +327,10 @@ class CommandController:
         if self._cooperative_step_ms > self._interruption_and_cleanup_ms:
             raise ValueError("cooperative step cannot exceed the interruption budget")
         if self._interruption_and_cleanup_ms > MAX_INTERRUPTION_AND_CLEANUP_MS:
-            raise ValueError("interruption and cleanup cannot exceed 2000 ms")
+            raise ValueError(
+                "interruption and cleanup cannot exceed "
+                f"{MAX_INTERRUPTION_AND_CLEANUP_MS} ms"
+            )
         self._metadata_lock = threading.RLock()
         self._requests: dict[str, _RequestState] = {}
 
