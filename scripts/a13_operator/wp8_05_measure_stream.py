@@ -44,6 +44,14 @@ def summarize(samples):
         'ttft_s': round(first_t - accepted, 6),
         'total_s': round(last_t - accepted, 6),
         'terminal': (terminal or {}).get('type'),
+        # WHICH terminal, not just whether there was one: a `failed` terminal that carries
+        # code=request_cleanup_unproven is the route saying it could not prove owner-scoped cleanup,
+        # and criterion 5 must count that as a failure rather than a settled request.
+        'terminal_code': (terminal or {}).get('code'),
+        'has_terminal': terminal is not None,
+        # ok=True means "the stream produced tokens and reached a terminal"; succeeded means the
+        # terminal was the SUCCESSFUL one. The two differ, and criterion 5 needs the second.
+        'succeeded': (terminal or {}).get('type') == 'completed',
         'text': ''.join(e.get('text') or '' for e, _t in tokens),
     }
     result['tpot_s'] = (round((last_t - first_t) / (len(tokens) - 1), 6)
