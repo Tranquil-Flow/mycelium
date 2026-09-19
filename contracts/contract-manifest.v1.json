@@ -675,8 +675,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "fa0496154cbddf1de71b9d9b2157626d72bbe7ea24ac86c9b865c0daa843e657",
-          "size_bytes": 54327
+          "sha256": "964170b2c06e671eade1ea9301efe5ad2bef36170738285c2e9c3f10a47cdafe",
+          "size_bytes": 54812
         }
       ],
       "protocol": "mycelium.live_route_status.v1"
@@ -695,8 +695,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "fa0496154cbddf1de71b9d9b2157626d72bbe7ea24ac86c9b865c0daa843e657",
-          "size_bytes": 54327
+          "sha256": "964170b2c06e671eade1ea9301efe5ad2bef36170738285c2e9c3f10a47cdafe",
+          "size_bytes": 54812
         },
         {
           "path": "ui/web/src/features/liveRoute/M13PlacementPanel.tsx",
@@ -720,8 +720,8 @@
         },
         {
           "path": "ui/web/src/features/liveRoute/routeStatus.ts",
-          "sha256": "fa0496154cbddf1de71b9d9b2157626d72bbe7ea24ac86c9b865c0daa843e657",
-          "size_bytes": 54327
+          "sha256": "964170b2c06e671eade1ea9301efe5ad2bef36170738285c2e9c3f10a47cdafe",
+          "size_bytes": 54812
         },
         {
           "path": "ui/web/src/features/liveRoute/M14TopologyPanel.tsx",
@@ -1750,8 +1750,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "dd727033f806dbea0660bc26da693d75b65335c3a9806a222d22dc4fa5080890",
-          "size_bytes": 138896
+          "sha256": "3bc40e9b6e40a07b2dfa9b646deaac15ff09ae49bae95de1fc4a3d323049909c",
+          "size_bytes": 140737
         }
       ],
       "protocol": "mycelium.traffic_liveness.v1"
@@ -1770,8 +1770,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "dd727033f806dbea0660bc26da693d75b65335c3a9806a222d22dc4fa5080890",
-          "size_bytes": 138896
+          "sha256": "3bc40e9b6e40a07b2dfa9b646deaac15ff09ae49bae95de1fc4a3d323049909c",
+          "size_bytes": 140737
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",
