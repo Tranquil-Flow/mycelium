@@ -163,28 +163,48 @@ class Deadline:
 
 #: End-to-end owner budget for cancellation + request-scoped cleanup.  Every
 #: other cleanup record below is a partition of this budget, never an extension
-#: of it (PLAN D9: "do not raise the 2 s total").
-CANCEL_AND_CLEANUP_BUDGET_SECONDS: Final[float] = 2.0
+#: of it.
+#:
+#: RE-DERIVED 2026-09-20 by owner decision, from the MEASUREMENT this file had
+#: been carrying unbuilt: the two-Mac peer's end-to-end cleanup returns at
+#: 1.83 s typical / 3.18 s worst (a13 lane, quoted at
+#: PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS below).  The previous 2.0 s total gave
+#: a 1.5 s window, which that measurement does not fit -- and because the peer's
+#: advertisement was window-derived rather than measured, the admission
+#: predicate could never refuse it, so the shortfall surfaced mid-request
+#: instead of at qualification (p75r1 and p77r1: command_cleanup_receipt_missing
+#: -> failed/request_cleanup_unproven).  PLAN D9's "do not raise the 2 s total"
+#: is therefore superseded, deliberately and on the record, by the same
+#: measured-not-modelled rule that rebuilt the RSS bound (b7f0e07).
+#: Recipe: one recovery slice must clear the measured worst case by 1.15
+#:   -> ceil(1.15 x 3.18 s) = 3.7 s, shipped as a 4.0 s slice; the nominal
+#:   attempt and the reserve that holds it stay 3.5 s, strictly below the slice
+#:   as before (0.5 < 1.1); the inline grace stays 0.5 s; 3.5 + 0.5 + 4.0 = 8.0 s.
+#: Composition that follows: window 8.0 - 3.5 = 4.5 s, admitted 4.5 - 0.2 = 4.3 s,
+#:   advertised 4.3 - 0.1 = 4.2 s -- which clears the measured worst case by 32 %,
+#:   so the advertisement describes the peer AND the predicate regains teeth.
+CANCEL_AND_CLEANUP_BUDGET_SECONDS: Final[float] = 8.0
 
 #: The final interval of the budget held back for exactly one bounded
 #: request-scoped snapshot fallback; equal to the snapshot attempt by
 #: construction.
-CLEANUP_FALLBACK_RESERVE_SECONDS: Final[float] = 0.5
+CLEANUP_FALLBACK_RESERVE_SECONDS: Final[float] = 3.5
 
 #: One bounded request-scoped snapshot round (probe a missing node's cleanup
 #: proof) inside the budget.
-CLEANUP_SNAPSHOT_ATTEMPT_SECONDS: Final[float] = 0.5
+CLEANUP_SNAPSHOT_ATTEMPT_SECONDS: Final[float] = 3.5
 
 #: The slice handed to one request-scoped fallback snapshot attempt at the point
 #: the route resumes it, capped by the owner's immutable deadline.  Measured on
 #: the two-Mac route: successful snapshot round trips to the relayed laptop were
 #: 0.875-1.066 s, and the previous 0.5 s slice was never even claimed before it
 #: expired, so the attempt always missed the window it was meant to recover
-#: into.  1.1 s covers the measured maximum with margin and still fits the
-#: owner's immutable budget after the inline receipt grace (0.5 + 1.1 <= 2.0).
-#: A slice shorter than one real round trip is not a recovery path, it is a
-#: second way to miss.
-CLEANUP_SNAPSHOT_SLICE_SECONDS: Final[float] = 1.1
+#: into.  Re-derived 2026-09-20 from the end-to-end cleanup measurement
+#: (1.83 s / 3.18 s): 4.0 s covers the worst case by 1.26 and still fits the
+#: budget after the inline receipt grace (0.5 + 4.0 <= 8.0).  A slice shorter
+#: than one real cleanup is not a recovery path, it is a second way to miss --
+#: which the 1.1 s slice proved to be against a peer that needs 3.18 s.
+CLEANUP_SNAPSHOT_SLICE_SECONDS: Final[float] = 4.0
 
 #: One bounded grace for the inline cancellation receipt to arrive before
 #: bounded snapshot rounds are allowed to race the delayed response.

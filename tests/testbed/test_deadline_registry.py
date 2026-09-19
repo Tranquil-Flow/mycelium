@@ -61,21 +61,21 @@ PINNED_SHIPPED_VIOLATED_CODES: frozenset[str] = frozenset()
 #: modules (file:line cited in the registry's ``derivation``). Deliberately NOT
 #: read from the registry: this is the independent side of the no-drift check.
 HISTORICAL_LITERALS: dict[str, float | int] = {
-    "cancel_and_cleanup_budget_seconds": 2.0,
-    "cleanup_fallback_reserve_seconds": 0.5,
-    "cleanup_snapshot_attempt_seconds": 0.5,
+    "cancel_and_cleanup_budget_seconds": 8.0,
+    "cleanup_fallback_reserve_seconds": 3.5,
+    "cleanup_snapshot_attempt_seconds": 3.5,
     "cleanup_inline_receipt_grace_seconds": 0.5,
     "cleanup_receipt_poll_seconds": 0.1,
     "cleanup_reconciliation_horizon_seconds": 60.0,
     "cleanup_reconciliation_workers": 4,
     "idle_keepalive_probe_deadline_seconds": 0.5,
-    # One value corrected on purpose (packet wp5-d9, derivation corrected by
-    # merge a13-resolve): the shipped literal was 2_000 ms and exceeded the
-    # 1_500 ms route fanout window (the round-50 defect); the window itself is
-    # still above the 1_300 ms the route's admission predicate admits, so the
-    # corrected value is window - transport margin - slack = 1_200 ms, derived
-    # here so it cannot drift.
-    "peer_advertised_maximum_total_cleanup_ms": 1_200,
+    # Corrected twice on purpose.  (wp5-d9 / a13-resolve made the shipped
+    # 2_000 ms fit inside the then window: window - margin - slack = 1_200 ms.)
+    # RE-DERIVED 2026-09-20 by owner decision from the MEASURED two-Mac cleanup
+    # (1.83 s / 3.18 s): the 2.0 s budget became 8.0 s, the window 4.5 s, and
+    # this value 4_500 - 200 - 100 = 4_200 ms -- which clears the measured worst
+    # case by 32 % instead of hiding it behind a window-shaped number.
+    "peer_advertised_maximum_total_cleanup_ms": 4_200,
     # a13-resolve additions: the a13 lane's MEASURED cleanups, registered so
     # the imported lane carries no second copy of a number this registry owns.
     # The slice covers a real relayed snapshot round trip (0.875-1.066 s
@@ -83,7 +83,7 @@ HISTORICAL_LITERALS: dict[str, float | int] = {
     # command delivery plus receipt return, the part of the window that is
     # transport and not cleanup; the slack is the headroom the advertised bound
     # keeps below the predicate's admitted maximum.
-    "cleanup_snapshot_slice_seconds": 1.1,
+    "cleanup_snapshot_slice_seconds": 4.0,
     "peer_cleanup_bound_transport_margin_ms": 200,
     "peer_advertised_cleanup_bound_slack_ms": 100,
     "gateway_sse_disconnect_poll_seconds": 0.1,
@@ -339,8 +339,8 @@ def test_shipped_composition_violation_set_is_pinned() -> None:
     assert shipped == []
 
     # Restate the shipped composition in numbers so the pin is self-evident.
-    assert deadlines.advertised_maximum_total_cleanup_ms == 1_200
-    assert deadlines.route_cleanup_fanout_window_ms == 1_500
+    assert deadlines.advertised_maximum_total_cleanup_ms == 4_200
+    assert deadlines.route_cleanup_fanout_window_ms == 4_500
     assert (
         deadlines.advertised_maximum_total_cleanup_ms
         <= deadlines.route_cleanup_fanout_window_ms
@@ -423,10 +423,10 @@ def test_invalid_composition_values_fail_closed() -> None:
 
 
 def test_derived_quantities_are_the_published_symbols() -> None:
-    assert deadlines.route_cleanup_fanout_window_seconds == 1.5
-    assert deadlines.route_cleanup_fanout_window_ms == 1_500
+    assert deadlines.route_cleanup_fanout_window_seconds == 4.5
+    assert deadlines.route_cleanup_fanout_window_ms == 4_500
     # wp5-d9: the advertised bound is derived from the window, not a literal.
-    assert deadlines.advertised_maximum_total_cleanup_ms == 1_200
+    assert deadlines.advertised_maximum_total_cleanup_ms == 4_200
     assert deadlines.advertised_maximum_total_cleanup_ms == (
         deadlines.derive_advertised_maximum_total_cleanup_ms()
     )
@@ -491,7 +491,7 @@ def test_peer_connect_deadline_sits_strictly_inside_the_route_fanout_window() ->
 
     assert record.unit == "seconds"
     assert value == 1.0
-    assert 0 < value < deadlines.route_cleanup_fanout_window_seconds == 1.5
+    assert 0 < value < deadlines.route_cleanup_fanout_window_seconds == 4.5
     # The window it must fit inside is itself derived, not asserted by hand.
     assert deadlines.route_cleanup_fanout_window_seconds == (
         deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
@@ -742,7 +742,7 @@ def test_advertised_bound_is_the_registry_value_and_matches_the_canonical_produc
         r'"maximum_total_cleanup_ms":\s*([A-Za-z_][A-Za-z0-9_.]*)', producer
     )
     assert pinned == ["advertised_maximum_total_cleanup_ms"], pinned
-    assert deadlines.advertised_maximum_total_cleanup_ms == 1_200
+    assert deadlines.advertised_maximum_total_cleanup_ms == 4_200
 
 
 def test_registry_only_inline_literals_still_hold_their_registry_values() -> None:
@@ -819,8 +819,8 @@ def test_cleanup_snapshot_attempt_record_has_no_consumerless_binding() -> None:
     slice_record = deadlines.deadline("cleanup_snapshot_slice_seconds")
     # Same number as the reserve by construction, and strictly different from -
     # smaller than - the duration one resumed attempt is actually handed.
-    assert attempt.value == deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS == 0.5
-    assert slice_record.value == deadlines.CLEANUP_SNAPSHOT_SLICE_SECONDS == 1.1
+    assert attempt.value == deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS == 3.5
+    assert slice_record.value == deadlines.CLEANUP_SNAPSHOT_SLICE_SECONDS == 4.0
     assert slice_record.value > attempt.value
     # The records must say so explicitly, because the two values must differ.
     for token in (
@@ -944,11 +944,12 @@ def test_advertised_cleanup_bound_fits_inside_the_route_fanout_window() -> None:
     advertised = deadlines.advertised_maximum_total_cleanup_ms
     window = deadlines.route_cleanup_fanout_window_ms
     assert advertised <= window, f"advertised {advertised} ms > window {window} ms"
-    # The D9 composition: 2.0 s budget - 0.5 s fallback reserve = 1.5 s window,
-    # and the advertised bound is the admitted maximum less one slack
-    # (a13-resolve): 1_500 - 200 - 100 = 1_200 ms.
-    assert advertised == 1_200
-    assert window == 1_500
+    # The D9 composition, re-derived 2026-09-20 from the MEASURED two-Mac
+    # cleanup (1.83 s / 3.18 s): 8.0 s budget - 3.5 s fallback reserve = 4.5 s
+    # window, and the advertised bound is the admitted maximum less one slack:
+    # 4_500 - 200 - 100 = 4_200 ms.
+    assert advertised == 4_200
+    assert window == 4_500
     assert (
         deadlines.check_peer_advertised_cleanup_bound(
             advertised_cleanup_ms=advertised,
