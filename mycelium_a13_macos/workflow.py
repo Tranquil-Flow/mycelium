@@ -222,13 +222,45 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     document['controller']=bind_hf_prepositions(document['controller'],prepared=prepared,
         target_source_roots=target_source_roots)
     coordinator=authority.coordinator
+    # Collect the node hello observations BEFORE the binding, so the binding can prefer a LIVE boot id
+    # over the one the plan document recorded. Measured 2026-09-19: soak03's plan carried
+    # boot-af00774d... while the node's hello said boot-a0423521..., because every round relaunches the
+    # apps so every round the boot ids move -- a capture-vs-use race that made qualification a coin flip
+    # (7 qualified / 7 unavailable).
+    #
+    # WHY THIS ORDER IS SAFE (checked, not assumed): bind_operator_plan_document does not touch run_plan --
+    # it sets the snapshot fields, controller['now'], and controller['peers'][].boot_id -- so the factory's
+    # run_id/deployment_id are the same either side; and `members` is built from the LIVE coordinator in
+    # both places, so the binding cannot change whose identity is signed.
+    #
+    # AND WHY IT CANNOT HURT: the nodes may not be talking yet at plan-compile time. If collection fails
+    # for ANY reason the binding is simply left without observations, which is its inert default, and the
+    # round proceeds byte-for-byte as it did before this change.
+    observed_boot_ids=None
+    try:
+        document_peers=[peer for peer in document['controller']['peers'] if isinstance(peer,dict)]
+        pre_run=document['controller']['run_plan']
+        pre_factory=ManagedSessionFactory(owner=channel,run_id=pre_run['run_id'],
+            deployment_id=pre_run['deployment_id'],
+            members=[coordinator.member(peer['node_id']) for peer in document_peers])
+        observed=collect_managed_hello_observations(pre_factory,run_id=pre_run['run_id'],
+            deployment_id=pre_run['deployment_id'],
+            node_ids=[peer['node_id'] for peer in document_peers])
+        observed_boot_ids={item['node_id']:item['boot_id'] for item in (observed.get('observations') or [])
+            if isinstance(item,dict) and isinstance(item.get('node_id'),str)
+            and isinstance(item.get('boot_id'),str) and item['boot_id']}
+        print('boot_id_observations_collected nodes=%d' % len(observed_boot_ids),flush=True)
+    except Exception as exc:
+        print('boot_id_observation_unavailable %r' % (exc,),flush=True)
+        observed_boot_ids=None
     bound=bind_operator_plan_document(document,signer=coordinator.signer,
         swarm_id=coordinator.swarm_id,seed_node_id=coordinator.seed_node_id,
-        members=coordinator.members(),now=time.time())
+        members=coordinator.members(),now=time.time(),observed_boot_ids=observed_boot_ids)
     c=bound['controller'];run=c['run_plan']
     members=[coordinator.member(peer['node_id']) for peer in c['peers']]
     factory=ManagedSessionFactory(owner=channel,run_id=run['run_id'],
         deployment_id=run['deployment_id'],members=members)
+    from .managed_observations import collect_managed_hello_observations
     from .managed_control import _segment
     run_id=_segment(run['run_id'])
     root=_private_directory(authority.state_root/'serving-runs'/run_id,create=True)
