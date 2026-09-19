@@ -170,6 +170,26 @@ def _bounded_native_diagnostics(raw: Any) -> dict[str, Any]:
     return result
 
 
+def _native_error_code(response: Any) -> str | None:
+    """The native's own bounded name for the cause, or ``None``.
+
+    ``_validate_response`` admits an error response only when its error mapping is exactly
+    ``{'code': <token matching the closed operation grammar>}``, so this field cannot carry
+    free text -- and it is re-validated here so a record written by any other caller stays
+    bounded too.  Dropping it is what made p74r1's ``infer_start`` failure say only that a
+    command failed on a node, never why (the third occurrence of that gap).
+    """
+    if not isinstance(response, Mapping):
+        return None
+    error = response.get("error")
+    if not isinstance(error, Mapping) or set(error) != {"code"}:
+        return None
+    code = error.get("code")
+    if not isinstance(code, str) or _OPERATION.fullmatch(code) is None:
+        return None
+    return code
+
+
 def _unavailable_code(worker: Any) -> str:
     """Precise bounded cause for a worker that cannot accept a command.
 
@@ -829,13 +849,21 @@ class ManagedWorker:
             raise WorkerError("model_execution_not_authorized")
 
     def _record_native_failure(self, session, *, command_id, command, response):
-        """Bounded local diagnostics, never raw stderr or model/prompt values."""
+        """Bounded local diagnostics, never raw stderr or model/prompt values.
+
+        Includes the native's own error code: it is the one field that names WHY the
+        command failed, it is already validated against the closed operation grammar by
+        ``_validate_response``, and it is re-validated by ``_native_error_code``.  Without
+        it this record says only that a command failed on a node.
+        """
         if self.capacity_root is None:return
         from .authority import _atomic_private_json
-        _atomic_private_json(self.capacity_root/'native-failure.private.json',{
-            'protocol':'mycelium.a13.native_failure_diagnostic.v1',
+        document={'protocol':'mycelium.a13.native_failure_diagnostic.v1',
             'run_id':self.run_id,'node_id':self.node_id,'command_id':command_id,
-            'command':command,**_bounded_native_diagnostics(getattr(session,'stderr',b''))})
+            'command':command,**_bounded_native_diagnostics(getattr(session,'stderr',b''))}
+        code=_native_error_code(response)
+        if code is not None:document['error_code']=code
+        _atomic_private_json(self.capacity_root/'native-failure.private.json',document)
 
     def _record_native_exit(self, session):
         """Bounded diagnostic for a worker guard trip.
