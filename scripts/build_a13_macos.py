@@ -12,6 +12,52 @@ import shutil
 
 ROOT=Path(__file__).resolve().parents[1]
 
+# THIS REPOSITORY IS THE APP'S SOURCE OF TRUTH. A second checkout (mycelium-a13-macos-demo) only ever held
+# a stale copy of it, and the committed PyInstaller spec pointed THERE -- so a build driven by that spec
+# would have produced an app from the wrong sources while every source check, digest compare and deploy
+# receipt still looked clean (measured 2026-09-19; the program's own ERRATA-6). Two guards follow: this tree
+# must look like the app tree, and the identity artefact records WHERE the sources came from as well as what
+# they hash to.
+_APP_TREE_MARKERS=('mycelium_a13_macos/__main__.py','mycelium_a13_macos/workflow.py',
+    'mycelium_seed/plan_binding.py','mycelium_live/supervisor.py','mycelium_live/route.py')
+
+# Compiled into the PYZ but NOT shipped as a13-runtime-source, so nothing recorded their provenance -- and
+# they own the route/serving state machine, the region this program has spent the most rounds on.
+_COMPILED_NOT_SHIPPED=('mycelium_live','mycelium_node','mycelium_router','mycelium_request_gateway',
+    'mycelium_physical_runner','mycelium_qualification','mycelium_membership','mycelium_mobile')
+
+
+def require_app_tree_root():
+    """Fail before packaging if this checkout does not look like the app's own tree."""
+    missing=[relative for relative in _APP_TREE_MARKERS if not (ROOT/relative).is_file()]
+    if missing:raise SystemExit('build_root_not_the_app_tree:'+','.join(missing))
+    return {'root':str(ROOT)}
+
+
+def identity_of_compiled_modules():
+    """Digests of the app-side modules PyInstaller compiles but does not ship as source."""
+    digests={}
+    for package in _COMPILED_NOT_SHIPPED:
+        for path in sorted((ROOT/package).rglob('*.py')):
+            if path.is_file() and not path.is_symlink() and '__pycache__' not in path.parts:
+                digests[str(path.relative_to(ROOT))]=hashlib.sha256(path.read_bytes()).hexdigest()
+    return digests
+
+
+def build_identity(compiler_identity):
+    """Provenance of the build's INPUTS: where they came from, and what they hash to.
+
+    Bytecode-level proof that a change actually ships is the program's tools/pyz_ledger.py; this artefact is
+    the build's own statement about its inputs, and the two are read together. A digest match between local
+    and deployed bundles proves the copy, never the content.
+    """
+    def git(*arguments):
+        result=subprocess.run(['git','-C',str(ROOT),*arguments],capture_output=True,text=True)
+        return result.stdout.strip() or None
+    return {'root':str(ROOT),'head':git('rev-parse','HEAD'),
+        'branch':git('rev-parse','--abbrev-ref','HEAD'),'worktree_dirty':bool(git('status','--porcelain')),
+        'compiled_not_shipped':identity_of_compiled_modules(),**compiler_identity}
+
 def require_compatible_mlx_wheels():
     """Fail before packaging if host-selected wheels exclude the minimum OS."""
     import importlib.metadata
@@ -77,6 +123,7 @@ def stage_compiler_sources(destination):
 def main():
     if platform.system()!='Darwin' or platform.machine()!='arm64':
         raise SystemExit('macos_arm64_build_required')
+    require_app_tree_root()
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root',type=Path,default=ROOT/'dist/0.1.0-preview.2')
     args=parser.parse_args()
@@ -130,7 +177,8 @@ def main():
     provenance.parent.mkdir(parents=True,exist_ok=True)
     shutil.copyfile(relay_license,provenance.parent/'cloudflared-LICENSE')
     provenance.write_text(json.dumps(runtime_wheels,indent=2)+'\n')
-    (provenance.parent/'compiler-source-identity.json').write_text(json.dumps(compiler_identity,sort_keys=True,indent=2)+'\n')
+    (provenance.parent/'compiler-source-identity.json').write_text(
+        json.dumps(build_identity(compiler_identity),sort_keys=True,indent=2)+'\n')
     expat=vendor_expat(output/'Mycelium A13 Demo.app')
     executable=output/'Mycelium A13 Demo.app/Contents/MacOS/Mycelium A13 Demo'
     preflight=subprocess.run([str(executable),'--preflight'],capture_output=True,text=True,check=True)

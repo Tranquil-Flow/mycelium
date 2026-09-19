@@ -40,16 +40,35 @@ def main():
     submission=InferenceSubmission(prompt='The capital of Germany is',max_new_tokens=8,qualification=QualificationBinding.from_dict(qualification['binding']))
     accepted=read('/api/v1/inference',submission.to_dict());save('accepted.json',accepted)
     events=[];terminals=[];started=time.monotonic()
-    with request(accepted['event_path'],extra={'Accept':'text/event-stream'}) as response:
-        assert response.headers.get_content_type()=='text/event-stream'
-        with (folder/'events.jsonl').open('x') as log:
-            (folder/'events.jsonl').chmod(0o600)
-            for raw in response:
-                if raw.startswith(b'data: '):
-                    event=json.loads(raw[6:]);validate_stream_event(event,accepted['request_id'])
-                    if events:assert event['sequence']==events[-1]['sequence']+1,'stream_sequence_gap'
-                    events.append(event);log.write(json.dumps(event)+'\n');log.flush()
-                    if event['type'] in ('completed','cancelled','failed'):terminals.append(event)
+    try:
+        with request(accepted['event_path'],extra={'Accept':'text/event-stream'}) as response:
+            assert response.headers.get_content_type()=='text/event-stream'
+            with (folder/'events.jsonl').open('x') as log:
+                (folder/'events.jsonl').chmod(0o600)
+                for raw in response:
+                    if raw.startswith(b'data: '):
+                        event=json.loads(raw[6:]);validate_stream_event(event,accepted['request_id'])
+                        if events:assert event['sequence']==events[-1]['sequence']+1,'stream_sequence_gap'
+                        events.append(event);log.write(json.dumps(event)+'\n');log.flush()
+                        if event['type'] in ('completed','cancelled','failed'):terminals.append(event)
+    except BaseException:
+        # CAPTURE THE POST-FAILURE STATE WHILE THE APP IS STILL UP. soak04 (2026-09-19) hung here for
+        # the client's own 300 s read timeout and left NO runtime-after.json, so the route's incident
+        # ledger -- the one artifact that names WHY no terminal event was published -- was unreadable
+        # afterwards: incidents live in the app's memory, and the round quits the apps at teardown
+        # (measured: no persisted evidence store under the owner root, native-exit written 11:41 while
+        # the failure was 11:28). The step still fails exactly as it did; it now fails with evidence.
+        for name,path in (('runtime-after.json','/__mycelium/evidence/runtime'),
+                          ('deployments-after.json','/__mycelium/deployments')):
+            try:
+                save(name,read(path))
+            except Exception as capture_error:
+                print('POST_FAILURE_CAPTURE_FAILED %s %r' % (name,capture_error),flush=True)
+        try:
+            print('POST_FAILURE_SERVING %s' % json.dumps(owner('/api/serving/status',{}),sort_keys=True),flush=True)
+        except Exception as capture_error:
+            print('POST_FAILURE_SERVING_FAILED %r' % (capture_error,),flush=True)
+        raise
     save('runtime-after.json',read('/__mycelium/evidence/runtime'))
     save('deployments-after.json',read('/__mycelium/deployments'))
     summary={'run_id':scope['run_id'],'request_id':accepted['request_id'],'event_count':len(events),'token_events':sum(e['type']=='token' for e in events),'terminals':terminals,'seconds':time.monotonic()-started,'generated_text':''.join(e['text'] for e in events if e['type']=='token')}
