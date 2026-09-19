@@ -112,6 +112,30 @@ class ConcurrentTargetControlPump(TargetControlPump):
             self._save_claims() # Never prepare an ack before the actual result is durable.
             del self._futures[command_id]
 
+    def _record_uncertain_ack(self, command_id, code, remaining):
+        """Keep the peer's own reason for an honest "unknown" before the row is retired.
+
+        Measured 2026-09-19 (round p76r1, preview.76): the peer claimed `configure`, could not
+        produce a native response, and acked disposition='reconciliation_required' -- honest and
+        correct.  But the ack carries no reason (_ACK_FIELDS is command_id, claim_token,
+        disposition, native_response) and the row is popped right after the ack is accepted, so the
+        owner learned only "unknown" while the peer kept nothing: the round could not name its own
+        cause and had to be reconstructed from a timestamp triangle across two machines.  This keeps
+        a bounded local record of the reason.  Diagnostic only -- it never gates control flow -- and
+        allowlisted like every other private record here: a truncated command id, one reason code,
+        a count.  No payloads, no claim token, no key material, no raw stderr.
+        """
+        try:
+            _atomic_private_json(self.root/'uncertain-ack.private.json',{
+                'protocol':'mycelium.a13.uncertain_ack.v1',
+                'run_id':getattr(getattr(self,'worker',None),'run_id',None),
+                'command_id_prefix':str(command_id)[:16],
+                'error_code':code if code is None or isinstance(code,str) else str(code),
+                'remaining_claims':int(remaining),
+            })
+        except BaseException:
+            pass
+
     def _record_uncertain_claim(self, unresolved):
         """Record which claim tripped the uncertainty guard, and its provenance.
 
@@ -247,6 +271,12 @@ class ConcurrentTargetControlPump(TargetControlPump):
                 # guard (never removed -> `_dispatch_ready` raised forever) and grew
                 # the claims map until the durable state failed its own `len > 3`
                 # validation on the next load.  Native work is still never re-run.
+                # Record WHY before retiring: the ack cannot carry a reason, so this
+                # is the only place the peer's own cause can survive.
+                existing = claims.get(command_id)
+                self._record_uncertain_ack(command_id,
+                    existing.get('error_code') if isinstance(existing, dict) else None,
+                    max(0, len(claims) - 1))
                 claims.pop(command_id, None)
             self._save_claims() # Replayed ack can safely finish after this write.
             self._state['outbound'] = None
