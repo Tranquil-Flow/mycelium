@@ -21,7 +21,11 @@ df -h /System/Volumes/Data | tail -1
 echo "=== [0/6] preserve the previous receipts ==="
 for b in readiness-gate.json readiness-gate.txt PACKAGE.json gate-run.json; do
   [ -f "$RUN/$b" ] || continue
-  cp -p "$RUN/$b" "$RUN/${b%.*}-pre78.${b##*.}" && echo "  preserved $b"
+  SUF=$("$PY" -B "$REPO/scripts/a13_operator/receipt_head.py" "$RUN/$b" 2>/dev/null || true)
+  SUF=${SUF:-$NEW}
+  DST="$RUN/${b%.*}-preserved-${SUF}.${b##*.}"
+  if [ -f "$DST" ] && cmp -s "$RUN/$b" "$DST"; then echo "  already preserved $b (as -preserved-$SUF)"; continue; fi
+  cp -p "$RUN/$b" "$DST" && echo "  preserved $b -> -preserved-$SUF"
 done
 
 echo "=== [1/6] GATE ==="

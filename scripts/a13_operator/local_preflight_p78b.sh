@@ -21,7 +21,13 @@ printf "worktree: "; git status --porcelain | wc -l | tr -d " "; echo " dirty fi
 echo "=== [0/6] preserve the previous receipts ==="
 for b in readiness-gate.json readiness-gate.txt PACKAGE.json gate-run.json; do
   [ -f "$RUN/$b" ] || continue
-  cp -p "$RUN/$b" "$RUN/${b%.*}-superseded-$TAG.${b##*.}" && echo "  preserved $b"
+  # Name the preserved copy after the head INSIDE it, not the head we happen to be on: a receipt's
+  # provenance is its own.  Falls back to the run tag only when the file carries no head.
+  SUF=$("$PY" -B "$REPO/scripts/a13_operator/receipt_head.py" "$RUN/$b" 2>/dev/null || true)
+  SUF=${SUF:-$TAG}
+  DST="$RUN/${b%.*}-preserved-${SUF}.${b##*.}"
+  if [ -f "$DST" ] && cmp -s "$RUN/$b" "$DST"; then echo "  already preserved $b (as -preserved-$SUF)"; continue; fi
+  cp -p "$RUN/$b" "$DST" && echo "  preserved $b -> -preserved-$SUF"
 done
 
 echo "=== [1/6] GATE ==="
