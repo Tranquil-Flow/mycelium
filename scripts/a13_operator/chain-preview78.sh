@@ -27,7 +27,7 @@ done
 echo "=== [1/6] GATE ==="
 env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 \
   "$PY" -B scripts/pilot_readiness_gate.py --run-id wp8-02-useful-two-mac --seeds 5 --events 50 \
-  > /tmp/asm/gate-pre78.log 2>&1
+  > "$RUN/gate-$NEW-${HEAD:0:7}.log" 2>&1
 echo "gate_exit=$?"
 VERDICT=$("$PY" -c "import json;print(json.load(open('$RUN/readiness-gate.json'))['verdict'])")
 RH=$("$PY" -c "import json;d=json.load(open('$RUN/readiness-gate.json'));print([c for c in d['checks'] if 'package' in c.get('id','')][0]['detail']['git_head'])")
@@ -36,8 +36,14 @@ echo "verdict=$VERDICT receipt_head=$RH"
 
 echo "=== [2/6] BUILD $NEW ==="
 env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 \
-  "$VENV" -B scripts/build_a13_macos.py --output-root "$DIST/$NEW" > /tmp/asm/preflight-build.log 2>&1
-echo "BUILD_EXIT=$?"; tail -3 /tmp/asm/preflight-build.log | head -c 600; echo
+  # Fail closed by name if a previous artifact already holds this root: build_a13_macos.py refuses it
+  # ("fresh_output_root_required", historical previews are immutable) and the old chain then read the
+  # STALE identity and died at [3/6] with "identity head != build head" -- the wrong name for the cause.
+  [ -e "$DIST/$NEW" ] && { echo "STOP: $DIST/$NEW already exists -- preserve it aside (rename, never delete) first"; echo "PIPELINE_DONE early"; exit 5; }
+  "$VENV" -B scripts/build_a13_macos.py --output-root "$DIST/$NEW" > "$RUN/build-$NEW-${HEAD:0:7}.log" 2>&1
+  BUILD_EXIT=$?
+  echo "BUILD_EXIT=$BUILD_EXIT"; tail -3 "$RUN/build-$NEW-${HEAD:0:7}.log" | head -c 600; echo
+  [ "$BUILD_EXIT" = 0 ] || { echo "STOP: the build refused or failed (see the log tail above)"; echo "PIPELINE_DONE early"; exit 5; }
 
 echo "=== [3/6] IDENTITY RECORDED BY THE BUILD (where the sources came from) ==="
 IDENT="$DIST/$NEW/Mycelium A13 Demo.app/Contents/Resources/third_party/compiler-source-identity.json"
