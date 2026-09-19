@@ -1,3 +1,4 @@
+import urllib.error
 """The operator RPC layer must tell a BUSY app from a DEAD one.
 
 Two physical attempts were lost to getting that distinction wrong (2026-09-16,
@@ -124,19 +125,68 @@ def test_send_phase_urlerror_timeout_is_also_retried(rpc, monkeypatch):
     assert seen["n"] == 2
 
 
-def test_refused_connection_is_not_retried(rpc, monkeypatch):
-    """A dead socket is not a busy app: it must fail closed immediately, by its own name."""
+class _FakeClient:
+    """Stand-in for AppClient, which round14_rpc CONSTRUCTS as `AppClient(root)`.
+
+    It must therefore be a class whose instances answer `.call(path, body)`. My first attempt at this
+    fixture patched in an INSTANCE and failed with "'_FakeClient' object is not callable" -- and rather
+    than leave that in place (which would have replaced a meaningful failure with a fixture failure) the
+    file was reverted. Behaviour is driven by the class attributes so a test can flip it between calls.
+    """
+
+    mode = "ok"
+    attempts = 0
+
+    def __init__(self, root):
+        _FakeClient.attempts += 1
+        if _FakeClient.mode == "refused":
+            raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+        self.root = root
+
+    def call(self, path, body=None):
+        return {"ok": path}
+
+
+def test_a_refusal_after_first_contact_is_not_retried(rpc, monkeypatch):
+    """A dead socket is not a busy app: ONCE THE CHANNEL HAS ANSWERED, a refusal fails closed at once.
+
+    This preserves the original concern of this test exactly -- a refusal must never be retried as though it
+    were a busy handshake -- for the case it was written about. A refusal arriving mid-run means the app is
+    gone, and retrying it would turn a dead app into a slow round.
+    """
     import urllib.error
 
     _surface(rpc.OWNER)
-    seen = {"n": 0}
+    monkeypatch.setattr(rpc, "AppClient", _FakeClient)
+    monkeypatch.setattr(rpc, "_OWNER_ANSWERED", [], raising=False)   # a mutable flag LIST
+    _FakeClient.mode = "ok"
+    _FakeClient.attempts = 0
+    assert rpc.owner("/api/serving/status") == {"ok": "/api/serving/status"}
+    assert _FakeClient.attempts == 1
 
-    class Refused:
-        def __init__(self, root):
-            seen["n"] += 1
-            raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
-
-    monkeypatch.setattr(rpc, "AppClient", Refused)
+    _FakeClient.mode = "refused"          # now the app is GONE
+    _FakeClient.attempts = 0
     with pytest.raises(urllib.error.URLError):
         rpc.owner("/api/serving/status")
-    assert seen["n"] == 1, "a refused connection must not be retried as a busy handshake"
+    assert _FakeClient.attempts == 1, "after the channel has answered, a refusal must not be retried"
+
+
+def test_a_refusal_before_first_contact_is_bounded_by_the_startup_grace(rpc, monkeypatch):
+    """Before the first reply a refusal IS retried -- inside a grace that must EXPIRE.
+
+    Measured reason: 79r1 had the owner surface file present (require_local passed) while the listener had
+    not yet bound, so the first call was refused. That is a startup STATE, not a death -- but an app that
+    never binds is still a dead app, so the grace must end and the call must raise rather than spin.
+    """
+    import urllib.error
+
+    _surface(rpc.OWNER)
+    monkeypatch.setattr(rpc, "AppClient", _FakeClient)
+    monkeypatch.setattr(rpc, "_OWNER_ANSWERED", [], raising=False)   # a mutable flag LIST
+    monkeypatch.setattr(rpc, "_OWNER_STARTUP_GRACE_S", 0.05, raising=False)
+    _FakeClient.mode = "refused"
+    _FakeClient.attempts = 0
+    with pytest.raises(urllib.error.URLError):
+        rpc.owner("/api/serving/status")
+    assert _FakeClient.attempts > 1, "a startup refusal must be retried within the grace"
+    assert _FakeClient.attempts < 200, "the grace must be bounded, not a spin"
