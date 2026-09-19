@@ -12,12 +12,15 @@ import re
 import threading
 import tempfile
 import time
+import traceback
 
 from .authority import _private_directory, _atomic_private_json
 from .concurrent_pump import ConcurrentTargetControlPump
 from .managed_control import _binding_from_member, _binding_advanced
 from .managed_staging import TargetStaging, StagingError
-from .worker import ManagedWorker
+# _NATIVE_DIAGNOSTIC_FRAME is imported rather than re-declared: one regex decides what a bounded frame
+# looks like for BOTH boundaries (the worker's native diagnostics and the runtime's control-loop death).
+from .worker import ManagedWorker, _NATIVE_DIAGNOSTIC_FRAME
 
 
 class RuntimeErrorCode(ValueError):
@@ -45,7 +48,36 @@ def _bounded_control_reason(exc: BaseException) -> dict:
             tokens.append(candidate[:64])
         if len(tokens) == 4:
             break
-    return {'exception_type': type(exc).__name__[:64], 'tokens': tokens}
+    return {'exception_type': type(exc).__name__[:64], 'tokens': tokens,
+            'frames': _bounded_control_frames(exc)}
+
+
+def _bounded_control_frames(exc: BaseException) -> list[dict]:
+    """WHERE the control loop died, bounded the same way the native diagnostics are.
+
+    WHY: the reason record named the exception class and the codes but never the site.  Measured on
+    round p75r1's target artifact, ``runtime-control-failure.private.json`` held
+
+        error_code: managed_control_message_expired · exception_type: ManagedControlError · no frames
+
+    and the same wedge class has recurred after being fixed twice at the pump level (round 38's dead
+    poll envelope, round 54's ``reconciliation_required`` reply -- both in ``control_pump.py``).  A
+    class name cannot distinguish "the pump raised from a path that is already handled" from "the pump
+    raised from a path that is not", which is exactly the question a fix turns on.
+
+    Same allowlist discipline as the native diagnostics, through the SAME regex: file basename, line
+    and function only, capped at 24, never the message and never a path.
+    """
+    frames: list[dict] = []
+    try:
+        text = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    except Exception:
+        return frames
+    for file, line, function in _NATIVE_DIAGNOSTIC_FRAME.findall(text):
+        name = Path(file).name
+        if re.fullmatch(r'[A-Za-z_][A-Za-z_0-9.]{0,80}[.]py', name):
+            frames.append({'file': name, 'line': int(line), 'function': function[:80]})
+    return frames[-24:]
 
 
 def _current_binding(member, run_id, deployment_id):
