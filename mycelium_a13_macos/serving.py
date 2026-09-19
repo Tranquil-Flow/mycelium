@@ -77,7 +77,17 @@ RESOURCE_PROPOSAL = ResourceProposal(
     #   estimate was short by ~625 MB, which is the app process's own resident
     #   footprint during the load peak: real, bounded, and previously unmodelled.
     # Rebuilt from the measurement: 2 x ceil(1.15 x 5,885,624,320) = 13,536,935,936 B.
-    max_combined_rss_bytes=13_536_935_936,
+    # MEASURED AGAIN 2026-09-19 (round p76r1, preview.76) by the same self-report, on the
+    #   owner node: observed_group_rss_bytes 7,371,915,264 against the then-current
+    #   per-node half of 6,768,467,968 -- over by 603,447,296 B.  That trip is why the
+    #   run-level `configure` could not be answered, the pump honestly acked
+    #   reconciliation_required, and the deployment was marked unavailable (ERRATA-17).
+    #   A 7B int8 model's resident weights alone are ~7 GB, so the 09-16 derivation was
+    #   sized for a lighter tranche rather than exposing a leak.
+    # Rebuilt from the newer measurement by the same recipe:
+    #   2 x ceil(1.15 x 7,371,915,264) = 16,955,405,108 B -- 8.48 GB per node, which the
+    #   16 GiB laptop can afford and the 48 GiB owner node comfortably so.
+    max_combined_rss_bytes=16_955_405_108,
     max_wall_seconds=1_800,
     run_count=1,
 )

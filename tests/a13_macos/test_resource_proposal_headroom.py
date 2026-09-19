@@ -21,10 +21,36 @@ from mycelium_a13_macos.serving import RESOURCE_PROPOSAL
 MEASURED_GROUP_PEAK_BYTES = 5_885_624_320
 OBSERVED_LIMIT_THAT_FAILED = 5_752_698_265
 
+# Measured 2026-09-19 by the guard's own self-report (round p76r1, preview.76,
+# owner node remote-mac-6df0e88d38533e6ad8ac589b -> native-exit.private.json):
+#     error_code                worker_memory_limit_exceeded
+#     observed_group_rss_bytes  7,371,915,264
+#     max_rss_bytes             6,768,467,968   (this proposal // 2)
+#     overshoot_bytes             603,447,296
+# That trip is what cost p76r1 its qualification: the run-level `configure` was in
+# flight, the worker refused, the pump honestly acked reconciliation_required, and the
+# owner -- correctly refusing an unaccounted command -- marked the deployment
+# unavailable.  The bound above was rebuilt from the 66r1/67r1 peak; the useful 7B
+# tranche needs more, and a 7B int8 model's resident weights alone are ~7 GB, so this
+# is a stale derivation rather than a leak.
+MEASURED_GROUP_PEAK_BYTES_P76R1 = 7_371_915_264
+
 
 def test_the_runner_derived_per_node_limit_clears_the_measured_group_peak():
     per_node = RESOURCE_PROPOSAL.max_combined_rss_bytes // 2
     assert per_node > MEASURED_GROUP_PEAK_BYTES
+
+
+def test_the_bound_clears_the_7B_admission_peak_measured_in_p76r1():
+    """The pinned measurement must track the workload, not only the older rounds."""
+
+    per_node = RESOURCE_PROPOSAL.max_combined_rss_bytes // 2
+    assert per_node > MEASURED_GROUP_PEAK_BYTES_P76R1, (
+        'per-node limit does not clear the peak the 7B admission actually reached'
+    )
+    assert per_node >= int(MEASURED_GROUP_PEAK_BYTES_P76R1 * 1.10), (
+        'a margin that only just exceeds the measurement is not a margin'
+    )
 
 
 def test_the_margin_is_real_headroom_not_a_few_percent():
