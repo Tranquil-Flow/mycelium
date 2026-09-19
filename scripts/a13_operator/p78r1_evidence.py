@@ -124,6 +124,35 @@ def post():
         print("    -> if this round withheld terminals, the ABSENCE is an instrument finding: the env")
         print("       MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG must be exported into the app's environment.")
 
+    print(f"=== APP ADMISSION STATUS ({LABEL}) ===")
+    # The document p78r1 never had.  The app's OWN view -- per-request phase / terminal_state / queue_wait_ms
+    # and the coordinator's incident list -- existed only in memory, and the round's status snapshots all
+    # PREDATE the soak, so the wedge had to be reconstructed from four artifacts over three attempts.  The
+    # chain now captures it twice while the app is still up (pre-soak and post-soak).
+    for stage in ("pre-soak", "post-soak"):
+        path = RUN / f"round{LABEL}-admission-status-{stage}.json"
+        if not path.exists():
+            print(f"  {stage}: MISSING {path.name}")
+            print("    -> an INSTRUMENT finding, not a route finding: the capture must run while the app is")
+            print("       still alive, and the trap quits it afterwards.")
+            continue
+        payload = json.loads(path.read_text())
+        doc = payload.get("document") if isinstance(payload, dict) else None
+        if not isinstance(doc, dict) or "queue" not in doc:
+            print(f"  {stage}: channel={payload.get('channel') if isinstance(payload, dict) else '?'} "
+                  f"UNREADABLE {json.dumps(payload)[:200]}")
+            continue
+        reqs = doc.get("requests") or []
+        queue = doc.get("queue") or {}
+        incidents = doc.get("incidents") or []
+        print(f"  {stage}: channel={payload.get('channel')} queue_depth={queue.get('depth')} "
+              f"active={len(queue.get('active_request_ids') or [])}/{queue.get('maximum_active_requests')} "
+              f"records={len(reqs)}")
+        print(f"    phases      : {json.dumps(dict(Counter(r.get('phase') for r in reqs)), sort_keys=True)}")
+        print(f"    terminals   : {json.dumps(dict(Counter(str(r.get('terminal_state')) for r in reqs)), sort_keys=True)}")
+        print(f"    reservations: {sum(1 for r in reqs if r.get('reservation_count'))} of {len(reqs)} still hold one")
+        print(f"    incidents   : {json.dumps(dict(Counter(i.get('state') or i.get('kind') for i in incidents)), sort_keys=True)}")
+
     print(f"=== restart_count (the C5 restart evidence) ===")
     for label, root, host in (("owner", OWNER_ROOT, None), ("laptop", "/Users/evinova/mycelium-wp8-02", "mycelium-laptop")):
         got = counters(root, host=host)
