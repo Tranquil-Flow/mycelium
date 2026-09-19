@@ -48,5 +48,12 @@ run() {
 
 run scripts/a13_operator/round14_bootstrap_compile.py || { echo "STEP_FAILED bootstrap_compile" | tee -a "$LOG"; exit 1; }
 run scripts/a13_operator/round14_start_and_activate.py || { echo "STEP_FAILED start_and_activate" | tee -a "$LOG"; exit 2; }
-run scripts/a13_operator/round14_stream.py            || { echo "STEP_FAILED stream" | tee -a "$LOG"; exit 3; }
+# The stream step is wrapped so the route's own refusal is READ rather than waited out. In p74r1 the app
+# printed "live route terminal blocked request_id=... reason=command_cleanup_receipt_missing" at the moment
+# of blocking, while the step sat on a socket read for its full timeout. The wrapper watches the daemon log,
+# aborts the step when that line appears, and preserves the step's own exit status otherwise; a stale line
+# from an earlier round cannot trigger it (it starts reading from the file's current end).
+run scripts/a13_operator/stream_step_watch.py \
+  --daemon-log "${EVIDENCE}/round${A13_LOG_LABEL:-$VERSION}-owner-daemon.log" \
+  -- scripts/a13_operator/round14_stream.py              || { echo "STEP_FAILED stream" | tee -a "$LOG"; exit 3; }
 echo "CHAIN_COMPLETE" | tee -a "$LOG"
