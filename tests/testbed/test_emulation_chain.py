@@ -475,11 +475,12 @@ def test_the_round50_composition_now_holds_in_the_emulated_chain(
     )
     assert shaping["route_fanout_window_ms"] == route_cleanup_fanout_window_ms
     assert shaping["peer_advertised_cleanup_ms"] <= shaping["route_fanout_window_ms"]
-    assert shaping["peer_advertised_cleanup_ms"] == 1_200
     assert shaping["peer_advertised_cleanup_ms"] <= (
         shaping["route_fanout_window_ms"] - PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
     )
-    assert shaping["cancel_and_cleanup_budget_ms"] == pytest.approx(2000.0)
+    assert shaping["cancel_and_cleanup_budget_ms"] == pytest.approx(
+        CANCEL_AND_CLEANUP_BUDGET_SECONDS * 1_000.0
+    )
     assert shaping["measured"]
     assert shaping["unmeasured"]
 

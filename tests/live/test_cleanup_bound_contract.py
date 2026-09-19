@@ -26,10 +26,14 @@ from mycelium_live.route import (
 )
 from physical_inference_node import MAXIMUM_TOTAL_CLEANUP_MS
 
-# The owner-side deadline is structurally immutable: `PhysicalLiveRoute.cancel_request`
+# The owner-side deadline is structurally bounded by the SAME registry record the
+# gateway stamps and the node's advertisement is derived from: `cancel_request`
 # raises `invalid_cancellation_deadline` for any deadline outside
-# (cancellation_started_at, cancellation_started_at + 2.0].
-IMMUTABLE_OWNER_CLEANUP_BUDGET_MS = 2_000
+# (cancellation_started_at, cancellation_started_at + the budget].  Read from the
+# registry, never re-typed here -- a second copy is what db80812 shipped.
+IMMUTABLE_OWNER_CLEANUP_BUDGET_MS = int(
+    mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS * 1_000
+)
 
 # Command delivery plus receipt return must fit inside the owner's window too, so the
 # declared bound cannot sit flush against it.
@@ -39,6 +43,15 @@ MINIMUM_TRANSPORT_MARGIN_MS = 200
 def _owner_fanout_window_ms() -> int:
     return IMMUTABLE_OWNER_CLEANUP_BUDGET_MS - int(
         _CLEANUP_FALLBACK_RESERVE_SECONDS * 1_000
+    )
+
+
+def _admitted_ceiling_ms() -> int:
+    """The route's real admitted ceiling: window minus transport margin."""
+
+    return (
+        _owner_fanout_window_ms()
+        - mycelium_deadlines.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
     )
 
 
@@ -110,43 +123,61 @@ def test_advertised_cleanup_bound_is_admitted_inside_the_window_with_margin() ->
 
     assert admit_peer_cleanup_bound(1_200, node_id="node-a") == 1_200
     assert admit_peer_cleanup_bound(1_300, node_id="node-a") == 1_300
+    ceiling = _admitted_ceiling_ms()
+    assert admit_peer_cleanup_bound(ceiling, node_id="node-a") == ceiling
+    with pytest.raises(ValueError):
+        admit_peer_cleanup_bound(ceiling + 1, node_id="node-a")
 
 
-def test_preview50_advertised_bound_is_refused_by_name() -> None:
-    """RED on the preview.50 value: 2000 ms was the whole owner budget.
+def test_a_bound_beyond_the_admitted_ceiling_is_refused_by_name() -> None:
+    """The named refusal, and the change of verdict recorded rather than dropped.
 
-    This is decision 4(a)'s required unit test: the advertised 2000 ms against a
-    1500 ms window, and here against its 200 - margin admitted ceiling.
+    Before the 2026-09-20 re-derivation the preview.50 advertisement (2000 ms)
+    was over-reaching: it was the whole 2000 ms owner budget against a 1500 ms
+    window and a 1300 ms admitted ceiling.  The budget was re-derived from the
+    measured peer cleanup, so 2000 ms now fits - asserted below so the changed
+    verdict is on the record - while the refusal still bites, by name, one step
+    past the ceiling.
     """
 
+    # the changed verdict, recorded: the preview.50 value is no longer refused
+    assert admit_peer_cleanup_bound(2_000, node_id="node-a") == 2_000
+
+    refused = _admitted_ceiling_ms() + 1
     with pytest.raises(ValueError) as raised:
-        admit_peer_cleanup_bound(2_000, node_id="node-a")
+        admit_peer_cleanup_bound(refused, node_id="node-a")
 
     message = str(raised.value)
     assert message.startswith("peer_cleanup_bound_exceeds_route_window:node-a:")
-    assert "advertised=2000" in message
-    assert "window=1500" in message
+    assert f"advertised={refused}" in message
+    assert f"window={_owner_fanout_window_ms()}" in message
 
 
-def test_measured_peer_cleanup_latency_is_refused() -> None:
-    """The round-52 §13 measurement does not fit, and is now refused at the boundary.
+def test_measured_peer_cleanup_latency_is_admitted_after_the_rederivation() -> None:
+    """The round-52 §13 measurement is what the budget was re-derived FROM.
 
     Measured on preview.52: the relayed peer's `infer_cancel_wait` returned
     complete 3.180 s after issue (and its request-scoped snapshot at 2.418 s)
-    against a 1500 ms fanout window. A bound derived from that measurement must
-    not be admitted, which is decision 3's "if it does not fit, the fix is the
-    delivery path, not the budget" expressed as a startup refusal.
+    against a 1500 ms fanout window.  Before the 2026-09-20 re-derivation these
+    values were refused here *and then discovered mid-request instead* -- the
+    p75r1/p77r1 `command_cleanup_receipt_missing` family, where the route could
+    not prove owner-scoped cleanup inside the window it had advertised.  The
+    owner decision re-derived the budget from this measurement, so the
+    measurement must now fit, and the refusal must still bite one step past the
+    ceiling rather than having been loosened away.
     """
 
     for measured_ms in (1_418, 1_830, 2_418, 3_180):
-        with pytest.raises(ValueError) as raised:
+        assert (
             admit_peer_cleanup_bound(measured_ms, node_id="remote-mac-e9fe")
-        assert "peer_cleanup_bound_exceeds_route_window" in str(raised.value)
+            == measured_ms
+        )
 
-    # 1418 ms is the only one that would have fitted the raw window (1500 ms)
-    # but it still breaches the admitted ceiling (1300 ms), which is the margin
-    # the transport needs for delivery plus receipt return.
-    assert admit_peer_cleanup_bound(1_200, node_id="remote-mac-e9fe") == 1_200
+    refused = _admitted_ceiling_ms() + 1
+    with pytest.raises(ValueError) as raised:
+        admit_peer_cleanup_bound(refused, node_id="remote-mac-e9fe")
+    assert "peer_cleanup_bound_exceeds_route_window" in str(raised.value)
+    assert f"advertised={refused}" in str(raised.value)
 
 
 def test_absent_advertisement_is_not_silently_admitted() -> None:
@@ -199,16 +230,29 @@ def test_the_route_refuses_an_over_reaching_peer_at_startup_qualification() -> N
     each peer's advertised bound, so the refusal lives there - never mid-request.
     """
 
-    for measured_ms in (1_830, 2_418, 3_180):
+    ceiling = _admitted_ceiling_ms()
+
+    # Admitted bounds -- including the measured values that motivated the
+    # re-derivation -- fail on this fixture's own observation window instead, so
+    # the predicate is discriminating the bound and not the wiring.
+    for admitted_ms in (1_830, 2_418, 3_180, ceiling):
+        with pytest.raises(RuntimeError) as admitted:
+            _qualification_route(admitted_ms).live_attestation(request_id="request-a")
+        assert "peer_cleanup_bound_exceeds_route_window" not in str(
+            admitted.value
+        ), admitted
+
+    # One step past the ceiling, and the whole budget, are refused by name.
+    for refused_ms in (ceiling + 1, _owner_fanout_window_ms() + 1):
         with pytest.raises(RuntimeError) as raised:
-            _qualification_route(measured_ms).live_attestation(request_id="request-a")
+            _qualification_route(refused_ms).live_attestation(request_id="request-a")
         message = str(raised.value)
         assert message.startswith(
             "peer_cleanup_bound_exceeds_route_window:remote-mac-e9fe:"
         ), message
-        assert f"advertised={measured_ms}" in message
-        assert "admitted=1300" in message
-        assert "window=1500" in message
+        assert f"advertised={refused_ms}" in message
+        assert f"admitted={ceiling}" in message
+        assert f"window={_owner_fanout_window_ms()}" in message
 
     # The shipped advertisement passes the same predicate on the same path, so
     # the refusal discriminates the bound rather than the qualification wiring.
@@ -218,3 +262,28 @@ def test_the_route_refuses_an_over_reaching_peer_at_startup_qualification() -> N
         )
     assert "peer_cleanup_bound_exceeds_route_window" not in str(shipped.value)
     assert "live_attestation_observation_window_incomplete" in str(shipped.value)
+
+
+def test_the_route_and_port_mint_the_registry_budget_not_a_local_copy() -> None:
+    """The half-migration guard -- paid for by db80812.
+
+    db80812 re-derived the registry record while ``mycelium_live.route`` still
+    minted ``now + 2.0`` in ten places and ``router_port`` in two.  As shipped
+    that commit was inert, and worse than inert: the node advertised the
+    registry-derived bound while its own owner could only ever wait the old
+    window -- the same D9 violation that failed p77r1's smoke request, merely
+    inverted.  The consumer bindings enforce the assignment; this test states the
+    consequence in the composition's own terms.
+    """
+
+    from mycelium_live import route as live_route
+    from mycelium_live import router_port
+
+    for module in (live_route, router_port):
+        assert (
+            module._MAX_CANCELLATION_AND_CLEANUP_SECONDS
+            == mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+        ), module.__name__
+
+    # the advertised bound still fits the admitted ceiling those modules mint
+    assert MAXIMUM_TOTAL_CLEANUP_MS <= _admitted_ceiling_ms()

@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 import pytest
 
+import mycelium_deadlines
 import mycelium_live.route as route_module
 from mycelium_live.command_controller import (
     CleanupResult,
@@ -1216,29 +1217,40 @@ def _round50_timeline_route(
     return route, t0
 
 
-def test_round50_timeline_was_final_on_the_preview51_classification(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """RED on the preview.51 values: this timeline ended in the incident.
+#: The fanout window the recorded incident actually had: the pre-re-derivation
+#: owner budget (2.0 s) minus its fallback reserve (0.5 s).  Kept as a literal on
+#: purpose -- it is a HISTORICAL window, and deriving it from the registry would
+#: silently re-point this test at the fixed composition.
+PRE_REDERIVATION_FANOUT_WINDOW_SECONDS = 1.5
+
+
+def test_round50_timeline_was_final_at_the_old_fanout_window() -> None:
+    """The incident reproduces at the window it actually had, not at a classifier.
 
     The recorded reason for request ``f35736e4-…`` was
-    ``command_deadline_exceeded@<laptop>`` — a slice-scoped expiry that the
-    preview.51 classifier (``node_response_timeout@`` only) treated as final,
-    with 0.987 s of the owner's window still unspent.
+    ``command_deadline_exceeded@<laptop>``, a slice-scoped expiry, with 0.987 s
+    of the owner's window still unspent.  Measured on this fixture during the
+    2026-09-20 re-derivation, the boundary is sharp: at or below the peer's
+    measured 1.73 s cleanup the wait is final, and from 2.0 s it reaches a proven
+    request-scoped receipt.  The pre-re-derivation composition gave the fallback
+    attempt exactly this 1.5 s, i.e. the failing side.
+
+    RETRACTED, measured in the same session: this test previously monkeypatched
+    ``_CLEANUP_RETRYABLE_ATTEMPT_CODES`` to the preview.51 value and credited the
+    outcome to the classifier.  Driven at 1.5 s with the *shipped* classifier the
+    wait raises the same reason verbatim -- at this window the retryable record
+    never earns a second attempt worth making.  The deadline was the cause and
+    the classifier was not, which is exactly what the re-derivation acted on.
     """
 
     published: list[Mapping[str, Any]] = []
     route, _t0 = _round50_timeline_route(published=published)
-    monkeypatch.setattr(
-        route_module,
-        "_CLEANUP_RETRYABLE_ATTEMPT_CODES",
-        ("node_response_timeout@",),
-    )
 
     with pytest.raises(RuntimeError) as raised:
         route._wait_for_cancellation_cleanup(
             frozenset({"node-a", "node-b"}),
-            deadline_monotonic_s=time.monotonic() + 2.0,
+            deadline_monotonic_s=time.monotonic()
+            + PRE_REDERIVATION_FANOUT_WINDOW_SECONDS,
             cleanup_subject={"request_id": "request-a"},
             receipt_only=True,
         )
@@ -1753,7 +1765,13 @@ def test_cancellation_fanout_reserves_owner_budget_for_fallback_snapshot() -> No
         }
 
     route._send_before = send_before
-    owner_deadline = time.monotonic() + 1.5
+    # The owner's window is the registry budget, not a hand-made shorter value:
+    # 1.5 s (the pre-re-derivation shape) cannot carry the fallback reserve at
+    # all, so it would exercise the degenerate branch instead of the composition
+    # this test is about.
+    owner_deadline = (
+        time.monotonic() + mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+    )
 
     assert (
         route.cancel_request("request-a", deadline_monotonic_s=owner_deadline) is True
@@ -1766,7 +1784,9 @@ def test_cancellation_fanout_reserves_owner_budget_for_fallback_snapshot() -> No
     )
 
     assert cleanup_subject == route._request_cleanup_subject("request-a")
-    assert command_deadlines["infer_cancel_wait"] <= owner_deadline - 0.49
+    assert command_deadlines["infer_cancel_wait"] <= owner_deadline - (
+        mycelium_deadlines.CLEANUP_FALLBACK_RESERVE_SECONDS - 0.01
+    )
     assert (
         command_budget_expiries["infer_cancel_wait"]
         <= command_deadlines["infer_cancel_wait"] + 0.01
@@ -1946,7 +1966,9 @@ def test_lost_peer_interrupts_only_requests_using_that_peer() -> None:
     route._handle_lost_peer_processes()
 
     assert [request_id for request_id, _deadline in cancelled] == ["affected"]
-    assert 0.0 < cancelled[0][1] - started <= 2.01
+    assert 0.0 < cancelled[0][1] - started <= (
+        mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS + 0.01
+    )
     liveness_incident = route._liveness.incidents()[0]
     assert liveness_incident.affected_track_ids == ("affected",)
     assert liveness_incident.scope == "peer"
@@ -2031,7 +2053,9 @@ def test_active_liveness_monitor_interrupts_request_on_transport_fatal(
     route._monitor_active_liveness_once()
 
     assert [request_id for request_id, _deadline in cancelled] == ["request-affected"]
-    assert 0.0 < cancelled[0][1] - started <= 2.01
+    assert 0.0 < cancelled[0][1] - started <= (
+        mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS + 0.01
+    )
     liveness_incident = route._liveness.incidents()[0]
     assert liveness_incident.affected_track_ids == ("request-affected",)
     assert liveness_incident.scope == "request"

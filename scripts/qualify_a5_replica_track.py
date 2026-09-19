@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import mycelium_deadlines  # noqa: E402
 from mycelium_live.router_port import LiveRouterPort  # noqa: E402
 from mycelium_live.supervisor import _qualified_runtime  # noqa: E402
 from mycelium_m16_runtime import build_live_m16_runtime  # noqa: E402
@@ -305,7 +306,9 @@ def _execute_track(
     else:
         cancellation_requested = router.cancel_with_deadline(
             request_id,
-            deadline_monotonic_s=time.monotonic() + 2.0,
+            deadline_monotonic_s=(
+                time.monotonic() + mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
+            ),
         )
         raise RuntimeError(
             "a5_track_execution_timeout:"

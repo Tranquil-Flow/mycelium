@@ -1326,6 +1326,14 @@ BOUND_CONSUMER_BINDINGS: Final[tuple[tuple[str, str], ...]] = (
         "mycelium_request_gateway.service._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
         "cancel_and_cleanup_budget_seconds",
     ),
+    (
+        "mycelium_live.route._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+        "cancel_and_cleanup_budget_seconds",
+    ),
+    (
+        "mycelium_live.router_port._MAX_CANCELLATION_AND_CLEANUP_SECONDS",
+        "cancel_and_cleanup_budget_seconds",
+    ),
 )
 
 #: ``(dotted path, registry name)`` for consumers whose module belongs to the

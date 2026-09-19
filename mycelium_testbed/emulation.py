@@ -90,6 +90,7 @@ if str(_REPO_ROOT) not in sys.path:
 from mycelium_deadlines import (  # noqa: E402
     CANCEL_AND_CLEANUP_BUDGET_SECONDS,
     CLEANUP_RECEIPT_POLL_SECONDS,
+    PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS,
     advertised_maximum_total_cleanup_ms,
     check_peer_advertised_cleanup_bound,
     route_cleanup_fanout_window_ms,
@@ -3933,12 +3934,21 @@ def _directory_digest(directory: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+# The negative case must hold the receipt PAST the route's real cleanup window or
+# it is not a negative case.  1700 ms was calibrated against the
+# pre-re-derivation 1500 ms window and went stale the moment the window moved
+# (2026-09-20); derived here so it cannot go stale again.
+NEGATIVE_CASE_RECEIPT_HOLD_MS: float = float(
+    route_cleanup_fanout_window_ms + PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+)
+
+
 def run_emulation(
     *,
     run_dir: Path | str,
     model_root: Path | str | None = None,
     seed: int = 20260915,
-    receipt_hold_ms: float | None = 1700.0,
+    receipt_hold_ms: float | None = NEGATIVE_CASE_RECEIPT_HOLD_MS,
     python: str | None = None,
     fsync: bool = True,
     token_steps: int = TOKEN_STEPS,
@@ -4004,7 +4014,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--run-dir", type=Path, required=True)
     run.add_argument("--model-root", type=Path, default=None)
     run.add_argument("--seed", type=int, default=20260915)
-    run.add_argument("--receipt-hold-ms", type=float, default=1700.0)
+    run.add_argument(
+        "--receipt-hold-ms", type=float, default=NEGATIVE_CASE_RECEIPT_HOLD_MS
+    )
     run.add_argument("--token-steps", type=int, default=TOKEN_STEPS)
     run.add_argument("--profile", choices=sorted(MODEL_PROFILES), default="pilot")
     args = parser.parse_args(argv)

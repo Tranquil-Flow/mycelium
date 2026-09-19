@@ -447,7 +447,7 @@ class RequestGatewayService:
                 terminal = session.terminal_event is not None
             if not terminal:
                 self._cancel_session(session)
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
         for session in sessions:
             future = session.future
             if future is None:

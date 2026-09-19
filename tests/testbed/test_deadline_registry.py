@@ -143,7 +143,11 @@ BOUND_SOURCES: dict[str, tuple[str, ...]] = {
         "_CLEANUP_RECONCILIATION_HORIZON_SECONDS",
         "_CLEANUP_RECONCILIATION_WORKERS",
         "PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS",
+        # 2026-09-20 cleanup-budget re-derivation: the route mints its
+        # cancellation/cleanup deadlines from the registry record.
+        "_MAX_CANCELLATION_AND_CLEANUP_SECONDS",
     ),
+    "mycelium_live/router_port.py": ("_MAX_CANCELLATION_AND_CLEANUP_SECONDS",),
     # wp5-bind-residual: the stage-pack authority TTL bounds.
     "mycelium_live/local_preparer.py": (
         "_STAGE_PACK_MIN_AUTHORITY_TTL_MS",

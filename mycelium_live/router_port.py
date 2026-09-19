@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, cast, Iterable, Mapping
 
+import mycelium_deadlines
 from mycelium_m16_runtime import M16AdmissionError, M16RuntimeCoordinator
 from mycelium_router.contracts import ExecutionGraph, RequestContext
 
@@ -28,6 +29,12 @@ from .a4_contracts import validate_interruptible_stage_command
 from .lock_order import LockOrderDetector, LockOrderViolation
 
 from .route import AffectedPeerQuarantined, InferenceCancelled, LiveRoute, TokenSink
+
+# The owner's cancellation-and-cleanup window, bound from the one registry record
+# the rest of the composition partitions -- never a second route-local copy.  A
+# 2.0 s literal here mints deadlines the node's own advertised bound cannot honour
+# (D9); BOUND_CONSUMER_BINDINGS keeps this from drifting.
+_MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -579,7 +586,7 @@ class LiveRouterPort:
     def cancel(self, request_id: str) -> bool:
         return self.cancel_with_deadline(
             request_id,
-            deadline_monotonic_s=time.monotonic() + 2.0,
+            deadline_monotonic_s=time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS,
         )
 
     def cancel_with_deadline(
@@ -718,7 +725,7 @@ class LiveRouterPort:
     ) -> float:
         identity = pending.command_identity
         if identity is None:
-            return time.monotonic() + 2.0
+            return time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
         if identity.cancellation_generation > 0:
             snapshots = self._commands.snapshot(
                 identity.request_id,

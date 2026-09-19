@@ -122,7 +122,8 @@ _CLEANUP_FALLBACK_RESERVE_SECONDS = mycelium_deadlines.CLEANUP_FALLBACK_RESERVE_
 _CLEANUP_INLINE_RECEIPT_GRACE_SECONDS = mycelium_deadlines.CLEANUP_INLINE_RECEIPT_GRACE_SECONDS
 # Reviewer decision 2: a peer may not advertise a cleanup bound the route cannot
 # honour.  The admitted maximum is the route's real wait for that advertisement
-# (the immutable 2 s budget minus the retry reserve) less a transport margin for
+# (the owner cancellation-and-cleanup budget ``_MAX_CANCELLATION_AND_CLEANUP_SECONDS``
+# minus the retry reserve) less a transport margin for
 # command delivery plus receipt return.  Measured against decision 3's
 # requirement, the two-Mac peer's end-to-end cleanup was **1.83 s / 3.18 s**
 # against a 1.5 s window (round52-…md §13), i.e. it does not fit — which is
@@ -131,6 +132,16 @@ _CLEANUP_INLINE_RECEIPT_GRACE_SECONDS = mycelium_deadlines.CLEANUP_INLINE_RECEIP
 # (``peer_cleanup_bound_transport_margin_ms``) because the advertised bound the
 # registry derives is written with it: advertised = window - margin - slack.
 PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS = mycelium_deadlines.PEER_CLEANUP_BOUND_TRANSPORT_MARGIN_MS
+
+# The owner's cancellation-and-cleanup window, in seconds: the ONE record the
+# whole composition partitions (``mycelium_deadlines``; re-derived 2026-09-20 from
+# the measured peer cleanup 1.83 s / 3.18 s by owner decision, the same pattern as
+# the RSS bound b7f0e07).  Every deadline this module mints for a cancellation or a
+# request-scoped cleanup is anchored on it: a route-local 2.0 s made the node
+# advertise a bound its own owner could never honour, which is precisely the D9
+# violation that failed p77r1's smoke request.  Bound from the registry, never
+# copied -- ``mycelium_deadlines.BOUND_CONSUMER_BINDINGS`` keeps it from drifting.
+_MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS
 
 
 def admit_peer_cleanup_bound(
@@ -2184,7 +2195,7 @@ class PhysicalLiveRoute:
                 except BaseException:
                     # Evidence projection must never suppress bounded safety work.
                     pass
-            interruption_deadline = observed_at_s + 2.0
+            interruption_deadline = observed_at_s + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
             for request_id in affected_tracks:
                 try:
                     self._record_scoped_runtime_incident(
@@ -3137,7 +3148,7 @@ class PhysicalLiveRoute:
         if time.monotonic() < final_deadline_monotonic_s:
             attempt_deadline = min(
                 final_deadline_monotonic_s,
-                time.monotonic() + 2.0,
+                time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS,
             )
             try:
                 self._wait_for_cancellation_cleanup(
@@ -3288,12 +3299,12 @@ class PhysicalLiveRoute:
             fanout_complete = threading.Event()
             active["cancellation_fanout_complete"] = fanout_complete
             if deadline_monotonic_s is None:
-                deadline_monotonic_s = active["cancellation_started_at"] + 2.0
+                deadline_monotonic_s = active["cancellation_started_at"] + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
             if (
                 not isinstance(deadline_monotonic_s, (int, float))
                 or isinstance(deadline_monotonic_s, bool)
                 or deadline_monotonic_s <= active["cancellation_started_at"]
-                or deadline_monotonic_s > active["cancellation_started_at"] + 2.0
+                or deadline_monotonic_s > active["cancellation_started_at"] + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
             ):
                 raise ValueError("invalid_cancellation_deadline")
             active["cancellation_deadline"] = float(deadline_monotonic_s)
@@ -3380,7 +3391,7 @@ class PhysicalLiveRoute:
             # request-scoped snapshot fallback when a complete response was
             # produced but delayed in the SSH/control transport.  Reserve one
             # existing bounded snapshot attempt; this does not extend the
-            # immutable two-second cleanup deadline.
+            # owner cancellation-and-cleanup window (see ``_MAX_CANCELLATION_AND_CLEANUP_SECONDS``).
             now = time.monotonic()
             fanout_deadline = deadline
             if deadline - now > _CLEANUP_FALLBACK_RESERVE_SECONDS:
@@ -3602,7 +3613,7 @@ class PhysicalLiveRoute:
             # controller/physical ordering gap exposed by sustained traffic.
             return float(authorize_cleanup(observed_route_deadline))
 
-        cancellation_deadline = authorize_cleanup(time.monotonic() + 2.0)
+        cancellation_deadline = authorize_cleanup(time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS)
         if not self.cancel_request(
             request_id,
             deadline_monotonic_s=cancellation_deadline,
@@ -3656,7 +3667,7 @@ class PhysicalLiveRoute:
         proposed_deadline = (
             float(existing_deadline)
             if existing_deadline is not None
-            else failure_observed_at + 2.0
+            else failure_observed_at + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
         )
         cleanup_deadline = authorize_cleanup(proposed_deadline)
         if self.cancel_request(
@@ -4308,7 +4319,7 @@ class PhysicalLiveRoute:
                                 request_id
                             ].get("cancellation_deadline")
                     if cancellation_deadline is None:
-                        cancellation_deadline = time.monotonic() + 2.0
+                        cancellation_deadline = time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
                     if authorize_cleanup is not None:
                         cancellation_deadline = authorize_cleanup(
                             float(cancellation_deadline)
@@ -4328,7 +4339,7 @@ class PhysicalLiveRoute:
                     # the same request-scoped cooperative interrupt operation as
                     # cancellation, but retain the already-determined completed
                     # terminal outcome after cleanup is proven.
-                    cleanup_deadline = time.monotonic() + 2.0
+                    cleanup_deadline = time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
                     assert authorize_cleanup is not None
                     cleanup_deadline = authorize_cleanup(cleanup_deadline)
                     if not self.cancel_request(
@@ -4404,7 +4415,7 @@ class PhysicalLiveRoute:
                     route_identity is not None
                     and self.request_cleanup_receipt(request_id) is None
                 ):
-                    cleanup_deadline = failure_observed_at + 2.0
+                    cleanup_deadline = failure_observed_at + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
                     try:
                         assert authorize_cleanup is not None
                         cleanup_deadline = self._authorize_failed_request_cleanup(
@@ -5178,7 +5189,7 @@ class PhysicalLiveRoute:
                             subject,
                             observed_at_ms=now_ms,
                         )
-            interruption_deadline = observed_at_s + 2.0
+            interruption_deadline = observed_at_s + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
             for request_id in active_tracks:
                 try:
                     self.cancel_request(
