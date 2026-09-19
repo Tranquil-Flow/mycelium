@@ -44,6 +44,16 @@ env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 \
   # ("fresh_output_root_required", historical previews are immutable) and the old chain then read the
   # STALE identity and died at [3/6] with "identity head != build head" -- the wrong name for the cause.
   [ -e "$DIST/$NEW" ] && { echo "STOP: $DIST/$NEW already exists -- preserve it aside (rename, never delete) first"; echo "PIPELINE_DONE early"; exit 5; }
+# The build's WORK dir (build/<name>, gitignored PyInstaller scratch) cannot be reused: its
+# compiler-source staging does mkdir(exist_ok=False), so the second build for a version raises
+# FileExistsError: .../compiler-sources -- measured 2026-09-20, after a preflight build's artifact was
+# preserved aside and .78 was built again.  The output-root guard above does not cover this, and the chain
+# would have aborted at [2/6].  Reclaiming superseded staging is allowed; the retained artifact under $DIST
+# is untouched (different directory).
+if [ -d "$REPO/build/$NEW" ]; then
+  echo "  reclaiming scratch $REPO/build/$NEW ($(du -sh "$REPO/build/$NEW" 2>/dev/null | cut -f1))"
+  rm -rf "$REPO/build/$NEW"
+fi
   "$VENV" -B scripts/build_a13_macos.py --output-root "$DIST/$NEW" > "$RUN/build-$NEW-${HEAD:0:7}.log" 2>&1
   BUILD_EXIT=$?
   echo "BUILD_EXIT=$BUILD_EXIT"; tail -3 "$RUN/build-$NEW-${HEAD:0:7}.log" | head -c 600; echo

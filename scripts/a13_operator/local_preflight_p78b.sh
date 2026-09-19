@@ -41,6 +41,16 @@ echo "verdict=$VERDICT receipt_head=$RH"
 [ "$VERDICT" = "GO" ] && [ "$RH" = "$HEAD" ] || { echo "STOP: gate not GO for this head"; echo "PREFLIGHT_LOCAL_FAILED"; exit 3; }
 
 echo "=== [2/6] BUILD $NEW ==="
+# The build's WORK dir (build/<name>, gitignored PyInstaller scratch) cannot be reused: its
+# compiler-source staging does mkdir(exist_ok=False), so the second build for a version raises
+# FileExistsError: .../compiler-sources -- measured 2026-09-20, after a preflight build's artifact was
+# preserved aside and .78 was built again.  The output-root guard above does not cover this, and the chain
+# would have aborted at [2/6].  Reclaiming superseded staging is allowed; the retained artifact under $DIST
+# is untouched (different directory).
+if [ -d "$REPO/build/$NEW" ]; then
+  echo "  reclaiming scratch $REPO/build/$NEW ($(du -sh "$REPO/build/$NEW" 2>/dev/null | cut -f1))"
+  rm -rf "$REPO/build/$NEW"
+fi
 env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 \
   "$VENV" -B scripts/build_a13_macos.py --output-root "$DIST/$NEW" > /tmp/asm/build-pre78-at-$TAG.log 2>&1
 echo "BUILD_EXIT=$?"; tail -3 /tmp/asm/build-pre78-at-$TAG.log | head -c 600; echo
