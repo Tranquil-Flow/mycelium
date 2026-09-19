@@ -160,3 +160,29 @@ sequenced by the owner-run wrapper described in `RUNNER_SPEC.md` §2/§3; this d
 supplies every tool that wrapper invokes, minus the build/smoke step. No step here
 starts the app on the owner Mac's frozen demo surfaces: the packaged app is launched
 with `--headless --state-root <A13_OWNER_ROOT>`/`<A13_REMOTE_ROOT>/target`.
+
+
+## Round apparatus moved in from /tmp (2026-09-20, commit `da033a0`)
+
+A round must run from this branch's committed bytes alone. Four things the preview.78 pipeline needed did
+not: the per-module `pyz_ledger.py` (lived in the program's `tools/`), the criterion-3 ssh audit shim,
+and the round's own instruments.
+
+| File | What it is |
+|---|---|
+| `pyz_ledger.py`, `tree_ledger.py` | byte-identical to the copies the pipeline ran; the ledger prints, per module, which markers are in the PYZ and whether the baseline row shows them changing |
+| `ssh-shim/ssh` | the instrument behind `A13_SSH_LOG`: logs one line per ssh invocation, then execs the real ssh. Its own comment names this directory as its home. **`chain-preview78e.sh` now fails closed if it is missing** — without it the calls stop being recorded and criterion 3 reads clean for the wrong reason |
+| `soak_interventions.py` | read-only locate/list/read of membership counters and worker processes on both Macs (C5 interventions) |
+| `p78r1_evidence.py` | collects the round's evidence from artifacts, never from a console line |
+| `soak_baseline_arm.sh`, `soak_head_arm.sh` | the two arms of the transport experiment (0/3 vs 2/3), the reproduction behind ERRATA-22 |
+| `run_readiness_gate.sh` | runs the readiness gate; **refuses to overwrite an existing gate log** and takes the label as `$1` |
+| `run_vitest.sh` | the canonical TS command, run directly — the shell guard rejects `npm` payloads |
+| `lan_sweep.sh`, `regen_and_check.sh`, `local_preflight_p78.sh` | read-only LAN discovery; fixture/manifest regen + drift check; the local half of the round chain |
+
+Evidence produced by a round now lands in the run directory (`$RUN/pyz-ledger-pre78.txt`,
+`$EV/criterion3-ssh-calls-p78r1.log`) instead of `/tmp`, so it survives a `/tmp` clean.
+
+**Two determinism fixes found while moving these in:** the ledger's marker order is now sorted (it
+iterated a set, so two runs over the same bundle could print the same evidence differently), and
+`detach_run.py` refuses to start a round into a log that already has content — a round log is evidence and
+interleaved launches would make it ambiguous which launch produced which line.
