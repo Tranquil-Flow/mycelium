@@ -178,7 +178,12 @@ rpc = load('round14_rpc', 'scripts/a13_operator/round14_rpc.py')
 # all passed. The app's API is a CSRF/session-sensitive single-writer channel; a second caller is a
 # plausible cause of the 403. So: wait on the chain's OWN log sentinel (no API traffic), then read the
 # status exactly once.
-LOG = '/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-mac/round${A13_LOG_LABEL}-supervisor.log'
+# The label must come from the ENVIRONMENT, not from shell interpolation: this block is a QUOTED heredoc
+# (<<'PY'), so a '${A13_LOG_LABEL}' written here reaches Python as those eleven literal characters and the
+# path never exists -- which made the chain_finished wait below spin its full 2100 s before every soak.
+# Every other reference in this block already reads os.environ; this one now does too.
+LOG = ('/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-mac'
+       '/round%s-supervisor.log' % os.environ.get('A13_LOG_LABEL', 'soak'))
 deadline = time.monotonic() + 2100
 while time.monotonic() < deadline:
     try:
@@ -222,6 +227,41 @@ def _route_alive(b):
         return ((st or {}).get('serving') or {}).get('state') == 'api_running'
     except Exception:
         return False
+
+# C5's PREREQUISITE, in the plan's own words: "soak only after one request completes end to end, or you
+# will spend an hour measuring a broken path." Two things make this gate necessary rather than nice:
+#   * 1704ac2 made a FAILED request publish a terminal too, so "a terminal arrived" no longer distinguishes
+#     a working path from a refuse-everything path. The driver's `succeeded` field exists for exactly this
+#     -- its own comment: ok=True means "the stream produced tokens and reached a terminal"; succeeded means
+#     the terminal was the SUCCESSFUL one, and "criterion 5 needs the second";
+#   * the soak spends 110 requests and ~an hour. Spending it on a path that cannot complete would produce a
+#     large, honest, useless measurement -- and would blur a real C5 result with a broken prerequisite.
+# The smoke request uses the SOAK'S OWN prompt and token count (wp8_05_soak.run_soak defaults), so it is the
+# same shape of request the soak would make, not a different one. Its outcome is written to the round
+# evidence either way: a refusal is a measurement, not a silence.
+smoke_prompt = os.environ.get('SOAK_PROMPT', 'Describe the city of Berlin in three sentences.')
+smoke_samples, smoke = measure.stream(base, smoke_prompt, int(os.environ.get('SOAK_TOKENS', '32')),
+                                      timeout=int(os.environ.get('SOAK_TIMEOUT', '180')))
+_smoke = {k: smoke.get(k) for k in ('ok', 'succeeded', 'terminal', 'terminal_code', 'has_terminal')}
+print('SMOKE_REQUEST', json.dumps(_smoke))
+_EV = '/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-mac'
+_smoke_path = os.path.join(_EV, 'round%s-smoke.json' % os.environ.get('A13_LOG_LABEL', 'soak'))
+with open(_smoke_path, 'w') as _fh:
+    _fh.write(json.dumps({'protocol': 'mycelium.a13.soak_precondition_smoke.v1',
+                          'run_label': os.environ.get('A13_LOG_LABEL', 'soak'),
+                          'prompt': smoke_prompt,
+                          'max_new_tokens': int(os.environ.get('SOAK_TOKENS', '32')),
+                          'base': base, **_smoke}, indent=1))
+print('SMOKE_WRITTEN', _smoke_path)
+if not smoke.get('succeeded'):
+    print(json.dumps({'ok': False, 'refused': 'soak_skipped_no_request_completed_end_to_end',
+                      'detail': 'the smoke request did not reach the SUCCESSFUL terminal, so the soak was '
+                                'not spent; a failure terminal still counts as failing this prerequisite',
+                      'terminal': smoke.get('terminal'),
+                      'terminal_code': smoke.get('terminal_code')}, indent=1))
+    raise SystemExit(0)
+print('SMOKE PASS -- one request completed end to end; the soak is now worth spending')
+
 _log = os.environ.get('A13_SSH_LOG', '/tmp/asm/criterion3-ssh-calls.log')
 before = len(audit.invocations(_log))
 print('ACCEPTANCE_WINDOW_SSH_BEFORE', before, 'total_in_run', before)
