@@ -10,9 +10,10 @@ import sys
 import os
 from pathlib import Path
 
-script = str(Path(sys.argv[1]).expanduser())
-if not Path(script).is_absolute():
-    raise SystemExit('detach_run.py needs an absolute script path (it launches with cwd=~): %s' % script)
+# Resolve against the CALLER's cwd, which is well defined; the round itself is launched with cwd=~,
+# so an unresolved relative path would die there as "No such file or directory" -- after the log file had
+# already been created, which is how this surfaced on the tool's first real use.
+script = str(Path(sys.argv[1]).expanduser().resolve())
 if not Path(script).exists():
     raise SystemExit('no such script: %s' % script)
 log = sys.argv[2] if len(sys.argv) > 2 else '/tmp/asm/detached.out'
