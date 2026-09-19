@@ -47,6 +47,20 @@ from wp8_05_measure_stream import stream as _stream
 # duplicate native executions." The numbers live here so a verdict cannot drift from the criterion.
 CRITERION_MIN_REQUESTS = 100
 CRITERION_MIN_CANCELLATIONS = 10
+# The driver mode that can actually CONFIRM a cancellation: ask via the product's own cancel endpoint
+# (DELETE <cancel_path>) and keep reading for its terminal. 'disconnect' closes the stream early, which
+# exercises the product's infer_cancel_wait path but cannot produce a confirmation.
+CANCEL_MODE = 'endpoint'
+
+
+def cancellation_confirmed(summary):
+    """A cancellation counts ONLY when the product's own terminal says `cancelled`.
+
+    Nothing else confirms it: not the client's request, not the endpoint's 202, not the absence of
+    tokens. A cancel that silently does nothing must stay visible as unconfirmed -- that is what
+    criterion 5's >=10 cancellations is measuring.
+    """
+    return summary.get('terminal') == 'cancelled'
 
 
 def summarize(records, *, expected=None, loop_deaths=0):
@@ -134,7 +148,7 @@ def run_soak(base, *, requests=110, cancel_every=10, prompt='Describe the city o
     """Issue requests sequentially; cancel every k-th; sample the route's health between requests."""
     records, loop_deaths, cancel_ids = [], [], []
     for i in range(1, requests + 1):
-        record = {'attempt': i}
+        record: dict = {'attempt': i}
         if sample_status is not None:
             alive = sample_status()
             if not alive:
@@ -143,19 +157,25 @@ def run_soak(base, *, requests=110, cancel_every=10, prompt='Describe the city o
         do_cancel = (cancel_every and i % cancel_every == 0)
         record['cancelled_requested'] = bool(do_cancel)
         try:
-            # CANCELLATION IS NOT WIRED YET, and the code says so rather than pretending:
-            # wp8_05_measure_stream.stream() takes no cancel hook, so a cancel attempt here would either
-            # raise (the LSP caught exactly that) or silently do nothing. Criterion 5 wants >=10
-            # cancellations, so this MUST be implemented before a soak can claim to meet it -- either by
-            # closing the event stream early and observing the product's terminal, or by the product's own
-            # cancel command (the mailbox vocabulary already carries `infer_cancel_wait`). Until then the
-            # record marks the intent and does NOT claim confirmation.
-            result = _stream(base, prompt, max_new_tokens, timeout=timeout,
-                             cancel_after_s=2.0 if do_cancel else None)
-            record.update(result)
+            # CANCELLATIONS ARE WIRED, AND CONFIRMED ONLY BY THE PRODUCT. The driver asks through the
+            # product's own cancel endpoint (DELETE <cancel_path>, asgi.py:260/:336) and then KEEPS
+            # READING, because the product's `cancelled` terminal is the only thing that confirms one
+            # (see cancellation_confirmed above). Criterion 5 wants >=10 confirmations, and a soak that
+            # counted its own request as the confirmation would hide exactly the failure it measures.
+            # THE DRIVER RETURNS (samples, summary) -- A TUPLE, and `record.update(tuple)` raises
+            # ValueError("dictionary update sequence element #0 has length ..."). That exception was
+            # swallowed by this block's own `except Exception` handler, so EVERY request was recorded as
+            # ok=False with a ValueError detail and the soak could not measure anything at all. Unpack.
+            _samples, summary = _stream(base, prompt, max_new_tokens, timeout=timeout,
+                                        cancel_after_s=2.0 if do_cancel else None,
+                                        cancel_mode=CANCEL_MODE if do_cancel else 'disconnect')
+            record.update(summary)
             if do_cancel:
-                record['cancelled_confirmed'] = False
-                record['cancelled_note'] = 'cancel_not_implemented_in_driver'
+                record['cancelled_confirmed'] = cancellation_confirmed(summary)
+                if not record['cancelled_confirmed']:
+                    record['cancelled_note'] = (
+                        'unconfirmed by the product: cancel_status=%s terminal=%s'
+                        % (summary.get('cancel_status'), summary.get('terminal')))
         except urllib.error.HTTPError as exc:
             record.update({'ok': False, 'error': 'HTTPError', 'detail': 'HTTP %s' % exc.code})
         except Exception as exc:

@@ -59,8 +59,24 @@ def summarize(samples):
     return result
 
 
-def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic, cancel_after_s=None):
-    """Submit one request and time every event as it ARRIVES. Returns (samples, summary)."""
+def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic, cancel_after_s=None,
+           cancel_mode='disconnect'):
+    """Submit one request and time every event as it ARRIVES. Returns (samples, summary).
+
+    cancel_mode:
+      'disconnect' -- close the stream early. The product treats a requestor going away as its own
+                      cancel trigger (route.py:2520, the inline `infer_cancel_wait`), so this
+                      exercises that real path. This client records only that it ASKED.
+      'endpoint'   -- call the product's explicit cancel (`cancel_path` from the submit response,
+                      DELETE /v1/inference/{request_id}) AND KEEP READING for the product's own
+                      terminal. Criterion 5 asks for >=10 CONFIRMED cancellations, and only the
+                      product's `cancelled` terminal can confirm one: a cancel that silently does
+                      nothing is exactly what the soak exists to catch, and a client that assumed
+                      its own request succeeded would hide it.
+    """
+    if cancel_mode not in ('disconnect', 'endpoint'):
+        # Fail closed on a mistyped mode rather than silently measuring the other one.
+        raise ValueError('cancel_mode_unknown:%s' % cancel_mode)
     # A COOKIE JAR IS REQUIRED, and 76r1 is the evidence: with plain urlopen the session cookie from
     # /api/v1/bootstrap is dropped, so every later call came back `HTTP Error 401: Unauthorized` -- all
     # three attempts. The pinned stream step (round14_stream.py:23) builds its opener with
@@ -81,6 +97,18 @@ def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic, c
 
     session = _json('/api/v1/bootstrap')['session']
     csrf = {session['csrf_header']: session['csrf_token']}
+
+    def _delete(path, extra=None):
+        """The product's cancel verb. Returns (status, body|None); an error status is a fact, not a
+        crash -- the caller reports it rather than dying inside a measurement."""
+        request = urllib.request.Request(
+            origin + path, method='DELETE',
+            headers={'Origin': origin, 'Accept': 'application/json', **(extra or {})})
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                return response.status, json.load(response)
+        except urllib.error.HTTPError as exc:
+            return exc.code, None
     qualification = _json('/api/v1/qualification/current')
     # USE THE PRODUCT'S OWN CONTRACT. 77r1 sent a hand-rolled dict and the gateway answered 400: the
     # contract carries `protocol` (and validates it), and the pinned step builds the same object --
@@ -94,6 +122,7 @@ def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic, c
     accepted = _json('/api/v1/inference', submission, extra=csrf)
     samples = []
     cancel_requested = False
+    cancel_status = None
     event_request = urllib.request.Request(base.rstrip('/') + accepted['event_path'], headers=headers)
     with opener.open(event_request, timeout=timeout) as response:
         _loop_start = clock()
@@ -103,21 +132,29 @@ def stream(base, prompt, max_new_tokens, *, timeout=600, clock=time.monotonic, c
             arrived = clock()
             event = json.loads(raw[6:])
             samples.append((event, arrived))
-            if cancel_after_s is not None and (arrived - _loop_start) >= cancel_after_s:
-                # CLOSE EARLY, WHICH IS THE PRODUCT'S OWN CANCEL TRIGGER. route.py:2520 refers to the
-                # INLINE infer_cancel_wait -- the owner cancels the inference when the requestor goes
-                # away -- so abandoning the stream here exercises the real path rather than a bespoke
-                # endpoint. This client records only that it ASKED; whether the product CONFIRMED the
-                # cancellation is read from the owner's and node's own evidence afterwards, because a
-                # cancellation that silently does nothing is exactly what criterion 5's soak exists to
-                # catch, and a client that assumes its own request succeeded would hide it.
+            if (cancel_after_s is not None and not cancel_requested
+                    and (arrived - _loop_start) >= cancel_after_s):
                 cancel_requested = True
+                if cancel_mode == 'endpoint':
+                    # ASK THE PRODUCT, THEN KEEP READING. Its own terminal is the only confirmation:
+                    # a cancellation that silently does nothing is exactly what criterion 5's soak
+                    # exists to catch, and a client that assumed its own request succeeded would hide
+                    # it. If no terminal ever arrives, the record carries no terminal and the soak
+                    # counts the request as a failure rather than a confirmation.
+                    cancel_status, _body = _delete(accepted['cancel_path'], extra=csrf)
+                    continue
+                # 'disconnect': closing here IS the product's own cancel trigger. route.py:2520
+                # refers to the INLINE infer_cancel_wait -- the owner cancels the inference when the
+                # requestor goes away -- so this exercises that real path. The client records only
+                # that it ASKED; confirmation is the product's own evidence.
                 break
             if event.get('type') in ('completed', 'cancelled', 'failed'):
                 break
     summary = summarize(samples)
     if cancel_after_s is not None:
         summary['cancelled_requested'] = bool(cancel_requested)
+        summary['cancel_mode'] = cancel_mode
+        summary['cancel_status'] = cancel_status
     return samples, summary
 
 
