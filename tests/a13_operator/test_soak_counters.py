@@ -6,6 +6,9 @@ happen, and a counter that can pass while the thing happened is worse than no co
 import importlib.util
 import json
 import pathlib
+import threading
+
+import pytest
 
 _p = pathlib.Path(__file__).resolve().parents[2] / 'scripts/a13_operator/wp8_05_soak.py'
 _spec = importlib.util.spec_from_file_location('soakmod', _p)
@@ -99,9 +102,23 @@ def test_the_criterion_is_met_only_at_the_floor_with_confirmed_cancellations():
     records = [_rec(rid='r%d' % i) for i in range(100)]
     records += [_rec(rid='c%d' % i, ok=False, cancel=True, confirmed=True, terminal='cancelled')
                 for i in range(10)]
-    s = soak.summarize(records, expected=110, loop_deaths=0)
+    s = soak.summarize(records, expected=110, loop_deaths=0, max_in_flight=4)
     assert s['succeeded'] == 100 and s['cancelled_confirmed'] == 10
     assert s['met_criterion_5'] is True
+
+
+def test_the_criterion_requires_MEASURED_concurrency():
+    """Criterion 5 asks for requests "sequential and concurrent". A run that never had two requests in
+    flight has not exercised the concurrent half, however the harness was configured."""
+    records = [_rec(rid='r%d' % i) for i in range(100)]
+    records += [_rec(rid='c%d' % i, ok=False, cancel=True, confirmed=True, terminal='cancelled')
+                for i in range(10)]
+    without = soak.summarize(records, expected=110, max_in_flight=1)
+    assert without['criterion_5']['concurrent_requests_met'] is False
+    assert without['met_criterion_5'] is False
+    with_concurrency = soak.summarize(records, expected=110, max_in_flight=4)
+    assert with_concurrency['criterion_5']['concurrent_requests_met'] is True
+    assert with_concurrency['met_criterion_5'] is True
 
 
 def test_cancellations_below_the_floor_keep_the_criterion_unmet():
@@ -120,11 +137,15 @@ def test_a_loop_death_alone_unmeets_the_criterion():
 
 
 def test_the_criterion_names_what_this_driver_cannot_measure():
-    """Honest limits, in the verdict itself: concurrency, a worker restart and a network change are NOT
-    exercised by this driver, so a summary must not imply they were."""
+    """Honest limits, in the verdict itself: a worker restart and a network change are NOT exercised by
+    this driver, so a summary must not imply they were. Concurrency WAS on this list and is not any more
+    (73516f8 added the phase), so the list must have lost that item too -- a limits list that keeps a
+    solved item is as misleading as one that omits an unsolved one."""
     s = soak.summarize([_rec(rid='a')], expected=1)
     listed = ' | '.join(s['criterion_5']['unmeasured_by_this_driver'])
-    assert 'concurrent' in listed and 'restart' in listed and 'network change' in listed
+    assert 'restart' in listed and 'network change' in listed
+    assert 'concurrent' not in listed, 'concurrency is measured now (max_in_flight)'
+    assert 'concurrent_requests_met' in s['criterion_5']
     assert s['criterion_5']['requests_met'] is False, 'one request is not >=100'
 
 
@@ -188,3 +209,59 @@ def test_a_cancelled_request_does_not_count_as_succeeded():
     assert s['cancelled_confirmed'] == 1
     assert s['succeeded'] == 1
     assert s['stuck_total'] == 0
+
+
+# --------------------------------------------------------------------------- #
+# The concurrent phase: measured in flight, and bounded by what the product admits.
+# --------------------------------------------------------------------------- #
+
+def test_a_soak_refuses_concurrency_the_product_never_admitted():
+    """Measuring a load the fleet did not admit is not a measurement of this pilot: the A4 qualification
+    installs maximum_concurrent_requests=4. Fail closed rather than overrun it."""
+    with pytest.raises(ValueError, match='concurrency_not_admitted'):
+        soak.run_soak('http://127.0.0.1:1', requests=4, out_dir='/tmp',
+                      concurrency=soak.ADMITTED_MAX_CONCURRENT_REQUESTS + 1)
+    with pytest.raises(ValueError, match='concurrency_not_admitted'):
+        soak.run_soak('http://127.0.0.1:1', requests=4, out_dir='/tmp', concurrency=0)
+
+
+def test_the_concurrent_phase_really_overlaps(tmp_path, monkeypatch):
+    """DETERMINISTIC overlap check. The fake blocks the CONCURRENT phase on a four-party barrier, so a
+    phase that ran one request at a time could never fill it and every concurrent record would carry the
+    barrier's error. The sequential phase (which run_soak runs first, single-threaded) skips the barrier
+    by call order, so this cannot be satisfied by accident."""
+    sequential_calls = 4
+    barrier = threading.Barrier(soak.ADMITTED_MAX_CONCURRENT_REQUESTS, timeout=10)
+    seen, seen_lock = {'n': 0}, threading.Lock()
+
+    def fake(base, prompt, tokens, *, timeout, cancel_after_s=None, cancel_mode='disconnect'):
+        with seen_lock:
+            seen['n'] += 1
+            index = seen['n']
+        if index > sequential_calls:
+            barrier.wait()
+        return [({'type': 'token'}, 0.5)], {
+            'ok': True, 'tokens': 1, 'total_s': 0.1, 'has_terminal': True,
+            'terminal': 'completed', 'terminal_code': None, 'succeeded': True, 'cancel_status': None}
+
+    monkeypatch.setattr(soak, '_stream', fake)
+    summary, _path = soak.run_soak('http://127.0.0.1:1', requests=8, cancel_every=0, timeout=5,
+                                   out_dir=str(tmp_path))
+    assert summary['phases'] == {'sequential': 4, 'concurrent': 4}
+    assert summary['max_in_flight'] == soak.ADMITTED_MAX_CONCURRENT_REQUESTS
+    assert summary['succeeded'] == 8, 'no concurrent record may carry a barrier error'
+    assert summary['criterion_5']['concurrent_requests_met'] is True
+    phases = [r.get('phase') for r in json.loads(
+        (tmp_path / ('soak-%s.json' % summary['label'])).read_text())['records']]
+    assert phases.count('sequential') == 4 and phases.count('concurrent') == 4
+
+
+def test_the_sequential_phase_reports_one_in_flight(tmp_path, monkeypatch):
+    """The measured high-water mark must distinguish the phases: a two-request run is 1 sequential plus 1
+    concurrent worker, so the maximum in flight is 1 and the concurrent condition stays UNMET."""
+    calls = []
+    monkeypatch.setattr(soak, '_stream', _fake_stream(None, calls))
+    summary, _path = soak.run_soak('http://127.0.0.1:1', requests=2, cancel_every=0, timeout=1,
+                                   out_dir=str(tmp_path))
+    assert summary['max_in_flight'] == 1
+    assert summary['criterion_5']['concurrent_requests_met'] is False

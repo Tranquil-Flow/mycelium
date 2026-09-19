@@ -31,6 +31,7 @@ way (a constant output path makes a stale file look like a fresh result).
 import argparse
 import json
 import os
+import threading
 import time
 import urllib.error
 
@@ -63,7 +64,7 @@ def cancellation_confirmed(summary):
     return summary.get('terminal') == 'cancelled'
 
 
-def summarize(records, *, expected=None, loop_deaths=0):
+def summarize(records, *, expected=None, loop_deaths=0, max_in_flight=0):
     """Fold per-request records into criterion 5's counters. Pure function: same records, same verdict.
 
     THE COUNTERS MUST NOT BE SATISFIABLE BY ACCIDENT. `ok` means "the stream produced tokens", which is
@@ -129,9 +130,12 @@ def summarize(records, *, expected=None, loop_deaths=0):
         'zero_loop_deaths': loop_deaths == 0,
         'requests_met': total >= CRITERION_MIN_REQUESTS,
         'cancellations_met': len(confirmed) >= CRITERION_MIN_CANCELLATIONS,
+        # MEASURED in-flight high-water mark, never the configured number: the criterion asks for
+        # requests "sequential and concurrent", so a run with one request in flight at a time has not
+        # exercised the concurrent half however it was configured.
+        'concurrent_requests_met': max_in_flight >= 2,
         # NOT measurable by this driver, and named here rather than left implied:
         'unmeasured_by_this_driver': [
-            'concurrent requests (this driver issues them sequentially)',
             'one restart of each Mac worker',
             'one network change',
         ],
@@ -143,49 +147,121 @@ def summarize(records, *, expected=None, loop_deaths=0):
     return summary
 
 
+ADMITTED_MAX_CONCURRENT_REQUESTS = 4
+"""The concurrency the product ADMITS: the A4 qualification installs
+``maximum_concurrent_requests: 4`` (mycelium_live/a4_install.py:160). Criterion 5 asks for requests
+"sequential and concurrent", so the soak runs both phases -- and refuses a concurrency the product never
+agreed to serve, because measuring a load the fleet did not admit is not a measurement of this pilot."""
+
+
+class _Inflight:
+    """High-water mark of requests ACTUALLY in flight, so the concurrent claim is measured rather than
+    configured. A configured number is a statement about the harness; this is a statement about the run."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.current = 0
+        self.maximum = 0
+
+    def enter(self):
+        with self._lock:
+            self.current += 1
+            self.maximum = max(self.maximum, self.current)
+
+    def leave(self):
+        with self._lock:
+            self.current -= 1
+
+
+def _attempt(base, index, *, phase, prompt, max_new_tokens, timeout, cancel_every, inflight,
+             sample_status):
+    """One request's record. SHARED by both phases so the sequential and concurrent halves of the
+    criterion cannot drift apart in what they measure."""
+    record: dict = {'attempt': index, 'phase': phase}
+    if sample_status is not None and not sample_status():
+        record['loop_death_observed'] = True
+    do_cancel = bool(cancel_every and index % cancel_every == 0)
+    record['cancelled_requested'] = do_cancel
+    inflight.enter()
+    try:
+        # CANCELLATIONS ARE WIRED, AND CONFIRMED ONLY BY THE PRODUCT. The driver asks through the
+        # product's own cancel endpoint (DELETE <cancel_path>, asgi.py:260/:336) and then KEEPS
+        # READING, because the product's `cancelled` terminal is the only thing that confirms one
+        # (see cancellation_confirmed above). Criterion 5 wants >=10 confirmations, and a soak that
+        # counted its own request as the confirmation would hide exactly the failure it measures.
+        # THE DRIVER RETURNS (samples, summary) -- A TUPLE, and `record.update(tuple)` raises
+        # ValueError("dictionary update sequence element #0 has length ..."). That exception was
+        # swallowed by this block's own `except Exception` handler, so EVERY request was recorded as
+        # ok=False with a ValueError detail and the soak could not measure anything at all. Unpack.
+        _samples, summary = _stream(base, prompt, max_new_tokens, timeout=timeout,
+                                    cancel_after_s=2.0 if do_cancel else None,
+                                    cancel_mode=CANCEL_MODE if do_cancel else 'disconnect')
+        record.update(summary)
+        if do_cancel:
+            record['cancelled_confirmed'] = cancellation_confirmed(summary)
+            if not record['cancelled_confirmed']:
+                record['cancelled_note'] = (
+                    'unconfirmed by the product: cancel_status=%s terminal=%s'
+                    % (summary.get('cancel_status'), summary.get('terminal')))
+    except urllib.error.HTTPError as exc:
+        record.update({'ok': False, 'error': 'HTTPError', 'detail': 'HTTP %s' % exc.code})
+    except Exception as exc:
+        record.update({'ok': False, 'error': type(exc).__name__, 'detail': str(exc)[:160]})
+    finally:
+        inflight.leave()
+    return record
+
+
 def run_soak(base, *, requests=110, cancel_every=10, prompt='Describe the city of Berlin in three sentences.',
-             max_new_tokens=32, timeout=180, label='soak', sample_status=None, out_dir='.'):
-    """Issue requests sequentially; cancel every k-th; sample the route's health between requests."""
-    records, loop_deaths, cancel_ids = [], [], []
-    for i in range(1, requests + 1):
-        record: dict = {'attempt': i}
-        if sample_status is not None:
-            alive = sample_status()
-            if not alive:
-                loop_deaths.append(i)
-                record['loop_death_observed'] = True
-        do_cancel = (cancel_every and i % cancel_every == 0)
-        record['cancelled_requested'] = bool(do_cancel)
-        try:
-            # CANCELLATIONS ARE WIRED, AND CONFIRMED ONLY BY THE PRODUCT. The driver asks through the
-            # product's own cancel endpoint (DELETE <cancel_path>, asgi.py:260/:336) and then KEEPS
-            # READING, because the product's `cancelled` terminal is the only thing that confirms one
-            # (see cancellation_confirmed above). Criterion 5 wants >=10 confirmations, and a soak that
-            # counted its own request as the confirmation would hide exactly the failure it measures.
-            # THE DRIVER RETURNS (samples, summary) -- A TUPLE, and `record.update(tuple)` raises
-            # ValueError("dictionary update sequence element #0 has length ..."). That exception was
-            # swallowed by this block's own `except Exception` handler, so EVERY request was recorded as
-            # ok=False with a ValueError detail and the soak could not measure anything at all. Unpack.
-            _samples, summary = _stream(base, prompt, max_new_tokens, timeout=timeout,
-                                        cancel_after_s=2.0 if do_cancel else None,
-                                        cancel_mode=CANCEL_MODE if do_cancel else 'disconnect')
-            record.update(summary)
-            if do_cancel:
-                record['cancelled_confirmed'] = cancellation_confirmed(summary)
-                if not record['cancelled_confirmed']:
-                    record['cancelled_note'] = (
-                        'unconfirmed by the product: cancel_status=%s terminal=%s'
-                        % (summary.get('cancel_status'), summary.get('terminal')))
-        except urllib.error.HTTPError as exc:
-            record.update({'ok': False, 'error': 'HTTPError', 'detail': 'HTTP %s' % exc.code})
-        except Exception as exc:
-            record.update({'ok': False, 'error': type(exc).__name__, 'detail': str(exc)[:160]})
-        records.append(record)
-        print('soak %d/%d ok=%s total_s=%s' % (i, requests, record.get('ok'),
-                                               record.get('total_s')), flush=True)
-    summary = summarize(records, expected=requests, loop_deaths=len(loop_deaths))
+             max_new_tokens=32, timeout=180, label='soak', sample_status=None, out_dir='.',
+             concurrency=ADMITTED_MAX_CONCURRENT_REQUESTS):
+    """Issue `requests` requests: the first half SEQUENTIALLY, the second half with `concurrency` in
+    flight. Criterion 5 asks for requests "sequential and concurrent", so both phases run in one
+    invocation and their records fold into one summary; `max_in_flight` reports what was measured."""
+    if concurrency < 1 or concurrency > ADMITTED_MAX_CONCURRENT_REQUESTS:
+        raise ValueError('concurrency_not_admitted:%r (the A4 qualification admits at most %d)'
+                         % (concurrency, ADMITTED_MAX_CONCURRENT_REQUESTS))
+    records, loop_deaths = [], []
+    lock = threading.Lock()
+    inflight = _Inflight()
+    tail = requests // 2
+    sequential_end = requests - tail
+    first_concurrent = sequential_end + 1
+
+    def work(indices, phase):
+        for i in indices:
+            record = _attempt(base, i, phase=phase, prompt=prompt, max_new_tokens=max_new_tokens,
+                              timeout=timeout, cancel_every=cancel_every, inflight=inflight,
+                              sample_status=sample_status)
+            with lock:
+                records.append(record)
+                if record.get('loop_death_observed'):
+                    loop_deaths.append(i)
+                print('soak %d/%d %s ok=%s total_s=%s'
+                      % (i, requests, phase, record.get('ok'), record.get('total_s')), flush=True)
+
+    work(range(1, sequential_end + 1), 'sequential')
+    if tail:
+        if concurrency > 1:
+            workers = [threading.Thread(
+                target=work,
+                args=(range(first_concurrent + offset, requests + 1, concurrency), 'concurrent'),
+                daemon=True)
+                for offset in range(min(concurrency, tail))]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+        else:
+            work(range(first_concurrent, requests + 1), 'concurrent')
+
+    summary = summarize(records, expected=requests, loop_deaths=len(loop_deaths),
+                        max_in_flight=inflight.maximum)
     summary['loop_death_at'] = loop_deaths[:5]
     summary['label'] = label
+    summary['concurrency'] = concurrency
+    summary['max_in_flight'] = inflight.maximum
+    summary['phases'] = {'sequential': sequential_end, 'concurrent': requests - sequential_end}
     path = os.path.join(out_dir, 'soak-%s.json' % label)
     with open(path, 'w') as fh:
         json.dump({'summary': summary, 'records': records}, fh, indent=1)
@@ -200,9 +276,13 @@ def main():
     ap.add_argument('--max-new-tokens', type=int, default=32)
     ap.add_argument('--out-dir', default='.')
     ap.add_argument('--label', default=os.environ.get('A13_LOG_LABEL', 'soak'))
+    ap.add_argument('--concurrency', type=int, default=ADMITTED_MAX_CONCURRENT_REQUESTS,
+                    help='in-flight requests for the concurrent half; the product admits at most %d'
+                         % ADMITTED_MAX_CONCURRENT_REQUESTS)
     args = ap.parse_args()
     summary, path = run_soak(args.base, requests=args.requests, cancel_every=args.cancel_every,
-                             max_new_tokens=args.max_new_tokens, label=args.label, out_dir=args.out_dir)
+                             max_new_tokens=args.max_new_tokens, label=args.label,
+                             out_dir=args.out_dir, concurrency=args.concurrency)
     print(json.dumps(summary, indent=1))
     print('SOAK_WRITTEN', path)
 
