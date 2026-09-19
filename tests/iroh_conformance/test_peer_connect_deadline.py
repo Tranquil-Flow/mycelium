@@ -210,7 +210,13 @@ def test_the_connect_deadline_is_registered_inside_the_route_fanout_window() -> 
     value = _registered_connect_deadline()
     fanout_window = deadlines.route_cleanup_fanout_window_seconds
 
-    assert fanout_window == 1.5, "the route fanout window moved; re-derive the value"
+    # RE-DERIVED 2026-09-20 (ERRATA-19/20/21): the route fanout window moved from 1.5 s
+    # (budget 2.0 - reserve 0.5) to 4.5 s (budget 8.0 - reserve 3.5), because the relayed
+    # peer's MEASURED cleanup was 1.83 s / 3.18 s and the old window could never honour it.
+    # The connect deadline itself does NOT move: it is a dead-peer DETECTION bound, not a
+    # cleanup budget, and the invariant this test protects is that it sits strictly inside
+    # the window -- which it now does with more headroom, not less.
+    assert fanout_window == 4.5, "the route fanout window moved; re-derive the value"
     assert 0 < value < fanout_window, (
         f"peer connect deadline {value}s must be strictly smaller than the route's "
         f"{fanout_window}s cleanup fanout window"

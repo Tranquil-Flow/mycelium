@@ -5,6 +5,7 @@ import threading
 import pytest
 
 from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
+import mycelium_deadlines
 from mycelium_request_gateway.service import RequestGatewayService
 from test_core import MutableQualificationSource, _synthetic_qualification
 
@@ -105,7 +106,14 @@ def test_cancellation_terminal_is_published_after_backend_release() -> None:
         service.close()
 
 
-def test_backend_missing_total_two_second_bound_fails_closed() -> None:
+def test_backend_missing_total_bound_fails_closed() -> None:
+    """A cleanup landing past the owner's bound fails closed with a named code.
+
+    The bound is the registry's since the 2026-09-20 re-derivation (ERRATA-20/21): the
+    property under test is the FAIL-CLOSED outcome, not the historical 2 s number, so the
+    clock jump past the bound is derived rather than re-typed.
+    """
+
     qualification = _synthetic_qualification()
     now = [10.0]
 
@@ -120,7 +128,8 @@ def test_backend_missing_total_two_second_bound_fails_closed() -> None:
             return "cancelled"
 
         def cancel(self, request_id):
-            now[0] = 12.001
+            # one millisecond past the owner's re-derived cleanup deadline (start 10.0)
+            now[0] = 10.0 + mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS + 0.001
             self.release.set()
 
     backend = Backend()
@@ -179,7 +188,7 @@ def test_gateway_propagates_one_original_absolute_cancellation_deadline() -> Non
         request_id = service.submit(_submission(qualification))
         assert backend.started.wait(timeout=1.0)
         assert service.cancel(request_id) is True
-        assert backend.deadlines == [12.0]
+        assert backend.deadlines == [10.0 + mycelium_deadlines.CANCEL_AND_CLEANUP_BUDGET_SECONDS]
         assert _terminal(service, request_id).kind == "cancelled"
     finally:
         backend.release.set()
