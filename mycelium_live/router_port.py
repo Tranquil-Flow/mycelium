@@ -6,9 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, cast, Iterable, Mapping
 
 import mycelium_deadlines
@@ -38,6 +40,98 @@ _MAX_CANCELLATION_AND_CLEANUP_SECONDS = mycelium_deadlines.CANCEL_AND_CLEANUP_BU
 
 
 _LOGGER = logging.getLogger(__name__)
+
+# A withheld terminal is the route's most consequential refusal: the client sees a stream that simply ends.
+# Until round p78r1 (ERRATA-23) the reason lived only in ``LiveRoute._incidents`` -- in memory -- so it died
+# with the app and the round had to be reconstructed from four artifacts over three attempts, still unable to
+# split "the cleanup-proof command was issued and went unclaimed" from "no proof command was ever minted".
+# This record makes that split one file read: a bounded, privacy-reduced line per withheld terminal, whose
+# command-id prefix can be joined against the owner's managed-control ledger.
+#
+# Privacy: id PREFIXES only (16 chars, the convention the node pump's diagnostics already use), no payload,
+# no claim token, no key material, no request text.  Bounded: 128 KiB then ONE rotation, so a soak cannot
+# grow it without limit.  Never raises: a diagnostic may not perturb the request path.
+#
+# WHERE IT LANDS, and why the env comes first: the route classes carry no state root (measured -- zero
+# attributes by any of the names searched below), and the two production construction sites have no root in
+# scope either, so there is no honest default.  The OPERATOR sets MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG to a
+# path inside the round's evidence directory (the e-chain does this); the root-attribute fallback below only
+# serves a host that happens to expose one.  Consequence worth stating where a reader will see it: if a round
+# withholds terminals and this file is ABSENT, that is a finding about the instrument, not a silence about
+# the route -- record it as such rather than concluding no terminal was blocked.
+_BLOCKED_TERMINAL_PROTOCOL = "mycelium.live_route_blocked_terminal.v1"
+_BLOCKED_TERMINAL_LOG_ENV = "MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG"
+_BLOCKED_TERMINAL_LOG_NAME = "route-blocked-terminals.jsonl"
+_BLOCKED_TERMINAL_LOG_MAX_BYTES = 131_072
+_ID_PREFIX_CHARS = 16
+
+
+def _blocked_terminal_log_path(route: Any) -> Path | None:
+    """Where the withheld-terminal record goes, or None when the route exposes no writable root.
+
+    Truthiness is checked rather than type alone: a MagicMock or a test double answers every ``getattr`` with
+    something, and ``Path(<Mock>)`` would raise inside a diagnostic path that must stay silent.
+    """
+
+    override = os.environ.get(_BLOCKED_TERMINAL_LOG_ENV)
+    if override:
+        return Path(override)
+    for attribute in ("evidence_root", "state_root", "_root", "_evidence_root"):
+        root = getattr(route, attribute, None)
+        if isinstance(root, (str, os.PathLike)) and str(root):
+            return Path(root) / _BLOCKED_TERMINAL_LOG_NAME
+    return None
+
+
+def _record_blocked_terminal(*, route: Any, request_id: str, reason: str, pending: Any) -> None:
+    """Persist which terminal was withheld, why, and which command it could not prove -- bounded and silent.
+
+    The command-id prefix is the join key: matched against ``managed_commands`` it tells the next round
+    whether that command was ever minted, what operation it carried, its declared TTL and its terminal state.
+    """
+
+    try:
+        path = _blocked_terminal_log_path(route)
+        if path is None:
+            return
+        identity = getattr(pending, "command_identity", None)
+
+        def _field(name: str) -> Any:
+            # ``command_identity`` is a CommandIdentity dataclass in the product and a Mapping in some
+            # doubles; both shapes must be readable or the join key silently comes out empty (measured once:
+            # a Mapping-only read wrote command_id_prefix "" and the record could not be joined).
+            if isinstance(identity, Mapping):
+                return identity.get(name)
+            return getattr(identity, name, None)
+
+        record = {
+            "protocol": _BLOCKED_TERMINAL_PROTOCOL,
+            "observed_at_unix_ms": int(time.time() * 1_000),
+            "request_id_prefix": str(request_id)[:_ID_PREFIX_CHARS],
+            "reason": str(reason)[:128],
+            "command_id_prefix": str(_field("command_id") or "")[:_ID_PREFIX_CHARS],
+            "request_attempt": _field("request_attempt"),
+            "path_id_prefix": str(_field("path_id") or "")[:_ID_PREFIX_CHARS],
+            "path_attempt": _field("path_attempt"),
+            "absolute_deadline_ms": _field("absolute_deadline_ms"),
+            "execution_started": bool(getattr(pending, "execution_started", False)),
+            "cleanup_owner_bound": getattr(pending, "cleanup_owner_id", None) is not None,
+            "cleanup_receipt_present": getattr(pending, "cleanup_receipt", None) is not None,
+        }
+        line = json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size + len(line) > _BLOCKED_TERMINAL_LOG_MAX_BYTES:
+            os.replace(path, path.with_name(path.name + ".1"))
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except BaseException:
+        # Deliberately silent: a read-only home, a full disk, or a route double with no root must never turn
+        # a withheld terminal into a different failure.  The record is a diagnostic, not a gate.
+        pass
 
 
 @dataclass
@@ -485,6 +579,12 @@ class LiveRouterPort:
                 terminal = recorded_terminal
             except RuntimeError as error:
                 terminal_blocked_reason = str(error)
+                _record_blocked_terminal(
+                    route=self._route,
+                    request_id=request_id,
+                    reason=terminal_blocked_reason,
+                    pending=pending,
+                )
                 _LOGGER.error(
                     "live route terminal blocked request_id=%s reason=%s",
                     request_id,

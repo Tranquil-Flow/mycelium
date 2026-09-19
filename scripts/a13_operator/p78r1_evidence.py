@@ -13,8 +13,10 @@ Every number printed here is read from a file or a `-get`/list command.  Nothing
 reason this script is read-only by construction.
 """
 import json
+import os
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 LABEL = sys.argv[2] if len(sys.argv) > 2 else "p78r1"
@@ -92,7 +94,29 @@ def post():
     if not soaks:
         print("  no soak artifact found (the soak did not run)")
 
-    print("=== restart_count (the C5 restart evidence) ===")
+    print(f"=== ROUTE WITHHELD TERMINALS ({LABEL}) ===")
+    # ERRATA-23: the reason a terminal was withheld used to die with the app.  The route now writes one
+    # bounded line per refusal; with the command-id prefix it joins against managed_commands, which is what
+    # splits "the proof command was issued and went unclaimed" from "no proof command was ever minted".
+    blocked = Path(os.environ.get("MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG")
+                   or (RUN / f"route-blocked-terminals-{LABEL}.jsonl"))
+    if blocked.exists():
+        rows = [json.loads(line) for line in blocked.read_text().splitlines() if line.strip()]
+        print(f"  {blocked.name}: {len(rows)} withheld terminal(s)")
+        for reason, count in Counter(row.get("reason") for row in rows).most_common():
+            print(f"    reason={reason}  n={count}")
+        print("    execution_started="
+              f"{sum(1 for row in rows if row.get('execution_started'))}"
+              f"  with_command_prefix={sum(1 for row in rows if row.get('command_id_prefix'))}"
+              f"  cleanup_owner_bound={sum(1 for row in rows if row.get('cleanup_owner_bound'))}")
+        if rows:
+            print(f"    last: {json.dumps(rows[-1], sort_keys=True)[:240]}")
+    else:
+        print(f"  MISSING {blocked}")
+        print("    -> if this round withheld terminals, the ABSENCE is an instrument finding: the env")
+        print("       MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG must be exported into the app's environment.")
+
+    print(f"=== restart_count (the C5 restart evidence) ===")
     for label, root, host in (("owner", OWNER_ROOT, None), ("laptop", "/Users/evinova/mycelium-wp8-02", "mycelium-laptop")):
         got = counters(root, host=host)
         if not got:

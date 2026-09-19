@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 
@@ -196,3 +197,70 @@ def test_poll_one_returns_immediately_while_route_worker_is_active(
         if time.monotonic() >= deadline:
             raise AssertionError("route_worker_did_not_complete")
         time.sleep(0.001)
+
+def test_blocked_terminal_is_persisted_so_the_next_round_reads_one_file(
+    live_graph, request_factory, tmp_path, monkeypatch
+) -> None:
+    """A withheld terminal must leave a bounded, joinable record on disk.
+
+    ERRATA-23 (round p78r1): the route withheld ~104 terminals and the reason for each lived only in
+    ``self._incidents`` -- in memory -- so it died with the app.  The round then had to be reconstructed
+    from four artifacts over three attempts and still could not split "the proof command was issued and
+    went unclaimed" from "no proof command was ever minted".  This record makes that split a file read.
+    """
+    from mycelium_m16_runtime import build_live_m16_runtime
+
+    class Qualification:
+        qualification_digest = "sha256:" + "e" * 64
+
+    class Sink:
+        def emit(self, _index, _token):
+            return None
+
+    class NoReceiptRoute:
+        # A non-simulated route is required: the shipped raise is skipped for simulated routes, so a
+        # FakeLiveRoute-based test would assert about a path the product never takes.
+        is_simulated = False
+
+        def is_alive(self) -> bool:
+            return True
+
+        def infer(self, _tokens, *, request_id, sink, command_identity, **_kwargs):
+            sink.emit(0, 4599)
+            raise RuntimeError("simulated_cleanup_unproven")
+
+        def request_cleanup_receipt(self, _request_id):
+            return None
+
+    log = tmp_path / "route-blocked-terminals.jsonl"
+    monkeypatch.setenv("MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG", str(log))
+
+    route = NoReceiptRoute()
+    coordinator = build_live_m16_runtime(live_graph)
+    port = LiveRouterPort(
+        route=route, execution_graph=live_graph, runtime_coordinator=coordinator
+    )
+    request_id = port.admit(
+        request_factory("blocked-terminal"), Sink(), qualification_binding=Qualification()
+    )
+    # The withheld terminal is recorded on the pending state (the same accessor the existing
+    # missing-cleanup-receipt test uses); the port then parks the request, so wait on the reason.
+    deadline = time.monotonic() + 2.0
+    pending = port._pending[request_id]
+    while pending.terminal_blocked_reason is None:
+        assert time.monotonic() < deadline, "the receipt-less terminal was not withheld"
+        time.sleep(0.005)
+    assert pending.terminal_blocked_reason == "command_cleanup_receipt_missing"
+
+    assert log.exists(), "the withheld terminal left no record at all"
+    lines = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+    assert lines, "the blocked-terminal record is empty"
+    record = lines[-1]
+    assert record["protocol"] == "mycelium.live_route_blocked_terminal.v1"
+    assert record["reason"] == "command_cleanup_receipt_missing"
+    assert record["request_id_prefix"] == request_id[:16]
+    assert record["command_id_prefix"], "the record must name the command, or it cannot be joined"
+    assert record["execution_started"] is True
+    # The route's own minted deadline travels with the record: the shape under suspicion in ERRATA-23 was a
+    # deadline the route could not honour, so the record must carry it rather than leave it to inference.
+    assert isinstance(record["absolute_deadline_ms"], int) and record["absolute_deadline_ms"] > 0

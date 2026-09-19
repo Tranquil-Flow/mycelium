@@ -22,6 +22,11 @@ EV=/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-ma
 export A13_OWNER_ROOT=/Users/evinova-self/mycelium-wp8-02/owner-lhr
 export A13_REMOTE_ROOT=/Users/evinova/mycelium-wp8-02
 export A13_EVIDENCE_DIR=$EV
+# The route's withheld-terminal record (ERRATA-23).  The route carries no state root, so the operator names
+# the path -- here, inside the round's own evidence.  A successor round inherits this line.  If a round
+# withholds terminals and this file is absent, that is a finding about the INSTRUMENT, not evidence that
+# nothing was blocked: record it as such.
+export MYCELIUM_LIVE_BLOCKED_TERMINAL_LOG="$EV/route-blocked-terminals-$A13_LOG_LABEL.jsonl"
 export A13_DIST_ROOT=/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-g1/dist
 export A13_TARGET_PREVIEW=preview78 A13_RPC_ROUND=rpc-round78
 export A13_ROTATE_RELAY=1
