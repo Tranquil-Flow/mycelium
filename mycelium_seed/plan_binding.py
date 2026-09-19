@@ -26,6 +26,7 @@ def bind_operator_plan_document(
     seed_node_id: str,
     members: Sequence[Mapping[str, Any]],
     now: float,
+    observed_boot_ids: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return a detached plan with freshly signed coordinator-bound offers."""
 
@@ -123,6 +124,41 @@ def bind_operator_plan_document(
     snapshot["swarm_id"] = swarm_id
     snapshot["assignment_offers"] = refreshed
     result["controller"]["now"] = now
+    # --------------------------------------------------------------------------------------------
+    # bind boot_id ONTO THE PEERS, which this function previously never touched.
+    #
+    # It refreshes the offers (generation, issued_at, expires_at, peer_endpoint_records) and re-signs
+    # them, but `result["controller"]["peers"]` is what workflow.py turns into PeerIdentity(**peer) --
+    # and so what the qualification's identity check compares against the node's LIVE hello. Left
+    # alone, the plan keeps whatever boot_id the topology recorded, while the node reports its CURRENT
+    # boot at qualification: one boot apart, which is the capture-vs-use race that makes qualification
+    # a coin flip (measured 2026-09-19: soak03's plan carried boot-af00774d... while the node's hello
+    # said boot-a0423521..., and every round relaunches the apps so every round the ids move).
+    #
+    # WHY THE OBSERVATION AND NOT THE MEMBER: boot_id is NOT a membership field -- grep shows it nowhere
+    # in mycelium_membership -- so `members` cannot supply it. The node's own observation carries it and
+    # is written every round (managed_observations.py:256).
+    #
+    # SAFETY SHAPE: additive and inert by default. With no observations supplied, the peers are left
+    # EXACTLY as before, so no existing caller changes behaviour. When supplied, only boot_id is
+    # replaced, and only for a node we have an observation for -- node_id, host_id and every other peer
+    # field stay untouched, so a node presenting a different node_id or host_id is still refused by the
+    # identity check exactly as before. The acceptance rule is not weakened anywhere.
+    if observed_boot_ids:
+        peers = result["controller"].get("peers")
+        if isinstance(peers, list):
+            refreshed_boot_ids = []
+            for peer in peers:
+                if not isinstance(peer, dict):
+                    continue
+                node_id = peer.get("node_id")
+                observed = observed_boot_ids.get(node_id) if isinstance(node_id, str) else None
+                if isinstance(observed, str) and observed and peer.get("boot_id") != observed:
+                    refreshed_boot_ids.append({"node_id": node_id, "from": peer.get("boot_id"),
+                                               "to": observed})
+                    peer["boot_id"] = observed
+            if refreshed_boot_ids:
+                result["controller"]["boot_id_bindings"] = refreshed_boot_ids
     return result
 
 
