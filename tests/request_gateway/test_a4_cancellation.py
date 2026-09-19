@@ -186,7 +186,17 @@ def test_gateway_propagates_one_original_absolute_cancellation_deadline() -> Non
         service.close()
 
 
-def test_cleanup_unproven_backend_outcome_cannot_publish_terminal() -> None:
+def test_cleanup_unproven_backend_outcome_publishes_a_failure_to_prove_terminal() -> None:
+    """REVERSAL, deliberate: this test used to assert that NO terminal could be published.
+
+    It was named test_cleanup_unproven_backend_outcome_cannot_publish_terminal and asserted
+    terminal_event is None. The suppression was there so an unproven cleanup could not hide behind a
+    tidy failure -- which is right -- but it left the user with no terminal at all, which exit
+    criterion 5 ("zero stuck requests") forbids and the pilot journey cannot survive. The terminal
+    now published claims only what the route knows (cleanup was NOT proven); it asserts no claim
+    about the command, so it contradicts nothing, and the session records the refusal so the soak
+    counters can count it as a FAILURE rather than a settled request.
+    """
     qualification = _synthetic_qualification()
 
     class Backend:
@@ -211,14 +221,18 @@ def test_cleanup_unproven_backend_outcome_cannot_publish_terminal() -> None:
         session.future.result(timeout=1.0)
 
         assert session.outcome == "terminal_blocked"
-        assert session.terminal_event is None
-        assert service.terminal_event_count(request_id) == 0
+        terminal = _terminal(service, request_id)
+        assert terminal.kind == "failed"
+        assert terminal.code == "request_cleanup_unproven"
+        assert session.cleanup_unproven is True
+        assert service.terminal_event_count(request_id) == 1
         assert session.backend_released is True
     finally:
         service.close()
 
 
-def test_cancelled_session_cannot_override_cleanup_unproven_backend_outcome() -> None:
+def test_cancelled_session_still_reports_the_routes_cleanup_unproven_refusal() -> None:
+    """The client's cancel must not mask the route's own refusal (reversal, see the test above)."""
     qualification = _synthetic_qualification()
 
     class Backend:
@@ -252,8 +266,11 @@ def test_cancelled_session_cannot_override_cleanup_unproven_backend_outcome() ->
         session.future.result(timeout=1.0)
 
         assert session.outcome == "terminal_blocked"
-        assert session.terminal_event is None
-        assert service.terminal_event_count(request_id) == 0
+        terminal = _terminal(service, request_id)
+        assert terminal.kind == "failed"
+        assert terminal.code == "request_cleanup_unproven"
+        assert session.cleanup_unproven is True
+        assert service.terminal_event_count(request_id) == 1
     finally:
         backend.cancelled.set()
         service.close()

@@ -86,6 +86,7 @@ class _Session:
     backend_cancellation_failed: bool = False
     backend_cancellation_accepted: bool | None = None
     backend_released: bool = False
+    cleanup_unproven: bool = False
     worker_done: bool = False
     future: Future[None] | None = None
     outcome: str | None = None
@@ -511,11 +512,7 @@ class RequestGatewayService:
                 else:
                     self._append_cancellation_terminal(session)
             elif outcome == "terminal_blocked":
-                # The physical route could not prove owner-scoped cleanup and
-                # therefore did not commit its terminal CAS. Retain a
-                # deliberately nonterminal session: publishing even a failure
-                # here would contradict the authoritative command ledger.
-                pass
+                self._append_cleanup_unproven_terminal(session)
             else:
                 self._append_terminal(session, "failed", code="backend_failed")
             with session.condition:
@@ -708,6 +705,29 @@ class RequestGatewayService:
             code="cancellation_cleanup_deadline_exceeded",
             cancellation_failure=True,
         )
+
+    def _append_cleanup_unproven_terminal(self, session: _Session) -> None:
+        """Publish a terminal that asserts FAILURE TO PROVE, and nothing else.
+
+        The physical route could not prove owner-scoped cleanup inside its window and therefore did
+        NOT commit its terminal CAS (``mycelium_live/route.py:4403-4448``, incident state
+        ``request_cleanup_unproven``). This path used to publish nothing at all, on the reasoning
+        that even a failure terminal would contradict the authoritative command ledger. That
+        reasoning holds for a terminal claiming the COMMAND completed, failed or was cleaned up.
+        It does not hold for this one, which claims only what the route knows: that cleanup was
+        never proven.
+
+        Publishing nothing left the user unable to tell a stuck request from a slow one -- which
+        exit criterion 5 ("zero stuck requests") forbids and the pilot journey cannot survive.
+
+        The refusal is recorded on the session so a consumer can see WHICH refusal it was and count
+        it as a failure rather than a success. In particular the soak counters must treat
+        ``request_cleanup_unproven`` as a failure: a soak that counted it as settled would make the
+        criterion easier to pass while the defect got quieter.
+        """
+        with session.condition:
+            session.cleanup_unproven = True
+        self._append_terminal(session, "failed", code="request_cleanup_unproven")
 
     def _await_backend_cancellation(self, session: _Session) -> str:
         """Resolve the owner cancellation without minting a second deadline."""
