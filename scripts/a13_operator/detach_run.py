@@ -10,7 +10,11 @@ import sys
 import os
 from pathlib import Path
 
-script = sys.argv[1]
+script = str(Path(sys.argv[1]).expanduser())
+if not Path(script).is_absolute():
+    raise SystemExit('detach_run.py needs an absolute script path (it launches with cwd=~): %s' % script)
+if not Path(script).exists():
+    raise SystemExit('no such script: %s' % script)
 log = sys.argv[2] if len(sys.argv) > 2 else '/tmp/asm/detached.out'
 allow_append = '--allow-append' in sys.argv
 Path(log).parent.mkdir(parents=True, exist_ok=True)
