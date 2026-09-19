@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 import re
+import shutil
 import threading
 import tempfile
 import time
@@ -26,6 +27,11 @@ from .worker import ManagedWorker, _NATIVE_DIAGNOSTIC_FRAME
 class RuntimeErrorCode(ValueError):
     pass
 
+
+# One replacement per worker death is the contract; the bound exists so a worker that cannot start
+# (stale socket, missing staging, load refused) cannot be respawned in a loop.
+_MAX_WORKER_REPLACEMENTS = 3
+_WORKER_REPLACEMENT_PROTOCOL = 'mycelium.a13.worker_replacement.v1'
 
 _CONTROL_FAILURE_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_.:]{0,63}")
 
@@ -121,18 +127,42 @@ class ManagedTargetRuntime:
         # in the original durable run root, never the temporary directory.
         temp_base=Path('/private/tmp') if Path('/private/tmp').is_dir() else Path('/tmp')
         self._socket_parent=Path(tempfile.mkdtemp(prefix='myc-a13-',dir=temp_base))
+        # Held so a REPLACEMENT worker can be built with the same parameters as the first one: a worker
+        # that exits must be followed by another, and only this object can mint it (worker.py:739-741
+        # refuses a second start on the same instance).
+        self._sidecar_binary=sidecar_binary
+        self._resource_policy=resource_policy
+        self._limits=limits
+        self._authorize_load=authorize_load
+        self._endpoint_secret_file=endpoint_secret_file
+        self._test_observer=_test_observer
+        self._worker_generation=0
+        self._worker_replacements=0
         try:
-            self.worker=ManagedWorker(node_id=staging.node_id,run_id=run_id,deployment_id=deployment_id,
-                artifact_root=staging.staging_root,socket_root=self._socket_parent/'s',
-                capacity_root=self.root,
-                sidecar_binary=sidecar_binary,resource_policy=resource_policy,limits=limits,
-                membership_current=self._membership_current,authorize_load=authorize_load,
-                endpoint_secret_file=endpoint_secret_file,_test_observer=_test_observer)
+            self.worker=self._make_worker()
             self.pump=ConcurrentTargetControlPump(self.root/'pump',client=client,worker=self.worker,
                 current_member=self._member,sequence_root=sequence_root)
         except BaseException:
             self._socket_parent.rmdir()
             raise
+
+    def _make_worker(self):
+        """Build one worker process.  Called once at start and again per replacement.
+
+        Each generation gets its OWN socket directory inside the runtime's private parent.  A Unix socket
+        file outlives the process that bound it, so re-using the same path for a replacement would fail
+        to bind -- which is one of the reasons a replacement needs its own path rather than the first
+        worker's.
+        """
+
+        suffix='s' if self._worker_generation==0 else 's%d' % self._worker_generation
+        return ManagedWorker(node_id=self.staging.node_id,run_id=self.run_id,
+            deployment_id=self.deployment_id,
+            artifact_root=self.staging.staging_root,socket_root=self._socket_parent/suffix,
+            capacity_root=self.root,
+            sidecar_binary=self._sidecar_binary,resource_policy=self._resource_policy,limits=self._limits,
+            membership_current=self._membership_current,authorize_load=self._authorize_load,
+            endpoint_secret_file=self._endpoint_secret_file,_test_observer=self._test_observer)
 
     def _verify_stage(self):
         try:
@@ -180,10 +210,78 @@ class ManagedTargetRuntime:
                 raise
             return self.status()
 
+    def _replace_worker_if_dead(self):
+        """Mint a REPLACEMENT worker when the native worker exited while this runtime is running.
+
+        WHY THIS EXISTS, measured: round p79r1 killed the owner node's worker mid-request
+        (native-exit.private.json: returncode 143, in_flight_count 1) and NOTHING replaced it -- no
+        --managed-node process afterwards, restart_count held at 27 through a 180 s bounded wait, no fresh
+        incarnation -- so every request after it was accepted and then withheld, 106 blocked terminals with
+        command_cleanup_receipt_missing.  C5 requires "one worker restart per Mac" AND "zero stuck / zero
+        cleanup-unproven"; those are mutually exclusive until the runtime replaces its own worker, because
+        without an executor cleanup can never be proven.
+
+        Bounded and fail-closed: at most _MAX_WORKER_REPLACEMENTS attempts per runtime, one bounded private
+        record per attempt (protocol, attempt number, previous error, outcome), and no attempt while the
+        runtime is stopping or closed.  The replacement keeps the CURRENT member incarnation: an executor
+        process is not a re-enrollment, so this does not mint a new incarnation and does not advance
+        restart_count -- the product's own re-admission path (peer.py:887-908) remains the only thing that
+        does, on a node resume.
+        """
+
+        if self._stop.is_set():
+            return
+        with self._lock:
+            if self._state!='running' or self._worker_replacements>=_MAX_WORKER_REPLACEMENTS:
+                return
+        try:
+            status=self.worker.status()
+        except Exception:
+            return
+        if status.get('running'):
+            return
+        with self._lock:
+            if self._state!='running':
+                return
+            self._worker_replacements+=1
+            attempt=self._worker_replacements
+        record={'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,'attempt':attempt,
+            'previous_error_code':status.get('error_code') if isinstance(status.get('error_code'),str) else None,
+            'max_attempts':_MAX_WORKER_REPLACEMENTS}
+        previous=self.worker
+        try:
+            self._worker_generation+=1
+            replacement=self._make_worker()
+            replacement.start()
+            record['outcome']='replaced'
+        except Exception as exc:
+            record['outcome']='failed'
+            code=getattr(exc,'code',None)
+            record['error_code']=code if isinstance(code,str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}',code) else None
+            try: record['cause_code']=str(exc)[:64]
+            except Exception: pass
+        else:
+            self.worker=replacement
+            # The pump dispatches through self.worker on EVERY use, so re-pointing the reference is the
+            # whole swap; nothing the pump already holds refers to the dead worker.
+            self.pump.worker=replacement
+            try:
+                if not replacement.status().get('running'):
+                    record['outcome']='started_not_running'
+            except Exception:
+                pass
+        try: _atomic_private_json(self.root/'worker-replacement.private.json',record)
+        except BaseException: pass
+        if record['outcome']!='replaced':
+            return
+        try: previous.close()
+        except Exception: pass
+
     def _serve(self):
         try:
             while not self._stop.is_set():
                 self._member()
+                self._replace_worker_if_dead()
                 step=self.pump.step()
                 # A retrying outbound is a bounded recovery, not a death: back off a
                 # little so a down origin is not hammered at the 50 ms poll cadence.
@@ -245,7 +343,7 @@ class ManagedTargetRuntime:
             if thread.is_alive(): raise RuntimeErrorCode('runtime_stop_incomplete')
         self.pump.close()
         if self.worker.process_group_present(): raise RuntimeErrorCode('runtime_stop_incomplete')
-        try: self._socket_parent.rmdir()
+        try: shutil.rmtree(self._socket_parent)
         except FileNotFoundError: pass
         except OSError: raise RuntimeErrorCode('runtime_socket_cleanup_incomplete') from None
         if cleanup:
