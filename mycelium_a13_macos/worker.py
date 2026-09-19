@@ -882,12 +882,28 @@ class ManagedWorker:
         """
         if self.capacity_root is None:return
         from .authority import _atomic_private_json
+        # Name the commands this exit cost.  Measured 2026-09-19 (round p76r1,
+        # preview.76): the peer's native exited with returncode 0 and an EMPTY stderr,
+        # so every command it then claimed was answered `reconciliation_required`
+        # within 70 ms of the claim, and the owner -- correctly refusing an unaccounted
+        # command -- failed the deployment at startup qualification.  This record said
+        # `worker_native_exited` and nothing connected the exit to a command, so the
+        # cost had to be reconstructed from timestamps.  `_pending_commands` is exactly
+        # the reserved-but-uncommitted set, so a non-empty one here means the native
+        # died mid-command.  Bounded like every other diagnostic: the names are capped,
+        # the count is honest, and a worker without the set records zero, never fails.
+        try:
+            in_flight=sorted(str(name) for name in (getattr(self,'_pending_commands',None) or ()))
+        except TypeError:
+            in_flight=[]
         _atomic_private_json(self.capacity_root/'native-exit.private.json',{
             'protocol':'mycelium.a13.native_exit_diagnostic.v1',
             'run_id':self.run_id,'node_id':self.node_id,
             'error_code':self._error,
             'error_detail':getattr(self,'_error_detail',None),
             'returncode':getattr(session,'returncode',None),
+            'in_flight_count':len(in_flight),
+            'in_flight_commands':in_flight[:3],
             **_bounded_native_diagnostics(getattr(session,'stderr',b''))})
 
     def _send(

@@ -90,3 +90,81 @@ def test_watch_records_the_exit_then_closes_the_worker(tmp_path):
     assert document['returncode'] == 9
     assert document['error_code'] == 'worker_native_exited'
     assert document['exception_types'] == ['IrohTransportError']
+
+
+def test_exit_diagnostic_names_the_command_the_native_could_not_answer(tmp_path):
+    """A silent clean exit is only actionable if the record says what it cost.
+
+    Measured 2026-09-19 (round p76r1, preview.76): the peer's native exited with
+    ``returncode`` 0 and an EMPTY stderr, so every command the peer then claimed
+    was answered ``reconciliation_required`` within 70 ms of the claim, and the
+    owner -- correctly refusing an unaccounted command -- failed the deployment
+    at startup qualification.  Nothing in this record connected the exit to a
+    command, so the cost had to be reconstructed from timestamps.
+    """
+
+    worker = NS(
+        capacity_root=tmp_path,
+        run_id='fixture-run',
+        node_id='fixture-node',
+        _error='worker_native_exited',
+        _pending_commands={'cmd-1111222233334444', 'cmd-aaaabbbbccccdddd'},
+    )
+    ManagedWorker._record_native_exit(worker, NS(returncode=0, stderr=b''))
+    document = json.loads((tmp_path / 'native-exit.private.json').read_text())
+    # A clean exit with no stderr is exactly the case that stayed unexplained.
+    assert document['returncode'] == 0
+    assert document['exception_types'] == [] and document['frames'] == []
+    # ... and now it says what it cost.
+    assert document['in_flight_count'] == 2
+    assert sorted(document['in_flight_commands']) == [
+        'cmd-1111222233334444',
+        'cmd-aaaabbbbccccdddd',
+    ]
+
+
+def test_exit_diagnostic_says_zero_when_nothing_was_in_flight(tmp_path):
+    worker = NS(
+        capacity_root=tmp_path,
+        run_id='fixture-run',
+        node_id='fixture-node',
+        _error='worker_native_exited',
+        _pending_commands=set(),
+    )
+    ManagedWorker._record_native_exit(worker, NS(returncode=0, stderr=b''))
+    document = json.loads((tmp_path / 'native-exit.private.json').read_text())
+    # An idle exit must not read like an interrupted command.
+    assert document['in_flight_count'] == 0
+    assert document['in_flight_commands'] == []
+
+
+def test_exit_diagnostic_bounds_the_in_flight_names_but_not_the_count(tmp_path):
+    """Bounded like every other record: the names are capped, the count is honest."""
+
+    pending = {'cmd-%032x' % index for index in range(9)}
+    worker = NS(
+        capacity_root=tmp_path,
+        run_id='fixture-run',
+        node_id='fixture-node',
+        _error='worker_native_exited',
+        _pending_commands=pending,
+    )
+    ManagedWorker._record_native_exit(worker, NS(returncode=0, stderr=b''))
+    document = json.loads((tmp_path / 'native-exit.private.json').read_text())
+    assert document['in_flight_count'] == len(pending)
+    assert len(document['in_flight_commands']) <= 3
+
+
+def test_exit_diagnostic_tolerates_a_worker_without_the_reservation_set(tmp_path):
+    """The record must never be the thing that fails: absence means zero, not a crash."""
+
+    worker = NS(
+        capacity_root=tmp_path,
+        run_id='fixture-run',
+        node_id='fixture-node',
+        _error='worker_native_exited',
+    )
+    ManagedWorker._record_native_exit(worker, NS(returncode=0, stderr=b''))
+    document = json.loads((tmp_path / 'native-exit.private.json').read_text())
+    assert document['in_flight_count'] == 0
+    assert document['in_flight_commands'] == []
