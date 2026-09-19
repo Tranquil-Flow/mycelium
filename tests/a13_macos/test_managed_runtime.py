@@ -108,3 +108,38 @@ def test_staging_identity_mismatch_fails_before_process(tmp_path):
     with _world(tmp_path/'world') as world:
         with pytest.raises(RuntimeErrorCode,match='runtime_staging_binding_mismatch'):
             runtime(tmp_path/'target',world,archive_digest='sha256:'+'0'*64)
+
+
+def test_a_dead_native_worker_is_replaced_while_the_runtime_is_running(tmp_path):
+    """A running runtime must mint a REPLACEMENT worker when its native worker exits.
+
+    Round p79r1 measured the consequence of that absence: the owner's worker was killed mid-request
+    (native-exit records returncode 143 with in_flight_count 1), no replacement was ever created (no
+    --managed-node process afterwards, restart_count held at 27 through a 180 s bounded wait, no new
+    incarnation), and every request after it was accepted and then withheld -- 106 blocked terminals.
+    C5's "one worker restart per Mac" and its "zero stuck / zero cleanup-unproven" are mutually
+    exclusive until the runtime replaces its own worker, so this is the property under test and not an
+    implementation detail.  The intervention is reproduced exactly as the round performs it: signal the
+    worker's process GROUP, not its leader.
+    """
+    import os
+    import signal
+
+    with _world(tmp_path / 'world') as world:
+        target = runtime(tmp_path / 'target', world)
+        try:
+            assert target.start()['state'] == 'running'
+            first = target.worker
+            assert first.status()['running'] is True
+            os.killpg(os.getpgid(first.pid), signal.SIGTERM)
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and target.worker is first:
+                time.sleep(0.1)
+            assert target.worker is not first, (
+                'the runtime did not replace its native worker: a killed worker was never followed by a '
+                'replacement, which is the measured p79r1 defect (no worker supervision exists)')
+            assert target.worker.status()['running'] is True
+            assert (target.root / 'worker-replacement.private.json').exists(), (
+                'the replacement must be recorded as its own bounded diagnostic')
+        finally:
+            target.close()
