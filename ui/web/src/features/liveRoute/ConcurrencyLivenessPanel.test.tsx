@@ -15,7 +15,10 @@ describe('ConcurrencyLivenessProjection', () => {
 
       expect(screen.getByRole('region', { name: 'Concurrent execution and scoped liveness' })).toBeInTheDocument();
       expect(screen.getByText('Qualification pending')).toBeInTheDocument();
-      expect(screen.getByText(/share one 2,000 ms limit/i)).toBeInTheDocument();
+      // the bound is rendered from the fixture's cancellation_and_cleanup_bound_ms (now the
+      // registry-derived 8_000 after the 2026-09-20 re-derivation), so this expectation follows
+      // the fixture rather than re-pinning the old number
+      expect(screen.getByText(/share one 8,000 ms limit/i)).toBeInTheDocument();
       const replicaView = view === 'readiness' || view === 'settings'
         ? 'qualification'
         : view === 'incidents'

@@ -3289,8 +3289,27 @@ class IrohTransport:
                 continue
             if not delivery_cancel_thread.is_alive():
                 continue
+            # The worker that close() just spawned finishes by reaching its OWN acknowledgement
+            # deadline -- min(_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS, delivery_timeout_seconds) --
+            # never the poll cadence, and substituting the cadence for that budget is exactly what
+            # `test_sidecar_cancellation_ack_uses_cleanup_budget_not_poll_cadence` forbids one level
+            # down.  Joining it for poll*4 (200 ms at the shipped 50 ms cadence) made close() raise
+            # delivery_cancellation_shutdown_timeout AND mark the transport fatal while the worker
+            # was still doing the job close had handed it.  Measured cost: the readiness gate's
+            # seeded soak failed 2 of 3 runs at HEAD vs 0 of 3 at the previous head, once the
+            # re-derived 8 s cleanup window (ERRATA-21) left more sends pending at close.
+            # Sized by the SAME convention as the four wind-down joins above --
+            # max(1.0, delivery_timeout_seconds) -- because this worker's own acknowledgement window
+            # is min(_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS, delivery_timeout_seconds), computed AFTER
+            # this join's clock starts, so a bound merely equal to that window still races it.  It
+            # was previously max(0.05, poll_interval_seconds * 4) = 200 ms at the shipped cadence:
+            # substituting the poll cadence for an acknowledgement budget is exactly what the sibling
+            # `test_sidecar_cancellation_ack_uses_cleanup_budget_not_poll_cadence` forbids.  Cost when
+            # it fired: close() raised delivery_cancellation_shutdown_timeout and marked the transport
+            # FATAL while its own worker was still working; the readiness gate's seeded soak failed 2
+            # of 3 runs at HEAD against 0 of 3 at the previous head (ERRATA-21).
             delivery_cancel_thread.join(
-                timeout=max(0.05, self.poll_interval_seconds * 4)
+                timeout=max(1.0, self.delivery_timeout_seconds)
             )
             if delivery_cancel_thread.is_alive():
                 error = IrohTransportError("delivery_cancellation_shutdown_timeout")

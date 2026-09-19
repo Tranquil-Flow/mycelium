@@ -15,7 +15,13 @@ const MAX_ITEMS = 256;
 // admission predicate admits at most window - 200 ms transport margin, so the
 // registry derives 1_200 ms). One spot, so the validator and the normalized
 // projection cannot disagree.
-const PEER_MAXIMUM_TOTAL_CLEANUP_MS = 1_200;
+// Mirrors mycelium_deadlines.advertised_maximum_total_cleanup_ms, which the canonical
+// fixture below is generated from.  Re-derived 2026-09-20 with the D9 cleanup budget
+// (ERRATA-19/20/21): 1_200 was only honourable inside the OLD 1_500 ms fanout window,
+// while the relayed peer's MEASURED cleanup is 1.83 s / 3.18 s.  This side cannot import
+// the Python registry, so the cross-language check is the fixture decoded by
+// routeStatus.test.ts -- which is what caught this pin.
+const PEER_MAXIMUM_TOTAL_CLEANUP_MS = 4_200;
 
 export interface LiveRouteCounters {
   readonly frames_sent: number;
@@ -85,7 +91,7 @@ export interface A4QualificationStatus {
   readonly deployment_id: string;
   readonly qualification_digest: string;
   readonly maximum_concurrent_requests: number;
-  readonly cancellation_and_cleanup_bound_ms: 2000;
+  readonly cancellation_and_cleanup_bound_ms: 8000;
   readonly cooperative_interruption_proven: boolean;
   readonly request_scoped_cleanup_proven: boolean;
   readonly shared_process_termination_used: false;
@@ -568,7 +574,7 @@ function a4Qualification(value: unknown): A4QualificationStatus {
   ];
   if (
     item.protocol !== 'mycelium.product_concurrency_liveness_qualification.v1'
-    || item.cancellation_and_cleanup_bound_ms !== 2_000
+    || item.cancellation_and_cleanup_bound_ms !== 8_000
     || item.shared_process_termination_used !== false
     || gates.some((gate) => typeof gate !== 'boolean')
     || typeof item.eligible !== 'boolean'
@@ -580,7 +586,7 @@ function a4Qualification(value: unknown): A4QualificationStatus {
     deployment_id: identifier(item.deployment_id, 'route_status.concurrency_liveness_qualification.deployment_id'),
     qualification_digest: digest(item.qualification_digest, 'route_status.concurrency_liveness_qualification.qualification_digest'),
     maximum_concurrent_requests: integer(item.maximum_concurrent_requests, 'route_status.concurrency_liveness_qualification.maximum_concurrent_requests'),
-    cancellation_and_cleanup_bound_ms: 2_000,
+    cancellation_and_cleanup_bound_ms: 8_000,
     cooperative_interruption_proven: item.cooperative_interruption_proven as boolean,
     request_scoped_cleanup_proven: item.request_scoped_cleanup_proven as boolean,
     shared_process_termination_used: false,

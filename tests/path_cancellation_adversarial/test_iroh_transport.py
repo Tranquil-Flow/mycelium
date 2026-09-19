@@ -1960,3 +1960,56 @@ def test_close_wins_cancellation_admission_race_without_starting_worker() -> Non
     assert transport._cancellation_threads == {}
     assert paused.permit_available()
     assert hub.sent == []
+
+
+def test_close_grants_delivery_cancel_workers_their_acknowledgement_window() -> None:
+    """A delivery-cancel worker spawned BY close() gets its own window, not the poll cadence.
+
+    Measured 2026-09-20: ``_close`` spawns a delivery-cancel worker for every still-pending send and
+    then joined those workers for ``max(0.05, poll_interval_seconds * 4)`` -- 200 ms at the shipped
+    50 ms cadence -- while the worker it had just spawned finishes by reaching its own
+    acknowledgement deadline, ``min(_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS, delivery_timeout_seconds)``
+    = up to 1 s.  A worker doing exactly the job close gave it therefore made ``close()`` raise
+    ``delivery_cancellation_shutdown_timeout`` AND mark the transport fatal.
+
+    This is the same category error the sibling
+    ``test_sidecar_cancellation_ack_uses_cleanup_budget_not_poll_cadence`` forbids one level down:
+    the poll cadence is not an acknowledgement budget.  Cost when it fired in the wild: the
+    readiness gate's seeded soak failed 2 of 3 runs at HEAD and 0 of 3 at the previous head, once
+    the re-derived 8 s cleanup window (ERRATA-21) left more sends pending at close.
+    """
+
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.poll_interval_seconds = 0.05  # the shipped cadence: the old join bound was 0.2 s
+
+    real_worker = transport._delivery_cancel_worker
+    worker_started = threading.Event()
+
+    def slow_worker(control, message_id, pending, cleanup_deadline_monotonic_s=None):
+        # the job close() hands this worker takes longer than the poll cadence and less than the
+        # worker's own acknowledgement window
+        worker_started.set()
+        time.sleep(0.5)
+        return real_worker(control, message_id, pending, cleanup_deadline_monotonic_s)
+
+    transport._delivery_cancel_worker = slow_worker  # type: ignore[method-assign]
+
+    cancellation = PathCancellation("request-a", "path-a", 1, 3)
+    exact_id = b"d" * 16
+    with transport._state_lock:
+        # a send that has begun admission: close() reserves its cancellation and spawns the worker
+        transport._pending[exact_id] = _PendingSend(
+            7,
+            cancellation.request_id,
+            cancellation.path_id,
+            cancellation.path_attempt,
+            admission_started=True,
+        )
+
+    close_thread, results, errors = run_in_thread(transport.close, daemon=True)
+    join_bounded(close_thread, timeout=5.0)
+
+    assert worker_started.is_set(), "close must have spawned the delivery-cancel worker"
+    assert errors == [], errors
+    assert results == [None]
