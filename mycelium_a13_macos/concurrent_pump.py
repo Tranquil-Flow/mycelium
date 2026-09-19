@@ -12,7 +12,7 @@ import re
 from .control_pump import TargetControlPump, ControlPumpError, _OUTBOUND_EXPIRED, _outbound_outcome
 from .authority import _atomic_private_json, _load_private_json
 from .durable_requests import prepare
-from .managed_control import OWNER_COMMAND_PROTOCOL, _verify_signed, _binding_from_member, _document_digest, _binding_advanced
+from .managed_control import OWNER_COMMAND_PROTOCOL, ManagedControlError, _verify_signed, _binding_from_member, _document_digest, _binding_advanced
 
 _PROTOCOL = 'mycelium.a13.concurrent_claims.v1'
 
@@ -158,15 +158,46 @@ class ConcurrentTargetControlPump(TargetControlPump):
         if unresolved:
             self._record_uncertain_claim(unresolved)
             raise ControlPumpError('control_reconciliation_required')
-        for command_id, row in claims.items():
+        for command_id, row in list(claims.items()):
             if row['phase'] != 'ready':
                 continue
             target = self._member()
             reply = row['reply']
             # Revalidate persisted owner command before crossing the process boundary.
-            statement = _verify_signed(reply['command_envelope'], expected_protocol=OWNER_COMMAND_PROTOCOL,
-                expected_key_record=self.client.trusted_owner_key_record,
-                expected_endpoint_id=reply['owner_endpoint_id'], now=self.client._clock())
+            try:
+                statement = _verify_signed(reply['command_envelope'], expected_protocol=OWNER_COMMAND_PROTOCOL,
+                    expected_key_record=self.client.trusted_owner_key_record,
+                    expected_endpoint_id=reply['owner_endpoint_id'], now=self.client._clock())
+            except ManagedControlError as error:
+                if getattr(error, 'code', None) != 'managed_control_message_expired':
+                    raise
+                # AN EXPIRED COMMAND IS A NORMAL OUTCOME ON A SLOW PEER, NOT A LOOP FAILURE.
+                # Round p75r1, measured end to end: this revalidation raised straight out of step();
+                # _serve treats any exception as terminal, so the target went `blocked` and stayed there;
+                # no further polls were made; the owner's decode hop then found no peer and died as
+                # delivery_deadline_exceeded -> request_cleanup_unproven -> no terminal for the client.
+                # The revalidation ABOVE must stay -- native work is never executed on an unrevalidated
+                # instruction -- but dying for it must not: the command's signed TTL has passed, so it is
+                # unusable, and executing it would be a stale instruction.  Retire THIS claim and keep
+                # claiming work; the owner settles the row through its own reconciliation, because the peer
+                # no longer lists it in active_claims and _answer_reconciliation_demand answers the demand
+                # the owner then makes.  ONLY this exact code is declined -- every other rejection, including
+                # a member mismatch or a signature failure, still fails closed.
+                claims.pop(command_id, None)
+                self._save_claims()
+                try:
+                    _atomic_private_json(self.root / 'expired-claim.private.json', {
+                        'protocol': 'mycelium.a13.expired_claim.v1',
+                        'run_id': self.worker.run_id,
+                        'command_id_prefix': command_id[:16],
+                        'remaining_claims': len(claims),
+                        'in_flight_futures': len(self._futures),
+                    })
+                except BaseException:
+                    # Diagnostics must never perturb control flow.  Bounded and allowlisted: the command id
+                    # is truncated and no reply payload, claim token or key material is written.
+                    pass
+                continue
             binding = _binding_from_member(target, self.worker.run_id, self.worker.deployment_id)
             if any(statement[field] != value for field, value in binding.items()):
                 raise ControlPumpError('control_membership_changed')
