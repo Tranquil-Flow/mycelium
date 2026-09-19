@@ -144,21 +144,27 @@ def bind_operator_plan_document(
     # replaced, and only for a node we have an observation for -- node_id, host_id and every other peer
     # field stay untouched, so a node presenting a different node_id or host_id is still refused by the
     # identity check exactly as before. The acceptance rule is not weakened anywhere.
+    #
+    # AND WHY NOTHING IS RECORDED IN THE PLAN: the controller's field set is CLOSED
+    # (mycelium_physical_runner/config.py:40-54) and every set member is checked exactly
+    # (_CONTROLLER_PEER_FIELDS at :55-65 includes "boot_id", so refreshing its VALUE is legal, while
+    # adding a controller key is not). An earlier version of this block also wrote
+    # result["controller"]["boot_id_bindings"], which made load_operator_plan refuse the ENTIRE bound
+    # plan with `plan_unknown_field: controller.boot_id_bindings`, surfacing as
+    # ServingPreparationError("operator_plan_canonical_invalid") and stopping serving -- measured
+    # 2026-09-19, i.e. the fix's own audit trail would have blocked every round in which the fix
+    # worked. The refresh is therefore reported by the CALLER (workflow.py prints `boot_id_refreshed`)
+    # and never stored in the plan.
     if observed_boot_ids:
         peers = result["controller"].get("peers")
         if isinstance(peers, list):
-            refreshed_boot_ids = []
             for peer in peers:
                 if not isinstance(peer, dict):
                     continue
                 node_id = peer.get("node_id")
                 observed = observed_boot_ids.get(node_id) if isinstance(node_id, str) else None
                 if isinstance(observed, str) and observed and peer.get("boot_id") != observed:
-                    refreshed_boot_ids.append({"node_id": node_id, "from": peer.get("boot_id"),
-                                               "to": observed})
                     peer["boot_id"] = observed
-            if refreshed_boot_ids:
-                result["controller"]["boot_id_bindings"] = refreshed_boot_ids
     return result
 
 

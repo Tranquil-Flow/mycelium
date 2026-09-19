@@ -211,6 +211,11 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     from .serving import _read_json_object, prepare_registry_launch
     from .managed_transfers import bind_hf_prepositions
     from .session_factory import ManagedSessionFactory
+    # Imported ABOVE the try that uses it. A function-local import written BELOW its use makes the name
+    # local for the whole scope, so the call site raised UnboundLocalError on every round and the except
+    # reported it as an expected unavailability (soak04, 2026-09-19: the collection had never once run,
+    # in any bundle, while every source check and digest compare said the change had shipped).
+    from .managed_observations import ManagedObservationsError, collect_managed_hello_observations
     from mycelium_seed.plan_binding import bind_operator_plan_document
     from physical_inference_qualification import QualificationController, PeerIdentity
     if (not isinstance(authority,DemoAuthority) or authority.coordinator is None
@@ -233,9 +238,15 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
     # run_id/deployment_id are the same either side; and `members` is built from the LIVE coordinator in
     # both places, so the binding cannot change whose identity is signed.
     #
-    # AND WHY IT CANNOT HURT: the nodes may not be talking yet at plan-compile time. If collection fails
-    # for ANY reason the binding is simply left without observations, which is its inert default, and the
-    # round proceeds byte-for-byte as it did before this change.
+    # AND WHY IT CANNOT HURT: the nodes may not be talking yet at plan-compile time. If the producer
+    # refuses -- ManagedObservationsError is its ONLY refusal type: no session, stale run id, malformed
+    # or non-distinct hello -- the binding is left without observations, which is its inert default, and
+    # the round proceeds byte-for-byte as it did before this change.
+    #
+    # AND WHAT MUST NOT BE INERT: a programming error. Catching bare Exception here hid a function-local
+    # import bug for an entire session: UnboundLocalError was reported as boot_id_observation_unavailable,
+    # i.e. as though the nodes were simply not talking, so no round log ever disagreed. Only the
+    # producer's own refusal is an expected condition. Anything else is a defect and must be loud.
     observed_boot_ids=None
     try:
         document_peers=[peer for peer in document['controller']['peers'] if isinstance(peer,dict)]
@@ -250,17 +261,26 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
             if isinstance(item,dict) and isinstance(item.get('node_id'),str)
             and isinstance(item.get('boot_id'),str) and item['boot_id']}
         print('boot_id_observations_collected nodes=%d' % len(observed_boot_ids),flush=True)
-    except Exception as exc:
+    except ManagedObservationsError as exc:
         print('boot_id_observation_unavailable %r' % (exc,),flush=True)
         observed_boot_ids=None
     bound=bind_operator_plan_document(document,signer=coordinator.signer,
         swarm_id=coordinator.swarm_id,seed_node_id=coordinator.seed_node_id,
         members=coordinator.members(),now=time.time(),observed_boot_ids=observed_boot_ids)
+    # The plan's controller field set is CLOSED (mycelium_physical_runner/config.py:40-54): storing the
+    # refresh inside the plan made load_operator_plan refuse the document outright (plan_unknown_field),
+    # so the audit lives HERE, in the round log, where the round that proves the boot-id fix fires can
+    # also show which peers it moved.
+    _before={peer.get('node_id'):peer.get('boot_id') for peer in document['controller'].get('peers') or []
+        if isinstance(peer,dict)}
+    _moved={peer.get('node_id'):[_before.get(peer.get('node_id')),peer.get('boot_id')]
+        for peer in bound['controller'].get('peers') or []
+        if isinstance(peer,dict) and peer.get('boot_id')!=_before.get(peer.get('node_id'))}
+    if _moved:print('boot_id_refreshed %s' % json.dumps(_moved,sort_keys=True,default=str),flush=True)
     c=bound['controller'];run=c['run_plan']
     members=[coordinator.member(peer['node_id']) for peer in c['peers']]
     factory=ManagedSessionFactory(owner=channel,run_id=run['run_id'],
         deployment_id=run['deployment_id'],members=members)
-    from .managed_observations import collect_managed_hello_observations
     from .managed_control import _segment
     run_id=_segment(run['run_id'])
     root=_private_directory(authority.state_root/'serving-runs'/run_id,create=True)

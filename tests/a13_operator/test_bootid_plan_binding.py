@@ -68,6 +68,10 @@ def test_behaviour_inert_without_observations_and_preferring_them_with(tmp_path)
     peer = refreshed['controller']['peers'][0]
     assert peer['boot_id'] == 'new'
     assert peer['node_id'] == 'n1' and peer['host_id'] == 'h1'
-    assert refreshed['controller']['boot_id_bindings'][0]['to'] == 'new'
+    # Nothing may be ADDED to the controller: its field set is closed and
+    # load_operator_plan refuses the document with plan_unknown_field (measured 2026-09-19, where the
+    # audit field made ServingPreparationError("operator_plan_canonical_invalid") stop serving).
+    assert 'boot_id_bindings' not in refreshed['controller']
+    assert set(refreshed['controller']) == set(base['controller'])
     missing = run({'controller': {'peers': [{'node_id': 'n2', 'boot_id': 'kept'}]}}, {'n1': 'new'})
     assert missing['controller']['peers'][0]['boot_id'] == 'kept'
