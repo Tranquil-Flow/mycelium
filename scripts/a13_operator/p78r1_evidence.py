@@ -105,10 +105,18 @@ def post():
         print(f"  {blocked.name}: {len(rows)} withheld terminal(s)")
         for reason, count in Counter(row.get("reason") for row in rows).most_common():
             print(f"    reason={reason}  n={count}")
+        # The CAUSE, as opposed to the withholding reason: without this the round knows only that terminals
+        # were withheld, never what the route actually hit (p78r1: 103 rows, one reason, cause discarded).
+        for code, count in Counter(row.get("route_error_code") for row in rows).most_common():
+            print(f"    route_error_code={code}  n={count}")
         print("    execution_started="
               f"{sum(1 for row in rows if row.get('execution_started'))}"
               f"  with_command_prefix={sum(1 for row in rows if row.get('command_id_prefix'))}"
-              f"  cleanup_owner_bound={sum(1 for row in rows if row.get('cleanup_owner_bound'))}")
+              f"  cleanup_owner_bound={sum(1 for row in rows if row.get('cleanup_owner_bound'))}"
+              f"  scoped_incident={sum(1 for row in rows if row.get('scoped_incident'))}")
+        if rows and not any(row.get("command_id_prefix") for row in rows):
+            print("    -> NO row carries a command-id prefix: join against managed_commands is impossible, so")
+            print("       treat the (a)/(b) split as UNMEASURED rather than as 'no proof command was minted'.")
         if rows:
             print(f"    last: {json.dumps(rows[-1], sort_keys=True)[:240]}")
     else:

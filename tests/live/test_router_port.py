@@ -264,3 +264,14 @@ def test_blocked_terminal_is_persisted_so_the_next_round_reads_one_file(
     # The route's own minted deadline travels with the record: the shape under suspicion in ERRATA-23 was a
     # deadline the route could not honour, so the record must carry it rather than leave it to inference.
     assert isinstance(record["absolute_deadline_ms"], int) and record["absolute_deadline_ms"] > 0
+    # The CAUSE must travel too, not only the withholding reason.  The route's own bounded failure code is
+    # computed a few lines ABOVE the block site (``_bounded_error_code``) and was then discarded: all 103
+    # p78r1 blocks reduced to the same sentence, ``command_cleanup_receipt_missing``, and the route failure
+    # underneath never reached any artifact -- the fourth occurrence of this program's "records where, never
+    # why" class.  Assert the two are distinguishable instead of assuming it.
+    assert record["route_error_code"] == "simulated_cleanup_unproven"
+    assert record["route_error_code"] != record["reason"]
+    # Whether a scoped/route cleanup incident existed decides the branch that follows: ``complete()`` retires
+    # the runtime reservation, ``retire_dispatch_slot()`` retains it.  A reader must not have to re-derive
+    # which branch ran (and therefore whether capacity was retained) from an in-memory list.
+    assert record["scoped_incident"] is False

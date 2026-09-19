@@ -48,6 +48,13 @@ _LOGGER = logging.getLogger(__name__)
 # This record makes that split one file read: a bounded, privacy-reduced line per withheld terminal, whose
 # command-id prefix can be joined against the owner's managed-control ledger.
 #
+# It carries the CAUSE as well as the refusal: ``route_error_code`` is the route's own bounded failure code
+# (``_bounded_error_code``, computed one line above the block site) and ``scoped_incident`` names which
+# recovery branch ran.  Round p78r1 is why -- 103 blocks, all with the identical reason
+# ``command_cleanup_receipt_missing``, while the failure underneath was discarded at the block site, so the
+# round could not say what the route had hit.  A diagnostic that keeps only the refusal is the
+# "records where, never why" class this program has now paid for four times.
+#
 # Privacy: id PREFIXES only (16 chars, the convention the node pump's diagnostics already use), no payload,
 # no claim token, no key material, no request text.  Bounded: 128 KiB then ONE rotation, so a soak cannot
 # grow it without limit.  Never raises: a diagnostic may not perturb the request path.
@@ -83,11 +90,26 @@ def _blocked_terminal_log_path(route: Any) -> Path | None:
     return None
 
 
-def _record_blocked_terminal(*, route: Any, request_id: str, reason: str, pending: Any) -> None:
+def _record_blocked_terminal(
+    *,
+    route: Any,
+    request_id: str,
+    reason: str,
+    pending: Any,
+    route_error_code: str | None = None,
+    scoped_incident: bool = False,
+) -> None:
     """Persist which terminal was withheld, why, and which command it could not prove -- bounded and silent.
 
     The command-id prefix is the join key: matched against ``managed_commands`` it tells the next round
     whether that command was ever minted, what operation it carried, its declared TTL and its terminal state.
+
+    ``route_error_code`` is the route's OWN bounded failure code -- the cause, as opposed to ``reason``,
+    which is only the port's sentence for withholding.  Both are needed: in round p78r1 all 103 blocks
+    carried the single reason ``command_cleanup_receipt_missing`` while the failure underneath (already
+    computed one line above the block site) was discarded, so the round could not say what the route had
+    actually hit.  ``scoped_incident`` records which of the two following branches ran, because they differ
+    in capacity: ``complete()`` retires the runtime reservation, ``retire_dispatch_slot()`` retains it.
     """
 
     try:
@@ -109,6 +131,8 @@ def _record_blocked_terminal(*, route: Any, request_id: str, reason: str, pendin
             "observed_at_unix_ms": int(time.time() * 1_000),
             "request_id_prefix": str(request_id)[:_ID_PREFIX_CHARS],
             "reason": str(reason)[:128],
+            "route_error_code": (str(route_error_code)[:64] if route_error_code else None),
+            "scoped_incident": bool(scoped_incident),
             "command_id_prefix": str(_field("command_id") or "")[:_ID_PREFIX_CHARS],
             "request_attempt": _field("request_attempt"),
             "path_id_prefix": str(_field("path_id") or "")[:_ID_PREFIX_CHARS],
@@ -579,16 +603,23 @@ class LiveRouterPort:
                 terminal = recorded_terminal
             except RuntimeError as error:
                 terminal_blocked_reason = str(error)
+                # Both facts are computed ONCE here: the branch below is chosen by the incident predicate, and
+                # the record must name the branch that actually ran (they differ in whether the runtime
+                # reservation is retired or retained).
+                scoped_incident = self._route_has_scoped_incident_for(pending.request)
                 _record_blocked_terminal(
                     route=self._route,
                     request_id=request_id,
                     reason=terminal_blocked_reason,
                     pending=pending,
+                    route_error_code=terminal_error_code,
+                    scoped_incident=scoped_incident,
                 )
                 _LOGGER.error(
-                    "live route terminal blocked request_id=%s reason=%s",
+                    "live route terminal blocked request_id=%s reason=%s route_error_code=%s",
                     request_id,
                     terminal_blocked_reason[:256],
+                    terminal_error_code,
                 )
                 # If a scoped liveness incident already projected the affected
                 # track's terminal status (e.g. a participating peer's transport
@@ -599,9 +630,7 @@ class LiveRouterPort:
                 # surfaces as the authoritative outcome. Without a scoped
                 # incident we keep the fail-closed "cleanup" phase so the
                 # operator can see the unproven cleanup.
-                if coordinator is not None and self._route_has_scoped_incident_for(
-                    pending.request
-                ):
+                if coordinator is not None and scoped_incident:
                     coordinator.complete(request_id, state="failed")
                 elif coordinator is not None:
                     # Cleanup-unproven with no scoped incident: the stream
