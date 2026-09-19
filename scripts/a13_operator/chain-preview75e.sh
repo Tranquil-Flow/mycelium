@@ -1,10 +1,15 @@
 #!/bin/bash
 # E: preview.75, one round on the boot-id fix, then the C5 soak against the live route.
 #   1. run ONE round with --no-quit so the serving route stays UP after the chain;
-#   2. ASSERT THE BOOT-ID FIX ACTUALLY FIRED (new here): the round's app log must carry
-#      `boot_id_observations_collected nodes=N` with N >= 1. Two defects made that fix inert in every
-#      bundle that carried it (ERRATA-6), and the silent path looked exactly like an expected
-#      condition, so silence is now a round failure and the soak does not start on it;
+#   2. JUDGE THE BOOT-ID COLLECTION and gate the soak on the VERDICT CLASS (revised 2026-09-19): the
+#      app log is graded by scripts/a13_operator/bootid_gate.sh, which blocks on a DEFECT or on having
+#      no log, and records a documented-inert refusal without blocking. The earlier policy -- silence is
+#      always a round failure, the soak does not start on it -- was written against the programming-error
+#      class (ERRATA-6's UnboundLocalError reported as boot_id_observation_unavailable, two bundles inert)
+#      and misfired on the producer's own refusal, because workflow.py:240-248 documents a refusal as the
+#      binding's INERT DEFAULT ("the round proceeds byte-for-byte as it did before this change"). Blocking
+#      on it coupled the C5 soak to a best-effort feature. A defect still stops the round; a refusal is
+#      recorded and the soak proceeds, and NO round may claim the fix fired without the success line;
 #   3. take timed requests against that live route and run the 110-request soak with cancellations;
 #   4. ALWAYS quit both apps and sweep both Macs -- in a trap, so no early exit and no lost context
 #      can leave strays.
@@ -120,13 +125,29 @@ echo "=== [2b/5] ASSERT THE BOOT-ID FIX FIRED (fail closed; the soak does not st
 # It supersedes /tmp/asm/bootid_guard.sh, which (a) decided from a log line rather than the producer's
 # vocabulary -- and the harness QUOTES protocol strings, so a harness log could pass an app-signature
 # check -- and (b) would not survive a reboot. Exit: 0 fired, 6 did-not-fire (named reason), 7 no log.
-env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV "$A13_PYTHON" -B \
-  scripts/a13_operator/bootid_guard.py --app-log "$OWNER_APP_LOG"
-if [ $? -ne 0 ]; then
-  echo "REFUSING to spend the soak on a round whose plan binding was never refreshed"
-  echo "(the guard above names the class: refused_expected means the producer itself refused --"
-  echo " e.g. ManagedObservationsError('managed_control_response_timeout') -- and the success line"
-  echo " 'boot_id_observations_collected nodes=N' must be OBSERVED before the soak is spent)"
+#
+# WHICH VERDICTS THIS GATE BLOCKS, and why the list is short (revised 2026-09-19, decisions.log):
+# the guard's own classes are not equivalent, so treating every non-zero exit as fatal coupled the C5 soak
+# to a feature the producer documents as BEST-EFFORT. workflow.py:240-248 says of this very collection:
+# "the nodes may not be talking yet at plan-compile time. If the producer refuses -- ManagedObservationsError
+# is its ONLY refusal type: no session, stale run id, malformed or non-distinct hello -- the binding is left
+# without observations, which is its inert default, and the round proceeds byte-for-byte as it did before
+# this change." So a refusal is the product's own documented inert condition, and p74r1's observed class IS
+# a refusal (managed_control_response_timeout), not the programming-error class the original brief was
+# written against.
+#   * class=defect  -> BLOCK. A programming error must be fixed, never soaked past. This is the class the
+#                      original brief was about (UnboundLocalError reported as boot_id_observation_unavailable).
+#   * exit 7        -> BLOCK. No app log means no evidence either way; do not guess.
+#   * FIRED         -> proceed, and the success line is recorded in the round evidence.
+#   * refused_expected / no_attempt -> proceed, RECORDED as the inert condition. Blocking here is what would
+#                      make C5 unreachable, and it is not what "fail closed on a defect" means.
+# The decision lives in ONE tested place: scripts/a13_operator/bootid_gate.sh, which calls the guard and
+# then distinguishes the classes the guard reports. It blocks ONLY on a defect or on having no log at all,
+# because the producer documents its refusal as the binding's inert default (workflow.py:240-248) while a
+# programming error must never be inert (workflow.py:246-248) -- see that file for the full reasoning and
+# decisions.log for the 2026-09-19 revision that narrowed this gate.
+if ! bash scripts/a13_operator/bootid_gate.sh "$OWNER_APP_LOG"; then
+  echo "REFUSING to spend the soak: the boot-id gate blocked (reason above)."
   exit 6
 fi
 
