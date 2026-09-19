@@ -41,6 +41,17 @@ echo "verdict=$VERDICT receipt_head=$RH"
 [ "$VERDICT" = "GO" ] && [ "$RH" = "$HEAD" ] || { echo "STOP: gate not GO for this head"; echo "PREFLIGHT_LOCAL_FAILED"; exit 3; }
 
 echo "=== [2/6] BUILD $NEW ==="
+if [ -d "$DIST/$NEW" ]; then
+  if [ -z "$(ls -A "$DIST/$NEW" 2>/dev/null)" ]; then
+    # The build mkdirs the output root BEFORE it can fail, so a failed build leaves an EMPTY root and every
+    # later attempt refuses with "fresh_output_root_required".  Measured twice in a row on 2026-09-20.
+    echo "  removing empty $DIST/$NEW -- debris a failed build left (it creates the root before it can fail)"
+    rmdir "$DIST/$NEW"
+  else
+    echo "STOP: $DIST/$NEW exists and is NOT empty -- preserve it aside (rename, never delete) first"
+    echo "PREFLIGHT_LOCAL_FAILED"; exit 5
+  fi
+fi
 # The build's WORK dir (build/<name>, gitignored PyInstaller scratch) cannot be reused: its
 # compiler-source staging does mkdir(exist_ok=False), so the second build for a version raises
 # FileExistsError: .../compiler-sources -- measured 2026-09-20, after a preflight build's artifact was
@@ -53,7 +64,9 @@ if [ -d "$REPO/build/$NEW" ]; then
 fi
 env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 \
   "$VENV" -B scripts/build_a13_macos.py --output-root "$DIST/$NEW" > /tmp/asm/build-pre78-at-$TAG.log 2>&1
-echo "BUILD_EXIT=$?"; tail -3 /tmp/asm/build-pre78-at-$TAG.log | head -c 600; echo
+BUILD_EXIT=$?
+  echo "BUILD_EXIT=$BUILD_EXIT"; tail -3 /tmp/asm/build-pre78-at-$TAG.log | head -c 600; echo
+  [ "$BUILD_EXIT" = 0 ] || { echo "STOP: the build refused or failed (see the log tail above)"; echo "PREFLIGHT_LOCAL_FAILED"; exit 5; }
 
 echo "=== [3/6] IDENTITY RECORDED BY THE BUILD ==="
 IDENT="$DIST/$NEW/Mycelium A13 Demo.app/Contents/Resources/third_party/compiler-source-identity.json"

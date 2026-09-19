@@ -43,7 +43,18 @@ env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV PYTHONDONTWRITEBYTECODE=1 \
   # Fail closed by name if a previous artifact already holds this root: build_a13_macos.py refuses it
   # ("fresh_output_root_required", historical previews are immutable) and the old chain then read the
   # STALE identity and died at [3/6] with "identity head != build head" -- the wrong name for the cause.
-  [ -e "$DIST/$NEW" ] && { echo "STOP: $DIST/$NEW already exists -- preserve it aside (rename, never delete) first"; echo "PIPELINE_DONE early"; exit 5; }
+  if [ -d "$DIST/$NEW" ]; then
+    if [ -z "$(ls -A "$DIST/$NEW" 2>/dev/null)" ]; then
+      # The build mkdirs the output root BEFORE it can fail (its very first act), so any failed build
+      # leaves an EMPTY root behind and every later attempt refuses with "fresh_output_root_required".
+      # An empty directory is not a retained artifact: it is debris from the failure itself.
+      echo "  removing empty $DIST/$NEW -- debris a failed build left (it creates the root before it can fail)"
+      rmdir "$DIST/$NEW"
+    else
+      echo "STOP: $DIST/$NEW exists and is NOT empty -- preserve it aside (rename, never delete) first"
+      echo "PIPELINE_DONE early"; exit 5
+    fi
+  fi
 # The build's WORK dir (build/<name>, gitignored PyInstaller scratch) cannot be reused: its
 # compiler-source staging does mkdir(exist_ok=False), so the second build for a version raises
 # FileExistsError: .../compiler-sources -- measured 2026-09-20, after a preflight build's artifact was
