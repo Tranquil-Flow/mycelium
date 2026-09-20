@@ -45,6 +45,13 @@ _BOOT_ID_OBSERVATION_MAX_RETRY_SECONDS=30.0
 # test_serving_workflow.py is refused with managed_observation_run_id_invalid, and retrying that turned a
 # 2.7 s file into minutes. Everything the NODE or the CHANNEL produces stays retryable, because that is
 # exactly the p80r1 shape: the node was still starting and did not answer for this run yet.
+#
+# managed_observation_captured_stale IS RETRYABLE, and it was measured rather than assumed: the producer
+# reads `now` at entry (managed_observations.py:176) and `captured` at exit (:262) and admits only
+# -60 <= now - captured <= 600 (:85-87, :40-41). `captured` is read later from the same clock, so the only
+# failing branch is `captured - now > 60`, i.e. THIS ATTEMPT took longer than 60 s -- usually because a
+# member's hello ran to its own 30 s budget while the node was still coming up. A retry re-reads `now` at
+# its own entry, so every attempt gets a NEW window and waiting can genuinely change the answer.
 _BOOT_ID_OBSERVATION_TERMINAL_CODES=frozenset((
     'managed_observation_clock_invalid',
     'managed_observation_run_id_invalid',
@@ -53,7 +60,6 @@ _BOOT_ID_OBSERVATION_TERMINAL_CODES=frozenset((
     'managed_observation_factory_invalid',
     'managed_observation_factory_scope_mismatch',
     'managed_observation_nodes_invalid',
-    'managed_observation_captured_stale',
 ))
 # Both are plain module attributes so a test can replace the wait and the clock; the retry schedule is
 # then pinned deterministically (tests/a13_macos/test_bootid_bounded_observation_wait.py) without the

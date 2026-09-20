@@ -245,3 +245,46 @@ def test_a_channel_that_is_already_up_is_collected_once_without_waiting(tmp_path
         assert 'boot_id_observations_collected nodes=%d' % len(peer_nodes) in out, out
     finally:
         channel.close()
+
+
+def test_a_duration_verdict_is_retried_because_a_new_attempt_gets_a_new_window(tmp_path, enrolled,
+                                                                             monkeypatch, capsys):
+    """`captured_stale` is NOT a verdict about our inputs: it is a verdict about how long THIS attempt took.
+
+    Measured in the producer (mycelium_a13_macos/managed_observations.py): entry reads `now`
+    (:176), exit reads `captured` (:262), and `_fresh_enough(now, captured)` (:85-87) admits only
+    `-_MAX_SKEW_SECONDS <= now - captured <= _MAX_STALE_SECONDS`. Because `captured` is read LATER from the
+    same clock, `now - captured <= 0` always, so the only failing branch is `captured - now >
+    _MAX_SKEW_SECONDS` -- 60.0 seconds (:41). It therefore means "this attempt's collection took longer
+    than 60 s", usually because a member's hello ran to its own 30 s budget while the node was still coming
+    up: exactly the p80r1 shape. A retry re-reads `now` at its own entry, so the window is new each time and
+    waiting CAN change the answer -- unlike run-id, deployment, factory and clock verdicts, which are pure
+    functions of the caller's inputs.
+
+    RED while `captured_stale` is in _BOOT_ID_OBSERVATION_TERMINAL_CODES: one attempt, no wait, and the
+    binding stays inert even though a warm second attempt was available.
+    """
+    authority, nodes, prepared, plan, roots, document = _prepared_plan(tmp_path, enrolled)
+    peer_nodes = [peer['node_id'] for peer in document['controller']['peers']]
+    attempts = []
+
+    def slow_then_ready(factory, *, run_id, deployment_id, node_ids):
+        attempts.append(list(node_ids))
+        if len(attempts) < 3:
+            raise ManagedObservationsError('managed_observation_captured_stale')
+        return _fake_document(run_id, deployment_id, node_ids)
+
+    monkeypatch.setattr('mycelium_a13_macos.managed_observations.collect_managed_hello_observations',
+                        slow_then_ready)
+    state = _bounded_wait(monkeypatch)
+    channel, workflow = _prepare(authority, prepared, plan, roots)
+    try:
+        assert len(attempts) == 3, (
+            'a duration verdict was treated as final after %d attempt(s): it is measured fresh on every '
+            'attempt, so waiting can change it' % (len(attempts),))
+        assert len(state['sleeps']) == 2, 'one wait between retries: %r' % (state['sleeps'],)
+        assert 'managed_observation_captured_stale' not in workflow_module._BOOT_ID_OBSERVATION_TERMINAL_CODES
+        out = capsys.readouterr().out
+        assert 'boot_id_observations_collected nodes=%d' % len(peer_nodes) in out, out
+    finally:
+        channel.close()
