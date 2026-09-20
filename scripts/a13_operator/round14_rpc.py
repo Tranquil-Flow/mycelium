@@ -121,8 +121,138 @@ def _is_refused(exc):
         return True
     return isinstance(exc, urllib.error.URLError) and 'refused' in str(getattr(exc, 'reason', exc)).lower()
 
+# ─────────────────────── ACTIVATION READINESS SEQUENCING (p82r3, 2026-09-20) ───────────────────────
+# WHY THIS EXISTS -- read off the four rounds that died at `STEP_FAILED start_and_activate`
+# (p82r1, p82r2, p81r2, p82r3): the round asked the app for a CONTROL decision while the app had not
+# reported that it was in a state to take one. p82r1 and p82r3 died inside the first
+# `/api/serving/status` read of the step as `handshake_timeout:...:attempts=16:TimeoutError('timed out')`
+# while the app was ALIVE (surface present; it answered /api/status and /api/quit minutes later): the app
+# does not answer inside app_rpc.py:15's FIXED 10 s read deadline while it compiles and then LOADS a 14 GB
+# model, and `_client`'s busy retry is bounded too, so which budget expired first -- not the app's own
+# state -- decided the round. `round14_rpc.py:100` names that consequence in its own words.
+#
+# THE FIX IS SEQUENCING, NOT PATIENCE ADDED TO ANY GUARD: no timeout, window, tolerance or identity check
+# is changed here -- app_rpc.py's 10 s, `_OWNER_CALL_BUDGET_S`, `_OWNER_STARTUP_GRACE_S`, `_busy_reason`,
+# `_is_refused`, `require_local/require_remote` and the reachability retry all stay byte-identical. What is
+# added is a WAIT ON THE APP'S OWN READINESS REPORT, taken before a control call is issued, whose exit
+# condition is the app's OWN reported field and never a clock:
+#
+#   `/api/serving/start`    -> `compilation.state == 'compiled'`         (chain_compile.py:83)
+#   `/api/serving/activate` -> `serving.state == 'awaiting_activation'`  (chain_compile.py:116)
+#
+# Each accepted value is quoted from the app's OWN handler, which is the code that decides whether the
+# call is accepted at all -- `start_serving`: "if state is None or state.get('state')!='compiled' or
+# proposal!=state['execution_proposal']: raise DemoError('model_execution_proposal_changed')";
+# `activate_serving`: "if workflow is None or gate is None or
+# workflow.status()['state']!='awaiting_activation': raise DemoError('managed_workflow_not_awaiting_activation')".
+#
+# REJECTED SIGNALS, after reading the app rather than guessing: `route_ready` is hardcoded False on every
+# `/api/serving/*` return (app.py:445) and never flips, and `serving_role` is not in the status payload at
+# all -- it exists only as the launcher's startup event (__main__.py:59, 'not_yet_serving') and as the
+# constant 'role':'not_yet_serving' (app.py:401). Neither can distinguish "still loading" from "ready".
+# The report carries no field for "too busy to answer" either: silence is not a state, so the wait below
+# treats a silent-but-live surface as work in progress and uses the app's OWN surface (native-control.json,
+# unlinked only on shutdown, app.py:771) as the death discriminator.
+_READINESS_READ = '/api/serving/status'   # read-only and non-mutating: the same cheap read the pinned
+                                          # step polls (round14_start_and_activate.py:10-15)
+_READINESS = {'/api/serving/start': ('compilation', 'compiled'),
+              '/api/serving/activate': ('serving', 'awaiting_activation')}
+_READINESS_TERMINAL = {'compilation': ('failed',), 'serving': ('failed', 'stopped')}
+# HOW LONG THE APP MAY TAKE: the app's OWN declaration, not a number picked here. `RESOURCE_PROPOSAL`
+# declares max_wall_seconds=1800 for this run (mycelium_a13_macos/serving.py:91), and the pinned step
+# already declares the same 1800 s of patience for the loop that waits on this very compile
+# (round14_start_and_activate.py:10: `deadline=time.monotonic()+1800`). The gate does not extend either;
+# it makes the app's own report, rather than a read deadline, decide when the call may be issued.
+# `tests/a13_operator/test_activation_readiness_sequencing.py` fails if those two declarations and this
+# constant stop agreeing.
+_READINESS_BUDGET_S = 1800.0
+_READINESS_RETRY_S = 5.0
+
+
+class NotReady(RuntimeError):
+    """The app ANSWERED, and its own report is not a state that accepts the requested control call.
+
+    Distinct from `HandshakeTimeout` ("the surface exists but did not answer in time") and from
+    `surface_lost` ("the app is not running"): here the app is running and speaking, and what it says is
+    that it has not reached (or can never reach) the state its own handler requires. The call is NOT
+    issued -- issuing it would either be refused by the app or be asked to survive a load on a 10 s read.
+    """
+
+
+def _readiness_budget_s():
+    try: return float(os.environ.get('A13_READINESS_BUDGET_S', _READINESS_BUDGET_S))
+    except (TypeError, ValueError): return _READINESS_BUDGET_S
+
+
+def _readiness_retry_s():
+    try: return float(os.environ.get('A13_READINESS_RETRY_SLEEP_S', _READINESS_RETRY_S))
+    except (TypeError, ValueError): return _READINESS_RETRY_S
+
+
+def _reported_state(report, section):
+    """The app's own reported state for one section of `/api/serving/status`, or None."""
+    value = (report or {}).get(section)
+    return value.get('state') if isinstance(value, dict) else None
+
+
+def await_ready(root, path):
+    """Block until the APP'S OWN report satisfies `path`'s precondition; then return. Issue nothing else.
+
+    The exit condition is the app's report alone:
+      * the required state appears                                   -> return; the caller may now call
+      * a terminal state appears (compilation failed / serving failed|stopped) -> NotReady, at once
+      * the surface disappears (require_local)                       -> surface_lost, at once (unchanged)
+      * the app is SILENT while its surface is still present         -> wait, bounded and logged
+      * anything that is not a busy/not-yet class (bad credential, a refusal after first contact) -> raised
+    """
+    section, accepted = _READINESS[path]
+    started = time.monotonic()
+    deadline = started + _readiness_budget_s()
+    retry = _readiness_retry_s()
+    grace = time.monotonic() + (_OWNER_STARTUP_GRACE_S if not _OWNER_ANSWERED else 0.0)
+    attempts = 0
+    last = 'not_asked'
+    while True:
+        attempts += 1
+        try:
+            report = _client(root).call(_READINESS_READ, {})
+        except Exception as exc:                                  # classified, never swallowed
+            reason = _busy_reason(exc)
+            if reason is not None or isinstance(exc, HandshakeTimeout):
+                last = reason or repr(exc)                        # alive but not answering yet
+            elif _is_refused(exc) and not _OWNER_ANSWERED and time.monotonic() < grace:
+                # The same narrow startup rule `owner()` already applies (79r1): a surface written before
+                # the listener bound is a startup state, not a death -- inside the grace only.
+                print('owner_startup_grace path=%s reason=%s' % (_READINESS_READ, repr(exc)[:110]), flush=True)
+                last = repr(exc)
+            else:
+                raise
+        else:
+            if not _OWNER_ANSWERED:
+                _OWNER_ANSWERED.append(True)
+            state = _reported_state(report, section)
+            if state in accepted:
+                return report
+            if state in _READINESS_TERMINAL.get(section, ()):
+                print('readiness_refused path=%s state=%s' % (path, state), flush=True)
+                raise NotReady('readiness_refused:%s:path=%s:state=%s' % (root, path, state)) from None
+            last = 'state=%s' % state
+        if time.monotonic() >= deadline:
+            print('readiness_timeout path=%s attempts=%d last=%s' % (path, attempts, last), flush=True)
+            raise NotReady('readiness_timeout:%s:path=%s:attempts=%d:last=%s'
+                           % (root, path, attempts, last)) from None
+        print('readiness_wait path=%s attempts=%d last=%s elapsed=%.1f'
+              % (path, attempts, last, time.monotonic() - started), flush=True)
+        time.sleep(retry)
+
+
 def owner(path,body=None):
     require_local(OWNER)
+    # SEQUENCING: a control call is issued only after the app has itself reported the state its own
+    # handler requires. Read-only calls are untouched -- they ARE the report (`/api/serving/status` is the
+    # probe the gate uses, so it cannot be gated by it).
+    if path in _READINESS:
+        await_ready(OWNER,path)
     deadline=time.monotonic()+_OWNER_CALL_BUDGET_S
     grace=time.monotonic()+(_OWNER_STARTUP_GRACE_S if not _OWNER_ANSWERED else 0.0)
     while True:
@@ -247,6 +377,14 @@ def _target_once_reachability_retry(path,body):
 
 def target(path,body=None):
     _attribute_call(path)
+    # NO READINESS GATE HERE, and that is a finding rather than an omission (p82r3 investigation,
+    # 2026-09-20): the TARGET app refuses `/api/serving/status` outright -- app.py:427-428 routes those
+    # paths to `owner_action_required` whenever `installation_role!='owner'` -- so the laptop's app
+    # publishes NO field the round could wait on. The target-side sequencing that exists is the app's own
+    # offer report (`/api/staging/check`), which the pinned step already polls to completion before it
+    # previews (round14_start_and_activate.py:26-28). A gate here would need a readiness read the target
+    # app does not serve; it is not invented. p81r2's `local_api_http_409:action_not_completed` at
+    # `/api/work/preview` is therefore NOT addressed by this change -- it is not a timeout class at all.
     # 1. Surface first: a missing control file fails closed as `surface_lost` (the 63r1 class).
     if not _TARGET_SURFACE_CHECKED:
         require_remote(REMOTE,REMOTE_HOST)
