@@ -617,6 +617,23 @@ _LONG_POLL_MAX_HOLD_SECONDS = 5.0
 """Hard ceiling for a configurable hold: a nonsense value must fail closed at
 construction rather than park a peer's control pump indefinitely."""
 
+_DELIVERY_WAKE_PROTOCOL = "mycelium.a13.mailbox_delivery_wake.v1"
+"""The in-process delivery wake-up a parked long poll waits on.
+
+The poll loop below already re-attempts inside its hold, but it re-attempts on an
+*interval* (``long_poll_step``).  An interval can only ever be as prompt as its own
+period, and the measured p81r1 inversion (DIAGNOSIS-p81r1-cleanup-unproven.md) is
+exactly that: the laptop peer's cleanup command was claimed at **3 957 ms of its
+4 427 ms life** and then needed **3 862 ms**, so it could never complete and the route
+withheld the terminal.  PLAN.md D9 prescribes the fix on this side of the inversion:
+"fix the delivery path (e.g. long-poll wake-up instead of interval polling), not the
+budget".  So an enqueue now *signals* the parked polls and they re-attempt at once.
+
+This is a delivery signal only.  It never widens, relaxes or re-derives a hold, a step,
+a deadline, a cleanup window, a skew or a staleness constant: the interval stays, as
+the ceiling that still bounds a missed signal.
+"""
+
 
 def _empty_poll_delivery(response: Mapping[str, Any]) -> bool:
     """True only for a signed poll receipt that delivered nothing.
@@ -679,6 +696,11 @@ class ManagedControlMailbox:
         self._monotonic = monotonic
         self._lock = threading.RLock()
         self._closed = False
+        # Delivery wake-up (see _DELIVERY_WAKE_PROTOCOL).  A monotonically increasing
+        # generation, so a waiter can tell "an enqueue signalled me" from "my interval
+        # elapsed" without holding the mailbox lock while it waits.
+        self._delivery_wakeup = threading.Condition(threading.Lock())
+        self._delivery_generation = 0
         self._prepare_database()
         self._initialize()
 
@@ -1047,6 +1069,10 @@ class ManagedControlMailbox:
                         response=response,
                     )
                     connection.commit()
+                    # The command is durable now, so a parked poll for this member may
+                    # claim it.  Signalled AFTER the commit: a woken poll re-attempts
+                    # against committed state, never against a half-written row.
+                    self._signal_delivery()
                     return response
                 except ManagedControlError:
                     connection.rollback()
@@ -1158,6 +1184,36 @@ class ManagedControlMailbox:
                 return True
         return False
 
+    def _signal_delivery(self) -> None:
+        """Wake every parked poll: a command has just become deliverable.
+
+        Called from ``enqueue`` after the row is committed, so a woken poll re-attempts
+        against durable state and can never observe a command that is not yet there.
+        Never raises and never blocks: a signal is not an outcome.
+        """
+
+        with self._delivery_wakeup:
+            self._delivery_generation += 1
+            self._delivery_wakeup.notify_all()
+
+    def _wait_for_delivery(self, timeout: float) -> bool:
+        """Wait up to ``timeout`` for a delivery signal; True if one arrived.
+
+        ``timeout`` is the caller's own step -- unchanged, and still the ceiling, so a
+        missed signal can never park a peer for longer than the interval it used
+        before.  A signal only ever makes the same wait *shorter*.
+        """
+
+        deadline = time.monotonic() + float(timeout)
+        with self._delivery_wakeup:
+            generation = self._delivery_generation
+            while self._delivery_generation == generation:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
+                    return False
+                self._delivery_wakeup.wait(remaining)
+            return True
+
     def _may_hold(self, envelope: Mapping[str, Any]) -> bool:
         """True only for a concurrent poll no *live* deadline is waiting on.
 
@@ -1222,6 +1278,13 @@ class ManagedControlMailbox:
         Two narrower scopes, both deliberate (see `_may_hold`): a peer that still
         owes an acknowledgement whose deadline is *live* is never parked, and a
         legacy serial poll keeps its immediate empty receipt.
+
+        The wait BETWEEN attempts is a delivery **wake-up**, not the interval: an
+        ``enqueue`` signals every parked poll, so a poll that is already open returns the
+        new command at once instead of at its next interval tick (`_signal_delivery`).
+        `long_poll_step` is unchanged and still the ceiling on the same wait, so a
+        missed signal can never park a peer for longer than before; only the promptness
+        of the delivery path changes.
         """
 
         if self.long_poll_hold <= 0.0 or not self._may_hold(envelope):
@@ -1237,7 +1300,7 @@ class ManagedControlMailbox:
             remaining = deadline - now
             if remaining <= 0.0:
                 return response
-            time.sleep(min(self.long_poll_step, remaining))
+            self._wait_for_delivery(min(self.long_poll_step, remaining))
 
     def _poll_once(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         """One authoritative claim attempt: verify, lock, one transaction, release."""

@@ -291,9 +291,21 @@ class ManagedTargetRuntime:
                 if isinstance(step,dict) and step.get('state')=='outbound_retryable':
                     self._outbound_retry_backoff=min(1.0,max(.1,self._outbound_retry_backoff*2))
                     delay=self._outbound_retry_backoff
+                    # The retry backoff keeps its own wait on purpose: a peer that owes an
+                    # undone outbound cannot send anything new until that retry resolves, so
+                    # waking it early could only hammer a down origin -- the thing this
+                    # backoff exists to prevent.  Delivery promptness is not at stake here.
+                    self._stop.wait(delay)
                 else:
                     self._outbound_retry_backoff=.1
-                self._stop.wait(delay)
+                    # Wait on the delivery wake-up with the cadence as the ceiling: a native
+                    # command finishing (which frees this peer's next claim slot, because the
+                    # ack is what retires the mailbox's claimed row), or an enqueue arriving
+                    # on an in-process mailbox, ends the wait at once.  The interval is
+                    # unchanged and still bounds the wait; only its promptness is.  This is
+                    # the delivery side of D9: p81r1's inversion was claim latency +
+                    # execution latency against a ~4.4 s window, not a window too small.
+                    self.pump.wait_for_wake(delay)
         except Exception as exc:
             code=str(exc)
             if not re.fullmatch(r'[a-z][a-z0-9_]{0,79}',code): code='runtime_control_failed'
@@ -334,6 +346,10 @@ class ManagedTargetRuntime:
 
     def close(self,*,cleanup=False):
         self._stop.set()
+        # Release the control loop's delivery wait at once, so a stop is never delayed by
+        # the interval (or the retry backoff) the loop happens to be sitting out.  Waiting
+        # is bounded by the same numbers as before; this only makes it end sooner.
+        self.pump.wake()
         # Native shutdown first bounds in-flight response waits, then HTTP/pump
         # ownership is released. No lock is held while joining the pump thread.
         self.worker.close()

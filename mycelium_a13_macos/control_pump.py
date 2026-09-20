@@ -121,6 +121,11 @@ class TargetControlPump:
         self.client=client;self.worker=worker;self.current_member=current_member
         self._sequence_root=sequence_root
         self._mutex=threading.RLock();self._closed=False;self._fd=-1
+        # Delivery wake-up for the control loop (see `wake` / `wait_for_wake`).  The loop
+        # may not be claim-latency-bound by its own interval: the ack that frees this
+        # peer's next delivery slot, and the enqueue that fills it, must be able to end
+        # the wait at once.
+        self._delivery_wakeup=threading.Event()
         # Consecutive retriable outbound attempts in THIS process, for the bounded
         # diagnostic only.  Never consulted for control flow.
         self._outbound_retry_attempts=0
@@ -341,8 +346,30 @@ class TargetControlPump:
             return {'state':disposition,'command_id':command['command_id'],'native_response':response,
                 'error_code':pending.get('error_code'),'ack':ack}
 
+    def wake(self):
+        """Release the control loop's wait: the delivery path changed.
+
+        Called when a native command finishes (so the ack that frees this peer's next
+        delivery slot goes out at once) and on close (so a waiting loop exits at once).
+        A wake-up only ever *ends* a wait early; it never lengthens one and it is not an
+        outcome -- the loop's next `step()` decides everything as before.
+        """
+        self._delivery_wakeup.set()
+
+    def wait_for_wake(self,timeout):
+        """Wait up to ``timeout`` for a delivery wake-up; True if woken.
+
+        ``timeout`` is the loop's own interval, unchanged and still the ceiling, so a
+        missed wake-up parks the loop no longer than the interval it used before.
+        """
+        woken=self._delivery_wakeup.wait(max(0.0,float(timeout)))
+        self._delivery_wakeup.clear()
+        return bool(woken)
+
     def close(self):
         with self._mutex:
             self._closed=True
             if self._fd>=0:
                 fcntl.flock(self._fd,fcntl.LOCK_UN);os.close(self._fd);self._fd=-1
+        # Release a loop parked in wait_for_wake so closing never waits out an interval.
+        self.wake()

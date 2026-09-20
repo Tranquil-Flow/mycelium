@@ -228,8 +228,17 @@ class ConcurrentTargetControlPump(TargetControlPump):
             command = statement['native_command']
             row['phase'] = 'executing'
             self._save_claims() # An interruption beyond here is conservatively uncertain.
-            self._futures[command_id] = self._executor.submit(self.worker.send,
+            future = self._executor.submit(self.worker.send,
                 command_id=command['command_id'], command=command['command'], payload=command['payload'])
+            # Release the control loop's wait the MOMENT this native command finishes, from
+            # the executor thread that finished it.  The ack that reports it is what frees
+            # this peer's next delivery slot in the mailbox (its control-claim capacity is
+            # counted from claimed rows), so leaving it to the loop's next interval tick is
+            # delivery latency -- p81r1's shape, where a cleanup command was claimed at
+            # 3 957 ms of a 4 427 ms life and could never complete.  Nothing about the
+            # command's own deadline changes; only when the loop next runs.
+            future.add_done_callback(lambda _: self.wake())
+            self._futures[command_id] = future
 
     def _finish_outbound(self, target):
         packet = self._state['outbound']
