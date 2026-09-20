@@ -1047,15 +1047,27 @@ def refresh_peer_identities(
         elif peer["process_transport"] == "managed_https":
             if managed_observations is None:
                 raise RuntimeError("managed_peer_observations_missing")
+            # PREFERENCE ORDER at the substitution site (p80r1, 2026-09-20): the LIVE hello observation
+            # wins over whatever identity the supplied topology recorded, because a node's run-scoped
+            # boot_id moves whenever it relaunches and topology.json carries NO boot_id at all -- so the
+            # observation is the only MEASURED source there is. Only a node with no observation of its own
+            # falls back to the topology, and the fallback is a value check, not an acceptance rule: an
+            # absent or unmeasured identity is still refused, so the template's placeholders
+            # ("pending-host-a" / "pending-boot-a", mycelium_a13_macos/compiler_inputs.py::_pending_peers)
+            # can never be mistaken for a measured run-scoped identity.
             admitted = managed_observations.get(peer["node_id"])
             if admitted is None:
-                raise RuntimeError("managed_peer_observations_missing")
-            host_id, boot_id = admitted
+                identity = peer.get("host_id"), peer.get("boot_id")
+                refusal = "managed_peer_observations_missing"
+            else:
+                identity = admitted
+                refusal = "managed_observation_identity_synthetic"
+            host_id, boot_id = identity
             if (
                 _MANAGED_IDENTITY_RE.fullmatch(str(host_id)) is None
                 or _MANAGED_IDENTITY_RE.fullmatch(str(boot_id)) is None
             ):
-                raise RuntimeError("managed_observation_identity_synthetic")
+                raise RuntimeError(refusal)
         else:
             command = ["ssh"]
             identity = peer.get("ssh_identity_file")

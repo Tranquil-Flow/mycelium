@@ -14,6 +14,53 @@ from .controller_staging import ManagedControllerStaging
 from .managed_control import ManagedControlClient
 from .target_app import TargetApplication
 
+# ONE bounded budget for the boot-id collection, plus its retry schedule.
+#
+# WHY: round p80r1 (2026-09-20) refused its only route with node_hello_identity_invalid /
+# kind='boot_id_mismatch' (physical_inference_qualification.py:1720): the plan's bound value
+# boot-615e5402... came from the round's OWN live hello at 11:44:14, while the node's live value at
+# 11:56:46 was boot-424573b4... -- the node's identity moved AFTER the round observed it, and the
+# app-side refresh that exists to prevent exactly this never fired. Its collection fired ONCE, here,
+# early, and raised ManagedObservationsError('managed_control_response_timeout') because the node was
+# not answering on this run yet (app log: "boot_id_observation_unavailable
+# ManagedObservationsError('managed_control_response_timeout')"). It has never once succeeded in any
+# round of this program (scripts/a13_operator/bootid_guard.py: the success line was never observed).
+#
+# WHAT A REFUSAL MEANS: not a verdict about the run. The producer refuses when the control channel is
+# not up for THIS owner and run yet, and a node that has not migrated onto this run's identities still
+# answers with the previous ones. So the collection is retried inside this one budget, with backoff.
+#
+# BOUNDED, AND INERT AT THE END: the budget bounds the WAITING only -- no per-command timeout or
+# deadline constant is widened (managed_observations._DEFAULT_TIMEOUT_SECONDS stays 30.0), and 180 s is
+# small against the round's own 2100 s chain wait (scripts/a13_operator/chain-preview80e.sh). When it
+# is exhausted the outcome is byte-for-byte the previous inert default: the same ManagedObservationsError
+# still reaches the guard below and the binding is left without observations.
+_BOOT_ID_OBSERVATION_BUDGET_SECONDS=180.0
+_BOOT_ID_OBSERVATION_INITIAL_RETRY_SECONDS=2.0
+_BOOT_ID_OBSERVATION_MAX_RETRY_SECONDS=30.0
+# WHICH REFUSALS ARE WORTH WAITING FOR: only the ones the passage of time can fix. A refusal that is a
+# verdict about THIS caller's own inputs -- a malformed or stale run id, an unusable deployment id, a
+# factory that does not match them, no nodes, a clock that moved -- is answered the same way forever, so
+# the inert default is reached at once instead of spending the budget on it. Measured: the pinned env's
+# test_serving_workflow.py is refused with managed_observation_run_id_invalid, and retrying that turned a
+# 2.7 s file into minutes. Everything the NODE or the CHANNEL produces stays retryable, because that is
+# exactly the p80r1 shape: the node was still starting and did not answer for this run yet.
+_BOOT_ID_OBSERVATION_TERMINAL_CODES=frozenset((
+    'managed_observation_clock_invalid',
+    'managed_observation_run_id_invalid',
+    'managed_observation_run_id_stale',
+    'managed_observation_deployment_invalid',
+    'managed_observation_factory_invalid',
+    'managed_observation_factory_scope_mismatch',
+    'managed_observation_nodes_invalid',
+    'managed_observation_captured_stale',
+))
+# Both are plain module attributes so a test can replace the wait and the clock; the retry schedule is
+# then pinned deterministically (tests/a13_macos/test_bootid_bounded_observation_wait.py) without the
+# suite ever sleeping.
+_boot_id_observation_clock=time.monotonic
+_boot_id_observation_wait=time.sleep
+
 
 def owner_channel(authority: DemoAuthority) -> ManagedControlOwner:
     """Use this installation's existing owner identity and local TLS listener."""
@@ -254,9 +301,27 @@ def prepare_serving_workflow(*, authority, channel, prepared, operator_plan,
         pre_factory=ManagedSessionFactory(owner=channel,run_id=pre_run['run_id'],
             deployment_id=pre_run['deployment_id'],
             members=[coordinator.member(peer['node_id']) for peer in document_peers])
-        observed=collect_managed_hello_observations(pre_factory,run_id=pre_run['run_id'],
-            deployment_id=pre_run['deployment_id'],
-            node_ids=[peer['node_id'] for peer in document_peers])
+        # BOUNDED RETRY (p80r1, 2026-09-20 -- see _BOOT_ID_OBSERVATION_BUDGET_SECONDS above for the
+        # measurement). This fired once and timed out, so the peers kept the values the plan document
+        # carried; the node's identity then moved and qualification refused them. One attempt is not a
+        # measurement of the run: it is a measurement of how early the owner asked. The retry spends ONE
+        # bounded budget with backoff, and the only thing it catches is the producer's own refusal --
+        # never a programming error, which must stay loud AND loud in its own vocabulary.
+        deadline=_boot_id_observation_clock()+_BOOT_ID_OBSERVATION_BUDGET_SECONDS
+        delay=_BOOT_ID_OBSERVATION_INITIAL_RETRY_SECONDS
+        while True:
+            try:
+                observed=collect_managed_hello_observations(pre_factory,run_id=pre_run['run_id'],
+                    deployment_id=pre_run['deployment_id'],
+                    node_ids=[peer['node_id'] for peer in document_peers])
+                break
+            except ManagedObservationsError as exc:
+                if exc.code in _BOOT_ID_OBSERVATION_TERMINAL_CODES:
+                    raise  # A verdict about this run's own inputs: waiting cannot change it.
+                remaining=deadline-_boot_id_observation_clock()
+                if remaining<=0:raise  # Budget spent: the outcome is exactly today's inert default.
+                _boot_id_observation_wait(min(delay,remaining))
+                delay=min(_BOOT_ID_OBSERVATION_MAX_RETRY_SECONDS,delay*2)
         observed_boot_ids={item['node_id']:item['boot_id'] for item in (observed.get('observations') or [])
             if isinstance(item,dict) and isinstance(item.get('node_id'),str)
             and isinstance(item.get('boot_id'),str) and item['boot_id']}

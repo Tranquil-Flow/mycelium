@@ -165,6 +165,10 @@ def test_an_expected_unavailability_keeps_the_binding_inert(tmp_path, enrolled, 
     """
     authority, nodes, prepared, plan, roots, document = _prepared_plan(tmp_path, enrolled)
     before = {peer['node_id']: peer.get('boot_id') for peer in document['controller']['peers']}
+    # Timing knob only: the retry loop added for p80r1 (workflow.py, bounded budget + backoff) is pinned
+    # on its own in tests/a13_macos/test_bootid_bounded_observation_wait.py with a deterministic clock.
+    # Here the budget is zeroed so the inert outcome is reached in ONE attempt with no waiting at all.
+    monkeypatch.setattr('mycelium_a13_macos.workflow._BOOT_ID_OBSERVATION_BUDGET_SECONDS', 0.0)
 
     def unavailable_collect(factory, *, run_id, deployment_id, node_ids):
         raise ManagedObservationsError('managed_observation_session_failed')
