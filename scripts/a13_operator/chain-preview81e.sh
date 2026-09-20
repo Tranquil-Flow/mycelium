@@ -238,40 +238,13 @@ def _route_alive(b):
     except Exception:
         return False
 
-# C5's PREREQUISITE, in the plan's own words: "soak only after one request completes end to end, or you
-# will spend an hour measuring a broken path." Two things make this gate necessary rather than nice:
-#   * 1704ac2 made a FAILED request publish a terminal too, so "a terminal arrived" no longer distinguishes
-#     a working path from a refuse-everything path. The driver's `succeeded` field exists for exactly this
-#     -- its own comment: ok=True means "the stream produced tokens and reached a terminal"; succeeded means
-#     the terminal was the SUCCESSFUL one, and "criterion 5 needs the second";
-#   * the soak spends 110 requests and ~an hour. Spending it on a path that cannot complete would produce a
-#     large, honest, useless measurement -- and would blur a real C5 result with a broken prerequisite.
-# The smoke request uses the SOAK'S OWN prompt and token count (wp8_05_soak.run_soak defaults), so it is the
-# same shape of request the soak would make, not a different one. Its outcome is written to the round
-# evidence either way: a refusal is a measurement, not a silence.
-smoke_prompt = os.environ.get('SOAK_PROMPT', 'Describe the city of Berlin in three sentences.')
-smoke_samples, smoke = measure.stream(base, smoke_prompt, int(os.environ.get('SOAK_TOKENS', '32')),
-                                      timeout=int(os.environ.get('SOAK_TIMEOUT', '180')))
-_smoke = {k: smoke.get(k) for k in ('ok', 'succeeded', 'terminal', 'terminal_code', 'has_terminal')}
-print('SMOKE_REQUEST', json.dumps(_smoke))
-_EV = '/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-mac'
-_smoke_path = os.path.join(_EV, 'round%s-smoke.json' % os.environ.get('A13_LOG_LABEL', 'soak'))
-with open(_smoke_path, 'w') as _fh:
-    _fh.write(json.dumps({'protocol': 'mycelium.a13.soak_precondition_smoke.v1',
-                          'run_label': os.environ.get('A13_LOG_LABEL', 'soak'),
-                          'prompt': smoke_prompt,
-                          'max_new_tokens': int(os.environ.get('SOAK_TOKENS', '32')),
-                          'base': base, **_smoke}, indent=1))
-print('SMOKE_WRITTEN', _smoke_path)
-if not smoke.get('succeeded'):
-    print(json.dumps({'ok': False, 'refused': 'soak_skipped_no_request_completed_end_to_end',
-                      'detail': 'the smoke request did not reach the SUCCESSFUL terminal, so the soak was '
-                                'not spent; a failure terminal still counts as failing this prerequisite',
-                      'terminal': smoke.get('terminal'),
-                      'terminal_code': smoke.get('terminal_code')}, indent=1))
-    raise SystemExit(0)
-print('SMOKE PASS -- one request completed end to end; the soak is now worth spending')
-
+# ---- HOISTED ABOVE THE SMOKE GATE (p81r1 finding) ----------------------------------------------
+# This block used to sit BELOW the smoke, which meant the smoke-failure path -- the one that ends the
+# round before the soak -- could not capture the app's own view at all. Round p81r1 therefore left both
+# `roundp81r1-admission-status-{pre,post}-soak.json` missing, and the round that most needed the
+# coordinator's own admission/incident document left none. The definitions must precede the smoke so
+# the refusal path can capture WHILE THE APP IS STILL ALIVE (the trap quits it afterwards).
+# Do not move this back below the smoke.
 # ---- THE APP'S OWN ADMISSION STATUS, CAPTURED WHILE THE APP IS STILL ALIVE ------------------------
 # Round p78r1 cost a day of reconstruction because no artifact held the app's own view: every status
 # snapshot the chain takes PREDATES the soak, and the app process was gone by the time anyone asked.  The
@@ -343,6 +316,42 @@ def _capture_admission_status(stage):
 
 from collections import Counter as _Counter
 
+# C5's PREREQUISITE, in the plan's own words: "soak only after one request completes end to end, or you
+# will spend an hour measuring a broken path." Two things make this gate necessary rather than nice:
+#   * 1704ac2 made a FAILED request publish a terminal too, so "a terminal arrived" no longer distinguishes
+#     a working path from a refuse-everything path. The driver's `succeeded` field exists for exactly this
+#     -- its own comment: ok=True means "the stream produced tokens and reached a terminal"; succeeded means
+#     the terminal was the SUCCESSFUL one, and "criterion 5 needs the second";
+#   * the soak spends 110 requests and ~an hour. Spending it on a path that cannot complete would produce a
+#     large, honest, useless measurement -- and would blur a real C5 result with a broken prerequisite.
+# The smoke request uses the SOAK'S OWN prompt and token count (wp8_05_soak.run_soak defaults), so it is the
+# same shape of request the soak would make, not a different one. Its outcome is written to the round
+# evidence either way: a refusal is a measurement, not a silence.
+smoke_prompt = os.environ.get('SOAK_PROMPT', 'Describe the city of Berlin in three sentences.')
+smoke_samples, smoke = measure.stream(base, smoke_prompt, int(os.environ.get('SOAK_TOKENS', '32')),
+                                      timeout=int(os.environ.get('SOAK_TIMEOUT', '180')))
+_smoke = {k: smoke.get(k) for k in ('ok', 'succeeded', 'terminal', 'terminal_code', 'has_terminal')}
+print('SMOKE_REQUEST', json.dumps(_smoke))
+_EV = '/Users/evinova-self/Documents/mycelium-core-program/runs/wp8-02-useful-two-mac'
+_smoke_path = os.path.join(_EV, 'round%s-smoke.json' % os.environ.get('A13_LOG_LABEL', 'soak'))
+with open(_smoke_path, 'w') as _fh:
+    _fh.write(json.dumps({'protocol': 'mycelium.a13.soak_precondition_smoke.v1',
+                          'run_label': os.environ.get('A13_LOG_LABEL', 'soak'),
+                          'prompt': smoke_prompt,
+                          'max_new_tokens': int(os.environ.get('SOAK_TOKENS', '32')),
+                          'base': base, **_smoke}, indent=1))
+print('SMOKE_WRITTEN', _smoke_path)
+if not smoke.get('succeeded'):
+    # The app is still alive at this point: capture its own admission/incident document BEFORE the
+    # refusal path ends the round. This is the capture p81r1 was missing (see the hoist note above).
+    _capture_admission_status('smoke-failed')
+    print(json.dumps({'ok': False, 'refused': 'soak_skipped_no_request_completed_end_to_end',
+                      'detail': 'the smoke request did not reach the SUCCESSFUL terminal, so the soak was '
+                                'not spent; a failure terminal still counts as failing this prerequisite',
+                      'terminal': smoke.get('terminal'),
+                      'terminal_code': smoke.get('terminal_code')}, indent=1))
+    raise SystemExit(0)
+print('SMOKE PASS -- one request completed end to end; the soak is now worth spending')
 _capture_admission_status('pre-soak')
 
 _log = os.environ.get('A13_SSH_LOG', '/tmp/asm/criterion3-ssh-calls.log')
