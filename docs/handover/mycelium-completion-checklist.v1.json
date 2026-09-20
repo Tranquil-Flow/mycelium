@@ -1,7 +1,7 @@
 {
   "protocol": "mycelium.completion_checklist.v1",
   "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
-  "updated_on": "2026-09-15",
+  "updated_on": "2026-09-20",
   "primary_gate": "A6",
   "workspace_ids": [
     "inference",
@@ -1571,7 +1571,7 @@
       "specification": "docs/superpowers/specs/2026-08-18-mycelium-a13-cross-platform-onboarding.md",
       "state": "design_only",
       "blockers": [
-        "the A13 Mac-first slice is uncommitted in the owner's lane and is being finished to C5 successful terminal plus a portable export (program plan D8); it no longer waits on A12 atomic completion",
+        "the A13 Mac-first slice is committed on the pilot branch (lane export e72d2b0, fanned in by 1a022c9); its C5 successful-terminal soak is still being pursued in-tree (scripts/a13_operator) and C1-C3 and C6-C8 remain integration-side work (program plan D8); it no longer waits on A12 atomic completion",
         "the cross-platform half of A13 remains specification-only and Windows x86_64 evidence is deferred (program plan D10)",
         "platform signing and clean-device test inventory"
       ],
