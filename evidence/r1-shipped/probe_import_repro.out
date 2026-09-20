@@ -1,0 +1,107 @@
+--- source WITHOUT module-level import ---
+def f():
+    import socket
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+
+--- source WITH module-level import ---
+import socket
+
+def f():
+    import socket
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+
+=== f() -- no module-level `import socket`
+    RESUME               
+    LOAD_SMALL_INT       
+    LOAD_CONST           None
+    IMPORT_NAME          socket
+    STORE_FAST           socket
+    LOAD_FAST_BORROW     socket
+    LOAD_ATTR            socket + NULL|self
+    CALL                 
+    COPY                 
+    LOAD_SPECIAL         __exit__
+    SWAP                 
+    SWAP                 
+    LOAD_SPECIAL         __enter__
+    CALL                 
+    STORE_FAST           listener
+    LOAD_FAST_BORROW     listener
+    LOAD_ATTR            bind + NULL|self
+    LOAD_CONST           ('127.0.0.1', 0)
+    CALL                 
+    POP_TOP              
+    LOAD_CONST           None
+    LOAD_CONST           None
+    LOAD_CONST           None
+    CALL                 
+    POP_TOP              
+    LOAD_CONST           None
+    RETURN_VALUE         
+    PUSH_EXC_INFO        
+    WITH_EXCEPT_START    
+    TO_BOOL              
+    POP_JUMP_IF_TRUE     to L1
+    NOT_TAKEN            
+    RERAISE              
+    POP_TOP              
+    POP_EXCEPT           
+    POP_TOP              
+    POP_TOP              
+    POP_TOP              
+    LOAD_CONST           None
+    RETURN_VALUE         
+    COPY                 
+    POP_EXCEPT           
+    RERAISE              
+=== f() -- WITH module-level `import socket`
+    RESUME               
+    LOAD_SMALL_INT       
+    LOAD_CONST           None
+    IMPORT_NAME          socket
+    STORE_FAST           socket
+    LOAD_FAST_BORROW     socket
+    LOAD_ATTR            socket
+    PUSH_NULL            
+    CALL                 
+    COPY                 
+    LOAD_SPECIAL         __exit__
+    SWAP                 
+    SWAP                 
+    LOAD_SPECIAL         __enter__
+    CALL                 
+    STORE_FAST           listener
+    LOAD_FAST_BORROW     listener
+    LOAD_ATTR            bind + NULL|self
+    LOAD_CONST           ('127.0.0.1', 0)
+    CALL                 
+    POP_TOP              
+    LOAD_CONST           None
+    LOAD_CONST           None
+    LOAD_CONST           None
+    CALL                 
+    POP_TOP              
+    LOAD_CONST           None
+    RETURN_VALUE         
+    PUSH_EXC_INFO        
+    WITH_EXCEPT_START    
+    TO_BOOL              
+    POP_JUMP_IF_TRUE     to L1
+    NOT_TAKEN            
+    RERAISE              
+    POP_TOP              
+    POP_EXCEPT           
+    POP_TOP              
+    POP_TOP              
+    POP_TOP              
+    LOAD_CONST           None
+    RETURN_VALUE         
+    COPY                 
+    POP_EXCEPT           
+    RERAISE              
+
+bytecode sequences identical? False
+  only in no-module-import version: [('LOAD_ATTR', 'socket + NULL|self')]
+  only in with-module-import version: [('LOAD_ATTR', 'socket'), ('PUSH_NULL', '')]

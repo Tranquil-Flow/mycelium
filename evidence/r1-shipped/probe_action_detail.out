@@ -1,0 +1,94 @@
+=== .82 (old) instructions 755..800
+     3304 L502 CALL                 
+     3312 L502 LOAD_ATTR            start + NULL|self
+     3332 L502 LOAD_CONST           True
+     3334 L502 LOAD_DEREF           body
+     3336 L502 LOAD_CONST           'max_seconds'
+     3338 L502 BINARY_OP            []
+     3350 L502 LOAD_CONST           ('acknowledged', 'max_seconds')
+     3352 L502 CALL_KW              
+     3360 L502 STORE_FAST           relay
+     3362 LTrue NOP                  
+     3364 LTrue LOAD_FAST_BORROW     socket
+     3366 L504 LOAD_ATTR            socket + NULL|self
+     3386 L504 CALL                 
+     3394 L504 COPY                 
+     3396 L504 LOAD_SPECIAL         __exit__
+     3398 L504 SWAP                 
+     3400 L504 SWAP                 
+     3402 L504 LOAD_SPECIAL         __enter__
+     3404 L504 CALL                 
+     3412 L504 STORE_FAST           listener
+     3414 LTrue LOAD_FAST_BORROW     listener
+     3416 L505 LOAD_ATTR            bind + NULL|self
+     3436 L505 LOAD_CONST           ('127.0.0.1', 0)
+     3438 L505 CALL                 
+     3446 L505 POP_TOP              
+     3448 L505 LOAD_FAST_BORROW     listener
+     3450 L505 LOAD_ATTR            getsockname + NULL|self
+     3470 L505 CALL                 
+     3478 L505 LOAD_SMALL_INT       
+     3480 L505 BINARY_OP            []
+     3492 L505 STORE_FAST           port
+     3494 LTrue LOAD_CONST           None
+     3496 L504 LOAD_CONST           None
+     3498 L504 LOAD_CONST           None
+     3500 L504 CALL                 
+     3508 L504 POP_TOP              
+     3510 LTrue LOAD_FAST_BORROW     relocate_authority
+     3512 L506 PUSH_NULL            
+     3514 L506 LOAD_DEREF           self
+     3516 L506 LOAD_ATTR            authority
+     3536 L506 LOAD_FAST_BORROW     relay
+     3538 L506 LOAD_ATTR            public_origin
+     3558 L506 LOAD_FAST_CHECK      port
+     3560 L506 LOAD_CONST           True
+     3562 L506 LOAD_CONST           ('public_origin', 'port', 'acknowledged')
+=== .83 (new) instructions 755..802
+     3304 L525 CALL                 
+     3312 L525 LOAD_ATTR            start + NULL|self
+     3332 L525 LOAD_CONST           True
+     3334 L525 LOAD_DEREF           body
+     3336 L525 LOAD_CONST           'max_seconds'
+     3338 L525 BINARY_OP            []
+     3350 L525 LOAD_CONST           ('acknowledged', 'max_seconds')
+     3352 L525 CALL_KW              
+     3360 L525 STORE_FAST           relay
+     3362 LTrue NOP                  
+     3364 LTrue LOAD_FAST_BORROW     socket
+     3366 L527 LOAD_ATTR            socket
+     3386 L527 PUSH_NULL            
+     3388 L527 CALL                 
+     3396 L527 COPY                 
+     3398 L527 LOAD_SPECIAL         __exit__
+     3400 L527 SWAP                 
+     3402 L527 SWAP                 
+     3404 L527 LOAD_SPECIAL         __enter__
+     3406 L527 CALL                 
+     3414 L527 STORE_FAST           listener
+     3416 LTrue LOAD_FAST_BORROW     listener
+     3418 L528 LOAD_ATTR            bind + NULL|self
+     3438 L528 LOAD_CONST           ('127.0.0.1', 0)
+     3440 L528 CALL                 
+     3448 L528 POP_TOP              
+     3450 L528 LOAD_FAST_BORROW     listener
+     3452 L528 LOAD_ATTR            getsockname + NULL|self
+     3472 L528 CALL                 
+     3480 L528 LOAD_SMALL_INT       
+     3482 L528 BINARY_OP            []
+     3494 L528 STORE_FAST           port
+     3496 LTrue LOAD_CONST           None
+     3498 L527 LOAD_CONST           None
+     3500 L527 LOAD_CONST           None
+     3502 L527 CALL                 
+     3510 L527 POP_TOP              
+     3512 LTrue LOAD_FAST_BORROW     relocate_authority
+     3514 L529 PUSH_NULL            
+     3516 L529 LOAD_DEREF           self
+     3518 L529 LOAD_ATTR            authority
+     3538 L529 LOAD_FAST_BORROW     relay
+     3540 L529 LOAD_ATTR            public_origin
+     3560 L529 LOAD_FAST_CHECK      port
+     3562 L529 LOAD_CONST           True
+     3564 L529 LOAD_CONST           ('public_origin', 'port', 'acknowledged')
+     3566 L529 CALL_KW              

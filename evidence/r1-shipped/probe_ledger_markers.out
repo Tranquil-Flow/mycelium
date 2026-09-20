@@ -1,0 +1,13 @@
+app.py: str constants  .82(1330ae9)=317  .83(9d68291)=317
+  str constants ADDED by R1: 0 []
+  str constants REMOVED by R1: 0 []
+
+app.py: co_names  .82=305  .83=312
+  co_names ADDED by R1: ['BUSY_BODY', 'BUSY_RESPONSE', 'MSG_DONTWAIT', 'answer_busy', 'range', 'recv', 'sendall']
+  (co_names ARE collected by pyz_ledger.walk(), but its strings_of_source() call returns
+   only [0] -- the strings set -- so co_names never reaches the marker set.)
+
+demo tree readable: /Users/evinova-self/Documents/playground/mycelium-a13-macos-demo/mycelium_a13_macos/app.py
+  pilot_only (pilot str consts absent from the demo tree), the ledger's marker set:
+    count=0  first few=[]
+  markers among them that name ANY R1 fact: NONE
