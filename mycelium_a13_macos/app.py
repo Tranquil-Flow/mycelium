@@ -14,6 +14,7 @@ from pathlib import Path
 import platform
 import secrets
 import shutil
+import socket
 import stat
 import threading
 import time
@@ -22,6 +23,16 @@ from dataclasses import asdict
 from .serving import CANDIDATE_MODEL, RESOURCE_PROPOSAL
 
 MAX_BODY = 65536
+# Refusal for a request that cannot be served because every concurrency slot is held. It is a
+# fixed literal, so no path, credential, traceback or internal state can appear in it.
+BUSY_BODY = b'{"error":"server_busy"}'
+BUSY_RESPONSE = (b'HTTP/1.1 503 Service Unavailable\r\n'
+                 b'Content-Type: application/json\r\n'
+                 b'Content-Length: ' + str(len(BUSY_BODY)).encode('ascii') + b'\r\n'
+                 b'Connection: close\r\n'
+                 b'Cache-Control: no-store\r\n'
+                 b'Retry-After: 1\r\n'
+                 b'\r\n' + BUSY_BODY)
 
 
 def model_contract():
@@ -189,9 +200,21 @@ class _Server(ThreadingHTTPServer):
     def __init__(self, address, handler):
         self.slots = threading.BoundedSemaphore(16)
         super().__init__(address, handler)
+    def answer_busy(self, request):
+        # Every slot is held: say so explicitly instead of closing with no response at all.
+        # The write must never reach (or stop) the accept loop, and no handler exists yet, so
+        # nothing but the fixed BUSY_RESPONSE bytes can reach the client.
+        try: request.sendall(BUSY_RESPONSE)
+        except Exception: pass
+        # Read what the client already sent -- bounded, never blocking -- so closing this socket
+        # is a FIN rather than a reset that could destroy the refusal already in flight.
+        try:
+            for _ in range(8):
+                if not request.recv(65536, socket.MSG_DONTWAIT): break
+        except Exception: pass
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
-            self.shutdown_request(request); return
+            self.answer_busy(request); self.shutdown_request(request); return
         try: super().process_request(request, client_address)
         except BaseException:
             self.slots.release(); raise
