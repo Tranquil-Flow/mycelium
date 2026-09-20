@@ -163,9 +163,11 @@ Then, in this frozen precedence:
    `(unknown, unavailable, conflicting, null)`;
 5. current geographic candidates agree: `(code, that source kind, null, null)` — including an
    explicit `unknown` statement, which renders off-globe with its source visible;
-6. no accepted geographic candidate exists and the current latency classes disagree:
+6. no accepted geographic candidate exists and no accepted latency class is current:
+   `(unknown, unavailable, expired, null)`;
+7. no accepted geographic candidate exists and the current latency classes disagree:
    `(unknown, unavailable, conflicting, null)`;
-7. otherwise `(unknown, latency_distance_class, null, class)`.
+8. otherwise a current latency class exists: `(unknown, latency_distance_class, null, class)`.
 
 Additional invariants:
 

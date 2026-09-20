@@ -96,6 +96,7 @@ def test_relay_evidence_never_labels_a_member_and_member_evidence_never_labels_a
         "conflicting",
         "geography_beats_class",
         "expired_geography_blocks_class",
+        "expired_class",
     ],
 )
 def test_unknown_blockers_follow_the_frozen_precedence(case):
@@ -123,6 +124,13 @@ def test_unknown_blockers_follow_the_frozen_precedence(case):
     elif case == "geography_beats_class":
         evidence = [current, conformance.latency_evidence(member["id"], "member", "far")]
         authorized, blocker = None, None
+    elif case == "expired_class":
+        evidence = [
+            conformance.latency_evidence(
+                member["id"], "member", "far", expires_at_unix_ms=NOW - 1
+            )
+        ]
+        authorized, blocker = None, "expired"
     else:
         evidence = [expired, conformance.latency_evidence(member["id"], "member", "far")]
         authorized, blocker = None, "expired"
