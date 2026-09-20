@@ -181,6 +181,19 @@ def test_conflicting_latency_classes_reduce_to_conflicting():
     assert row["region_source"] == "unavailable"
 
 
+def test_an_agreeing_declaration_and_reviewed_relay_metadata_report_the_declaration():
+    value = conformance.snapshot()
+    endpoint = conformance.node_of_kind(value, "endpoint")
+    evidence = [
+        conformance.region_evidence(endpoint["id"], "relay", "owner_declared", "asia"),
+        conformance.region_evidence(
+            endpoint["id"], "relay", "reviewed_relay_metadata", "asia"
+        ),
+    ]
+    row = by_node(reduce_rows(value, evidence))[endpoint["id"]]
+    assert (row["region"], row["region_source"]) == ("asia", "owner_declared")
+
+
 def test_reduction_is_pure_deterministic_bounded_and_vocabulary_only():
     value = conformance.snapshot()
     member, _ = conformance.members(value)
@@ -224,7 +237,7 @@ def test_projection_accepts_widened_regions_only_when_rows_agree_with_nodes():
     assert validate_route_explorer(globe) == globe
     assert globe["overlays"] == "unavailable"
     assert {item["region"] for item in globe["nodes"]} == {"europe", "unknown"}
-    assert {item["id"] for item in globe["regions"]} == {
+    assert {item["node"] for item in globe["regions"]} == {
         item["id"] for item in globe["nodes"]
     }
 

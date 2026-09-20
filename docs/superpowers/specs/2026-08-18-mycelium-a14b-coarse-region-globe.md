@@ -171,6 +171,8 @@ Additional invariants:
 
 - An on-globe row is exactly a row whose `region` is not `unknown`. Because rule 7 emits
   `region == 'unknown'`, `unknown` and non-geographic latency classes are always off-globe.
+- Source precedence is total. When an owner declaration and reviewed relay metadata agree on
+  one subject, the row reports `owner_declared`; when they disagree it is `conflicting`.
 - Withdrawal is a signed successor statement: the withdrawn record leaves the accepted
   authority set and its row reduces under rule 2. Evidence records are immutable.
 - The reduction is pure, deterministic, sorted by `node`, bounded by the projection's node
@@ -188,7 +190,10 @@ The reduction is published through the existing closed projection, additively:
    code, and node `region_source` widens from `unavailable` to
    `unavailable`, `owner_declared`, `reviewed_relay_metadata`, or `latency_distance_class`.
 2. The projection gains an **optional** `regions` key holding the reduction rows in the exact
-   shape of Section 5, sorted by `node`, one row per node, bounded by the node bound.
+   shape of Section 5, sorted by `node`, one row per node, bounded by the node bound. The key
+   is present exactly when the snapshot publishes at least one reviewed evidence record; a
+   snapshot without evidence yields the A14a projection unchanged, with every region
+   `unknown`/`unavailable`.
 3. `regions` is optional so that A14a-era projections remain valid unchanged. When present,
    every row must name a node of the projection, and `row.region`/`row.region_source` must
    equal that node's `region`/`region_source`; a mismatch is a contract rejection.
@@ -202,9 +207,19 @@ The reduction is published through the existing closed projection, additively:
 5. Registration follows the A14a pattern: registry, manifest, Python and TypeScript
    validators, and the generated conformance fixture move together, and the manifest digest
    is refreshed by regeneration rather than hand-editing. A14b may not add the two protocols
-   by editing a manifest alone.
+   by editing a manifest alone. Because the node enum and the snapshot field change owner
+   sources, A14b must also regenerate the manifest entries for `mycelium.route_explorer.v1`,
+   `mycelium.product_snapshot.v1`, and the projector.
 6. `overlays` remains exactly `'unavailable'` until a qualified A5–A7/A11 overlay authority
    is bound. A14b creates no overlay.
+7. **Declared A14a supersession.** The A14a boundary case `test_semantic_rejection[region]`
+   in `tests/a14_acceptance/test_route_projection_boundaries.py` asserts the A14a-era freeze
+   by requiring `nodes[0]['region'] = 'europe'` to be rejected. Widening the enum supersedes
+   that exact case and nothing else: A14b must replace its value with a non-vocabulary code
+   such as `us-east-1` so the rejection still tests a forbidden value, and it must record the
+   supersession in its acceptance record. The frozen inventory (`inventory.v1.json` and
+   `test_inventory.py`), every other A14a case, and the A14a browser behaviour are not
+   amended. A widening that silently deletes or weakens that case is not A14b acceptance.
 
 ## 7. Presentation and equivalence
 

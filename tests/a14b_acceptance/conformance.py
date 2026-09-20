@@ -169,6 +169,12 @@ def members(value: dict) -> list:
     return [item for item in nodes(value) if item["kind"] == "member"]
 
 
+def _detach_projection(value: dict) -> dict:
+    """Accept a snapshot or a projection and return a detached projection copy."""
+    source = value["route_explorer"] if "route_explorer" in value else value
+    return json.loads(json.dumps(source))
+
+
 def with_regions(value: dict, rows: list) -> dict:
     """Attach reduction rows and the matching node regions; re-seal the projection."""
     import sys
@@ -176,7 +182,7 @@ def with_regions(value: dict, rows: list) -> dict:
     sys.path.insert(0, str(ROOT))
     from mycelium_product_spine.route_explorer import digest
 
-    result = json.loads(json.dumps(projection(value)))
+    result = _detach_projection(value)
     by_node = {row["node"]: row for row in rows}
     for item in result["nodes"]:
         row = by_node[item["id"]]
@@ -194,7 +200,7 @@ def without_regions(value: dict) -> dict:
     sys.path.insert(0, str(ROOT))
     from mycelium_product_spine.route_explorer import digest
 
-    result = json.loads(json.dumps(projection(value)))
+    result = _detach_projection(value)
     result.pop("regions", None)
     result["digest"] = digest({k: v for k, v in result.items() if k != "digest"})
     return result
