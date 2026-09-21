@@ -13,11 +13,11 @@ absence means "the app is not running" - never "bad credentials". Without this g
 `surface_lost:<owner|target>:<state>:daemon=<evidence>`.
 """
 from pathlib import Path
-import json,os,socket,subprocess,shlex,time,urllib.error,uuid,sys
+import json,os,re,socket,subprocess,shlex,time,urllib.error,uuid,sys
 HERE=Path(__file__).resolve().parent
 sys.path.insert(0,str(HERE))
 from app_rpc import AppClient
-from round14_surface import require_local,require_remote
+from round14_surface import require_local,require_remote,local_state
 
 def _required(name):
     value=os.environ.get(name)
@@ -246,8 +246,123 @@ def await_ready(root, path):
         time.sleep(retry)
 
 
+# ───────────────── COMPILE EVIDENCE: THE OBSERVATIONAL WAIT (2026-09-21) ─────────────────
+# WHY THIS EXISTS, MEASURED. p82r1/p82r3 died inside the FIRST `/api/serving/status` read of the pinned
+# step as `handshake_timeout:...:attempts=16:TimeoutError('timed out')`
+# (tests/a13_operator/test_activation_readiness_sequencing.py:3-9) and p83r1 died at the same line --
+# `round14_start_and_activate.py:12` -- before any control call was ever issued. While the app compiles
+# (7 m 46 s measured, plus the model load) it answers NOTHING inside `app_rpc.py:15`'s FIXED 10 s read
+# deadline and `_client`'s busy retry is bounded, so the round dies minutes before the compile can
+# possibly finish: which budget expired first -- not the app's own state -- decided the round.
+#
+# THE FIX IS AN OBSERVATION, NOT PATIENCE ADDED TO ANY GUARD. No timeout, deadline, window, retry count
+# or identity check changes: `app_rpc.py`'s 10 s, `A13_HANDSHAKE_DEADLINE_S`, `_OWNER_CALL_BUDGET_S`,
+# `_OWNER_STARTUP_GRACE_S`, `_READINESS_BUDGET_S`, `_busy_reason`, `_is_refused` and
+# `require_local/require_remote` stay exactly as they were. What is added is a wait BEFORE a call the
+# compile blocks is issued, whose exit condition is the APP'S OWN ON-DISK STATE and never a clock:
+#
+#   SUCCESS  `{OWNER}/authority/serving-runs/{run_id}/operator-plan.json`, written by
+#            `mycelium_a13_macos/workflow.py:357-360` (`_atomic_private_json`, which refuses a
+#            pre-existing one at `:359`). It is the app's LAST disk write before `chain_compile.py:69`
+#            sets `state='compiled'` -- in memory only, so this file is the only durable form of that
+#            verdict and its absence cannot coexist with an app that reports 'compiled'.
+#   FAILURE  `{OWNER}/chain-runs/{run_id}/compile-error.private.log` (`chain_compile.py:71`).
+#
+# WHY NOT `compiled/build-report.json`, the last write of `build()` (build_qwen_live_route.py:2157)?
+# Because `chain_compile.py:54-69` then takes `app.guard` and runs `prepare_serving_workflow`, which may
+# spend up to `_BOOT_ID_OBSERVATION_BUDGET_SECONDS=180` in a bounded retry (workflow.py:38, :316-330)
+# while holding it -- and every session-taking request, the handshake POST included (app.py:872), blocks
+# on that same guard. Waking there would put the round's first read inside a window as long as the very
+# budget it must survive. The terminal marker is what the app writes last before it can answer again.
+#
+# THE RUN ID IS THE ROUND'S OWN, not a guess: step 1 writes it to `{OWNER}/{ROUND}/current-scope.json`
+# before it asks the app to compile (round14_bootstrap_compile.py:242-244, :275) and both steps run
+# under one A13_RPC_ROUND (run_a13_attempt.sh:34, :49-50). It is validated with the app's own segment
+# rule (managed_control.py:207, :283-285) before it is ever used as a path.
+#
+# THE WAIT REUSES THE APP'S OWN DECLARED WALL BOUND (`_READINESS_BUDGET_S`, 1800 s -- already derived
+# from `serving.py`'s RESOURCE_PROPOSAL.max_wall_seconds and the pinned step's own 1800 s of patience)
+# and the existing retry interval: no new number is picked. It engages ONLY for the paths the compile
+# blocks (`_COMPILE_DEPENDENT`) and ONLY when the round's own scope record names a run whose root
+# exists, so every other caller -- `/api/quit` during a teardown included -- is untouched, and a round
+# that is not waiting on a compile behaves exactly as it did before.
+#
+# IT CANNOT TURN A FAILURE INTO A PASS: it issues no RPC at all, so it can only DELAY the existing call
+# path. Whatever ends it -- the marker, the failure record, the surface going away, its own bound -- the
+# caller's own read is then issued with its own budgets, unchanged.
+_COMPILE_DEPENDENT = frozenset(('/api/serving/status','/api/serving/start','/api/serving/activate'))
+_RUN_SCOPE = 'current-scope.json'
+_RUN_ID_SEGMENT = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z')   # == managed_control.py:207
+_COMPILE_ERROR_LOG = 'compile-error.private.log'                      # chain_compile.py:71
+
+
+def _run_root(run_id):
+    """`mycelium_a13_macos/chain_compile.py:31`: the app's run root for this run."""
+    return OWNER/'chain-runs'/run_id
+
+
+def _marker_path(run_id):
+    """`mycelium_a13_macos/workflow.py:357-360`: the app's own last write before it reports 'compiled'."""
+    return OWNER/'authority'/'serving-runs'/run_id/'operator-plan.json'
+
+
+def _compile_run_id():
+    """The run this round is compiling, taken from the round's own scope record; None if there is none."""
+    try:
+        document=json.loads((PRIVATE/_RUN_SCOPE).read_text())
+    except (OSError,ValueError):
+        return None
+    run_id=document.get('run_id') if isinstance(document,dict) else None
+    return run_id if isinstance(run_id,str) and _RUN_ID_SEGMENT.fullmatch(run_id) else None
+
+
+def _compile_evidence(run_id):
+    """The app's OWN on-disk verdict for this run: 'failed' | 'completed' | None while still compiling."""
+    if (_run_root(run_id)/_COMPILE_ERROR_LOG).exists():return 'failed'
+    if _marker_path(run_id).exists():return 'completed'
+    return None
+
+
+def await_compile_end():
+    """Wait, OBSERVATIONALLY, until the app's own on-disk state says this round's compile has ended.
+
+    Issues no RPC of any kind, so it cannot expire inside a read deadline and costs the handshake budget
+    nothing. Returns the evidence it stopped on:
+      'completed' the app's own marker (workflow.py:360) exists -- the compile is over
+      'failed'    the app's own failure record (chain_compile.py:71) exists
+      'absent'    no run to watch, or the control surface is gone (app.py:794): the caller's EXISTING
+                  path decides, in its own vocabulary (`surface_lost`, `compiler_not_ready`, ...)
+      'expired'   the app's own declared wall bound elapsed: the caller's existing path runs unchanged
+    """
+    run_id=_compile_run_id()
+    if run_id is None:return 'absent'
+    if not _run_root(run_id).is_dir():return 'absent'
+    started=time.monotonic();deadline=started+_readiness_budget_s();retry=_readiness_retry_s();attempts=0
+    while True:
+        attempts+=1
+        evidence=_compile_evidence(run_id)
+        if evidence is not None:
+            print('compile_evidence run_id=%s evidence=%s attempts=%d elapsed=%.1f'
+                  %(run_id,evidence,attempts,time.monotonic()-started),flush=True)
+            return evidence
+        if local_state(OWNER).get('present') is not True:
+            print('compile_wait_surface_lost run_id=%s attempts=%d'%(run_id,attempts),flush=True)
+            return 'absent'
+        if time.monotonic()>=deadline:
+            print('compile_wait_expired run_id=%s attempts=%d'%(run_id,attempts),flush=True)
+            return 'expired'
+        print('compile_wait run_id=%s attempts=%d elapsed=%.1f'
+              %(run_id,attempts,time.monotonic()-started),flush=True)
+        time.sleep(retry)
+
+
 def owner(path,body=None):
     require_local(OWNER)
+    # OBSERVATIONAL WAIT (block above): a call the compile blocks is not issued while the app is still
+    # compiling -- the round watches the app's own on-disk evidence instead of polling into a read
+    # deadline it cannot survive. The call itself, and every budget it uses, is unchanged.
+    if path in _COMPILE_DEPENDENT:
+        await_compile_end()
     # SEQUENCING: a control call is issued only after the app has itself reported the state its own
     # handler requires. Read-only calls are untouched -- they ARE the report (`/api/serving/status` is the
     # probe the gate uses, so it cannot be gated by it).
