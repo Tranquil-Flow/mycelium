@@ -1,10 +1,11 @@
-"""A7 acceptance suite: the KV-successor RED modules are RED by design.
+"""A7 acceptance suite: deterministic core remains explicit opt-in.
 
 `test_kv_successor_contract.py` and `test_kv_successor_boundaries.py` exercise
-the successor/recovery contract core the A7 gate has not implemented yet, so they
-fail on purpose. They are marked `scaffold_red`, which the repository's pytest.ini
+the now-implemented in-memory successor/recovery contract core. These tests pass;
+runtime/product/physical closure is still absent. The historical `scaffold_red`
+marker remains, which the repository's pytest.ini
 deselects from default collection. `test_inventory.py` is the already-landed
-frozen inventory and stays in default collection: only the two RED modules are
+frozen inventory and stays in default collection: only the two core modules are
 marked here, not the whole directory.
 
 Opt in with:
