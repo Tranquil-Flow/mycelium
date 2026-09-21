@@ -203,12 +203,78 @@ def process_inventory() -> dict[int, ProcessRecord]:
     return processes
 
 
+_KERNEL_IMAGE_CACHE: dict[str, Path] = {}
+
+
+def kernel_executable_image(launch_path: Path) -> Path:
+    """Return the binary the kernel reports for one registered launch path.
+
+    macOS framework interpreters started through a venv ``bin/python`` symlink
+    re-enter ``.../Resources/Python.app/Contents/MacOS/Python``, so the kernel
+    fingerprint is *not* ``launch_path.resolve()`` - that is the framework's
+    ``bin/python3.x`` stub, a different file.  The image is learned from the
+    same ``ps`` inventory the rest of this harness already trusts, once per
+    launch path, instead of being assumed from one host layout.  The probe is a
+    child that blocks on stdin and is reaped immediately: it runs no workload.
+    """
+
+    resolved = launch_path.resolve(strict=True)
+    key = str(resolved)
+    cached = _KERNEL_IMAGE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    image = resolved
+    probe = None
+    try:
+        probe = subprocess.Popen(
+            [key, "-c", "import sys; sys.stdin.buffer.read()"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        record = None
+        deadline = time.monotonic() + PROCESS_WAIT_TIMEOUT
+        while record is None and time.monotonic() < deadline:
+            record = process_inventory().get(probe.pid)
+            if record is None:
+                if probe.poll() is not None:
+                    break
+                time.sleep(0.02)
+        if record is not None and record.comm:
+            image = Path(record.comm).resolve(strict=True)
+    except Exception:  # probe failure keeps the pre-existing expectation
+        image = resolved
+    finally:
+        if probe is not None:
+            probe.kill()
+            probe.wait(timeout=PROCESS_WAIT_TIMEOUT)
+    _KERNEL_IMAGE_CACHE[key] = image
+    return image
+
+
+def accepted_executables(expected_executable: Path) -> tuple[Path, ...]:
+    """Every path the kernel may legitimately report for one launch path."""
+
+    resolved = expected_executable.resolve(strict=True)
+    image = kernel_executable_image(resolved)
+    return (resolved,) if image == resolved else (resolved, image)
+
+
+def _matched_executable(comm: str, expected_executable: Path) -> Path:
+    for candidate in accepted_executables(expected_executable):
+        if same_canonical_file(comm, candidate):
+            return candidate
+    _require(False, "member has unexpected executable")
+    raise AssertionError("member has unexpected executable")  # unreachable
+
+
 def _capture_member(
     owner: OwnedGroup,
     record: ProcessRecord,
     expected_executable: Path,
 ) -> OwnedMember:
-    executable = expected_executable.resolve(strict=True)
+    executable = _matched_executable(record.comm, expected_executable)
     _require(
         type(record.pid) is int and record.pid > 1,
         "member PID must be an exact positive integer",
@@ -219,10 +285,6 @@ def _capture_member(
         if record.pid == owner.pid
         else record.ppid in {member.record.pid for member in owner.members},
         "member has unexpected ancestry",
-    )
-    _require(
-        same_canonical_file(record.comm, executable),
-        "member has unexpected executable",
     )
     executable_identity = path_identity(executable)
     _require(

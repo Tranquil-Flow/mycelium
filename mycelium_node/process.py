@@ -246,15 +246,26 @@ def _absolute_path(value: str | Path) -> Path:
     return Path(os.path.abspath(path))
 
 
+def _root_owned_sticky(metadata: os.stat_result) -> bool:
+    """Return whether one walk component is a trusted root-owned sticky directory.
+
+    ``/tmp``-style roots (mode 1777) are the single world-writable directory a
+    walk may accept: the sticky bit stops other users renaming or replacing an
+    existing entry, which is the escape the world-writable check defends
+    against.  Every walk variant must decide this here, so the strict and the
+    lenient walks cannot disagree about the same component again.
+    """
+
+    return metadata.st_uid == 0 and bool(metadata.st_mode & stat.S_ISVTX)
+
+
 def _validate_walk_component(metadata: os.stat_result) -> None:
     if not stat.S_ISDIR(metadata.st_mode):
         raise ValueError("path component is invalid")
     if metadata.st_uid not in {0, os.getuid()}:
         raise ValueError("path component is invalid")
     writable_by_others = stat.S_IMODE(metadata.st_mode) & 0o022
-    if writable_by_others and not (
-        metadata.st_uid == 0 and metadata.st_mode & stat.S_ISVTX
-    ):
+    if writable_by_others and not _root_owned_sticky(metadata):
         raise ValueError("path component is invalid")
 
 
@@ -700,7 +711,10 @@ def private_directory_parent_fd(
                 elif (
                     not stat.S_ISDIR(metadata.st_mode)
                     or metadata.st_uid not in {0, os.getuid()}
-                    or stat.S_IMODE(metadata.st_mode) & 0o002
+                    or (
+                        stat.S_IMODE(metadata.st_mode) & 0o002
+                        and not _root_owned_sticky(metadata)
+                    )
                 ):
                     raise ValueError("path component is invalid")
                 descriptor = child
