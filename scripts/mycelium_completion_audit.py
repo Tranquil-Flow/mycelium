@@ -1,12 +1,41 @@
 #!/usr/bin/env python3
-"""Validate the live A3-A15 completion checklist without promoting its claims."""
+"""Validate the live A3-A15 completion checklist without promoting its claims.
+
+A blocker may name an artifact and assert something checkable about that
+artifact inside a claim clause::
+
+    [[claim:<kind> <argument>[ <argument>]]]
+
+    path_exists <path>            a directory entry exists at <path>
+    path_absent <path>            no directory entry exists at <path>
+    marker_present <path> <token> the regular file at <path> contains <token>
+    marker_absent <path> <token>  the regular file at <path> does not contain <token>
+    commit_present <sha>          the commit is in the local object database
+    commit_reachable <sha>        the commit is HEAD or an ancestor of HEAD
+    commit_unreachable <sha>      the commit exists and is neither HEAD nor an ancestor
+
+A claim clause is optional, because blockers are also free prose. A blocker that
+carries no clause is not checked here, so a green audit does not mean every
+blocker is true: it means every clause that was written down holds. A clause
+that IS written down must parse and must hold against the artifact it names.
+Contradicted, undecidable and malformed clauses are findings, reported as
+``gate:<id>:blocker:<index>:claim_contradicted|claim_unresolved|claim_invalid``.
+
+Paths are repository-relative inside the audited root (a claim never reaches
+outside it); marker clauses compare against the file's whitespace-normalized
+text; Git clauses are answered by the work tree that contains the audited root,
+and a root that is not a Git work tree with a readable HEAD makes them
+undecidable rather than true.
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -140,6 +169,21 @@ GATE_FIELDS = {
     "ui_workspaces",
     "handover",
 }
+BLOCKER_CLAIM_MARKER = "[[claim:"
+BLOCKER_CLAIM_SPAN = re.compile(r"\[\[claim:([^\[\]]*)\]\]")
+BLOCKER_CLAIM_ARITY = {
+    "path_exists": 1,
+    "path_absent": 1,
+    "marker_present": 2,
+    "marker_absent": 2,
+    "commit_present": 1,
+    "commit_reachable": 1,
+    "commit_unreachable": 1,
+}
+GIT_CLAIM_KINDS = frozenset(
+    {"commit_present", "commit_reachable", "commit_unreachable"}
+)
+GIT_COMMIT = re.compile(r"[0-9a-f]{7,64}")
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -187,6 +231,189 @@ def _timestamp(value: object) -> datetime:
 
 def _digest_is_valid(value: object) -> bool:
     return isinstance(value, str) and SHA256.fullmatch(value) is not None
+
+
+def blocker_claims(text: object) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Return the machine-checkable claim clauses of one blocker, in text order.
+
+    Each entry is ``(status, kind, arguments)``. ``status`` is ``"claim"`` for a
+    well-formed clause, which must then be resolved against the repository, or
+    ``"invalid"`` for a claim marker that does not parse -- an unknown kind, the
+    wrong number of arguments, a malformed Git revision, a path that is not a
+    clean repository-relative path, or a marker that is never closed. ``kind``
+    then carries the offending kind, or ``"malformed"`` when the marker itself
+    could not be read.
+    """
+
+    if not isinstance(text, str):
+        return []
+    clauses: list[tuple[str, str, tuple[str, ...]]] = []
+    spans: list[tuple[int, int]] = []
+    for match in BLOCKER_CLAIM_SPAN.finditer(text):
+        spans.append((match.start(), match.end()))
+        parts = match.group(1).strip().split()
+        if not parts:
+            clauses.append(("invalid", "malformed", ()))
+            continue
+        kind = parts[0]
+        if kind not in BLOCKER_CLAIM_ARITY:
+            clauses.append(("invalid", kind, ()))
+            continue
+        arguments = tuple(parts[1:])
+        if len(arguments) != BLOCKER_CLAIM_ARITY[kind]:
+            clauses.append(("invalid", kind, ()))
+            continue
+        if kind in GIT_CLAIM_KINDS:
+            if GIT_COMMIT.fullmatch(arguments[0]) is None:
+                clauses.append(("invalid", kind, ()))
+                continue
+        else:
+            relative = PurePosixPath(arguments[0])
+            if (
+                relative.is_absolute()
+                or relative.as_posix() != arguments[0]
+                or ".." in relative.parts
+            ):
+                clauses.append(("invalid", kind, ()))
+                continue
+        clauses.append(("claim", kind, arguments))
+    for marker in re.finditer(re.escape(BLOCKER_CLAIM_MARKER), text):
+        if not any(start <= marker.start() < end for start, end in spans):
+            clauses.append(("invalid", "malformed", ()))
+    return clauses
+
+
+def _claim_relative_path(root: Path, value: str) -> Path | None:
+    """Resolve a claim argument inside the repository, needing nothing to exist.
+
+    ``None`` means the argument would name a path outside the audited root, which
+    makes the clause invalid rather than false.
+    """
+
+    try:
+        resolved = (root / value).resolve()
+        resolved.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    return root / value
+
+
+def _git_command(
+    root: Path, *arguments: str
+) -> subprocess.CompletedProcess[bytes] | None:
+    """Run one read-only Git query inside the audited root, or ``None`` if it cannot run."""
+
+    try:
+        return subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(root), *arguments],
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("GIT_")
+            },
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _git_head(root: Path, cache: dict[str, object]) -> str | None:
+    """Return the HEAD revision of the work tree containing the root, cached per audit."""
+
+    if "head" not in cache:
+        cache["head"] = None
+        inside = _git_command(root, "rev-parse", "--is-inside-work-tree")
+        if (
+            inside is not None
+            and inside.returncode == 0
+            and inside.stdout.strip() == b"true"
+        ):
+            head = _git_command(root, "rev-parse", "--verify", "HEAD")
+            if head is not None and head.returncode == 0:
+                resolved = head.stdout.decode("utf-8", "replace").strip()
+                cache["head"] = resolved or None
+    value = cache["head"]
+    return value if isinstance(value, str) else None
+
+
+def _blocker_claim_holds(
+    root: Path,
+    kind: str,
+    arguments: tuple[str, ...],
+    cache: dict[str, object],
+) -> bool | None:
+    """Decide one claim against the repository; ``None`` when it cannot be decided.
+
+    ``None`` is not a pass: the caller reports it as ``claim_unresolved``.
+    """
+
+    if kind in GIT_CLAIM_KINDS:
+        if _git_head(root, cache) is None:
+            return None
+        commit = arguments[0]
+        exists = _git_command(root, "cat-file", "-e", f"{commit}^{{commit}}")
+        if exists is None:
+            return None
+        if kind == "commit_present":
+            return exists.returncode == 0
+        if exists.returncode != 0:
+            # An object that is absent locally is not HEAD and not an ancestor.
+            return False
+        ancestor = _git_command(root, "merge-base", "--is-ancestor", commit, "HEAD")
+        if ancestor is None or ancestor.returncode not in (0, 1):
+            return None
+        if kind == "commit_reachable":
+            return ancestor.returncode == 0
+        return ancestor.returncode != 0
+
+    path = _claim_relative_path(root, arguments[0])
+    if path is None:
+        raise ValueError("claim_path_outside_repository")
+    if kind == "path_exists":
+        return path.exists() or path.is_symlink()
+    if kind == "path_absent":
+        return not (path.exists() or path.is_symlink())
+    try:
+        artifact = _relative_file(root, arguments[0]).read_text("utf-8")
+    except (OSError, UnicodeError, ValueError):
+        return None
+    contained = arguments[1] in " ".join(artifact.split())
+    return contained if kind == "marker_present" else not contained
+
+
+def audit_blocker_claims(
+    root: Path,
+    gate_id: str,
+    blockers: list[str],
+    git_state: dict[str, object] | None = None,
+) -> list[str]:
+    """Return findings for the checkable claims carried by one gate's blockers.
+
+    This checks truth against the artifacts a blocker names. It does not check
+    prose, and it does not check a blocker that names nothing.
+    """
+
+    cache = {} if git_state is None else git_state
+    findings: list[str] = []
+    for index, blocker in enumerate(blockers):
+        prefix = f"gate:{gate_id}:blocker:{index}"
+        for status, kind, arguments in blocker_claims(blocker):
+            if status == "invalid":
+                findings.append(f"{prefix}:claim_invalid:{kind}")
+                continue
+            try:
+                holds = _blocker_claim_holds(root, kind, arguments, cache)
+            except ValueError:
+                findings.append(f"{prefix}:claim_invalid:{kind}")
+                continue
+            if holds is None:
+                findings.append(f"{prefix}:claim_unresolved:{kind}")
+            elif not holds:
+                findings.append(f"{prefix}:claim_contradicted:{kind}")
+    return findings
 
 
 def _audit_completed_evidence(
@@ -378,6 +605,7 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
     gate_ids: list[str] = []
     gate_states: dict[str, str] = {}
     gate_dependencies: dict[str, set[str]] = {}
+    git_state: dict[str, object] = {}
     for index, gate in enumerate(gates_value):
         prefix = f"gate:{index}"
         if not isinstance(gate, dict) or set(gate) != GATE_FIELDS:
@@ -447,12 +675,16 @@ def audit(repo_root: str | Path, checklist: str = DEFAULT_CHECKLIST) -> dict[str
             except (OSError, ValueError):
                 findings.append(f"{prefix}:handover_unavailable")
         try:
-            _string_list(
+            blockers = _string_list(
                 gate.get("blockers"),
                 allow_empty=gate.get("state") == "complete",
             )
         except ValueError:
             findings.append(f"{prefix}:blockers_invalid")
+        else:
+            findings.extend(
+                audit_blocker_claims(root, gate_id, blockers, git_state)
+            )
         try:
             completed = set(
                 _string_list(gate.get("completed_requirements"), allow_empty=True)
