@@ -7,6 +7,7 @@ import math
 import re
 from typing import Any, Mapping, Sequence
 
+from mycelium_a6_recovery import validate_recovery_runtime
 from mycelium_request_gateway.contracts import is_public_model_id
 
 
@@ -811,3 +812,15 @@ __all__ = [
     "validate_swarm_result",
     "validate_swarm_status",
 ]
+
+
+
+def validate_recovery_product_projection(document: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        result = validate_recovery_runtime(document)
+        _safe_json_tree(result)
+        return result
+    except GatewayValidationError:
+        raise
+    except Exception:
+        raise GatewayValidationError("invalid_recovery_projection") from None

@@ -5,7 +5,7 @@ import hashlib
 import json
 import threading
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Callable, Mapping, Protocol
 
 from mycelium_qualification.contracts import RouteQualificationV1
 from mycelium_qualification.evidence import sha256_document
@@ -81,7 +81,11 @@ class _GatewayTokenSink:
         text = self._codec.decode_token(token_id)
         if not isinstance(text, str):
             raise AdmissionError("invalid_decoded_token")
-        self._emit_token(token_index, text, token_id)
+        private_emit = getattr(self._emit_token, "emit_router_token", None)
+        if callable(private_emit):
+            private_emit(token_index, token_id, text)
+        else:
+            self._emit_token(token_index, text, token_id)
 
 
 class RouterSessionBackend:
@@ -194,6 +198,9 @@ class RouterSessionBackend:
             for item in prompt_token_ids
         ):
             raise AdmissionError("invalid_encoded_prompt")
+        bind_encoded_prompt = getattr(emit_token, "bind_encoded_prompt", None)
+        if callable(bind_encoded_prompt):
+            bind_encoded_prompt(prompt_token_ids)
         now = self._clock()
         if not isinstance(now, (int, float)) or isinstance(now, bool):
             raise AdmissionError("invalid_router_clock")
@@ -289,6 +296,7 @@ class RouterSessionBackend:
                         new_generation=publisher_generation + 1,
                     ) is not True:
                         raise AdmissionError("publisher_generation_sync_failed")
+            recovery_attempts = 0
             while True:
                 if is_cancelled() or self._is_cancelled(request_id):
                     self._cancel_once(request_id)
@@ -301,6 +309,37 @@ class RouterSessionBackend:
                     return "failed"
                 if status == "TERMINAL_BLOCKED":
                     return "terminal_blocked"
+                if status == "RECOVERY_REQUIRED":
+                    if recovery_attempts >= 2:
+                        return "failed"
+                    checkpoint_binding = getattr(
+                        self._router,
+                        "recovery_checkpoint_binding",
+                        None,
+                    )
+                    recover = getattr(self._router, "recover_full_context", None)
+                    freeze = getattr(emit_token, "freeze_replay_checkpoint", None)
+                    if not (
+                        callable(checkpoint_binding)
+                        and callable(recover)
+                        and callable(freeze)
+                    ):
+                        return "failed"
+                    binding = checkpoint_binding(request_id)
+                    if not isinstance(binding, Mapping):
+                        raise AdmissionError("recovery_binding_invalid")
+                    frozen_binding = dict(binding)
+                    frozen_binding.setdefault("recovery_attempt", recovery_attempts)
+                    checkpoint = freeze(**frozen_binding)
+                    if recover(request_id, checkpoint) is not True:
+                        recovery_status = self._router.request_status(request_id)
+                        if recovery_status == "CANCELLED":
+                            return "cancelled"
+                        if recovery_status == "TERMINAL_BLOCKED":
+                            return "terminal_blocked"
+                        return "failed"
+                    recovery_attempts += 1
+                    continue
                 if status != "DECODING":
                     raise AdmissionError("invalid_router_state")
                 progressed = self._router.decode_one(request_id)
@@ -467,6 +506,21 @@ class RouterSessionBackend:
         if (ordered[-1], ordered[0]) not in legal_loopbacks:
             raise AdmissionError("qualification_mismatch")
         return frozenset(selected_placements)
+
+    def recovery_public_projection(
+        self, committed_token_counts: Mapping[str, int]
+    ) -> Mapping[str, object]:
+        source = getattr(self._router, "recovery_public_projection", None)
+        if not callable(source):
+            raise AdmissionError("recovery_projection_unavailable")
+        try:
+            document = source(dict(committed_token_counts))
+        except Exception as exc:
+            code = getattr(exc, "code", "recovery_projection_unavailable")
+            raise AdmissionError(str(code)) from None
+        if not isinstance(document, Mapping):
+            raise AdmissionError("recovery_projection_invalid")
+        return document
 
     def cancel(self, request_id: str) -> bool:
         return self._cancel_once(request_id, external=True)

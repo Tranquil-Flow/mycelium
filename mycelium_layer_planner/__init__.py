@@ -2,6 +2,7 @@
 
 from .contracts import ModelIdentity, PlanningPolicy, RoutePlanV2
 from .planner import plan_snapshot
+from .recovery_intent import project_recovery_intent
 from .replanning import (
     ReplanAssessment,
     ReplanOutcome,
@@ -22,6 +23,7 @@ __all__ = [
     "assess_topology_event",
     "dumps_replan_outcome",
     "plan_snapshot",
+    "project_recovery_intent",
     "replan_for_event",
     "replan_outcome_to_dict",
 ]

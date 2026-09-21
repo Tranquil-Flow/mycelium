@@ -1,0 +1,59 @@
+{
+  "binding": {
+    "deployment_epoch": 1,
+    "deployment_id": "synthetic-a6-deployment",
+    "graph_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "model_id": "synthetic-a6-model",
+    "model_revision": "synthetic-immutable-revision",
+    "representation_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "topology_generation": 1
+  },
+  "compatibility": {
+    "architecture_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "context_policy_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+    "generation_settings_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "manifest_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "model_id": "synthetic-a6-model",
+    "model_revision": "synthetic-immutable-revision",
+    "output_semantics_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+    "qualification_parity_policy_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "representation_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "special_token_policy_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+    "tokenizer_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "vocabulary_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "workload_envelope_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "compatible": false,
+  "expiry_unix_ms": 31000,
+  "fallback": "unverified",
+  "freshness": "unverified",
+  "issued_at_unix_ms": 1000,
+  "parity": "unverified",
+  "physical_challenge": "unexecuted",
+  "protocol": "mycelium.full_context_recovery_qualification.v1",
+  "qualification_digest": "sha256:607d898e39300d9328cf18944ca8928832661f8b747b7940f479da941d644b1b",
+  "qualification_id": "synthetic-a6-unexecuted-qualification",
+  "reason_codes": [
+    "synthetic_fixture_not_qualified"
+  ],
+  "request_binding": {
+    "checkpoint_digest": "sha256:d08a1089499acf9ebc79a295cc930dcac8f73b2d26a2e297d163c2e2d4b65ebe",
+    "committed_watermark": 1,
+    "owner_qualification_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "recovery_attempt": 0,
+    "request_id": "synthetic-a6-request",
+    "source_attempt": 1
+  },
+  "resource": "unverified",
+  "route": "unverified",
+  "successor_binding": {
+    "path_attempt": 1,
+    "path_id": "synthetic-a6-successor-path",
+    "path_manifest_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "placement_ids": [
+      "synthetic-a6-successor-placement"
+    ],
+    "request_attempt": 2,
+    "request_id": "synthetic-a6-request"
+  }
+}

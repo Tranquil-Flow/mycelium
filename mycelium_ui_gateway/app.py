@@ -42,6 +42,7 @@ from .validation import (
     validate_request_event_id,
     validate_observatory_envelope,
     validate_qualification,
+    validate_recovery_product_projection,
     validate_stream_event,
     validate_submission,
     validate_swarm_result,
@@ -58,6 +59,7 @@ _BOOTSTRAP = "/api/v1/bootstrap"
 _OBSERVATORY_SNAPSHOT = "/api/v1/observatory/snapshot"
 _OBSERVATORY_EVENTS = "/api/v1/observatory/events"
 _QUALIFICATION = "/api/v1/qualification/current"
+_RECOVERY_STATUS = "/api/v1/recovery/status"
 _INFERENCE = "/api/v1/inference"
 _SWARM_STATUS = "/api/v1/swarm/status"
 _SWARM_INVITES = "/api/v1/swarm/invites"
@@ -70,6 +72,7 @@ _API_PATHS = {
     "observatory_snapshot": _OBSERVATORY_SNAPSHOT,
     "observatory_events": _OBSERVATORY_EVENTS,
     "qualification_current": _QUALIFICATION,
+    "recovery_status": _RECOVERY_STATUS,
     "inference_submit": _INFERENCE,
     "swarm_status": _SWARM_STATUS,
     "swarm_invites": _SWARM_INVITES,
@@ -323,6 +326,8 @@ class ProductGatewayASGIApplication:
                 await self._stream_observatory(scope, receive, send)
             elif route == "qualification":
                 await self._qualification(send)
+            elif route == "recovery_status":
+                await self._recovery_status(send)
             elif route == "inference_submit":
                 await self._inference_submit(scope, receive, send, session)
             elif route == "inference_events":
@@ -356,6 +361,7 @@ class ProductGatewayASGIApplication:
             _OBSERVATORY_SNAPSHOT: ("observatory_snapshot", frozenset({"GET"})),
             _OBSERVATORY_EVENTS: ("observatory_events", frozenset({"GET"})),
             _QUALIFICATION: ("qualification", frozenset({"GET"})),
+            _RECOVERY_STATUS: ("recovery_status", frozenset({"GET"})),
             _INFERENCE: ("inference_submit", frozenset({"POST"})),
             _SWARM_STATUS: ("swarm_status", frozenset({"GET"})),
             _SWARM_INVITES: ("swarm_invites", frozenset({"POST"})),
@@ -561,6 +567,16 @@ class ProductGatewayASGIApplication:
         )
         validate_qualification(document)
         await self._send_json(send, 200, document)
+
+    async def _recovery_status(self, send: Send) -> None:
+        _status, document = await self._json_upstream(
+            self._request_gateway_app,
+            method="GET",
+            path="/v1/recovery/status",
+            token=self._request_token,
+        )
+        validated = validate_recovery_product_projection(document)
+        await self._send_json(send, 200, validated)
 
     async def _product_snapshot(self, send: Send) -> None:
         if self._product_app is None:

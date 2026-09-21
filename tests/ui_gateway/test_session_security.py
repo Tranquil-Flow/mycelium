@@ -176,6 +176,7 @@ def test_bootstrap_creates_bounded_http_only_strict_session(app) -> None:
             "observatory_snapshot": "/api/v1/observatory/snapshot",
             "observatory_events": "/api/v1/observatory/events",
             "qualification_current": "/api/v1/qualification/current",
+            "recovery_status": "/api/v1/recovery/status",
             "inference_submit": "/api/v1/inference",
             "swarm_status": "/api/v1/swarm/status",
             "swarm_invites": "/api/v1/swarm/invites",

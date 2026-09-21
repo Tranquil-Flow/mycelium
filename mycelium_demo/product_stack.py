@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import os
 from typing import Any, Callable, Iterable, Mapping
 
 from mycelium_request_gateway import create_request_gateway_application
@@ -51,6 +52,7 @@ def build_loopback_product_stack(
     codec: Any,
     observatory_app: Any,
     product_app: Any | None = None,
+    product_app_factory: Callable[[Callable[[], Any]], Any] | None = None,
     swarm_coordinator: Any,
     request_bearer_token: str,
     replica_qualifications_factory: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
@@ -58,6 +60,7 @@ def build_loopback_product_stack(
     public_origin: str | None = None,
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
+    replay_checkpoint_root: str | os.PathLike[str] | None = None,
 ) -> Any:
     """Compose the browser gateway on loopback, optionally behind an explicit HTTPS proxy."""
     if trusted_https_proxy:
@@ -69,6 +72,8 @@ def build_loopback_product_stack(
             raise ValueError("invalid_trusted_proxy_capability")
     elif trusted_proxy_capability is not None:
         raise ValueError("trusted_proxy_capability_requires_trusted_https_proxy")
+    if product_app is not None and product_app_factory is not None:
+        raise ValueError("product_application_ambiguous")
     request_gateway_app = create_request_gateway_application(
         qualification_source=qualification_source,
         router=router,
@@ -76,7 +81,10 @@ def build_loopback_product_stack(
         bearer_token=request_bearer_token,
         replica_qualifications_factory=replica_qualifications_factory,
         replica_loss_placement_ids_factory=replica_loss_placement_ids_factory,
+        replay_checkpoint_root=replay_checkpoint_root,
     )
+    if product_app_factory is not None:
+        product_app = product_app_factory(request_gateway_app.recovery_public_projection)
     return create_product_gateway_application(
         config=GatewayConfig(
             bind_host="127.0.0.1",

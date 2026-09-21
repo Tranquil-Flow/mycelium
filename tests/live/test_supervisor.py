@@ -272,6 +272,28 @@ def test_build_live_stack_returns_app_and_health_source(
     assert all(node["membership_state"] == "assigned" for node in swarm["native_nodes"])
 
 
+def test_build_live_stack_wires_private_a6_checkpoint_store(
+    tmp_path, live_graph, deployment_dir
+) -> None:
+    route = FakeLiveRoute(scripted_tokens=(4599,))
+    route.open()
+    state_root = tmp_path / "product-state"
+
+    stack = build_live_stack(
+        route=route,
+        deployment_dir=deployment_dir,
+        execution_graph=live_graph,
+        bearer_token="test-token",
+        product_state_root=state_root,
+    )
+
+    request_gateway = stack.app._request_gateway_app
+    checkpoint_root = request_gateway._service._replay_checkpoint_root
+    assert checkpoint_root == state_root / "private" / "a6-replay-checkpoints"
+    assert checkpoint_root.is_dir()
+    assert checkpoint_root.stat().st_mode & 0o077 == 0
+
+
 def test_artifact_acquisition_endpoint_projects_durable_provisioner_ledger(
     tmp_path: Path,
 ) -> None:

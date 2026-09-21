@@ -17,6 +17,8 @@
     "test:interactive-multibrowser": "node scripts/interactive-multibrowser-e2e.mjs",
     "test:a4-live-browser": "node scripts/a4-product-browser-e2e.mjs",
     "test:a5-live-browser": "node scripts/a5-product-browser-e2e.mjs",
+    "test:a6-browser-harness": "node --test scripts/a6-product-browser-e2e.test.mjs",
+    "test:a6-live-browser": "node scripts/a6-product-browser-e2e.mjs",
     "test:e2e": "PLAYWRIGHT_NO_COPY_PROMPT=1 VITE_OBSERVATORY_SOURCE_MODE=fixture npm run build && PLAYWRIGHT_NO_COPY_PROMPT=1 playwright test",
     "test:e2e:install": "playwright install chromium firefox webkit",
     "contracts:diff": "node scripts/contract-diff.mjs",

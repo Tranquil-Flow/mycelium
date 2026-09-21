@@ -29,6 +29,7 @@ ENTITY_KINDS = (
     "incident",
     "load_proof",
     "qualification",
+    "recovery",
     "request",
     "route",
     "runtime_kv_ownership",
@@ -388,6 +389,30 @@ def _runtime_kv(value: object) -> bool:
     )
 
 
+def _recovery(value: object) -> bool:
+    fields = {
+        "request_count",
+        "recovering_count",
+        "terminal_count",
+        "terminal_blocked_count",
+        "cleanup_complete_count",
+        "reconciled_count",
+        "max_recovery_attempt",
+        "breaker_state",
+    }
+    if not _exact(value, fields) or value["breaker_state"] not in {"closed", "open"}:
+        return False
+    counts = tuple(value[field] for field in fields if field != "breaker_state")
+    return (
+        all(_integer(item) for item in counts)
+        and value["recovering_count"] <= value["request_count"]
+        and value["terminal_count"] <= value["request_count"]
+        and value["terminal_blocked_count"] <= value["request_count"]
+        and value["cleanup_complete_count"] <= value["request_count"]
+        and value["reconciled_count"] <= value["request_count"]
+    )
+
+
 def _request(value: object) -> bool:
     fields = {"state", "path_attempt", "sequence", "qualification_id"}
     return (
@@ -450,6 +475,7 @@ _ATTRIBUTE_VALIDATORS: dict[str, Callable[[object], bool]] = {
     "incident": _incident,
     "load_proof": _load_proof,
     "qualification": _qualification,
+    "recovery": _recovery,
     "request": _request,
     "route": _route,
     "runtime_kv_ownership": _runtime_kv,

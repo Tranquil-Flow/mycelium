@@ -472,6 +472,30 @@ class CommandController:
             state.completion_cleanup_authorized = completion_cleanup
             return MutationResult(True, "cancel_requested", self._snapshot(state))
 
+    def promote_completion_cleanup_to_cancellation(
+        self,
+        identity: CommandIdentity,
+        *,
+        observed_at_ms: int,
+    ) -> MutationResult:
+        """Make an accepted user cancellation supersede completion cleanup."""
+
+        observed = _integer(observed_at_ms, "observed_at_ms")
+        request, state, rejection = self._locate(identity)
+        if rejection is not None:
+            return rejection
+        assert request is not None and state is not None
+        with request.lock:
+            if state.terminal is not None:
+                return MutationResult(False, "already_terminal", self._snapshot(state))
+            if state.cancellation_requested_at_ms is None:
+                return MutationResult(False, "cancel_generation_missing", self._snapshot(state))
+            if not state.completion_cleanup_authorized:
+                return MutationResult(True, "duplicate", self._snapshot(state), duplicate=True)
+            state.completion_cleanup_authorized = False
+            state.cancellation_requested_at_ms = observed
+            return MutationResult(True, "user_cancellation_promoted", self._snapshot(state))
+
     def advance_publisher_generation(
         self,
         identity: CommandIdentity,

@@ -1,0 +1,332 @@
+{
+  "base_commit": "3282983100595dfc8a730a06cf0cf5c750219e32",
+  "files": [
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-gate-v1.json",
+      "sha256": "sha256:8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e",
+      "size_bytes": 418
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-intent-v1.json",
+      "sha256": "sha256:1d14e03f0a0d8eea0596ceb28dd470866e8bdb4a91418ff9244c888db3308db0",
+      "size_bytes": 1000
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-qualification-v1.json",
+      "sha256": "sha256:f9a91c5bf634029ad05bfa2dbd3dfb73d01fbd1a1cfd90bc1445a18d4163e3db",
+      "size_bytes": 2936
+    },
+    {
+      "path": "contracts/compatibility-fixtures/full-context-recovery-runtime-v1.json",
+      "sha256": "sha256:b399ad6cf7450e19441b93704b45873c8fcd0598a4dde253a5e69521979c52b5",
+      "size_bytes": 870
+    },
+    {
+      "path": "contracts/compatibility-fixtures/private-request-replay-checkpoint-v1.json",
+      "sha256": "sha256:b820928148a33a32f8d20f60e72c0907d0f49982f1df1236f5a3ba9cc42805f5",
+      "size_bytes": 1473
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-event-v1.json",
+      "sha256": "sha256:30872dc0aa48f53ec1de23f1834052ea04deee0ecadb5e8e73db90341491b93d",
+      "size_bytes": 6162
+    },
+    {
+      "path": "contracts/compatibility-fixtures/product-snapshot-v1.json",
+      "sha256": "sha256:c59a39e8cc2e0982117b0c0699863d02ba26e032d47b9380875f28083a91d996",
+      "size_bytes": 5650
+    },
+    {
+      "path": "contracts/contract-manifest.v1.json",
+      "sha256": "sha256:9f347410b7cc49df97c2342666621635197fc0ef95e3dcae24e43aee175533e0",
+      "size_bytes": 70319
+    },
+    {
+      "path": "docs/handover/A6_SESSION5B_CANDIDATE_2026-09-07.md",
+      "sha256": "sha256:320d01ce4fdc2835785b9ce1888601f50843d0dda4898221f13b2c71b3c5f4d3",
+      "size_bytes": 4493
+    },
+    {
+      "path": "mycelium_a6_gateway.py",
+      "sha256": "sha256:da3ee50aeb3bd8419a9f28f7108203b1017f8f6383b445d3a0a8231731d6a3d5",
+      "size_bytes": 8779
+    },
+    {
+      "path": "mycelium_a6_m16.py",
+      "sha256": "sha256:e112dceb7aefffa43a127d9b192adc038de186a9f349d0d6f9881de40c63eac1",
+      "size_bytes": 11370
+    },
+    {
+      "path": "mycelium_a6_recovery.py",
+      "sha256": "sha256:aa4ea871723fdbe05837673ad80a789c62061b3f21ff070c0c1bfb01a5724ac0",
+      "size_bytes": 83734
+    },
+    {
+      "path": "mycelium_demo/product_stack.py",
+      "sha256": "sha256:5cc93d52f0ad1a85145db249d140a06b38a34bfad39f35edd7edec75e7e22895",
+      "size_bytes": 4233
+    },
+    {
+      "path": "mycelium_layer_planner/__init__.py",
+      "sha256": "sha256:950a5bbe3c08e270841272122c069e696b4e7823414e690a57e99be5df5bdfbf",
+      "size_bytes": 701
+    },
+    {
+      "path": "mycelium_layer_planner/recovery_intent.py",
+      "sha256": "sha256:3dce33a1d9a085c09ede5c7678c4421b11e2d75fcbc8816f1f54f30718b44cd9",
+      "size_bytes": 1183
+    },
+    {
+      "path": "mycelium_live/a6_recovery.py",
+      "sha256": "sha256:77182fd018e6c952869e0cf763574f2e285c602ec18e4f87625c4d08c3f4d93d",
+      "size_bytes": 13290
+    },
+    {
+      "path": "mycelium_live/command_controller.py",
+      "sha256": "sha256:7136fff26d888bca4dd49fa105c6e00cfc91f65abff8f096375d54b4c0d43f37",
+      "size_bytes": 37188
+    },
+    {
+      "path": "mycelium_live/router_port.py",
+      "sha256": "sha256:21616b1025f4ef001c5a7c3fd5947bd978b631c4b4f46349e6936d9520ff0803",
+      "size_bytes": 87246
+    },
+    {
+      "path": "mycelium_live/supervisor.py",
+      "sha256": "sha256:6a78c9b6d216715938915025b02950ee645f5034a9816a80cd29da0090658f04",
+      "size_bytes": 119618
+    },
+    {
+      "path": "mycelium_m16_runtime.py",
+      "sha256": "sha256:0f790ed3e31bbccc3a9acdeaf80cb0364d955e4c7c4870c2d60409460169cac4",
+      "size_bytes": 48605
+    },
+    {
+      "path": "mycelium_product_spine/app.py",
+      "sha256": "sha256:f8cf15acb3550d4cdab44792062642ed27145a7ae52eee769087394e179cbbd5",
+      "size_bytes": 10037
+    },
+    {
+      "path": "mycelium_product_spine/contracts.py",
+      "sha256": "sha256:3581b3ea93bd86cce3bbdba63378448495a299f51da5df6c722a9ee747e30bfb",
+      "size_bytes": 24991
+    },
+    {
+      "path": "mycelium_product_spine/projector.py",
+      "sha256": "sha256:39ee84988882605ab44a9aeb033442fef81680ebcc821ec8b5a117192f8c7fe3",
+      "size_bytes": 53736
+    },
+    {
+      "path": "mycelium_request_gateway/asgi.py",
+      "sha256": "sha256:06dd14721793cde0e0e2db92d439efbbb875cc60c14272c1925cfcb569c57041",
+      "size_bytes": 13930
+    },
+    {
+      "path": "mycelium_request_gateway/backend.py",
+      "sha256": "sha256:c65441abc65dccdc79934ddf9352b57363f025dc07a152fa1f0a7c712c88b5d1",
+      "size_bytes": 26793
+    },
+    {
+      "path": "mycelium_request_gateway/init.py",
+      "sha256": "sha256:4557520f6cb0f473b85182cd87aa52d5bfed91421b3dc11ef51ac35217ece7fb",
+      "size_bytes": 3569
+    },
+    {
+      "path": "mycelium_request_gateway/service.py",
+      "sha256": "sha256:ab310b1acd43c9022c9b7b0deda64933b95b5c1ecfb2e28e94a08732a240efc4",
+      "size_bytes": 56911
+    },
+    {
+      "path": "mycelium_ui_gateway/app.py",
+      "sha256": "sha256:45187cb245b7f26cd6334084da99b79e416595ee950fb8c89f4d9d66a902f62d",
+      "size_bytes": 41188
+    },
+    {
+      "path": "mycelium_ui_gateway/validation.py",
+      "sha256": "sha256:84c114e373f8d4afe960300c248423ba6ec454938e120c1ecf3305294f12fcfa",
+      "size_bytes": 31161
+    },
+    {
+      "path": "scripts/build_a6_source_manifest.py",
+      "sha256": "sha256:6b876ffa8b211da1951dfadc0089f8f0ae869ccc9db6ba7453648ae7c33a8678",
+      "size_bytes": 5632
+    },
+    {
+      "path": "scripts/contract_registry.py",
+      "sha256": "sha256:f6adfcda2d718526b9f8b4c2babb037cd3f177b91df72e377ab870b9ef0fbad5",
+      "size_bytes": 21544
+    },
+    {
+      "path": "scripts/generate_contract_fixtures.py",
+      "sha256": "sha256:3eed511c2b96365162c256a91f0cf42d66333aa942d6b19306307049af4fdec2",
+      "size_bytes": 90515
+    },
+    {
+      "path": "scripts/run_a6_recovery_case.py",
+      "sha256": "sha256:b1aedbe42b75ef405d0cfad22cc0d2226f7de00785dfa85d2baa027477d9cfc8",
+      "size_bytes": 17889
+    },
+    {
+      "path": "scripts/run_a6_recovery_gate.py",
+      "sha256": "sha256:cbc95f1fe494e2419fc1035dc6d9aa758f69ac9ba6af3cea0180433b4f4e6ce7",
+      "size_bytes": 11811
+    },
+    {
+      "path": "test_a6_recovery.py",
+      "sha256": "sha256:634718f45e5e23e81302d98b0d4bc3d6289e5b22bf0c587865064abf141a31d8",
+      "size_bytes": 34445
+    },
+    {
+      "path": "tests/contracts/test_a6_intent_bounds.py",
+      "sha256": "sha256:6aee2cbb5d6ddfe3e0130a6cacfc7fdb57bd433596ca5a434cc6090bc864250e",
+      "size_bytes": 1707
+    },
+    {
+      "path": "tests/contracts/test_a6_qualification_claims.py",
+      "sha256": "sha256:6e794fd70f6056ec9d3565a5ea778a094eb0df8b51c7a731e556d287b491e2ea",
+      "size_bytes": 2350
+    },
+    {
+      "path": "tests/contracts/test_contract_fixtures.py",
+      "sha256": "sha256:29ebcf240e678d76eddf7d0fd263c175793cf595abb263322db79c4f83aca716",
+      "size_bytes": 34457
+    },
+    {
+      "path": "tests/demo/test_product_physical_composition.py",
+      "sha256": "sha256:33df2b97b2374fb63a5ef4fe179dc557db705ed0857aace0139d7fe86aeb2356",
+      "size_bytes": 15320
+    },
+    {
+      "path": "tests/governance/test_a6_source_manifest.py",
+      "sha256": "sha256:558021da82316985adcd799266fda72bcae53cb27ddcda85fef0ed1bc702410f",
+      "size_bytes": 2633
+    },
+    {
+      "path": "tests/layer_planner/test_a6_recovery_intent.py",
+      "sha256": "sha256:be4a5eb35fd4840e7c17ce7fafae6f726ef99c81fc1d80893d1467f66ba220eb",
+      "size_bytes": 1112
+    },
+    {
+      "path": "tests/live/test_a6_integration_boundaries.py",
+      "sha256": "sha256:e0d7ea16d2301f152d28cc5354999b0fa0b147dd28c1b4d05790f0b530f535e2",
+      "size_bytes": 3557
+    },
+    {
+      "path": "tests/live/test_a6_live_router_recovery.py",
+      "sha256": "sha256:95226af09cd64e8b664948374b8bc6e8b510b9ed4cc1998913066e84b871dffc",
+      "size_bytes": 28577
+    },
+    {
+      "path": "tests/live/test_a6_m16_recovery.py",
+      "sha256": "sha256:e2cc8e173a7a361dee9d157faf0d44f5dfc993a6c4a109471bab788eec968451",
+      "size_bytes": 25018
+    },
+    {
+      "path": "tests/live/test_a6_physical_qualification.py",
+      "sha256": "sha256:1b2538b6b0566ffc2e6304c32707e27fb10b26ddb75afce3823177ecd70eb6bf",
+      "size_bytes": 8189
+    },
+    {
+      "path": "tests/live/test_a6_production_composition.py",
+      "sha256": "sha256:08a97b5e8f4ff3a914e0ef434564a6fdeed1c1e2afad4fc51333db2b17638046",
+      "size_bytes": 6422
+    },
+    {
+      "path": "tests/live/test_a6_recovery_gate.py",
+      "sha256": "sha256:cbc5d0ac0210bf6fb9cce56f27a24c67d733b81ac663e5a83389a3845701985d",
+      "size_bytes": 6960
+    },
+    {
+      "path": "tests/live/test_supervisor.py",
+      "sha256": "sha256:dc5067d3f784c3f09499b30de9fe7325e2568298c4b20ff43233554644ca43df",
+      "size_bytes": 60941
+    },
+    {
+      "path": "tests/product_spine/test_a6_recovery_projection.py",
+      "sha256": "sha256:53163d0b5af6e1896cd3e4af3dedbb7b1d968d022789207c1c1369ff26d4ff1c",
+      "size_bytes": 5096
+    },
+    {
+      "path": "tests/request_gateway/test_a6_checkpoint_restart.py",
+      "sha256": "sha256:65360bb0315c7ef64b2a5be01dc3d7a63451d804b38262a8ba99979e2897dfae",
+      "size_bytes": 1932
+    },
+    {
+      "path": "tests/request_gateway/test_a6_gateway.py",
+      "sha256": "sha256:d681fe84e783e70fb3a3dff8d239f4b59200d651f5e77d72115cbcb46628d0a0",
+      "size_bytes": 27375
+    },
+    {
+      "path": "tests/request_gateway/test_a6_gateway_emitter_protocol.py",
+      "sha256": "sha256:59b784964a957cb7325259172166e805782e4b03539a4ff7d59d304fa7aaa679",
+      "size_bytes": 7106
+    },
+    {
+      "path": "tests/request_gateway/test_a6_recovery_product_path.py",
+      "sha256": "sha256:bc54cf67c23c78d10c24f7122f6915b6afe2ed11dd0460f3c4c07c51bc5b1204",
+      "size_bytes": 8402
+    },
+    {
+      "path": "tests/request_gateway/test_backend_cli.py",
+      "sha256": "sha256:2ae56756a0db6248038afc270529a981e8485321259af5aea1df8f13fdaadcd1",
+      "size_bytes": 13232
+    },
+    {
+      "path": "tests/ui_gateway/test_inference.py",
+      "sha256": "sha256:80152e37f6e5e60a670cb8b9f19cc04abb78b301dabbf741c1647bd45e2f7227",
+      "size_bytes": 10896
+    },
+    {
+      "path": "tests/ui_gateway/test_session_security.py",
+      "sha256": "sha256:9383660d47b9c4731a90a36cf768f8ac2e40878c9c9df24bf303d7699f7871bd",
+      "size_bytes": 13011
+    },
+    {
+      "path": "ui/web/package.json",
+      "sha256": "sha256:d4025d5ecd97150dd6d4b33a0d0024c85b20871a0dc4df25d452c8e636446145",
+      "size_bytes": 2227
+    },
+    {
+      "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
+      "sha256": "sha256:776e0e20cbc9644020830228eea91589790628d994b8348f2d60886d2b1bc241",
+      "size_bytes": 18145
+    },
+    {
+      "path": "ui/web/scripts/a6-product-browser-e2e.test.mjs",
+      "sha256": "sha256:7bf393b4847e1ce4b4e99acd11d34838be1898c74f837752f01ecd27fc8d1786",
+      "size_bytes": 9134
+    },
+    {
+      "path": "ui/web/src/App.tsx",
+      "sha256": "sha256:e2e46c51ef8af9ae477c69b90d6c6cad7c4a35333717ab4aba01957d0f07498e",
+      "size_bytes": 20463
+    },
+    {
+      "path": "ui/web/src/app/ProductShell.test.tsx",
+      "sha256": "sha256:c350f793aeba5ca971188dd538870a7382b9c21ddc9aca7d2dd9ace4966a67e5",
+      "size_bytes": 5683
+    },
+    {
+      "path": "ui/web/src/features/productEvidence/contracts.ts",
+      "sha256": "sha256:e686e2ea1b4afd9ada63a23675c15292f5565e7bca40d08b42455d72e438cfcd",
+      "size_bytes": 41452
+    },
+    {
+      "path": "ui/web/src/features/recovery/RecoveryStatusBar.test.tsx",
+      "sha256": "sha256:ce2f9776f66294b7a1e14889de87a29a255d8dafa076b3958895a6c0b714cd72",
+      "size_bytes": 6322
+    },
+    {
+      "path": "ui/web/src/features/recovery/RecoveryStatusBar.tsx",
+      "sha256": "sha256:ca0c9de62de3da866877931675655bcd794a12e6b95ba81775c3ee32dd362cc8",
+      "size_bytes": 3994
+    },
+    {
+      "path": "ui/web/src/features/recovery/workspaceFields.json",
+      "sha256": "sha256:8b13e4c18bd71851486368040cf4e6236a6a46828a21ad048227e3c6c8649e23",
+      "size_bytes": 792
+    }
+  ],
+  "protocol": "mycelium.a6_source_manifest.v1",
+  "source_digest": "sha256:ba0b0570edc5a307d65d4a27bcada82318f422958418df9212b3956ad2e40c24"
+}

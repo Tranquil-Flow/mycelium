@@ -6,9 +6,11 @@ from dataclasses import dataclass, field
 from dataclasses import replace
 import hashlib
 import hmac
+import os
+from pathlib import Path
 import threading
 import time
-from typing import Callable, Protocol
+from typing import TYPE_CHECKING, Callable, Mapping, Protocol
 
 from .contracts import (
     AdmissionError,
@@ -25,6 +27,9 @@ from .observability import GatewayMetrics
 from .qualification import CapturedQualification, QualificationGate, QualificationSource
 
 import mycelium_deadlines
+
+if TYPE_CHECKING:
+    from mycelium_a6_recovery import ReplayCheckpoint
 
 
 _MAX_BACKEND_TOKEN_TEXT_BYTES = 1 << 20
@@ -71,6 +76,8 @@ class _Session:
     acknowledged_through: int = -1
     expected_token_index: int = 0
     token_digests: list[bytes] = field(default_factory=list)
+    encoded_prompt_token_ids: tuple[int, ...] | None = None
+    committed_token_ids: list[int | None] = field(default_factory=list)
     terminal_event: StreamEvent | None = None
     terminal_count: int = 0
     maximum_buffered: int = 0
@@ -98,6 +105,86 @@ class _Session:
     last_event_at: float | None = None
     ever_subscribed: bool = False
     last_ack_at: float | None = None
+    replay_checkpoint_store_identity: str | None = None
+
+
+class _GatewayEmission:
+    """Private backend→gateway channel for exact A6 replay material.
+
+    It remains callable with the frozen ``TokenEmitter`` shape
+    ``(token_index, token_text, token_id=None)`` -- the optional third id stays part of the
+    protocol, positionally and by keyword, so a conforming backend is never narrowed by the
+    widening of this emitter into an object (``contracts.py``, ``TokenEmitter``).  Only the
+    production Router backend uses the two private methods that retain canonical token IDs
+    atomically with the corresponding gateway delivery event.
+    """
+
+    __slots__ = ("_service", "_session")
+
+    def __init__(self, service: "RequestGatewayService", session: _Session) -> None:
+        self._service = service
+        self._session = session
+
+    def __call__(
+        self,
+        token_index: int,
+        token_text: str,
+        token_id: int | None = None,
+    ) -> None:
+        self._service._accept_token(
+            self._session,
+            token_index,
+            token_text,
+            token_id=token_id,
+        )
+
+    def bind_encoded_prompt(self, token_ids: tuple[int, ...]) -> None:
+        self._service._bind_encoded_prompt(self._session, token_ids)
+
+    def emit_router_token(
+        self,
+        token_index: int,
+        token_id: int,
+        token_text: str,
+    ) -> None:
+        self._service._accept_token(
+            self._session,
+            token_index,
+            token_text,
+            token_id=token_id,
+        )
+
+    def freeze_replay_checkpoint(
+        self,
+        *,
+        store_identity: str,
+        session_id: str,
+        source_attempt: int,
+        path_id: str,
+        path_attempt: int,
+        tokenizer_digest: str,
+        created_at_unix_ms: int,
+        expiry_unix_ms: int,
+        path_digest: str | None = None,
+        recovery_attempt: int = 0,
+        reconciliation_state: str = "frozen",
+    ) -> ReplayCheckpoint:
+        if self._service._replay_checkpoint_root is None:
+            raise AdmissionError("replay_store_unavailable")
+        return self._service.freeze_replay_checkpoint(
+            self._session.request_id,
+            store_identity=store_identity,
+            session_id=session_id,
+            source_attempt=source_attempt,
+            path_id=path_id,
+            path_attempt=path_attempt,
+            tokenizer_digest=tokenizer_digest,
+            created_at_unix_ms=created_at_unix_ms,
+            expiry_unix_ms=expiry_unix_ms,
+            path_digest=path_digest,
+            recovery_attempt=recovery_attempt,
+            reconciliation_state=reconciliation_state,
+        )
 
 
 class EventSubscription:
@@ -186,6 +273,7 @@ class RequestGatewayService:
         max_pending_requests: int = 64,
         clock: Callable[[], float] = time.monotonic,
         metrics: GatewayMetrics | None = None,
+        replay_checkpoint_root: str | os.PathLike[str] | None = None,
     ) -> None:
         if (
             not isinstance(max_buffered_events, int)
@@ -227,6 +315,21 @@ class RequestGatewayService:
             thread_name_prefix="mycelium-request-worker",
         )
         self._metrics = metrics if metrics is not None else GatewayMetrics()
+        self._replay_checkpoint_root = None
+        if replay_checkpoint_root is not None:
+            checkpoint_root = Path(replay_checkpoint_root)
+            checkpoint_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if checkpoint_root.is_symlink() or not checkpoint_root.is_dir():
+                raise ValueError("invalid_replay_checkpoint_root")
+            os.chmod(checkpoint_root, 0o700)
+            self._replay_checkpoint_root = checkpoint_root
+        self._startup_recovery_reconciliations: tuple[dict[str, str], ...] = ()
+        if self._replay_checkpoint_root is not None:
+            from mycelium_a6_recovery import CheckpointStore
+
+            self._startup_recovery_reconciliations = (
+                CheckpointStore.reconcile_orphans(self._replay_checkpoint_root)
+            )
         self._sessions: dict[str, _Session] = {}
         self._lock = threading.RLock()
         self._closed = False
@@ -234,8 +337,65 @@ class RequestGatewayService:
     def health(self) -> dict[str, str]:
         return {"service": "mycelium-request-gateway", "status": "ok"}
 
+    def startup_recovery_reconciliations(self) -> tuple[dict[str, str], ...]:
+        return tuple(dict(item) for item in self._startup_recovery_reconciliations)
+
     def current_qualification(self) -> dict[str, object]:
         return safe_qualification_projection(self._gate.current_projection_source())
+
+    def recovery_public_projection(self) -> dict[str, object]:
+        source = getattr(self._backend, "recovery_public_projection", None)
+        if not callable(source):
+            raise AdmissionError("recovery_projection_unavailable")
+        with self._lock:
+            sessions = tuple(self._sessions.items())
+        committed_counts: dict[str, int] = {}
+        for request_id, session in sessions:
+            with session.condition:
+                committed_counts[request_id] = session.expected_token_index
+        document = source(committed_counts)
+        if not isinstance(document, Mapping):
+            raise AdmissionError("recovery_projection_invalid")
+        try:
+            from mycelium_a6_recovery import _digest, validate_recovery_runtime
+
+            projected = validate_recovery_runtime(document)
+            requests = list(projected["requests"])
+            if len(requests) + len(self._startup_recovery_reconciliations) > 4_096:
+                raise ValueError("recovery_projection_too_large")
+            existing_ids = {str(item["request_id"]) for item in requests}
+            next_index = 1
+            for reconciliation in self._startup_recovery_reconciliations:
+                request_id = f"restart-reconciliation-{next_index}"
+                while request_id in existing_ids:
+                    next_index += 1
+                    request_id = f"restart-reconciliation-{next_index}"
+                next_index += 1
+                existing_ids.add(request_id)
+                requests.append(
+                    {
+                        "request_id": request_id,
+                        "attempt": 1,
+                        "path_id": "withheld",
+                        "path_attempt": 0,
+                        "phase": "aborted",
+                        "committed_token_count": 0,
+                        "recovery_attempt": 0,
+                        "terminal": None,
+                        "cleanup_complete": True,
+                        "reconciled": reconciliation["outcome"],
+                    }
+                )
+            body = {
+                "protocol": projected["protocol"],
+                "binding": projected["binding"],
+                "requests": requests,
+                "breaker": projected["breaker"],
+            }
+            body["runtime_digest"] = _digest(body)
+            return validate_recovery_runtime(body)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AdmissionError("recovery_projection_invalid") from exc
 
     def submit(
         self,
@@ -433,6 +593,108 @@ class RequestGatewayService:
         with session.condition:
             return session.terminal_count
 
+    def freeze_replay_checkpoint(
+        self,
+        request_id: str,
+        *,
+        store_identity: str,
+        session_id: str,
+        source_attempt: int,
+        path_id: str,
+        path_attempt: int,
+        tokenizer_digest: str,
+        created_at_unix_ms: int,
+        expiry_unix_ms: int,
+        path_digest: str | None = None,
+        recovery_attempt: int = 0,
+        reconciliation_state: str = "frozen",
+    ) -> ReplayCheckpoint:
+        """Freeze the gateway-owned committed delivery state into an A6 replay
+        checkpoint (A6 spec section 4).  The gateway is the sole authority for
+        the canonical encoded prompt and the committed generated-token prefix;
+        session, attempt, path, and model authority are exact caller-supplied
+        bindings, never derived or defaulted here."""
+        from mycelium_a6_gateway import (
+            CommittedDeliverySnapshot,
+            freeze_replay_checkpoint as freeze_checkpoint,
+        )
+
+        session = self._get_session(request_id)
+        with session.condition:
+            submission = session.submission
+            captured = session.captured
+            if session.terminal_event is not None:
+                raise AdmissionError("request_already_terminal")
+            if submission is None or captured is None:
+                raise AdmissionError("request_state_released")
+            encoded_prompt_token_ids = session.encoded_prompt_token_ids
+            if (
+                encoded_prompt_token_ids is None
+                or len(session.committed_token_ids) != len(session.token_digests)
+                or any(token_id is None for token_id in session.committed_token_ids)
+            ):
+                raise AdmissionError("replay_material_unavailable")
+            snapshot = CommittedDeliverySnapshot(
+                request_id=session.request_id,
+                encoded_prompt_token_ids=encoded_prompt_token_ids,
+                generation_settings={
+                    "protocol": submission.protocol,
+                    "max_new_tokens": submission.max_new_tokens,
+                    "workload_profile_id": submission.workload_profile_id,
+                    "qos_class": submission.qos_class,
+                },
+                committed_token_ids=tuple(
+                    token_id
+                    for token_id in session.committed_token_ids
+                    if token_id is not None
+                ),
+                delivery_cursor=session.acknowledged_through,
+                publisher_generation=session.publisher_generation,
+                session_id=session_id,
+                source_attempt=source_attempt,
+                path_id=path_id,
+                path_digest=(
+                    captured.binding.path_manifest_digest
+                    if path_digest is None
+                    else path_digest
+                ),
+                path_attempt=path_attempt,
+                deployment_id=captured.binding.deployment_id,
+                deployment_epoch=captured.binding.deployment_epoch,
+                topology_generation=captured.binding.topology_version,
+                source_qualification_digest=captured.binding.qualification_digest,
+                model_id=captured.binding.model_id,
+                representation_digest=captured.binding.manifest_digest,
+                tokenizer_digest=tokenizer_digest,
+                recovery_attempt=recovery_attempt,
+            )
+        private_store_identity = "a6-request-" + hashlib.sha256(
+            request_id.encode("utf-8")
+        ).hexdigest()
+        checkpoint = freeze_checkpoint(
+            snapshot,
+            store_identity=private_store_identity,
+            created_at_unix_ms=created_at_unix_ms,
+            expiry_unix_ms=expiry_unix_ms,
+            reconciliation_state=reconciliation_state,
+        )
+        root = self._replay_checkpoint_root
+        if root is not None:
+            from mycelium_a6_recovery import CheckpointStore
+
+            store = CheckpointStore(root, store_identity=private_store_identity)
+            store.write(checkpoint)
+            with session.condition:
+                if session.terminal_event is not None:
+                    store.discard()
+                    raise AdmissionError("request_already_terminal")
+                existing_store = session.replay_checkpoint_store_identity
+                if existing_store not in (None, private_store_identity):
+                    store.discard()
+                    raise AdmissionError("replay_checkpoint_store_changed")
+                session.replay_checkpoint_store_identity = private_store_identity
+        return checkpoint
+
     def metrics_snapshot(self) -> dict[str, int]:
         return self._metrics.snapshot()
 
@@ -484,12 +746,7 @@ class RequestGatewayService:
             outcome = self._backend.run(
                 session.request_id,
                 submission,
-                lambda token_index, token_text, token_id=None: self._accept_token(
-                    session,
-                    token_index,
-                    token_text,
-                    token_id,
-                ),
+                _GatewayEmission(self, session),
                 session.stop.is_set,
             )
             self._release_backend_once(session)
@@ -538,15 +795,57 @@ class RequestGatewayService:
         finally:
             self._release_backend_once(session)
             with session.condition:
+                checkpoint_store_identity = session.replay_checkpoint_store_identity
+                discard_checkpoint = session.terminal_event is not None
+                session.replay_checkpoint_store_identity = None
                 session.submission = None
                 session.captured = None
                 session.token_digests.clear()
+                session.encoded_prompt_token_ids = None
+                session.committed_token_ids.clear()
                 session.worker_done = True
                 session.condition.notify_all()
+            if (
+                discard_checkpoint
+                and checkpoint_store_identity is not None
+                and self._replay_checkpoint_root is not None
+            ):
+                from mycelium_a6_recovery import CheckpointStore
+
+                CheckpointStore(
+                    self._replay_checkpoint_root,
+                    store_identity=checkpoint_store_identity,
+                ).discard()
             self._admission_slots.release()
 
+    def _bind_encoded_prompt(
+        self,
+        session: _Session,
+        token_ids: tuple[int, ...],
+    ) -> None:
+        if (
+            not isinstance(token_ids, tuple)
+            or not token_ids
+            or not all(type(token_id) is int and token_id >= 0 for token_id in token_ids)
+        ):
+            raise AdmissionError("invalid_encoded_prompt")
+        with session.condition:
+            if session.stop.is_set() or session.terminal_event is not None:
+                raise AdmissionError("request_cancelled")
+            if session.expected_token_index != 0:
+                raise AdmissionError("encoded_prompt_bound_after_decode")
+            if session.encoded_prompt_token_ids is None:
+                session.encoded_prompt_token_ids = token_ids
+            elif session.encoded_prompt_token_ids != token_ids:
+                raise AdmissionError("encoded_prompt_mismatch")
+
     def _accept_token(
-        self, session: _Session, token_index: int, token_text: str, token_id: int | None = None
+        self,
+        session: _Session,
+        token_index: int,
+        token_text: str,
+        *,
+        token_id: int | None = None,
     ) -> None:
         if (
             not isinstance(token_index, int)
@@ -554,7 +853,10 @@ class RequestGatewayService:
             or token_index < 0
             or not isinstance(token_text, str)
             or len(token_text) > _MAX_BACKEND_TOKEN_TEXT_BYTES
-            or (token_id is not None and (type(token_id) is not int or token_id < 0))
+            or (
+                token_id is not None
+                and (type(token_id) is not int or token_id < 0)
+            )
         ):
             raise AdmissionError("invalid_backend_token")
         try:
@@ -585,6 +887,13 @@ class RequestGatewayService:
                     if (
                         token_index >= len(session.token_digests)
                         or session.token_digests[token_index] != token_digest
+                        or (
+                            token_id is not None
+                            and (
+                                token_index >= len(session.committed_token_ids)
+                                or session.committed_token_ids[token_index] != token_id
+                            )
+                        )
                     ):
                         raise AdmissionError("token_order_violation")
                     return
@@ -612,6 +921,7 @@ class RequestGatewayService:
                     )
                     self._append_event_locked(session, event)
                     session.token_digests.append(token_digest)
+                    session.committed_token_ids.append(token_id)
                     session.expected_token_index += 1
                     self._metrics.increment("token_events_total")
                     return
@@ -660,6 +970,18 @@ class RequestGatewayService:
             )
             if len(session.events) >= session.capacity:
                 raise RuntimeError("terminal_event_capacity_invariant")
+            checkpoint_store_identity = session.replay_checkpoint_store_identity
+            if (
+                checkpoint_store_identity is not None
+                and self._replay_checkpoint_root is not None
+            ):
+                from mycelium_a6_recovery import CheckpointStore
+
+                CheckpointStore(
+                    self._replay_checkpoint_root,
+                    store_identity=checkpoint_store_identity,
+                ).discard()
+                session.replay_checkpoint_store_identity = None
             event = StreamEvent(
                 request_id=session.request_id,
                 sequence=session.latest_sequence + 1,
@@ -798,6 +1120,12 @@ class RequestGatewayService:
                         return event
                 terminal = session.terminal_event
                 if terminal is not None and cursor >= terminal.sequence:
+                    return None
+                if (
+                    session.worker_done
+                    and session.outcome == "terminal_blocked"
+                    and cursor >= session.latest_sequence
+                ):
                     return None
                 if deadline is not None:
                     remaining = deadline - time.monotonic()

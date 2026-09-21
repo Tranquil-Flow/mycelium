@@ -1,0 +1,29 @@
+{
+  "binding": {
+    "a4_atomic_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "deployment_epoch": 1,
+    "deployment_id": "synthetic-a6-deployment",
+    "qualification_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "breaker": {
+    "failure_observations_unix_ms": [],
+    "open_until_unix_ms": 0,
+    "state": "closed"
+  },
+  "protocol": "mycelium.full_context_recovery_runtime.v1",
+  "requests": [
+    {
+      "attempt": 1,
+      "cleanup_complete": false,
+      "committed_token_count": 0,
+      "path_attempt": 0,
+      "path_id": "synthetic-a6-source-path",
+      "phase": "active",
+      "reconciled": null,
+      "recovery_attempt": 0,
+      "request_id": "synthetic-a6-request",
+      "terminal": null
+    }
+  ],
+  "runtime_digest": "sha256:3d821bbd8c9935047c8b18213e12f0c0692c3019cdf0fb6d01d16699bae07f75"
+}

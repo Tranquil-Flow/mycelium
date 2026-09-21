@@ -18,6 +18,7 @@ export const PRODUCT_ENTITY_KINDS = Object.freeze([
   'incident',
   'load_proof',
   'qualification',
+  'recovery',
   'request',
   'route',
   'runtime_kv_ownership',
@@ -702,6 +703,7 @@ const ATTRIBUTE_KEYS: Readonly<Record<ProductEntityKind, readonly string[]>> = O
   incident: ['state', 'reason_code', 'observed_at_unix_ms'],
   load_proof: ['proof_digest', 'assignment_id', 'load_generation', 'ready'],
   qualification: ['qualification_digest', 'route_ready', 'issued_at_unix_ms', 'expires_at_unix_ms', 'reason_codes'],
+  recovery: ['request_count', 'recovering_count', 'terminal_count', 'terminal_blocked_count', 'cleanup_complete_count', 'reconciled_count', 'max_recovery_attempt', 'breaker_state'],
   request: ['state', 'path_attempt', 'sequence', 'qualification_id'],
   route: ['deployment_id', 'model_id', 'topology_version', 'decode_mode', 'placement_provenance', 'route_alive', 'concurrency_eligible', 'cancellation_cleanup_bound_ms', 'publisher_generation_fenced', 'scoped_liveness_proven'],
   runtime_kv_ownership: ['device_id', 'stage_id', 'decode_mode', 'kv_state_count', 'kv_byte_budget', 'proof_digest'],
@@ -796,6 +798,15 @@ function decodeAttributes(kind: ProductEntityKind, value: unknown, field: string
       integer(read('kv_byte_budget'), `${field}.kv_byte_budget`);
       digestOrNull(read('proof_digest'), `${field}.proof_digest`);
       break;
+    case 'recovery': {
+      const requestCount = integer(read('request_count'), `${field}.request_count`);
+      for (const key of ['recovering_count', 'terminal_count', 'terminal_blocked_count', 'cleanup_complete_count', 'reconciled_count'] as const) {
+        if (integer(read(key), `${field}.${key}`) > requestCount) return fail(`${field}.${key}`, 'count exceeds request count');
+      }
+      integer(read('max_recovery_attempt'), `${field}.max_recovery_attempt`);
+      enumeration(read('breaker_state'), ['closed', 'open'] as const, `${field}.breaker_state`);
+      break;
+    }
     case 'request':
       enumeration(read('state'), ['accepted', 'running', 'completed', 'failed', 'cancelled'] as const, `${field}.state`);
       integer(read('path_attempt'), `${field}.path_attempt`, 1);

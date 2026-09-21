@@ -11,11 +11,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast, Iterable, Mapping
+from typing import Any, Callable, cast, Iterable, Mapping
 
 import mycelium_deadlines
+from mycelium_a6_m16 import M16RecoveryAuthority
+from mycelium_a6_recovery import ReplayCheckpoint
 from mycelium_m16_runtime import M16AdmissionError, M16RuntimeCoordinator
-from mycelium_router.contracts import ExecutionGraph, RequestContext
+from mycelium_router.contracts import ExecutionGraph, PathManifest, RequestContext
+from mycelium_router.serialization import path_manifest_to_dict
 
 from .command_controller import (
     CleanupResult,
@@ -176,6 +179,11 @@ class _Pending:
     cancellation_requested: threading.Event = field(default_factory=threading.Event)
     release_requested: bool = False
     execution_started: bool = False
+    recovery_required: bool = False
+    recovery_phase: str = "active"
+    recovery_attempts: int = 0
+    recovery_failure_reason: str | None = None
+    recovery_excluded_placements: set[str] = field(default_factory=set)
 
 
 class LiveRouterPort:
@@ -192,7 +200,28 @@ class LiveRouterPort:
         execution_graph: ExecutionGraph,
         runtime_coordinator: M16RuntimeCoordinator | None = None,
         lock_order_detector: LockOrderDetector | None = None,
+        recovery_authority: M16RecoveryAuthority | None = None,
+        recovery_qualification_source: (
+            Callable[
+                [str, ReplayCheckpoint, Mapping[str, Any], PathManifest],
+                tuple[Mapping[str, Any], Mapping[str, Any]],
+            ]
+            | None
+        ) = None,
+        recovery_tokenizer_digest: str | None = None,
+        recovery_a4_atomic_commit: str | None = None,
+        recovery_clock_ms: Callable[[], int] | None = None,
     ) -> None:
+        recovery_parts = (
+            recovery_authority,
+            recovery_qualification_source,
+            recovery_tokenizer_digest,
+        )
+        if any(part is not None for part in recovery_parts) and (
+            runtime_coordinator is None
+            or any(part is None for part in recovery_parts)
+        ):
+            raise ValueError("a6_recovery_configuration_incomplete")
         self._route = route
         self._graph = execution_graph
         self._lock = threading.RLock()
@@ -204,7 +233,16 @@ class LiveRouterPort:
         self._admission_dispatch_lock = threading.Lock()
         self._pending: dict[str, _Pending] = {}
         self._sinks: dict[str, object] = {}
+        self._recovery_failures: dict[str, str] = {}
         self._coordinator = runtime_coordinator
+        self._recovery_authority = recovery_authority
+        self._recovery_qualification_source = recovery_qualification_source
+        self._recovery_tokenizer_digest = recovery_tokenizer_digest
+        self._recovery_a4_atomic_commit = recovery_a4_atomic_commit
+        self._recovery_qualification_digest: str | None = None
+        self._recovery_clock_ms = recovery_clock_ms or (
+            lambda: int(time.time() * 1_000)
+        )
         self._commands = CommandController()
         self._lock_order = lock_order_detector or LockOrderDetector()
         self._closed = False
@@ -305,6 +343,11 @@ class LiveRouterPort:
                         "simulation_only": True,
                     }
                 )
+            with self._lock:
+                if self._recovery_qualification_digest not in (None, qualification_digest):
+                    coordinator.cancel(request.request_id)
+                    raise M16AdmissionError("qualification_binding_changed")
+                self._recovery_qualification_digest = qualification_digest
             issued_at_ms = int(time.monotonic() * 1_000)
             publisher_generation = kwargs.get("publisher_generation", 1)
             if type(publisher_generation) is not int or publisher_generation < 1:
@@ -488,6 +531,11 @@ class LiveRouterPort:
             def emit(self, token_index: int, token_id: int) -> None:
                 nonlocal first_token
                 if coordinator is not None:
+                    if route_identity is None or not coordinator.authorizes_route_identity(
+                        request_id,
+                        route_identity,
+                    ):
+                        return
                     coordinator.mark_phase(
                         request_id,
                         "first_token" if not first_token else "decode",
@@ -544,7 +592,9 @@ class LiveRouterPort:
                     )
                 )
                 route_options["publish_cleanup_receipt"] = lambda receipt: (
-                    self_outer._publish_route_cleanup_receipt(pending, receipt)
+                    self_outer._publish_route_cleanup_receipt(
+                        pending, receipt, expected_identity=identity,
+                    )
                 )
             self._route.infer(
                 request.prompt_token_ids,
@@ -584,6 +634,30 @@ class LiveRouterPort:
             terminal = "CANCELLED"
             terminal_error_code = None
             admission_refused = False
+        recovery_requested = bool(
+            terminal == "FAILED"
+            and not admission_refused
+            and coordinator is not None
+            and self._recovery_authority is not None
+            and self._route_has_scoped_incident_for(pending.request)
+        )
+        if recovery_requested:
+            assert coordinator is not None
+            coordinator.mark_phase(request_id, "cleanup")
+            try:
+                self._record_command_terminal(pending, "FAILED")
+            except RuntimeError as error:
+                coordinator.complete(request_id, state="failed")
+                with self._changed:
+                    pending.terminal_blocked_reason = str(error)
+                    self._changed.notify_all()
+                return
+            with self._changed:
+                pending.recovery_required = True
+                pending.recovery_phase = "failure_observed"
+                pending.execution_started = False
+                self._changed.notify_all()
+            return
         if coordinator is not None:
             coordinator.mark_phase(request_id, "cleanup")
         if admission_refused:
@@ -667,6 +741,7 @@ class LiveRouterPort:
                 pending.cursor >= len(pending.tokens)
                 and pending.terminal_status is None
                 and pending.terminal_blocked_reason is None
+                and not pending.recovery_required
             ):
                 self._changed.wait(timeout=30.0)
             if pending.cursor >= len(pending.tokens):
@@ -695,8 +770,11 @@ class LiveRouterPort:
             pending = self._pending.get(request_id)
             if pending is None:
                 return "UNKNOWN"
-            if pending.terminal_status is not None and pending.cursor >= len(
-                pending.tokens
+            if pending.recovery_required and pending.cursor >= len(pending.tokens):
+                return "RECOVERY_REQUIRED"
+            if (
+                pending.terminal_status is not None
+                and pending.cursor >= len(pending.tokens)
             ):
                 return pending.terminal_status
             if pending.terminal_blocked_reason is not None and pending.cursor >= len(
@@ -711,6 +789,421 @@ class LiveRouterPort:
         with self._lock:
             pending = self._pending.get(request_id)
             return None if pending is None else pending.terminal_error_code
+
+    def recovery_checkpoint_binding(self, request_id: str) -> dict[str, object]:
+        """Return privacy-reduced source authority needed for gateway freeze."""
+
+        with self._changed:
+            pending = self._pending.get(request_id)
+            if (
+                pending is None
+                or not pending.recovery_required
+                or pending.route_identity is None
+                or self._recovery_tokenizer_digest is None
+            ):
+                raise M16AdmissionError("recovery_not_pending")
+            source = dict(pending.route_identity)
+            attempt = pending.recovery_attempts
+        now_ms = self._recovery_clock_ms()
+        return {
+            "store_identity": (
+                f"a6:{source['deployment_id']}:{request_id}:attempt:{attempt}"
+            ),
+            "session_id": f"request-session:{request_id}",
+            "source_attempt": source["request_attempt"],
+            "path_id": source["path_id"],
+            "path_digest": source["path_manifest_digest"],
+            "path_attempt": source["path_attempt"],
+            "tokenizer_digest": self._recovery_tokenizer_digest,
+            "created_at_unix_ms": now_ms,
+            "expiry_unix_ms": now_ms + 30_000,
+            "recovery_attempt": attempt,
+        }
+
+    @staticmethod
+    def _recovery_failure_code(error: BaseException) -> str:
+        """Map internal failures to bounded non-disclosing retained codes."""
+
+        if isinstance(error, M16AdmissionError):
+            code = str(error)
+            if (
+                code
+                and len(code) <= 96
+                and all(character.islower() or character.isdigit() or character == "_" for character in code)
+            ):
+                return code
+            return "recovery_authority_rejected"
+        if isinstance(error, InferenceCancelled):
+            return "recovery_cancelled"
+        if isinstance(error, TimeoutError):
+            return "recovery_timeout"
+        if isinstance(error, RuntimeError) and str(error) == "command_cleanup_receipt_missing":
+            return "cleanup_authority_failed"
+        if isinstance(error, RuntimeError):
+            return "successor_execution_failed"
+        return "recovery_internal_failure"
+
+    def recover_full_context(
+        self,
+        request_id: str,
+        checkpoint: ReplayCheckpoint,
+    ) -> bool:
+        """Execute one qualified full-context replay and publish only its suffix."""
+
+        coordinator = self._coordinator
+        authority = self._recovery_authority
+        qualification_source = self._recovery_qualification_source
+        if coordinator is None or authority is None or qualification_source is None:
+            return False
+        with self._changed:
+            pending = self._pending.get(request_id)
+            if (
+                pending is None
+                or not pending.recovery_required
+                or pending.request is None
+                or pending.route_identity is None
+                or pending.placement_ids is None
+                or pending.recovery_attempts >= 2
+            ):
+                return False
+            source_request = pending.request
+            source_identity = dict(pending.route_identity)
+            excluded_placements = frozenset(
+                set(pending.placement_ids) | pending.recovery_excluded_placements
+            )
+            source_command = pending.command_identity
+            source_token_count = len(pending.tokens)
+            publisher_generation = (
+                1
+                if source_command is None
+                else source_command.publisher_generation
+            )
+            pending.recovery_attempts += 1
+            pending.recovery_phase = "successor_pending"
+
+        successor_identity: dict[str, Any] | None = None
+        source_fenced = False
+        cutover_committed = False
+        successor_registered = False
+        command_terminal_error: str | None = None
+        try:
+            manifest = authority.reserve_candidate(
+                checkpoint=checkpoint,
+                source_request=source_request,
+                expected_source_identity=source_identity,
+                excluded_placements=excluded_placements,
+                now_unix_ms=self._recovery_clock_ms(),
+            )
+            successor_identity = coordinator.recovery_successor_identity(request_id)
+            source_compatibility, qualification = qualification_source(
+                request_id,
+                checkpoint,
+                successor_identity,
+                manifest,
+            )
+            authority.qualify_reserved_successor(
+                checkpoint=checkpoint,
+                successor_manifest=manifest,
+                qualification=qualification,
+                source_compatibility=source_compatibility,
+                expected_source_identity=source_identity,
+                now_unix_ms=self._recovery_clock_ms(),
+            )
+            successor_request = coordinator.recovery_successor_request(request_id)
+            successor_manifest = path_manifest_to_dict(manifest)
+            successor_placements = tuple(
+                hop.placement_id for hop in manifest.ordered_hops
+            )
+            if source_command is None:
+                raise M16AdmissionError("recovery_command_identity_missing")
+            self._register_recovery_command(
+                pending,
+                route_identity=successor_identity,
+                placement_ids=successor_placements,
+                qualification_digest=source_command.qualification_digest,
+                publisher_generation=publisher_generation,
+                absolute_deadline_ms=source_command.absolute_deadline_ms,
+            )
+            successor_registered = True
+            coordinator.fence_recovery_source(
+                request_id,
+                expected_source_identity=source_identity,
+            )
+            source_fenced = True
+
+            buffered: list[tuple[int, int]] = []
+
+            class _RecoveryCollector:
+                def emit(self, token_index: int, token_id: int) -> None:
+                    if (
+                        type(token_index) is not int
+                        or token_index != len(buffered)
+                        or type(token_id) is not int
+                        or token_id < 0
+                    ):
+                        raise M16AdmissionError("recovery_output_noncontiguous")
+                    buffered.append((token_index, token_id))
+
+            identity = pending.command_identity
+            assert identity is not None
+            route_options = {
+                "route_identity": successor_identity,
+                "locked_path_manifest": successor_manifest,
+                "command_identity": self._command_identity_document(identity),
+                "publish_cleanup_receipt": lambda receipt: (
+                    self._publish_route_cleanup_receipt(
+                        pending, receipt, expected_identity=identity,
+                    )
+                ),
+                "authorize_cleanup": lambda deadline: (
+                    self._request_command_cancellation(
+                        pending,
+                        deadline_monotonic_s=deadline,
+                        completion_cleanup=True,
+                    )
+                ),
+            }
+            with self._changed:
+                pending.execution_started = True
+                pending.recovery_phase = "recovery_prefill"
+            self._route.infer(
+                successor_request.prompt_token_ids,
+                max_new_tokens=successor_request.max_new_tokens,
+                request_id=request_id,
+                sink=_RecoveryCollector(),
+                cancel_requested=pending.cancellation_requested.is_set,
+                **route_options,
+            )
+            if len(buffered) > successor_request.max_new_tokens:
+                raise M16AdmissionError("recovery_output_overflow")
+
+            # Qualification is an expiring owner publication, not a one-time
+            # prefill admission token. Re-read and validate the exact reserved
+            # successor immediately before the cutover CAS so expiry,
+            # revocation, deployment, topology, or path drift cannot authorize
+            # publication after long successor execution.
+            current_source_compatibility, current_qualification = (
+                qualification_source(
+                    request_id,
+                    checkpoint,
+                    successor_identity,
+                    manifest,
+                )
+            )
+            authority.qualify_reserved_successor(
+                checkpoint=checkpoint,
+                successor_manifest=manifest,
+                qualification=current_qualification,
+                source_compatibility=current_source_compatibility,
+                expected_source_identity=source_identity,
+                now_unix_ms=self._recovery_clock_ms(),
+            )
+
+            # Cancellation and cutover share the Router lock. Once an accepted
+            # cancellation is visible, no successor publication generation may
+            # be committed behind it.
+            with self._changed:
+                if pending.cancellation_requested.is_set():
+                    raise InferenceCancelled("recovery_cancelled_before_cutover")
+                pending.recovery_phase = "cutover_pending"
+                committed_identity = coordinator.cutover_recovery_successor(
+                    request_id,
+                    expected_source_identity=source_identity,
+                    expected_successor_identity=successor_identity,
+                )
+                cutover_committed = True
+            with self._changed:
+                pending.request = successor_request
+                pending.route_identity = committed_identity
+                pending.path_manifest = successor_manifest
+                pending.placement_ids = successor_placements
+                for token_index, token_id in buffered:
+                    coordinator.mark_phase(
+                        request_id,
+                        "first_token" if token_index == 0 else "decode",
+                    )
+                    pending.tokens.append(
+                        (
+                            checkpoint.committed_token_count + token_index,
+                            token_id,
+                        )
+                    )
+                pending.recovery_required = False
+                pending.recovery_phase = "recovered_decode"
+            cutover_observer = getattr(self._route, "recovery_cutover_committed", None)
+            if callable(cutover_observer):
+                cutover_observer(request_id)
+            coordinator.mark_phase(request_id, "cleanup")
+            terminal = self._record_command_terminal(pending, "COMPLETED")
+            coordinator.complete(request_id, state=terminal.lower())
+            with self._changed:
+                pending.terminal_status = terminal
+                if terminal == "FAILED":
+                    pending.terminal_error_code = "deadline_exceeded"
+                self._changed.notify_all()
+            return True
+        except Exception as error:
+            retryable_successor_failure = (
+                source_fenced
+                and not cutover_committed
+                and successor_identity is not None
+                and isinstance(error, (RuntimeError, TimeoutError))
+                and not isinstance(error, (InferenceCancelled, M16AdmissionError))
+                and not pending.cancellation_requested.is_set()
+                and pending.recovery_attempts < 2
+            )
+            if retryable_successor_failure:
+                try:
+                    if successor_registered:
+                        self._record_command_terminal(pending, "FAILED")
+                        self._retire_command(pending)
+                        successor_registered = False
+                    coordinator.discard_recovery_successor(
+                        request_id,
+                        expected_source_identity=source_identity,
+                    )
+                except Exception:
+                    retryable_successor_failure = False
+                else:
+                    with self._changed:
+                        pending.recovery_excluded_placements.update(
+                            successor_placements
+                        )
+                        pending.recovery_phase = "successor_pending"
+                        self._changed.notify_all()
+                    return self.recover_full_context(request_id, checkpoint)
+
+            cancelled = (
+                isinstance(error, InferenceCancelled)
+                or pending.cancellation_requested.is_set()
+                or coordinator.terminal_state(request_id) == "cancelled"
+            )
+            try:
+                if cancelled:
+                    if coordinator.terminal_state(request_id) is None:
+                        coordinator.cancel(request_id)
+                elif cutover_committed:
+                    # Cutover moved M16 authority to the successor, but no
+                    # terminal may be published until exact cleanup is proven.
+                    # Keep the coordinator nonterminal in cleanup when the
+                    # command cleanup receipt/terminal CAS fails.
+                    pass
+                elif source_fenced and successor_identity is not None:
+                    coordinator.abort_recovery(
+                        request_id,
+                        expected_source_identity=source_identity,
+                        expected_successor_identity=successor_identity,
+                    )
+                else:
+                    if successor_identity is not None:
+                        coordinator.discard_recovery_successor(
+                            request_id,
+                            expected_source_identity=source_identity,
+                        )
+                    if coordinator.terminal_state(request_id) is None:
+                        coordinator.complete(request_id, state="failed")
+            finally:
+                if successor_registered:
+                    try:
+                        self._record_command_terminal(
+                            pending,
+                            "CANCELLED" if cancelled else "FAILED",
+                        )
+                    except RuntimeError as terminal_error:
+                        command_terminal_error = str(terminal_error)
+                with self._changed:
+                    pending.recovery_required = False
+                    if cutover_committed:
+                        del pending.tokens[source_token_count:]
+                        pending.cursor = min(pending.cursor, len(pending.tokens))
+                    if cancelled:
+                        pending.recovery_failure_reason = None
+                        if command_terminal_error is None:
+                            pending.terminal_status = "CANCELLED"
+                    else:
+                        pending.recovery_failure_reason = self._recovery_failure_code(error)
+                        self._recovery_failures[request_id] = (
+                            pending.recovery_failure_reason
+                        )
+                        if command_terminal_error is None:
+                            pending.terminal_status = "FAILED"
+                    if command_terminal_error is not None:
+                        pending.terminal_blocked_reason = command_terminal_error
+                    self._changed.notify_all()
+            return False
+
+    def recovery_public_projection(
+        self, committed_token_counts: Mapping[str, int]
+    ) -> dict[str, Any]:
+        """Aggregate Router facts with gateway-owned committed counts."""
+
+        coordinator = self._coordinator
+        atomic_commit = self._recovery_a4_atomic_commit
+        qualification_digest = self._recovery_qualification_digest
+        if coordinator is None or atomic_commit is None or qualification_digest is None:
+            raise M16AdmissionError("recovery_projection_unavailable")
+        if (
+            not isinstance(atomic_commit, str)
+            or len(atomic_commit) != 40
+            or any(character not in "0123456789abcdef" for character in atomic_commit)
+        ):
+            raise M16AdmissionError("recovery_projection_binding_invalid")
+        status = coordinator.status()
+        requests: list[dict[str, Any]] = []
+        for item in status["requests"]:
+            request_id = item["request_id"]
+            if request_id not in committed_token_counts:
+                continue
+            committed_count = committed_token_counts[request_id]
+            if type(committed_count) is not int or committed_count < 0:
+                raise M16AdmissionError("recovery_projection_count_invalid")
+            identity = coordinator.route_identity(request_id)
+            terminal = item["terminal_state"]
+            if terminal is None:
+                with self._lock:
+                    pending = self._pending.get(request_id)
+                    phase = "active" if pending is None else pending.recovery_phase
+            else:
+                phase = "terminal" if terminal == "completed" else "aborted"
+            requests.append(
+                {
+                    "request_id": request_id,
+                    "attempt": identity["request_attempt"],
+                    "path_id": identity["path_id"],
+                    "path_attempt": identity["path_attempt"],
+                    "phase": phase,
+                    "committed_token_count": committed_count,
+                    "recovery_attempt": max(0, identity["request_attempt"] - 1),
+                    "cleanup_complete": terminal is not None and item["reservation_count"] == 0,
+                    "reconciled": None,
+                    "terminal": terminal,
+                }
+            )
+        requests.sort(key=lambda item: item["request_id"])
+        runtime: dict[str, Any] = {
+            "protocol": "mycelium.full_context_recovery_runtime.v1",
+            "binding": {
+                "deployment_id": self._graph.deployment_id,
+                "deployment_epoch": self._graph.deployment_epoch,
+                "qualification_digest": qualification_digest,
+                "a4_atomic_commit": atomic_commit,
+            },
+            "requests": requests,
+            "breaker": {
+                "state": "closed",
+                "failure_observations_unix_ms": [],
+                "open_until_unix_ms": 0,
+            },
+        }
+        runtime["runtime_digest"] = self._digest_document(runtime)
+        return runtime
+
+    def recovery_failure_reason(self, request_id: str) -> str | None:
+        with self._lock:
+            pending = self._pending.get(request_id)
+            if pending is not None and pending.recovery_failure_reason is not None:
+                return pending.recovery_failure_reason
+            return self._recovery_failures.get(request_id)
 
     def cancel(self, request_id: str) -> bool:
         return self.cancel_with_deadline(
@@ -845,6 +1338,108 @@ class LiveRouterPort:
             ).hexdigest()
         )
 
+    @staticmethod
+    def _command_identity_document(identity: CommandIdentity) -> dict[str, object]:
+        return {
+            "deployment_id": identity.deployment_id,
+            "deployment_epoch": identity.deployment_epoch,
+            "qualification_digest": identity.qualification_digest,
+            "request_id": identity.request_id,
+            "request_attempt": identity.request_attempt,
+            "path_id": identity.path_id,
+            "path_attempt": identity.path_attempt,
+            "path_digest": identity.path_digest,
+            "topology_generation": identity.topology_generation,
+            "command_id": identity.command_id,
+            "publisher_generation": identity.publisher_generation,
+            "absolute_deadline_ms": identity.absolute_deadline_ms,
+            "cancellation_generation": identity.cancellation_generation,
+        }
+
+    def _register_recovery_command(
+        self,
+        pending: _Pending,
+        *,
+        route_identity: Mapping[str, Any],
+        placement_ids: tuple[str, ...],
+        qualification_digest: str,
+        publisher_generation: int,
+        absolute_deadline_ms: int,
+    ) -> None:
+        if not placement_ids:
+            raise M16AdmissionError("path_identity_invalid")
+        graph_placement = next(
+            (
+                (stage, placement)
+                for stage in self._graph.stages
+                for placement in stage.placements
+                if placement.placement_id == placement_ids[0]
+            ),
+            None,
+        )
+        if graph_placement is None:
+            raise M16AdmissionError("path_identity_invalid")
+        stage, placement = graph_placement
+        issued_at_ms = int(time.monotonic() * 1_000)
+        request_id = route_identity["request_id"]
+        request_attempt = route_identity["request_attempt"]
+        identity = CommandIdentity(
+            deployment_id=route_identity["deployment_id"],
+            deployment_epoch=route_identity["deployment_epoch"],
+            qualification_digest=qualification_digest,
+            request_id=request_id,
+            request_attempt=request_attempt,
+            path_id=route_identity["path_id"],
+            path_attempt=route_identity["path_attempt"],
+            path_digest=route_identity["path_manifest_digest"],
+            topology_generation=route_identity["topology_generation"],
+            command_id=f"request:{request_id}:attempt:{request_attempt}",
+            publisher_generation=publisher_generation,
+            absolute_deadline_ms=absolute_deadline_ms,
+        )
+        cleanup_owner_id = f"physical-live-route:{self._graph.deployment_id}"
+        envelope = CommandEnvelope(
+            identity=identity,
+            stage_id=stage.stage_id,
+            placement_id=placement.placement_id,
+            assignment_id=placement.assignment_id,
+            kind=CommandKind.PREFILL,
+            issued_at_ms=issued_at_ms,
+            idempotency_digest=self._digest_document(dict(route_identity)),
+            cleanup_owner_id=cleanup_owner_id,
+            maximum_request_bytes=131_072,
+            maximum_response_bytes=16_777_216,
+        )
+        validate_interruptible_stage_command(
+            {
+                "protocol": "mycelium.interruptible_stage_command.v1",
+                **self._command_identity_document(identity),
+                "stage_id": envelope.stage_id,
+                "placement_id": envelope.placement_id,
+                "assignment_id": envelope.assignment_id,
+                "command_kind": envelope.kind.value,
+                "issued_at_ms": envelope.issued_at_ms,
+                "idempotency_digest": envelope.idempotency_digest,
+                "cooperative_step_ms": 100,
+                "cleanup_owner_id": envelope.cleanup_owner_id,
+                "maximum_request_bytes": envelope.maximum_request_bytes,
+                "maximum_response_bytes": envelope.maximum_response_bytes,
+                "expected_terminal_revision": envelope.expected_terminal_revision,
+            }
+        )
+        try:
+            with self._lock_order.scope("deployment", owner_id=request_id):
+                registration = self._commands.register(envelope)
+        except LockOrderViolation as error:
+            raise M16AdmissionError(error.code) from error
+        if not registration.accepted:
+            raise M16AdmissionError(
+                f"recovery_command_registration_failed:{registration.reason}"
+            )
+        pending.command_identity = identity
+        pending.cleanup_owner_id = cleanup_owner_id
+        pending.cleanup_receipt = None
+
     def _request_command_cancellation(
         self,
         pending: _Pending,
@@ -856,6 +1451,15 @@ class LiveRouterPort:
         if identity is None:
             return time.monotonic() + _MAX_CANCELLATION_AND_CLEANUP_SECONDS
         if identity.cancellation_generation > 0:
+            if not completion_cleanup:
+                promoted = self._commands.promote_completion_cleanup_to_cancellation(
+                    identity,
+                    observed_at_ms=int(time.monotonic() * 1_000),
+                )
+                if not promoted.accepted:
+                    raise RuntimeError(
+                        f"command_cancellation_rejected:{promoted.reason}"
+                    )
             snapshots = self._commands.snapshot(
                 identity.request_id,
                 request_attempt=identity.request_attempt,
@@ -891,11 +1495,23 @@ class LiveRouterPort:
         self,
         pending: _Pending,
         receipt: Mapping[str, Any],
+        *,
+        expected_identity: CommandIdentity | None = None,
     ) -> None:
         """Publish physical cleanup at the route proof boundary."""
 
         should_release = False
         with self._changed:
+            if expected_identity is not None:
+                current = pending.command_identity
+                if current is None or (
+                    current.request_attempt != expected_identity.request_attempt
+                    or current.path_id != expected_identity.path_id
+                    or current.path_attempt != expected_identity.path_attempt
+                    or current.command_id != expected_identity.command_id
+                ):
+                    # An old callback cannot replace the successor receipt.
+                    return
             # Retain the exact receipt with command ownership before any
             # terminal publication.  The route may release its request-scoped
             # copy as soon as the gateway observes this callback; a racing

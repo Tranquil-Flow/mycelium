@@ -1,0 +1,32 @@
+{
+  "binding": {
+    "deployment_epoch": 1,
+    "deployment_id": "synthetic-a6-deployment",
+    "graph_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "model_id": "synthetic-a6-model",
+    "model_revision": "synthetic-immutable-revision",
+    "representation_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "topology_generation": 1
+  },
+  "breaker": {
+    "state": "closed"
+  },
+  "candidate_path_ids": [
+    "synthetic-a6-successor-path"
+  ],
+  "generated_at_unix_ms": 2000,
+  "hysteresis": {
+    "candidate_first_seen_unix_ms": 1000,
+    "equivalent_candidate_generations": 1,
+    "state": "hysteresis_pending"
+  },
+  "intent_digest": "sha256:bcbc8698bd2d918f92c63dcdefb75836af07410b8afe9bb8651d382b1a5498d2",
+  "protocol": "mycelium.full_context_recovery_intent.v1",
+  "rejection_reasons": [
+    "synthetic_fixture_not_ready"
+  ],
+  "retained_path_ids": [
+    "synthetic-a6-source-path"
+  ],
+  "route_ready": false
+}

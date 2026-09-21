@@ -183,6 +183,7 @@
       "incident",
       "load_proof",
       "qualification",
+      "recovery",
       "request",
       "route",
       "runtime_kv_ownership",

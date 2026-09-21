@@ -104,9 +104,13 @@ describe('product shell feature slots', () => {
 
     render(<App deviceLabOperatorToken="direct-memory-token" />);
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    expect(new Headers(fetchSpy.mock.calls[0][1]?.headers).get('authorization')).toBe(
-      'Bearer direct-memory-token',
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.some(
+          ([, init]) =>
+            new Headers(init?.headers).get('authorization') === 'Bearer direct-memory-token',
+        ),
+      ).toBe(true),
     );
     expect(window.location.href).not.toContain('direct-memory-token');
     expect(JSON.stringify(storageSpy.mock.calls)).not.toContain('direct-memory-token');

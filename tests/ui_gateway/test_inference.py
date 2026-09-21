@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from conftest import (
     PROMPT_CANARY,
@@ -283,3 +284,37 @@ def test_per_session_request_history_is_bounded(upstreams, coordinator) -> None:
     assert second.status == 429
     assert second.json()["code"] == "request_capacity"
     assert request_number[0] == 1
+
+
+def test_recovery_status_is_strict_privacy_reduced_projection(upstreams, coordinator) -> None:
+    observatory, _request_gateway = upstreams
+    root = Path(__file__).resolve().parents[2]
+    runtime = json.loads(
+        (root / "contracts/compatibility-fixtures/full-context-recovery-runtime-v1.json").read_text()
+    )
+    projection = runtime
+
+    async def responder(scope, _body):
+        assert scope["path"] == "/v1/recovery/status"
+        return 200, [(b"content-type", b"application/json")], [json_body(projection)]
+
+    request_gateway = FakeUpstream(responder)
+    app = create_product_gateway_application(
+        config=GatewayConfig(),
+        observatory_app=observatory,
+        request_gateway_app=request_gateway,
+        swarm_coordinator=coordinator,
+        request_gateway_bearer_token="private-request-bearer",
+    )
+    boot = request(app, "/api/v1/bootstrap")
+    result = request(
+        app, "/api/v1/recovery/status", headers=session_headers(boot)
+    )
+
+    assert result.status == 200
+    assert result.json() == projection
+    assert (b"cache-control", b"no-store") in result.headers
+    scope, body = request_gateway.calls[-1]
+    assert scope["method"] == "GET"
+    assert body == b""
+    assert auth_values(scope) == [b"Bearer private-request-bearer"]

@@ -29,6 +29,13 @@ from mycelium_layer_planner.serialization import route_plan_from_dict
 from mycelium_layer_planner.public_projection import validate_m13_placement_projection
 from mycelium_layer_planner.workload_intelligence import validate_m15_plan_comparison
 from mycelium_m16_runtime import validate_m16_runtime_status
+from mycelium_a6_recovery import (
+    validate_checkpoint_projection,
+    validate_recovery_gate,
+    validate_recovery_intent,
+    validate_recovery_qualification,
+    validate_recovery_runtime,
+)
 from mycelium_request_gateway.contracts import InferenceSubmission, StreamEvent
 from mycelium_topology_evidence import (
     validate_m14_topology_projection,
@@ -115,6 +122,21 @@ EXPECTED_PROTOCOLS = {
     "m14-topology-projection-v1.json": "mycelium.m14_topology_projection.v1",
     "m15-plan-comparison-v1.json": "mycelium.m15_plan_comparison.v1",
     "concurrent-request-runtime-v1.json": "mycelium.concurrent_request_runtime.v1",
+    "private-request-replay-checkpoint-v1.json": (
+        "mycelium.private_request_replay_checkpoint.v1"
+    ),
+    "full-context-recovery-intent-v1.json": (
+        "mycelium.full_context_recovery_intent.v1"
+    ),
+    "full-context-recovery-runtime-v1.json": (
+        "mycelium.full_context_recovery_runtime.v1"
+    ),
+    "full-context-recovery-qualification-v1.json": (
+        "mycelium.full_context_recovery_qualification.v1"
+    ),
+    "full-context-recovery-gate-v1.json": (
+        "mycelium.full_context_recovery_gate.v1"
+    ),
     "interruptible-stage-command-v1.json": "mycelium.interruptible_stage_command.v1",
     "traffic-liveness-v1.json": "mycelium.traffic_liveness.v1",
     "scoped-runtime-incident-v1.json": "mycelium.scoped_runtime_incident.v1",
@@ -565,6 +587,20 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     manual_route = load_fixture("manual-provisioning-route-v1.json")
     validate_manual_provisioning_route_v1(manual_route)
 
+    validate_checkpoint_projection(
+        load_fixture("private-request-replay-checkpoint-v1.json")
+    )
+    validate_recovery_intent(
+        load_fixture("full-context-recovery-intent-v1.json")
+    )
+    validate_recovery_runtime(
+        load_fixture("full-context-recovery-runtime-v1.json")
+    )
+    validate_recovery_qualification(
+        load_fixture("full-context-recovery-qualification-v1.json")
+    )
+    validate_recovery_gate(load_fixture("full-context-recovery-gate-v1.json"))
+
     assignment = load_fixture("layer-assignment-v2.json")
     validate_assignment_identity(assignment)
     report = load_fixture("artifact-verification-report-v1.json")
@@ -726,3 +762,80 @@ def test_compatibility_fixtures_are_accepted_by_executable_consumers() -> None:
     assert decode_observatory_snapshot(semantic_snapshot) == semantic_snapshot
     semantic_event = load_fixture("observatory-event-v1.json")
     assert decode_observatory_event(semantic_event) == semantic_event
+
+
+def test_a6_runtime_contract_pins_live_projection_owners() -> None:
+    from scripts.contract_registry import CONTRACT_SPECS
+
+    spec = next(
+        item
+        for item in CONTRACT_SPECS
+        if item.protocol == "mycelium.full_context_recovery_runtime.v1"
+    )
+    assert {
+        "mycelium_live/router_port.py",
+        "mycelium_request_gateway/service.py",
+        "mycelium_ui_gateway/app.py",
+    }.issubset(spec.owner_sources)
+
+
+def test_a6_gate_contract_pins_physical_and_browser_harnesses() -> None:
+    from scripts.contract_registry import CONTRACT_SPECS
+
+    spec = next(
+        item
+        for item in CONTRACT_SPECS
+        if item.protocol == "mycelium.full_context_recovery_gate.v1"
+    )
+    assert {
+        "scripts/run_a6_recovery_case.py",
+        "scripts/run_a6_recovery_gate.py",
+        "ui/web/scripts/a6-product-browser-e2e.mjs",
+    }.issubset(spec.owner_sources)
+
+
+_A6_OWNER_REQUIREMENTS = {
+    "mycelium.private_request_replay_checkpoint.v1": {
+        "mycelium_a6_gateway.py",
+        "mycelium_a6_recovery.py",
+        "mycelium_request_gateway/service.py",
+    },
+    "mycelium.full_context_recovery_intent.v1": {
+        "mycelium_a6_recovery.py",
+        "mycelium_layer_planner/recovery_intent.py",
+    },
+    "mycelium.full_context_recovery_runtime.v1": {
+        "mycelium_a6_recovery.py",
+        "mycelium_m16_runtime.py",
+        "mycelium_live/router_port.py",
+        "mycelium_live/supervisor.py",
+        "mycelium_request_gateway/backend.py",
+        "mycelium_request_gateway/service.py",
+        "mycelium_product_spine/app.py",
+        "mycelium_product_spine/contracts.py",
+        "mycelium_product_spine/projector.py",
+        "mycelium_demo/product_stack.py",
+        "mycelium_ui_gateway/app.py",
+        "ui/web/src/features/productEvidence/contracts.ts",
+        "ui/web/src/features/recovery/RecoveryStatusBar.tsx",
+    },
+    "mycelium.full_context_recovery_qualification.v1": {
+        "mycelium_a6_m16.py",
+        "mycelium_a6_recovery.py",
+        "mycelium_live/a6_recovery.py",
+    },
+    "mycelium.full_context_recovery_gate.v1": {
+        "mycelium_a6_recovery.py",
+        "scripts/run_a6_recovery_case.py",
+        "scripts/run_a6_recovery_gate.py",
+        "ui/web/scripts/a6-product-browser-e2e.mjs",
+    },
+}
+
+
+def test_all_a6_contracts_pin_every_production_owner() -> None:
+    from scripts.contract_registry import CONTRACT_SPECS
+
+    by_protocol = {item.protocol: set(item.owner_sources) for item in CONTRACT_SPECS}
+    for protocol, required in _A6_OWNER_REQUIREMENTS.items():
+        assert required <= by_protocol[protocol], protocol

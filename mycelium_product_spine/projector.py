@@ -109,6 +109,88 @@ def _binding(
     }
 
 
+_RECOVERY_PHASES = frozenset(
+    {
+        "active",
+        "failure_observed",
+        "checkpoint_frozen",
+        "successor_pending",
+        "recovery_prefill",
+        "cutover_pending",
+        "recovered_decode",
+        "cleanup",
+        "terminal",
+        "aborted",
+    }
+)
+
+
+def _recovery_aggregate(value: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, int | str]]:
+    if value.get("protocol") != "mycelium.full_context_recovery_runtime.v1":
+        raise ValueError("recovery_projection_invalid")
+    binding = value.get("binding")
+    requests = value.get("requests")
+    breaker = value.get("breaker")
+    if (
+        not isinstance(binding, Mapping)
+        or not isinstance(requests, list)
+        or len(requests) > 4_096
+        or not isinstance(breaker, Mapping)
+        or breaker.get("state") not in {"closed", "open"}
+    ):
+        raise ValueError("recovery_projection_invalid")
+    counts = {
+        "request_count": len(requests),
+        "recovering_count": 0,
+        "terminal_count": 0,
+        "terminal_blocked_count": 0,
+        "cleanup_complete_count": 0,
+        "reconciled_count": 0,
+        "max_recovery_attempt": 0,
+        "breaker_state": str(breaker["state"]),
+    }
+    for request in requests:
+        if not isinstance(request, Mapping):
+            raise ValueError("recovery_projection_invalid")
+        phase = request.get("phase")
+        attempt = request.get("recovery_attempt")
+        cleanup = request.get("cleanup_complete")
+        reconciled = request.get("reconciled")
+        terminal = request.get("terminal")
+        if (
+            phase not in _RECOVERY_PHASES
+            or not isinstance(attempt, int)
+            or isinstance(attempt, bool)
+            or not 0 <= attempt <= 2
+            or type(cleanup) is not bool
+            or reconciled not in {None, "resumed", "aborted", "already_terminal"}
+            or (terminal is not None and not isinstance(terminal, str))
+        ):
+            raise ValueError("recovery_projection_invalid")
+        if phase not in {"active", "terminal", "aborted"}:
+            counts["recovering_count"] += 1
+        if terminal is not None:
+            counts["terminal_count"] += 1
+        if terminal == "TERMINAL_BLOCKED":
+            counts["terminal_blocked_count"] += 1
+        if cleanup:
+            counts["cleanup_complete_count"] += 1
+        if reconciled is not None:
+            counts["reconciled_count"] += 1
+        counts["max_recovery_attempt"] = max(counts["max_recovery_attempt"], attempt)
+    deployment_id = binding.get("deployment_id")
+    deployment_epoch = binding.get("deployment_epoch")
+    if (
+        not isinstance(deployment_id, str)
+        or not deployment_id
+        or not isinstance(deployment_epoch, int)
+        or isinstance(deployment_epoch, bool)
+        or deployment_epoch < 1
+    ):
+        raise ValueError("recovery_projection_invalid")
+    return _binding(deployment_id=deployment_id, deployment_epoch=deployment_epoch), counts
+
+
 class ProductProjector:
     """Atomically publish privacy-reduced snapshots without mutating any authority."""
 
@@ -154,6 +236,7 @@ class ProductProjector:
         route_status: Mapping[str, Any] | None,
         qualification: Mapping[str, Any] | None,
         internet_native: Mapping[str, Any] | None = None,
+        recovery_status: Mapping[str, Any] | None = None,
         now_unix_ms: int,
         source_mode: str = "live",
         source_errors: Mapping[str, str] | None = None,
@@ -172,6 +255,7 @@ class ProductProjector:
                 "assignment-source",
                 "route-source",
                 "qualification-source",
+                "recovery-source",
             }
             or _CODE.fullmatch(reason) is None
             for source_id, reason in errors.items()
@@ -186,6 +270,7 @@ class ProductProjector:
                 route_status=route_status,
                 qualification=qualification,
                 internet_native=internet_native,
+                recovery_status=recovery_status,
                 now_unix_ms=now_unix_ms,
                 source_mode=source_mode,
                 generation=generation,
@@ -208,6 +293,7 @@ class ProductProjector:
         route_status: Mapping[str, Any] | None,
         qualification: Mapping[str, Any] | None,
         internet_native: Mapping[str, Any] | None,
+        recovery_status: Mapping[str, Any] | None,
         now_unix_ms: int,
         source_mode: str,
         generation: int,
@@ -242,6 +328,12 @@ class ProductProjector:
             if internet_native is None
             else json.loads(json.dumps(dict(internet_native)))
         )
+        recovery_error = source_errors.get("recovery-source")
+        recovery_current = recovery_error is None and isinstance(recovery_status, Mapping)
+        recovery_binding = None
+        recovery_attributes = None
+        if recovery_current:
+            recovery_binding, recovery_attributes = _recovery_aggregate(recovery_status)
         membership_error = source_errors.get("membership-source")
         assignment_error = source_errors.get("assignment-source")
         route_error = source_errors.get("route-source")
@@ -314,6 +406,17 @@ class ProductProjector:
                 qualification_reason,
             ),
             self._source_state(
+                "recovery-source",
+                "request_gateway_recovery",
+                "current" if recovery_current else "missing",
+                now_unix_ms,
+                recovery_error
+                if recovery_error is not None
+                else None
+                if recovery_current
+                else "recovery_source_missing",
+            ),
+            self._source_state(
                 "planner-source",
                 "unsupported_until_m13",
                 "unsupported",
@@ -356,6 +459,22 @@ class ProductProjector:
                 placed_by_raw_node.setdefault(stage["node_id"], []).append(stage)
 
         entities: list[dict[str, Any]] = []
+        if recovery_current and recovery_binding is not None and recovery_attributes is not None:
+            entities.append(
+                {
+                    "entity_id": "recovery-runtime",
+                    "kind": "recovery",
+                    "label": "Full-context replay recovery",
+                    "source_id": "recovery-source",
+                    "binding": recovery_binding,
+                    "freshness": {
+                        "status": "current",
+                        "observed_at_unix_ms": now_unix_ms,
+                        "valid_until_unix_ms": now_unix_ms,
+                    },
+                    "attributes": recovery_attributes,
+                }
+            )
         relations: list[dict[str, Any]] = []
         readiness: list[dict[str, Any]] = []
         notices: list[dict[str, Any]] = []
@@ -1062,6 +1181,7 @@ class ProductProjector:
                             "artifact-source": "mycelium.physical_deployment.v1",
                             "runtime-source": "mycelium.live_route_status.v1",
                             "request-source": "mycelium.observatory.request_projection.v1",
+                            "recovery-source": "mycelium.full_context_recovery_runtime.v1",
                         }[source["source_id"]],
                         "source_generation": source["generation"],
                         "evidence_digest": None,
@@ -1089,6 +1209,7 @@ class ProductProjector:
                     "assignment-source",
                     "route-source",
                     "qualification-source",
+                    "recovery-source",
                 }
                 and source["status"] in {"missing", "stale", "conflict"}
                 for source in source_states

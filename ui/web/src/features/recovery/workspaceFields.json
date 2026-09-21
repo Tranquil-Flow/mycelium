@@ -1,0 +1,42 @@
+{
+  "inference": [
+    "Request count",
+    "Recovering count",
+    "Terminal count"
+  ],
+  "lab": [
+    "Maximum recovery attempt",
+    "Cleanup complete count",
+    "Breaker state"
+  ],
+  "network": [
+    "Recovery source status",
+    "Snapshot cursor",
+    "Recovering count"
+  ],
+  "nodes": [
+    "Request count",
+    "Cleanup complete count",
+    "Reconciled count"
+  ],
+  "plans": [
+    "Maximum recovery attempt",
+    "Recovering count",
+    "Terminal blocked count"
+  ],
+  "readiness": [
+    "Recovery source status",
+    "Cleanup complete count",
+    "Reconciled count"
+  ],
+  "incidents": [
+    "Terminal count",
+    "Terminal blocked count",
+    "Breaker state"
+  ],
+  "settings": [
+    "Maximum recovery attempt",
+    "Recovery source status",
+    "Retained snapshot count"
+  ]
+}

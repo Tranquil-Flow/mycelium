@@ -365,6 +365,61 @@ CONTRACT_SPECS = (
         ),
     ),
     ContractSpec(
+        "private-request-replay-checkpoint-v1.json",
+        "mycelium.private_request_replay_checkpoint.v1",
+        (
+            "mycelium_a6_gateway.py",
+            "mycelium_a6_recovery.py",
+            "mycelium_request_gateway/service.py",
+        ),
+    ),
+    ContractSpec(
+        "full-context-recovery-intent-v1.json",
+        "mycelium.full_context_recovery_intent.v1",
+        (
+            "mycelium_a6_recovery.py",
+            "mycelium_layer_planner/recovery_intent.py",
+        ),
+    ),
+    ContractSpec(
+        "full-context-recovery-runtime-v1.json",
+        "mycelium.full_context_recovery_runtime.v1",
+        (
+            "mycelium_a6_recovery.py",
+            "mycelium_demo/product_stack.py",
+            "mycelium_live/router_port.py",
+            "mycelium_live/supervisor.py",
+            "mycelium_m16_runtime.py",
+            "mycelium_product_spine/app.py",
+            "mycelium_product_spine/contracts.py",
+            "mycelium_product_spine/projector.py",
+            "mycelium_request_gateway/backend.py",
+            "mycelium_request_gateway/service.py",
+            "mycelium_ui_gateway/app.py",
+            "ui/web/src/features/productEvidence/contracts.ts",
+            "ui/web/src/features/recovery/RecoveryStatusBar.tsx",
+        ),
+    ),
+    ContractSpec(
+        "full-context-recovery-qualification-v1.json",
+        "mycelium.full_context_recovery_qualification.v1",
+        (
+            "mycelium_a6_m16.py",
+            "mycelium_a6_recovery.py",
+            "mycelium_live/a6_recovery.py",
+        ),
+    ),
+    ContractSpec(
+        "full-context-recovery-gate-v1.json",
+        "mycelium.full_context_recovery_gate.v1",
+        (
+            "mycelium_a6_recovery.py",
+            "scripts/run_a6_recovery_case.py",
+            "scripts/run_a6_recovery_gate.py",
+            "ui/web/scripts/a6-product-browser-e2e.mjs",
+        ),
+    ),
+    ContractSpec(
         "interruptible-stage-command-v1.json",
         "mycelium.interruptible_stage_command.v1",
         (

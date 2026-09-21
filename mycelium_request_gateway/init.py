@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+import os
 import time
 import uuid
 from typing import Any
@@ -26,6 +27,7 @@ def create_request_gateway_application(
     replica_qualifications_factory: Callable[[], Iterable[Mapping[str, Any]]] | None = None,
     replica_loss_placement_ids_factory: Callable[[], frozenset[str]] | None = None,
     replica_now_unix_ms: Callable[[], int] | None = None,
+    replay_checkpoint_root: str | os.PathLike[str] | None = None,
 ) -> RequestGatewayASGIApplication:
     """Build production adapters around a qualifier-owned current-record source.
 
@@ -78,6 +80,7 @@ def create_request_gateway_application(
         max_buffered_events=max_buffered_events,
         max_sessions=max_sessions,
         clock=clock,
+        replay_checkpoint_root=replay_checkpoint_root,
     )
     return RequestGatewayASGIApplication(
         service,

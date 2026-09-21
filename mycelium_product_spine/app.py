@@ -27,6 +27,7 @@ class ProductEvidenceApplication:
         route_source: Callable[[], Mapping[str, Any] | None],
         qualification_source: Callable[[], Mapping[str, Any] | None],
         internet_native_source: Callable[[], Mapping[str, Any]] | None = None,
+        recovery_source: Callable[[], Mapping[str, Any] | None] | None = None,
         clock_unix_ms: Callable[[], int] | None = None,
         replay_limit: int = 128,
         state_root: str | Path | None = None,
@@ -50,8 +51,11 @@ class ProductEvidenceApplication:
         self._membership_source = membership_source
         self._assignment_source = assignment_source
         self._route_source = route_source
+        if recovery_source is not None and not callable(recovery_source):
+            raise ValueError("product_source_invalid")
         self._qualification_source = qualification_source
         self._internet_native_source = internet_native_source
+        self._recovery_source = recovery_source
         self._clock_unix_ms = clock_unix_ms or (lambda: int(time.time() * 1_000))
         self._store = (
             None
@@ -166,12 +170,19 @@ class ProductEvidenceApplication:
                 if self._internet_native_source is None
                 else self._internet_native_source()
             )
+            recovery_status = None
+            if self._recovery_source is not None:
+                try:
+                    recovery_status = self._recovery_source()
+                except Exception:
+                    source_errors["recovery-source"] = "recovery_source_failed"
             snapshot = self._projector.project(
                 members=members,
                 assignments=assignments,
                 route_status=route_status,
                 qualification=qualification,
                 internet_native=internet_native,
+                recovery_status=recovery_status,
                 now_unix_ms=self._clock_unix_ms(),
                 source_errors=source_errors,
             )

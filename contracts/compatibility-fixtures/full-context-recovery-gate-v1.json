@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "claim_boundary": "synthetic fixture; no executed gate"
+  },
+  "executed": false,
+  "gate_digest": "sha256:9e6cd3343fc5fe659fb30098c211da35fcaaf4b365629c19c68de7574ef60d0e",
+  "gate_id": "A6",
+  "gate_kind": "deterministic_positive",
+  "passed": false,
+  "privacy_reduced_projection": false,
+  "protocol": "mycelium.full_context_recovery_gate.v1",
+  "scenario_id": "synthetic-fixture-unexecuted"
+}

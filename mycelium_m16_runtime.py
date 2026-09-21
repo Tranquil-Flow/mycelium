@@ -469,9 +469,13 @@ class M16RuntimeCoordinator:
             ) from exc
         self._requests[request.request_id] = {
             "request": request,
+            "request_attempt": 1,
             "workload_profile_id": workload_profile_id,
             "manifest": manifest,
             "path_manifest_digest": path_digest,
+            "recovery_successor": None,
+            "recovery_source_fenced": False,
+            "recovery_attempts": 0,
             "phase": "queued",
             "queued_at": queued_at,
             "dispatch_at": None,
@@ -641,6 +645,22 @@ class M16RuntimeCoordinator:
         return None if record is None else str(record["phase"])
 
     @_synchronized
+    def terminal_state(self, request_id: str) -> str | None:
+        record = self._requests.get(request_id)
+        if record is None or record["terminal_state"] is None:
+            return None
+        return str(record["terminal_state"])
+
+    @_synchronized
+    def request_context(self, request_id: str) -> RequestContext:
+        """Return owner-held exact request context for internal execution wiring."""
+
+        record = self._requests.get(request_id)
+        if record is None:
+            raise M16AdmissionError("request_not_admitted")
+        return record["request"]
+
+    @_synchronized
     def route_identity(self, request_id: str) -> dict[str, Any]:
         """Return the Router-owned immutable identity for one admitted request.
 
@@ -656,7 +676,7 @@ class M16RuntimeCoordinator:
         manifest = record["manifest"]
         return {
             "request_id": request.request_id,
-            "request_attempt": 1,
+            "request_attempt": record["request_attempt"],
             "path_id": manifest.path_id,
             "path_attempt": manifest.path_attempt,
             "path_manifest_digest": record["path_manifest_digest"],
@@ -673,6 +693,285 @@ class M16RuntimeCoordinator:
         if record is None:
             raise M16AdmissionError("request_not_admitted")
         return path_manifest_to_dict(record["manifest"])
+
+    @_synchronized
+    def recovery_deployment_binding(self) -> dict[str, Any]:
+        """Expose the privacy-reduced immutable deployment binding A6 consumes."""
+
+        return {
+            "deployment_id": self._graph.deployment_id,
+            "deployment_epoch": self._graph.deployment_epoch,
+            "topology_generation": self._graph.topology_version,
+            "model_id": self._graph.model_id,
+            "model_revision": self._graph.resolved_commit,
+            "representation_digest": self._graph.manifest_digest,
+            "graph_digest": self._graph_digest,
+        }
+
+    @_synchronized
+    def reserve_recovery_successor(
+        self,
+        request_id: str,
+        *,
+        recovery_request: RequestContext,
+        expected_source_identity: Mapping[str, Any],
+        excluded_placements: frozenset[str],
+    ) -> PathManifest:
+        """Reserve one new immutable A6 path without changing active identity.
+
+        The caller supplies the exact replay context.  M16 validates that it is
+        the original encoded prompt followed by the committed prefix (which may be empty),
+        with the remaining generation budget reduced by exactly that prefix.
+        M16 owns and mints the successor path/attempt identities.
+        """
+
+        record = self._requests.get(request_id)
+        if (
+            record is None
+            or record["terminal_state"] is not None
+            or request_id not in self._active_request_ids
+        ):
+            raise M16AdmissionError("recovery_source_not_active")
+        if dict(expected_source_identity) != self.route_identity(request_id):
+            raise M16AdmissionError("stale_source_identity")
+        if record["recovery_successor"] is not None:
+            raise M16AdmissionError("successor_already_reserved")
+        if (
+            not isinstance(excluded_placements, frozenset)
+            or not excluded_placements
+            or not all(
+                isinstance(placement_id, str) and placement_id
+                for placement_id in excluded_placements
+            )
+        ):
+            raise M16AdmissionError("recovery_exclusions_required")
+
+        source_request = record["request"]
+        if not isinstance(recovery_request, RequestContext):
+            raise M16AdmissionError("recovery_context_invalid")
+        source_prompt = source_request.prompt_token_ids
+        replay_prompt = recovery_request.prompt_token_ids
+        committed_count = len(replay_prompt) - len(source_prompt)
+        if (
+            recovery_request.request_id != request_id
+            or committed_count < 0
+            or replay_prompt[: len(source_prompt)] != source_prompt
+            or committed_count >= source_request.max_new_tokens
+        ):
+            raise M16AdmissionError("recovery_context_invalid")
+        expected_recovery_request = RequestContext(
+            request_id=source_request.request_id,
+            prompt_token_ids=replay_prompt,
+            max_new_tokens=source_request.max_new_tokens - committed_count,
+            expected_new_tokens=source_request.expected_new_tokens - committed_count,
+            qos_class=source_request.qos_class,
+            admitted_at=source_request.admitted_at,
+            target_ttft_ms=source_request.target_ttft_ms,
+            target_tpot_ms=source_request.target_tpot_ms,
+            target_tokens_per_second=source_request.target_tokens_per_second,
+            sampling_seed=source_request.sampling_seed,
+            generation_config_digest=source_request.generation_config_digest,
+        )
+        if recovery_request != expected_recovery_request:
+            raise M16AdmissionError("recovery_context_invalid")
+
+        source_manifest = record["manifest"]
+        recovery_attempt = record["recovery_attempts"] + 1
+        build = self._builder.start(
+            recovery_request,
+            self._graph,
+            path_attempt=source_manifest.path_attempt + recovery_attempt,
+            excluded_placements=excluded_placements,
+        )
+        try:
+            while not self._builder.is_complete(build):
+                build = self._builder.advance(
+                    build,
+                    self._states,
+                    now=self._clock.now(),
+                    lease_now=self._lease_clock.now(),
+                )
+            manifest = self._builder.lock(
+                build,
+                now=self._clock.now(),
+                lease_now=self._lease_clock.now(),
+            )
+        except RoutingError as exc:
+            self._builder.abort(build)
+            raise M16AdmissionError("recovery_successor_unavailable") from exc
+
+        record["recovery_successor"] = {
+            "request": recovery_request,
+            "manifest": manifest,
+            "path_manifest_digest": manifest.manifest_digest,
+            "request_attempt": record["request_attempt"] + 1,
+        }
+        record["recovery_attempts"] = recovery_attempt
+        return manifest
+
+    @_synchronized
+    def recovery_successor_identity(self, request_id: str) -> dict[str, Any]:
+        record = self._requests.get(request_id)
+        successor = None if record is None else record["recovery_successor"]
+        if successor is None:
+            raise M16AdmissionError("successor_not_reserved")
+        manifest = successor["manifest"]
+        return {
+            "request_id": request_id,
+            "request_attempt": successor["request_attempt"],
+            "path_id": manifest.path_id,
+            "path_attempt": manifest.path_attempt,
+            "path_manifest_digest": successor["path_manifest_digest"],
+            "deployment_id": self._graph.deployment_id,
+            "deployment_epoch": manifest.deployment_epoch,
+            "topology_generation": manifest.topology_version,
+        }
+
+    @_synchronized
+    def recovery_successor_request(self, request_id: str) -> RequestContext:
+        record = self._requests.get(request_id)
+        successor = None if record is None else record["recovery_successor"]
+        if successor is None:
+            raise M16AdmissionError("successor_not_reserved")
+        return successor["request"]
+
+    @_synchronized
+    def fence_recovery_source(
+        self,
+        request_id: str,
+        *,
+        expected_source_identity: Mapping[str, Any],
+    ) -> None:
+        record = self._requests.get(request_id)
+        if record is None or record["terminal_state"] is not None:
+            raise M16AdmissionError("recovery_source_not_active")
+        if dict(expected_source_identity) != self.route_identity(request_id):
+            raise M16AdmissionError("stale_source_identity")
+        if record["recovery_successor"] is None:
+            raise M16AdmissionError("successor_not_reserved")
+        record["recovery_source_fenced"] = True
+
+    @_synchronized
+    def authorizes_route_identity(
+        self,
+        request_id: str,
+        identity: Mapping[str, Any],
+    ) -> bool:
+        record = self._requests.get(request_id)
+        return bool(
+            record is not None
+            and record["terminal_state"] is None
+            and not record["recovery_source_fenced"]
+            and dict(identity) == self.route_identity(request_id)
+        )
+
+    @_synchronized
+    def cutover_recovery_successor(
+        self,
+        request_id: str,
+        *,
+        expected_source_identity: Mapping[str, Any],
+        expected_successor_identity: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        record = self._requests.get(request_id)
+        if record is None or record["terminal_state"] is not None:
+            raise M16AdmissionError("recovery_source_not_active")
+        if dict(expected_source_identity) != self.route_identity(request_id):
+            raise M16AdmissionError("stale_source_identity")
+        successor = record["recovery_successor"]
+        if successor is None:
+            raise M16AdmissionError("successor_not_reserved")
+        successor_identity = self.recovery_successor_identity(request_id)
+        if dict(expected_successor_identity) != successor_identity:
+            raise M16AdmissionError("stale_successor_identity")
+        if not record["recovery_source_fenced"]:
+            raise M16AdmissionError("source_attempt_not_fenced")
+
+        source_manifest = record["manifest"]
+        self._scheduler.release_path(source_manifest.path_id)
+        self._ledger.release(
+            tuple(hop.reservation_id for hop in source_manifest.ordered_hops)
+        )
+        record["request"] = successor["request"]
+        record["request_attempt"] = successor["request_attempt"]
+        record["manifest"] = successor["manifest"]
+        record["path_manifest_digest"] = successor["path_manifest_digest"]
+        record["phase"] = "recovery_prefill"
+        record["recovery_successor"] = None
+        record["recovery_source_fenced"] = False
+        return successor_identity
+
+    @_synchronized
+    def discard_recovery_successor(
+        self,
+        request_id: str,
+        *,
+        expected_source_identity: Mapping[str, Any],
+    ) -> bool:
+        record = self._requests.get(request_id)
+        if record is None or record["terminal_state"] is not None:
+            return False
+        if dict(expected_source_identity) != self.route_identity(request_id):
+            raise M16AdmissionError("stale_source_identity")
+        successor = record["recovery_successor"]
+        if successor is None:
+            return False
+        self._ledger.release(
+            tuple(
+                hop.reservation_id
+                for hop in successor["manifest"].ordered_hops
+            )
+        )
+        record["recovery_successor"] = None
+        return True
+
+    @_synchronized
+    def abort_recovery(
+        self,
+        request_id: str,
+        *,
+        expected_source_identity: Mapping[str, Any],
+        expected_successor_identity: Mapping[str, Any],
+    ) -> bool:
+        """Fail one fenced pre-cutover recovery and release all reservations.
+
+        Qualification rejection may already have discarded the successor; the
+        still-fenced source remains sufficient fail-closed abort authority.
+        """
+
+        record = self._requests.get(request_id)
+        if (
+            record is None
+            or record["terminal_state"] is not None
+            or request_id not in self._active_request_ids
+        ):
+            return False
+        if dict(expected_source_identity) != self.route_identity(request_id):
+            raise M16AdmissionError("stale_source_identity")
+        successor = record["recovery_successor"]
+        if (
+            successor is not None
+            and dict(expected_successor_identity)
+            != self.recovery_successor_identity(request_id)
+        ):
+            raise M16AdmissionError("stale_successor_identity")
+        if not record["recovery_source_fenced"]:
+            raise M16AdmissionError("source_attempt_not_fenced")
+
+        self._scheduler.release_path(record["manifest"].path_id)
+        self._ledger.release_request(request_id)
+        record["recovery_successor"] = None
+        record["phase"] = "terminal"
+        record["terminal_state"] = "failed"
+        record["terminal_at"] = self._clock.now()
+        self._active_request_ids.discard(request_id)
+        self._record_incident(
+            "recovery_abort_cleanup",
+            request_id,
+            "request",
+            "source_and_successor_released",
+        )
+        return True
 
     @_synchronized
     def attach_performance_budget(self, document: Mapping[str, Any]) -> None:

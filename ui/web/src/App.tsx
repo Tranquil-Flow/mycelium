@@ -51,6 +51,7 @@ import {
 import { SettingsProvider } from './features/settings/SettingsContext';
 import { SettingsWorkspace } from './features/settings/SettingsWorkspace';
 import { GovernanceReadinessSource } from './features/governance/GovernanceReadinessSource';
+import { RecoveryStatusBar } from './features/recovery/RecoveryStatusBar';
 import { IncidentsView } from './views/IncidentsView';
 import { NetworkView } from './views/NetworkView';
 import { PlansView } from './views/PlansView';
@@ -456,6 +457,7 @@ export default function App({
         productEvidenceConfigured={productEvidence.configured}
         productEvidenceState={productEvidence.visible}
       >
+        <RecoveryStatusBar route={activeView} enabled={source.source_mode === 'live'} />
         <ProductFeatureSlot
           route={activeView}
           registry={featureRegistry}

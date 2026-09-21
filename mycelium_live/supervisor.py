@@ -21,6 +21,8 @@ from urllib.parse import unquote, urlsplit
 import uuid
 
 from mycelium_demo.product_stack import build_loopback_product_stack
+from mycelium_a6_m16 import M16RecoveryAuthority
+from mycelium_a6_recovery import ReplayCheckpoint
 from mycelium_evidence import EvidenceProjectionRegistry, sealed_evidence_projection
 from mycelium_governance import governance_readiness
 from mycelium_product_spine import ProductEvidenceApplication, ProductProjector
@@ -37,6 +39,7 @@ from mycelium_request_gateway.contracts import (
     safe_qualification_projection,
 )
 from mycelium_m16_runtime import build_live_m16_runtime
+from mycelium_router.contracts import PathManifest
 from mycelium_performance_budget import validate_performance_budget_v3
 from mycelium_m18_replication import validate_replica_plan, validate_replica_runtime
 from mycelium_m19_recovery import (
@@ -55,6 +58,7 @@ from mycelium_ui_gateway.coordinator import CoordinatorError
 from physical_inference_qualification import ControllerError
 
 from .activation import DeploymentActivationError, PreparedDeploymentActivation
+from .a6_recovery import LiveA6RecoveryQualifier, tokenizer_artifact_digest
 from .artifact_provisioner import ArtifactAcquisitionStore
 from .codec import prompt_codec_from_deployment
 from .health import RouteHealthSource
@@ -406,8 +410,23 @@ def build_live_stack(
     public_origin: str | None = None,
     trusted_https_proxy: bool = False,
     trusted_proxy_capability: bytes | None = None,
+    recovery_qualification_source: (
+        Callable[
+            [str, ReplayCheckpoint, Mapping[str, Any], PathManifest],
+            tuple[Mapping[str, Any], Mapping[str, Any]],
+        ]
+        | None
+    ) = None,
+    recovery_tokenizer_digest: str | None = None,
+    recovery_a4_atomic_commit: str | None = None,
 ) -> LiveStack:
     """Compose the production browser and request gateways around a live route."""
+    if (recovery_qualification_source is None) != (
+        recovery_tokenizer_digest is None
+    ):
+        raise ValueError("a6_recovery_configuration_incomplete")
+    if recovery_qualification_source is not None and product_state_root is None:
+        raise ValueError("a6_recovery_checkpoint_root_required")
     codec = prompt_codec_from_deployment(deployment_dir)
     stop_token_ids = getattr(codec, "stop_token_ids", frozenset())
     configure_stop_tokens = getattr(route, "set_stop_token_ids", None)
@@ -427,6 +446,14 @@ def build_live_stack(
         route=route,
         execution_graph=execution_graph,
         runtime_coordinator=coordinator,
+        recovery_authority=(
+            None
+            if recovery_qualification_source is None
+            else M16RecoveryAuthority(coordinator)
+        ),
+        recovery_qualification_source=recovery_qualification_source,
+        recovery_tokenizer_digest=recovery_tokenizer_digest,
+        recovery_a4_atomic_commit=recovery_a4_atomic_commit,
     )
     configure_runtime_source = getattr(route, "set_m16_runtime_source", None)
     if callable(configure_runtime_source):
@@ -436,17 +463,20 @@ def build_live_stack(
         refresh=lambda: _qualify_open_route(route),
         refresh_allowed=router.is_idle,
     )
-    product_app = _optional_product_application(
-        route,
-        health,
-        state_root=product_state_root,
-    )
+    def product_app_factory(recovery_source: Callable[[], Mapping[str, Any]]) -> Any | None:
+        return _optional_product_application(
+            route,
+            health,
+            recovery_source=recovery_source,
+            state_root=product_state_root,
+        )
+
     app = build_loopback_product_stack(
         qualification_source=health,
         router=router,
         codec=codec,
         observatory_app=LiveObservatoryApplication(health),
-        product_app=product_app,
+        product_app_factory=product_app_factory,
         swarm_coordinator=LiveSwarmCoordinator(route, health, seed_url=seed_url),
         request_bearer_token=bearer_token,
         replica_qualifications_factory=(
@@ -462,6 +492,11 @@ def build_live_stack(
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
+        replay_checkpoint_root=(
+            None
+            if product_state_root is None
+            else Path(product_state_root) / "private" / "a6-replay-checkpoints"
+        ),
     )
     return LiveStack(app=app, health=health, route=route)
 
@@ -493,6 +528,11 @@ def build_registry_stack(
         public_origin=public_origin,
         trusted_https_proxy=trusted_https_proxy,
         trusted_proxy_capability=trusted_proxy_capability,
+        replay_checkpoint_root=(
+            None
+            if product_state_root is None
+            else Path(product_state_root) / "private" / "a6-replay-checkpoints"
+        ),
     )
     return LiveStack(app=app, health=registry, route=registry)
 
@@ -501,6 +541,7 @@ def _product_application(
     route: Any,
     qualification_source: Any,
     *,
+    recovery_source: Callable[[], Mapping[str, Any]] | None = None,
     state_root: Path | None = None,
 ) -> Any:
     membership = getattr(route, "product_membership_records", None)
@@ -532,6 +573,13 @@ def _product_application(
         internet_native_source=(
             internet_native_document if callable(internet_native) else None
         ),
+        recovery_source=(
+            recovery_source
+            if recovery_source is not None
+            else getattr(route, "recovery_public_projection", None)
+            if callable(getattr(route, "recovery_public_projection", None))
+            else None
+        ),
         state_root=state_root,
     )
 
@@ -540,6 +588,7 @@ def _optional_product_application(
     route: Any,
     qualification_source: Any,
     *,
+    recovery_source: Callable[[], Mapping[str, Any]] | None = None,
     state_root: Path | None = None,
 ) -> Any | None:
     required = (
@@ -549,7 +598,10 @@ def _optional_product_application(
     )
     if not all(callable(value) for value in required):
         return None
-    return _product_application(route, qualification_source, state_root=state_root)
+    return _product_application(
+        route, qualification_source, recovery_source=recovery_source,
+        state_root=state_root,
+    )
 
 
 class LiveHTTPServer(ThreadingHTTPServer):
@@ -2455,6 +2507,61 @@ def run_registry_server(
                     pass
 
 
+def _sealed_a4_atomic_commit() -> str:
+    path = ROOT / "docs" / "handover" / "a4-completion-record.v1.json"
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 1_048_576:
+        raise RuntimeError("a4_completion_record_unavailable")
+    try:
+        document = json.loads(path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+        raise RuntimeError("a4_completion_record_invalid") from exc
+    if not isinstance(document, Mapping) or document.get("state") != "complete":
+        raise RuntimeError("a4_completion_record_invalid")
+    commit = document.get("atomic_commit")
+    if (
+        not isinstance(commit, str)
+        or len(commit) != 40
+        or any(character not in "0123456789abcdef" for character in commit)
+    ):
+        raise RuntimeError("a4_completion_record_invalid")
+    return commit
+
+
+def _build_physical_product_stack(
+    *,
+    route: LiveRoute,
+    deployment_dir: Path,
+    execution_graph: Any,
+    bearer_token: str,
+    product_state_root: Path,
+    seed_url: str | None,
+    public_origin: str | None = None,
+    trusted_https_proxy: bool = False,
+    trusted_proxy_capability: bytes | None = None,
+) -> LiveStack:
+    tokenizer_digest = tokenizer_artifact_digest(deployment_dir)
+    qualifier = LiveA6RecoveryQualifier(
+        graph=execution_graph,
+        deployment_dir=deployment_dir,
+        tokenizer_digest=tokenizer_digest,
+        route=route,
+    )
+    return build_live_stack(
+        route=route,
+        deployment_dir=deployment_dir,
+        execution_graph=execution_graph,
+        bearer_token=bearer_token,
+        product_state_root=product_state_root,
+        seed_url=seed_url,
+        recovery_qualification_source=qualifier,
+        recovery_tokenizer_digest=tokenizer_digest,
+        recovery_a4_atomic_commit=_sealed_a4_atomic_commit(),
+        public_origin=public_origin,
+        trusted_https_proxy=trusted_https_proxy,
+        trusted_proxy_capability=trusted_proxy_capability,
+    )
+
+
 def run_physical_server(
     *,
     operator_plan: Path,
@@ -2554,7 +2661,7 @@ def run_physical_server(
                 explicit_path=model_operation_file,
             )
         )
-        stack = build_live_stack(
+        stack = _build_physical_product_stack(
             route=route,
             deployment_dir=selected_deployment_dir,
             execution_graph=route.execution_graph,

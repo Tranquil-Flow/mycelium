@@ -19,7 +19,11 @@ from mycelium_request_gateway.client import (
     ServiceGatewayClient,
 )
 from mycelium_request_gateway.cli import stream_prompt
-from mycelium_request_gateway.contracts import StreamEvent, qualification_binding
+from mycelium_request_gateway.contracts import (
+    InferenceSubmission,
+    StreamEvent,
+    qualification_binding,
+)
 from mycelium_request_gateway.service import RequestGatewayService
 from mycelium_router.contracts import RouterConfig
 from mycelium_router.fakes import (
@@ -141,6 +145,62 @@ class GatedRuntimePort(FakeRuntimePort):
     def cancel(self, path_id):
         super().cancel(path_id)
         self.allow_decode.set()
+
+
+def test_router_adapter_retains_exact_private_replay_token_ids() -> None:
+    qualification = _synthetic_qualification()
+    gated_runtime = GatedRuntimePort()
+    router, clock, _capacity, _runtime = _runtime_stack(
+        graph=_synthetic_execution_graph(),
+        runtime=gated_runtime,
+    )
+    service = RequestGatewayService(
+        qualification_source=MutableQualificationSource(qualification),
+        backend=RouterSessionBackend(
+            router=router,
+            codec=RecordingCodec(),
+            clock=clock.now,
+            qualification_source=MutableQualificationSource(qualification),
+        ),
+        request_id_source=lambda: "router-replay-material-001",
+        max_buffered_events=16,
+    )
+    try:
+        request_id = service.submit(
+            InferenceSubmission(
+                prompt="private replay prompt",
+                max_new_tokens=3,
+                qualification=qualification_binding(qualification),
+            )
+        )
+        subscription = service.subscribe(request_id, last_event_id=None)
+        token_event = None
+        while token_event is None:
+            event = subscription.next_event(timeout=2)
+            assert event is not None
+            subscription.ack(event.sequence)
+            if event.kind == "token":
+                token_event = event
+        assert gated_runtime.second_decode_started.wait(timeout=2)
+
+        checkpoint = service.freeze_replay_checkpoint(
+            request_id,
+            store_identity="router-replay-material-store",
+            session_id="router-replay-material-session",
+            source_attempt=1,
+            path_id="path-source-1",
+            path_attempt=0,
+            tokenizer_digest="sha256:" + "4" * 64,
+            created_at_unix_ms=1_000,
+            expiry_unix_ms=2_000_000,
+        )
+
+        assert checkpoint.encoded_prompt == (7, 8, 9)
+        assert checkpoint.committed_prefix_tokens == (101,)
+        assert checkpoint.committed_token_count == 1
+    finally:
+        service.cancel("router-replay-material-001")
+        service.close()
 
 
 def test_router_adapter_cancellation_releases_capacity_and_kv_once():

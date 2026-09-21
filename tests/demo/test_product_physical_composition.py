@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 import model_manifest as model_manifest_contract
+from mycelium_demo import product_stack
 from mycelium_demo.product_stack import build_loopback_product_stack
 from mycelium_qualification import QualificationAuthority
 from mycelium_router.serialization import execution_graph_from_dict
@@ -420,3 +421,48 @@ def test_trusted_proxy_composition_requires_proxy_capability_configuration() -> 
             request_bearer_token=REQUEST_BEARER_TOKEN,
             trusted_proxy_capability=b"a" * 64,
         )
+
+
+def test_product_stack_builds_projection_from_gateway_owned_recovery_source(monkeypatch) -> None:
+    def recovery_source() -> dict[str, str]:
+        return {"protocol": "mycelium.full_context_recovery_runtime.v1"}
+
+    request_app = type(
+        "RequestApp",
+        (),
+        {"recovery_public_projection": staticmethod(recovery_source)},
+    )()
+    product_app = object()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        product_stack,
+        "create_request_gateway_application",
+        lambda **_kwargs: request_app,
+    )
+
+    def create_product(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(product_stack, "create_product_gateway_application", create_product)
+
+    observed: list[object] = []
+
+    def factory(source) -> object:
+        observed.append(source)
+        return product_app
+
+    result = product_stack.build_loopback_product_stack(
+        qualification_source=object(),
+        router=object(),
+        codec=object(),
+        observatory_app=object(),
+        product_app_factory=factory,
+        swarm_coordinator=object(),
+        request_bearer_token="bounded-test-token",
+    )
+
+    assert result is not None
+    assert observed == [request_app.recovery_public_projection]
+    assert captured["product_app"] is product_app

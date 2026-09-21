@@ -101,6 +101,15 @@ from mycelium_request_gateway.contracts import (
     StreamEvent,
 )
 from mycelium_m16_runtime import validate_m16_runtime_status
+from mycelium_a6_gateway import CommittedDeliverySnapshot, freeze_replay_checkpoint
+from mycelium_a6_recovery import (
+    OwnerAuthority,
+    RecoveryRuntime,
+    build_recovery_gate,
+    build_recovery_intent,
+    build_recovery_qualification,
+    recovery_request_binding,
+)
 from mycelium_m23_kv import PROTOCOL as M23_KV_PROTOCOL, validate_m23_kv_evidence
 from mycelium_live.activation import (
     ACTIVATION_PROTOCOL,
@@ -151,6 +160,128 @@ def canonical_bytes(document: dict[str, Any]) -> bytes:
     return (
         json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     ).encode("utf-8")
+
+
+def a6_recovery_documents() -> dict[str, dict[str, Any]]:
+    def sha(char: str) -> str:
+        return "sha256:" + char * 64
+
+    binding = {
+        "deployment_id": "synthetic-a6-deployment",
+        "deployment_epoch": 1,
+        "topology_generation": 1,
+        "model_id": "synthetic-a6-model",
+        "model_revision": "synthetic-immutable-revision",
+        "representation_digest": sha("1"),
+        "graph_digest": sha("2"),
+    }
+    compatibility = {
+        "model_id": "synthetic-a6-model",
+        "model_revision": "synthetic-immutable-revision",
+        "representation_digest": sha("1"),
+        "manifest_digest": sha("3"),
+        "tokenizer_digest": sha("4"),
+        "vocabulary_digest": sha("5"),
+        "special_token_policy_digest": sha("6"),
+        "architecture_digest": sha("7"),
+        "context_policy_digest": sha("8"),
+        "output_semantics_digest": sha("9"),
+        "generation_settings_digest": sha("a"),
+        "qualification_parity_policy_digest": sha("b"),
+        "workload_envelope_digest": sha("c"),
+    }
+    snapshot = CommittedDeliverySnapshot(
+        request_id="synthetic-a6-request",
+        encoded_prompt_token_ids=(7, 8, 9),
+        generation_settings={
+            "protocol": "mycelium.request_gateway.v2",
+            "max_new_tokens": 4,
+            "workload_profile_id": None,
+            "qos_class": None,
+        },
+        committed_token_ids=(101,),
+        delivery_cursor=1,
+        publisher_generation=1,
+        session_id="synthetic-a6-session",
+        source_attempt=1,
+        path_id="synthetic-a6-source-path",
+        path_digest=sha("d"),
+        path_attempt=0,
+        deployment_id=binding["deployment_id"],
+        deployment_epoch=binding["deployment_epoch"],
+        topology_generation=binding["topology_generation"],
+        source_qualification_digest=sha("0"),
+        model_id=binding["model_id"],
+        representation_digest=binding["representation_digest"],
+        tokenizer_digest=compatibility["tokenizer_digest"],
+    )
+    private_checkpoint = freeze_replay_checkpoint(
+        snapshot,
+        store_identity="synthetic-a6-owner-private-store",
+        created_at_unix_ms=1_000,
+        expiry_unix_ms=31_000,
+    )
+    checkpoint = private_checkpoint.public_projection()
+    owner = OwnerAuthority(
+        a4_atomic_commit="a" * 40,
+        deployment_id=binding["deployment_id"],
+        deployment_epoch=binding["deployment_epoch"],
+    )
+    owner.register_canonical_path(
+        "synthetic-a6-source-path",
+        digest=sha("d"),
+        attempt=0,
+    )
+    runtime = RecoveryRuntime(owner)
+    runtime.admit(
+        "synthetic-a6-request",
+        identity=owner.admission_identity(
+            "synthetic-a6-request",
+            path_id="synthetic-a6-source-path",
+        ),
+        absolute_deadline_ms=60_000,
+    )
+    return {
+        "private-request-replay-checkpoint-v1.json": checkpoint,
+        "full-context-recovery-intent-v1.json": build_recovery_intent(
+            binding,
+            retained_path_ids=("synthetic-a6-source-path",),
+            candidate_path_ids=("synthetic-a6-successor-path",),
+            equivalent_candidate_generations=1,
+            candidate_first_seen_unix_ms=1_000,
+            generated_at_unix_ms=2_000,
+            rejection_reasons=("synthetic_fixture_not_ready",),
+        ),
+        "full-context-recovery-runtime-v1.json": runtime.status(),
+        "full-context-recovery-qualification-v1.json": (
+            build_recovery_qualification(
+                binding,
+                qualification_id="synthetic-a6-unexecuted-qualification",
+                request_binding=recovery_request_binding(private_checkpoint),
+                successor_binding={
+                    "request_id": "synthetic-a6-request",
+                    "request_attempt": 2,
+                    "path_id": "synthetic-a6-successor-path",
+                    "path_attempt": 1,
+                    "path_manifest_digest": sha("e"),
+                    "placement_ids": ["synthetic-a6-successor-placement"],
+                },
+                compatibility=compatibility,
+                compatible=False,
+                issued_at_unix_ms=1_000,
+                expiry_unix_ms=31_000,
+                reason_codes=("synthetic_fixture_not_qualified",),
+            )
+        ),
+        "full-context-recovery-gate-v1.json": build_recovery_gate(
+            gate_id="A6",
+            scenario_id="synthetic-fixture-unexecuted",
+            gate_kind="deterministic_positive",
+            executed=False,
+            passed=False,
+            checks={"claim_boundary": "synthetic fixture; no executed gate"},
+        ),
+    }
 
 
 def planner_snapshot() -> dict[str, Any]:
@@ -2243,6 +2374,7 @@ def documents() -> dict[str, dict[str, Any]]:
         "m14-topology-projection-v1.json": m14_topology_projection(),
         "m15-plan-comparison-v1.json": m15_plan_comparison(),
         "concurrent-request-runtime-v1.json": m16_runtime_status(),
+        **a6_recovery_documents(),
         **a4_fixtures(),
         **internet_fixtures(),
         **route_explorer_fixtures(),

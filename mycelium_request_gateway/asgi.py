@@ -12,6 +12,7 @@ from .service import EventSubscription, RequestGatewayService
 
 HEALTH_PATH = "/healthz"
 QUALIFICATION_PATH = "/v1/qualification/current"
+RECOVERY_STATUS_PATH = "/v1/recovery/status"
 INFERENCE_PATH = "/v1/inference"
 MAX_REQUEST_BODY_BYTES = 262_144
 Receive = Callable[[], Awaitable[dict[str, Any]]]
@@ -174,6 +175,9 @@ class RequestGatewayASGIApplication:
             lambda: secrets.token_urlsafe(32)
         )
 
+    def recovery_public_projection(self) -> Mapping[str, Any]:
+        return self._service.recovery_public_projection()
+
     async def __call__(self, scope: Mapping[str, Any], receive: Receive, send: Send) -> None:
         scope_type = scope.get("type")
         if scope_type == "lifespan":
@@ -195,7 +199,7 @@ class RequestGatewayASGIApplication:
             return
 
         route = _inference_route(path)
-        recognized = path == QUALIFICATION_PATH or route is not None
+        recognized = path in {QUALIFICATION_PATH, RECOVERY_STATUS_PATH} or route is not None
         if not recognized:
             await _send_json(send, 404, {"error": "not_found"})
             return
@@ -214,6 +218,18 @@ class RequestGatewayASGIApplication:
                 return
             try:
                 projection = self._service.current_qualification()
+            except AdmissionError as exc:
+                await _send_json(send, 503, {"error": exc.code})
+                return
+            await _send_json(send, 200, projection)
+            return
+
+        if path == RECOVERY_STATUS_PATH:
+            if method != "GET":
+                await self._method_not_allowed(send, "GET")
+                return
+            try:
+                projection = self._service.recovery_public_projection()
             except AdmissionError as exc:
                 await _send_json(send, 503, {"error": exc.code})
                 return
