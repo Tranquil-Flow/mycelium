@@ -132,7 +132,7 @@ def _validate_route_identity(identity: RouteIdentity, execution_graph: Any) -> N
 class LiveObservatoryApplication:
     """Minimal read-only Observatory projection of the qualifier-owned record."""
 
-    def __init__(self, health: RouteHealthSource) -> None:
+    def __init__(self, health: Any) -> None:
         self._health = health
         self._lock = threading.Lock()
         # Survive backend restarts without replaying a generation below the
@@ -242,7 +242,7 @@ class LiveSwarmCoordinator:
     def __init__(
         self,
         membership_source: Any,
-        health: RouteHealthSource,
+        health: Any,
         *,
         seed_url: str | None = None,
     ) -> None:
@@ -319,6 +319,484 @@ class LiveStack:
     app: Any
     health: Any
     route: LiveRoute
+
+
+COLD_ROUTE_RESTART_ERROR_CODE = "cold_route_restart_in_progress"
+COLD_ROUTE_RESTART_EXHAUSTED_CODE = "cold_route_restart_budget_exhausted"
+COLD_ROUTE_RESTART_FAILED_CODE = "cold_route_restart_failed"
+
+
+class ColdRouteRestartError(RuntimeError):
+    """Bounded public error raised for requests that hit a cold restart seam."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+class ColdRouteRestartOwner:
+    """Own one replaceable physical route and cold-restart it with fresh authority.
+
+    The owner is both a ``LiveRoute`` proxy and a qualification source.  It never
+    replays the request that discovered a dead route: that request receives the
+    stable retryable error code, while the owner constructs, opens, qualifies,
+    and publishes a replacement route for subsequent requests.
+    """
+
+    is_simulated = False
+    acts_as_qualification_source = True
+
+    def __init__(
+        self,
+        *,
+        route_factory: Callable[[], LiveRoute],
+        open_and_qualify: Callable[[Any, int], tuple[RouteIdentity, Any]],
+        restart_budget: int = 1,
+    ) -> None:
+        if not callable(route_factory) or not callable(open_and_qualify):
+            raise ValueError("cold_route_restart_factory_required")
+        if (
+            type(restart_budget) is not int
+            or isinstance(restart_budget, bool)
+            or restart_budget < 0
+            or restart_budget > 8
+        ):
+            raise ValueError("cold_route_restart_budget_invalid")
+        self._route_factory = route_factory
+        self._open_and_qualify = open_and_qualify
+        self._restart_budget = restart_budget
+        self._lock = threading.RLock()
+        self._changed = threading.Condition(self._lock)
+        self._current: LiveRoute | None = None
+        self._startup_failed_route: LiveRoute | None = None
+        self._qualification: Any | None = None
+        self._generation = 0
+        self._restart_attempts = 0
+        self._state = "new"
+        self._last_error_code: str | None = None
+        self._last_restart_reason: str | None = None
+        self._closed = False
+        self._dropped = False
+        self._request_routes: dict[str, LiveRoute] = {}
+        self._stop_token_ids: tuple[int, ...] | None = None
+        self._m16_runtime_source: Callable[[], Mapping[str, Any] | None] | None = None
+        self._m17_model_operation_set = False
+        self._m17_model_operation: Mapping[str, Any] | None = None
+
+    def open(self) -> RouteIdentity:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("route_closed")
+            if self._current is not None or self._generation != 0:
+                raise RuntimeError("route_already_open")
+            self._state = "starting"
+            self._last_error_code = None
+        route = self._route_factory()
+        try:
+            identity, qualification = self._open_and_prepare(route, generation=1)
+        except BaseException:
+            with self._lock:
+                self._startup_failed_route = route
+                self._qualification = None
+                self._state = "failed"
+                self._last_error_code = COLD_ROUTE_RESTART_FAILED_CODE
+                self._changed.notify_all()
+            raise
+        with self._lock:
+            if self._closed:
+                self._startup_failed_route = route
+                raise RuntimeError("route_closed")
+            self._current = route
+            self._generation = 1
+            self._qualification = qualification
+            self._state = "ready"
+            self._last_error_code = None
+            self._last_restart_reason = None
+            self._changed.notify_all()
+        return identity
+
+    def publish(self, qualification: Any) -> None:
+        with self._lock:
+            if self._dropped or self._state != "ready":
+                return
+            self._qualification = qualification
+
+    def drop(self) -> None:
+        with self._lock:
+            self._dropped = True
+            self._qualification = None
+            self._changed.notify_all()
+
+    def current(self) -> Any | None:
+        with self._lock:
+            route = self._current
+            qualification = self._qualification
+            if (
+                self._dropped
+                or self._state != "ready"
+                or route is None
+                or qualification is None
+            ):
+                return None
+        try:
+            return qualification if route.is_alive() else None
+        except BaseException:
+            return None
+
+    @property
+    def execution_graph(self) -> Any:
+        route = self._current_route_or_raise()
+        return route.execution_graph  # type: ignore[attr-defined]
+
+    @property
+    def startup_challenge(self) -> Any:
+        route = self._current_route_or_raise()
+        return route.startup_challenge  # type: ignore[attr-defined]
+
+    def infer(
+        self,
+        token_ids: Sequence[int],
+        *,
+        max_new_tokens: int,
+        request_id: str,
+        sink: Any,
+        cancel_requested: Callable[[], bool] | None = None,
+        selected_placement_ids: Sequence[str] | None = None,
+        route_identity: Mapping[str, Any] | None = None,
+        locked_path_manifest: Mapping[str, Any] | None = None,
+        command_identity: Mapping[str, Any] | None = None,
+        authorize_cleanup: Callable[[float], float] | None = None,
+        publish_cleanup_receipt: Callable[[Mapping[str, Any]], None] | None = None,
+    ) -> Any:
+        route, generation = self._ready_route_or_raise()
+        if not self._route_alive(route):
+            self._restart_from(route, generation, reason="route_not_alive")
+            raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE)
+        with self._lock:
+            self._request_routes[request_id] = route
+        try:
+            return route.infer(
+                token_ids,
+                max_new_tokens=max_new_tokens,
+                request_id=request_id,
+                sink=sink,
+                cancel_requested=cancel_requested,
+                selected_placement_ids=selected_placement_ids,
+                route_identity=route_identity,
+                locked_path_manifest=locked_path_manifest,
+                command_identity=command_identity,
+                authorize_cleanup=authorize_cleanup,
+                publish_cleanup_receipt=publish_cleanup_receipt,
+            )
+        except BaseException as exc:
+            if self._restartable_failure(route, exc):
+                try:
+                    self._restart_from(route, generation, reason=self._error_code(exc))
+                except ColdRouteRestartError as restart_exc:
+                    raise restart_exc from exc
+                raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE) from exc
+            raise
+
+    def release_request(self, request_id: str) -> None:
+        with self._lock:
+            route = self._request_routes.pop(request_id, None)
+        if route is not None:
+            route.release_request(request_id)
+
+    def counters(self) -> RouteCounters:
+        with self._lock:
+            route = self._current
+            state = self._state
+            error = self._last_error_code
+        if route is not None and state == "ready":
+            return route.counters()
+        return RouteCounters(
+            frames_sent=0,
+            frames_received=0,
+            applied_operation_count=0,
+            fatal=error,
+        )
+
+    def public_status(self) -> Mapping[str, Any]:
+        with self._lock:
+            route = self._current
+            state = self._state
+            generation = self._generation
+            attempts = self._restart_attempts
+            budget = self._restart_budget
+            error = self._last_error_code
+            reason = self._last_restart_reason
+            qualification = self._qualification
+        route_alive = False
+        document: dict[str, Any]
+        if route is not None and state == "ready":
+            try:
+                document = dict(route.public_status())
+            except BaseException:
+                document = {"protocol": "mycelium.live_route_status.v1"}
+            route_alive = self._route_alive(route)
+        else:
+            document = {"protocol": "mycelium.live_route_status.v1"}
+        route_ready = bool(state == "ready" and route_alive and qualification is not None)
+        document["route_alive"] = route_alive
+        document["route_ready"] = route_ready
+        document["route_restarting"] = state == "restarting"
+        document["restart_failed"] = state == "failed"
+        document["cold_route_restart"] = {
+            "protocol": "mycelium.cold_route_restart_status.v1",
+            "state": state,
+            "generation": generation,
+            "attempts": attempts,
+            "budget": budget,
+            "budget_exhausted": state == "failed" and error == COLD_ROUTE_RESTART_EXHAUSTED_CODE,
+            "last_error_code": error,
+            "last_restart_reason": reason,
+        }
+        return document
+
+    def is_alive(self) -> bool:
+        with self._lock:
+            return not self._closed and self._state != "new"
+
+    def close(self) -> None:
+        routes: list[LiveRoute] = []
+        with self._lock:
+            self._closed = True
+            self._state = "closed"
+            if self._current is not None:
+                routes.append(self._current)
+                self._current = None
+            if self._startup_failed_route is not None:
+                routes.append(self._startup_failed_route)
+            self._qualification = None
+            self._changed.notify_all()
+        for route in self._unique_routes(routes):
+            route.close()
+
+    def cleanup(self) -> None:
+        with self._lock:
+            route = self._startup_failed_route
+            self._startup_failed_route = None
+        if route is not None:
+            route.cleanup()
+
+    def set_stop_token_ids(self, token_ids: Sequence[int]) -> None:
+        cached = tuple(token_ids)
+        with self._lock:
+            self._stop_token_ids = cached
+            route = self._current
+        if route is not None:
+            configure = getattr(route, "set_stop_token_ids", None)
+            if callable(configure):
+                configure(cached)
+
+    def set_m16_runtime_source(
+        self, source: Callable[[], Mapping[str, Any] | None]
+    ) -> None:
+        if not callable(source):
+            raise ValueError("m16_runtime_source_invalid")
+        with self._lock:
+            self._m16_runtime_source = source
+            route = self._current
+        if route is not None:
+            configure = getattr(route, "set_m16_runtime_source", None)
+            if callable(configure):
+                configure(source)
+
+    def set_m17_model_operation(self, document: Mapping[str, Any] | None) -> None:
+        with self._lock:
+            self._m17_model_operation_set = True
+            self._m17_model_operation = None if document is None else dict(document)
+            route = self._current
+        if route is not None:
+            configure = getattr(route, "set_m17_model_operation", None)
+            if callable(configure):
+                configure(document)
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        route = self._current_route_or_raise()
+        return getattr(route, name)
+
+    def _open_and_prepare(
+        self,
+        route: LiveRoute,
+        *,
+        generation: int,
+    ) -> tuple[RouteIdentity, Any]:
+        identity, qualification = self._open_and_qualify(route, generation)
+        self._apply_cached_configuration(route)
+        return identity, qualification
+
+    def _apply_cached_configuration(self, route: LiveRoute) -> None:
+        with self._lock:
+            stop_token_ids = self._stop_token_ids
+            runtime_source = self._m16_runtime_source
+            model_operation_set = self._m17_model_operation_set
+            model_operation = self._m17_model_operation
+        if stop_token_ids is not None:
+            configure_stop = getattr(route, "set_stop_token_ids", None)
+            if callable(configure_stop):
+                configure_stop(stop_token_ids)
+        if runtime_source is not None:
+            configure_runtime = getattr(route, "set_m16_runtime_source", None)
+            if callable(configure_runtime):
+                configure_runtime(runtime_source)
+        if model_operation_set:
+            configure_model = getattr(route, "set_m17_model_operation", None)
+            if callable(configure_model):
+                configure_model(model_operation)
+
+    def _ready_route_or_raise(self) -> tuple[LiveRoute, int]:
+        with self._lock:
+            if self._state == "restarting":
+                raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE)
+            if self._state == "failed":
+                raise ColdRouteRestartError(
+                    self._last_error_code or COLD_ROUTE_RESTART_FAILED_CODE
+                )
+            if self._closed:
+                raise RuntimeError("route_closed")
+            if self._state != "ready" or self._current is None:
+                raise RuntimeError("route_not_open")
+            return self._current, self._generation
+
+    def _current_route_or_raise(self) -> LiveRoute:
+        route, _generation = self._ready_route_or_raise()
+        return route
+
+    def _restart_from(self, route: LiveRoute, generation: int, *, reason: str) -> None:
+        with self._lock:
+            if self._state == "restarting":
+                raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE)
+            if self._state == "failed":
+                raise ColdRouteRestartError(
+                    self._last_error_code or COLD_ROUTE_RESTART_FAILED_CODE
+                )
+            if self._current is not route or self._generation != generation:
+                raise ColdRouteRestartError(COLD_ROUTE_RESTART_ERROR_CODE)
+            if self._restart_attempts >= self._restart_budget:
+                self._state = "failed"
+                self._last_error_code = COLD_ROUTE_RESTART_EXHAUSTED_CODE
+                self._last_restart_reason = reason[:128]
+                self._qualification = None
+                self._current = None
+                self._changed.notify_all()
+                retire_route = route
+                exhausted = True
+                next_generation = generation
+            else:
+                self._state = "restarting"
+                self._last_error_code = COLD_ROUTE_RESTART_ERROR_CODE
+                self._last_restart_reason = reason[:128]
+                self._qualification = None
+                self._current = None
+                self._restart_attempts += 1
+                self._changed.notify_all()
+                retire_route = route
+                exhausted = False
+                next_generation = generation + 1
+        try:
+            self._retire_route(retire_route)
+        except BaseException as exc:
+            self._mark_restart_failed(str(getattr(exc, "code", exc)) or type(exc).__name__)
+            raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE) from exc
+        if exhausted:
+            raise ColdRouteRestartError(COLD_ROUTE_RESTART_EXHAUSTED_CODE)
+        replacement: LiveRoute | None = None
+        try:
+            replacement = self._route_factory()
+            identity, qualification = self._open_and_prepare(
+                replacement,
+                generation=next_generation,
+            )
+            _ = identity  # Identity is validated by the opener; retained via route state.
+        except BaseException as exc:
+            if replacement is not None:
+                try:
+                    self._retire_route(replacement)
+                except BaseException:
+                    pass
+            self._mark_restart_failed(self._error_code(exc))
+            raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE) from exc
+        with self._lock:
+            if self._closed:
+                self._startup_failed_route = replacement
+                raise ColdRouteRestartError(COLD_ROUTE_RESTART_FAILED_CODE)
+            self._current = replacement
+            self._generation = next_generation
+            self._qualification = qualification
+            self._state = "ready"
+            self._last_error_code = None
+            self._last_restart_reason = None
+            self._changed.notify_all()
+
+    def _mark_restart_failed(self, reason: str) -> None:
+        with self._lock:
+            self._state = "failed"
+            self._last_error_code = COLD_ROUTE_RESTART_FAILED_CODE
+            self._last_restart_reason = reason[:128]
+            self._qualification = None
+            self._current = None
+            self._changed.notify_all()
+
+    @staticmethod
+    def _retire_route(route: LiveRoute) -> None:
+        close_error: BaseException | None = None
+        try:
+            route.close()
+        except BaseException as exc:  # pragma: no cover - defensive masking guard
+            close_error = exc
+        try:
+            route.cleanup()
+        except BaseException as exc:
+            if close_error is None:
+                close_error = exc
+        if close_error is not None:
+            raise RuntimeError("cold_route_restart_retire_failed") from close_error
+
+    @staticmethod
+    def _route_alive(route: LiveRoute) -> bool:
+        try:
+            return bool(route.is_alive())
+        except BaseException:
+            return False
+
+    def _restartable_failure(self, route: LiveRoute, error: BaseException) -> bool:
+        code = self._error_code(error)
+        return (not self._route_alive(route)) or code in {
+            "route_not_open",
+            "selected_route_not_open",
+        }
+
+    @staticmethod
+    def _error_code(error: BaseException) -> str:
+        code = getattr(error, "remote_code", None) or getattr(error, "code", None)
+        if not isinstance(code, str) or not code:
+            code = str(error).partition(":")[0]
+        if (
+            not code
+            or len(code) > 64
+            or not code[0].islower()
+            or any(
+                character not in "abcdefghijklmnopqrstuvwxyz0123456789_"
+                for character in code
+            )
+        ):
+            return "runtime_error"
+        return code
+
+    @staticmethod
+    def _unique_routes(routes: Sequence[LiveRoute]) -> tuple[LiveRoute, ...]:
+        seen: set[int] = set()
+        unique: list[LiveRoute] = []
+        for route in routes:
+            marker = id(route)
+            if marker not in seen:
+                seen.add(marker)
+                unique.append(route)
+        return tuple(unique)
 
 
 def _load_trusted_proxy_capability(path: Path) -> bytes:
@@ -458,10 +936,14 @@ def build_live_stack(
     configure_runtime_source = getattr(route, "set_m16_runtime_source", None)
     if callable(configure_runtime_source):
         configure_runtime_source(router.runtime_status)
-    health = RouteHealthSource(
-        route=route,
-        refresh=lambda: _qualify_open_route(route),
-        refresh_allowed=router.is_idle,
+    health = (
+        route
+        if getattr(route, "acts_as_qualification_source", False) is True
+        else RouteHealthSource(
+            route=route,
+            refresh=lambda: _qualify_open_route(route),
+            refresh_allowed=router.is_idle,
+        )
     )
     def product_app_factory(recovery_source: Callable[[], Mapping[str, Any]]) -> Any | None:
         return _optional_product_application(
@@ -2589,22 +3071,19 @@ def run_physical_server(
     force_relay: bool = False,
 ) -> int:
     deployment = native_deployment_projection(operator_plan)
-    route = PhysicalLiveRoute.from_operator_plan(
-        operator_plan,
-        seed_state_root=seed_state_root,
-        force_relay=force_relay,
-    )
-    stack: LiveStack | None = None
-    server: LiveHTTPServer | None = None
-    startup_complete = False
-    capacity_refresh: ModelCapacityRefresh | None = None
-    artifact_acquisition_store: ArtifactAcquisitionStore | None = None
-    try:
-        representation_authorization = _representation_authorization(
-            representation_authorization_file
+    selected_deployment_dir: Path | None = None
+
+    def route_factory() -> LiveRoute:
+        return PhysicalLiveRoute.from_operator_plan(
+            operator_plan,
+            seed_state_root=seed_state_root,
+            force_relay=force_relay,
         )
+
+    def open_and_qualify(concrete: Any, generation: int) -> tuple[RouteIdentity, Any]:
+        nonlocal selected_deployment_dir
         try:
-            identity = route.open()
+            identity = concrete.open()
         except ControllerError as exc:
             safe_code = exc.remote_code or exc.code
             _emit_serve_diagnostic(exc, stage="route_open")
@@ -2617,7 +3096,7 @@ def run_physical_server(
             raise RuntimeError(
                 f"startup_route_open_rejected:{_startup_reason(exc)}"
             ) from exc
-        _validate_route_identity(identity, route.execution_graph)
+        _validate_route_identity(identity, concrete.execution_graph)
         if (
             identity.deployment_id != deployment.deployment_id
             or identity.model_id != deployment.model_id
@@ -2625,45 +3104,69 @@ def run_physical_server(
         ):
             raise RuntimeError("startup_representation_identity_mismatch")
 
-        qualification = _qualify_open_route(route)
-        route.set_deployment_qualification(
+        qualification = _qualify_open_route(concrete)
+        concrete.set_deployment_qualification(
             qualification,
             quantization=deployment.quantization,
         )
-        if save_live_qualification is not None:
+        if generation == 1 and save_live_qualification is not None:
             _save_live_qualification(qualification, save_live_qualification)
         if a4_evidence is not None:
-            graph = route.execution_graph
+            graph = concrete.execution_graph
             a4_document = build_a4_qualification(
                 **a4_evidence,
                 qualification_digest=qualification_digest(qualification),
                 graph_digest=getattr(graph, "graph_digest", None),
                 manifest_digest=getattr(graph, "manifest_digest", None),
             )
-            route.set_a4_qualification(a4_document)
+            concrete.set_a4_qualification(a4_document)
 
         if replica_qualification_files:
             replica_documents = [
                 _read_replica_qualification_file(path)
                 for path in replica_qualification_files
             ]
-            route.set_replica_track_qualification(replica_documents)
+            concrete.set_replica_track_qualification(replica_documents)
 
-        selected_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
-        route.set_public_projections(
-            placement=_placement_projection(selected_deployment_dir),
-            topology=_topology_projection(selected_deployment_dir),
-            workload_comparison=_workload_comparison(selected_deployment_dir),
+        concrete_deployment_dir = deployment_dir or _deployment_from_plan(operator_plan)
+        selected_deployment_dir = concrete_deployment_dir
+        concrete.set_public_projections(
+            placement=_placement_projection(concrete_deployment_dir),
+            topology=_topology_projection(concrete_deployment_dir),
+            workload_comparison=_workload_comparison(concrete_deployment_dir),
         )
-        route.set_m17_model_operation(
+        concrete.set_m17_model_operation(
             _m17_model_operation(
-                selected_deployment_dir,
+                concrete_deployment_dir,
                 explicit_path=model_operation_file,
             )
         )
+        return identity, qualification
+
+    route = ColdRouteRestartOwner(
+        route_factory=route_factory,
+        open_and_qualify=open_and_qualify,
+        restart_budget=1,
+    )
+    stack: LiveStack | None = None
+    server: LiveHTTPServer | None = None
+    startup_complete = False
+    capacity_refresh: ModelCapacityRefresh | None = None
+    artifact_acquisition_store: ArtifactAcquisitionStore | None = None
+    try:
+        representation_authorization = _representation_authorization(
+            representation_authorization_file
+        )
+        identity = route.open()
+        qualification = route.current()
+        if qualification is None:
+            raise RuntimeError("startup_route_qualification_unavailable")
+        active_deployment_dir = selected_deployment_dir
+        if active_deployment_dir is None:
+            raise RuntimeError("startup_deployment_dir_unavailable")
         stack = _build_physical_product_stack(
             route=route,
-            deployment_dir=selected_deployment_dir,
+            deployment_dir=active_deployment_dir,
             execution_graph=route.execution_graph,
             bearer_token=secrets.token_urlsafe(32),
             product_state_root=product_state_root or seed_state_root,
@@ -2710,7 +3213,7 @@ def run_physical_server(
             evidence_registry=EvidenceProjectionRegistry(
                 runtime_source=route.public_status,
                 historical_records=_historical_evidence(
-                    selected_deployment_dir,
+                    active_deployment_dir,
                     deployment_id=identity.deployment_id,
                 )
                 + _explicit_historical_evidence(historical_evidence_files),
@@ -3035,6 +3538,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
+    "COLD_ROUTE_RESTART_ERROR_CODE",
+    "COLD_ROUTE_RESTART_EXHAUSTED_CODE",
+    "COLD_ROUTE_RESTART_FAILED_CODE",
+    "ColdRouteRestartError",
+    "ColdRouteRestartOwner",
     "LiveStack",
     "build_live_stack",
     "build_registry_stack",
