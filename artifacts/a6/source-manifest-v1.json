@@ -313,8 +313,8 @@
     },
     {
       "path": "tests/a13_macos/test_control_delivery_wakeup.py",
-      "sha256": "sha256:ce509846abcb98d860600aa9ab20c10af08c4fd448d2959ceb517b8802f7b677",
-      "size_bytes": 22036
+      "sha256": "sha256:2d960dbdb77a97b243b0e12f629e419f94b4b95775dbab7d30e664d08f78a787",
+      "size_bytes": 30482
     },
     {
       "path": "tests/a13_macos/test_control_origin.py",
@@ -517,6 +517,11 @@
       "size_bytes": 69139
     },
     {
+      "path": "tests/physical_qualification/test_cancel_phase_diagnostics.py",
+      "sha256": "sha256:f26c1de1dbc3d0750001c7d533ce03b60f1b52d1f2b97ce3091c8f309a2ccf2c",
+      "size_bytes": 22549
+    },
+    {
       "path": "tests/product_spine/test_a6_recovery_projection.py",
       "sha256": "sha256:53163d0b5af6e1896cd3e4af3dedbb7b1d968d022789207c1c1369ff26d4ff1c",
       "size_bytes": 5096
@@ -673,5 +678,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:46081b792f35ba44d2b8a1588223ace6f6626f39623fa9eb96eb613df9b174a5"
+  "source_digest": "sha256:13cb1947e7a90a33d0d5d4da5825f3f17c63edbecb80b6f05de04102483eb119"
 }
