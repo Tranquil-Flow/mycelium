@@ -13,6 +13,30 @@ actually observed, and collecting evidence after an incident.
 - Evidence for every command in this file: `runs/wp9-2/` (index in §0.2).
 - Owner of the un-executed parts: WP5. See §7.
 
+**Closure-train review (2026-09-21).** An independent draft of this runbook exists at
+`runs/wp9-2-draft/pilot-service-runbook.md` (795 lines, packet wp9-2, written 2026-09-20) and was diffed
+against this file line by line. It is a **parallel pass over the same recorded commit, not a replacement**:
+its extra bulk is reflowed prose, renumbered sections, and its own evidence index for the *same*
+observations (its `[PRIOR]` labels re-cite `runs/wp9-2/`). Only the deltas below were source-supported and
+are now in this file; the rest was deliberately not taken. Evidence for the review pass itself:
+`runs/20260921-closure-train/wp9/`.
+
+| Draft delta | Verdict | Basis |
+|---|---|---|
+| Duplicate-frame mechanism in §5.5 | **taken** — the draft's correction is the a4-at-most-once RCA's own correction | `rca/wp2-8-at-most-once-duplicate-frame.md`, "Correction (2026-09-16)" |
+| Recorded-commit build shape in §3.1 | **taken** | re-verified here: `git archive a5437e2 \| tar -t` = 1390 files (`02-recorded-commit-closure.txt`) |
+| Package-digest rollup derivation in §3.2 | **taken** | `scripts/pilot_readiness_gate.py:1310-1321`, read at source |
+| Terminate-path line citations in §4.1/§4.3 | **taken** | `mycelium_service_runner.py:102`, `:111`, `:188`, read at source |
+| Its re-observations of *this* host (launchctl/pmset samples, demo pid churn) | **not taken** | same evidence `runs/wp9-2/` already carries, at a different timestamp |
+| Its `NOT EXECUTED` ledger and label scheme | **not taken** | §0.1/§0.2 are this file's ledger; two ledgers in one document is worse than one |
+
+Re-verified while reviewing (unchanged in this file, listed in `runs/20260921-closure-train/wp9/`): all 12
+recorded payload digests, sizes and modes still match the gate tree (`01-digest-verify.txt`); the three
+`release/service-configs/*.json` blobs are byte-identical at `a5437e2` and at this worktree's HEAD
+`e23d243` (`02-recorded-commit-closure.txt`); `tests/path_cancellation_adversarial/test_at_most_once_dispatch.py`
+is green (`03-at-most-once-gate.txt`); `scripts/claim_boundary_audit.py` is `ok: true`
+(`04-claim-boundary-audit.txt`).
+
 **Why there is a "not executed" column everywhere.** Everything in this runbook that can be exercised
 without touching the live machine was exercised against the gate-built packages in a scratch directory.
 Anything that would need `sudo`, a real `launchctl` load, a root-owned path, or the live hackathon demo
@@ -175,6 +199,25 @@ points at `<OUTPUT-ROOT>/service-config.json`. Confirm the configs you are build
 ones (`git hash-object release/service-configs/node.json` → `f027fd66…` for node, `86bcab86…` for seed,
 `4bd68e22…` for supervisor — `05-build-scratch-root.txt`).
 
+To be sure you are building the **recorded bytes** rather than whatever HEAD happens to be, build from the
+recorded commit's own tree instead of from the checkout. The packager's import closure is not just its own
+files, so extract the whole tree:
+
+```sh
+git archive a5437e2f3e5269a77a4b214a4406c07ec320048e | tar -x -C <scratch-tree>
+/opt/homebrew/bin/python3 -B <scratch-tree>/scripts/package_m22_service.py \
+  --config <scratch-tree>/release/service-configs/node.json \
+  --output-root <OUTPUT-ROOT>/node
+```
+
+`git archive a5437e2f3e5269a77a4b214a4406c07ec320048e | tar -t` lists **1390 files**
+(`runs/20260921-closure-train/wp9/02-recorded-commit-closure.txt`), which is why the closure matters.
+Building that tree's three configs into a scratch root reproduces every recorded digest
+(`runs/wp9-2-draft/13-recorded-commit-build.txt`, `RESULT: PASS`). The same file records that the three
+`release/service-configs/*.json` blobs are byte-identical at `a5437e2` and at the current worktree HEAD, so
+today the two build shapes agree — but the `git archive` shape is the one that keeps agreeing when HEAD
+moves.
+
 ### 3.2 Verify the recorded digests before installing
 
 `[RAN] 03-digest-verify.txt` — `RESULT: PASS` for all 12 files, and every file is mode 0600.
@@ -186,6 +229,11 @@ ones (`git hash-object release/service-configs/node.json` → `f027fd66…` for 
 
 It compares `PACKAGE.json` → each `service-package-manifest.json` → the bytes on disk, and checks size
 and mode. Read a failure as "stop and re-record", never as "close enough".
+
+If you ever have to recompute the gate-level rollup itself, its derivation is: `sha256` over, for each role
+in sorted role order, `role\0`, then for each file in sorted path order `path\0sha256\n`
+(`[READ] scripts/pilot_readiness_gate.py:1310-1321`, `_package_digest`). Rebuilding at a different output
+root changes it, because the plist and unit embed the root (§2, fact 1).
 
 Also validate the plists before copying them anywhere:
 
@@ -304,8 +352,10 @@ that must land as a recorded package (see §8, risk 1), not as a hand edit on th
 2. Stop the service: `launchctl bootout gui/$(id -u)/org.mycelium.<service>` (`[NOT EXECUTED]`) or, to
    restart in place, `launchctl kickstart -k …` (`[NOT EXECUTED]`). Both are the same graceful path the
    runner implements as SIGTERM → worker process group → `stop_timeout_seconds` before SIGKILL
-   (`[RAN] 08-runner-rehearsal.txt`: SIGTERM produced `state=stopped_by_manager`, `child_exit_code=-15`;
-   a worker that ignored SIGTERM produced `-9`).
+   (`[READ] mycelium_service_runner.py:98-114`: `os.killpg(…, SIGTERM)` at `:102`, the wait at `:106`, and
+   `os.killpg(…, SIGKILL)` at `:111`, reached from the supervisor loop at `:188`; `[RAN] 08-runner-rehearsal.txt`:
+   SIGTERM produced `state=stopped_by_manager`, `child_exit_code=-15`; a worker that ignored SIGTERM
+   produced `-9`).
 3. Build the new version **into the same recorded output root** (§2, fact 1) and verify the digests
    (§3.2).
 4. Start it again and verify the running bytes (§4.4).
@@ -564,7 +614,30 @@ grep -h '"kind":"delivered"' <trace>/requests/*.jsonl | grep '"status":"duplicat
 The rehearsal run contained 18 such events. This is the observable behind
 `rca/wp2-duplicate-frame-observation.md`: over that 20-seed sweep, 6 of 20 seeds delivered a duplicated
 iroh frame, every failing seed had one present, and the request failed closed with a named terminal
-(`transport_closed`) inside budget. The invariants held; the cost is liveness, not execution safety.
+(`transport_closed`) inside budget. At that **default** injected duplicate rate the invariant held and the
+cost was liveness, not execution safety.
+
+**Correction (2026-09-16, packet a4-at-most-once) — the at-most-once invariant is not only about
+duplicated frames.** `rca/wp2-8-at-most-once-duplicate-frame.md` first reported a firing of
+`at_most_one_native_execution_per_command` at 5× the default duplicate rate, and then corrected its own
+mechanism hypothesis in a dated "Correction" section. The measured cause is **not** a duplicated frame
+reaching execution:
+
+- the firing episode had **no duplicated frame at all** — `SoakTransport`, the only transport-fault
+  consumer, is installed for the canonical episode only;
+- the two native executions came from two different call paths (`receive_hop` → `_execute_runtime`, then
+  `receive_progressive_prefill` → `_execute_runtime`), captured in-process with both call stacks;
+- the real mechanism is that **a dispatch rejected after its enqueue leaves its `HopWorkItem` in the
+  relay's shared scheduler queue**, and a later, unrelated dispatch's `pop_next()` pops and executes it —
+  a second native execution of an identity whose path had already been released.
+
+So the earlier "dedupe by message id" direction (and the same direction in `packets/wp5-preconditions.md`
+§7) pointed at the wrong layer. The fix that landed is in the scheduler/queue path:
+`5371acd fix(router): never execute a work item whose dispatch was rejected`, gated deterministically (it
+fires in ~0.07 s on **every** run) by
+`tests/path_cancellation_adversarial/test_at_most_once_dispatch.py` — re-run while reviewing this file,
+`4 passed in 0.08s` (`runs/20260921-closure-train/wp9/03-at-most-once-gate.txt`). The soak is corroboration
+for this defect from now on, not the detector.
 
 **Calibration warning.** Do not use `grep -L '"kind":"terminal"' <trace>/requests/*.jsonl` as a
 stuck-request detector: in the green rehearsal run (soak's own `green=True`, no invariant codes) that
@@ -578,9 +651,11 @@ submitted.
 
 - A stuck frame with a live worker: restart the worker (§5.3); the request is expected to reach a named
   terminal inside budget, so a hang past budget is the defect to report, not to retry silently.
-- A duplicated frame: the product decision is **open and WP5-owned** (§7) — either dedupe the
+- A duplicated frame: the *tolerance* decision is **open and WP5-owned** (§7) — either dedupe the
   receipt/pump path by message id, or accept fail-closed-with-a-name as the contract and record it in the
-  claim sheet's exclusions. Do not weaken `at_most_one_native_execution_per_command` while doing it.
+  claim sheet's exclusions. Do not weaken `at_most_one_native_execution_per_command` while doing it. Note
+  that this is now a *scoping* question, not the root cause of the at-most-once firing: that was the
+  scheduler-queue defect corrected above and fixed in `5371acd`.
 - Reproduce deterministically before and after any change:
   `python3 -B -m mycelium_testbed.soak --seed <N> --events 200 --run-id repro`. Read the result
   as **structural**: what gates is any invariant firing and terminal coverage, named in
@@ -620,6 +695,12 @@ snapshots are re-derived. An operator must **not** hand-edit the constant: the U
 (`routeStatus.ts:490`,`:564`), so a change is a contract migration through the canonical producers, and
 `docs`/manifest rules forbid hand edits. Until WP5 lands, treat "the peer kept advertising its start-up
 address" as an expected symptom of a network change, not as a bug in the peer.
+
+One half of that delivery-path work **has** landed, so do not look for it as a pending item: the owner's
+cleanup-receipt wait is event-driven now — `[READ] mycelium_live/route.py:3185` waits on the route's stop
+event with the poll interval as its upper bound, rather than sleeping out a bare interval. What is still
+missing is the same section's other half: re-deriving the advertised value instead of publishing one
+captured at start-up.
 
 ### 5.7 Quick reference: the runner's own status vocabulary
 
@@ -690,7 +771,12 @@ lands. The pilot-specific material belongs to WP5 and is deliberately **not** de
   `[NOT EXECUTED - would bind 8791 and needs WP5 material]`.
 - **Useful-model stage packs / the model artefact.** Nothing here covers model bytes, MLX, or stage
   packs.
-- **Duplicate-frame policy** (§5.5): dedupe vs fail-closed-with-a-name.
+- **Duplicate-frame policy** (§5.5): the *tolerance* decision (dedupe vs fail-closed-with-a-name) is still
+  open. The execution-safety half is **closed**: the at-most-once firing was a scheduler-queue defect
+  (a rejected dispatch left its `HopWorkItem` for a later `pop_next()`), fixed in `5371acd` and gated by
+  `tests/path_cancellation_adversarial/test_at_most_once_dispatch.py`. The message-id-dedupe direction
+  originally recorded here did not describe that firing
+  (`rca/wp2-8-at-most-once-duplicate-frame.md`, "Correction (2026-09-16)").
 - **Stale advertised bound / address re-derivation** (§5.6): the invariant "a published address or bound
   is either re-derived on change or rejected with a named reason" and one test per site.
 - **Rotation and watchdog.** The manifest declares
@@ -730,3 +816,21 @@ lands. The pilot-specific material belongs to WP5 and is deliberately **not** de
    limitation concretely.
 7. **This document was written against the packages built at `a5437e2…`.** Re-run §3.2 before relying on
    any digest in it.
+8. **`tests/security/test_release_security_audit.py::test_current_checkout_and_runbook_preserve_claim_boundary`
+   was RED at frozen head `e23d243`, and was not caused by this document.** It failed on
+   `audit_repository(ROOT)["ok"] is True` with one finding:
+   `secret_cli_argument` at `mycelium_testbed/emulation.py:4020`, subject `--token-steps`. That is the
+   emulation's token-*step* budget (`TOKEN_STEPS = 8`, `mycelium_testbed/emulation.py:204`), not a secret;
+   the audit's own rule flags any `--<secret-word>` option that does not end in a file/env/fd/path/ref
+   suffix (`scripts/release_security_audit.py:66-69,240-243`), so the name trips it as a false positive.
+   This document declares no CLI argument at all (0 hits for `add_argument`), so it cannot produce that
+   class of finding; the failing byte is a harness source file, and neither renaming its option nor
+   relaxing the audit rule is a docs-only change. Left untouched on purpose — see
+   `runs/20260921-closure-train/wp9/06-claim-boundary-attribution.txt`. The document half of the same test
+   (`docs/security/release-security-audit.md`'s boundary literals) is unaffected by this file.
+
+   **Source repair:** `2c1115a` renames the emulation-only CLI option to `--generation-steps`
+   while preserving the integer parser, default and runtime `token_steps` parameter. The old spelling
+   is no longer accepted; update external emulation commands accordingly. No security-audit rule,
+   exception or guard changed. The repair's CLI/emulation/security/claims/contracts selection passed
+   94 tests (`runs/20260921-closure-train/security-fix/green.log`); that is not full-suite or physical proof.

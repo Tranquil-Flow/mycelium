@@ -1,0 +1,260 @@
+{
+  "protocol": "mycelium.gate_completion_record.v1",
+  "gate_id": "A0",
+  "state": "integrated_unqualified",
+  "state_basis": "The independent 2026-09-15 review gives A0 as integrated/unqualified; ERRATA-29 §3 records the same stage. The register cannot express it (see register_treatment) and this record does not promote it: no physical, browser or full-regression requirement of A0's own specification has been executed on this head.",
+  "outcome": {
+    "decision": "held_open",
+    "gate_complete": false,
+    "register_row_written": false,
+    "manifest_repin_owed": false,
+    "reason": "A0's machinery is green on this head (measured below) but its own specification's live/browser and atomic-commit requirements are unexecuted, and the register cannot hold an A0 row without asserting a contract A0 does not have.",
+    "maximum_truthful_claim": "source-level governance machinery qualification only"
+  },
+  "claim_boundary": "This record asserts exactly one thing: on commit e23d2433947668a7ed5da8577c00d6307db98e58 of the pilot integration line, A0's governance/claims machinery is present and green as measured below, and NO register row, manifest re-pin, guard, threshold, expectation set or identity check was changed to produce it. It does NOT claim A0 is complete, does not claim any live, physical, browser or full-regression evidence, does not claim the goal's gap (a) (the audit is not digest-blind on this head) and does not claim the governing plan was amended.",
+  "specification": {
+    "path": "docs/superpowers/specs/2026-08-11-mycelium-a0-governance-reconciliation.md",
+    "digest": "sha256:f42a9ea77aeafe69229b07e8221dcae4ef3e9a1c0f4b103544e3feddf912b63a",
+    "governing_plan": "docs/superpowers/plans/2026-08-11-mycelium-completion-plan.md",
+    "governing_plan_references_this_specification": false,
+    "note": "ERRATA-29 §1: a register row requires the specification path to appear verbatim in the governing plan. It does not. This record does not amend the plan."
+  },
+  "closing_commit": "assigned_by_git_to_the_containing_commit_of_this_record",
+  "closing_commit_is_an_a0_atomic_feature_commit": false,
+  "bindings": {
+    "head": "e23d2433947668a7ed5da8577c00d6307db98e58",
+    "checklist": {
+      "path": "docs/handover/mycelium-completion-checklist.v1.json",
+      "digest": "sha256:9aa2614696a2925eb0305713233393fe1491dfc17f2c609e21a4ca3ab48b7a0c",
+      "edited_by_this_record": false
+    },
+    "audit": {
+      "path": "scripts/mycelium_completion_audit.py",
+      "digest": "sha256:c5cab7b54436ea5b16a53babbccab45e275a6d8ba3af7e7113484860cb6e3160",
+      "edited_by_this_record": false
+    },
+    "claim_boundary_audit": {
+      "path": "scripts/claim_boundary_audit.py",
+      "digest": "sha256:90cf0cee77c5185ec97cc44b01ce3b8a16e4dd8a95b31e6094b94e1eda06cd5e"
+    },
+    "contract_audit": {
+      "path": "scripts/contract_audit.py",
+      "digest": "sha256:ea3d3db187d8b61fc872351efa32f0b2cb79b73e2cc9a5e4def3db19e4d6727d"
+    },
+    "governance_gate": {
+      "path": "scripts/governance_gate.py",
+      "digest": "sha256:27025d4064ba35f9ba868d973e75e4ed3d8e9b14e8674617587d768fd35ded78"
+    },
+    "blocker_claim_tests": {
+      "path": "tests/governance/test_completion_audit_blocker_claims.py",
+      "digest": "sha256:2c6a1f42edb49a76516facea6651c287558e1d5f3b146d61f79eafc5c5377122",
+      "landed_in": "27c45f2"
+    },
+    "blocker_claim_grammar_doc": {
+      "path": "docs/operations/blocker-claim-clauses.md",
+      "digest": "sha256:751224fe688f2ee9a3386ecc5b50e1221990fb26e62d51e7073d23d6467fbf99",
+      "landed_in": "c6c01bf"
+    }
+  },
+  "requirements": {
+    "vocabulary": {
+      "declared_by_a0_specification": "A0's own specification (or its governing plan section) binds this requirement in substance.",
+      "not_declared_by_a0_specification": "A0's own specification does not bind this requirement; recording it as satisfied would be the form-passes-truth-fails defect ERRATA-29 §2 rejects.",
+      "executed_on_head": "Evidence actually produced on this head, cited below.",
+      "not_executed_on_head": "No evidence on this head. Recorded as a gap, never as a pass."
+    },
+    "assessments": [
+      {
+        "requirement": "specification",
+        "declared_by_a0_specification": true,
+        "executed_on_head": true,
+        "disposition": "partial",
+        "evidence": "docs/superpowers/specs/2026-08-11-mycelium-a0-governance-reconciliation.md @ sha256:f42a9ea7…; the governing plan does not reference it verbatim, so the register's plan binding cannot be satisfied without a plan edit this lane is not authorised to make."
+      },
+      {
+        "requirement": "implementation",
+        "declared_by_a0_specification": true,
+        "executed_on_head": true,
+        "disposition": "partial",
+        "evidence": "A0 spec §3-§6 machinery is present and green on this head: scripts/governance_gate.py exit 0, scripts/claim_boundary_audit.py exit 0 (612 source files), scripts/contract_audit.py exit 0 (80 contracts), scripts/mycelium_completion_audit.py exit 0 (13 gates, primary A6), and the F1 blocker-claim check (27c45f2) is live. Not assessed here: A0 spec §7.1/§7.2 per-clause coverage."
+      },
+      {
+        "requirement": "product_integration",
+        "declared_by_a0_specification": true,
+        "executed_on_head": "not_assessed",
+        "disposition": "open",
+        "evidence": "A0 spec §6 requires CI to invoke the aggregate gate on every change to production source, UI source, contracts, specs, plans or the architecture ledger. This lane did not enumerate CI workflow wiring on this head and makes no claim about it."
+      },
+      {
+        "requirement": "deterministic_positive",
+        "declared_by_a0_specification": true,
+        "executed_on_head": true,
+        "disposition": "partial",
+        "evidence": "tests/governance: 30 passed, exit 0 on this head (command in verification). Source-level determinism only; A0's spec does not bind a physical positive."
+      },
+      {
+        "requirement": "deterministic_negative",
+        "declared_by_a0_specification": true,
+        "executed_on_head": "not_assessed",
+        "disposition": "open",
+        "evidence": "A0 spec §7.4 requires negative repository copies (one unlisted POST surface, one unregistered boundary protocol, one promoted milestone) to fail deterministically. This lane did not verify those negatives on this head."
+      },
+      {
+        "requirement": "physical_positive",
+        "declared_by_a0_specification": true,
+        "declared_form": "A0 spec §7.5 requires a real browser-path check; A0 spec §1 forbids A0 promoting any runtime capability.",
+        "executed_on_head": false,
+        "disposition": "open",
+        "evidence": "No browser-path check for A0's own contract has been executed on this head, and none is fabricated here. The register's literal 'physical positive' witness string is absent from A0's specification (ERRATA-29 §1)."
+      },
+      {
+        "requirement": "physical_negative",
+        "declared_by_a0_specification": false,
+        "executed_on_head": false,
+        "disposition": "open",
+        "evidence": "A0's specification binds no physical negative; the register demands the literal witness string for every row (ERRATA-29 §1). Writing the claim to satisfy the template is the defect ERRATA-29 §2 rejects."
+      },
+      {
+        "requirement": "ui_live_all_eight",
+        "declared_by_a0_specification": false,
+        "declared_form": "A0 spec §6 binds Settings and Readiness only; §7.5 binds surviving refresh and workspace switching.",
+        "executed_on_head": false,
+        "disposition": "not_declared_by_a0_specification",
+        "evidence": "An eight-workspace live UI contract is not A0's; asserting it would exceed A0's specification. The two-workspace projection A0's spec does bind was not executed on this head either, so nothing is claimed live."
+      },
+      {
+        "requirement": "browser_navigation_reconnect",
+        "declared_by_a0_specification": false,
+        "executed_on_head": false,
+        "disposition": "not_declared_by_a0_specification",
+        "evidence": "A0 spec §7.5 requires survival of refresh and workspace switching, not navigation/reconnect. Not executed on this head."
+      },
+      {
+        "requirement": "browser_second_session",
+        "declared_by_a0_specification": false,
+        "executed_on_head": false,
+        "disposition": "not_declared_by_a0_specification",
+        "evidence": "A0 spec §7.5 requires that the surface never show release-ready; a second-session contract is not A0's. Not executed on this head."
+      },
+      {
+        "requirement": "full_regressions_audits",
+        "declared_by_a0_specification": true,
+        "executed_on_head": true,
+        "disposition": "partial",
+        "evidence": "Audits and named suites measured green on this head (see verification). NOT full: the core suite carries 3 real and 2 order-dependent failures recorded in ERRATA-38, so 'full regressions' is not satisfied and is not claimed."
+      },
+      {
+        "requirement": "architecture_handover",
+        "declared_by_a0_specification": true,
+        "executed_on_head": "not_assessed",
+        "disposition": "open",
+        "evidence": "A0 spec §7.6 requires the corrected architecture and recovery prose inside A0's single atomic commit. docs/handover/CURRENT_AND_PLANNED_ARCHITECTURE.md exists on this head; this lane did not verify its A0-era corrections."
+      },
+      {
+        "requirement": "atomic_feature_commit",
+        "declared_by_a0_specification": true,
+        "executed_on_head": false,
+        "disposition": "open",
+        "evidence": "A0 spec §7.6 requires A0 to land as ONE atomic commit containing plan, corrected architecture prose, ledger, audits, tests, CI gate, pin refresh and UI projection. No such commit exists. The F1 change has its own atomic commit (27c45f2); this record's containing commit is a record-only commit and is not an A0 atomic feature commit."
+      }
+    ]
+  },
+  "register_treatment": {
+    "decision": "no_register_row_for_A0_A1_A2",
+    "decided_without_guard_weakening": true,
+    "register_scope_observed_at_source": {
+      "path": "scripts/mycelium_completion_audit.py",
+      "expected_gates": "A3..A15",
+      "expected_gates_source": "EXPECTED_GATES = tuple(f\"A{index}\" for index in range(3, 16)) (:48)",
+      "checklist_top_fields_closed": "set(document) != TOP_FIELDS appends checklist_shape_invalid (:571)",
+      "gate_id_tuple_equality": "tuple(gate_ids) != EXPECTED_GATES (:733)",
+      "primary_gate_must_be_non_complete": ":765-:768",
+      "non_primary_gate_state_restriction": ":774-:776"
+    },
+    "gates": {
+      "A0": {
+        "row_written": false,
+        "reason": "A row for A0 fires, per gate: specification_gate_unbound, specification_physical_positive_missing, specification_physical_negative_missing, specification_design_boundary_missing, specification_atomic_commit_missing, specification_workspace_missing x8 and plan_specification_unbound (ERRATA-29 §1). Satisfying them would require writing claims into A0's specification that its own governing plan section contradicts (ERRATA-29 §2, packet packets/a0-2-requirement-contract.md).",
+        "home_of_state": "this record"
+      },
+      "A1": {
+        "row_written": false,
+        "reason": "Same row contract failure as A0 (ERRATA-29 §1). A1's re-measure is held as evidence outside the register: runs/a0-a1-closure/2026-09-20-a1-remeasure-on-frozen-head.md (tests/product_spine 27 passed, exit 0, on 7d0ffb6), independently re-measured by this lane on this head (27 passed, exit 0).",
+        "home_of_state": "runs/a0-a1-closure/ plus this record"
+      },
+      "A2": {
+        "row_written": false,
+        "reason": "Same row contract failure as A0 (ERRATA-29 §1). Its specification exists on this head (docs/superpowers/specs/2026-08-11-mycelium-a2-swarm-artifact-acquisition.md @ sha256:f4e6e507…) but this lane produced no A2 evidence and claims none.",
+        "home_of_state": "none on this head; not claimed"
+      }
+    },
+    "blocked_alternatives_and_why_untouched": {
+      "extend_EXPECTED_GATES": "Guard-class. It would turn a currently green audit red with gate_sequence_invalid and is blocked pending the owner's answer to Q1 (runs/a0-a1-closure/2026-09-20-owner-question-register-scope.md). NOT touched.",
+      "requirement_contract_not_applicable_field": "Drafted and bounded in packets/a0-2-requirement-contract.md; the mechanism exists only on the unlanded candidate branch wp/a0-requirement-contract @ 9b42200 (READ ONLY this lane, not re-done). Not landed here.",
+      "complete_row_using_not_applicable": "In the unlanded requirement-contract candidate 9b42200, a justified not-applicable requirement makes complete unreachable at scripts/mycelium_completion_audit.py:817 (owner question Q3 proof). This is a citation to that candidate, not the current 809-line audit. Changing that guard's meaning is a parent/owner decision. NOT touched.",
+      "second_register_for_A0_A2": "Option (b) in the owner question; a new governance artifact needing its own audit consumer. Not created by this lane."
+    },
+    "owner_decisions_still_open": ["Q1 register scope A0-A2", "Q2 more than one gate in flight", "Q3 may an exempting gate ever be complete"]
+  },
+  "pin_treatment": {
+    "adjudicated_claim": "The current goal (GOAL-prompt-gate-closeout-v5.md §3.6, echoed by packets/a0-2-requirement-contract.md line 68) states the checklist is contract-pinned and that a checklist edit and its manifest re-pin must land in the same commit.",
+    "adjudication": "REFUTED at this head. The checklist has no live digest pin. Re-pinning is not owed and would be destructive.",
+    "verified_at_source": [
+      "contracts/contract-manifest.v1.json (sha256:99de2860…): 0 occurrences of 'completion-checklist'; no docs/handover path among its owner sources. The contract manifest is the live pinning mechanism and it does not pin the checklist.",
+      "docs/handover/a5-integration-source-manifest.v1.json (sha256:bf100e9c…): protocol mycelium.combined_candidate_source_manifest.v1, base_commit 0281498298f4b51a8fb656c9c3b3ddc9f082e225, 1124 pins; it pins the checklist at sha256:e66fdd5eac0f015aac44bf6d52a535ca1f4111c3fcfcd391402cf659957cd8bb, size_bytes 78592.",
+      "That pin is CORRECT for its own base: git show 0281498298f4b51a8fb656c9c3b3ddc9f082e225:docs/handover/mycelium-completion-checklist.v1.json hashes to e66fdd5eac0f015aac44bf6d52a535ca1f4111c3fcfcd391402cf659957cd8bb and measures 78592 bytes (verified by this lane). The base commit is an ancestor of this head (git merge-base --is-ancestor exit 0).",
+      "The checklist on this head is 79117 bytes / sha256:9aa26146…, so the historical pin does not describe it — by design: that file describes the 1124-file candidate of commit 02814982, and rewriting its sha256/size_bytes would make a retained artifact lie about its own base commit (ERRATA-34).",
+      "No live enforcement: the only test naming that protocol (tests/a8_acceptance/test_prospective_source_selection.py) constructs its own manifest dict in-test; scripts/contract_audit.py never mentions the checklist or docs/handover; the completion audit reads the checklist as data to validate, not as a pinned source.",
+      "mycelium_internet/physical.py reads the combined manifest only as the trust root for the historical A8 source-binding digest (it requires the manifest's own digest to equal the recorded expected digest before verifying pins), so editing that manifest would invalidate historical A8 binding verification rather than satisfy a live obligation."
+    ],
+    "action_taken": {
+      "manifests_edited": 0,
+      "manifest_regenerated": false,
+      "checklist_edited": false
+    },
+    "consequence": "A future checklist edit needs the edit and nothing else; the historical manifests stay immutable."
+  },
+  "verification": {
+    "environment": "env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV /opt/homebrew/bin/python3 -B",
+    "worktree": "/Users/evinova-self/Documents/playground/mycelium-closure-20260921-a0",
+    "head_at_measurement": "e23d2433947668a7ed5da8577c00d6307db98e58",
+    "logs_outside_repository": "/Users/evinova-self/Documents/mycelium-core-program/runs/20260921-closure-train/a0/logs/",
+    "results": [
+      {"command": "python3 -B scripts/mycelium_completion_audit.py", "exit": 0, "stdout": "Mycelium completion audit OK: 13 gates, primary A6"},
+      {"command": "python3 -B scripts/claim_boundary_audit.py", "exit": 0, "stdout": "claim boundary audit OK: 612 source files"},
+      {"command": "python3 -B scripts/contract_audit.py", "exit": 0, "stdout": "contract audit OK: 80 contracts"},
+      {"command": "python3 -B scripts/governance_gate.py", "exit": 0, "stdout": "governance gate OK: ledger, claim boundary, and contracts"},
+      {"command": "python3 -B -m pytest tests/product_spine -q", "exit": 0, "stdout": "27 passed"},
+      {"command": "python3 -B -m pytest tests/governance -q", "exit": 0, "stdout": "30 passed"}
+    ],
+    "count_drift_noted": "The goal's §2 quotes claim_boundary_audit OK over 502 files and contract_audit over 79 contracts; measured here: 612 and 80. Counts are re-measured, never quoted.",
+    "post_edit_rerun": "PERFORMED after this record was written, with identical results: completion audit exit 0 (13 gates, primary A6 -- the register is untouched by this record), claim_boundary_audit exit 0 (612 source files), contract_audit exit 0 (80 contracts), governance_gate exit 0, tests/product_spine 27 passed + tests/governance 30 passed (57 passed, exit 0). Logs: runs/20260921-closure-train/a0/logs/post-*.txt."
+  },
+  "not_claimed": [
+    "A0 is complete, or will complete by this record.",
+    "Any live, physical, browser, second-session, reconnect or eight-workspace evidence for A0.",
+    "That the goal's A0 gap (a) (audit digest-blindness) is a live gap on this head; ERRATA-35 records the opposite and this lane did not re-open it.",
+    "That the register or any guard, threshold, expectation set, identity check, allow-list or timeout was changed: none was.",
+    "That the historical a5-integration-source-manifest.v1.json is stale: it is internally consistent at its own base.",
+    "That A1's or A2's gate state is hereby closed.",
+    "That the requirement-contract mechanism (9b42200) is landed: it is not on this branch."
+  ],
+  "limitations": [
+    "Source-level evidence only; no device, browser, route or live service was exercised.",
+    "A0 spec §7.1-§7.2 per-clause coverage and §7.4 negative repository copies were not verified by this lane.",
+    "No mechanical consumer reads gate completion records today (only scripts/run_a4_qualification_gate.py writes one), so this record's force is review, not audit.",
+    "The A0/A1/A2 register question is owner-facing and open; this record records the treatment but does not decide it."
+  ],
+  "provenance": {
+    "written_by": "A0 closure lane subagent, 2026-09-21",
+    "evidence_read_first": [
+      "runs/wp8-02-useful-two-mac/ERRATA-29.md",
+      "runs/wp8-02-useful-two-mac/ERRATA-34.md",
+      "packets/a0-2-requirement-contract.md",
+      "runs/a0-a1-closure/2026-09-20-owner-question-register-scope.md",
+      "docs/operations/blocker-claim-clauses.md",
+      "docs/operations/red-by-design-suites.md"
+    ],
+    "read_only_candidates_not_redone": ["e45cc42 (mycelium-a0-claims)", "9b42200 (mycelium-a0-reqcontract)"]
+  }
+}
