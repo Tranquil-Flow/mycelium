@@ -60,6 +60,27 @@ and the wall-clock bound it keeps is unchanged (``WAKE_BOUND_SECONDS``) and stil
 pinned statement -- claim latency must not be a function of the poll interval -- with
 its anchor moved onto the delivery path, so its number is the wake-up's own cost.
 
+**The control loop's own wait, measured the same way.**
+``test_native_completion_wakes_the_control_loop_before_its_interval_expires`` states the
+same guarantee on the *pump's* wait (``TargetControlPump.wake`` / ``wait_for_wake``), and
+it used to measure its latency from **before the native command it stubs**: ``release.set()``
+unblocks the stub, the real ``send`` then runs over the sidecar, and only when that future
+completes does its done-callback signal ``wake``.  Measured on one host at load1 8.6-13.1,
+ten samples: the stubbed command's own execution was 0.028-0.047 s of a 0.028-0.047 s total
+(99.0-99.3 %), and the signal-to-release cost the assertion is actually about was
+0.00010-0.00024 s (<= 0.5 %) in the same samples.  A second ten-sample batch on the same
+host at load1 5.6-6.2 measured the same shape at 0.016-0.020 s of 0.016-0.021 s with the
+signal-to-release cost at 0.00005-0.00007 s: the quantity the old anchor measured tracks
+host load (16 ms -> 47 ms between the two batches), the one it must measure does not.
+The consumed failure (0.1046 s against
+``< 0.1 s``) is that same pre-signal quantity at L2 self-load.  So it is re-anchored onto
+the pump's own delivery signal, exactly as above, and the facts that separate a wake-up from
+interval polling are asserted directly instead: the completion **signalled**; the signal
+**moved** the state the parked wait measures (``_delivery_wakeup``); and the parked wait was
+**ended** by that signal -- ``threading.Event.wait`` returns True only when the flag was set,
+so a wait that returns False paid its full timeout, which is the interval and not the
+wake-up.  The bound itself is unchanged (``WAKE_BOUND_SECONDS``).
+
 Offline and fleet-free: a loopback-TLS mailbox, a real native worker and the real
 ``ManagedTargetRuntime`` control loop on one machine.  No Mac, no relay, no fleet.
 """
@@ -206,6 +227,114 @@ def _assert_the_enqueue_woke_the_park(
         f"step {step_seconds}s (owner-side enqueue cost {owner_enqueue_cost:.3f}s, "
         "excluded: it is Ed25519 + BEGIN IMMEDIATE + synchronous=FULL + loopback TLS, "
         "not the delivery path): the delivery path is still interval-gated"
+    )
+
+
+class _DeliveryWakeSpy(threading.Event):
+    """The pump's own delivery flag, observed without changing its semantics.
+
+    ``set``/``wait`` record and then delegate to ``threading.Event``, so the pump's
+    behaviour is bit-for-bit unchanged.  This is the lowest level at which the guarantee
+    can be stated honestly: ``TargetControlPump.wake`` is ``self._delivery_wakeup.set()``
+    and the control loop's wait is ``self._delivery_wakeup.wait(interval)`` inside
+    ``wait_for_wake``, so this flag *is* the delivery signal -- and a wait that never
+    touches it (an interval poll over any other state) is exactly the implementation the
+    assertion has to exclude.
+
+    * ``signals`` -- when the flag was set, i.e. when ``wake`` ran.
+      ``ConcurrentTargetControlPump._dispatch_ready`` calls it from the native dispatch
+      future's done-callback, the moment the native command finished and the ack that
+      frees this peer's next delivery slot became sendable.  Everything the test spends
+      before that point -- unblocking the stubbed ``send``, the real native command
+      itself, the executor thread's own scheduling -- is not the wake-up, and measuring a
+      *wake-up* bound from before it is what made this test's number a function of host
+      load.  The stamp is taken at or before the real ``set``, so a latency measured from
+      it is never smaller than the true signal-to-release cost.
+    * ``moved`` -- the sets that took the flag from clear to set.  A set on a flag that
+      was already set (a signal nobody consumed) cannot have released a parked wait.
+    * ``waits`` -- every wait on the flag, as ``(woken, started_at, ended_at)``.
+      ``threading.Event.wait`` returns True only when the flag was set, so a wait that
+      returned True was *ended by the signal*, and one that returned False paid its whole
+      timeout -- which is the interval, not the wake-up.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.signals: list[float] = []
+        self.moved = 0
+        self.waits: list[tuple[bool, float, float]] = []
+
+    def set(self) -> None:
+        at = time.monotonic()
+        moved_before = self.is_set()
+        super().set()
+        self.signals.append(at)
+        if self.is_set() and not moved_before:
+            self.moved += 1
+
+    def wait(self, timeout=None):
+        started = time.monotonic()
+        woken = super().wait(timeout)
+        self.waits.append((bool(woken), started, time.monotonic()))
+        return woken
+
+
+def _assert_the_completion_woke_the_control_loop(
+    wake: _DeliveryWakeSpy, *, native_send_cost: float
+) -> None:
+    """The stated guarantee, on quantities the native command's own cost cannot dominate.
+
+    Each of these is false for an interval-gated control-loop wait, at any host load:
+
+    * the parked loop **waited on the delivery signal at all** -- a loop that only
+      re-attempts on an interval never touches the flag;
+    * the native command finishing **signalled** it (the flag was set by ``wake``, which
+      the pump runs from the completion callback) and the set **moved** it -- a signal
+      that does not move the state the wait measures cannot waken it;
+    * the signal *ended* the parked wait: no wait that started after the signal paid its
+      own timeout, and a wait returned True after it (``Event.wait`` returns True only
+      when the flag was set) -- that is the difference between a wake-up and the interval;
+    * the wake-up latency, measured from the signal, is under ``WAKE_BOUND_SECONDS``.
+
+    ``native_send_cost`` is reported for diagnosis only: it is the cost the bound
+    deliberately excludes (unblocking the stub plus the real native command), so a future
+    failure here names how much of the old number was never the wake-up.
+    """
+
+    assert wake.waits, (
+        "the parked control loop never waited on the pump's delivery signal "
+        "(_delivery_wakeup): its wait was not the signal under test, so the guarantee "
+        "was not exercised"
+    )
+    assert wake.signals, (
+        "no delivery wake-up: the native command finishing did not set the signal the "
+        "control loop waits on (_delivery_wakeup), so the loop could only leave its park "
+        "on its own interval"
+    )
+    assert wake.moved >= 1, (
+        "the pump set the delivery signal, but no set moved it from clear to set: a "
+        "signal that was already set cannot have released a parked wait"
+    )
+    woke_at = wake.signals[0]
+
+    timed_out = [w for w in wake.waits if not w[0] and w[1] >= woke_at]
+    assert not timed_out, (
+        f"{len(timed_out)} control-loop wait(s) started after the native command had "
+        "already finished and paid their full timeout: the loop waited out its interval "
+        "instead of the wake-up"
+    )
+    released = [w for w in wake.waits if w[0] and w[2] >= woke_at]
+    assert released, (
+        "the delivery signal was set, but no parked wait returned True afterwards: "
+        "nothing was actually released by the wake-up"
+    )
+
+    wake_latency = released[-1][2] - woke_at
+    assert wake_latency < WAKE_BOUND_SECONDS, (
+        f"wake-up latency {wake_latency:.6f}s measured from the pump's own delivery signal "
+        f"(native command's own cost {native_send_cost:.3f}s, excluded: it is unblocking "
+        "the stub plus the real native send, not the wake-up): the control loop's wait was "
+        "not released by the signal"
     )
 
 
@@ -399,6 +528,12 @@ def test_native_completion_wakes_the_control_loop_before_its_interval_expires(
     behind it.  RED on the unmodified bytes: the pump has no wake-up at all.  GREEN:
     a native command finishing releases the loop's wait immediately, and the runtime's
     control loop waits on that signal instead of on the interval alone.
+
+    The latency is measured from the pump's own delivery signal -- the ``wake`` that runs
+    from the completion callback -- and not from before ``release.set()``, because the
+    stubbed native command's own execution (tens of milliseconds, and ~all of the consumed
+    0.1046 s failure) is not the wake-up: see
+    ``_assert_the_completion_woke_the_control_loop`` and the module docstring.
     """
 
     _production_poll_defaults_are_untouched()
@@ -419,15 +554,24 @@ def test_native_completion_wakes_the_control_loop_before_its_interval_expires(
                 world["member"]["node_id"]
             ),
         )
+        wake = _DeliveryWakeSpy()
+        monkeypatch.setattr(pump, "_delivery_wakeup", wake)
         release = threading.Event()
         entered = threading.Event()
         original = native.send
+        native_send_cost: list[float] = []
 
         def blocked(**kwargs):
-            if kwargs["command_id"] == "slow-hello":
-                entered.set()
-                release.wait(5)
-            return original(**kwargs)
+            if kwargs["command_id"] != "slow-hello":
+                return original(**kwargs)
+            entered.set()
+            release.wait(5)
+            unblocked_at = time.monotonic()
+            response = original(**kwargs)
+            # Reported for diagnosis only: this is the cost the wake-up bound
+            # deliberately excludes (see `_assert_the_completion_woke_the_control_loop`).
+            native_send_cost.append(time.monotonic() - unblocked_at)
+            return response
 
         monkeypatch.setattr(native, "send", blocked)
         try:
@@ -435,12 +579,19 @@ def test_native_completion_wakes_the_control_loop_before_its_interval_expires(
             _enqueue(world, "slow-hello")
             assert pump.step()["state"] == "dispatched"
             assert entered.wait(2.0)
-            # Nothing has completed: the wake-up must not have fired yet.
+            # Nothing has completed: the wake-up must not have fired yet -- "not merely
+            # not observed", which a signal consumed before the park would also satisfy.
             assert pump.wait_for_wake(0.3) is False
-            woken_at = time.monotonic()
+            assert not wake.signals, (
+                "the pump signalled a delivery wake-up before the native command had "
+                "finished: the wake-up is not wired to the completion"
+            )
             release.set()
             assert pump.wait_for_wake(2.0) is True
-            assert time.monotonic() - woken_at < WAKE_BOUND_SECONDS
+            assert native_send_cost, "the test never ran its native command"
+            _assert_the_completion_woke_the_control_loop(
+                wake, native_send_cost=native_send_cost[0]
+            )
         finally:
             release.set()
             pump.close()
