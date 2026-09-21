@@ -65,6 +65,25 @@ _MAX_CONCURRENT_CANCELLATION_CLIENTS = 4
 # work, not a transport polling operation; limiting it to the 50 ms poll cadence
 # turns ordinary physical latency into a permanent pending-delivery blocker.
 _DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS = 1.0
+# One bounded sidecar cancellation attempt.  Inside a live owner operation this
+# is the per-attempt window, sized to leave retry headroom rather than consume
+# the whole cleanup authority at once; after the transport is closed it is the
+# whole shutdown grant close() hands a worker it spawns for a still-pending
+# send.
+_DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS = 0.2
+# A delivery timeout is a *delivery* budget, not a *shutdown* budget: it is the
+# sender's own deadline and may be tens of seconds.  Joining the delivery-cancel
+# workers ``_close`` spawns for ``max(1.0, delivery_timeout_seconds)`` therefore
+# made one ``close()`` call take 10 s at a 10 s delivery timeout, which is what
+# `test_close_or_rotation_first_blocked_cancel_has_bounded_lifecycle[close]`
+# measures (and `test_deadline_cancel_worker_is_accounted_and_close_is_bounded`
+# measures at a 50 ms delivery timeout).  ``_close`` now hands every worker it
+# spawns ONE absolute shutdown deadline and waits that same deadline plus this
+# handoff margin, so the worker's sanction and close()'s join are one clock by
+# construction -- a join merely equal to an independently computed window still
+# races it.
+_DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS = _DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS
+_DELIVERY_CANCEL_SHUTDOWN_HANDOFF_SECONDS = 0.05
 _NON_DELIVERED_SCOPED_ERRORS = frozenset(
     {
         "manifest_delta_queue_full",
@@ -587,6 +606,14 @@ class IrohTransport:
         self._ack_queue: Queue[_AckRequest] = Queue(maxsize=queue_capacity)
         self._cancellation_threads: dict[str, threading.Thread] = {}
         self._delivery_cancel_threads: dict[bytes, threading.Thread] = {}
+        # Message ids whose registered delivery-cancel worker has actually issued a
+        # sidecar cancellation attempt.  close() reads it to attribute a shutdown
+        # overrun (see _mark_delivery_cancel_attempt_started).  It is keyed by the
+        # message id because the send record itself is removed by the sender's own
+        # wind-down while the worker that owns the cancellation is still running,
+        # and it is discarded exactly where the worker unregisters, so it stays
+        # bounded by the number of live delivery-cancel workers.
+        self._delivery_cancel_attempts: set[bytes] = set()
         self._last_cancellation: PathCancellation | None = None
         self._cancellation_history_capacity = queue_capacity
         self._cancellations_by_subject: OrderedDict[
@@ -1698,6 +1725,34 @@ class IrohTransport:
             self._delivery_cancel_threads.pop(message_id, None)
             raise
 
+    def _mark_delivery_cancel_attempt_started(
+        self,
+        message_id: bytes,
+    ) -> None:
+        """Publish the one piece of evidence ``_close`` needs to attribute an overrun.
+
+        The defect ``_close`` reports as ``delivery_cancellation_shutdown_timeout`` is,
+        in its own words, "a sidecar call that ignored its deadline".  Thread liveness
+        alone does not establish that: a granted worker can still be alive past the
+        shutdown grant having asked the sidecar nothing at all -- it may have spent the
+        whole grant queueing for one of the ``_MAX_CONCURRENT_CANCELLATION_CLIENTS``
+        lanes, or simply not have been scheduled.  Recording the attempt here, under the
+        same lock ``_close`` reads it with, is what separates "the sidecar overran its
+        deadline" (report, stay fail-closed) from "the worker had not started yet"
+        (return, retain and account).  Without it a bound can only be sized to fail one
+        of those two cases.
+
+        The evidence is filed against the message id and only while this worker is the
+        registered owner of it, so it cannot outlive the worker that produced it.
+        """
+
+        with self._state_lock:
+            if (
+                self._delivery_cancel_threads.get(message_id)
+                is threading.current_thread()
+            ):
+                self._delivery_cancel_attempts.add(message_id)
+
     def _delivery_cancel_worker(
         self,
         control: Any | None,
@@ -1754,6 +1809,7 @@ class IrohTransport:
                         admission_finished_before_cancel = (
                             pending.admission_finished
                         )
+                    self._mark_delivery_cancel_attempt_started(message_id)
                     outcome = self._cancel_with_client(
                         dedicated,
                         message_id,
@@ -1762,7 +1818,9 @@ class IrohTransport:
                         # retry instead of consuming the whole cleanup authority in
                         # one attempt. Socket timeouts invalidate SidecarClient and
                         # are handled by moving to another pre-established lane.
-                        timeout=min(0.2, remaining),
+                        timeout=min(
+                            _DELIVERY_CANCEL_ATTEMPT_TIMEOUT_SECONDS, remaining
+                        ),
                     )
                     confirmed = outcome is True
                     if confirmed:
@@ -1822,6 +1880,8 @@ class IrohTransport:
             else:
                 # Unit adapters and pre-start teardown do not own the production
                 # cancellation pool; retain the explicit control-client fallback.
+                if control is not None:
+                    self._mark_delivery_cancel_attempt_started(message_id)
                 confirmed = self._cancel_with_client(
                     control,
                     message_id,
@@ -1837,6 +1897,7 @@ class IrohTransport:
                     pending.cancel_confirmed = True
                 if self._delivery_cancel_threads.get(message_id) is current:
                     self._delivery_cancel_threads.pop(message_id, None)
+                    self._delivery_cancel_attempts.discard(message_id)
                     if pending is not None and not confirmed:
                         # A failed acknowledgement is still a cleanup blocker, but
                         # it must remain eligible for the delivery timer or a later
@@ -3192,6 +3253,9 @@ class IrohTransport:
             self._close()
 
     def _close(self) -> None:
+        shutdown_cleanup_deadline = (
+            time.monotonic() + _DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS
+        )
         with self._state_lock:
             if self._closed:
                 clients: tuple[Any | None, ...] = ()
@@ -3212,6 +3276,7 @@ class IrohTransport:
                             cancellation_client,
                             message_id,
                             pending,
+                            cleanup_deadline_monotonic_s=shutdown_cleanup_deadline,
                         )
                 clients = (
                     self._receive_client,
@@ -3229,7 +3294,7 @@ class IrohTransport:
             dispatcher_thread = self._dispatcher_thread
             forward_thread = self._forward_thread
             cancellation_threads = tuple(self._cancellation_threads.values())
-            delivery_cancel_threads = tuple(self._delivery_cancel_threads.values())
+            delivery_cancel_threads = tuple(self._delivery_cancel_threads.items())
         for client in clients:
             if client is None:
                 continue
@@ -3282,39 +3347,64 @@ class IrohTransport:
                 error = IrohTransportError("path_cancellation_shutdown_timeout")
                 self._set_fatal(error)
                 raise error
-        for delivery_cancel_thread in delivery_cancel_threads:
+        for message_id, delivery_cancel_thread in delivery_cancel_threads:
             if delivery_cancel_thread is None:
                 continue
             if delivery_cancel_thread is threading.current_thread():
                 continue
             if not delivery_cancel_thread.is_alive():
                 continue
-            # The worker that close() just spawned finishes by reaching its OWN acknowledgement
-            # deadline -- min(_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS, delivery_timeout_seconds) --
-            # never the poll cadence, and substituting the cadence for that budget is exactly what
-            # `test_sidecar_cancellation_ack_uses_cleanup_budget_not_poll_cadence` forbids one level
-            # down.  Joining it for poll*4 (200 ms at the shipped 50 ms cadence) made close() raise
-            # delivery_cancellation_shutdown_timeout AND mark the transport fatal while the worker
-            # was still doing the job close had handed it.  Measured cost: the readiness gate's
-            # seeded soak failed 2 of 3 runs at HEAD vs 0 of 3 at the previous head, once the
-            # re-derived 8 s cleanup window (ERRATA-21) left more sends pending at close.
-            # Sized by the SAME convention as the four wind-down joins above --
-            # max(1.0, delivery_timeout_seconds) -- because this worker's own acknowledgement window
-            # is min(_DELIVERY_CANCEL_ACK_TIMEOUT_SECONDS, delivery_timeout_seconds), computed AFTER
-            # this join's clock starts, so a bound merely equal to that window still races it.  It
-            # was previously max(0.05, poll_interval_seconds * 4) = 200 ms at the shipped cadence:
-            # substituting the poll cadence for an acknowledgement budget is exactly what the sibling
-            # `test_sidecar_cancellation_ack_uses_cleanup_budget_not_poll_cadence` forbids.  Cost when
-            # it fired: close() raised delivery_cancellation_shutdown_timeout and marked the transport
-            # FATAL while its own worker was still working; the readiness gate's seeded soak failed 2
-            # of 3 runs at HEAD against 0 of 3 at the previous head (ERRATA-21).
+            # close() is bounded by ONE shutdown grant, not by the delivery
+            # budget: see _DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS.  The worker
+            # this loop waits for was either handed that same absolute deadline
+            # by _close above, or owns its own (the delivery-deadline path hands
+            # the aged owner deadline down).  Either way the join ends at
+            # shutdown_cleanup_deadline + one handoff margin, so the worker's
+            # sanction and this join share one clock and a bound merely equal to
+            # an independently computed window cannot race it.  Widening this
+            # join to the delivery timeout is what made close() take 10 s at a
+            # 10 s delivery timeout and is measured red by
+            # `test_close_or_rotation_first_blocked_cancel_has_bounded_lifecycle
+            # [close]` and `test_deadline_cancel_worker_is_accounted_and_
+            # close_is_bounded`.
             delivery_cancel_thread.join(
-                timeout=max(1.0, self.delivery_timeout_seconds)
+                timeout=max(
+                    0.0,
+                    shutdown_cleanup_deadline
+                    + _DELIVERY_CANCEL_SHUTDOWN_HANDOFF_SECONDS
+                    - time.monotonic(),
+                )
             )
-            if delivery_cancel_thread.is_alive():
-                error = IrohTransportError("delivery_cancellation_shutdown_timeout")
-                self._set_fatal(error)
-                raise error
+            if not delivery_cancel_thread.is_alive():
+                continue
+            # A worker still alive past the grant is reported ONLY when it is
+            # past the sanction it was granted AND inside it -- i.e. a sidecar
+            # call that ignored its deadline -- which is the defect the report
+            # names.  Liveness by itself does not establish that defect, and this
+            # is a bounded-close test, not a thread-count test: the worker may
+            # have consumed the whole grant queueing for one of the
+            # _MAX_CONCURRENT_CANCELLATION_CLIENTS lanes, or simply not have been
+            # scheduled yet.  That case is a late start, not an overrun:
+            # `test_close_grants_delivery_cancel_workers_their_acknowledgement_
+            # window` (adversarial corpus) and
+            # `test_close_retains_a_delivery_cancel_worker_that_has_not_begun_its_
+            # attempt` (root file) measure it, and no join bound can serve both it
+            # and the two bound tests above -- only the distinction can.
+            # Returning here is the bounded, retained outcome: the worker keeps
+            # ownership of the message (it is still registered and will unregister
+            # itself), the pending send stays reserved but never falsely confirmed
+            # cancelled, and `cancel_started` is left False by the non-confirmed
+            # path so the record remains eligible for a later sweep instead of
+            # being silently reported as done.  No window is widened and no
+            # receipt is dropped: the accounted state is exactly what the failure
+            # path already leaves behind, minus the false FATAL.
+            with self._state_lock:
+                attempt_started = message_id in self._delivery_cancel_attempts
+            if not attempt_started:
+                continue
+            error = IrohTransportError("delivery_cancellation_shutdown_timeout")
+            self._set_fatal(error)
+            raise error
         with self._state_lock:
             if self._receiver_thread is thread:
                 self._receiver_thread = None

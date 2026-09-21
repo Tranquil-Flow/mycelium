@@ -32,6 +32,7 @@ from mycelium_router.transports.iroh import (
     IrohTransport,
     IrohTransportError,
     PeerBinding,
+    _PendingSend,
     _bounded_trace_identity,
     _delivery_receipt_digest,
 )
@@ -2824,3 +2825,198 @@ def test_start_rejects_prior_fatal_receiver_state() -> None:
     with pytest.raises(IrohTransportError, match="fatal_receive"):
         transport.start()
     transport.close()
+
+
+def _pending_send_for_close(shutdown_hub: _Hub, transport: IrohTransport) -> bytes:
+    """Register one admitted, never-acknowledged send so close() owns its cancel worker."""
+
+    message_id = b"c" * 16
+    with transport._state_lock:
+        transport._pending[message_id] = _PendingSend(
+            7,
+            "request-close-bound",
+            "path-close-bound",
+            1,
+            admission_started=True,
+        )
+    del shutdown_hub
+    return message_id
+
+
+def test_close_shutdown_bound_does_not_scale_with_delivery_timeout() -> None:
+    """close() is bounded by ONE shutdown grant, not by the delivery budget.
+
+    Regression for the widened join: sizing the close-time delivery-cancel join at
+    ``max(1.0, delivery_timeout_seconds)`` made a single close() call take 10 s at a
+    10 s delivery timeout -- a delivery deadline is not a shutdown budget.  The
+    same wedged sidecar cancellation (one that ignores its own timeout) is
+    measured at two delivery timeouts three orders of magnitude apart; close()
+    must report within its own bounded shutdown window at both, keep the worker
+    accounted, and hand that worker the same bounded window rather than the
+    delivery timeout.
+    """
+
+    grant = iroh_module._DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS
+    assert 0 < grant < 0.5
+    for delivery_timeout in (0.05, 5.0):
+        hub = _Hub()
+        hub.block_cancel = True
+        transport = _transport(hub, delivery_timeout_seconds=delivery_timeout)
+        transport.bind_router(_RecordingRouter())
+        transport.start()
+        message_id = _pending_send_for_close(hub, transport)
+        try:
+            started = time.monotonic()
+            with pytest.raises(
+                IrohTransportError,
+                match="delivery_cancellation_shutdown_timeout",
+            ):
+                transport.close()
+            elapsed = time.monotonic() - started
+
+            # Bounded, and bounded independently of delivery_timeout_seconds.
+            assert elapsed < 0.5, (delivery_timeout, elapsed)
+            # The worker is accounted, not lost: close() reported it, it did not
+            # silently drop or reap it.
+            assert transport.worker_threads_alive == 1
+            assert hub.cancels == []
+            # The shutdown grant -- not the delivery timeout -- is what reached
+            # the sidecar, so worker sanction and close()'s join are one clock.
+            assert hub.cancel_timeouts
+            assert all(
+                timeout is not None and 0 < timeout <= grant
+                for timeout in hub.cancel_timeouts
+            ), (delivery_timeout, hub.cancel_timeouts)
+        finally:
+            hub.release_cancel.set()
+            hub.release_confirmed_send.set()
+        transport.close()
+        assert transport.worker_threads_alive == 0
+        assert hub.cancels == [message_id]
+
+
+def test_close_is_bounded_and_does_not_falsely_fail_a_completing_cancel() -> None:
+    """The bounded close() must not report failure for work that fits its grant.
+
+    The counterpart of the test above, and the concern that produced the widened
+    join: a cooperative sidecar cancellation completes inside the shutdown grant,
+    so close() returns normally with the exact message cancelled once.  A bound
+    that fails honest work is not a bound, it is a false negative.
+    """
+
+    hub = _Hub()
+    transport = _transport(hub, delivery_timeout_seconds=5.0)
+    transport.bind_router(_RecordingRouter())
+    transport.start()
+    message_id = _pending_send_for_close(hub, transport)
+    try:
+        started = time.monotonic()
+        transport.close()
+        elapsed = time.monotonic() - started
+    finally:
+        hub.release_confirmed_send.set()
+
+    assert elapsed < 0.5
+    assert transport.worker_threads_alive == 0
+    assert hub.cancels == [message_id]
+    assert hub.cancel_timeouts
+    assert all(
+        timeout is not None
+        and 0 < timeout <= iroh_module._DELIVERY_CANCEL_SHUTDOWN_GRANT_SECONDS
+        for timeout in hub.cancel_timeouts
+    )
+
+
+def test_close_retains_a_delivery_cancel_worker_that_has_not_begun_its_attempt() -> None:
+    """close() reports an overrun, not a late start: bounded return, worker retained.
+
+    The two neighbouring tests pin the half of this contract that says a worker which
+    *ignored its deadline inside a sidecar call* must be reported (``delivery_cancellation_
+    shutdown_timeout``, bounded, fail-closed).  This test pins the other half, which
+    ``tests/path_cancellation_adversarial/test_iroh_transport.py::
+    test_close_grants_delivery_cancel_workers_their_acknowledgement_window`` measures from
+    the outside and which no bound can satisfy on its own: a delivery-cancel worker that
+    has NOT yet begun its sanctioned attempt -- its grant consumed by waiting for one of
+    ``_MAX_CONCURRENT_CANCELLATION_CLIENTS`` cancellation lanes, or simply not scheduled --
+    is not the defect the report names.  ``_close`` documents the defect as "a sidecar call
+    that ignored its deadline"; thread liveness alone does not establish that, and marking
+    the transport FATAL for it is the false negative that made the readiness gate's seeded
+    soak fail 2 of 3 runs (ERRATA-21 left more sends pending at close).
+
+    No window is widened: close() still joins for the same one shutdown grant plus handoff
+    and returns inside 0.5 s.  What changes is that it returns instead of failing, and
+    everything stays accounted -- the worker remains registered, the send is reserved but
+    never falsely confirmed cancelled, and ``cancel_started`` stays False so the record is
+    still eligible for a retry sweep rather than silently reported as done.
+    """
+
+    hub = _Hub()
+    transport = _transport(hub)
+    transport.poll_interval_seconds = 0.05
+
+    real_worker = transport._delivery_cancel_worker
+    worker_started = threading.Event()
+    release_stall = threading.Event()
+
+    def delayed_worker(control, message_id, pending, cleanup_deadline_monotonic_s=None):
+        # The stall stands in for any reason a granted worker has not reached its own
+        # attempt yet.  It is longer than the shutdown grant and shorter than the
+        # acknowledgement window the adversarial sibling names for this worker.
+        worker_started.set()
+        release_stall.wait(timeout=5.0)
+        return real_worker(control, message_id, pending, cleanup_deadline_monotonic_s)
+
+    transport._delivery_cancel_worker = delayed_worker  # type: ignore[method-assign]
+
+    message_id = b"e" * 16
+    with transport._state_lock:
+        transport._pending[message_id] = _PendingSend(
+            7,
+            "request-close-late-start",
+            "path-close-late-start",
+            1,
+            admission_started=True,
+        )
+
+    close_errors: list[BaseException] = []
+    worker_threads: list[threading.Thread] = []
+
+    def close() -> None:
+        try:
+            transport.close()
+        except BaseException as error:  # pragma: no cover - asserted below
+            close_errors.append(error)
+
+    close_thread = threading.Thread(target=close, daemon=True)
+    started = time.monotonic()
+    close_thread.start()
+    close_thread.join(timeout=5.0)
+    elapsed = time.monotonic() - started
+    try:
+        assert not close_thread.is_alive()
+        assert worker_started.is_set(), "close() must have spawned the cancel worker"
+        assert close_errors == [], close_errors
+        assert elapsed < 0.5, elapsed
+        # Retained and accounted, not lost and not falsely completed.
+        assert transport.worker_threads_alive == 1
+        with transport._state_lock:
+            pending = transport._pending[message_id]
+            worker_threads.append(transport._delivery_cancel_threads[message_id])
+        assert pending.cancelled is True
+        assert pending.cancel_confirmed is False
+        with transport._state_lock:
+            assert message_id not in transport._delivery_cancel_attempts
+        assert hub.cancels == []
+        assert transport.pending_delivery_count == 1
+    finally:
+        release_stall.set()
+    worker_threads[0].join(timeout=5.0)
+    assert not worker_threads[0].is_alive()
+    # The worker exited on its own, having made no sidecar call (its sanction had
+    # already expired), and left the record eligible rather than silently done.
+    assert transport.worker_threads_alive == 0
+    with transport._state_lock:
+        assert message_id not in transport._delivery_cancel_threads
+    assert pending.cancel_confirmed is False
+    assert pending.cancel_started is False
+    assert hub.cancels == []
