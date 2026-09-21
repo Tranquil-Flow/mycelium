@@ -1925,8 +1925,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "3bc40e9b6e40a07b2dfa9b646deaac15ff09ae49bae95de1fc4a3d323049909c",
-          "size_bytes": 140737
+          "sha256": "23694cc7e123f7d8f96bbaa872d887efb97b345cc8e86826e81d0961ec128c12",
+          "size_bytes": 145721
         }
       ],
       "protocol": "mycelium.traffic_liveness.v1"
@@ -1945,8 +1945,8 @@
         },
         {
           "path": "mycelium_router/transports/iroh.py",
-          "sha256": "3bc40e9b6e40a07b2dfa9b646deaac15ff09ae49bae95de1fc4a3d323049909c",
-          "size_bytes": 140737
+          "sha256": "23694cc7e123f7d8f96bbaa872d887efb97b345cc8e86826e81d0961ec128c12",
+          "size_bytes": 145721
         },
         {
           "path": "native/iroh_transport/src/sidecar.rs",
