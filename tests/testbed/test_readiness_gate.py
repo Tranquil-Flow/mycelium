@@ -501,7 +501,13 @@ def test_every_mandatory_check_runs_even_when_an_earlier_one_fails(tmp_path: Pat
 # --------------------------------------------------------------------------- #
 
 
-def test_check_a_discovers_the_ci_pytest_step_audits_and_ui_scripts(tmp_path: Path) -> None:
+def test_check_a_discovers_the_ci_pytest_step_audits_and_ui_scripts(
+    tmp_path: Path, ui_web_toolchain: None
+) -> None:
+    # `ui_web_toolchain` models the gitignored `ui/web/node_modules` prerequisite
+    # the gate reads before it will discover the declared npm scripts. The
+    # assertions below are unchanged: discovery of the *declared* scripts is what
+    # this test is about, and no npm/ui command is executed (commands are stubbed).
     ctx = context(tmp_path)
     discovered = gate.discover_canonical_commands(ctx)
     runnable = [item for item in discovered if item.kind == "run"]
@@ -561,8 +567,15 @@ def test_check_a_skips_an_undiscoverable_pytest_step_with_a_reason(tmp_path: Pat
     assert not any("dependency_install" in reason for reason in result.reasons)
 
 
-def test_check_a_records_the_dependency_prerequisite_without_failing(tmp_path: Path) -> None:
-    """A green (a) with a recorded, not-executed workflow prerequisite stays green."""
+def test_check_a_records_the_dependency_prerequisite_without_failing(
+    tmp_path: Path, ui_web_toolchain: None
+) -> None:
+    """A green (a) with a recorded, not-executed workflow prerequisite stays green.
+
+    ``ui_web_toolchain`` supplies the gitignored ``ui/web/node_modules``
+    prerequisite so that the only *unexecuted* prerequisite this test observes is
+    the workflow's dependency install; the assertion is unchanged.
+    """
 
     runner = StubRunner(
         [
