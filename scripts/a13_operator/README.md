@@ -170,7 +170,7 @@ and the round's own instruments.
 
 | File | What it is |
 |---|---|
-| `pyz_ledger.py`, `tree_ledger.py` | byte-identical to the copies the pipeline ran; the ledger prints, per module, which markers are in the PYZ and whether the baseline row shows them changing |
+| `pyz_ledger.py`, `tree_ledger.py` | `tree_ledger.py` is byte-identical to the copy the pipeline ran; `pyz_ledger.py` was byte-identical until 2026-09-21, when its row set and its needle were fixed (below) — the ledger prints, per module of the archive's real table of contents, which markers are in the PYZ and whether the baseline row shows them changing |
 | `ssh-shim/ssh` | the instrument behind `A13_SSH_LOG`: logs one line per ssh invocation, then execs the real ssh. Its own comment names this directory as its home. **`chain-preview78e.sh` now fails closed if it is missing** — without it the calls stop being recorded and criterion 3 reads clean for the wrong reason |
 | `soak_interventions.py` | read-only locate/list/read of membership counters and worker processes on both Macs (C5 interventions) |
 | `p78r1_evidence.py` | collects the round's evidence from artifacts, never from a console line |
@@ -186,3 +186,27 @@ Evidence produced by a round now lands in the run directory (`$RUN/pyz-ledger-pr
 iterated a set, so two runs over the same bundle could print the same evidence differently), and
 `detach_run.py` refuses to start a round into a log that already has content — a round log is evidence and
 interleaved launches would make it ambiguous which launch produced which line.
+
+## The ledger's two blind spots (2026-09-21, lane `lane/pyz-ledger-coverage`)
+
+`pyz_ledger.py` printed `PYZ modules: 1888` and then walked a **hardcoded 9-entry dict** with a
+**str-only needle**. Measured consequence: `runs/wp8-02-useful-two-mac/pyz-ledger-pre83.txt` shows
+every `vs baseline` delta a dot — not one `+` in nine rows, i.e. "no watched module changed" — while
+`mycelium_a13_macos.app` had changed. A full-TOC byte differential over all 1888 modules finds exactly
+one differing module, 71255 -> 72286 decompressed bytes, and the R1 fix that made it adds ZERO new str
+constants (317 -> 317; every literal it introduces is `bytes`). Both blind spots are now closed:
+
+* the row set is the **archive's real table of contents**, one row per module, and each module is paired
+  to source by its own name — there is no curated list left to hide a module;
+* markers are **str AND byte-string constants**, the byte ones tested as substrings of the NUL-joined
+  bytes constants (the compiler folds adjacent byte literals, so const boundaries are codegen);
+* a module with no pairing is printed **UNCOVERED** with the paths tried, a module whose bytecode
+  changed with no marker moving is printed **CHANGED-UNATTRIBUTED**, and the baseline sweep is computed
+  over the whole TOC so a changed module can never go unreported;
+* controls are kept and strengthened: both kinds, and both sides of the differential.
+
+`test_pyz_ledger_coverage.py` pins it in both directions: the pre-fix tool (kept byte-identical in
+`fixtures/pyz_ledger_pre_fix_9d68291.py`, sha-checked against git `9d68291`) **must** miss the change —
+on the real `.83`/`.82` pair and on a hermetic PYZ fixture — and the fixed tool must report it and state
+what it does not cover. Run: `env -u PYTHONPATH /opt/homebrew/bin/python3 -B
+scripts/a13_operator/test_pyz_ledger_coverage.py`.
