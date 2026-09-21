@@ -98,12 +98,13 @@ env -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u PYTHONPATH -u
     -m mycelium_testbed.l3_scenarios S1 --evidence-dir <abs dir>          # S2, S3, or all
 ```
 
-exit code **0**, 16.9 s for all three:
+exit code **0** when every scenario is GREEN and **1** when any is RED - the graded run exited **1**
+because S2 was RED (see "run by run" below); the three scenarios take ~17-20 s in total:
 
 | Scenario | Command | Verdict | Counts | Record |
 |---|---|---|---|---|
 | S1 | `... l3_scenarios S1 --evidence-dir ...` | **GREEN** | 20/20 admitted (202), 20/20 `completed`, 4 tokens each, 0 failed | `runs/v2/l3-scenarios-s1-s3-r1/evidence/S1-sequential-20.json` |
-| S2 | `... l3_scenarios S2 --evidence-dir ...` | **GREEN** | 8/8 admitted, 8/8 `completed`; peak in-flight **8**; 8 admitted before the first terminal; 2.59 s with >1 in flight | `.../S2-concurrent-8.json` |
+| S2 | `... l3_scenarios S2 --evidence-dir ...` | **GREEN in 4 observed runs, RED in the graded one** | GREEN run: 8/8 admitted, 8/8 `completed`, peak in-flight **8**, 2.59 s with >1 in flight. Graded run: 8/8 admitted, peak in-flight **8**, 6/8 `completed`, **2/8 `failed:backend_failed`** | `.../S2-concurrent-8.json` (the graded RED) and `.../S2-concurrent-8-run3-RED-backend_failed.json` (the same record under an explicit name) |
 | S3 | `... l3_scenarios S3 --evidence-dir ...` | **GREEN** | 10/10 cancellations accepted, 10/10 **`cancelled`** terminals with the stall entered on a real decode of that request, 1 client token delivered before each cancel, cancel→terminal 22-57 ms, both ends' paths released, 0 pending deliveries; **the 11th request `completed`** with 4 tokens | `.../S3-cancellations-10.json` |
 
 Measured detail worth naming:
@@ -120,24 +121,41 @@ Measured detail worth naming:
   real (native children, `IrohTransport` pair, refused unqualified POST) **before** the verdict, so a RED
   cannot come from a degraded harness.
 
-### The caveat that matters: the quiet-host guard, run by run
+### The caveat that matters: run by run, including the one RED
 
-Two runs produced records in this lane, and their loads differ enough that the difference has to be read
-with the verdict:
+Every run of every scenario in this lane, in order, with the load it ran under (S1/S2/S3 in the "graded"
+row is the run whose records are in `runs/v2/l3-scenarios-s1-s3-r1/evidence/`):
 
-| Run | Commit | load1 (S1/S2/S3) | Verdicts |
-|---|---|---|---|
-| first | `e45719c` + the three uncommitted files | 34.9 / 31.1 / 29.1 | S1/S2/S3 GREEN |
-| graded (current records) | this commit, tree clean at run time | **7.6 / 9.9 / 10.7** | S1/S2/S3 GREEN |
+| # | Commit | load1 (S1/S2/S3) | S1 | S2 | S3 |
+|---|---|---|---|---|---|
+| 1 | `e45719c` + the three uncommitted files | 34.9 / 31.1 / 29.1 | GREEN | GREEN | GREEN |
+| 2 | `3ddfb76`, tree clean at run time | 7.6 / 9.9 / 10.7 | GREEN | GREEN | GREEN |
+| 3 (graded) | `3d756ed`, tree clean at run time | 13.3 / 15.1 / 17.6 | GREEN | **RED** | GREEN |
+| 4, 5 | `3d756ed` (S2 only, `runs/v2/l3-scenarios-s1-s3-r1/s2-repro/`) | - / 8-15 / - | - | GREEN | - |
 
-Sibling lanes were loading this host during the first run. The recorded verdicts are state and
+**Run 3's S2 is RED and it was not tuned away.** 8/8 requests were admitted and really overlapped
+(`peak_in_flight: 8`), 6/8 reached `completed`, and **2/8 terminated `failed` with code
+`backend_failed` mid-stream** - `l3-s2-001` after 3 tokens at 3.076 s, `l3-s2-002` after 2 tokens at
+4.371 s (record copied to `evidence/S2-concurrent-8-run3-RED-backend_failed.json`). Two further S2 runs
+immediately afterwards were GREEN, and its own gap list (`request_N_terminal:'failed':'backend_failed'`)
+is what the pytest wrapper asserts, so the scenario is a genuine RED detector rather than a green claim.
+
+Sibling lanes were loading this host during runs 1 and 3. The recorded verdicts are state and
 terminal-state facts (a `completed`/`cancelled` terminal, a released path both ends, a refused
-unqualified POST) with sub-second stability, not timing flukes - but PLAN v2 §2.1 requires L3
-*qualification* to run under load1 ≤ 8, and only S1's graded run is inside that ceiling; S2 and S3 are
-just outside it. So: **these runs demonstrate the capability; S1 is additionally quiet-host qualified,
-S2 and S3 need one quiet re-run before anyone calls them qualified.** The guard is recorded, never
-enforced, because a skip would hide exactly the finding the run exists to produce; the load travels in
-each record so a reader can weigh it.
+unqualified POST) with sub-second stability, not timing flukes - but two things follow from the ledger
+and neither is being explained away:
+
+* **S2 is not stable at 8 concurrent requests on a loaded host.** Its failure mode - a `failed`
+  terminal at ~3.0 s after 2-3 streamed tokens - matches the harness's own
+  `delivery_timeout_seconds=3.0` (`tests/e2e_request_iroh/harness.py:~631`), which is a *harness*
+  budget, not a PLAN requirement. Whether the shipped plane or the harness's 3-second delivery window
+  is what fails is exactly the question a quiet-host S2 qualification has to answer, and this lane
+  deliberately did not raise the timeout to make the scenario pass (§5.8).
+* **PLAN v2 §2.1 requires L3 qualification under load1 ≤ 8.** Only S1's run 2 is inside that ceiling;
+  S2 and S3 need a quiet re-run before anyone calls them qualified. The guard is recorded, never
+  enforced, because a skip would hide exactly the finding the run exists to produce; the load travels
+  in each record so a reader can weigh it.
+
 
 
 ## 5. Seams and findings recorded while building this (not fixed here)
@@ -173,6 +191,18 @@ each record so a reader can weigh it.
    the sibling's 2 plus these 4. The new module carries `pytestmark = pytest.mark.emulation`, and its name
    is deliberately outside the root `conftest.py`'s `_RISKY_NAME` pattern, so the ladder never has to
    classify an unregistered higher-level scenario.
+8. **S2's eight concurrent requests sit on the harness's 3-second native delivery budget.**
+   `tests/e2e_request_iroh/harness.py:~631` builds both transports with `delivery_timeout_seconds=3.0`,
+   and the one RED S2 run failed 2/8 requests at 3.076 s / 4.371 s with `backend_failed` after 2-3
+   tokens - the shape of a delivery window expiring under a loaded host, not of a router or gateway
+   decision. The scenario keeps the harness's number **on purpose**: raising it would make S2 pass
+   without answering whether the shipped plane can hold eight concurrent streams inside the budget it
+   actually ships with. A quiet-host S2 run is the next step, and it belongs to whoever owns S2's
+   qualification, not to this capability lane.
+9. **The cancellation latch reads as released, not held.** `adapter_cancellation_latch: false` in the
+   cleanup facts is the harness's own `adapter_released` condition (`REQUEST_ID not in
+   backend._cancelled`) - i.e. the adapter released the request after cleanup. It is not a failure, and
+   the field name is this capability's, not the product's.
 
 ## 6. Shipped-path elements NOT yet covered
 
