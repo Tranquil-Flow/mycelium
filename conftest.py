@@ -101,6 +101,12 @@ EMULATION_MODULES: dict[str, str] = {
         "opt-in real control path (MYCELIUM_TESTBED_IROH_E2E=1): the only soak test that builds "
         "and launches the native iroh sidecar and sweeps over it"
     ),
+    "tests/l3/test_real_worker_kill.py": (
+        "kills the real shipped a13_macos managed worker process group (SIGKILL to the process the "
+        "runtime started, not a mailbox re-subscribe) and bounds the recovery it observes: real "
+        "TargetApplication.start_work -> ManagedTargetRuntime -> ManagedWorker with its native child, "
+        "real iroh sidecar installed; no model load and no fault proxy"
+    ),
     "test_two_process_inference_qualification.py": (
         "executable qualification: spawns two real MLX router workers and exercises the shipped "
         "router path and its timeout reaping"
