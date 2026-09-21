@@ -4017,7 +4017,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument(
         "--receipt-hold-ms", type=float, default=NEGATIVE_CASE_RECEIPT_HOLD_MS
     )
-    run.add_argument("--token-steps", type=int, default=TOKEN_STEPS)
+    run.add_argument(
+        "--generation-steps", dest="token_steps", type=int, default=TOKEN_STEPS
+    )
     run.add_argument("--profile", choices=sorted(MODEL_PROFILES), default="pilot")
     args = parser.parse_args(argv)
 
