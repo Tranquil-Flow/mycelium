@@ -2,6 +2,11 @@
   "base_commit": "3282983100595dfc8a730a06cf0cf5c750219e32",
   "files": [
     {
+      "path": "conftest.py",
+      "sha256": "sha256:6fa29a9c860799b812d9efddc0fbce86a592f71196a4404168af781a5252960a",
+      "size_bytes": 12151
+    },
+    {
       "path": "contracts/compatibility-fixtures/full-context-recovery-gate-v1.json",
       "sha256": "sha256:8894f8a40c072bc7c21446477335eb4ccc0ad1472438e27a8c21a6c69c0a4d9e",
       "size_bytes": 418
@@ -147,6 +152,16 @@
       "size_bytes": 31161
     },
     {
+      "path": "pytest.ini",
+      "sha256": "sha256:580708389b10849a015bd43b9229cfe5afb5b63d6d5c2526f0cb91c9aac04e6d",
+      "size_bytes": 2354
+    },
+    {
+      "path": "requirements-dev.txt",
+      "sha256": "sha256:f865e5465c9750b1e939a2ddb5f42b9a7e6b0960399f15b6e76d25a9b886b01c",
+      "size_bytes": 1763
+    },
+    {
       "path": "scripts/build_a6_source_manifest.py",
       "sha256": "sha256:6b876ffa8b211da1951dfadc0089f8f0ae869ccc9db6ba7453648ae7c33a8678",
       "size_bytes": 5632
@@ -162,6 +177,11 @@
       "size_bytes": 90515
     },
     {
+      "path": "scripts/quiet_host_guard.py",
+      "sha256": "sha256:c44821001841d4ac044696de15184d7fac0f628fb9628f691e73c96f04e88a27",
+      "size_bytes": 36438
+    },
+    {
       "path": "scripts/run_a6_recovery_case.py",
       "sha256": "sha256:b1aedbe42b75ef405d0cfad22cc0d2226f7de00785dfa85d2baa027477d9cfc8",
       "size_bytes": 17889
@@ -175,6 +195,11 @@
       "path": "test_a6_recovery.py",
       "sha256": "sha256:634718f45e5e23e81302d98b0d4bc3d6289e5b22bf0c587865064abf141a31d8",
       "size_bytes": 34445
+    },
+    {
+      "path": "tests/QUARANTINE.md",
+      "sha256": "sha256:11f88f08d5a408cd7a9beda83e399d71a0c0579de18cc904710ff3ade65df2b0",
+      "size_bytes": 2069
     },
     {
       "path": "tests/contracts/test_a6_intent_bounds.py",
@@ -272,6 +297,16 @@
       "size_bytes": 13232
     },
     {
+      "path": "tests/test_quiet_host_guard.py",
+      "sha256": "sha256:168dc5d11fe08542f6120a676102917ac6c8ba78f3a70db472093f36b752e122",
+      "size_bytes": 35293
+    },
+    {
+      "path": "tests/test_test_ladder.py",
+      "sha256": "sha256:472ff8ec90176c231499a497c880858b649f0a2c12d0f5f8d28ac640f0317fdb",
+      "size_bytes": 16795
+    },
+    {
       "path": "tests/ui_gateway/test_inference.py",
       "sha256": "sha256:80152e37f6e5e60a670cb8b9f19cc04abb78b301dabbf741c1647bd45e2f7227",
       "size_bytes": 10896
@@ -328,5 +363,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:ba0b0570edc5a307d65d4a27bcada82318f422958418df9212b3956ad2e40c24"
+  "source_digest": "sha256:cbaeb08667f1f2ac8cd58ef0a8121214e14bd7921a967d317382032f91cda8ba"
 }
