@@ -9,6 +9,7 @@ from itertools import count
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import shutil
 import socket
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from typing import Any
 from unittest.mock import Mock
 import uuid
@@ -410,6 +412,79 @@ def _exception_leaves(error: BaseException) -> list[BaseException]:
 
 def _owned_temp_root_for_test() -> Path:
     return harness.create_owned_temp_root()
+
+
+# The native cleanup identity family (batch-4 L2 red, Lane C) needs two real
+# observations, not a load-shaped guess: a *settled* process is the one running
+# its own payload, and a *fork-to-exec* observation is one taken before that
+# payload starts.  A child launched through `_owned_settling_launcher` proves
+# its own settle by writing this token, so the reproduction holds the Darwin
+# identity window open deterministically instead of inventing load.
+_SETTLED_TOKEN = "mycelium-settled-member\n"
+_SETTLED_PAYLOAD = (
+    "import sys; "
+    f"sys.stdout.write({_SETTLED_TOKEN!r}); "
+    "sys.stdout.flush(); "
+    "sys.stdin.buffer.read()"
+)
+
+
+def _owned_settling_launcher(root: Path, *, hold: float = 0.5) -> Path:
+    """Return a launch path whose fork-to-exec window is held open.
+
+    The kernel reports the launcher itself - not the interpreter it is about to
+    become - until the ``exec`` below lands, which is the same window a loaded
+    host exposes by accident when the harness reads a just-spawned member.
+    """
+
+    launcher = root / "settling-launcher"
+    launcher.write_text(
+        f'#!/bin/sh\nsleep {hold}\nexec "{SERVICE_EXECUTABLE}" "$@"\n'
+    )
+    launcher.chmod(0o755)
+    return launcher
+
+
+def _await_settled_member(process: subprocess.Popen[str], *, token: str) -> str:
+    """Return the kernel comm of a child that proved it is running its payload."""
+
+    assert process.stdout is not None
+    descriptor = process.stdout.fileno()
+    deadline = time.monotonic() + harness.PROCESS_WAIT_TIMEOUT * 5
+    seen = ""
+    while token not in seen:
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, f"child never ran its payload: {seen!r}"
+        readable, _, _ = select.select([descriptor], [], [], min(remaining, 0.05))
+        if not readable:
+            continue
+        chunk = os.read(descriptor, 4096)
+        assert chunk, f"child exited before running its payload: {seen!r}"
+        seen += chunk.decode()
+    record = harness.process_inventory().get(process.pid)
+    assert record is not None, "settled child is missing from the inventory"
+    return record.comm
+
+
+def _spawn_owned_member(executable: Path) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        [str(executable), "-c", _SETTLED_PAYLOAD],
+        cwd=str(WORKTREE_ROOT),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+
+
+def _reap_owned_member(process: subprocess.Popen[str]) -> None:
+    if process.poll() is None:
+        process.kill()
+    process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT)
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None and not stream.closed:
+            stream.close()
 
 
 _ObservationTrust = tuple[bytes, str, dict[str, Any]]
@@ -970,11 +1045,21 @@ def test_owner_registration_requires_live_exact_process(
     pid = 9_151
     process = Mock(pid=pid, **{"poll.return_value": None})
     expected = SERVICE_EXECUTABLE
+    # Read the settled image from a real member before the inventory is faked:
+    # a settled member of this interpreter is reported as the image it re-enters
+    # during startup, never as the launch path it was spawned through.
+    settled_comm = _settled_service_comm()
     spoof = tmp_path / expected.name
     spoof.write_bytes(b"spoof")
     row = harness.ProcessRecord(pid, os.getpid(), pid, "start", str(spoof))
     inventory = {pid: row}
-    monkeypatch.setattr(harness, "process_inventory", lambda: inventory)
+    # The faked row replaces one process in the live inventory: the identity
+    # probe has to keep seeing itself for the launch path's settled image to be
+    # learnable while the member is faked.
+    real_inventory = harness.process_inventory
+    monkeypatch.setattr(
+        harness, "process_inventory", lambda: {**real_inventory(), **inventory}
+    )
     real_getpgid = os.getpgid
 
     def getpgid(candidate: int) -> int:
@@ -987,13 +1072,127 @@ def test_owner_registration_requires_live_exact_process(
     with pytest.raises(AssertionError, match="executable"):
         harness.register_owned_group(owners, "node", process, expected)
     assert owners["node"].leader is None
-    inventory[pid] = row._replace(comm=str(expected))
+    inventory[pid] = row._replace(comm=settled_comm)
     process.poll.return_value = 0
     with pytest.raises(AssertionError, match="live"):
         harness.register_owned_group(owners, "node", process, expected)
     process.poll.return_value = None
     owner = harness.register_owned_group(owners, "node", process, expected)
     assert owner.leader == inventory[pid] and owners == {"node": owner}
+
+
+def _settled_service_comm() -> str:
+    """Return the comm the kernel reports for a *settled* service interpreter.
+
+    A live member of this interpreter is reported as the image it re-enters
+    during startup, not as the launch path: mocks that carry the launch path as
+    a settled member describe a process state the kernel never shows.
+    """
+
+    process = _spawn_owned_member(SERVICE_EXECUTABLE)
+    try:
+        return _await_settled_member(process, token=_SETTLED_TOKEN)
+    finally:
+        _reap_owned_member(process)
+
+
+def test_registration_accepts_the_settled_image_of_a_held_open_exec(
+    tmp_path: Path,
+) -> None:
+    """A live member whose image is still settling must stay owned.
+
+    Batch-4's L2 lost the native two-node e2e to
+    ``AssertionError: member has unexpected executable`` and then to
+    ``cleanup refused unregistered, missing, or reused group member ...:
+    live=[...] registered=[]``: the image learned for a launch path had been
+    read from an observation taken before that interpreter's own startup exec
+    landed, so the harness refused a member it had just spawned itself.
+
+    The launcher below holds the fork-to-exec window open, so the pre-exec
+    observation is guaranteed without inventing load, while the member's
+    settled image is the interpreter's re-entered one.
+    """
+
+    launcher = _owned_settling_launcher(tmp_path)
+    process = subprocess.Popen(
+        [str(launcher), "-c", _SETTLED_PAYLOAD],
+        cwd=str(WORKTREE_ROOT),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        settled_comm = _await_settled_member(process, token=_SETTLED_TOKEN)
+        assert not harness.same_canonical_file(settled_comm, launcher), (
+            f"the launcher must re-enter another image, not {settled_comm!r}"
+        )
+        owners: dict[str, harness.OwnedGroup] = {}
+        owner = harness.register_owned_group(
+            owners, "settled", process, launcher, worktree=WORKTREE_ROOT
+        )
+        member = owner.members[0]
+        assert harness.same_canonical_file(member.record.comm, Path(settled_comm)), (
+            f"member was fingerprinted as {member.record.comm!r}, but the "
+            f"kernel reports the settled image {settled_comm!r}"
+        )
+        assert harness.same_canonical_file(member.executable, Path(settled_comm))
+        assert owner.leader == member.record
+        groups, known = harness.owned_inventory([owner], known_pids={process.pid})
+        assert groups == {owner.pgid: [process.pid]} and known == [process.pid]
+        errors, uncertain = harness.signal_owned_groups([owner], signal.SIGTERM)
+        assert errors == [] and uncertain is False
+        assert process.wait(timeout=harness.PROCESS_WAIT_TIMEOUT * 5) == -signal.SIGTERM
+    finally:
+        _reap_owned_member(process)
+
+
+def test_registration_never_fingerprints_a_fork_to_exec_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recorded member identity must be the settled observation.
+
+    The other half of the same family: an observation taken between fork and
+    exec describes a state the process has already left, so recording it makes
+    the harness read a live member as replaced and refuse a group it owns.  The
+    inventory below serves the pre-exec observation first - what a loaded host
+    does - and the settled one from then on, which is what the kernel reports
+    once the member is up.
+    """
+
+    pid = 9_171
+    process = Mock(pid=pid, **{"poll.return_value": None})
+    settled_comm = _settled_service_comm()
+    real_inventory = harness.process_inventory
+    pre_exec = harness.ProcessRecord(
+        pid, os.getpid(), pid, "Thu Jul 23 21:00:00 2026", str(SERVICE_EXECUTABLE)
+    )
+    observations = [pre_exec, pre_exec._replace(comm=settled_comm)]
+
+    def inventory() -> dict[int, harness.ProcessRecord]:
+        return {
+            **real_inventory(),
+            pid: observations.pop(0) if len(observations) > 1 else observations[0],
+        }
+
+    monkeypatch.setattr(harness, "process_inventory", inventory)
+    real_getpgid = os.getpgid
+
+    def getpgid(candidate: int) -> int:
+        return pid if candidate == pid else real_getpgid(candidate)
+
+    monkeypatch.setattr(os, "getpgid", getpgid)
+    monkeypatch.setattr(os, "getsid", lambda candidate: pid)
+    monkeypatch.setattr(harness, "process_cwd", lambda candidate: WORKTREE_ROOT)
+    owners: dict[str, harness.OwnedGroup] = {}
+    owner = harness.register_owned_group(
+        owners, "node", process, SERVICE_EXECUTABLE
+    )
+    assert owner.leader is not None and owner.leader.comm == settled_comm
+    assert owner.members[0].record.comm == settled_comm
+    groups, known = harness.owned_inventory([owner], known_pids=set())
+    assert groups == {pid: [pid]} and known == []
 
 
 def test_cleanup_preserves_body_and_cleanup_faults_without_helpers(

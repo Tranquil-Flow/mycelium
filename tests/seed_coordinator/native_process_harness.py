@@ -10,6 +10,7 @@ import hmac
 import os
 from pathlib import Path
 import secrets
+import select
 import signal
 import stat
 import subprocess
@@ -27,6 +28,18 @@ _RENAME_EXCL = 0x00000004
 _RENAME_NOREPLACE = 0x00000001
 _OWNED_ROOT_SENTINEL_KEY = secrets.token_bytes(32)
 _OWNED_ROOT_SENTINEL_VERSION = b"mycelium.native-root.v1"
+
+# The kernel image probe must prove it is running *its payload* before its
+# image is read as final (see ``kernel_executable_image``).  The token is
+# written by the payload itself, which runs only after every startup exec of
+# the launch path has landed.
+PROBE_READY_TOKEN = b"mycelium.native-probe.v1\n"
+PROBE_SOURCE = (
+    "import sys; "
+    f"sys.stdout.buffer.write({PROBE_READY_TOKEN!r}); "
+    "sys.stdout.buffer.flush(); "
+    "sys.stdin.buffer.read()"
+)
 
 
 def _rename_noreplace_at(
@@ -206,8 +219,42 @@ def process_inventory() -> dict[int, ProcessRecord]:
 _KERNEL_IMAGE_CACHE: dict[str, Path] = {}
 
 
+def _await_probe_payload(probe: subprocess.Popen[bytes]) -> bool:
+    """True once the probe has proven it is running its own payload.
+
+    The readiness token is written by the payload, i.e. after every startup
+    ``exec`` the launch path performs, so the kernel image observed afterwards
+    is the one the process will keep.  A snapshot taken earlier can still
+    report the launch path - or, for a script launch path, the launcher's own
+    interpreter - which is a state that is already gone by the time the
+    process is up.
+    """
+
+    stream = probe.stdout
+    if stream is None:
+        return False
+    descriptor = stream.fileno()
+    deadline = time.monotonic() + PROCESS_WAIT_TIMEOUT
+    seen = b""
+    while PROBE_READY_TOKEN not in seen:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or probe.poll() is not None:
+            return False
+        readable, _, _ = select.select([descriptor], [], [], min(remaining, 0.05))
+        if not readable:
+            continue
+        try:
+            chunk = os.read(descriptor, 4096)
+        except OSError:
+            return False
+        if not chunk:
+            return False
+        seen += chunk
+    return True
+
+
 def kernel_executable_image(launch_path: Path) -> Path:
-    """Return the binary the kernel reports for one registered launch path.
+    """Return the settled binary the kernel reports for one registered path.
 
     macOS framework interpreters started through a venv ``bin/python`` symlink
     re-enter ``.../Resources/Python.app/Contents/MacOS/Python``, so the kernel
@@ -216,6 +263,15 @@ def kernel_executable_image(launch_path: Path) -> Path:
     same ``ps`` inventory the rest of this harness already trusts, once per
     launch path, instead of being assumed from one host layout.  The probe is a
     child that blocks on stdin and is reaped immediately: it runs no workload.
+
+    The image is read only once the probe has proven it is running that
+    payload: between fork and exec the kernel still reports the launch path
+    itself, and caching such an observation as the image would declare "this
+    launch path never re-enters another image" for the rest of the session -
+    which then refuses the settled members this harness owns.  An interpreter
+    that cannot run the payload within ``PROCESS_WAIT_TIMEOUT`` keeps the
+    pre-existing expectation (the launch path), so a launch path that is not
+    an interpreter is unaffected.
     """
 
     resolved = launch_path.resolve(strict=True)
@@ -227,22 +283,16 @@ def kernel_executable_image(launch_path: Path) -> Path:
     probe = None
     try:
         probe = subprocess.Popen(
-            [key, "-c", "import sys; sys.stdin.buffer.read()"],
+            [key, "-c", PROBE_SOURCE],
             stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        record = None
-        deadline = time.monotonic() + PROCESS_WAIT_TIMEOUT
-        while record is None and time.monotonic() < deadline:
+        if _await_probe_payload(probe):
             record = process_inventory().get(probe.pid)
-            if record is None:
-                if probe.poll() is not None:
-                    break
-                time.sleep(0.02)
-        if record is not None and record.comm:
-            image = Path(record.comm).resolve(strict=True)
+            if record is not None and record.comm:
+                image = Path(record.comm).resolve(strict=True)
     except Exception:  # probe failure keeps the pre-existing expectation
         image = resolved
     finally:
@@ -269,11 +319,49 @@ def _matched_executable(comm: str, expected_executable: Path) -> Path:
     raise AssertionError("member has unexpected executable")  # unreachable
 
 
+def _settled_member_record(
+    record: ProcessRecord, expected_executable: Path
+) -> ProcessRecord:
+    """Return the member fingerprint taken once its kernel image has settled.
+
+    A member observed between fork and exec still reports the launch path, or
+    the launcher's own interpreter for a script launch path.  That state is
+    gone by the time the member runs, so fingerprinting it would make the
+    member look replaced - and so refused - at the first cleanup revalidation
+    of a process the harness owns.  The settled image is the one this launch
+    path's own probe proved (``kernel_executable_image``); an observation on
+    any other path is a real identity mismatch and is left to the matcher.
+    """
+
+    settled = kernel_executable_image(expected_executable)
+    if same_canonical_file(record.comm, settled):
+        return record
+    if not same_canonical_file(record.comm, expected_executable):
+        return record
+    deadline = time.monotonic() + PROCESS_WAIT_TIMEOUT
+    current = record
+    while not same_canonical_file(current.comm, settled):
+        _require(
+            time.monotonic() < deadline,
+            f"member {record.pid} never reached the settled image of "
+            f"{expected_executable}",
+        )
+        time.sleep(0.02)
+        observed = process_inventory().get(record.pid)
+        if observed is None:
+            raise AssertionError(
+                f"member {record.pid} disappeared before its exec landed"
+            )
+        current = observed
+    return current
+
+
 def _capture_member(
     owner: OwnedGroup,
     record: ProcessRecord,
     expected_executable: Path,
 ) -> OwnedMember:
+    record = _settled_member_record(record, expected_executable)
     executable = _matched_executable(record.comm, expected_executable)
     _require(
         type(record.pid) is int and record.pid > 1,
@@ -350,7 +438,7 @@ def register_owned_group(
     )
     member = _capture_member(owner, leader, executable)
     _require(process.poll() is None, f"registration lost live process {pid}")
-    owners[node_id] = owner._replace(leader=leader, members=(member,))
+    owners[node_id] = owner._replace(leader=member.record, members=(member,))
     return owners[node_id]
 
 
