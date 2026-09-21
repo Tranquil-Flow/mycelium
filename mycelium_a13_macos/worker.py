@@ -30,6 +30,24 @@ from mycelium_qualification.evidence import canonical_json_bytes
 from .resources import observe_policy, policy_violation
 
 _CLEANUP_RESERVE_SECONDS = 10
+_STARTUP_TIMEOUT_SECONDS = 30.0
+"""Bounded allowance for ONE spawn+hello handshake.
+
+The handshake is startup, not model execution, and it must not be charged
+against the model's wall budget.  It used to be bounded by the managed
+session's response timeout, which ``_native_budgets`` derives from that budget:
+at ``max_wall_seconds=12`` the 10 s cleanup reserve leaves a 2.0 s bound, while a
+cold native spawn plus its hello needs longer than that on a loaded host.  The
+L2 runs ``pytest -n8``, so the suite generates that load itself (the batch-2 L2
+sat at load1 ~57) and no admission rule can prevent it: measured there, the
+hello exhausted its 2.0 s bound and ``start()`` failed closed with
+``node_response_timeout`` before the worker ever executed anything.
+
+So startup gets its own bounded allowance -- far above the handshake's real
+cost (quiet: ~0.4 s) and far below the managed session cap
+(``MAX_SESSION_TIMEOUT_SECONDS * _NATIVE_RESPONSE_TRANSIT_MARGIN``), so a wedged
+child still fails closed instead of hanging ``start()``.
+"""
 _NATIVE_PROTOCOL = "mycelium.physical_node_control.v1"
 
 
@@ -456,6 +474,7 @@ class _ConcurrentNativeSession:
         command: str,
         payload: Mapping[str, Any],
         deadline_monotonic_s: float | None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         options: dict[str, Any] = {
             "terminate_on_timeout": False,
@@ -466,6 +485,11 @@ class _ConcurrentNativeSession:
             if remaining <= 0:
                 raise TimeoutError("command_deadline_exceeded")
             options["timeout_seconds"] = remaining
+        elif timeout_seconds is not None:
+            # A phase-specific bound -- the startup handshake -- or the session
+            # default, which is derived from the model's wall budget and must
+            # not be the only bound a spawn+hello has to fit inside.
+            options["timeout_seconds"] = timeout_seconds
         try:
             result = self._process.command(command, payload, **options)
         except self._process_module._RemoteNodeError as exc:
@@ -487,13 +511,15 @@ class _ConcurrentNativeSession:
         )
 
     def send(
-        self, *, command_id: str, command: str, payload: Mapping[str, Any]
+        self, *, command_id: str, command: str, payload: Mapping[str, Any],
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         return self._send(
             command_id=command_id,
             command=command,
             payload=payload,
             deadline_monotonic_s=None,
+            timeout_seconds=timeout_seconds,
         )
 
     def send_before(
@@ -509,6 +535,7 @@ class _ConcurrentNativeSession:
             command=command,
             payload=payload,
             deadline_monotonic_s=deadline_monotonic_s,
+            timeout_seconds=None,
         )
 
     def interrupt_command(self, command_id: str, *, code: str) -> bool:
@@ -785,6 +812,28 @@ class ManagedWorker:
             return (sys.executable, "--managed-node", *args)
         return (sys.executable, "-B", "-m", "mycelium_a13_macos.worker", *args)
 
+    def _arm_deadline(self) -> None:
+        """Arm the one wall deadline, after the handshake, from the owner clock.
+
+        Two things are load-bearing.  It is armed only once the node is up, so
+        the deadline can never fire inside ``start()`` and kill a node that has
+        not executed anything yet.  And it is anchored to the budget owner's
+        ``_started_at``, so a replacement stays inside the original allowance
+        instead of minting a fresh one.  Enforcement lives in this timer thread,
+        not in the guard: a blocked policy observer cannot defer it.
+        """
+        if self._started_at is None:
+            raise WorkerError("worker_replacement_state_unavailable")
+        remaining = (
+            self._started_at
+            + self.limits.max_wall_seconds
+            - _CLEANUP_RESERVE_SECONDS
+            - time.monotonic()
+        )
+        self._deadline_timer = threading.Timer(max(0, remaining), self._expire)
+        self._deadline_timer.daemon = True
+        self._deadline_timer.start()
+
     def start(self) -> dict[str, Any]:
         if self._session is not None or self._closed.is_set():
             raise WorkerError("worker_restart_requires_new_instance")
@@ -792,12 +841,14 @@ class ManagedWorker:
         if refusal is not None:
             raise WorkerError(refusal)
         self._check()
-        if self._budget_owner is self:
-            self._started_at = time.monotonic()
-        else:
+        # A replacement transfers no authority: it shares the owner's execution
+        # clock before it spawns, so it stays inside the original allowance.  The
+        # owning worker's clock is set at handshake completion below, so its own
+        # spawn+hello startup is never charged against the model's wall budget.
+        if self._budget_owner is not self:
             self._started_at = self._budget_owner._started_at
-        if self._started_at is None:
-            raise WorkerError("worker_replacement_state_unavailable")
+            if self._started_at is None:
+                raise WorkerError("worker_replacement_state_unavailable")
         argv = self._native_argv()
         _, response_timeout = _native_budgets(self.limits)
         with self._close_lock:
@@ -816,21 +867,28 @@ class ManagedWorker:
             with self._close_lock:
                 if self._closed.is_set():
                     raise WorkerError("worker_not_running")
-            remaining = (
-                self.limits.max_wall_seconds
-                - _CLEANUP_RESERVE_SECONDS
-                - (time.monotonic() - self._started_at)
-            )
-            self._deadline_timer = threading.Timer(max(0, remaining), self._expire)
-            self._deadline_timer.daemon = True
-            self._deadline_timer.start()
+            # Startup is not model execution: the handshake answers under its own
+            # bounded allowance, never under the model's leftover wall budget.
             hello = self._session.send(
-                command_id="managed-hello", command="hello", payload={}
+                command_id="managed-hello",
+                command="hello",
+                payload={},
+                timeout_seconds=_STARTUP_TIMEOUT_SECONDS,
             )
             pid = self.pid
             if hello.get("ok") is not True or pid is None or os.getpgid(pid) != pid:
                 raise WorkerError("worker_native_start_failed")
             self._group_owned = True
+            if self._budget_owner is self:
+                # One admitted execution owns the wall budget, and that budget
+                # starts once the node is up.  Charging the spawn+hello against
+                # it made a small ``max_wall_seconds`` impossible: 12 s minus the
+                # 10 s cleanup reserve is a 2.0 s deadline, so the timer expired
+                # inside ``start()`` -- killing the node before it executed
+                # anything, and leaving a blocked-observer case no window at all
+                # on the loaded host the L2 runs on.
+                self._started_at = time.monotonic()
+            self._arm_deadline()
             self._check()
             self._monitor = threading.Thread(
                 target=self._watch, name="a13-worker-guard", daemon=True

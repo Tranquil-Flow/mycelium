@@ -92,6 +92,14 @@ def test_deadline_is_independent_of_a_blocked_policy_observer(tmp_path):
         limits=WorkerLimits(max_rss_bytes=2000000000,max_disk_bytes=10000000,max_wall_seconds=12,max_commands=8))
     try:
         w.start();block[0]=True
+        # The wall deadline is armed AFTER the handshake, for the whole remaining
+        # budget (12 s minus the 10 s cleanup reserve).  If the spawn+hello were
+        # still charged against that budget, the timer would already have fired
+        # here -- the node would be closing, and the blocked observer would never
+        # be reached at all.
+        timer=w._deadline_timer
+        assert timer is not None and 0 < timer.interval <= w.limits.max_wall_seconds - 10
+        assert w.status()['running'] is True and not w._closed.is_set()
         assert entered.wait(3)
         wait_closed(w)
         assert w.status()['error_code']=='worker_wall_limit_exceeded'
