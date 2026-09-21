@@ -356,6 +356,127 @@ def await_compile_end():
         time.sleep(retry)
 
 
+# ───────────────── SERVING EVIDENCE: THE SAME WAIT, ONE PHASE LATER (2026-09-21) ─────────────────
+# WHY THIS EXISTS. The compile fix above (commit 266615f) names this wait as NOT fixed and NOT claimed:
+# "the post-activation wait for `serving.state == 'api_running'` (round14_start_and_activate.py:42-46)
+# is the SAME unbounded-duration exposure: that phase has no on-disk success marker either (only
+# serve-error.private.json, chain_compile.py:96)". It does have one, and it is the app's own last disk
+# write before that state -- the same shape as the compile marker, one phase later.
+#
+# READ OFF SOURCE, NOT GUESSED -- what the app writes on its way to `api_running`:
+#   * `mycelium_a13_macos/workflow.py:233-234` runs `self.launch.run(...)` = `RegistryLaunch.run`
+#     (`mycelium_a13_macos/serving.py:211-258`), whose runner is `_native_registry_runner`
+#     (`serving.py:493-496`) = `mycelium_live.supervisor.run_registry_server`.
+#   * `run_registry_server` (supervisor.py:2211-2455) QUALIFIES each plan FIRST -- the route open and
+#     the model load, `_qualified_runtime` (:2273-2286) -- and only THEN builds the registry:
+#     `LiveDeploymentRegistry(..., state_path=registry_state, ...)` (:2287-2292).
+#   * that constructor's LAST statement persists the registry to disk (`mycelium_live/registry.py:149`
+#     -> `_persist`, :785-815: temp file + fsync + os.replace), and `state_path` is never None here:
+#     `serving.py:599` sets `registry_state = root / "registry-state.json"`, :608 passes it, with
+#     `private_state_root=root/'registry'` from `workflow.py:362`, where
+#     `root = authority.state_root/'serving-runs'/run_id` (:357).
+#   * only AFTER that does the HTTP server exist (`create_server`, :2390-2404) and only then does
+#     `on_started` (:2427-2428) run the callback that sets `_state='api_running'` (`workflow.py:213`)
+#     -- in memory, never persisted.
+# So `{OWNER}/authority/serving-runs/{run_id}/registry/registry-state.json` is the durable form of the
+# verdict the operator waits for: its ABSENCE cannot coexist with an app that reports 'api_running'.
+# MEASURED IN A REAL ROUND (not inferred): the owner-root mtime timeline of round 64r1 lists this file
+# at the same second as the pinned step's own terminal write,
+# `authority/serving-runs/<run>/registry/registry-state.json ; rpc-round64/serving-load-result.json`
+# (runs/wp8-02-useful-two-mac/RESULT-4.md:125; the second file is round14_start_and_activate.py:47).
+#
+# WHY IT DOES NOT FIRE BEFORE THE APP CAN ANSWER -- the compile fix's own discriminator, re-applied.
+# That fix rejected `compiled/build-report.json` because `chain_compile.py:54` then holds `app.guard`
+# (`app.py:872` takes the same guard for the handshake POST) for up to
+# `_BOOT_ID_OBSERVATION_BUDGET_SECONDS=180`. This phase has no such holder: the only `with app.guard`
+# outside `app.py` is that compile one, and it is in `start_compile`, not in what runs after
+# activation. This marker is also written AFTER the qualification (supervisor.py:2273-2286) and BEFORE
+# the remaining steps to `api_running`, which are composition and a socket bind (`build_registry_stack`
+# :2374-2382 -> :469-497; `create_server` :2390-2404 -> :1578-1617) -- so the app's control surface has
+# no pending long-running work of the kind that starved it during the compile.
+#
+# WHERE IT ENGAGES, AND WHERE IT MUST NOT: only after THIS process has itself asked the app to
+# activate (`/api/serving/activate`, chain_compile.py:103-119). Before activation there is no serving
+# phase to observe, and the pre-activation reads ARE the app's readiness report (`await_ready`'s own
+# probe) and the pinned step's first read -- gating those would delay a round that has not started
+# this phase. So `/api/quit` during a teardown, the soak steps' own polls and every pre-activation
+# read keep the path they had.
+#
+# AND WHAT IT WATCHES IS A *PREPARED* SERVING RUN -- the app's own durable statement that there is one:
+# `workflow.py:361-362` runs `prepare_registry_launch(private_state_root=root/'registry', ...)` while
+# the compile still holds, and that call creates `{serving-runs}/{run_id}/registry/` and its `product/`
+# (`serving.py:596-598`). No such root means there is no serving run for this run id to observe, so the
+# wait disengages immediately ('absent') -- the same rule and the same idiom the compile wait uses
+# ("no run to watch"), one level down. A round that has not prepared this phase is untouched.
+#
+# IT CANNOT TURN A FAILURE INTO A PASS: it issues no RPC of any kind, so it can only DELAY the existing
+# call. A `failed` serving state has its own durable record (`chain_compile.py:96`); a `stopped` one
+# does not (`workflow.py:235` returns normally when the stop event is set), so in that one case the wait
+# ends on its own bound and the caller's existing read -- with its own budgets -- reports it.
+_SERVING_DEPENDENT = frozenset(('/api/serving/status',))
+_SERVING_REQUESTS = frozenset(('/api/serving/activate',))     # the call that starts this phase
+_SERVING_ERROR = 'serve-error.private.json'                   # chain_compile.py:96
+_SERVING_STATE = 'registry-state.json'                        # mycelium_live/registry.py:149
+_SERVING_REQUESTED = []   # mutable: has THIS process asked the app to activate? (mirrors _OWNER_ANSWERED)
+
+
+def _serving_root(run_id):
+    """`workflow.py:357-362`: the app's own registry root for this run."""
+    return OWNER/'authority'/'serving-runs'/run_id/'registry'
+
+
+def _serving_marker_path(run_id):
+    """`serving.py:599` + `mycelium_live/registry.py:149`: persisted before the app reports api_running."""
+    return _serving_root(run_id)/_SERVING_STATE
+
+
+def _serving_error_path(run_id):
+    """`chain_compile.py:95-97`: the app's own failure record for this phase."""
+    return _run_root(run_id)/_SERVING_ERROR
+
+
+def _serving_evidence(run_id):
+    """The app's OWN on-disk verdict for this run: 'failed' | 'completed' | None while still qualifying."""
+    if _serving_error_path(run_id).exists():return 'failed'
+    if _serving_marker_path(run_id).exists():return 'completed'
+    return None
+
+
+def await_serving_end():
+    """Wait, OBSERVATIONALLY, until the app's own on-disk state says this round's serving phase ended.
+
+    Issues no RPC of any kind, so it cannot expire inside a read deadline. Returns the evidence it
+    stopped on:
+      'completed' the registry the app persists before `api_running` exists -- the phase ended
+      'failed'    the app's own failure record (chain_compile.py:96) exists
+      'absent'    no run to watch, no *prepared* serving run for this run id (serving.py:596-598), or
+                  the control surface is gone (app.py:794): the caller's EXISTING path decides, in its
+                  own vocabulary (`surface_lost`, ...)
+      'expired'   the app's own declared wall bound elapsed: the caller's existing path runs unchanged
+    """
+    run_id=_compile_run_id()
+    if run_id is None:return 'absent'
+    if not _run_root(run_id).is_dir():return 'absent'
+    if not _serving_root(run_id).is_dir():return 'absent'
+    started=time.monotonic();deadline=started+_readiness_budget_s();retry=_readiness_retry_s();attempts=0
+    while True:
+        attempts+=1
+        evidence=_serving_evidence(run_id)
+        if evidence is not None:
+            print('serving_evidence run_id=%s evidence=%s attempts=%d elapsed=%.1f'
+                  %(run_id,evidence,attempts,time.monotonic()-started),flush=True)
+            return evidence
+        if local_state(OWNER).get('present') is not True:
+            print('serving_wait_surface_lost run_id=%s attempts=%d'%(run_id,attempts),flush=True)
+            return 'absent'
+        if time.monotonic()>=deadline:
+            print('serving_wait_expired run_id=%s attempts=%d'%(run_id,attempts),flush=True)
+            return 'expired'
+        print('serving_wait run_id=%s attempts=%d elapsed=%.1f'
+              %(run_id,attempts,time.monotonic()-started),flush=True)
+        time.sleep(retry)
+
+
 def owner(path,body=None):
     require_local(OWNER)
     # OBSERVATIONAL WAIT (block above): a call the compile blocks is not issued while the app is still
@@ -363,6 +484,11 @@ def owner(path,body=None):
     # deadline it cannot survive. The call itself, and every budget it uses, is unchanged.
     if path in _COMPILE_DEPENDENT:
         await_compile_end()
+    # THE SAME WAIT, ONE PHASE LATER (block above): once THIS process has asked the app to activate,
+    # the serving state is read from the app's own on-disk evidence rather than polled while the app
+    # qualifies. Absent that request the read path is exactly what it was.
+    if path in _SERVING_DEPENDENT and _SERVING_REQUESTED:
+        await_serving_end()
     # SEQUENCING: a control call is issued only after the app has itself reported the state its own
     # handler requires. Read-only calls are untouched -- they ARE the report (`/api/serving/status` is the
     # probe the gate uses, so it cannot be gated by it).
@@ -375,6 +501,11 @@ def owner(path,body=None):
             value=_client(OWNER).call(path,body)
             if not _OWNER_ANSWERED:
                 _OWNER_ANSWERED.append(True)
+            # THE SERVING PHASE HAS NOW BEEN ASKED FOR (block above): from here on this process reads the
+            # serving state from the app's own on-disk evidence. A refusal never reaches this line, so a
+            # round whose activation was refused keeps the read path it had.
+            if path in _SERVING_REQUESTS and not _SERVING_REQUESTED:
+                _SERVING_REQUESTED.append(True)
             return value
         except Exception as exc:
             reason=_busy_reason(exc)
