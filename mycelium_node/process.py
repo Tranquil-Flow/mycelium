@@ -239,6 +239,24 @@ class _ProcessGroupMember:
     session_id: int
 
 
+class TransientIdentityObservation(ProcessLookupError):
+    """An owned incarnation was not stably observable across two snapshots.
+
+    Darwin reports one identity per process, but a process legitimately replaces
+    its own image (the pinned launcher exec's the interpreter, and a framework
+    interpreter may exec its own stub).  While that replacement is in flight the
+    two snapshots taken by ``_inventory_darwin_process`` can disagree about the
+    executable, and the second one can even fail outright.
+
+    That disagreement is *not* evidence that the incarnation is gone, so it must
+    not be reported as an unconditional absence.  This subclass keeps every
+    existing fail-closed caller unchanged (it IS a ``ProcessLookupError``) while
+    letting an owner that still holds the child unreaped retry the observation
+    inside its own original bounded deadline instead of treating a legitimate
+    exec transition as a vanished pid.
+    """
+
+
 def _absolute_path(value: str | Path) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
@@ -881,7 +899,13 @@ def _inventory_darwin_process(pid: int) -> _ProcessIdentity:
         or executable_path != second_path
         or os.getsid(pid) != session_id
     ):
-        raise ProcessLookupError(pid)
+        # The incarnation was not stably observable across the two snapshots.
+        # Do not claim the pid is gone: an owned child that replaces its own
+        # image mid-exec produces exactly this disagreement.  Callers that hold
+        # the child unreaped retry this within their own bounded deadline (see
+        # ``observe_owned_process_identity``); every other caller keeps its
+        # existing fail-closed behaviour through the ProcessLookupError base.
+        raise TransientIdentityObservation(pid)
     return _ProcessIdentity(
         pid=pid,
         parent_pid=first[1],
@@ -1100,6 +1124,51 @@ def _identity_matches_pre_exec_ownership(
         and current.start_token == ownership.start_token
         and current.executable in {ownership.launcher_executable, target_executable}
     )
+
+
+def observe_owned_process_identity(
+    process: subprocess.Popen[bytes],
+    ownership: _PreExecOwnership,
+    deadline: float,
+    *,
+    interval: float = 0.01,
+) -> _ProcessIdentity:
+    """Observe an owned child that is still in flight, without racing its exec.
+
+    An owned child legitimately replaces its own image while it runs: the pinned
+    pre-exec launcher exec's the target, and a framework interpreter may exec its
+    own stub afterwards.  During that window ``_inventory_darwin_process`` cannot
+    always take two consistent snapshots, and it reports that as a
+    ``ProcessLookupError`` (``TransientIdentityObservation``).  For a child this
+    owner started, that is not an absence: as long as the child has not been
+    reaped the incarnation still exists, so re-observe it instead of concluding
+    it is gone.
+
+    Retrying is bounded and cannot hide a real disappearance:
+
+    * the retry stops the moment ``process.poll()`` reports the child reaped --
+      then a ``ProcessLookupError`` really does mean the pid is gone (the
+      already-reaped case), and it propagates;
+    * the retry stops when ``deadline`` expires, so a caller's original bounded
+      window is never extended;
+    * the returned identity is a complete observation and is NOT validated here.
+      The caller must still apply ``_identity_matches_pre_exec_ownership`` (or
+      its own checks) to it, so tolerating a transient observation never turns an
+      unowned incarnation into an accepted one.
+    """
+
+    while True:
+        try:
+            return _inventory_process(ownership.pid)
+        except ProcessLookupError:
+            if process.poll() is not None:
+                # The child this owner started has been reaped; absence is now
+                # the true answer, so never retry past that point.
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(interval, remaining))
 
 
 def _inventory_linux_process_group(

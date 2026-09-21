@@ -11,6 +11,12 @@ import pytest
 
 import mycelium_node.process as process_module
 
+# Bounded re-observation window for one owned-child observation.  It only ever
+# covers a kernel observation that could not be taken consistently during the
+# child's own exec transition, never the test's outer wait (see _wait_until).
+_OWNED_OBSERVATION_SECONDS = 0.5
+_READY_WAIT_SECONDS = 2.0
+
 
 def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
     deadline = time.monotonic() + timeout
@@ -19,14 +25,39 @@ def _wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
     assert predicate()
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS libproc regression")
-def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
-    """Cleanup retains the incarnation while an owned Mac executable changes."""
+def _observe_owned(
+    supervised: process_module.PhysicalNodeProcess,
+    ownership: process_module._PreExecOwnership,
+) -> process_module._ProcessIdentity:
+    """Observe the supervised child without racing its own exec transition.
 
+    ``observe_owned_process_identity`` re-observes only while this owner still
+    holds the child unreaped and only inside this bounded window, so a
+    transient mid-exec observation (the two Darwin snapshots disagreeing because
+    the owned launcher is replacing its image) is retried instead of being read
+    as a vanished pid.  A reaped child still raises immediately, and the
+    returned identity is a complete observation that every assertion below
+    still checks.
+    """
+
+    return process_module.observe_owned_process_identity(
+        supervised._process,
+        ownership,
+        time.monotonic() + _OWNED_OBSERVATION_SECONDS,
+    )
+
+
+def _owned_exec_transition_observed(
+    supervised: process_module.PhysicalNodeProcess,
+    ownership: process_module._PreExecOwnership,
+) -> bool:
+    return _observe_owned(supervised, ownership).executable == ownership.launcher_executable
+
+
+def _write_exec_transition_target(tmp_path: Path, launcher_path: str) -> tuple[Path, Path, Path]:
     ready = tmp_path / "ready"
     release = tmp_path / "release"
     target = tmp_path / "exec-transition.sh"
-    launcher_path = process_module._inventory_process(os.getpid()).executable.path
     target.write_text(
         "#!/bin/sh\n"
         f"printf ready > {str(ready)!r}\n"
@@ -35,8 +66,11 @@ def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
         "'import signal; signal.signal(signal.SIGTERM, signal.SIG_IGN); signal.pause()'\n",
         encoding="utf-8",
     )
+    return ready, release, target
 
-    supervised = process_module.PhysicalNodeProcess(
+
+def _supervise(target: Path) -> process_module.PhysicalNodeProcess:
+    return process_module.PhysicalNodeProcess(
         command=("/bin/sh", str(target)),
         node_id="node-native-cleanup",
         run_id="run-native-cleanup",
@@ -44,6 +78,16 @@ def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
         response_timeout_seconds=0.05,
         shutdown_timeout_seconds=1.0,
     )
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS libproc regression")
+def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
+    """Cleanup retains the incarnation while an owned Mac executable changes."""
+
+    launcher_path = process_module._inventory_process(os.getpid()).executable.path
+    ready, release, target = _write_exec_transition_target(tmp_path, launcher_path)
+
+    supervised = _supervise(target)
     ownership = supervised._pre_exec_ownership
     launch = supervised._launch_identity
     assert ownership is not None
@@ -51,11 +95,8 @@ def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
     try:
         _wait_until(ready.exists)
         release.touch()
-        _wait_until(
-            lambda: process_module._inventory_process(supervised.pid).executable
-            == ownership.launcher_executable
-        )
-        current = process_module._inventory_process(supervised.pid)
+        _wait_until(lambda: _owned_exec_transition_observed(supervised, ownership))
+        current = _observe_owned(supervised, ownership)
         assert current.start_token == ownership.start_token
         assert current.process_group == ownership.process_group == supervised.pid
         assert current.session_id == ownership.session_id == supervised.pid
@@ -66,7 +107,7 @@ def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
         assert supervised.returncode == -signal.SIGKILL
     finally:
         if supervised._process.poll() is None:
-            current = process_module._inventory_process(supervised.pid)
+            current = _observe_owned(supervised, ownership)
             assert current.pid == ownership.pid
             assert current.parent_pid == ownership.parent_pid == os.getpid()
             assert current.start_token == ownership.start_token
@@ -77,7 +118,111 @@ def test_cleanup_accepts_owned_macos_exec_transition(tmp_path: Path) -> None:
                 ownership,
                 supervised._target_executable_identity,
             )
-            os.killpg(ownership.process_group, signal.SIGKILL)
+            try:
+                os.killpg(ownership.process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                # Already gone: the owned group holds nothing left to kill.
+                # The authoritative cleanup below still has to finish.
+                pass
             supervised._process.wait(timeout=2.0)
         # Complete pipe/thread cleanup even when the assertion above is RED.
+        supervised.close()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS libproc regression")
+def test_owned_observation_retries_the_exec_transition_and_still_rejects_unowned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mid-exec observation of our child is retried, never read as death.
+
+    Regression for the ``pytest -n8`` red at ``mycelium_node/process.py:870`` in
+    the L2 tree (line 884 in the batch base): the two Darwin snapshots taken by
+    ``_inventory_darwin_process`` disagree while the owned launcher replaces its
+    own image, and that disagreement was reported as a vanished process.  The
+    injected disagreement below reproduces exactly that observation on a child
+    that is provably still alive and unreaped.
+
+    The retry must not launder a foreign incarnation into acceptance: a stable
+    but unowned executable is still rejected by the ownership predicate.
+    """
+
+    launcher_path = process_module._inventory_process(os.getpid()).executable.path
+    ready, release, target = _write_exec_transition_target(tmp_path, launcher_path)
+
+    supervised = _supervise(target)
+    ownership = supervised._pre_exec_ownership
+    assert ownership is not None
+    real_executable_path = process_module._darwin_executable_path
+    injected = {"remaining": 0, "count": 0}
+
+    def straddling_executable_path(pid: int) -> Path:
+        # One observation is split across the pre-exec image and the current
+        # one, exactly as the kernel does when the exec lands between the two
+        # snapshots.  The pre-exec image is a real, statable file so only the
+        # disagreement itself is injected.
+        if injected["remaining"] > 0:
+            injected["remaining"] -= 1
+            injected["count"] += 1
+            return target
+        return real_executable_path(pid)
+
+    try:
+        _wait_until(ready.exists, timeout=_READY_WAIT_SECONDS)
+        monkeypatch.setattr(process_module, "_darwin_executable_path", straddling_executable_path)
+
+        # 1. The injected disagreement is reported as a transient observation,
+        #    and the child is provably alive and unreaped while it is raised.
+        injected["remaining"] = 1
+        with pytest.raises(process_module.TransientIdentityObservation):
+            process_module._inventory_process(supervised.pid)
+        assert injected["count"] == 1
+        assert supervised._process.poll() is None
+
+        # 2. The owned observation retries that same disagreement inside its
+        #    bounded window and still returns this child's own incarnation.
+        #    At this point the child's live image is the launched target's
+        #    shell - neither the launcher nor the final executable - so what
+        #    must hold after the retry is the unchanged incarnation, which the
+        #    final transition check below pins to the owned executable.
+        injected["remaining"] = 1
+        current = _observe_owned(supervised, ownership)
+        assert injected["count"] == 2
+        assert current.pid == ownership.pid
+        assert current.parent_pid == ownership.parent_pid == os.getpid()
+        assert current.start_token == ownership.start_token
+        assert current.process_group == ownership.process_group == supervised.pid
+        assert current.session_id == ownership.session_id == supervised.pid
+
+        # 3. A stable but unowned executable is still rejected: the retry above
+        #    only tolerates an unstable observation, it never accepts a foreign
+        #    incarnation.
+        monkeypatch.setattr(
+            process_module,
+            "_darwin_executable_path",
+            lambda pid: Path("/bin/cat"),
+        )
+        foreign = _observe_owned(supervised, ownership)
+        assert foreign.executable.path == "/bin/cat"
+        assert foreign.executable != ownership.launcher_executable
+        assert not process_module._identity_matches_pre_exec_ownership(
+            foreign,
+            ownership,
+            supervised._target_executable_identity,
+        )
+
+        monkeypatch.setattr(process_module, "_darwin_executable_path", real_executable_path)
+
+        # 4. Cleanup of the owned child is still proven end to end.
+        release.touch()
+        _wait_until(lambda: _owned_exec_transition_observed(supervised, ownership))
+        supervised.close()
+        assert supervised.returncode == -signal.SIGKILL
+    finally:
+        monkeypatch.setattr(process_module, "_darwin_executable_path", real_executable_path)
+        if supervised._process.poll() is None:
+            try:
+                os.killpg(ownership.process_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            supervised._process.wait(timeout=2.0)
         supervised.close()
