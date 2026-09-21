@@ -64,7 +64,7 @@
     },
     {
       "attributes": {
-        "cancellation_cleanup_bound_ms": 2000,
+        "cancellation_cleanup_bound_ms": 8000,
         "concurrency_eligible": false,
         "decode_mode": "stage_local_kv",
         "deployment_id": "12345678-1234-5678-1234-567812345678",
@@ -268,6 +268,30 @@
       "kind": "source_provenance",
       "label": "Evidence source",
       "source_id": "qualification-source"
+    },
+    {
+      "attributes": {
+        "authority": "request_gateway_recovery",
+        "evidence_digest": null,
+        "source_generation": null,
+        "source_protocol": "mycelium.full_context_recovery_runtime.v1"
+      },
+      "binding": {
+        "deployment_epoch": null,
+        "deployment_id": null,
+        "route_generation": null,
+        "route_id": null,
+        "topology_version": null
+      },
+      "entity_id": "provenance-recovery-source",
+      "freshness": {
+        "observed_at_unix_ms": null,
+        "status": "missing",
+        "valid_until_unix_ms": null
+      },
+      "kind": "source_provenance",
+      "label": "Evidence source",
+      "source_id": "recovery-source"
     },
     {
       "attributes": {
@@ -482,6 +506,13 @@
       "scope_id": "product-root",
       "severity": "warning",
       "source_id": "qualification-source"
+    },
+    {
+      "code": "recovery_source_missing",
+      "notice_id": "source-recovery-source-missing",
+      "scope_id": "product-root",
+      "severity": "warning",
+      "source_id": "recovery-source"
     }
   ],
   "protocol": "mycelium.product_snapshot.v1",
@@ -494,7 +525,7 @@
     "cursor": 1,
     "generation": 1,
     "published_at_unix_ms": 1000000,
-    "snapshot_id": "snapshot-1-9a2e867c26049219",
+    "snapshot_id": "snapshot-1-050cbd7e786bed91",
     "source_mode": "fixture"
   },
   "readiness": [
@@ -586,7 +617,7 @@
     }
   ],
   "route_explorer": {
-    "digest": "sha256:6414f11c48cc2a8dea68d3f40f8ba5d707d2c3af67fdbf036bf438accd35adf9",
+    "digest": "sha256:84cca19319fec27252d6bcc34e633acdf1a99eef3cd2c7a85c26b132ecb4bff7",
     "generation": 1,
     "nodes": [
       {
@@ -711,7 +742,7 @@
         "transport": "relay"
       }
     ],
-    "source_digest": "sha256:18020535af1b5b24e5fd854eeb23a0389be17021cf32339ad147e0f271329c59",
+    "source_digest": "sha256:e84688b5c146e40db513ccf9a9eba0a1a16376dbfcae6798b0c9ee0b1d5d6d6e",
     "source_mode": "fixture"
   },
   "source_states": [
@@ -748,6 +779,15 @@
       "observed_at_unix_ms": null,
       "reason_code": "qualification_source_missing",
       "source_id": "qualification-source",
+      "status": "missing",
+      "valid_until_unix_ms": null
+    },
+    {
+      "authority": "request_gateway_recovery",
+      "generation": null,
+      "observed_at_unix_ms": null,
+      "reason_code": "recovery_source_missing",
+      "source_id": "recovery-source",
       "status": "missing",
       "valid_until_unix_ms": null
     },
@@ -805,6 +845,7 @@
     "incident",
     "load_proof",
     "qualification",
+    "recovery",
     "request",
     "route",
     "runtime_kv_ownership",

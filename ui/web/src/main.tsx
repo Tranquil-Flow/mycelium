@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { canonicalizeApplicationPath } from './app/consumerRoute';
 import { createObservatorySource } from './data/observatorySource';
 import {
   createProductObservatoryLiveSource,
@@ -15,11 +16,13 @@ import {
 } from './features/productEvidence/source';
 
 const deviceLabOperatorToken = consumeDeviceLabOperatorCapability();
+const surface = canonicalizeApplicationPath();
 
 const rootElement = document.getElementById('root');
 if (rootElement === null) throw new Error('Network Observatory root element is missing');
 const root = createRoot(rootElement);
-const sourceMode = resolveProductObservatorySourceMode(import.meta.env.VITE_OBSERVATORY_SOURCE_MODE);
+const sourceMode = surface === 'consumer' ? 'live'
+  : resolveProductObservatorySourceMode(import.meta.env.VITE_OBSERVATORY_SOURCE_MODE);
 
 function renderProduct(
   source: Parameters<typeof App>[0]['source'],
@@ -43,7 +46,11 @@ async function bootstrapLiveProduct(): Promise<void> {
   );
 }
 
-if (deviceLabOperatorToken !== null) {
+if (surface !== 'operator') {
+  // Consumer owns its live bootstrap and failure/retry display. Never substitute
+  // the operator fixture client, even in an explicitly fixture-built bundle.
+  renderProduct(createProductObservatoryLiveSource());
+} else if (deviceLabOperatorToken !== null) {
   // The isolated Device Lab server intentionally exposes only its same-origin
   // operator API, not the physical product bootstrap. App renders the live local
   // Device Lab workspace before consulting this non-authoritative fixture source.

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { applicationSurface, canonicalizeApplicationPath } from './app/consumerRoute';
+import { ConsumerLiveRoute } from './features/consumer/ConsumerLiveRoute';
 import { ProductFeatureSlot } from './app/ProductFeatureSlot';
 import { createInitialProductState, type ProductState } from './app/ProductState';
 import {
@@ -80,7 +82,7 @@ export interface AppProps {
 
 const defaultSource = createObservatorySource({ source_mode: 'fixture' });
 const emptyFeatureRegistry = createProductFeatureRegistry([]);
-const fixtureInferenceClient = new FixtureInferenceClient();
+
 const liveM15ComparisonClient = new HttpM15ComparisonClient();
 const liveDeploymentRegistryClient = new HttpDeploymentRegistryClient();
 const recordedLifecycleProjections = Object.freeze(
@@ -188,12 +190,29 @@ function SemanticProjectionView({ state }: { readonly state: LiveObservatorySour
   );
 }
 
-export default function App({
+export default function App(props: AppProps) {
+  const [surface, setSurface] = useState(canonicalizeApplicationPath);
+  useEffect(() => {
+    const synchronize = () => setSurface(canonicalizeApplicationPath());
+    window.addEventListener('hashchange', synchronize);
+    window.addEventListener('popstate', synchronize);
+    return () => {
+      window.removeEventListener('hashchange', synchronize);
+      window.removeEventListener('popstate', synchronize);
+    };
+  }, []);
+  if (surface === 'consumer') return <ConsumerLiveRoute />;
+  if (surface === 'not-found') return <main><h1>Page not found</h1><a href="/">Return to Mycelium</a></main>;
+  return <OperatorApp {...props} />;
+}
+
+function OperatorApp({
   source = defaultSource,
   featureRegistry = emptyFeatureRegistry,
   productState,
   deviceLabOperatorToken = null,
 }: AppProps) {
+  const fixtureInferenceClient = useMemo(() => source.source_mode === 'live' ? undefined : new FixtureInferenceClient(), [source]);
   const productEvidence = useProductEvidence();
   const effectiveProductState =
     productState !== undefined && productState.source_mode === source.source_mode
@@ -211,6 +230,9 @@ export default function App({
 
   useEffect(() => {
     const synchronizeHash = () => {
+      // A departing operator listener must not rewrite a consumer anchor before
+      // the outer route boundary handles the same history event.
+      if (applicationSurface(window.location.pathname, window.location.hash) !== 'operator') return;
       const nextView = parseProductRoute(window.location.hash);
       if (nextView === null) {
         window.history.replaceState(null, '', productRouteHref('inference'));
@@ -225,7 +247,11 @@ export default function App({
     };
     synchronizeHash();
     window.addEventListener('hashchange', synchronizeHash);
-    return () => window.removeEventListener('hashchange', synchronizeHash);
+    window.addEventListener('popstate', synchronizeHash);
+    return () => {
+      window.removeEventListener('hashchange', synchronizeHash);
+      window.removeEventListener('popstate', synchronizeHash);
+    };
   }, []);
 
   useEffect(() => {
