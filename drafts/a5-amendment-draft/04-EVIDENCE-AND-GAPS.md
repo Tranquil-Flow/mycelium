@@ -239,6 +239,8 @@ and read the failure artifacts directly. **Consequence:** §1.6 of `02-OPTIONS.m
 
 **G12 — no reviewer has checked this draft.** It is a first-party draft produced by one subagent under the parent's instruction; it has had no independent read. **Consequence:** treat every judgement (particularly the §4 recommendation in `02-OPTIONS.md`) as a proposal, not a finding. **Closed by:** an independent review pass before the owner acts on it.
 
+**G13 — this draft and the earlier draft in `runs/a5-disposition/` differ on the *width* of the `P05` decoupling, and the owner is choosing between them.** The review's own D3 event text keeps a condition in `P05`'s effective dependencies — `["A5 fresh valid non-promoting disposition per session7-i4o3rh0h-owner-decision (or any later owner amendment)", "P19"]` (`PROPOSED_PLAN_DELTA.md:86`) — whereas this draft's `C1` removes the A5 condition **entirely**, per the instruction that A6 source integration proceed *independently of any A5 disposition*. I did **not** silently resolve this in favour of the review's text, and the reason is stated: the task's instruction is explicit, and the program plan already states the wider rule in words (`PLAN.md:32`, D2 — *"A6 source integration no longer waits on **any** A5 result"*). The narrower option is nonetheless defensible and is closer to the review's D3. **Closed by:** the owner's answer to `C1`; both widths are drafted, and `01-AMENDMENT.md` §8.3's event text is the place to switch.
+
 ---
 
 ## 9. Self-check against the hard rules of the task

@@ -65,10 +65,15 @@ ground (its Q1–Q3 map to this draft's C1–C3). This draft **supersedes nothin
 independent draft that: adds the before/after edge quotes at `file:line`; drafts both future-purpose options
 in full rather than naming them; adds the invariants section and the non-establishment list; and **withdraws**
 that draft's Q4 (`closing_commit` = `b9001e6`) on the authority quoted above. The two drafts disagree on
-exactly two points, both stated in the open: the `closing_commit` item, and the width of the `P05`
-decoupling (that draft keeps a fresh-valid-disposition condition; this one removes the A5 condition entirely,
-per the task's instruction that A6 source integration proceed *independently of any A5 disposition* —
-see gap **G8** in `04-EVIDENCE-AND-GAPS.md`'s numbering plan and `02-OPTIONS.md` §4).
+exactly two points, both stated in the open:
+
+- **the `closing_commit` item** — that draft proposes `b9001e6`; this one withdraws the item entirely
+  (`01-AMENDMENT.md` §5);
+- **the width of the `P05` decoupling** — that draft keeps a *"fresh valid non-promoting A5 disposition"*
+  condition (following the review's D3 text); this one removes the A5 condition **entirely**, per the task's
+  instruction that A6 source integration proceed *independently of any A5 disposition* (`01-AMENDMENT.md`
+  §2, `02-OPTIONS.md` §4). **The owner should choose between these two widths deliberately** — the wider
+  decoupling is the one the program plan already states in words (`PLAN.md:32`, D2).
 
 ## Provenance of the drafting work
 
