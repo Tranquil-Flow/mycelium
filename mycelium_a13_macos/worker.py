@@ -41,6 +41,9 @@ class WorkerError(RuntimeError):
         # Numbers behind a limit refusal, when the guard has them: the code alone
         # cannot say whether the bound or the accounting is wrong.
         self.limit_detail: dict[str, int] | None = None
+        # Why a memory observation refused, when the guard knows: a bare code
+        # made the batch-2 L2 triage (2026-09-21) depend on re-running the host.
+        self.observation_detail: dict[str, Any] | None = None
         super().__init__(code)
 
 
@@ -516,6 +519,12 @@ class _ConcurrentNativeSession:
 
 
 class ManagedWorker:
+    # Memory observation (`_group_rss`): the per-attempt bound, plus the bounded
+    # tolerance for a host-loaded stall that the batch-2 L2 exposed.
+    _OBSERVATION_TIMEOUT_S = 2.0
+    _OBSERVATION_ATTEMPTS = 3
+    _OBSERVATION_BACKOFF_S = 0.05
+
     def __init__(
         self,
         *,
@@ -682,38 +691,68 @@ class ManagedWorker:
 
     def _group_rss(self, deadline_monotonic_s: float | None = None) -> int:
         # Numbers only: never collect other processes' argv or environment.
-        try:
-            timeout = 2.0
+        #
+        # A host under load can stall a cheap `/bin/ps` past the per-attempt
+        # bound (or delay this thread past it) without saying anything about the
+        # worker: the batch-2 L2 on 2026-09-21 at load1 ~57 stalled twice out of
+        # thousands of observations that normally return in ~50 ms, and each
+        # stall killed a healthy worker with worker_memory_observation_failed.
+        # So the per-attempt bound stays, but a stalled attempt is retried a
+        # bounded number of times -- a fresh call is a new observation, not a
+        # repeat of a failing one.  The caller's deadline still wins, exhausting
+        # the attempts still refuses (an unobservable host must never look like
+        # a worker at zero RSS), and a report we cannot parse is our own
+        # assumption breaking, so it refuses instead of under-counting.
+        attempts = 0
+        while attempts < self._OBSERVATION_ATTEMPTS:
+            attempts += 1
+            timeout = self._OBSERVATION_TIMEOUT_S
             if deadline_monotonic_s is not None:
                 remaining = deadline_monotonic_s - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("command_deadline_exceeded")
                 timeout = min(timeout, remaining)
-            report = subprocess.run(
-                ["/bin/ps", "-axo", "pid=,pgid=,rss="],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=True,
-            )
+            try:
+                report = subprocess.run(
+                    ["/bin/ps", "-axo", "pid=,pgid=,rss="],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=True,
+                )
+            except subprocess.TimeoutExpired:
+                if (
+                    deadline_monotonic_s is not None
+                    and time.monotonic() >= deadline_monotonic_s
+                ):
+                    raise TimeoutError("command_deadline_exceeded") from None
+                time.sleep(self._OBSERVATION_BACKOFF_S)
+                continue
+            except Exception:
+                # `/bin/ps` could not be run at all: not a scheduling hiccup.
+                raise WorkerError("worker_memory_observation_failed") from None
             total = 0
-            for line in report.stdout.splitlines():
-                self._deadline_check(deadline_monotonic_s)
-                fields = line.split()
-                if len(fields) != 3:
-                    raise ValueError()
-                _pid, pgid, kib = map(int, fields)
-                if pgid == self.pid:
-                    total += kib * 1024
+            try:
+                for line in report.stdout.splitlines():
+                    self._deadline_check(deadline_monotonic_s)
+                    fields = line.split()
+                    if len(fields) != 3:
+                        raise ValueError()
+                    _pid, pgid, kib = map(int, fields)
+                    if pgid == self.pid:
+                        total += kib * 1024
+            except TimeoutError:
+                raise
+            except ValueError:
+                raise WorkerError("worker_memory_observation_failed") from None
             return total
-        except TimeoutError:
-            raise
-        except subprocess.TimeoutExpired:
-            if deadline_monotonic_s is not None:
-                raise TimeoutError("command_deadline_exceeded") from None
-            raise WorkerError("worker_memory_observation_failed") from None
-        except Exception:
-            raise WorkerError("worker_memory_observation_failed") from None
+        error = WorkerError("worker_memory_observation_failed")
+        error.observation_detail = {
+            "attempts": attempts,
+            "per_attempt_timeout_seconds": self._OBSERVATION_TIMEOUT_S,
+            "deadline_bound": deadline_monotonic_s is not None,
+        }
+        raise error
 
     def _native_argv(self) -> tuple[str, ...]:
         """Exact native-node argv, with the derived command budget.
