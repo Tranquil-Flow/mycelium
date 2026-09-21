@@ -283,15 +283,24 @@ def observe_recovery(runtime: Any, *, previous_worker: Any, killed_at: float,
     route_recovered_at: float | None = None
 
     def sample(note: str) -> dict[str, Any]:
-        status = runtime.status()
+        # ``ManagedTargetRuntime.status`` is the shipped runtime's own record, and
+        # it is the record that *owns* ``route_ready``.  The reserved name is
+        # carried below only as a verbatim read of that record, the shape
+        # ``mycelium_testbed/iroh_e2e.py`` uses for ``evidence.route_ready``: the
+        # harness never recomputes the claim into a boolean of its own, and a
+        # value the record did not publish stays absent (``None``) instead of
+        # being manufactured into ``False``.  A harness that mints this claim -
+        # as a literal or as a computed guess - is the defect
+        # ``tests/testbed/test_harness_claim_boundary.py`` exists to catch.
+        record = runtime.status()
         entry = {
             "note": note,
             "at_seconds": time.monotonic() - killed_at,
-            "state": status.get("state"),
-            "error_code": status.get("error_code"),
+            "state": record.get("state"),
+            "error_code": record.get("error_code"),
             "worker_is_previous": runtime.worker is previous_worker,
-            "worker_running": bool(status.get("worker_running")),
-            "route_ready": bool(status.get("route_ready")),
+            "worker_running": bool(record.get("worker_running")),
+            "route_ready": record.get("route_ready"),
         }
         timeline.append(entry)
         return entry
