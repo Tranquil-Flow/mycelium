@@ -127,9 +127,8 @@ class ManagedTargetRuntime:
         # in the original durable run root, never the temporary directory.
         temp_base=Path('/private/tmp') if Path('/private/tmp').is_dir() else Path('/tmp')
         self._socket_parent=Path(tempfile.mkdtemp(prefix='myc-a13-',dir=temp_base))
-        # Held so a REPLACEMENT worker can be built with the same parameters as the first one: a worker
-        # that exits must be followed by another, and only this object can mint it (worker.py:739-741
-        # refuses a second start on the same instance).
+        # Retain construction inputs for bounded pre-load process replacement.
+        # A configured worker instead requires a fresh run and re-qualification.
         self._sidecar_binary=sidecar_binary
         self._resource_policy=resource_policy
         self._limits=limits
@@ -138,6 +137,7 @@ class ManagedTargetRuntime:
         self._test_observer=_test_observer
         self._worker_generation=0
         self._worker_replacements=0
+        self._replacement_worker=None
         try:
             self.worker=self._make_worker()
             self.pump=ConcurrentTargetControlPump(self.root/'pump',client=client,worker=self.worker,
@@ -211,28 +211,17 @@ class ManagedTargetRuntime:
             return self.status()
 
     def _replace_worker_if_dead(self):
-        """Mint a REPLACEMENT worker when the native worker exited while this runtime is running.
+        """Replace only a pre-load process; configured runs require cold restart.
 
-        WHY THIS EXISTS, measured: round p79r1 killed the owner node's worker mid-request
-        (native-exit.private.json: returncode 143, in_flight_count 1) and NOTHING replaced it -- no
-        --managed-node process afterwards, restart_count held at 27 through a 180 s bounded wait, no fresh
-        incarnation -- so every request after it was accepted and then withheld, 106 blocked terminals with
-        command_cleanup_receipt_missing.  C5 requires "one worker restart per Mac" AND "zero stuck / zero
-        cleanup-unproven"; those are mutually exclusive until the runtime replaces its own worker, because
-        without an executor cleanup can never be proven.
-
-        Bounded and fail-closed: at most _MAX_WORKER_REPLACEMENTS attempts per runtime, one bounded private
-        record per attempt (protocol, attempt number, previous error, outcome), and no attempt while the
-        runtime is stopping or closed.  The replacement keeps the CURRENT member incarnation: an executor
-        process is not a re-enrollment, so this does not mint a new incarnation and does not advance
-        restart_count -- the product's own re-admission path (peer.py:887-908) remains the only thing that
-        does, on a node resume.
+        No replay, request continuity, readiness or old-worker cleanup receipt is
+        inferred from a new process. The route owner must start a fresh run and
+        re-qualify after configure has been dispatched, even if its reply was lost.
         """
 
         if self._stop.is_set():
             return
         with self._lock:
-            if self._state!='running' or self._worker_replacements>=_MAX_WORKER_REPLACEMENTS:
+            if self._state!='running':
                 return
         try:
             status=self.worker.status()
@@ -240,8 +229,44 @@ class ManagedTargetRuntime:
             return
         if status.get('running'):
             return
+        # Freeze command admission before deciding whether any native model
+        # state could exist. A concurrent configure either committed before close
+        # (and requires cold restart), or cannot commit after close.
+        previous=self.worker
+        try:
+            previous.close()
+            if not previous.cleanup_proven() or previous.process_group_present():
+                raise RuntimeErrorCode('runtime_stop_incomplete')
+        except Exception:
+            self._stop.set()
+            _atomic_private_json(self.root/'worker-replacement.private.json',{
+                'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
+                'attempt':self._worker_replacements,'outcome':'failed',
+                'error_code':'runtime_replacement_cleanup_unproven',
+                'max_attempts':_MAX_WORKER_REPLACEMENTS})
+            raise RuntimeErrorCode('runtime_replacement_cleanup_unproven')
+        if previous.requires_cold_restart():
+            with self._lock:
+                self._stop.set()
+                self._state='blocked'; self._error='runtime_cold_restart_required'
+            _atomic_private_json(self.root/'worker-replacement.private.json',{
+                'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
+                'attempt':self._worker_replacements,'outcome':'refused',
+                'error_code':'runtime_cold_restart_required',
+                'max_attempts':_MAX_WORKER_REPLACEMENTS})
+            raise RuntimeErrorCode('runtime_cold_restart_required')
+        refusal=self.worker.replacement_refusal()
+        if refusal is not None:
+            if getattr(self,'_replacement_refusal_recorded',None)!=refusal:
+                _atomic_private_json(self.root/'worker-replacement.private.json',{
+                    'protocol':_WORKER_REPLACEMENT_PROTOCOL,'run_id':self.run_id,
+                    'attempt':self._worker_replacements,'outcome':'refused',
+                    'error_code':refusal,'max_attempts':_MAX_WORKER_REPLACEMENTS})
+                self._replacement_refusal_recorded=refusal
+            return
         with self._lock:
-            if self._state!='running':
+            if (self._state!='running' or self._stop.is_set()
+                    or self._worker_replacements>=_MAX_WORKER_REPLACEMENTS):
                 return
             self._worker_replacements+=1
             attempt=self._worker_replacements
@@ -249,33 +274,59 @@ class ManagedTargetRuntime:
             'previous_error_code':status.get('error_code') if isinstance(status.get('error_code'),str) else None,
             'max_attempts':_MAX_WORKER_REPLACEMENTS}
         previous=self.worker
+        replacement=None
+        cleanup_unproven=False
         try:
             self._worker_generation+=1
             replacement=self._make_worker()
+            replacement.inherit_execution_budget(previous)
+            # Own the unpublished process too: close must be able to interrupt
+            # native startup before it joins this control thread.
+            with self._lock:
+                if self._stop.is_set() or self._state!='running' or self.worker is not previous:
+                    raise RuntimeErrorCode('runtime_replacement_stopped')
+                self._replacement_worker=replacement
             replacement.start()
-            record['outcome']='replaced'
+
+            with self._lock:
+                if self._stop.is_set() or self._state!='running' or self.worker is not previous:
+                    raise RuntimeErrorCode('runtime_replacement_stopped')
+                if not replacement.status().get('running'):
+                    raise RuntimeErrorCode('runtime_replacement_not_running')
+                self.worker=replacement
+                self.pump.worker=replacement
+                record['outcome']='replaced'
         except Exception as exc:
+            if replacement is not None:
+                try:
+                    replacement.close()
+                    if not replacement.cleanup_proven() or replacement.process_group_present():
+                        raise RuntimeErrorCode('runtime_stop_incomplete')
+                except Exception:
+                    # Retain ownership for explicit close; a failed teardown is
+                    # not permission to forget the process or mint another one.
+                    cleanup_unproven=True
+                    record['cleanup_error_code']='runtime_replacement_cleanup_unproven'
+                    with self._lock:
+                        self._replacement_worker=replacement
+                        self._stop.set()
             record['outcome']='failed'
             code=getattr(exc,'code',None)
             record['error_code']=code if isinstance(code,str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}',code) else None
-            try: record['cause_code']=str(exc)[:64]
-            except Exception: pass
-        else:
-            self.worker=replacement
-            # The pump dispatches through self.worker on EVERY use, so re-pointing the reference is the
-            # whole swap; nothing the pump already holds refers to the dead worker.
-            self.pump.worker=replacement
-            try:
-                if not replacement.status().get('running'):
-                    record['outcome']='started_not_running'
-            except Exception:
-                pass
+            cause=str(exc)
+            if re.fullmatch(r'[a-z][a-z0-9_]{0,63}',cause):
+                record['cause_code']=cause
+        finally:
+            with self._lock:
+                if not cleanup_unproven and self._replacement_worker is replacement:
+                    self._replacement_worker=None
         try: _atomic_private_json(self.root/'worker-replacement.private.json',record)
         except BaseException: pass
+        if cleanup_unproven:
+            raise RuntimeErrorCode('runtime_replacement_cleanup_unproven')
         if record['outcome']!='replaced':
             return
-        try: previous.close()
-        except Exception: pass
+
 
     def _serve(self):
         try:
@@ -345,20 +396,28 @@ class ManagedTargetRuntime:
                 'model_load_authorized':self.worker.status()['model_load_authorized']}
 
     def close(self,*,cleanup=False):
-        self._stop.set()
+        with self._lock:
+            self._stop.set()
+            worker=self.worker
+            replacement=self._replacement_worker
         # Release the control loop's delivery wait at once, so a stop is never delayed by
         # the interval (or the retry backoff) the loop happens to be sitting out.  Waiting
         # is bounded by the same numbers as before; this only makes it end sooner.
         self.pump.wake()
         # Native shutdown first bounds in-flight response waits, then HTTP/pump
         # ownership is released. No lock is held while joining the pump thread.
-        self.worker.close()
+        worker.close()
+        if replacement is not None and replacement is not worker:
+            replacement.close()
         thread=self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=15)
             if thread.is_alive(): raise RuntimeErrorCode('runtime_stop_incomplete')
         self.pump.close()
-        if self.worker.process_group_present(): raise RuntimeErrorCode('runtime_stop_incomplete')
+        if (not worker.cleanup_proven() or worker.process_group_present()
+                or (replacement is not None and
+                    (not replacement.cleanup_proven() or replacement.process_group_present()))):
+            raise RuntimeErrorCode('runtime_stop_incomplete')
         try: shutil.rmtree(self._socket_parent)
         except FileNotFoundError: pass
         except OSError: raise RuntimeErrorCode('runtime_socket_cleanup_incomplete') from None

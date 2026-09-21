@@ -139,9 +139,15 @@ def _deactivate_working_directory_token(token: _WorkingDirectoryToken) -> None:
 class NodeProcessError(RuntimeError):
     """Stable, fail-closed node-process failure."""
 
-    def __init__(self, code: str, detail: str = "") -> None:
+    def __init__(
+        self, code: str, detail: str = "", *,
+        cleanup_owner: "PhysicalNodeProcess | None" = None,
+    ) -> None:
         self.code = code
         self.detail = detail
+        # Preserve incarnation-bound teardown when a failed constructor cannot
+        # prove that the child it spawned has gone.
+        self.cleanup_owner = cleanup_owner
         super().__init__(code if not detail else f"{code}:{detail}")
 
 
@@ -1583,7 +1589,9 @@ class PhysicalNodeProcess:
                 if cleaned
                 else "node_process_cleanup_failed"
             )
-            raise NodeProcessError(code) from exc
+            raise NodeProcessError(
+                code, cleanup_owner=None if cleaned else self,
+            ) from exc
         finally:
             for name in tuple(handshake):
                 _close_handshake_descriptor(handshake, name)

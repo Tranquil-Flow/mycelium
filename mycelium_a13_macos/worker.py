@@ -583,10 +583,20 @@ class ManagedWorker:
         self._command_count = 0
         self._commands: set[str] = set()
         self._pending_commands: set[str] = set()
+        # One admitted execution owns every replacement's wall/command budget.
+        self._budget_owner = self
+        self._owner_stop_requested = False
         self._load_admitted = False
+        # Even a lost configure acknowledgement may have loaded native state.
+        # Such a runtime needs a fresh run, never same-run replay or continuity.
+        self._configure_dispatched = False
         self._account_lock = threading.RLock()
         self._guard_lock = threading.Lock()
         self._close_lock = threading.Lock()
+        self._cleanup_complete = False
+        self._starting = False
+        self._startup_cleanup_unproven = False
+        self._startup_cleanup_owner: Any | None = None
         self._last_observation: dict[str, str] | None = None
 
     @staticmethod
@@ -621,8 +631,8 @@ class ManagedWorker:
             if violation:
                 raise WorkerError(violation)
             if (
-                self._started_at is not None
-                and time.monotonic() - self._started_at
+                self._budget_owner._started_at is not None
+                and time.monotonic() - self._budget_owner._started_at
                 >= self.limits.max_wall_seconds - _CLEANUP_RESERVE_SECONDS
             ):
                 raise WorkerError("worker_wall_limit_exceeded")
@@ -739,10 +749,22 @@ class ManagedWorker:
     def start(self) -> dict[str, Any]:
         if self._session is not None or self._closed.is_set():
             raise WorkerError("worker_restart_requires_new_instance")
+        refusal = self.replacement_refusal()
+        if refusal is not None:
+            raise WorkerError(refusal)
         self._check()
-        self._started_at = time.monotonic()
+        if self._budget_owner is self:
+            self._started_at = time.monotonic()
+        else:
+            self._started_at = self._budget_owner._started_at
+        if self._started_at is None:
+            raise WorkerError("worker_replacement_state_unavailable")
         argv = self._native_argv()
         _, response_timeout = _native_budgets(self.limits)
+        with self._close_lock:
+            if self._closed.is_set() or self._starting or self._session is not None:
+                raise WorkerError("worker_restart_requires_new_instance")
+            self._starting = True
         try:
             self._session = _ConcurrentNativeSession(
                 argv=argv,
@@ -752,6 +774,9 @@ class ManagedWorker:
                 timeout_seconds=response_timeout,
             )
             self.pid = self._session.pid
+            with self._close_lock:
+                if self._closed.is_set():
+                    raise WorkerError("worker_not_running")
             remaining = (
                 self.limits.max_wall_seconds
                 - _CLEANUP_RESERVE_SECONDS
@@ -773,39 +798,57 @@ class ManagedWorker:
             )
             self._monitor.start()
             return hello
-        except BaseException:
+        except BaseException as exc:
+            with self._close_lock:
+                self._cleanup_complete = False
+                self._starting = False
+                if self._session is None and getattr(exc, "code", None) == "node_process_cleanup_failed":
+                    self._startup_cleanup_unproven = True
+                    self._startup_cleanup_owner = getattr(exc, "cleanup_owner", None)
             self.close()
             raise
+        finally:
+            with self._close_lock:
+                self._starting = False
 
     def _reserve_command(self, command_id: str) -> Any:
         with self._account_lock:
+            budget = getattr(self, "_budget_owner", self)
             if self._session is None or self._closed.is_set():
                 raise WorkerError(_unavailable_code(self))
-            if command_id in self._commands or command_id in self._pending_commands:
+            if command_id in budget._commands or command_id in budget._pending_commands:
                 raise WorkerError("worker_command_reconciliation_required")
             if (
-                self._command_count + len(self._pending_commands)
+                budget._command_count + len(budget._pending_commands)
                 >= self.limits.max_commands
             ):
                 raise WorkerError("worker_command_limit_exceeded")
-            self._pending_commands.add(command_id)
+            budget._pending_commands.add(command_id)
             return self._session
 
     def _retire_reservation(self, command_id: str) -> None:
         with self._account_lock:
-            self._pending_commands.discard(command_id)
+            self._budget_owner._pending_commands.discard(command_id)
 
-    def _commit_command(self, command_id: str, session: Any) -> None:
+    def _commit_command(self, command_id: str, session: Any, *, command: str | None = None) -> None:
         with self._account_lock:
+            budget = getattr(self, "_budget_owner", self)
             if (
                 self._session is not session
                 or self._closed.is_set()
-                or command_id not in self._pending_commands
+                or command_id not in budget._pending_commands
             ):
                 raise WorkerError(_unavailable_code(self))
-            self._pending_commands.remove(command_id)
-            self._commands.add(command_id)
-            self._command_count += 1
+            if budget._owner_stop_requested and command != "stop":
+                raise WorkerError("worker_owner_stopped")
+            budget._pending_commands.remove(command_id)
+            budget._commands.add(command_id)
+            budget._command_count += 1
+            if command == "stop":
+                # Delivery may succeed even when its acknowledgement is lost.
+                budget._owner_stop_requested = True
+            if command == "configure":
+                self._configure_dispatched = True
 
     @staticmethod
     def _validate_response(
@@ -939,6 +982,9 @@ class ManagedWorker:
             "command": command,
             "payload": payload_document,
         }
+        with self._account_lock:
+            if self._budget_owner._owner_stop_requested and command != "stop":
+                raise WorkerError("worker_owner_stopped")
         session = self._reserve_command(command_id)
         committed = False
         try:
@@ -956,7 +1002,7 @@ class ManagedWorker:
             if frozenset(payload_document) not in _OPERATION_PAYLOAD_FIELDS[command]:
                 raise WorkerError("worker_command_invalid")
             self._deadline_check(deadline_monotonic_s)
-            self._commit_command(command_id, session)
+            self._commit_command(command_id, session, command=command)
             committed = True
             if deadline_monotonic_s is None:
                 response = session.send(
@@ -1065,6 +1111,40 @@ class ManagedWorker:
                 self.close()
                 return
 
+    def replacement_refusal(self) -> str | None:
+        """Expired/stopped authority never mints another native process."""
+        with self._account_lock:
+            budget = self._budget_owner
+            if budget._owner_stop_requested:
+                return "worker_owner_stopped"
+            if (budget._started_at is not None and time.monotonic() >=
+                    budget._started_at + self.limits.max_wall_seconds - _CLEANUP_RESERVE_SECONDS):
+                return "worker_wall_limit_exceeded"
+            if budget._command_count + len(budget._pending_commands) >= self.limits.max_commands:
+                return "worker_command_limit_exceeded"
+            return None
+
+    def inherit_execution_budget(self, previous: "ManagedWorker") -> None:
+        """Transfer no authority: share the original accounting before start."""
+        if (self._session is not None or self._started_at is not None
+                or self._closed.is_set() or self.limits != previous.limits
+                or (self.node_id, self.run_id, self.deployment_id) !=
+                   (previous.node_id, previous.run_id, previous.deployment_id)):
+            raise WorkerError("worker_replacement_state_unavailable")
+        with previous._account_lock:
+            refusal = previous.replacement_refusal()
+            if refusal is not None:
+                raise WorkerError(refusal)
+            if previous._budget_owner._started_at is None:
+                raise WorkerError("worker_replacement_state_unavailable")
+            self._budget_owner = previous._budget_owner
+            self._account_lock = previous._account_lock
+
+    def requires_cold_restart(self) -> bool:
+        """No model state, request KV, or old cleanup authority transfers."""
+        with self._account_lock:
+            return self._configure_dispatched or self._load_admitted
+
     def process_group_present(self) -> bool:
         if not self._group_owned or self.pid is None:
             return False
@@ -1083,22 +1163,37 @@ class ManagedWorker:
                 "stopping": self._closed.is_set() and running,
                 "error_code": self._error,
                 "model_load_authorized": self._load_admitted,
-                "command_count": self._command_count,
+                "command_count": self._budget_owner._command_count,
                 "resource_observation": self._last_observation,
                 "route_ready": False,
             }
 
+    def cleanup_proven(self) -> bool:
+        """A pre-hello ownership refusal is not proof that no process survives."""
+        with self._close_lock:
+            return self._closed.is_set() and self._cleanup_complete and not self._starting
+
     def close(self) -> None:
         with self._close_lock:
-            self._closed.set()
+            with self._account_lock:
+                self._closed.set()
             if self._deadline_timer is not None:
                 self._deadline_timer.cancel()
-            session = self._session
+            session = self._session or self._startup_cleanup_owner
             if session is not None:
                 try:
                     session.close()
                 except Exception:
+                    self._cleanup_complete = False
                     self._error = self._error or "worker_cleanup_failed"
+                else:
+                    self._cleanup_complete = True
+                    self._startup_cleanup_unproven = False
+                    self._startup_cleanup_owner = None
+            else:
+                # An unassigned session does not prove its constructor never
+                # spawned a child; a missing cleanup handle remains unknown.
+                self._cleanup_complete = not self._startup_cleanup_unproven
             # PhysicalNodeProcess alone owns descriptor-, process-incarnation-,
             # and process-group-bound termination.  If it cannot prove safe
             # ownership, do not bypass that guard with an unverified killpg.

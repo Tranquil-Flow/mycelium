@@ -1027,7 +1027,11 @@ def test_a_poll_that_owes_an_expired_acknowledgement_is_held_open(tmp_path: Path
     ("the empty poll was not held open") failed.
     """
 
-    with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0}) as world:
+    # Exercise expiry after a successful claim, independently of TLS/setup
+    # scheduling. The hold and wake assertions below still use real monotonic time.
+    now = [time.time()]
+    with _world(tmp_path, control_clock=lambda: now[0],
+                mailbox_options={"long_poll_hold": 2.0}) as world:
         enqueued = world["owner_client"].enqueue(
             target=world["member"],
             native_command=_command("expired-health-probe", operation="health"),
@@ -1041,7 +1045,8 @@ def test_a_poll_that_owes_an_expired_acknowledgement_is_held_open(tmp_path: Path
         assert delivery["delivery_kind"] == "command"
         assert delivery["command_id"] == "expired-health-probe"
         active = {delivery["command_id"]: delivery["claim_token"]}
-        time.sleep(0.25)  # the owner's own deadline for that claim passes
+        assert world["mailbox"]._outstanding_claim_deadline_is_live(active)
+        now[0] += 0.25  # the owner's own 0.2 s deadline passes after claim
         assert not world["mailbox"]._outstanding_claim_deadline_is_live(active)
 
         outcome: dict[str, Any] = {}
@@ -1095,7 +1100,9 @@ def test_the_hold_is_refused_while_any_outstanding_claim_has_a_live_deadline(
     against an ungated 1.5 s park.
     """
 
-    with _world(tmp_path, mailbox_options={"long_poll_hold": 2.0}) as world:
+    now = [time.time()]
+    with _world(tmp_path, control_clock=lambda: now[0],
+                mailbox_options={"long_poll_hold": 2.0}) as world:
         world["owner_client"].enqueue(
             target=world["member"],
             native_command=_command("short-probe", operation="health"),
@@ -1119,7 +1126,13 @@ def test_the_hold_is_refused_while_any_outstanding_claim_has_a_live_deadline(
         }
         assert set(delivered) == {"short-probe", "long-ledger-claim"}
 
-        time.sleep(0.25)  # only the 0.2 s probe's deadline has passed
+        now[0] += 0.25  # only the 0.2 s probe's deadline has passed
+        assert not world["mailbox"]._outstanding_claim_deadline_is_live(
+            {"short-probe": delivered["short-probe"]}
+        )
+        assert world["mailbox"]._outstanding_claim_deadline_is_live(
+            {"long-ledger-claim": delivered["long-ledger-claim"]}
+        )
         started = time.monotonic()
         follow_up = _concurrent_poll(
             world, sequence=3, nonce="target-long-poll-nonce-3",

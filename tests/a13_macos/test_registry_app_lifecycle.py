@@ -14,6 +14,9 @@ def test_registry_server_can_be_owned_by_app_thread_and_reports_bound_port(tmp_p
         deployment_id='fixture',model_id='fixture-model',model_revision='fixture-revision',quantization='int8-weight-only',topology_size=2))
     def unavailable(*args,**kwargs):raise ValueError('fixture_model_execution_denied')
     monkeypatch.setattr(supervisor,'_qualified_runtime',unavailable)
+    def unrelated_audit(*args, **kwargs):
+        raise AssertionError('app lifecycle fixture must not run repository audits')
+    monkeypatch.setattr(supervisor, 'governance_readiness', unrelated_audit)
     monkeypatch.setattr(supervisor.signal,'signal',lambda *args:pytest.fail('application worker must not install global signal handlers'))
     stop=threading.Event();ready=threading.Event();started=[];outcomes=[]
     def observed(document):started.append(document);ready.set()
@@ -21,7 +24,8 @@ def test_registry_server_can_be_owned_by_app_thread_and_reports_bound_port(tmp_p
         try:
             outcomes.append(supervisor.run_registry_server(operator_plans=[tmp_path/'fixture-plan'],
                 host='127.0.0.1',port=0,static_root=static,seed_state_root=tmp_path/'seed',
-                product_state_root=tmp_path/'product',stop_event=stop,on_started=observed))
+                product_state_root=tmp_path/'product',stop_event=stop,on_started=observed,
+                governance_root=None))
         except BaseException as exc:outcomes.append(exc);ready.set()
     worker=threading.Thread(target=run,daemon=True);worker.start()
     try:

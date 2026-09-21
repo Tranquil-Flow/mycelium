@@ -74,6 +74,9 @@ def _compose_registry(monkeypatch, tmp_path: Path, *, api_only: bool):
         product_state_root=tmp_path / "product",
         stop_event=stop,
         on_started=observed,
+        # This fixture checks HTTP/UI mode, not repository audit timing. The
+        # production default and the dedicated governance suites stay intact.
+        governance_root=None,
     )
 
     def run():
@@ -156,6 +159,18 @@ def test_create_server_rejects_non_loopback_even_when_api_only(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Full run_registry_server composition (threaded, model-free)
 # ---------------------------------------------------------------------------
+
+
+def test_headless_http_fixture_does_not_run_checkout_governance(tmp_path, monkeypatch):
+    def forbidden_governance(*args, **kwargs):
+        raise AssertionError("HTTP mode fixture must not run unrelated repository audits")
+
+    monkeypatch.setattr(supervisor, "governance_readiness", forbidden_governance)
+    stop, ready, started, outcomes, run = _compose_registry(monkeypatch, tmp_path, api_only=True)
+    stop.set()
+    run()
+    assert outcomes == [0]
+    assert ready.is_set() and len(started) == 1
 
 
 def test_registry_server_api_only_serves_api_and_rejects_static(tmp_path, monkeypatch):
