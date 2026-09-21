@@ -1,0 +1,36 @@
+adjudication(a9): re-measure the 2026-09-16 demotion at 349845b and record a real baseline
+
+Independent adjudication of gate A9 at integration/core-pilot 349845b, read-only
+against the pilot tree. No integration, no rebase, no record or gate-state edit.
+
+What A9 claims, with file:line: the spec is design_only by its own first line; the
+in-repo completion record (docs/handover/mycelium-completion-checklist.v1.json
+:1308-1372) claims one completed requirement (specification) and lists implementation
+plus 11 more as pending; the programme register carries verified_stage spec with
+reported_stage implemented preserved.
+
+Demotion premise re-measured independently:
+- "ba6abbe has 209/209 paths unintegrated" REPRODUCES, and is stronger: 0 of the 209
+  paths carry the candidate blob at HEAD, 0 ever appeared in that path's history,
+  157 are absent, 52 divergent, 0 of 27 commits are ancestors, 0 of 27 patch-identical
+  to any of the 484 commits in core, and no v2 protocol string exists outside docs/.
+- "candidate count 101" DOES NOT REPRODUCE: 124 at the 2026-09-21 ref set (it moved
+  122 to 123 to 124 inside this lane's own window because a sibling lane was
+  committing). The 97 sub-count is a historical measurement, not a rule.
+- "15 paths also changed in core since the base" is age-stale: 18.
+
+Claim-by-claim status: A9:specification is SUPPORTED (the checklist digest
+sha256:65f2ebc8... is byte-exact for the spec at HEAD); the implementation claim is
+supported only as an unintegrated candidate, never as a statement about the branch;
+the lane's own 75-pass and 1,755-pass numbers are MERELY UNMEASURED here; all physical,
+performance, UI and atomic-commit closure criteria are UNMET.
+
+Green baseline from real runs at 349845b, one suite at a time, 11 invocations:
+854 passed / 1 skipped / 1 failed, 10 of 11 exit 0. tests/security has one known
+pre-existing heuristic false positive already documented in the programme record.
+tests/seed_coordinator completed whole and green (398 passed, three times, EXIT=0)
+where the 2026-09-20 lane recorded an 11-minute stall.
+
+The demotion stands on its load-bearing fact. Its count premise and one sentence of
+prose do not hold up as written. Nothing here re-credits A9: a green baseline over the
+v1 surface is not a closure record.
