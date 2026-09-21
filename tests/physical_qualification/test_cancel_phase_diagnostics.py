@@ -36,6 +36,62 @@ from physical_inference_node import (
     _CANCEL_PHASE_DIAGNOSTIC_ENV,
 )
 
+# ---------------------------------------------------------------------------
+# The destination is process-global, so the writers are too.
+#
+# ``_cancel_phase_diagnostic`` reads its destination from ``os.environ`` at
+# *write* time, and a reserved cancellation worker is allowed to outlive the
+# command that spawned it: deferred cleanup owns the response lane until its
+# immutable owner deadline, so ``_infer_cancel`` returns the acknowledgement
+# while ``apply_cancellation`` keeps the seal poll running in its own thread.  A
+# worker a sibling test leaves polling therefore appends its own
+# ``seal_poll``/``seal_poll_error`` lines to whatever file the *next* test points
+# the variable at.
+#
+# The batch-5 L2 run recorded exactly that: four foreign entries in front of this
+# file's report -- first one ``seal_poll_error``, ``call_index`` 0, thread
+# ``mycelium-cancel-...`` -- from
+# ``tests/physical_qualification/test_a4_node_cancellation.py::
+# test_cancel_before_start_still_fences_registered_transport_path``, whose
+# double's ``_snapshot`` raises on every poll of its 2 000 ms budget and which
+# returns as soon as its worker retires from ``service._cancellation_workers``
+# (that happens *before* the seal starts).
+#
+# Every such worker retires inside its own bounded owner deadline (measured:
+# 1.92 s of polling left after the sibling file's last test, against the largest
+# budget any test transmits, 2 000 ms), so waiting for them is a scheduling gate
+# rather than a race against load, and it is what keeps the exact-content
+# assertions in this file a statement about this test's own calls instead of
+# about every thread alive in the process.
+_CANCEL_WORKER_THREAD_PREFIX = "mycelium-cancel-"
+_CANCEL_WORKER_QUIESCE_TIMEOUT_SECONDS = 10.0
+
+
+def _await_foreign_cancellation_workers() -> None:
+    """Return once no cancellation worker but this test's own is still running.
+
+    Call this *before* arming ``_CANCEL_PHASE_DIAGNOSTIC_ENV``.  Afterwards no
+    thread that can write to the destination is alive, and none can appear while
+    this test runs: a worker only starts inside a cancellation command another
+    test issues, and a worker finishes its seal poll inside its own immutable
+    deadline, which no assertion here changes.
+    """
+
+    deadline = time.monotonic() + _CANCEL_WORKER_QUIESCE_TIMEOUT_SECONDS
+    while True:
+        foreign = tuple(
+            thread.name
+            for thread in threading.enumerate()
+            if thread is not threading.current_thread()
+            and thread.is_alive()
+            and thread.name.startswith(_CANCEL_WORKER_THREAD_PREFIX)
+        )
+        if not foreign:
+            return
+        assert time.monotonic() < deadline, foreign
+        time.sleep(0.005)
+
+
 CONTROL = {
     "deployment_id": "deployment-cancel-diag",
     "deployment_epoch": 1,
@@ -152,6 +208,9 @@ def test_phases_are_recorded_once_per_call_without_changing_the_outcome(
     monkeypatch,
 ) -> None:
     destination = tmp_path / "cancel-phases.jsonl"
+    # Nothing but this test's own two calls may append: arm the destination only
+    # after every cancellation worker a sibling test left polling has retired.
+    _await_foreign_cancellation_workers()
     monkeypatch.setenv(_CANCEL_PHASE_DIAGNOSTIC_ENV, str(destination))
     service = _service(tmp_path)
     payload = {"request_id": "request-x", **CONTROL}
@@ -515,6 +574,9 @@ def test_the_seal_reports_no_swallowed_error_on_the_committed_path(
     """
 
     destination = tmp_path / "seal-phases.jsonl"
+    # Same process-global destination, same gate: this test's own inline seal is
+    # the only writer whose entries it may judge.
+    _await_foreign_cancellation_workers()
     monkeypatch.setenv(_CANCEL_PHASE_DIAGNOSTIC_ENV, str(destination))
     service = _service(tmp_path)
     service._signed_result = _production_signed_result(service)  # type: ignore[method-assign]
