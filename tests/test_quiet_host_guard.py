@@ -10,6 +10,14 @@ The suite deliberately mixes two kinds of evidence:
 
 Run:  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -B -m pytest -q \\
         -p no:cacheprovider tests/test_quiet_host_guard.py
+
+It must also hold under the L2 gate shape, ``pytest -n8``: an xdist worker is an
+execnet interpreter child of the ``-m pytest`` driver that spawned it, so the
+self-identity checks below prove that a real pytest **owns** this process,
+instead of assuming that this process **is** the runner.  The product guard is
+unchanged and still fail-closed: the self-identity premise only ever accepts a
+genuine censused runner invocation that is this process or one of its own
+ancestors, never a suite in a sibling lane.
 """
 
 from __future__ import annotations
@@ -423,6 +431,29 @@ def _kill_group(proc, pidfile) -> None:
         pass
 
 
+def _owning_pytest_runner(rows, own_pid: int):
+    """The censused real pytest invocation that owns ``own_pid``, or ``None``.
+
+    Single-process pytest: this process *is* the runner.  pytest-xdist (the L2
+    gate runs ``-n8``): this process is an execnet worker whose own argv is the
+    ``-u -c ... exec(eval(sys.stdin.readline()))`` bootstrap, so the pytest that
+    owns it is the ``-m pytest`` driver above it in the process table.  The
+    owner must be this process or one of its own ancestors, so a runner in a
+    sibling lane - including the live suite this file itself spawns - can never
+    satisfy the clause, and a bare interpreter ancestor (a non-suite argv) is
+    not accepted by the guard's own classification.
+    """
+    by_pid = {row.pid: row for row in rows}
+    if own_pid not in by_pid:
+        return None
+    owners = qhg.own_process_sets(rows, own_pid)
+    for pid in (own_pid, *owners.ancestors):
+        row = by_pid.get(pid)
+        if row is not None and row.kind == "runner" and "-m pytest" in " ".join(row.argv):
+            return row
+    return None
+
+
 def test_real_pytest_suite_and_its_descendant_are_detected(live_lane_suite):
     rows = qhg.read_process_census()
     by_pid = {row.pid: row for row in rows}
@@ -467,9 +498,25 @@ def test_own_process_tree_is_excluded_from_the_real_census(live_lane_suite):
     rows = qhg.read_process_census()
     own_pid = os.getpid()
     assert any(row.pid == own_pid for row in rows), "this test process must be censused"
-    assert any(row.pid == own_pid and row.kind == "runner" for row in rows), (
-        "this file really is running under a real pytest process"
+
+    # Positive control, xdist-correct: a real pytest must own this process.  In a
+    # single-process run this process *is* the runner; under ``-n`` this process
+    # is the execnet interpreter child that the ``-m pytest`` driver above it
+    # owns.  Either way the owner is a genuine censused runner invocation, and a
+    # runner that is neither this process nor one of its ancestors (a sibling
+    # lane, or the live suite this file spawns itself) never satisfies it.
+    own_row = {row.pid: row for row in rows}[own_pid]
+    assert own_row.kind in {"runner", "interpreter"}, (
+        "this file must run inside a real interpreter: "
+        f"own pid={own_pid} kind={own_row.kind!r} argv={own_row.argv!r}"
     )
+    owner = _owning_pytest_runner(rows, own_pid)
+    assert owner is not None, (
+        "this file really is running under a real pytest process: "
+        f"own pid={own_pid} kind={own_row.kind!r} comm={own_row.comm!r} "
+        f"argv={own_row.argv!r}"
+    )
+    assert owner.kind == "runner" and "-m pytest" in " ".join(owner.argv)
 
     owners = qhg.own_process_sets(rows, own_pid)
     assert own_pid in owners.self_pids
@@ -487,6 +534,56 @@ def test_own_process_tree_is_excluded_from_the_real_census(live_lane_suite):
     assert (report.verdict == "GO") == (scan.roots == ())
     if scan.roots:
         assert qhg.R_LANE_SUITE in report.blocking_reasons
+
+
+def test_owning_pytest_runner_requires_a_real_pytest_owner_and_no_mislabel():
+    """Negative control for the self-identity premise above.
+
+    The premise must be greened only by a genuine pytest that owns this process:
+    a real ``python -m pytest`` running in another lane, a bare interpreter, and
+    a non-pytest module invocation are all censused here and none of them may be
+    accepted as the owner.  The guard's own classification is the same one the
+    live suite uses, so a mislabel would have to be a product defect, not a
+    weakened assertion.
+    """
+    worker = 5_101
+    driver = 5_100
+    sibling_lane = 5_200
+    module_host = 5_300
+    module_child = 5_301
+    bootstrap = f"{PYTHON} -u -c import sys;exec(eval(sys.stdin.readline()))"
+    rows = _rows(
+        [
+            _ps_line(driver, 1, PYTHON, f"{PYTHON} -B -m pytest -q -n2 tests/lane.py"),
+            _ps_line(worker, driver, PYTHON, bootstrap),
+            _ps_line(sibling_lane, 1, PYTHON, f"{PYTHON} -m pytest -q tests/other_lane.py"),
+            _ps_line(module_host, 1, PYTHON, f"{PYTHON} -m mycelium_seed.service --serve"),
+            _ps_line(module_child, module_host, PYTHON, bootstrap),
+        ]
+    )
+    by_pid = {row.pid: row for row in rows}
+    assert by_pid[driver].kind == "runner"
+    assert by_pid[sibling_lane].kind == "runner", "the decoy lane is a real suite"
+    assert by_pid[module_host].kind != "runner", (
+        "a non-pytest module invocation must not classify as a runner: "
+        f"{module_host} classified {by_pid[module_host].kind!r}"
+    )
+
+    # Single-process shape: this process is its own owner.
+    own_owner = _owning_pytest_runner(rows, driver)
+    assert own_owner is not None and own_owner.pid == driver
+    # xdist shape: the ``-m pytest`` driver above the worker owns the worker.
+    worker_owner = _owning_pytest_runner(rows, worker)
+    assert worker_owner is not None and worker_owner.pid == driver
+    # A suite in a sibling lane is not an owner, however real it is ...
+    assert _owning_pytest_runner(rows, module_child) is None, (
+        "a runner that is neither this process nor one of its ancestors must not "
+        "be accepted as the owner"
+    )
+    # ... and the guard really does exclude only self and its own ancestors.
+    owners = qhg.own_process_sets(rows, worker)
+    assert sibling_lane not in owners.ancestors
+    assert sibling_lane not in owners.descendants
 
 
 # --------------------------------------------------------------------------- #

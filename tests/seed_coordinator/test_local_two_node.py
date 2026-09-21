@@ -52,7 +52,45 @@ NOW = 7_000.0
 NODE_IDS = ("node-local-a", "node-local-b")
 WORKTREE_ROOT = Path(__file__).resolve().parents[2]
 NODE_SCRIPT = WORKTREE_ROOT / "physical_inference_node.py"
-SERVICE_EXECUTABLE = Path(sys.prefix, "Resources/Python.app/Contents/MacOS/Python")
+
+# The interpreter the seed child must be spawned with is *this* interpreter: the
+# same venv and the same immutable binary, taken exactly as the running
+# interpreter reports itself.
+#
+# The path is deliberately **not** resolved.  Resolving it would strip the venv
+# and select the base framework interpreter, and the venv the documented host
+# recipe creates - ``python3.14 -m venv --system-site-packages <root>/.venv``,
+# runs/v2/l2-host-prep/evidence/remote2/verify/prep.sh:16 - is a stdlib-layout
+# venv: ``<prefix>/bin/python`` plus ``pyvenv.cfg``, and no
+# ``Resources/Python.app/Contents/MacOS/Python`` at all.  Only a macOS framework
+# *bundle* prefix has that path, which is why composing it from ``sys.prefix``
+# produced ``FileNotFoundError: <prefix>/Resources`` on the venv layout.
+#
+# Spawning the venv's own ``bin/python`` keeps ``pyvenv.cfg`` discovery intact,
+# so the child really is the venv interpreter; the harness identity checks
+# (``path_identity`` / ``same_canonical_file`` on the resolved binary) are
+# unchanged and stay exact - a symlink indirection is fine, a different binary
+# is not.
+def _invoking_service_executable() -> Path:
+    candidates: list[Path] = []
+    if sys.executable:
+        candidates.append(Path(sys.executable))
+    candidates.append(Path(sys.prefix, "bin", "python"))
+    candidates.append(Path(sys.prefix, "Resources/Python.app/Contents/MacOS/Python"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise RuntimeError(
+        f"no usable interpreter identity: sys.executable={sys.executable!r} "
+        f"sys.prefix={sys.prefix!r}"
+    )
+
+
+SERVICE_EXECUTABLE = _invoking_service_executable()
+INTERPRETER_PROBE_SOURCE = (
+    "import json, sys; print(json.dumps({'executable': sys.executable, "
+    "'prefix': sys.prefix, 'base_prefix': sys.base_prefix}))"
+)
 MAC_RUNTIME_CAPABILITY = {
     "runtime_backend": "mlx",
     "transport": "iroh",
@@ -754,6 +792,54 @@ def test_sidecar_observation_requires_exact_child_and_owned_group(
     errors, uncertain = harness.signal_owned_groups([registered], signal.SIGTERM)
     assert errors == [] and uncertain is False
     assert signals == [(registered.pgid, signal.SIGTERM)]
+
+
+def test_service_executable_is_the_invoking_interpreter_and_keeps_its_prefix() -> None:
+    """The spawned service child is *this* interpreter, not another one.
+
+    Three bounded local parts:
+
+    * the selected path exists and is exactly what the running interpreter
+      reports as itself - no resolution step that could strip the venv;
+    * a real child spawned from it reports the same ``sys.prefix``, i.e. the
+      venv's ``pyvenv.cfg`` discovery survives the spawn, which is what lets the
+      child import the same environment at all;
+    * the child's immutable executable identity equals the identity the harness
+      demands during native ownership checks, so those assertions stay exact.
+    """
+    assert SERVICE_EXECUTABLE.exists(), f"missing service interpreter: {SERVICE_EXECUTABLE}"
+    if sys.executable and Path(sys.executable).exists():
+        assert SERVICE_EXECUTABLE == Path(sys.executable), (
+            "the running interpreter must be selected verbatim; resolving it would "
+            "drop the venv and select the base framework interpreter"
+        )
+    else:
+        assert SERVICE_EXECUTABLE.parent == Path(sys.prefix, "bin")
+
+    probe = subprocess.run(
+        [str(SERVICE_EXECUTABLE), "-c", INTERPRETER_PROBE_SOURCE],
+        cwd=str(WORKTREE_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    child = json.loads(probe.stdout.strip().splitlines()[-1])
+
+    assert child["prefix"] == sys.prefix, (
+        f"child interpreter selected prefix {child['prefix']!r}, not this run's "
+        f"{sys.prefix!r}: the spawn would have lost the venv"
+    )
+    if sys.prefix != sys.base_prefix:
+        assert child["base_prefix"] != child["prefix"], (
+            "a venv child must not fall back to the base interpreter"
+        )
+    assert harness.same_canonical_file(child["executable"], SERVICE_EXECUTABLE), (
+        f"child executable {child['executable']!r} is not {SERVICE_EXECUTABLE}"
+    )
+    assert harness.path_identity(child["executable"]) == harness.path_identity(
+        SERVICE_EXECUTABLE
+    ), "the child interpreter's immutable identity must equal the expected one"
 
 
 @pytest.mark.parametrize("requested", [signal.SIGTERM, signal.SIGKILL])
