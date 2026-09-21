@@ -41,7 +41,12 @@ from test_managed_runtime import runtime
 from test_control_session import owner, session
 from test_worker import worker
 from mycelium_a13_macos.concurrent_pump import ConcurrentTargetControlPump
-from mycelium_a13_macos.managed_control import _LONG_POLL_HOLD_SECONDS, _LONG_POLL_STEP_SECONDS
+from mycelium_a13_macos.managed_control import (
+    ManagedControlMailbox,
+    _LONG_POLL_HOLD_SECONDS,
+    _LONG_POLL_STEP_SECONDS,
+    _empty_poll_delivery,
+)
 from mycelium_a13_macos.managed_runtime import ManagedTargetRuntime
 
 #: The window THIS test's owner waits for one command, in this offline reproduction.
@@ -134,6 +139,65 @@ def test_enqueue_wakes_a_parked_poll_instead_of_waiting_for_the_poll_interval(
         assert claim_latency < WAKE_BOUND_SECONDS, (
             f"claim latency {claim_latency:.3f}s at poll step {step_seconds}s: the "
             "delivery path is still interval-gated"
+        )
+
+
+def test_an_enqueue_that_lands_during_an_attempt_is_not_a_lost_wakeup(
+    tmp_path, monkeypatch
+) -> None:
+    """A signal that lands *inside* a claim attempt must not cost a poll interval.
+
+    The wait between attempts has to be measured against the delivery generation read
+    **before** the attempt.  An enqueue that has already committed while the attempt was
+    in flight has made a new command deliverable, so the next attempt must start at once;
+    if the generation is read *after* the attempt instead, that enqueue is
+    indistinguishable from "nothing has happened yet" and the poll pays a whole
+    ``long_poll_step`` of dead time for a command that is already waiting.
+
+    RED before the fix at ``step=1.0`` -- measured 1 in 3 quiet runs of the probe this
+    test is derived from (`_wait_for_delivery` returning ``timeout`` immediately after an
+    enqueue that committed during the previous attempt): the poll waits out its interval.
+    GREEN: the poll returns the command as soon as the enqueue lands, exactly as it does
+    when the signal is observed while the poll is already parked.  Nothing here widens a
+    hold, a step, a deadline, a skew or a staleness constant; ``long_poll_step`` stays the
+    ceiling on the same wait and is only the fallback when no signal was missed.
+    """
+
+    _production_poll_defaults_are_untouched()
+    step_seconds = OBSERVABLE_POLL_STEP_SECONDS
+    with _world(tmp_path, mailbox_options={"long_poll_step": step_seconds}) as world:
+        real_once = ManagedControlMailbox._poll_once
+        signal_landed = threading.Event()
+        landed_at: list[float] = []
+
+        def once(self, envelope):
+            response = real_once(self, envelope)
+            if not signal_landed.is_set() and _empty_poll_delivery(response):
+                # The attempt has returned, so the mailbox lock is free and the owner's
+                # own enqueue can land inside the window under test -- deterministically,
+                # instead of racing a scheduling window.
+                landed_at.append(time.monotonic())
+                _enqueue(world, "woken-during-attempt")
+                signal_landed.set()
+            return response
+
+        monkeypatch.setattr(ManagedControlMailbox, "_poll_once", once)
+        thread, box = _poll_in_background(
+            world,
+            sequence=1,
+            request_id="parked-poll-during-attempt",
+            step_seconds=step_seconds,
+        )
+        thread.join(5)
+        assert not thread.is_alive()
+        assert signal_landed.is_set(), "the test never landed its enqueue"
+        claim_latency = time.monotonic() - landed_at[0]
+
+        assert box["delivery"]["delivery_kind"] == "command", box
+        assert box["delivery"]["command_id"] == "woken-during-attempt"
+        assert claim_latency < WAKE_BOUND_SECONDS, (
+            f"claim latency {claim_latency:.3f}s at poll step {step_seconds}s: an enqueue "
+            "that committed during the previous attempt was a lost wake-up"
         )
 
 

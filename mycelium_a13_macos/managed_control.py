@@ -1196,17 +1196,36 @@ class ManagedControlMailbox:
             self._delivery_generation += 1
             self._delivery_wakeup.notify_all()
 
-    def _wait_for_delivery(self, timeout: float) -> bool:
+    def _delivery_generation_now(self) -> int:
+        """The signal generation to measure the NEXT attempt's wait against.
+
+        Read *before* an attempt, so a signal that lands while that attempt is in
+        flight is still visible to the wait that follows it (``_wait_for_delivery``).
+        """
+
+        with self._delivery_wakeup:
+            return self._delivery_generation
+
+    def _wait_for_delivery(self, timeout: float, *, observed: int | None = None) -> bool:
         """Wait up to ``timeout`` for a delivery signal; True if one arrived.
 
         ``timeout`` is the caller's own step -- unchanged, and still the ceiling, so a
         missed signal can never park a peer for longer than the interval it used
         before.  A signal only ever makes the same wait *shorter*.
+
+        ``observed`` is the generation the caller read **before** its attempt.  If the
+        generation has already moved on, an enqueue committed *during* that attempt: the
+        command is deliverable now, so this returns immediately instead of spending the
+        interval rediscovering it.  Without that, a signal that lands in the window
+        between an attempt returning empty and this wait starting is a lost wake-up and
+        the claim latency for that command is a full ``long_poll_step`` -- measured 1.03
+        to 1.06 s at a 1.0 s step, and the same shape the parked-poll wake-up exists to
+        remove (p81r1's ``infer_cancel_wait`` claimed at 3 957 ms of a 4 427 ms life).
         """
 
         deadline = time.monotonic() + float(timeout)
         with self._delivery_wakeup:
-            generation = self._delivery_generation
+            generation = self._delivery_generation if observed is None else observed
             while self._delivery_generation == generation:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0.0:
@@ -1282,15 +1301,23 @@ class ManagedControlMailbox:
         The wait BETWEEN attempts is a delivery **wake-up**, not the interval: an
         ``enqueue`` signals every parked poll, so a poll that is already open returns the
         new command at once instead of at its next interval tick (`_signal_delivery`).
-        `long_poll_step` is unchanged and still the ceiling on the same wait, so a
+        ``long_poll_step`` is unchanged and still the ceiling on the same wait, so a
         missed signal can never park a peer for longer than before; only the promptness
         of the delivery path changes.
+
+        The signal generation is read *before* each attempt and handed to the wait that
+        follows it, so an ``enqueue`` that commits while an attempt is in flight is not a
+        lost wake-up either: that command is already deliverable and the next attempt
+        starts at once.  Reading it after the attempt left exactly that window, and a
+        poll that fell into it paid a whole ``long_poll_step`` for a command that was
+        already waiting.
         """
 
         if self.long_poll_hold <= 0.0 or not self._may_hold(envelope):
             return self._poll_once(envelope)
         deadline = None
         while True:
+            observed = self._delivery_generation_now()
             response = self._poll_once(envelope)
             if not _empty_poll_delivery(response):
                 return response
@@ -1300,7 +1327,7 @@ class ManagedControlMailbox:
             remaining = deadline - now
             if remaining <= 0.0:
                 return response
-            self._wait_for_delivery(min(self.long_poll_step, remaining))
+            self._wait_for_delivery(min(self.long_poll_step, remaining), observed=observed)
 
     def _poll_once(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
         """One authoritative claim attempt: verify, lock, one transaction, release."""
