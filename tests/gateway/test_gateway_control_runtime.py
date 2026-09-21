@@ -13,6 +13,7 @@ from contextlib import contextmanager
 import http.client
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import shutil
@@ -29,11 +30,13 @@ from mycelium_demo import gateway_control_runtime as runtime_module
 from mycelium_demo.gateway_control_runtime import (
     DEFAULT_PUBLIC_ORIGIN_PORT,
     ENV_PUBLIC_ORIGIN_PORT,
+    ENV_REQUEST_BEARER_TOKEN,
     GATEWAY_INFERENCE_PATH,
     PUBLIC_INFERENCE_PATH,
     EchoStubBackend,
     GatewayControlRuntime,
     GatewayControlRuntimeError,
+    bearer_token_from_environment,
     build_parser,
     map_public_path_to_gateway_path,
 )
@@ -573,6 +576,154 @@ def test_cli_entry_point_serves_end_to_end_on_loopback(tmp_path: Path) -> None:
                 if event["event"] == "completed":
                     break
         assert kinds == ["accepted", "token", "token", "token", "completed"]
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:  # pragma: no cover - defensive
+            process.kill()
+            process.wait(timeout=10)
+
+
+# --------------------------------------------------------------------------- #
+# Credential provisioning: no secret value may cross the argv boundary
+# --------------------------------------------------------------------------- #
+def _child_environment(**overrides: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"}
+    }
+    environment["PYTHONPATH"] = str(REPO_ROOT)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment.update(overrides)
+    return environment
+
+
+def _secret_bearing_options() -> list[str]:
+    """Option strings the release security audit itself would flag.
+
+    The rule is imported, not re-implemented, so this test cannot drift from
+    ``scripts/release_security_audit.py``: an option is secret-bearing unless it
+    references its value (``-env``/``-file``/``-path``/``-ref``/``-fd``).
+    """
+
+    from scripts.release_security_audit import _secret_option
+
+    return [
+        option
+        for action in build_parser()._actions
+        for option in action.option_strings
+        if _secret_option(option)
+    ]
+
+
+def test_cli_declares_no_secret_bearing_argument() -> None:
+    parser = build_parser()
+
+    assert _secret_bearing_options() == []
+    assert parser.parse_args([]).request_bearer_token_env == ENV_REQUEST_BEARER_TOKEN
+    assert (
+        parser.parse_args(["--request-bearer-token-env", "OTHER_TOKEN_VAR"]).request_bearer_token_env
+        == "OTHER_TOKEN_VAR"
+    )
+    # The removed shape is not silently re-added under the same name.
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--request-bearer-token", DIAGNOSTIC_TOKEN])
+
+
+def test_bearer_credential_is_read_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ENV_REQUEST_BEARER_TOKEN, raising=False)
+    assert bearer_token_from_environment() is None
+    assert bearer_token_from_environment("SOME_UNSET_VARIABLE") is None
+
+    monkeypatch.setenv(ENV_REQUEST_BEARER_TOKEN, DIAGNOSTIC_TOKEN)
+    assert bearer_token_from_environment() == DIAGNOSTIC_TOKEN
+
+    monkeypatch.setenv("ALTERNATE_TOKEN_VARIABLE", "alternate-credential")
+    assert bearer_token_from_environment("ALTERNATE_TOKEN_VARIABLE") == "alternate-credential"
+
+
+def test_module_help_exposes_no_secret_bearing_argument() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "mycelium_demo.gateway_control_runtime", "--help"],
+        cwd=str(REPO_ROOT),
+        env=_child_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=120,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "--request-bearer-token-env" in completed.stdout
+    for option in re.findall(r"--[a-z0-9-]+", completed.stdout):
+        assert option.endswith("-env") or not option.startswith(
+            "--request-bearer-token"
+        ), f"the help still advertises a secret-bearing argument: {option}"
+
+    from scripts.release_security_audit import audit_repository
+
+    result = audit_repository(REPO_ROOT)
+    assert [
+        finding
+        for finding in result["findings"]
+        if finding["code"] == "secret_cli_argument"
+        and finding["path"] == "mycelium_demo/gateway_control_runtime.py"
+    ] == []
+
+
+def test_cli_provisions_the_bearer_credential_from_the_named_environment_variable(
+    tmp_path: Path,
+) -> None:
+    """The credential works end to end while never appearing in argv."""
+
+    public_port = _free_loopback_port()
+    control_port = _free_loopback_port()
+    credential = "env-provisioned-credential"
+    argv = [
+        sys.executable,
+        "-m",
+        "mycelium_demo.gateway_control_runtime",
+        "--public-port",
+        str(public_port),
+        "--control-port",
+        str(control_port),
+        "--state-root",
+        str(tmp_path),
+        "--request-bearer-token-env",
+        "M1_TEST_GATEWAY_TOKEN",
+    ]
+    process = subprocess.Popen(
+        argv,
+        cwd=str(REPO_ROOT),
+        env=_child_environment(M1_TEST_GATEWAY_TOKEN=credential),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        ready_line = process.stdout.readline() if process.stdout else ""
+        assert ready_line, "the entry point did not report its ports"
+        gateway = json.loads(ready_line)["ports"]["gateway_upstream"]
+
+        # The credential itself never crossed the argv boundary.
+        assert credential not in " ".join(argv)
+
+        # Without the credential the gateway's own surface denies (401)...
+        assert _request(gateway, "GET", "/v1/qualification/current")[0] == 401
+
+        # ...and the credential provisioned through the environment admits it.
+        status, _headers, body = _request(
+            gateway,
+            "GET",
+            "/v1/qualification/current",
+            headers={"Authorization": f"Bearer {credential}"},
+        )
+        assert status == 200
+        assert json.loads(body.decode("utf-8"))["route_ready"] is True
     finally:
         process.terminate()
         try:

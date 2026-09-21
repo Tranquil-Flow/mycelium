@@ -46,6 +46,24 @@ back as token events.  A real model, a real Router, and physical qualification
 are explicitly out of scope here; the synthetic qualification that satisfies the
 gateway's fail-closed admission gate is documented as *local contract proof
 only* in :func:`load_stub_qualification`.
+
+Credential provisioning
+-----------------------
+The gateway's bearer credential is **never accepted as a command-line
+argument**: argv is world-readable on this host (``ps``) and is retained by
+shell history, so a secret literal typed there has left the process boundary
+before the process starts.  The CLI therefore accepts only the *name* of the
+environment variable that holds the credential, and resolves its value from the
+environment at invocation:
+
+``--request-bearer-token-env <NAME>`` (default
+:data:`ENV_REQUEST_BEARER_TOKEN` = ``MYCELIUM_REQUEST_GATEWAY_TOKEN``), read by
+:func:`bearer_token_from_environment`.  This mirrors the landed
+``mycelium-request --token-env`` shape in
+:mod:`mycelium_request_gateway.cli`.  ``--capability-file`` keeps its own
+meaning (the loopback proxy capability, not the bearer credential); the
+constructor keyword ``request_bearer_token`` remains available to in-process
+callers and tests, which do not cross an argv boundary.
 """
 
 from __future__ import annotations
@@ -1257,6 +1275,20 @@ def _env_port(name: str, default: int) -> int:
     return value
 
 
+def bearer_token_from_environment(variable: str = ENV_REQUEST_BEARER_TOKEN) -> str | None:
+    """Read the gateway bearer credential from ``variable`` in the environment.
+
+    The credential is provisioned out of band (the environment of the serving
+    process) and is deliberately **not** an option value: see the module
+    docstring's *Credential provisioning* section.  ``variable`` is only the
+    *name* of the environment variable, so naming it on the command line carries
+    no secret.  An unset or empty variable means "no bearer credential", exactly
+    as the removed ``--request-bearer-token`` default did.
+    """
+
+    return os.environ.get(variable)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m mycelium_demo.gateway_control_runtime",
@@ -1264,6 +1296,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Loopback gateway + control-origin runtime with the stub/echo backend. "
             "Never installs launchd jobs and never edits DNS or tunnel state."
         ),
+        # Abbreviations are disabled on purpose: with them, ``--request-bearer-token``
+        # would resolve to ``--request-bearer-token-env`` and silently swallow the
+        # *credential* as if it were the variable name.  The credential is only ever
+        # read from the environment (see ``bearer_token_from_environment``), so this
+        # also keeps the argv surface free of secret-shaped values.
+        allow_abbrev=False,
     )
     parser.add_argument(
         "--public-port",
@@ -1289,8 +1327,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--capability-file", type=Path)
     parser.add_argument("--authenticated-user", default="owner")
     parser.add_argument(
-        "--request-bearer-token",
-        default=os.environ.get(ENV_REQUEST_BEARER_TOKEN),
+        "--request-bearer-token-env",
+        default=ENV_REQUEST_BEARER_TOKEN,
+        metavar="NAME",
+        help=(
+            "name of the environment variable holding the gateway bearer "
+            f"credential (default {ENV_REQUEST_BEARER_TOKEN}); the credential "
+            "value itself is never accepted as an argument"
+        ),
     )
     parser.add_argument(
         "--state-root",
@@ -1319,7 +1363,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             control_public_host=args.control_public_host,
             capability_file=args.capability_file,
             authenticated_user=args.authenticated_user,
-            request_bearer_token=args.request_bearer_token,
+            request_bearer_token=bearer_token_from_environment(
+                args.request_bearer_token_env
+            ),
             state_root=args.state_root,
             max_buffered_events=args.max_buffered_events,
             restart_budget=args.restart_budget,
