@@ -83,6 +83,43 @@ successful edge authentication fails before reaching the application; missing,
 duplicate, or incorrect edge-injected identity/capability headers fail closed in
 the application with `access_denied`.
 
+For the M1 recording path, Cloudflared must route the apex to a loopback trusted
+proxy rather than directly to the product gateway, because ingress rules cannot
+inject the owner-private capability header. Keep `control.mycelium.now`
+unconfigured until the mailbox/control HTTP surface is explicitly mounted. A
+candidate `~/.cloudflared/mycelium-demo.yml` ingress shape is therefore:
+
+```yaml
+ingress:
+  - hostname: mycelium.now
+    service: http://127.0.0.1:<PUBLIC_ORIGIN_PROXY_PORT>
+  - hostname: control.mycelium.now
+    service: http_status:404
+  - service: http_status:404
+```
+
+Start the stdlib loopback proxy with the same owner-private capability file used
+by `mycelium_demo serve --mode live`:
+
+```bash
+python -m mycelium_demo.public_origin_proxy \
+  --listen-host 127.0.0.1 \
+  --listen-port <PUBLIC_ORIGIN_PROXY_PORT> \
+  --upstream http://127.0.0.1:<PRODUCT_GATEWAY_PORT> \
+  --public-host mycelium.now \
+  --trusted-proxy-capability-file <OWNER_PRIVATE_CAPABILITY_FILE>
+```
+
+The proxy binds to loopback, overwrites `Host`, `X-Forwarded-Proto`,
+`X-Mycelium-Authenticated-User`, and `X-Mycelium-Proxy-Capability`, strips
+client-supplied authorization/trusted headers, and forwards only the public
+browser inference contract: `POST /api/v1/inference`,
+`GET /api/v1/inference/<request_id>/events`, and
+`DELETE /api/v1/inference/<request_id>/cancel`. It streams SSE responses and
+rejects bare or reordered inference cancel/event paths, raw internal
+`/v1/inference/*`, `/__mycelium/*`, and swarm invite/join/leave mutations before
+contacting the product gateway.
+
 ### Exact candidate, browser authority, and transport authority
 
 After all source-sensitive tests pass, freeze and audit the exact closed candidate:
