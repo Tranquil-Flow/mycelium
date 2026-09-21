@@ -758,18 +758,34 @@ def test_full_stdin_pipe_write_consumes_command_timeout_budget() -> None:
 def test_real_process_survives_1100_interrupt_late_response_lifecycles(
     tmp_path: Path,
 ) -> None:
+    gate_dir = tmp_path / "late-response-gates"
+    gate_dir.mkdir()
     script = tmp_path / "sustained-late-response-node.py"
     script.write_text(
         """
 import json
+import os
 import sys
 import threading
 import time
 
+gate_dir = sys.argv[1]
 write_lock = threading.Lock()
 
 def respond(command):
-    time.sleep(0.003)
+    # Only the configure lifecycles are gated.  Their reply is held until this
+    # command's release marker exists, and the test creates that marker only
+    # after interrupt_command has returned, so this late response is provably
+    # published after the interrupt instead of racing it against a fixed sleep.
+    # Every other frame (the health check at the end, the stop frame) must be
+    # answered immediately, exactly as before.
+    if command.get("command") == "configure":
+        release = os.path.join(gate_dir, "release-" + command["command_id"])
+        deadline = time.monotonic() + 10.0
+        while not os.path.exists(release):
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.0005)
     response = {
         "protocol": command["protocol"],
         "command_id": command["command_id"],
@@ -789,16 +805,33 @@ for raw in sys.stdin:
     )
     script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     process = PhysicalNodeProcess(
-        command=(sys.executable, str(script)),
+        command=(sys.executable, str(script), str(gate_dir)),
         node_id="node-a",
         run_id="run-1",
         deployment_id="deployment-1",
         response_timeout_seconds=1.0,
     )
+    # A command registers its waiter before it writes its frame, and this writer
+    # signals that the frame write returned.  Waiting for it puts the interrupt
+    # provably after the frame write, which is what makes the interrupt below
+    # retire a registered waiter every time: otherwise the interrupt can win the
+    # narrow window between registration and the write, cancel the command
+    # before any frame reaches the child, and leave this test exercising no late
+    # response at all.
+    frame_written = threading.Event()
+    write_frame = process._control_frame_writer
+
+    def record_frame_write(stream, payload, deadline):
+        written = write_frame(stream, payload, deadline)
+        frame_written.set()
+        return written
+
+    process._control_frame_writer = record_frame_write
     try:
         for index in range(1_100):
             command_id = f"interrupted-{index}"
             result: list[str] = []
+            frame_written.clear()
 
             def exchange() -> None:
                 try:
@@ -819,6 +852,7 @@ for raw in sys.stdin:
                     if command_id in process._waiters:
                         break
                 time.sleep(0.0001)
+            assert frame_written.wait(timeout=1.0)
             assert process.interrupt_command(
                 command_id,
                 code="request_cancelled",
@@ -826,6 +860,13 @@ for raw in sys.stdin:
             waiter.join(timeout=1.0)
             assert not waiter.is_alive()
             assert result == ["request_cancelled"]
+            # The interrupt retired a registered waiter, so this command's
+            # eventual reply is fenced by a tombstone until it is consumed.  The
+            # child is still holding that reply behind the gate, so the
+            # tombstone is present now and only the late response can remove it.
+            with process._waiters_lock:
+                assert command_id in process._retired_command_ids
+            (gate_dir / f"release-{command_id}").touch()
             deadline = time.monotonic() + 1.0
             while time.monotonic() < deadline:
                 with process._waiters_lock:

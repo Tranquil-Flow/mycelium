@@ -50,7 +50,7 @@ only accepted value:
 --gateway-port / MYCELIUM_GATEWAY_UPSTREAM_PORT  (default 0 = ephemeral)
 --control-port / MYCELIUM_CONTROL_ORIGIN_PORT    (default 4352)
 --state-root / MYCELIUM_GATEWAY_RUNTIME_STATE_ROOT
---request-bearer-token / MYCELIUM_REQUEST_GATEWAY_TOKEN
+--request-bearer-token-env NAME / MYCELIUM_REQUEST_GATEWAY_TOKEN  (NAME defaults to MYCELIUM_REQUEST_GATEWAY_TOKEN)
 ```
 
 ## 3. Production invocation

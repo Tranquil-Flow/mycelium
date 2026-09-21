@@ -819,6 +819,12 @@ def test_cancel_before_start_still_fences_registered_transport_path() -> None:
     service._pending_cancellations = {}
     service._cancellation_controls = {}
     service._cancellation_workers = {}
+    # ``__init__`` creates this ledger, and the cancellation worker reads it
+    # while sealing (``_seal_cancellation_receipt_until_deadline``): a double
+    # without it raises AttributeError inside that worker's thread instead of
+    # sealing, which surfaces as an unhandled-thread-exception warning on an
+    # unrelated test boundary.
+    service._request_cleanup_receipts = {}
     untyped_service._signed_result = lambda event, details: {
         "event": event,
         "details": details,
