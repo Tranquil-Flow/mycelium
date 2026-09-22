@@ -80,5 +80,20 @@
 .how li p { color: var(--muted); font-size: 13px; margin-top: 8px; }
 .footer { display: flex; justify-content: space-between; gap: 20px; padding: 24px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0,1fr); } .how { grid-template-columns: 1fr; gap: 20px; } }
+.completion { font-size: 12px; color: var(--ink); margin: 10px 0 0; }
+.latency { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 10px 18px; margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid var(--line); }
+.latency > div { display: flex; flex-direction: column; gap: 3px; }
+.latency dt { color: var(--muted); font: 11px/1.4 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .07em; }
+.latency dd { margin: 0; font: 13px/1.5 ui-monospace, monospace; overflow-wrap: anywhere; }
+.routeFacts { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 18px; }
+.routeFacts h2 { margin-bottom: 14px; }
+.routeFacts h3 { margin: 22px 0 8px; color: var(--leaf); font: 11px/1.5 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .1em; }
+.routeFacts .facts dt { min-width: 0; }
+.routeFacts .facts dd { text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.routeTable { width: 100%; border-collapse: collapse; font: 11px/1.5 ui-monospace, monospace; margin: 6px 0 10px; }
+.routeTable caption { text-align: left; color: var(--muted); font: 11px/1.5 ui-sans-serif, system-ui, sans-serif; padding-bottom: 8px; }
+.routeTable th, .routeTable td { text-align: left; vertical-align: top; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.routeTable thead th { color: var(--muted); font-weight: 500; }
+.incidentList { list-style: none; padding: 0; margin: 8px 0 14px; font: 11px/1.6 ui-monospace, monospace; color: #efd0a2; overflow-wrap: anywhere; }
 @media (max-width: 600px) { .nav { padding: 18px 20px; flex-wrap: wrap; gap: 12px; } .nav nav { gap: 24px; } .main { padding: 0 18px; } .hero { padding: 46px 0 32px; } .cardHeader { padding: 22px 18px 10px; flex-direction: column; gap: 0; } .model { text-align: left; max-width: 100%; margin-bottom: 16px; } .composer { padding: 0 18px 18px; } .response { padding: 20px 18px; } .privacy { padding: 16px 18px; } .how ol { grid-template-columns: 1fr; } .how { margin: 40px 0; } .footer { flex-direction: column; } .explorer { padding: 8px 16px; } .explorer > summary span { display: block; float: none; } }
 @media (prefers-reduced-motion: reduce) { .page *, .page *::before, .page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }

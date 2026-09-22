@@ -28,11 +28,17 @@ request, after the canonical engine revalidates qualification. Reconnect resumes
 an interrupted accepted request at its last applied event, without resubmission.
 A cancellation acknowledgement is not displayed as a confirmed terminal.
 
-Unavailable contract fields: cold-restart state/ETA, TTFT, TPOT, Mac display names
-and stage-to-Mac layer ranges. `route_explorer` offers endpoint/member peers,
-retained segments, transport measurements and freshness, not those fields.
-Do not reinterpret RTT as TTFT, segment count as layer count, peers as Macs,
-or evidence-feed reconnecting as worker recovery. Source fixture/replay/degraded
+TTFT/TPOT are measured in the browser from the real request event stream
+(`clientTiming.ts`, a pass-through client over the same `InferenceClient`) and every
+figure is labelled client-side; the origin's snapshots carry no TTFT/TPOT
+(`has_ttft: false` / `has_tpot: false` in the physical transcript). Stage, layer and
+node placement is read from the product snapshot's `stage`/`device` entities and their
+`placed_on` relations; when those are not published the panel says so and no split is
+inferred. Still unavailable: cold-restart status/ETA, Mac display names and OS identity,
+and any layer-to-node mapping the documents do not carry. Do not reinterpret RTT as TTFT,
+segment count as layer count, a transport endpoint as a Mac, a device id as a hostname,
+or evidence-feed reconnecting as worker recovery. `route_explorer` offers endpoint/member
+peers, retained segments, transport measurements and freshness, not those fields. Source fixture/replay/degraded
 and frozen status remain explicit. No two-Mac success, in-place recovery or soak
 claim is made. All operator/evidence links begin with `/operator`.
 

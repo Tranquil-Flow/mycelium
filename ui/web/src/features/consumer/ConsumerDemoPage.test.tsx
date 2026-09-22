@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PRODUCT_INFERENCE_PROTOCOL, PRODUCT_INFERENCE_EVENT_PROTOCOL, type ProductQualification, type InferenceEvent, type InferenceSubmission } from '../../app/contracts';
 import type { InferenceClient } from '../inference/requestClient';
 import { ConsumerDemoPage } from './ConsumerDemoPage';
+import type { ConsumerRouteStatusFacts } from './consumerObservatory';
+import type { ConsumerRouteStatusPort } from './ConsumerRoutePanel';
 
 // Test-only protocol fixtures. These are not live qualification or model evidence.
 const NOW = 1_800_000_000_000;
@@ -40,8 +42,14 @@ class TestClient implements InferenceClient {
 }
 const evidence = vi.hoisted(() => ({ latest: null as any, visible: null as any, configured: false, loading: false, frozen: false, error_code: null }));
 vi.mock('../productEvidence/ProductEvidenceContext', () => ({ useProductEvidence: () => evidence }));
+// No route-status document in this file: the panel stays in its loading state so
+// these tests exercise the request engine and the consumer surface alone.
+const pendingRouteStatus: ConsumerRouteStatusPort = () =>
+  new Promise<ConsumerRouteStatusFacts>(() => undefined);
 const setup = (client = new TestClient()) => {
-  const rendered = render(<ConsumerDemoPage client={client} now={() => NOW} />);
+  const rendered = render(
+    <ConsumerDemoPage client={client} now={() => NOW} routeStatus={pendingRouteStatus} />,
+  );
   return { client, ...rendered };
 };
 async function start() {
@@ -52,17 +60,20 @@ async function start() {
 }
 beforeEach(() => { Object.assign(evidence, { latest: null, visible: null, configured: false, loading: false, frozen: false }); });
 describe('ConsumerDemoPage', () => {
-  it('keeps missing route facts and restart timing unavailable; operator links stay behind /operator', async () => {
+  it('keeps missing route facts unavailable, reports no latency until it is measured, and points operator links at /operator', async () => {
     setup();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('A little question. A shared intelligence.');
     expect(screen.getByText(/Cold-restart status and ETA are unavailable/)).toBeVisible();
-    expect(screen.getByLabelText('TTFT')).toHaveTextContent('Unavailable');
-    expect(screen.getByLabelText('TPOT')).toHaveTextContent('Unavailable');
-    expect(screen.getByText(/Mac names and layer placement are unavailable/)).toBeVisible();
+    expect(screen.getByLabelText('TTFT')).toHaveTextContent('Not measured');
+    expect(screen.getByLabelText('TPOT')).toHaveTextContent('Not measured');
+    expect(screen.getByLabelText('Output completeness')).toHaveTextContent('No output yet');
+    expect(screen.getByText(/No layer-to-node split is inferred/)).toBeVisible();
+    expect(screen.getByText(/Mac names, hostnames and OS identities are not part of the published contract/)).toBeVisible();
     for (const link of screen.getAllByRole('link').filter(a => /Operator|Evidence/.test(a.textContent ?? ''))) {
       expect(link.getAttribute('href')).toMatch(/^\/operator/);
     }
-    await screen.findByText('test-only-model');
+    // The model identity is published twice: the request header and the route panel.
+    await waitFor(() => expect(screen.getAllByText('test-only-model').length).toBeGreaterThan(0));
   });
   it('streams only real client events and retries a named terminal failure through the existing session engine', async () => {
     const { client } = setup(); await start();
@@ -126,6 +137,7 @@ describe('ConsumerDemoPage', () => {
     expect(screen.getByText('Evidence feed connected')).toBeVisible();
     expect(screen.getByLabelText('Published peers')).toHaveTextContent('0');
     expect(screen.queryByText(/Two Macs connected/)).not.toBeInTheDocument();
-    await screen.findByText('test-only-model');
+    // The model identity is published twice: the request header and the route panel.
+    await waitFor(() => expect(screen.getAllByText('test-only-model').length).toBeGreaterThan(0));
   });
 });
