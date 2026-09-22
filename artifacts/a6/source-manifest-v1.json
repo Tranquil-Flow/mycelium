@@ -42,9 +42,14 @@
       "size_bytes": 5650
     },
     {
+      "path": "contracts/compatibility-fixtures/product-ui-bootstrap-v1.json",
+      "sha256": "sha256:a2d9c70ec4bc7869d4e31625c52b2bf3cb86e093b1a5c817793bce4d481122d3",
+      "size_bytes": 1006
+    },
+    {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:4f20784556129f57bf92219984142bca7933c418671afcae41827b20a37ab65c",
-      "size_bytes": 70319
+      "sha256": "sha256:9fb46a788f4c3f1f7d4802b467b7da19091d848fd81b2f97e6f923331d46453f",
+      "size_bytes": 70320
     },
     {
       "path": "docs/handover/A6_SESSION5B_CANDIDATE_2026-09-07.md",
@@ -278,8 +283,8 @@
     },
     {
       "path": "scripts/generate_contract_fixtures.py",
-      "sha256": "sha256:3eed511c2b96365162c256a91f0cf42d66333aa942d6b19306307049af4fdec2",
-      "size_bytes": 90515
+      "sha256": "sha256:2e1f3d891d911c2c8ea3d5847f17d0adf5a8524deb3ab28c89fd8bb40ccf8ccd",
+      "size_bytes": 90573
     },
     {
       "path": "scripts/quiet_host_guard.py",
@@ -587,6 +592,11 @@
       "size_bytes": 13011
     },
     {
+      "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",
+      "sha256": "sha256:a2a81d2fb5b120c5ab7585d9dd9ca5f7353441c15f13b9cc6b6970d3192ca752",
+      "size_bytes": 2446
+    },
+    {
       "path": "ui/web/package.json",
       "sha256": "sha256:d4025d5ecd97150dd6d4b33a0d0024c85b20871a0dc4df25d452c8e636446145",
       "size_bytes": 2227
@@ -620,6 +630,16 @@
       "path": "ui/web/src/app/consumerRoute.ts",
       "sha256": "sha256:033930c5509eb756962cf76c413fe57ca42cae318a160005d9f74a6d7c5f4037",
       "size_bytes": 1010
+    },
+    {
+      "path": "ui/web/src/app/contracts.test.ts",
+      "sha256": "sha256:9499ce86e36d9765872bc5874c23a9f9c5b906ed75f498c991bb0eff4104d6df",
+      "size_bytes": 14570
+    },
+    {
+      "path": "ui/web/src/app/contracts.ts",
+      "sha256": "sha256:e285820bf9bd1f2bb3d16e011e70336a016db83fc371fd36af10f82eb9f5b093",
+      "size_bytes": 36454
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.demo.test.tsx",
@@ -712,6 +732,11 @@
       "size_bytes": 792
     },
     {
+      "path": "ui/web/src/features/swarm/SwarmClient.test.ts",
+      "sha256": "sha256:41e019790de52480960bc59239c7a8d22c7176a3f10edc3ae1e6b0eef47f09bb",
+      "size_bytes": 5704
+    },
+    {
       "path": "ui/web/src/main.consumer.test.tsx",
       "sha256": "sha256:7f6237ebbc46bc3e3b0f6cb2d71c67b97fbb845756ad8c3c1717bb85100ffbc8",
       "size_bytes": 3182
@@ -728,5 +753,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:18292cdda7080362115022f50c774281578354e327e756eeb0aef8e8390b7ff9"
+  "source_digest": "sha256:467cf25c9d0764a8bf2bbfef9c1d117da52df3b8529f427255d0c8471a400050"
 }
