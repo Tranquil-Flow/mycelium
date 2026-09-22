@@ -8,6 +8,24 @@ import time
 from mycelium_a13_macos.worker import ManagedWorker, WorkerError
 
 
+def _poll_dead_or_alive(process, *, deadline_seconds: float = 5.0, interval: float = 0.02) -> bool:
+    """Return True iff `process` is reaped within `deadline_seconds`.
+
+    The product's PhysicalNodeProcess.close() drives cleanup on a bounded deadline
+    (stop_timeout bounded by response_timeout/0.5/remaining), so a deterministic
+    test that asserts on poll() must also wait the bounded deadline — bare poll()
+    is load-sensitive and races the OS reaper. Returns False on timeout so the
+    caller can produce an actionable diagnostic.
+    """
+    end = time.monotonic() + deadline_seconds
+    while time.monotonic() < end:
+        if process.poll() is not None:
+            return True
+        time.sleep(interval)
+    return process.poll() is not None
+
+
+
 @pytest.mark.parametrize('outcome', ['success', 'unknown'])
 def test_owner_stop_is_not_resurrected_by_replacement(tmp_path, monkeypatch, outcome):
     runtime, old, new, session, _ = _replacement_fixture(tmp_path, monkeypatch)
@@ -226,13 +244,15 @@ def test_constructor_cleanup_failure_is_not_reported_clean(tmp_path, monkeypatch
             assert runtime._replacement_worker is new
         # Retry through the managed owner, not through the test's rescue handle.
         new.close()
-        assert owned[0]._process.poll() is not None
+        assert _poll_dead_or_alive(owned[0]._process), \
+            f"child still alive after deadline: pid={owned[0]._process.pid}"
         assert new.cleanup_proven()
     finally:
         # Retain deterministic rescue even when testing an unfixed baseline.
         for process in owned:
             process.close()
-            assert process._process.poll() is not None
+            assert _poll_dead_or_alive(process._process), \
+                f"child still alive after deadline: pid={process._process.pid}"
         old.close()
         new.close()
 
