@@ -312,6 +312,11 @@
       "size_bytes": 2069
     },
     {
+      "path": "tests/a13_macos/test_authority.py",
+      "sha256": "sha256:8c7702b8db41312da5971df63e986f831ae5609a98c3027e0ba1576b392a4ba3",
+      "size_bytes": 10347
+    },
+    {
       "path": "tests/a13_macos/test_control_delivery_wakeup.py",
       "sha256": "sha256:2d960dbdb77a97b243b0e12f629e419f94b4b95775dbab7d30e664d08f78a787",
       "size_bytes": 30482
@@ -723,5 +728,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:e42e3ed14ccce1e292463da757dbb4398cd3e1f7e79b29c2d006e60d7ad22de0"
+  "source_digest": "sha256:18292cdda7080362115022f50c774281578354e327e756eeb0aef8e8390b7ff9"
 }
