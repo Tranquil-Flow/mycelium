@@ -140,7 +140,7 @@ def test_pairing_uses_real_https_join_sqlite_and_atomic_private_acceptance(
     }
     assert authority.accept_pairing(handoff) == accepted
     changed = copy.deepcopy(handoff)
-    changed["ciphertext"] = "A" + changed["ciphertext"][1:]
+    changed["ciphertext"] = ("B" if changed["ciphertext"][0] != "B" else "C") + changed["ciphertext"][1:]
     with pytest.raises(DemoAuthorityError, match="pairing_handoff_changed"):
         authority.accept_pairing(changed)
 
@@ -178,7 +178,7 @@ def test_tampered_handoff_leaves_only_private_encrypted_recovery_and_no_member(
     )
     token = plaintext["invite_bundle"]["token"]
     changed = copy.deepcopy(handoff)
-    changed["ciphertext"] = "A" + changed["ciphertext"][1:]
+    changed["ciphertext"] = ("B" if changed["ciphertext"][0] != "B" else "C") + changed["ciphertext"][1:]
     with pytest.raises(DemoAuthorityError, match="pairing_handoff_invalid"):
         authority.accept_pairing(changed)
 
