@@ -1429,8 +1429,8 @@
     {
       "fixture": {
         "path": "contracts/compatibility-fixtures/product-ui-bootstrap-v1.json",
-        "sha256": "11e90cf87c77e19928d69d2d00c1e5eae120559343e128a24faf4df260b1baee",
-        "size_bytes": 956
+        "sha256": "a2d9c70ec4bc7869d4e31625c52b2bf3cb86e093b1a5c817793bce4d481122d3",
+        "size_bytes": 1006
       },
       "owner_sources": [
         {
@@ -1440,13 +1440,13 @@
         },
         {
           "path": "ui/contracts/product/product-ui-bootstrap-v1.schema.json",
-          "sha256": "640abbfc971ad1841d02f7ab922901cc951e97f3ca20e77f997c9243fb1998db",
-          "size_bytes": 2360
+          "sha256": "a2a81d2fb5b120c5ab7585d9dd9ca5f7353441c15f13b9cc6b6970d3192ca752",
+          "size_bytes": 2446
         },
         {
           "path": "ui/web/src/app/contracts.ts",
-          "sha256": "60c327e1a6919e93e81cd6f85c5439dc931781b95567f16889024e11ccb93885",
-          "size_bytes": 36408
+          "sha256": "e285820bf9bd1f2bb3d16e011e70336a016db83fc371fd36af10f82eb9f5b093",
+          "size_bytes": 36454
         }
       ],
       "protocol": "mycelium.product_ui.bootstrap.v1"
@@ -1610,8 +1610,8 @@
         },
         {
           "path": "ui/web/src/app/contracts.ts",
-          "sha256": "60c327e1a6919e93e81cd6f85c5439dc931781b95567f16889024e11ccb93885",
-          "size_bytes": 36408
+          "sha256": "e285820bf9bd1f2bb3d16e011e70336a016db83fc371fd36af10f82eb9f5b093",
+          "size_bytes": 36454
         }
       ],
       "protocol": "mycelium.request_event.v2"
@@ -1645,8 +1645,8 @@
         },
         {
           "path": "ui/web/src/app/contracts.ts",
-          "sha256": "60c327e1a6919e93e81cd6f85c5439dc931781b95567f16889024e11ccb93885",
-          "size_bytes": 36408
+          "sha256": "e285820bf9bd1f2bb3d16e011e70336a016db83fc371fd36af10f82eb9f5b093",
+          "size_bytes": 36454
         }
       ],
       "protocol": "mycelium.request_gateway.v2"

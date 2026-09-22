@@ -21,7 +21,7 @@
     "api": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["observatory_snapshot", "observatory_events", "qualification_current", "inference_submit", "swarm_status", "swarm_invites", "swarm_join", "swarm_leave", "product_snapshot", "product_events", "product_export"],
+      "required": ["observatory_snapshot", "observatory_events", "qualification_current", "inference_submit", "swarm_status", "swarm_invites", "swarm_join", "swarm_leave", "product_snapshot", "product_events", "product_export", "recovery_status"],
       "properties": {
         "observatory_snapshot": { "const": "/api/v1/observatory/snapshot" },
         "observatory_events": { "const": "/api/v1/observatory/events" },
@@ -33,7 +33,8 @@
         "swarm_leave": { "const": "/api/v1/swarm/leave" },
         "product_snapshot": { "const": "/api/v1/product/snapshot" },
         "product_events": { "const": "/api/v1/product/events" },
-        "product_export": { "const": "/api/v1/product/export" }
+        "product_export": { "const": "/api/v1/product/export" },
+        "recovery_status": { "const": "/api/v1/recovery/status" }
       }
     },
     "limits": {

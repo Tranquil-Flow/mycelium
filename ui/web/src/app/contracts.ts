@@ -25,6 +25,7 @@ export const PRODUCT_API_PATHS = Object.freeze({
   product_snapshot: '/api/v1/product/snapshot',
   product_events: '/api/v1/product/events',
   product_export: '/api/v1/product/export',
+  recovery_status: '/api/v1/recovery/status',
 } as const);
 
 const SHA256_REF = /^sha256:[0-9a-f]{64}$/;

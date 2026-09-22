@@ -199,6 +199,17 @@ describe('frozen product UI wire contracts', () => {
     ).toThrow(ProductContractError);
   });
 
+  it('accepts the live gateway bootstrap shape (api advertises recovery_status)', () => {
+    // Fixture-vs-live seam regression: the live gateway advertises
+    // recovery_status in the bootstrap api map and the decoder must accept it.
+    const liveShaped = {
+      ...bootstrap,
+      api: { ...bootstrap.api, recovery_status: '/api/v1/recovery/status' },
+    };
+    const decoded = decodeProductBootstrap(liveShaped);
+    expect(decoded.api.recovery_status).toBe('/api/v1/recovery/status');
+  });
+
   it.each([
     ['fixture', 'Fixture data'],
     ['live', 'Live evidence'],

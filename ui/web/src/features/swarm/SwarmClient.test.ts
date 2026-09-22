@@ -41,6 +41,7 @@ const bootstrap: ProductBootstrap = {
     product_snapshot: '/api/v1/product/snapshot',
     product_events: '/api/v1/product/events',
     product_export: '/api/v1/product/export',
+    recovery_status: '/api/v1/recovery/status',
   },
   limits: { max_prompt_utf8_bytes: 131_072, max_new_tokens: 4_096 },
   qualification_authority: 'mycelium_qualification.qualifier:RouteQualificationV1',

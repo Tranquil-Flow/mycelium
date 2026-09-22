@@ -7,6 +7,7 @@
     "product_export": "/api/v1/product/export",
     "product_snapshot": "/api/v1/product/snapshot",
     "qualification_current": "/api/v1/qualification/current",
+    "recovery_status": "/api/v1/recovery/status",
     "swarm_invites": "/api/v1/swarm/invites",
     "swarm_join": "/api/v1/swarm/join",
     "swarm_leave": "/api/v1/swarm/leave",
