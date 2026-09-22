@@ -450,13 +450,13 @@
         },
         {
           "path": "mycelium_product_spine/contracts.py",
-          "sha256": "3581b3ea93bd86cce3bbdba63378448495a299f51da5df6c722a9ee747e30bfb",
-          "size_bytes": 24991
+          "sha256": "b4071ddd79a5099695ca436f08b5b83052f603759d305980a99d13de0e823267",
+          "size_bytes": 25992
         },
         {
           "path": "mycelium_product_spine/projector.py",
-          "sha256": "39ee84988882605ab44a9aeb033442fef81680ebcc821ec8b5a117192f8c7fe3",
-          "size_bytes": 53736
+          "sha256": "09cd84b692b922f0e6a9732b0ac4477cdf3bf2a04623e092010522ea61f985a3",
+          "size_bytes": 54287
         },
         {
           "path": "mycelium_request_gateway/backend.py",
@@ -475,8 +475,8 @@
         },
         {
           "path": "ui/web/src/features/productEvidence/contracts.ts",
-          "sha256": "e686e2ea1b4afd9ada63a23675c15292f5565e7bca40d08b42455d72e438cfcd",
-          "size_bytes": 41452
+          "sha256": "92ac571da49825db3e4f6b410e2f7043948c84410677383abdce04fbbe5fd92d",
+          "size_bytes": 41867
         },
         {
           "path": "ui/web/src/features/recovery/RecoveryStatusBar.tsx",
@@ -1400,8 +1400,8 @@
       "owner_sources": [
         {
           "path": "mycelium_product_spine/contracts.py",
-          "sha256": "3581b3ea93bd86cce3bbdba63378448495a299f51da5df6c722a9ee747e30bfb",
-          "size_bytes": 24991
+          "sha256": "b4071ddd79a5099695ca436f08b5b83052f603759d305980a99d13de0e823267",
+          "size_bytes": 25992
         }
       ],
       "protocol": "mycelium.product_event.v1"
@@ -1415,13 +1415,13 @@
       "owner_sources": [
         {
           "path": "mycelium_product_spine/contracts.py",
-          "sha256": "3581b3ea93bd86cce3bbdba63378448495a299f51da5df6c722a9ee747e30bfb",
-          "size_bytes": 24991
+          "sha256": "b4071ddd79a5099695ca436f08b5b83052f603759d305980a99d13de0e823267",
+          "size_bytes": 25992
         },
         {
           "path": "mycelium_product_spine/projector.py",
-          "sha256": "39ee84988882605ab44a9aeb033442fef81680ebcc821ec8b5a117192f8c7fe3",
-          "size_bytes": 53736
+          "sha256": "09cd84b692b922f0e6a9732b0ac4477cdf3bf2a04623e092010522ea61f985a3",
+          "size_bytes": 54287
         }
       ],
       "protocol": "mycelium.product_snapshot.v1"
@@ -1660,8 +1660,8 @@
       "owner_sources": [
         {
           "path": "mycelium_product_spine/route_explorer.py",
-          "sha256": "b37b0e6cbb8a00c55a90d14f9867d0bca86f059e069747f5b8865d6074731c2e",
-          "size_bytes": 8973
+          "sha256": "6b09b31e5a0889e7ab88c67989db934d39c9a05ae3d1179a8e761f5adb885e88",
+          "size_bytes": 11213
         }
       ],
       "protocol": "mycelium.route_explorer.v1"

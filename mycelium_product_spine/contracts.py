@@ -171,6 +171,15 @@ def _privacy_walk(value: object) -> bool:
     return value is None or isinstance(value, (str, int, bool))
 
 
+def _coarse_region_evidence_list(value: object) -> bool:
+    """Bounded list of reviewable records; each record is validated in full below."""
+    return (
+        isinstance(value, list)
+        and len(value) <= MAX_ITEMS
+        and all(isinstance(item, Mapping) for item in value)
+    )
+
+
 def _binding(value: object) -> bool:
     fields = {
         "deployment_id",
@@ -690,6 +699,10 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
     # Older product-v1 publications remain readable, explicitly without an explorer.
     if isinstance(document, Mapping) and 'route_explorer' in document:
         fields.add('route_explorer')
+    # Reviewed coarse-region records are optional publication input; the
+    # projection carries them only as reduced rows.
+    if isinstance(document, Mapping) and 'coarse_region_evidence' in document:
+        fields.add('coarse_region_evidence')
     if not _exact(document, fields) or document["protocol"] != SNAPSHOT_PROTOCOL:
         raise ProductContractError("product_snapshot_invalid")
     if (
@@ -710,6 +723,10 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
         or not _provenance(document["provenance"])
         or document["publication"]["source_mode"]
         != document["provenance"]["source_mode"]
+        or (
+            'coarse_region_evidence' in document
+            and not _coarse_region_evidence_list(document['coarse_region_evidence'])
+        )
         or not _privacy_walk(document)
     ):
         raise ProductContractError("product_snapshot_invalid")
@@ -732,6 +749,12 @@ def validate_product_snapshot(document: Mapping[str, Any]) -> dict[str, Any]:
     try:
         detached = dict(document)
         detached["internet_native"] = internet_native
+        if 'coarse_region_evidence' in document:
+            from .coarse_region import validate_coarse_region_evidence
+            detached["coarse_region_evidence"] = [
+                validate_coarse_region_evidence(item)
+                for item in document["coarse_region_evidence"]
+            ]
         if 'route_explorer' in document:
             from .route_explorer import project_route_explorer, validate_route_explorer
             explorer = validate_route_explorer(document['route_explorer'])

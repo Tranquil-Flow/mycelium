@@ -53,7 +53,7 @@ def test_semantic_rejection(case):
     if case=='node_duplicate':p['nodes'].append(p['nodes'][0])
     if case=='segment_duplicate':p['segments'].append(s)
     if case=='unbound_endpoint':s['source']='sha256:'+'f'*64
-    if case=='region':p['nodes'][0]['region']='europe'
+    if case=='region':p['nodes'][0]['region']='us-east-1'
     if case=='negative_generation':s['binding']['path_generation']=-1
     if case=='false_zero':p['segments'][1]['metrics']['measured_zero']=False
     if case=='unknown_metric':s['metrics']['rtt_ms']=0
