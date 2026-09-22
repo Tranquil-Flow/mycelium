@@ -617,29 +617,74 @@
       "size_bytes": 1010
     },
     {
+      "path": "ui/web/src/features/consumer/ConsumerDemoPage.demo.test.tsx",
+      "sha256": "sha256:511092c74d9fcc7978024efcd9c65aae06b604fa08aadb4bfad894879fd610ac",
+      "size_bytes": 14638
+    },
+    {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.module.css",
-      "sha256": "sha256:1912ff74c8614182254efc42272a7b99e6175a8921b8587740ed025d45dfe15e",
-      "size_bytes": 8201
+      "sha256": "sha256:0253ef5daeeb796c46eafc1ec7c1182ceffece431858834f120e7af3633760a7",
+      "size_bytes": 9761
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.test.tsx",
-      "sha256": "sha256:f4e70734b016e94471a8cb37c04115edb43af7bfa9f6ae62e53e9a706ac63c3a",
-      "size_bytes": 8995
+      "sha256": "sha256:461a816f456ee707d2c5b895e13abf0ccef0c0231b953445093da53168338500",
+      "size_bytes": 9957
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.tsx",
-      "sha256": "sha256:41a9449442cb2d4401e50c0a66e2d8b9066872f53a900bcf3edf8469895a8b5c",
-      "size_bytes": 12493
+      "sha256": "sha256:e6d097f739eda8800a213806d36ed44bb2fb7627d5faf25a18470b2889a3e214",
+      "size_bytes": 17102
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerLiveRoute.tsx",
-      "sha256": "sha256:0db314efb4acd7085e3ba620ebb0191c8891559f0439ca745b0b5e19cb8f90db",
-      "size_bytes": 2966
+      "sha256": "sha256:86f0f9182665f5a532723fecfdeac2da3c84ebf485a61e9b5f55f294e5dcec7c",
+      "size_bytes": 3685
+    },
+    {
+      "path": "ui/web/src/features/consumer/ConsumerRoutePanel.tsx",
+      "sha256": "sha256:316ac11c4bcc3e7ef59b94817ab31f07beb105ad52da807132662fc79cbcc5d8",
+      "size_bytes": 10638
     },
     {
       "path": "ui/web/src/features/consumer/README.md",
-      "sha256": "sha256:2d5c5a2782c2b190343e85c7c16ae0a1a693e8379c8bef653289e1c6d15d030b",
-      "size_bytes": 4132
+      "sha256": "sha256:55bf3b33ed2bbe7bd3c91c467257edcd88ace542fac3675b30c99abc52e04b92",
+      "size_bytes": 4698
+    },
+    {
+      "path": "ui/web/src/features/consumer/clientTiming.test.ts",
+      "sha256": "sha256:b48b43b5f3be2937b197227900af1fb8e195f5e7b0664fcc99128ecca4a9e5e7",
+      "size_bytes": 9042
+    },
+    {
+      "path": "ui/web/src/features/consumer/clientTiming.ts",
+      "sha256": "sha256:23656615aef7397093698a3506e6edef4f703638db2ca439da8dbef5f70c5453",
+      "size_bytes": 6593
+    },
+    {
+      "path": "ui/web/src/features/consumer/consumerObservatory.test.ts",
+      "sha256": "sha256:088312f147852324ac5a231d9baa77d1a79cc893b0e8f424096e5844288ba584",
+      "size_bytes": 4534
+    },
+    {
+      "path": "ui/web/src/features/consumer/consumerObservatory.ts",
+      "sha256": "sha256:28433e9817d457c5241400891e3d95ac9f0e29ccd905bfa09de72bc1c3736f79",
+      "size_bytes": 7243
+    },
+    {
+      "path": "ui/web/src/features/consumer/consumerRouteFacts.test.ts",
+      "sha256": "sha256:e7c76c12e83b2356b8313645119dbf9e126b470424ee11a36bb928c66823fbdf",
+      "size_bytes": 7868
+    },
+    {
+      "path": "ui/web/src/features/consumer/consumerRouteFacts.ts",
+      "sha256": "sha256:fb4b0db00479a1ee3a70a3cd8ccae275f803b3b167faf49da6a893c3530c9394",
+      "size_bytes": 9530
+    },
+    {
+      "path": "ui/web/src/features/consumer/useElapsedSeconds.ts",
+      "sha256": "sha256:30f7c500703f83e558d5b96e610fb7c82967f78d969b6dbe75b00583aec07d0b",
+      "size_bytes": 992
     },
     {
       "path": "ui/web/src/features/productEvidence/contracts.ts",
@@ -678,5 +723,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:13cb1947e7a90a33d0d5d4da5825f3f17c63edbecb80b6f05de04102483eb119"
+  "source_digest": "sha256:e42e3ed14ccce1e292463da757dbb4398cd3e1f7e79b29c2d006e60d7ad22de0"
 }
