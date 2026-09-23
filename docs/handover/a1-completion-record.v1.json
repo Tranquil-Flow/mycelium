@@ -1,0 +1,92 @@
+{
+ "protocol": "mycelium.gate_completion_record.v1",
+ "gate_id": "A1",
+ "state": "integrated_unqualified",
+ "state_basis": "A1's software-positive evidence is green on this head (37 tests: tests/product_spine + tests/evidence) and the live/sealed separation machinery is present; but A1's own specification binds physical/browser positive gates and an executed browser result, none of which are executed on this head (the standing origin is route_dropped and frozen for this workstream). This record does not promote A1.",
+ "outcome": {
+  "decision": "held_open",
+  "gate_complete": false,
+  "register_row_written": false,
+  "reason": "browser/physical positive gates unexecuted; no checklist row for A1 exists (rows start at A3) and adding one is owed; recorded here as open, never as pass.",
+  "maximum_truthful_claim": "software-level live/sealed separation evidence only"
+ },
+ "claim_boundary": "This record asserts exactly one thing: on the head bound below, A1's software-positive suites pass and the live/sealed evidence-separation modules are present. It does NOT claim browser, physical, or full-regression evidence, does not claim UI-live-all-eight, and does not claim A1 is complete.",
+ "specification": {
+  "path": "docs/superpowers/specs/2026-08-11-mycelium-a1-live-evidence-separation.md",
+  "digest": "sha256:cb14cfcb7e0922d2bca5146ad438656158e6733d84a5b4312e876ca637648a5e"
+ },
+ "closing_commit": "assigned_by_git_to_the_containing_commit_of_this_record",
+ "closing_commit_is_an_a1_atomic_feature_commit": false,
+ "bindings": {
+  "head": "6de8899322ff06597a2c9dde2d3ae30eeb6c38e3",
+  "evidence_command": "python -m pytest tests/product_spine tests/evidence -q (37 passed, exit 0)"
+ },
+ "requirements": {
+  "disposition_legend": {
+   "partial": "Some but not all binding evidence exists on this head.",
+   "open": "No evidence on this head; recorded as a gap, never as a pass."
+  },
+  "assessments": [
+   {
+    "requirement": "specification",
+    "disposition": "partial",
+    "evidence": "spec present at sha256:cb14cfcb7"
+   },
+   {
+    "requirement": "implementation",
+    "disposition": "partial",
+    "evidence": "live/sealed separation present (review F-checks); mycelium_evidence.py + product evidence spine modules exist in the tree"
+   },
+   {
+    "requirement": "deterministic_positive",
+    "disposition": "partial",
+    "evidence": "37 passed, exit 0 on this head: tests/product_spine + tests/evidence (serial)"
+   },
+   {
+    "requirement": "deterministic_negative",
+    "disposition": "open",
+    "evidence": "not enumerated in this lane"
+   },
+   {
+    "requirement": "physical_positive",
+    "disposition": "open",
+    "evidence": "standing origin route_dropped; no physical round spent by this workstream"
+   },
+   {
+    "requirement": "browser_positive",
+    "disposition": "open",
+    "evidence": "last browser gate record is 2026-08-11 prose; nothing re-executed on this head"
+   },
+   {
+    "requirement": "ui_live_all_eight",
+    "disposition": "open",
+    "evidence": "not executed"
+   }
+  ]
+ },
+ "verification": {
+  "command": "env-scrubbed python -m pytest tests/product_spine tests/evidence -q",
+  "result": "37 passed in 0.21s, exit 0",
+  "run_at_head": "6de8899322ff06597a2c9dde2d3ae30eeb6c38e3"
+ },
+ "not_claimed": [
+  "gate completion",
+  "browser evidence",
+  "physical evidence",
+  "checklist row",
+  "register row",
+  "full-regression evidence"
+ ],
+ "limitations": [
+  "the 37-test run covers the software-positive slice only; A1 spec 9.2 (negative) and 9.3/9.4 (physical/browser) are unexecuted on this head",
+  "the standing origin is frozen for this workstream (route_dropped); no requalification was attempted"
+ ],
+ "provenance": {
+  "written_by": "orchestrator (Moonsong) in the adapters-perf-a9-a10 workstream",
+  "written_on": "2026-09-23",
+  "basis_documents": [
+   "GOAL-prompt-adapters-perf-a9-a10.md",
+   "2026-09-15 independent review (A1 row: integrated, no closure record, tests not rerun on HEAD)"
+  ]
+ }
+}
