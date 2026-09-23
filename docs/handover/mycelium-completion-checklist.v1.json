@@ -1,7 +1,7 @@
 {
  "protocol": "mycelium.completion_checklist.v1",
  "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
- "updated_on": "2026-09-23T13:50:16Z",
+ "updated_on": "2026-09-23T14:12:39Z",
  "primary_gate": "A6",
  "workspace_ids": [
   "inference",
@@ -1341,11 +1341,33 @@
       "environment_digest": null,
       "authority_generation": null
      }
+    },
+    {
+     "protocol": "mycelium.executed_requirement_evidence.v1",
+     "requirement": "implementation",
+     "disposition": "partial",
+     "artifact_reference": "mycelium_platform_neutral/peer_profile.py",
+     "artifact_digest": "sha256:7dd4e4bc1d8ccef69041986449e91785c619be5767097b583231ffbdae9345c4",
+     "provenance": "source",
+     "subject": "A9:implementation (9 frozen contracts + v2 migration tests, deterministic half)",
+     "observed_at": "2026-09-23T14:12:39Z",
+     "fresh_until": null,
+     "binding_scope": "source",
+     "bindings": {
+      "contract_digest": null,
+      "model_digest": null,
+      "representation_digest": null,
+      "runtime_digest": null,
+      "environment_digest": null,
+      "authority_generation": null
+     },
+     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [],
+   "partial_requirements": [
+    "implementation"
+   ],
    "pending_requirements": [
-    "implementation",
     "product_integration",
     "deterministic_positive",
     "deterministic_negative",
@@ -1405,11 +1427,33 @@
       "environment_digest": null,
       "authority_generation": null
      }
+    },
+    {
+     "protocol": "mycelium.executed_requirement_evidence.v1",
+     "requirement": "implementation",
+     "disposition": "partial",
+     "artifact_reference": "mycelium_router/a10_batch_admission.py",
+     "artifact_digest": "sha256:72814b0dfb0c451c2ac142cd8583dbc34c111948a9583525241f0df87422a399",
+     "provenance": "source",
+     "subject": "A10:implementation (deterministic negatives + admission path; physical positives RED by design)",
+     "observed_at": "2026-09-23T14:12:39Z",
+     "fresh_until": null,
+     "binding_scope": "source",
+     "bindings": {
+      "contract_digest": null,
+      "model_digest": null,
+      "representation_digest": null,
+      "runtime_digest": null,
+      "environment_digest": null,
+      "authority_generation": null
+     },
+     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [],
+   "partial_requirements": [
+    "implementation"
+   ],
    "pending_requirements": [
-    "implementation",
     "product_integration",
     "deterministic_positive",
     "deterministic_negative",
@@ -1468,11 +1512,33 @@
       "environment_digest": null,
       "authority_generation": null
      }
+    },
+    {
+     "protocol": "mycelium.executed_requirement_evidence.v1",
+     "requirement": "implementation",
+     "disposition": "partial",
+     "artifact_reference": "mycelium_speculative_decode.py",
+     "artifact_digest": "sha256:10b8dc766714624ac51c494e3a0f23177764456c69600db2a468798fbce02859",
+     "provenance": "source",
+     "subject": "A11:implementation (verifier transactions + prefix parity; physical/browser RED by design)",
+     "observed_at": "2026-09-23T14:12:39Z",
+     "fresh_until": null,
+     "binding_scope": "source",
+     "bindings": {
+      "contract_digest": null,
+      "model_digest": null,
+      "representation_digest": null,
+      "runtime_digest": null,
+      "environment_digest": null,
+      "authority_generation": null
+     },
+     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [],
+   "partial_requirements": [
+    "implementation"
+   ],
    "pending_requirements": [
-    "implementation",
     "product_integration",
     "deterministic_positive",
     "deterministic_negative",
@@ -1533,11 +1599,33 @@
       "environment_digest": null,
       "authority_generation": null
      }
+    },
+    {
+     "protocol": "mycelium.executed_requirement_evidence.v1",
+     "requirement": "implementation",
+     "disposition": "partial",
+     "artifact_reference": "mycelium_mobile/a12_evidence.py",
+     "artifact_digest": "sha256:4eb19ced15181e71bb40c97db927f65d4c990eb53db4321658d4bff90bcef5ce",
+     "provenance": "source",
+     "subject": "A12:implementation (four eligibility rungs + evidence contract; native device gates RED by design)",
+     "observed_at": "2026-09-23T14:12:39Z",
+     "fresh_until": null,
+     "binding_scope": "source",
+     "bindings": {
+      "contract_digest": null,
+      "model_digest": null,
+      "representation_digest": null,
+      "runtime_digest": null,
+      "environment_digest": null,
+      "authority_generation": null
+     },
+     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [],
+   "partial_requirements": [
+    "implementation"
+   ],
    "pending_requirements": [
-    "implementation",
     "product_integration",
     "deterministic_positive",
     "deterministic_negative",
