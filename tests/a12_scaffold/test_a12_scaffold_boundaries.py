@@ -1,13 +1,17 @@
 """A12 scaffold boundary suite: explicit, honest not-implemented seams.
 
 GREEN DISCIPLINE (read before trusting a pass in this file): every test here passes
-because the scaffold's refusals and honesty guards exist — not because any A12
-behaviour works.  The eight declared execution seams (enrollment, capability
-eligibility, artifact readiness, operation qualification, optional draft binding,
-runtime observation, product projection, physical gate) are deliberately
-unimplemented; these tests pin that they cannot silently succeed, that their coded
-errors are closed and unique, and that the guards reject the shortcuts the A12
-specification and acceptance inventory forbid.
+because the refusals and honesty guards that remain exist — not because any A12
+behaviour works.  Five execution seams are still deliberately unimplemented
+(physical operation qualification, optional draft binding, runtime observation,
+product projection, physical gate); these tests pin that they cannot silently
+succeed, that their coded errors are closed and unique, and that the guards reject
+the shortcuts the A12 specification and acceptance inventory forbid.
+
+The three deterministic rung seams (enrollment, capability eligibility, artifact
+readiness) landed in the deterministic half: they author closed rung-proof records
+and are asserted absent from ``a12.BOUNDARIES`` below.  LANDING ONE OF THE REMAINING
+FIVE is what removes it from this table — never a relaxed assertion here.
 
 Nothing in this file is closure evidence.  ``EARNED_CLOSURE_REQUIREMENTS`` must stay
 empty against the thirteen canonical names of ``scripts/mycelium_completion_audit.py``.
@@ -60,8 +64,17 @@ CURRENT_PRIOR_RUNGS = {
     "artifact_readiness": "eligible",
 }
 
+# The rung seams that landed with the deterministic half.  They author closed rung
+# documents instead of refusing, so they must be absent from ``a12.BOUNDARIES`` and
+# their plausible payloads must not raise ``A12NotImplementedError`` any more.
+LANDED_SEAMS = ("enroll_mobile_member", "qualify_capability_eligibility", "promote_assignment_artifact")
+
+# How many execution seams are still deliberately unimplemented.
+DECLARED_BOUNDARY_COUNT = 5
+
 # One plausible payload per declared entry point.  Each must pass shape validation
-# and then hit the coded refusal; none may return a value.
+# and then hit the coded refusal; none may return a value.  The three landed rung
+# seams keep their payload too: it is used to prove they no longer refuse.
 BOUNDARY_PAYLOADS: dict[str, dict[str, object]] = {
     "enroll_mobile_member": {
         "member_ref": "member:1",
@@ -129,9 +142,10 @@ def test_boundary_codes_are_closed_unique_and_declared() -> None:
     names = [name for name, _ in a12.BOUNDARIES]
     codes = [code for _, code in a12.BOUNDARIES]
 
-    assert len(names) == len(set(names)) == 8
+    assert len(names) == len(set(names)) == DECLARED_BOUNDARY_COUNT
     assert len(codes) == len(set(codes))
     assert set(codes) == set(a12.BOUNDARY_CODES)
+    assert set(names) == set(BOUNDARY_PAYLOADS) - set(LANDED_SEAMS)
     for name in names:
         function = getattr(a12, name)
         assert function.__module__ == a12.__name__
@@ -154,7 +168,7 @@ def test_every_declared_boundary_refuses_with_its_coded_error(
     assert not isinstance(error.value, a12.A12ContractError)
 
 
-@pytest.mark.parametrize("entry_point", sorted(BOUNDARY_PAYLOADS))
+@pytest.mark.parametrize("entry_point", sorted(name for name, _ in a12.BOUNDARIES))
 def test_no_boundary_returns_a_success_document(entry_point: str) -> None:
     function = getattr(a12, entry_point)
     returned: object = None
@@ -167,6 +181,29 @@ def test_no_boundary_returns_a_success_document(entry_point: str) -> None:
 
     assert raised is True
     assert returned is None
+
+
+@pytest.mark.parametrize("entry_point", LANDED_SEAMS)
+def test_landed_rung_seams_author_closed_documents_instead_of_refusing(
+    entry_point: str,
+) -> None:
+    """A landed seam leaves the boundary; it must author a closed rung document."""
+
+    function = getattr(a12, entry_point)
+    document: object = None
+    refused = False
+
+    try:
+        document = function(**BOUNDARY_PAYLOADS[entry_point])
+    except a12.A12NotImplementedError:
+        refused = True
+
+    assert refused is False
+    assert isinstance(document, dict)
+    assert document["protocol"] == a12.RUNG_PROOF_PROTOCOL
+    assert document["physical_execution"] is False
+    assert a12.validate_rung_proof(document) == document
+    assert entry_point not in {name for name, _ in a12.BOUNDARIES}
 
 
 def test_declared_contract_protocols_are_the_specifications_three_records() -> None:
