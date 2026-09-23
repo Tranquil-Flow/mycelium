@@ -240,6 +240,7 @@ class ProductProjector:
         now_unix_ms: int,
         source_mode: str = "live",
         source_errors: Mapping[str, str] | None = None,
+        coarse_region_evidence: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if (
             not isinstance(now_unix_ms, int)
@@ -261,6 +262,10 @@ class ProductProjector:
             for source_id, reason in errors.items()
         ):
             raise ValueError("product_projection_input_invalid")
+        if coarse_region_evidence is not None and not isinstance(
+            coarse_region_evidence, (list, tuple)
+        ):
+            raise ValueError("product_projection_input_invalid")
         with self._lock:
             generation = self._generation + 1
             cursor = self._cursor + 1
@@ -276,6 +281,7 @@ class ProductProjector:
                 generation=generation,
                 cursor=cursor,
                 source_errors=errors,
+                coarse_region_evidence=coarse_region_evidence,
             )
             validated = validate_product_snapshot(snapshot)
             from .route_explorer import project_route_explorer
@@ -299,6 +305,7 @@ class ProductProjector:
         generation: int,
         cursor: int,
         source_errors: Mapping[str, str],
+        coarse_region_evidence: Sequence[Mapping[str, Any]] | None,
     ) -> dict[str, Any]:
         route_current = (
             isinstance(route_status, Mapping)
@@ -1216,7 +1223,7 @@ class ProductProjector:
             )
             else source_mode
         )
-        return {
+        snapshot = {
             "protocol": "mycelium.product_snapshot.v1",
             "publication": {
                 "snapshot_id": f"snapshot-{generation}-{snapshot_digest[:16]}",
@@ -1238,6 +1245,9 @@ class ProductProjector:
                 "source_mode": publication_mode,
             },
         }
+        if coarse_region_evidence is not None:
+            snapshot["coarse_region_evidence"] = list(coarse_region_evidence)
+        return snapshot
 
     @staticmethod
     def _source_state(

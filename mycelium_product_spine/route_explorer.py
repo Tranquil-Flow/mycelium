@@ -4,13 +4,23 @@
 A8's activation summary identifies a remote endpoint, not a membership edge or
 request phase. Keep that observation separate from selected logical links. In
 particular, never join those namespaces by display name or borrow its transport
-class for every selected link. Region and optional overlay authorities are absent.
+class for every selected link. Reviewed coarse-region records are reduced for
+publication; no region or overlay authority exists.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import re
+
+from .coarse_region import (
+    DISTANCE_CLASSES,
+    REGIONS,
+    REGION_BLOCKERS,
+    REGION_SOURCES,
+    ROW_FIELDS,
+    project_coarse_regions,
+)
 
 PROTOCOL = 'mycelium.route_explorer.v1'
 MAX_NODES = 4096
@@ -25,6 +35,7 @@ DIMS = {
 }
 _HASH = re.compile(r'sha256:[0-9a-f]{64}\Z')
 _FIELDS = {'protocol', 'generation', 'source_mode', 'source_digest', 'nodes', 'segments', 'overlays', 'digest'}
+_OPTIONAL_FIELDS = _FIELDS | {'regions'}
 _SEGMENT_FIELDS = {'id', 'source', 'destination', 'binding', 'connection_generation', 'issued_at', 'expires_at', 'metrics', 'authority_digest', 'provenance', 'history', *DIMS}
 _METRICS = {'rtt_ms', 'warm_rtt_ms', 'jitter_ms', 'goodput_bytes_per_second', 'loss_ratio', 'sample_count', 'measured_zero'}
 _BINDING = {'deployment', 'request', 'attempt', 'track', 'path_generation'}
@@ -42,11 +53,33 @@ def _hash(v):
     return isinstance(v, str) and _HASH.fullmatch(v) is not None
 
 
+def _validate_regions(regions, nodes, ids):
+    def require(ok):
+        if not ok:
+            raise ValueError('route_explorer_invalid')
+    require(type(regions) is list and len(regions) <= MAX_NODES)
+    require(len(regions) == len(nodes))
+    seen = set()
+    for row in regions:
+        require(type(row) is dict and set(row) == ROW_FIELDS)
+        require(_hash(row['node']) and row['node'] in ids and row['node'] not in seen)
+        require(row['region'] in REGIONS and row['region_source'] in REGION_SOURCES)
+        require(row['region_blocker'] in (None, *REGION_BLOCKERS))
+        require(row['distance_class'] in (None, *DISTANCE_CLASSES))
+        seen.add(row['node'])
+    require([row['node'] for row in regions] == sorted(row['node'] for row in regions))
+    by_node = {row['node']: row for row in regions}
+    require(set(by_node) == ids)
+    for node in nodes:
+        row = by_node[node['id']]
+        require(row['region'] == node['region'] and row['region_source'] == node['region_source'])
+
+
 def validate_route_explorer(value):
     def require(ok):
         if not ok:
             raise ValueError('route_explorer_invalid')
-    require(type(value) is dict and set(value) == _FIELDS)
+    require(type(value) is dict and set(value) in (_FIELDS, _OPTIONAL_FIELDS))
     require(value['protocol'] == PROTOCOL and _integer(value['generation']))
     require(value['source_mode'] in ('live', 'fixture', 'replay', 'degraded'))
     require(value['overlays'] == 'unavailable' and _hash(value['source_digest']))
@@ -58,8 +91,10 @@ def validate_route_explorer(value):
         require(type(n) is dict and set(n) == {'id', 'kind', 'region', 'region_source'})
         require(_hash(n['id']) and n['id'] not in ids)
         require(n['kind'] in ('member', 'endpoint'))
-        require(n['region'] == 'unknown' and n['region_source'] == 'unavailable')
+        require(n['region'] in REGIONS and n['region_source'] in REGION_SOURCES)
         ids.add(n['id'])
+    if 'regions' in value:
+        _validate_regions(value['regions'], nodes, ids)
     segment_ids = set()
     for s in segments:
         require(type(s) is dict and set(s) == _SEGMENT_FIELDS)
@@ -99,6 +134,7 @@ def project_route_explorer(snapshot):
     """Called only after the ordinary product validator reduces source authority."""
     material = {k: v for k, v in snapshot.items() if k != 'route_explorer'}
     mode = snapshot['publication']['source_mode']
+    evidence = snapshot.get('coarse_region_evidence')
     nodes, segments = {}, []
     def node(public_id, kind):
         ref = digest([kind, public_id])
@@ -142,9 +178,27 @@ def project_route_explorer(snapshot):
                 expires_at=a['evidence_lifetime_until_unix_ms'], metrics=a['metrics'] if resolved else dict(empty_metrics))
     # An identical evidence record is one immutable segment, never duplicate traffic.
     segments = list({s['id']: s for s in segments}.values())
+    ordered = sorted(nodes.values(), key=lambda n: n['id'])
+    if evidence:
+        # The published evidence set supplies the accepted authority digests; the
+        # `regions` key is present exactly when at least one reviewed record is
+        # published, and a snapshot without evidence keeps the A14a projection.
+        rows = project_coarse_regions(
+            ordered, evidence,
+            now_unix_ms=snapshot['publication']['published_at_unix_ms'],
+            authorized_authorities=frozenset(record['authority_digest'] for record in evidence))
+        by_node = {row['node']: row for row in rows}
+        for item in ordered:
+            row = by_node[item['id']]
+            item['region'] = row['region']
+            item['region_source'] = row['region_source']
+    else:
+        rows = None
     result = dict(protocol=PROTOCOL, generation=snapshot['publication']['generation'], source_mode=mode,
-                  source_digest=digest(material), nodes=sorted(nodes.values(), key=lambda n: n['id']),
+                  source_digest=digest(material), nodes=ordered,
                   segments=sorted(segments, key=lambda s: (s['issued_at'] or 0, s['id'])), overlays='unavailable')
+    if rows is not None:
+        result['regions'] = rows
     result['digest'] = digest(result)
     return validate_route_explorer(result)
 
