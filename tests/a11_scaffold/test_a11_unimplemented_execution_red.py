@@ -1,12 +1,25 @@
-"""WEAK-RED tests: A11 execution behaviour this scaffold deliberately does not implement.
+"""WEAK-RED tests: A11 execution behaviour still unimplemented after the
+deterministic verifier half landed.
 
-Every test in this file is RED in the scaffold lane and fails with
-``SpeculativeDecodeUnavailable`` raised by this lane's own boundary functions.
-That is WEAK evidence of absence: the failure is produced by the scaffold, not
-by a demonstrated gap in a7b412a. It is recorded here so the lane's incompleteness
-is machine-visible, and so these tests can be driven to GREEN only by landing the
-real execution path (A10 verifier, private transport, live-route benchmark,
-physical qualification, product projection).
+THREE of these tests are now GREEN, driven by the deterministic in-process
+transaction state machine (``test_a11_verifier_transaction.py``):
+
+* ``test_request_admission_projects_a_target_only_or_speculative_decision`` --
+  deterministic admission with sampling rejection;
+* ``test_target_verification_transaction_commits_only_the_common_prefix`` -- the
+  transaction state machine, opened at the exact committed prefix;
+* ``test_verified_prefix_commit_advances_the_target_watermark_once`` -- the
+  atomic/monotonic/idempotent commit arbitration.
+
+GREEN here proves deterministic transaction and admission arithmetic on an injected
+decision source and an in-process ledger. It proves no physical verification, no
+proposal transfer, no benchmark, no qualification and no browser state.
+
+The remaining FOUR tests are RED and fail with ``SpeculativeDecodeUnavailable``
+raised by this lane's own boundary functions: private proposal transfer, the
+live-route paired benchmark, the physical/browser qualification bundle and the
+eight-workspace product projection. That is WEAK evidence of absence -- the failure
+is produced by the scaffold, not by a demonstrated gap in the baseline.
 
 Do not cite a failure in this file as proof that the baseline lacks the
 behaviour; cite ``test_a11_contract_scaffold.py`` and the baseline probes in the
