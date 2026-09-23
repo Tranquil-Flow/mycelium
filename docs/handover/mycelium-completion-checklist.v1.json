@@ -1,7 +1,7 @@
 {
  "protocol": "mycelium.completion_checklist.v1",
  "claim_boundary": "progress navigation only; completion requires each gate's executed product, physical, browser, audit, handover, and atomic commit evidence",
- "updated_on": "2026-09-23T14:12:39Z",
+ "updated_on": "2026-09-23T15:05:21Z",
  "primary_gate": "A6",
  "workspace_ids": [
   "inference",
@@ -1327,10 +1327,10 @@
      "protocol": "mycelium.executed_requirement_evidence.v1",
      "requirement": "specification",
      "artifact_reference": "docs/superpowers/specs/2026-08-18-mycelium-a9-platform-neutral-peer-capability.md",
-     "artifact_digest": "sha256:65f2ebc829d64dfb3a466a5321be097a2078403f9077235c74bdcd08679e1d8e",
+     "artifact_digest": "sha256:847bdeaac60cec1c90dcdc07005363bbb797aa5c7b012e8110d7430d506c29d8",
      "provenance": "source",
      "subject": "A9:specification",
-     "observed_at": "2026-08-18T00:00:00Z",
+     "observed_at": "2026-09-23T15:05:21Z",
      "fresh_until": null,
      "binding_scope": "source",
      "bindings": {
@@ -1341,32 +1341,9 @@
       "environment_digest": null,
       "authority_generation": null
      }
-    },
-    {
-     "protocol": "mycelium.executed_requirement_evidence.v1",
-     "requirement": "implementation",
-     "disposition": "partial",
-     "artifact_reference": "mycelium_platform_neutral/peer_profile.py",
-     "artifact_digest": "sha256:7dd4e4bc1d8ccef69041986449e91785c619be5767097b583231ffbdae9345c4",
-     "provenance": "source",
-     "subject": "A9:implementation (9 frozen contracts + v2 migration tests, deterministic half)",
-     "observed_at": "2026-09-23T14:12:39Z",
-     "fresh_until": null,
-     "binding_scope": "source",
-     "bindings": {
-      "contract_digest": null,
-      "model_digest": null,
-      "representation_digest": null,
-      "runtime_digest": null,
-      "environment_digest": null,
-      "authority_generation": null
-     },
-     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [
-    "implementation"
-   ],
+   "partial_requirements": [],
    "pending_requirements": [
     "product_integration",
     "deterministic_positive",
@@ -1378,7 +1355,8 @@
     "browser_second_session",
     "full_regressions_audits",
     "architecture_handover",
-    "atomic_feature_commit"
+    "atomic_feature_commit",
+    "implementation"
    ],
    "ui_workspaces": [
     "inference",
@@ -1427,32 +1405,9 @@
       "environment_digest": null,
       "authority_generation": null
      }
-    },
-    {
-     "protocol": "mycelium.executed_requirement_evidence.v1",
-     "requirement": "implementation",
-     "disposition": "partial",
-     "artifact_reference": "mycelium_router/a10_batch_admission.py",
-     "artifact_digest": "sha256:72814b0dfb0c451c2ac142cd8583dbc34c111948a9583525241f0df87422a399",
-     "provenance": "source",
-     "subject": "A10:implementation (deterministic negatives + admission path; physical positives RED by design)",
-     "observed_at": "2026-09-23T14:12:39Z",
-     "fresh_until": null,
-     "binding_scope": "source",
-     "bindings": {
-      "contract_digest": null,
-      "model_digest": null,
-      "representation_digest": null,
-      "runtime_digest": null,
-      "environment_digest": null,
-      "authority_generation": null
-     },
-     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [
-    "implementation"
-   ],
+   "partial_requirements": [],
    "pending_requirements": [
     "product_integration",
     "deterministic_positive",
@@ -1464,7 +1419,8 @@
     "browser_second_session",
     "full_regressions_audits",
     "architecture_handover",
-    "atomic_feature_commit"
+    "atomic_feature_commit",
+    "implementation"
    ],
    "ui_workspaces": [
     "inference",
@@ -1512,32 +1468,9 @@
       "environment_digest": null,
       "authority_generation": null
      }
-    },
-    {
-     "protocol": "mycelium.executed_requirement_evidence.v1",
-     "requirement": "implementation",
-     "disposition": "partial",
-     "artifact_reference": "mycelium_speculative_decode.py",
-     "artifact_digest": "sha256:10b8dc766714624ac51c494e3a0f23177764456c69600db2a468798fbce02859",
-     "provenance": "source",
-     "subject": "A11:implementation (verifier transactions + prefix parity; physical/browser RED by design)",
-     "observed_at": "2026-09-23T14:12:39Z",
-     "fresh_until": null,
-     "binding_scope": "source",
-     "bindings": {
-      "contract_digest": null,
-      "model_digest": null,
-      "representation_digest": null,
-      "runtime_digest": null,
-      "environment_digest": null,
-      "authority_generation": null
-     },
-     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [
-    "implementation"
-   ],
+   "partial_requirements": [],
    "pending_requirements": [
     "product_integration",
     "deterministic_positive",
@@ -1549,7 +1482,8 @@
     "browser_second_session",
     "full_regressions_audits",
     "architecture_handover",
-    "atomic_feature_commit"
+    "atomic_feature_commit",
+    "implementation"
    ],
    "ui_workspaces": [
     "inference",
@@ -1599,32 +1533,9 @@
       "environment_digest": null,
       "authority_generation": null
      }
-    },
-    {
-     "protocol": "mycelium.executed_requirement_evidence.v1",
-     "requirement": "implementation",
-     "disposition": "partial",
-     "artifact_reference": "mycelium_mobile/a12_evidence.py",
-     "artifact_digest": "sha256:4eb19ced15181e71bb40c97db927f65d4c990eb53db4321658d4bff90bcef5ce",
-     "provenance": "source",
-     "subject": "A12:implementation (four eligibility rungs + evidence contract; native device gates RED by design)",
-     "observed_at": "2026-09-23T14:12:39Z",
-     "fresh_until": null,
-     "binding_scope": "source",
-     "bindings": {
-      "contract_digest": null,
-      "model_digest": null,
-      "representation_digest": null,
-      "runtime_digest": null,
-      "environment_digest": null,
-      "authority_generation": null
-     },
-     "note": "landed via lane merges on integration/core-pilot; deterministic halves green (313-test sweep); qualification gates remain unexecuted."
     }
    ],
-   "partial_requirements": [
-    "implementation"
-   ],
+   "partial_requirements": [],
    "pending_requirements": [
     "product_integration",
     "deterministic_positive",
@@ -1636,7 +1547,8 @@
     "browser_second_session",
     "full_regressions_audits",
     "architecture_handover",
-    "atomic_feature_commit"
+    "atomic_feature_commit",
+    "implementation"
    ],
    "ui_workspaces": [
     "inference",
@@ -1747,32 +1659,9 @@
       "environment_digest": null,
       "authority_generation": null
      }
-    },
-    {
-     "protocol": "mycelium.executed_requirement_evidence.v1",
-     "requirement": "implementation",
-     "disposition": "partial",
-     "artifact_reference": "tests/product_spine/test_a14b_atomic_regions.py",
-     "artifact_digest": "sha256:3ff53344f80da6f57c8c421da113b298692b2472ffc8e16935a0f685ea4f3533",
-     "provenance": "source",
-     "subject": "A14b:implementation (atomic coarse-region slice)",
-     "observed_at": "2026-09-23T13:50:16Z",
-     "fresh_until": null,
-     "binding_scope": "source",
-     "bindings": {
-      "contract_digest": null,
-      "model_digest": null,
-      "representation_digest": null,
-      "runtime_digest": null,
-      "environment_digest": null,
-      "authority_generation": null
-     },
-     "note": "landed as merge 545ae1c8 on integration/core-pilot; 57/57 affected suites green on head; A14a signed region authority remains unbuilt, so implementation stays partial."
     }
    ],
-   "partial_requirements": [
-    "implementation"
-   ],
+   "partial_requirements": [],
    "pending_requirements": [
     "product_integration",
     "deterministic_positive",
@@ -1784,7 +1673,8 @@
     "browser_second_session",
     "full_regressions_audits",
     "architecture_handover",
-    "atomic_feature_commit"
+    "atomic_feature_commit",
+    "implementation"
    ],
    "ui_workspaces": [
     "inference",

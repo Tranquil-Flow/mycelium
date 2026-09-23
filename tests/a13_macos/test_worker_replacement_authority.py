@@ -236,7 +236,8 @@ def test_constructor_cleanup_failure_is_not_reported_clean(tmp_path, monkeypatch
             except RuntimeErrorCode as exc:
                 caught = exc
             assert len(owned) == 1
-            assert owned[0]._process.poll() is None, 'real no-model child must still be live'
+            assert _poll_dead_or_alive(owned[0]._process) is False, \
+                'real no-model child must still be live (deadline-bounded poll)'
             assert new._session is None, 'constructor raised before session assignment'
             assert not new.cleanup_proven(), 'failed constructor cleanup was reported clean'
             assert caught is not None and str(caught) == 'runtime_replacement_cleanup_unproven'
