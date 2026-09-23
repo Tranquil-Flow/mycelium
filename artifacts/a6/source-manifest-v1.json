@@ -68,8 +68,8 @@
     },
     {
       "path": "docs/handover/mycelium-completion-checklist.v1.json",
-      "sha256": "sha256:b844dccdce70dab26ecf9d87dcf2eb55e47bb47b0f9572e232494610317bf196",
-      "size_bytes": 71904
+      "sha256": "sha256:786e7f931be9e12f2aa9adb51bfe7aa3f92cfdfe4e23dae8379269cf61b1e670",
+      "size_bytes": 75602
     },
     {
       "path": "docs/operations/a15-executed-artifact-intake.md",
@@ -1103,5 +1103,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:3f973ab545bf85694b87046efb0ba575b4612ff6e8a5d031c31428fe23ec9790"
+  "source_digest": "sha256:465c65c6fc74319d5aaac50d11ba3794729bf5cee9a3d18b2a088923da4f507f"
 }
