@@ -1,22 +1,35 @@
-"""A11 target-authoritative speculative decoding: closed contract scaffold.
+"""A11 target-authoritative speculative decoding: closed contracts plus the
+deterministic verifier transaction half.
 
 CAPABILITY-Named replacement for the unintegrated ``mycelium.m20_speculative_*``
-records, per the A11 specification section 4. This module owns the *design-time*
-half of A11 only:
+records, per the A11 specification section 4.
+
+Implemented here:
 
 - closed, canonically digested validators for the four A11 records
   (``mycelium.speculative_decode_plan.v1``, ``..._runtime.v1``,
   ``..._benchmark.v1``, ``..._qualification.v1``);
-- the frozen adaptive-deadline arithmetic; and
-- the frozen circuit-breaker decision.
+- the frozen adaptive-deadline arithmetic and the frozen circuit-breaker
+  decision;
+- the **deterministic** half of the A11 runtime cycle (specification section 5):
+  a target-verification transaction state machine with the three frozen modes
+  (``rollback_to_prefix``, ``commit_verified_prefix``,
+  ``commit_verified_prefix_plus_target_correction``), one bounded causal target
+  call per transaction, prefix-parity checking against sequential target
+  execution, an atomic/monotonic/idempotent commit ledger, fail-closed conflict
+  handling, and deterministic request admission with sampling rejection.
 
-Every execution seam -- proposal transfer, A10 target verification, target KV
-commit, live-route benchmark execution, physical qualification, registry
-admission and browser projection -- raises :class:`SpeculativeDecodeUnavailable`
-with a closed reason code and returns no document. Nothing in this module
-executes speculation, claims benefit, or qualifies anything; it is the scaffold
-stage of the A11 gate and must not be read as an implementation or completion
-claim.
+The transaction half runs on an **injected decision source and an in-process
+prefix ledger**. It is not the physically qualified A10 verifier, not a model
+runtime, and it moves no proposal: nothing here loads a model, touches KV bytes,
+transfers a proposal, runs a benchmark, publishes a decision, or qualifies a
+deployment. Every remaining execution seam -- private proposal transfer,
+live-route benchmark execution, physical qualification and browser projection --
+raises :class:`SpeculativeDecodeUnavailable` with a closed reason code and
+returns no document.
+
+The A11 gate stays ``design_only``: this module earns no closure requirement and
+must not be read as a physical, benefit, or qualification claim.
 """
 
 from __future__ import annotations
@@ -116,12 +129,41 @@ PROPOSAL_MAXIMUM_WIDTH_BOUND = 16
 PROPOSAL_MAXIMUM_COUNT_BOUND = 512
 PROPOSAL_MAXIMUM_BYTES_BOUND = 8192
 
+# The only qualified generation policy (specification section 3). An unsupported or
+# unknown policy fails speculative admission; it is never silently changed.
+QUALIFIED_GENERATION_POLICIES = frozenset({"deterministic_greedy"})
+# The three frozen transaction modes of the target verification operation.
+TRANSACTION_MODES = (
+    "rollback_to_prefix",
+    "commit_verified_prefix",
+    "commit_verified_prefix_plus_target_correction",
+)
+# Internal deterministic state record of the in-process transaction state machine.
+TRANSACTION_STATE_KIND = "mycelium.speculative_decode_transaction_state"
+TRANSACTION_COMMIT_STATES = (
+    "open",
+    "verified_prefix_ready",
+    "target_correction_ready",
+    "committed",
+    "committed_with_correction",
+    "rolled_back",
+)
+TRANSACTION_FAILURES = frozenset({"parity_failed"})
+
 SCAFFOLD_STAGE = "scaffold"
-IMPLEMENTED_CLAIM = "closed contract validation and policy arithmetic only"
+IMPLEMENTED_CLAIM = (
+    "closed contract validation, policy arithmetic and the deterministic in-process "
+    "verifier transaction semantics only"
+)
 CLAIM_BOUNDARY = (
-    "closed contract validation and policy arithmetic only; no runtime execution, "
-    "no proposal transfer, no target verification, no speculative decoding, no "
+    "closed contract validation, policy arithmetic and deterministic in-process "
+    "transaction/admission semantics only; no physical target verification, no proposal "
+    "transfer, no speculative decoding on a live route, no benchmark execution, no "
     "benefit, no enabled decision, no measured-disabled evaluation, no qualification claim"
+)
+DETERMINISTIC_VERIFIER_CLAIM = (
+    "deterministic in-process transaction and admission semantics only; no physical "
+    "target verification, no proposal transfer, no benchmark execution, no qualification claim"
 )
 
 DIGEST_FIELDS = {
@@ -1238,17 +1280,922 @@ def compatibility_fixtures() -> dict[str, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Deterministic verifier transactions (specification section 5, in-process model)
+#
+# One transaction evaluates every bounded candidate position in ONE causal target
+# call, compares every per-position decision with sequential target execution, and
+# then rolls back, commits the verified prefix, or commits the verified prefix plus
+# one target-authoritative correction. Commits are atomic, strictly monotonic and
+# idempotent for an identical cycle digest; a conflicting duplicate, a stale prefix
+# or a parity failure fails closed to the previous target watermark.
+#
+# The decision source is injected and the watermark is an in-process ledger. Neither
+# is the physically qualified A10 verifier, and no proposal moves: these records
+# carry digests and counts, never raw tokens.
+# ---------------------------------------------------------------------------
+
+_TRANSACTION_FIELDS = frozenset(
+    {
+        "kind",
+        "plan_digest",
+        "cycle_ref",
+        "idempotency_digest",
+        "generation_policy",
+        "proposal_width",
+        "evaluated_position_count",
+        "verified_count",
+        "accepted_prefix_length",
+        "rejected_count",
+        "target_corrected_count",
+        "rollback_count",
+        "committed_position_count",
+        "committed_count",
+        "target_prefix_position",
+        "target_prefix_digest",
+        "target_watermark_position",
+        "target_watermark_digest",
+        "commit_state",
+        "transaction_mode",
+        "parity",
+        "deadline_ms",
+        "deadline_clamp_reason",
+        "accepted_prefix_digest",
+        "committed_digest",
+        "correction_token_digest",
+        "failure_reason",
+        "claim",
+    }
+)
+_TRANSACTION_COUNT_FIELDS = (
+    "proposal_width",
+    "evaluated_position_count",
+    "verified_count",
+    "accepted_prefix_length",
+    "rejected_count",
+    "target_corrected_count",
+    "rollback_count",
+    "committed_position_count",
+    "committed_count",
+    "target_prefix_position",
+    "target_watermark_position",
+)
+_TRANSACTION_DIGEST_FIELDS = (
+    "target_prefix_digest",
+    "target_watermark_digest",
+    "accepted_prefix_digest",
+    "committed_digest",
+    "correction_token_digest",
+)
+_PARITY_STATES = ("not_checked", "matched", "failed")
+_COMMITTED_STATES = ("committed", "committed_with_correction")
+_COMMITTABLE_STATES = ("verified_prefix_ready", "target_correction_ready")
+_REQUEST_PREFERENCES = ("target_only_requested", "speculative_requested")
+_GENESIS_DIGEST = "sha256:" + "0" * 64
+
+
+def _contract(code: str, detail: Any = None) -> SpeculativeDecodeContractError:
+    return SpeculativeDecodeContractError(code, None if detail is None else str(detail))
+
+
+def _token(value: Any, code: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0 or value >= 1 << 31:
+        raise _contract(code, value)
+    return value
+
+
+def _token_sequence(value: Any, code: str) -> tuple[int, ...]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or not len(value):
+        raise _contract(code, value)
+    return tuple(_token(item, code) for item in value)
+
+
+def _digest_or_none(value: Any, code: str) -> str | None:
+    if value is None:
+        return None
+    try:
+        return _sha256(value, code)
+    except ValueError as exc:
+        raise _contract(code, value) from exc
+
+
+def _prefix_digest(*, parent_digest: str, position: int, tokens: Sequence[int]) -> str:
+    """Digest of a target-owned prefix: parent digest, position and committed tokens."""
+
+    return _digest({"parent": parent_digest, "position": int(position), "tokens": [int(item) for item in tokens]})
+
+
+def _token_digest(token: int) -> str:
+    return _digest({"token": int(token)})
+
+
+class TargetPrefixLedger:
+    """Deterministic in-process model of the target-owned committed prefix.
+
+    This is not a target runtime, not KV storage and not a model: it holds one
+    position/digest watermark and the closed commit arbitration rules of
+    specification section 5. A commit is one atomic assignment; the watermark is
+    strictly monotonic; an identical cycle digest is idempotent and never advances
+    twice; a conflicting duplicate cycle fails closed and leaves the watermark
+    untouched.
+    """
+
+    def __init__(self, *, position: int = 0, digest: str | None = None, generation: int = 1) -> None:
+        if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+            raise _contract("invalid_committed_prefix_position", position)
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+            raise _contract("invalid_prefix_generation", generation)
+        if digest is None:
+            digest = _prefix_digest(parent_digest=_GENESIS_DIGEST, position=position, tokens=())
+        else:
+            digest = _digest_or_none(digest, "invalid_committed_prefix_digest")
+        if digest is None:
+            raise _contract("invalid_committed_prefix_digest")
+        self._position = position
+        self._digest = digest
+        self._generation = generation
+        self._commit_count = 0
+        self._rollback_count = 0
+        self._cycles: dict[str, dict[str, Any]] = {}
+        self._digests: dict[str, tuple[str, int]] = {}
+
+    @property
+    def position(self) -> int:
+        return self._position
+
+    @property
+    def digest(self) -> str:
+        return self._digest
+
+    @property
+    def generation(self) -> int:
+        return self._generation
+
+    def snapshot(self) -> dict[str, Any]:
+        """The current watermark, its generation and the arbitration counters."""
+
+        return {
+            "position": self._position,
+            "digest": self._digest,
+            "generation": self._generation,
+            "commit_count": self._commit_count,
+            "rollback_count": self._rollback_count,
+            "cycles": sorted(self._cycles),
+        }
+
+    def commit(self, *, cycle_ref: Any, idempotency_digest: Any, position: Any, digest: Any) -> dict[str, Any]:
+        try:
+            reference = _text(cycle_ref, "invalid_cycle_ref")
+            idempotency = _sha256(idempotency_digest, "invalid_idempotency_digest")
+            target_digest = _sha256(digest, "invalid_committed_prefix_digest")
+        except ValueError as exc:
+            raise _contract(exc.args[0], exc.args[1] if len(exc.args) > 1 else None) from exc
+        if isinstance(position, bool) or not isinstance(position, int) or position < 0:
+            raise _contract("invalid_committed_prefix_position", position)
+
+        previous = self._cycles.get(reference)
+        if previous is not None:
+            if previous["idempotency_digest"] != idempotency:
+                raise _contract("conflicting_duplicate_cycle", reference)
+            record = dict(previous["record"])
+            record["idempotent_duplicate"] = True
+            record["advanced"] = False
+            return record
+
+        seen = self._digests.get(idempotency)
+        if seen is not None:
+            recorded_ref, recorded_position = seen
+            if recorded_position != position:
+                raise _contract("conflicting_duplicate_cycle", reference)
+            # The identical operation presented under a second cycle reference is
+            # still the same commit: idempotent, and never a second advance.
+            record = dict(self._cycles[recorded_ref]["record"])
+            record["idempotent_duplicate"] = True
+            record["advanced"] = False
+            return record
+
+        if position < self._position:
+            raise _contract("non_monotonic_commit", f"position={position} watermark={self._position}")
+        if position == self._position:
+            # A commit advances the watermark; the same position carrying other
+            # content is a conflicting cycle, never a silent no-op advance.
+            raise _contract("conflicting_duplicate_cycle", reference)
+
+        # One atomic assignment: a commit that cannot complete fully never runs.
+        advance = position - self._position
+        self._position = position
+        self._digest = target_digest
+        self._generation += 1
+        self._commit_count += 1
+        record = {
+            "cycle_ref": reference,
+            "idempotency_digest": idempotency,
+            "target_watermark_position": self._position,
+            "target_watermark_digest": self._digest,
+            "committed_position_count": advance,
+            "generation": self._generation,
+            "advanced": True,
+            "idempotent_duplicate": False,
+        }
+        self._cycles[reference] = {"idempotency_digest": idempotency, "record": record}
+        self._digests[idempotency] = (reference, position)
+        return dict(record)
+
+    def rollback(self, *, cycle_ref: Any) -> dict[str, Any]:
+        """Discard tentative state; the committed watermark is untouched."""
+
+        try:
+            reference = _text(cycle_ref, "invalid_cycle_ref")
+        except ValueError as exc:
+            raise _contract("invalid_cycle_ref", exc.args[1] if len(exc.args) > 1 else None) from exc
+        self._rollback_count += 1
+        return {
+            "cycle_ref": reference,
+            "rolled_back": True,
+            "target_watermark_position": self._position,
+            "target_watermark_digest": self._digest,
+            "generation": self._generation,
+        }
+
+
+def _transaction_state(**overrides: Any) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "kind": TRANSACTION_STATE_KIND,
+        "plan_digest": _GENESIS_DIGEST,
+        "cycle_ref": "",
+        "idempotency_digest": None,
+        "generation_policy": _GENERATION_POLICY,
+        "proposal_width": 0,
+        "evaluated_position_count": 0,
+        "verified_count": 0,
+        "accepted_prefix_length": 0,
+        "rejected_count": 0,
+        "target_corrected_count": 0,
+        "rollback_count": 0,
+        "committed_position_count": 0,
+        "committed_count": 0,
+        "target_prefix_position": 0,
+        "target_prefix_digest": None,
+        "target_watermark_position": 0,
+        "target_watermark_digest": None,
+        "commit_state": "open",
+        "transaction_mode": None,
+        "parity": "not_checked",
+        "deadline_ms": None,
+        "deadline_clamp_reason": None,
+        "accepted_prefix_digest": None,
+        "committed_digest": None,
+        "correction_token_digest": None,
+        "failure_reason": None,
+        "claim": DETERMINISTIC_VERIFIER_CLAIM,
+    }
+    record.update(overrides)
+    return record
+
+
+def _validate_transaction_state(value: Any) -> dict[str, Any]:
+    try:
+        record = _closed(value, _TRANSACTION_FIELDS, "verification_transaction_invalid")
+        if record["kind"] != TRANSACTION_STATE_KIND:
+            raise ValueError("verification_transaction_invalid")
+        _sha256(record["plan_digest"], "verification_transaction_invalid")
+        _text(record["cycle_ref"], "verification_transaction_invalid")
+        if record["idempotency_digest"] is not None:
+            _sha256(record["idempotency_digest"], "verification_transaction_invalid")
+        if record["generation_policy"] not in QUALIFIED_GENERATION_POLICIES:
+            raise ValueError("verification_transaction_invalid")
+        for key in _TRANSACTION_COUNT_FIELDS:
+            _integer(record[key], "verification_transaction_invalid")
+        if record["commit_state"] not in TRANSACTION_COMMIT_STATES:
+            raise ValueError("verification_transaction_invalid")
+        if record["transaction_mode"] is not None and record["transaction_mode"] not in TRANSACTION_MODES:
+            raise ValueError("verification_transaction_invalid")
+        if record["parity"] not in _PARITY_STATES:
+            raise ValueError("verification_transaction_invalid")
+        if record["failure_reason"] is not None and record["failure_reason"] not in TRANSACTION_FAILURES:
+            raise ValueError("verification_transaction_invalid")
+        _number(record["deadline_ms"], "verification_transaction_invalid", nullable=True)
+        for key in _TRANSACTION_DIGEST_FIELDS:
+            _digest_or_none(record[key], "verification_transaction_invalid")
+        if record["claim"] != DETERMINISTIC_VERIFIER_CLAIM:
+            raise ValueError("verification_transaction_invalid")
+
+        width = record["proposal_width"]
+        evaluated = record["evaluated_position_count"]
+        accepted = record["accepted_prefix_length"]
+        rejected = record["rejected_count"]
+        corrected = record["target_corrected_count"]
+        committed = record["committed_position_count"]
+        if evaluated > width or accepted + rejected != evaluated or corrected > 1 or corrected > rejected:
+            raise ValueError("verification_transaction_invalid")
+        if record["rollback_count"] > width - accepted:
+            raise ValueError("verification_transaction_invalid")
+        if committed != record["committed_count"] or committed > accepted + corrected:
+            raise ValueError("verification_transaction_invalid")
+        if record["commit_state"] == "open":
+            if any(record[key] for key in _TRANSACTION_COUNT_FIELDS if key != "proposal_width"):
+                raise ValueError("verification_transaction_invalid")
+            if record["committed_digest"] is not None or record["accepted_prefix_digest"] is not None:
+                raise ValueError("verification_transaction_invalid")
+        else:
+            if evaluated != width:
+                raise ValueError("verification_transaction_invalid")
+            if record["committed_digest"] is None or record["accepted_prefix_digest"] is None:
+                raise ValueError("verification_transaction_invalid")
+        if record["commit_state"] not in _COMMITTED_STATES and committed != 0:
+            raise ValueError("verification_transaction_invalid")
+        if record["commit_state"] == "committed_with_correction" and (
+            corrected != 1 or record["transaction_mode"] != TRANSACTION_MODES[2]
+        ):
+            raise ValueError("verification_transaction_invalid")
+        if record["commit_state"] == "committed" and (
+            corrected != 0 or record["transaction_mode"] != TRANSACTION_MODES[1]
+        ):
+            raise ValueError("verification_transaction_invalid")
+        return record
+    except SpeculativeDecodeContractError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _contract("verification_transaction_invalid") from exc
+
+
+def _require_decision_source(target: Any) -> Any:
+    if not callable(getattr(target, "evaluate_bounded_positions", None)):
+        raise _contract("target_decision_source_invalid", type(target).__name__)
+    return target
+
+
+def _bounded_call(target: Any, *, prefix_digest: str, candidates: tuple[int, ...]) -> tuple[int, ...]:
+    source = _require_decision_source(target)
+    try:
+        raw = source.evaluate_bounded_positions(prefix_digest=prefix_digest, candidates=candidates)
+    except SpeculativeDecodeContractError:
+        raise
+    except Exception as exc:  # a decision source may not surface an arbitrary failure
+        raise _contract("target_decision_source_failed", type(exc).__name__) from exc
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+        raise _contract("target_decision_invalid", type(raw).__name__)
+    return tuple(_token(item, "target_decision_invalid") for item in raw)
+
+
+def sequential_target_decisions(
+    *, target: Any, prefix_digest: Any, candidates: Sequence[int]
+) -> tuple[int, ...]:
+    """Run the target sequentially on the same prefix: exactly one decision per position.
+
+    When the decision source declares ``sequential_decisions`` (the qualified
+    reference oracle), that execution is used. Otherwise the causal single-position
+    form of ``evaluate_bounded_positions`` is used: position ``i`` is the last
+    decision of a call over ``candidates[: i + 1]``, which a causal target answers
+    without consulting ``candidates[i]``.
+    """
+
+    source = _require_decision_source(target)
+    digest = _digest_or_none(prefix_digest, "invalid_committed_prefix_digest")
+    if digest is None:
+        raise _contract("invalid_committed_prefix_digest", prefix_digest)
+    tokens = _token_sequence(candidates, "invalid_candidate_tokens")
+    oracle = getattr(source, "sequential_decisions", None)
+    if callable(oracle):
+        try:
+            raw = oracle(prefix_digest=digest, candidates=tokens)
+        except SpeculativeDecodeContractError:
+            raise
+        except Exception as exc:
+            raise _contract("target_decision_source_failed", type(exc).__name__) from exc
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+            raise _contract("target_decision_invalid", type(raw).__name__)
+        decisions = tuple(_token(item, "target_decision_invalid") for item in raw)
+        if len(decisions) != len(tokens):
+            raise _contract("target_decision_invalid", f"sequential_width={len(decisions)}")
+        return decisions
+    return tuple(
+        _bounded_call(source, prefix_digest=digest, candidates=tokens[: index + 1])[-1]
+        for index in range(len(tokens))
+    )
+
+
+def check_prefix_parity(
+    *,
+    target: Any,
+    prefix_digest: Any,
+    candidates: Sequence[int],
+    decisions: Sequence[int] | None = None,
+) -> dict[str, Any]:
+    """Compare one bounded call's per-position decisions with sequential execution.
+
+    Every position decision of the bounded multi-position call must equal the
+    decision sequential target execution produces for the same prefix and the same
+    accepted tokens. ``first_divergence`` names the first position that does not.
+    """
+
+    digest = _digest_or_none(prefix_digest, "invalid_committed_prefix_digest")
+    if digest is None:
+        raise _contract("invalid_committed_prefix_digest", prefix_digest)
+    tokens = _token_sequence(candidates, "invalid_candidate_tokens")
+    if decisions is None:
+        bounded = _bounded_call(target, prefix_digest=digest, candidates=tokens)
+    else:
+        if isinstance(decisions, (str, bytes)) or not isinstance(decisions, Sequence):
+            raise _contract("target_decision_invalid", type(decisions).__name__)
+        bounded = tuple(_token(item, "target_decision_invalid") for item in decisions)
+    if len(bounded) != len(tokens):
+        raise _contract("target_decision_invalid", f"bounded_width={len(bounded)}")
+    sequential = sequential_target_decisions(target=target, prefix_digest=digest, candidates=tokens)
+    divergence = next(
+        (index for index, (left, right) in enumerate(zip(bounded, sequential)) if left != right), None
+    )
+    return {
+        "parity": "failed" if divergence is not None else "matched",
+        "positions_compared": len(tokens),
+        "first_divergence": divergence,
+        "sequential_calls": len(tokens),
+        "claim": DETERMINISTIC_VERIFIER_CLAIM,
+    }
+
+
+def _admit_transaction_deadline(plan: Mapping[str, Any], deadline_ms: Any) -> tuple[float | None, str | None]:
+    policy = plan["deadline_policy"]
+    remaining = policy["remaining_request_deadline_ms"]
+    if deadline_ms is None:
+        admitted = admit_proposal_deadline(
+            warm_target_only_p95_tpot_ms=policy["warm_target_only_p95_tpot_ms"],
+            remaining_request_deadline_ms=remaining,
+        )
+        return admitted["admitted_deadline_ms"], admitted["clamp_reason"]
+    try:
+        observed = _number(deadline_ms, "verification_deadline_invalid", minimum=0.0)
+    except ValueError as exc:
+        raise _contract("verification_deadline_invalid", deadline_ms) from exc
+    if observed is None:  # a non-nullable number never returns None
+        raise _contract("verification_deadline_invalid", deadline_ms)
+    requested = observed
+    if requested < DEADLINE_MINIMUM_MS:
+        value, reason = DEADLINE_MINIMUM_MS, "floor_applied"
+    elif requested > DEADLINE_MAXIMUM_MS:
+        value, reason = DEADLINE_MAXIMUM_MS, "ceiling_applied"
+    else:
+        value, reason = float(requested), "within_bounds"
+    if remaining is not None and float(remaining) < value:
+        return float(remaining), "request_deadline_clamp"
+    return float(value), reason
+
+
+def open_target_verification_transaction(
+    *,
+    plan: Mapping[str, Any],
+    width: int | None = None,
+    deadline_ms: float | None = None,
+    proposal_width: int | None = None,
+    cycle_ref: str | None = None,
+    request_id: str | None = None,
+    committed_prefix_position: int = 0,
+    committed_prefix_digest: str | None = None,
+    idempotency_digest: str | None = None,
+) -> dict[str, Any]:
+    """Open one deterministic transaction at the exact committed target prefix.
+
+    The admitted deadline follows the frozen formula: floor/ceiling clamp first,
+    then the request-remaining-deadline clamp. An unsupported generation policy
+    fails admission here and is never coerced to greedy.
+    """
+
+    document = validate_speculative_decode_plan(plan)
+    policy = document["compatibility"]["generation_policy"]
+    if policy not in QUALIFIED_GENERATION_POLICIES:
+        raise _contract("unsupported_generation_policy", policy)
+
+    requested_width = width if width is not None else proposal_width
+    if isinstance(requested_width, bool) or not isinstance(requested_width, int) or requested_width < 1:
+        raise _contract("proposal_width_out_of_bounds", requested_width)
+    maximum = min(
+        int(document["proposal_bounds"]["maximum_width"]),
+        int(document["verifier"]["qualified_width"]),
+    )
+    if requested_width > maximum:
+        raise _contract("proposal_width_out_of_bounds", requested_width)
+
+    if isinstance(committed_prefix_position, bool) or not isinstance(committed_prefix_position, int) or (
+        committed_prefix_position < 0
+    ):
+        raise _contract("invalid_committed_prefix_position", committed_prefix_position)
+    if committed_prefix_digest is None:
+        prefix_digest = _prefix_digest(
+            parent_digest=_GENESIS_DIGEST, position=committed_prefix_position, tokens=()
+        )
+    else:
+        prefix_digest = _digest_or_none(committed_prefix_digest, "invalid_committed_prefix_digest")
+
+    reference = cycle_ref if cycle_ref is not None else request_id
+    if reference is None:
+        reference = "cycle:" + document["plan_digest"].split(":")[1][:16]
+    try:
+        reference = _text(reference, "invalid_cycle_ref")
+    except ValueError as exc:
+        raise _contract("invalid_cycle_ref", reference) from exc
+
+    admitted_ms, clamp_reason = _admit_transaction_deadline(document, deadline_ms)
+
+    if idempotency_digest is None:
+        idempotency = _digest(
+            {
+                "plan": document["plan_digest"],
+                "cycle": reference,
+                "width": requested_width,
+                "prefix": [committed_prefix_position, prefix_digest],
+                "deadline_ms": admitted_ms,
+            }
+        )
+    else:
+        idempotency = _digest_or_none(idempotency_digest, "invalid_idempotency_digest")
+    if idempotency is None:
+        raise _contract("invalid_idempotency_digest")
+
+    return _transaction_state(
+        plan_digest=document["plan_digest"],
+        cycle_ref=reference,
+        idempotency_digest=idempotency,
+        proposal_width=requested_width,
+        target_prefix_position=committed_prefix_position,
+        target_prefix_digest=prefix_digest,
+        target_watermark_position=committed_prefix_position,
+        target_watermark_digest=prefix_digest,
+        deadline_ms=admitted_ms,
+        deadline_clamp_reason=clamp_reason,
+    )
+
+
+def verify_transaction_positions(
+    *,
+    transaction: Mapping[str, Any],
+    candidate_tokens: Sequence[int],
+    target: Any,
+) -> dict[str, Any]:
+    """Evaluate every bounded position in ONE causal call and decide the mode.
+
+    All positions matching -> ``commit_verified_prefix``. First mismatch -> the
+    common prefix plus one target-authoritative correction
+    (``commit_verified_prefix_plus_target_correction``). A parity failure or a
+    non-causal decision source -> ``rollback_to_prefix``, which commits nothing and
+    leaves the exact original prefix in place.
+    """
+
+    record = _validate_transaction_state(transaction)
+    if record["commit_state"] != "open":
+        raise _contract("transaction_not_open", record["commit_state"])
+    source = _require_decision_source(target)
+    tokens = _token_sequence(candidate_tokens, "invalid_candidate_tokens")
+    if len(tokens) != record["proposal_width"]:
+        raise _contract("proposal_width_mismatch", f"{len(tokens)}!={record['proposal_width']}")
+
+    prefix_digest = record["target_prefix_digest"]
+    decisions = _bounded_call(source, prefix_digest=prefix_digest, candidates=tokens)
+    if len(decisions) != len(tokens):
+        raise _contract("target_decision_invalid", f"{len(decisions)}!={len(tokens)}")
+    parity = check_prefix_parity(
+        target=source, prefix_digest=prefix_digest, candidates=tokens, decisions=decisions
+    )
+
+    width = len(tokens)
+    updated = dict(record)
+    updated.update({"evaluated_position_count": width, "verified_count": width, "parity": parity["parity"]})
+    if parity["parity"] != "matched":
+        updated.update(
+            {
+                "accepted_prefix_length": 0,
+                "rejected_count": width,
+                "target_corrected_count": 0,
+                "rollback_count": 1,
+                "commit_state": "rolled_back",
+                "transaction_mode": TRANSACTION_MODES[0],
+                "failure_reason": "parity_failed",
+                "accepted_prefix_digest": prefix_digest,
+                "committed_digest": prefix_digest,
+                "correction_token_digest": None,
+                "committed_position_count": 0,
+                "committed_count": 0,
+            }
+        )
+        return updated
+
+    accepted = next(
+        (index for index, (candidate, decision) in enumerate(zip(tokens, decisions)) if candidate != decision),
+        width,
+    )
+    rejected = width - accepted
+    corrected = 0 if accepted == width else 1
+    if corrected:
+        mode = TRANSACTION_MODES[2]
+        state = "target_correction_ready"
+        committed_tokens = tokens[:accepted] + (int(decisions[accepted]),)
+        correction_digest = _token_digest(int(decisions[accepted]))
+    else:
+        mode = TRANSACTION_MODES[1]
+        state = "verified_prefix_ready"
+        committed_tokens = tokens
+        correction_digest = None
+    updated.update(
+        {
+            "accepted_prefix_length": accepted,
+            "rejected_count": rejected,
+            "target_corrected_count": corrected,
+            "rollback_count": corrected,
+            "commit_state": state,
+            "transaction_mode": mode,
+            "failure_reason": None,
+            "accepted_prefix_digest": _prefix_digest(
+                parent_digest=prefix_digest,
+                position=record["target_prefix_position"] + accepted,
+                tokens=tokens[:accepted],
+            ),
+            "committed_digest": _prefix_digest(
+                parent_digest=prefix_digest,
+                position=record["target_prefix_position"] + accepted + corrected,
+                tokens=committed_tokens,
+            ),
+            "correction_token_digest": correction_digest,
+            "committed_position_count": 0,
+            "committed_count": 0,
+        }
+    )
+    return updated
+
+
+def commit_verified_prefix(
+    *,
+    plan: Mapping[str, Any] | None = None,
+    transaction: Mapping[str, Any] | None = None,
+    accepted_prefix_length: int | None = None,
+    correction_token: int | None = None,
+    ledger: TargetPrefixLedger | None = None,
+    committed_prefix_position: int = 0,
+    cycle_ref: str | None = None,
+    idempotency_digest: str | None = None,
+) -> dict[str, Any]:
+    """Commit a verified prefix, or a verified prefix plus one target correction.
+
+    Two entry points, one arbitration rule:
+
+    * ``transaction=`` -- the verified transaction produced by
+      :func:`verify_transaction_positions`. The commit is applied to ``ledger`` (when
+      given) atomically, monotonically and idempotently per cycle digest; a
+      rolled-back, parity-failed or otherwise uncommittable transaction is refused.
+    * ``plan=`` with ``accepted_prefix_length=`` -- the deterministic commit
+      *arithmetic* over a caller-supplied accepted prefix. It never claims that a
+      proposal was verified here, and it never touches a ledger.
+    """
+
+    if transaction is None:
+        if plan is None:
+            raise _contract("verification_transaction_required")
+        if ledger is not None:
+            raise _contract("commit_ledger_requires_transaction")
+        document = validate_speculative_decode_plan(plan)
+        policy = document["compatibility"]["generation_policy"]
+        if policy not in QUALIFIED_GENERATION_POLICIES:
+            raise _contract("unsupported_generation_policy", policy)
+        try:
+            accepted = _integer(accepted_prefix_length, "invalid_accepted_prefix_length")
+        except ValueError as exc:
+            raise _contract("invalid_accepted_prefix_length", accepted_prefix_length) from exc
+        if isinstance(committed_prefix_position, bool) or not isinstance(committed_prefix_position, int) or (
+            committed_prefix_position < 0
+        ):
+            raise _contract("invalid_committed_prefix_position", committed_prefix_position)
+        corrections = 0 if correction_token is None else 1
+        correction_digest = (
+            None if correction_token is None else _token_digest(_token(correction_token, "invalid_correction_token"))
+        )
+        count = accepted + corrections
+        return {
+            "kind": TRANSACTION_STATE_KIND,
+            "plan_digest": document["plan_digest"],
+            "cycle_ref": cycle_ref,
+            "idempotency_digest": idempotency_digest,
+            "generation_policy": _GENERATION_POLICY,
+            "transaction_mode": TRANSACTION_MODES[2] if corrections else TRANSACTION_MODES[1],
+            "commit_state": "committed_with_correction" if corrections else "committed",
+            "accepted_prefix_length": accepted,
+            "target_corrected_count": corrections,
+            "committed_position_count": count,
+            "committed_count": count,
+            "target_prefix_position": committed_prefix_position,
+            "target_watermark_position": committed_prefix_position + count,
+            "target_watermark_digest": None,
+            "committed_digest": None,
+            "correction_token_digest": correction_digest,
+            "verification": "caller_supplied_accepted_prefix",
+            "idempotent_duplicate": False,
+            "ledger_applied": False,
+            "claim": DETERMINISTIC_VERIFIER_CLAIM,
+        }
+
+    record = _validate_transaction_state(transaction)
+    if record["commit_state"] not in _COMMITTABLE_STATES:
+        raise _contract("transaction_not_committable", record["commit_state"])
+    accepted = record["accepted_prefix_length"]
+    corrected = record["target_corrected_count"]
+    if correction_token is not None:
+        supplied = _token_digest(_token(correction_token, "invalid_correction_token"))
+        if supplied != record["correction_token_digest"]:
+            raise _contract("correction_token_mismatch", record["correction_token_digest"])
+    if ledger is not None and not isinstance(ledger, TargetPrefixLedger):
+        raise _contract("invalid_prefix_ledger", type(ledger).__name__)
+
+    count = accepted + corrected
+    position = record["target_prefix_position"] + count
+    committed = dict(record)
+    committed.update(
+        {
+            "commit_state": "committed_with_correction" if corrected else "committed",
+            "committed_position_count": count,
+            "committed_count": count,
+            "target_watermark_position": position,
+            "target_watermark_digest": record["committed_digest"],
+            "idempotent_duplicate": False,
+            "advanced": True,
+            "ledger_applied": ledger is not None,
+        }
+    )
+    if ledger is not None:
+        watermark = ledger.commit(
+            cycle_ref=record["cycle_ref"],
+            idempotency_digest=record["idempotency_digest"],
+            position=position,
+            digest=record["committed_digest"],
+        )
+        committed.update(
+            {
+                "advanced": watermark["advanced"],
+                "idempotent_duplicate": watermark["idempotent_duplicate"],
+                "target_watermark_position": watermark["target_watermark_position"],
+                "target_watermark_digest": watermark["target_watermark_digest"],
+                "ledger_generation": watermark["generation"],
+            }
+        )
+    return committed
+
+
+def rollback_to_prefix(
+    *,
+    transaction: Mapping[str, Any] | None = None,
+    ledger: TargetPrefixLedger | None = None,
+    plan: Mapping[str, Any] | None = None,
+    committed_prefix_position: int = 0,
+    committed_prefix_digest: str | None = None,
+) -> dict[str, Any]:
+    """Roll a transaction back to the exact original target prefix.
+
+    Nothing is committed and the target watermark is untouched; a ledger, when
+    given, records the rollback and never moves.
+    """
+
+    if transaction is None:
+        if plan is None:
+            raise _contract("verification_transaction_required")
+        if ledger is not None:
+            raise _contract("commit_ledger_requires_transaction")
+        document = validate_speculative_decode_plan(plan)
+        policy = document["compatibility"]["generation_policy"]
+        if policy not in QUALIFIED_GENERATION_POLICIES:
+            raise _contract("unsupported_generation_policy", policy)
+        if isinstance(committed_prefix_position, bool) or not isinstance(committed_prefix_position, int) or (
+            committed_prefix_position < 0
+        ):
+            raise _contract("invalid_committed_prefix_position", committed_prefix_position)
+        if committed_prefix_digest is None:
+            prefix_digest = _prefix_digest(
+                parent_digest=_GENESIS_DIGEST, position=committed_prefix_position, tokens=()
+            )
+        else:
+            prefix_digest = _digest_or_none(committed_prefix_digest, "invalid_committed_prefix_digest")
+        return _transaction_state(
+            plan_digest=document["plan_digest"],
+            cycle_ref="cycle:rollback",
+            target_prefix_position=committed_prefix_position,
+            target_prefix_digest=prefix_digest,
+            target_watermark_position=committed_prefix_position,
+            target_watermark_digest=prefix_digest,
+            accepted_prefix_digest=prefix_digest,
+            committed_digest=prefix_digest,
+            commit_state="rolled_back",
+            transaction_mode=TRANSACTION_MODES[0],
+            rollback_count=1,
+        )
+
+    record = _validate_transaction_state(transaction)
+    if record["commit_state"] in _COMMITTED_STATES:
+        raise _contract("transaction_not_rollbackable", record["commit_state"])
+    if ledger is not None:
+        if not isinstance(ledger, TargetPrefixLedger):
+            raise _contract("invalid_prefix_ledger", type(ledger).__name__)
+        ledger.rollback(cycle_ref=record["cycle_ref"])
+    rolled = dict(record)
+    rolled.update(
+        {
+            "commit_state": "rolled_back",
+            "transaction_mode": TRANSACTION_MODES[0],
+            "rollback_count": max(1, record["rollback_count"]),
+            "committed_position_count": 0,
+            "committed_count": 0,
+            "target_watermark_position": record["target_prefix_position"],
+            "target_watermark_digest": record["target_prefix_digest"],
+        }
+    )
+    return rolled
+
+
+def integrate_request_admission(
+    *,
+    plan: Mapping[str, Any],
+    request_id: str,
+    preference: str,
+    generation_policy: str | None = None,
+    revoked: bool = False,
+) -> dict[str, Any]:
+    """Project the deterministic admission of one future request.
+
+    Speculation is off by default and a preference applies to a future request only.
+    An unsupported or unknown generation policy fails speculative admission, uses
+    target-only mode, and is never silently changed to greedy.
+    """
+
+    document = validate_speculative_decode_plan(plan)
+    try:
+        reference = _text(request_id, "request_id_invalid")
+    except ValueError as exc:
+        raise _contract("request_id_invalid", request_id) from exc
+    if preference not in _REQUEST_PREFERENCES:
+        raise _contract("request_preference_invalid", preference)
+    if type(revoked) is not bool:
+        raise _contract("request_admission_invalid", revoked)
+    requested_policy = (
+        generation_policy if generation_policy is not None else document["compatibility"]["generation_policy"]
+    )
+    try:
+        requested_policy = _text(requested_policy, "unsupported_generation_policy")
+    except ValueError as exc:
+        raise _contract("unsupported_generation_policy", requested_policy) from exc
+
+    decision = document["decision"]
+    if requested_policy not in QUALIFIED_GENERATION_POLICIES:
+        overlay_disabled_reason = "incompatible_token_semantics"
+    elif revoked:
+        overlay_disabled_reason = "parity_failed"
+    elif decision["state"] != ENABLED_DECISION:
+        overlay_disabled_reason = decision["reason"]
+    else:
+        overlay_disabled_reason = None
+
+    if preference == "target_only_requested":
+        mode, fallback, admission, effective = ("target_only", None, "target_only_requested", None)
+    elif revoked:
+        mode, fallback, admission, effective = (
+            "target_only",
+            "parity_failed",
+            "revoked_requalification_required",
+            None,
+        )
+    elif overlay_disabled_reason is not None:
+        mode, fallback, admission, effective = (
+            "target_only",
+            overlay_disabled_reason,
+            "target_only_fallback",
+            None,
+        )
+    else:
+        mode, fallback, admission, effective = (
+            "speculative_admitted",
+            None,
+            "speculative_admitted",
+            _GENERATION_POLICY,
+        )
+    return {
+        "request_id": reference,
+        "plan_digest": document["plan_digest"],
+        "requested_preference": preference,
+        "requested_generation_policy": requested_policy,
+        "effective_generation_policy": effective,
+        "mode": mode,
+        "admission": admission,
+        "fallback_reason": fallback,
+        "overlay_disabled_reason": overlay_disabled_reason,
+        "revoked": revoked,
+        "off_by_default": True,
+        "applies_to": "future_requests_only",
+        "target_only_available": True,
+        "claim": DETERMINISTIC_VERIFIER_CLAIM,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Honest not-implemented boundaries
 # ---------------------------------------------------------------------------
 
 BOUNDARY_CODES = frozenset(
     {
-        "a10_target_verifier_not_available",
         "private_proposal_transfer_not_implemented",
-        "target_kv_commit_not_implemented",
         "live_route_benchmark_not_implemented",
         "physical_qualification_not_implemented",
-        "registry_admission_integration_not_implemented",
         "product_projection_not_implemented",
     }
 )
@@ -1262,22 +2209,10 @@ def _unavailable(code: str, **context: Any) -> None:
     raise SpeculativeDecodeUnavailable(code, detail)
 
 
-def open_target_verification_transaction(**context: Any) -> dict[str, Any]:
-    """Boundary: requires the physically qualified A10 multi-position verifier."""
-
-    _unavailable("a10_target_verifier_not_available", **context)
-
-
 def transfer_proposal_envelope(**context: Any) -> dict[str, Any]:
     """Boundary: requires the authenticated private runtime transport."""
 
     _unavailable("private_proposal_transfer_not_implemented", **context)
-
-
-def commit_verified_prefix(**context: Any) -> dict[str, Any]:
-    """Boundary: requires the live target KV authority and commit watermark."""
-
-    _unavailable("target_kv_commit_not_implemented", **context)
 
 
 def run_paired_product_benchmark(**context: Any) -> dict[str, Any]:
@@ -1290,12 +2225,6 @@ def execute_qualification_bundle(**context: Any) -> dict[str, Any]:
     """Boundary: requires the physical positive/negative and browser gates."""
 
     _unavailable("physical_qualification_not_implemented", **context)
-
-
-def integrate_request_admission(**context: Any) -> dict[str, Any]:
-    """Boundary: requires registry-owned future-request target projection."""
-
-    _unavailable("registry_admission_integration_not_implemented", **context)
 
 
 def project_workspace_state(**context: Any) -> dict[str, Any]:
@@ -1330,6 +2259,7 @@ __all__ = [
     "DEADLINE_MINIMUM_MS",
     "DEADLINE_UNKNOWN_REASON",
     "DEADLINE_WARM_P95_MULTIPLIER",
+    "DETERMINISTIC_VERIFIER_CLAIM",
     "DISABLED_DECISION",
     "DISABLED_REASONS",
     "ENABLED_DECISION",
@@ -1340,13 +2270,20 @@ __all__ = [
     "PROPOSAL_MAXIMUM_BYTES_BOUND",
     "PROPOSAL_MAXIMUM_COUNT_BOUND",
     "PROPOSAL_MAXIMUM_WIDTH_BOUND",
+    "QUALIFIED_GENERATION_POLICIES",
     "QUALIFICATION_PROTOCOL",
     "RUNTIME_PROTOCOL",
     "SAMPLE_REQUIRED_REASONS",
     "SCAFFOLD_STAGE",
     "SpeculativeDecodeContractError",
     "SpeculativeDecodeUnavailable",
+    "TRANSACTION_COMMIT_STATES",
+    "TRANSACTION_FAILURES",
+    "TRANSACTION_MODES",
+    "TRANSACTION_STATE_KIND",
+    "TargetPrefixLedger",
     "admit_proposal_deadline",
+    "check_prefix_parity",
     "circuit_breaker_decision",
     "commit_verified_prefix",
     "compatibility_fixtures",
@@ -1354,12 +2291,15 @@ __all__ = [
     "integrate_request_admission",
     "open_target_verification_transaction",
     "project_workspace_state",
+    "rollback_to_prefix",
     "run_paired_product_benchmark",
     "seal",
+    "sequential_target_decisions",
     "transfer_proposal_envelope",
     "validate_public_projection",
     "validate_speculative_decode_benchmark",
     "validate_speculative_decode_plan",
     "validate_speculative_decode_qualification",
     "validate_speculative_decode_runtime",
+    "verify_transaction_positions",
 ]
