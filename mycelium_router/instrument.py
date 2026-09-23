@@ -78,10 +78,12 @@ class _Hop:
 class _RequestTrace:
     """One request. Owns a list of hops and the received_at / finished_at markers."""
 
-    __slots__ = ("_recorder", "_trace")
+    __slots__ = ("_recorder", "_trace", "_hop_count", "_last_hop_id")
 
     def __init__(self, recorder: "HopRecorder", request_id: str) -> None:
         self._recorder = recorder
+        self._hop_count = 0
+        self._last_hop_id: str | None = None
         self._trace = {
             "request_id": request_id,
             "received_at": time.monotonic(),
@@ -96,6 +98,8 @@ class _RequestTrace:
         hop: dict = {
             "stage_id": stage_id,
             "node_id": node_id,
+            "hop_id": "",
+            "causal_predecessor": None,
             "queue_in_at": 0.0,
             "compute_start_at": 0.0,
             "compute_end_at": 0.0,
@@ -111,10 +115,14 @@ class _RequestTrace:
             "queue_ms": 0.0,
         }
         h = _Hop(self, hop)
+        self._hop_count += 1
+        hop["hop_id"] = f"{stage_id}:{node_id}:{self._hop_count}"
+        hop["causal_predecessor"] = self._last_hop_id
         try:
             yield h
         finally:
             self._finalize_hop(hop)
+            self._last_hop_id = hop["hop_id"]
             self._trace["hops"].append(hop)
 
     def _finalize_hop(self, hop: dict) -> None:

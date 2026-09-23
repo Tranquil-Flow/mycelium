@@ -29,6 +29,7 @@ REQUIRED_DECISIONS = {
     "qualified_activation_precision",
     "component_aware_performance_authority",
     "dynamic_ui_projection",
+    "runtime_backend_registry",
 }
 REQUIRED_CASES = {
     "authority_dimension_independence",
@@ -311,3 +312,28 @@ def test_a9_ui_inventory_is_dynamic_generation_bound_and_all_workspace_complete(
         "correctness_implies_acceleration",
         "equal_layer_cost_assumed",
     } <= forbidden
+
+
+def test_runtime_backend_registry_modules_exist_and_are_implemented_only() -> None:
+    """Each registered runtime backend has an importable module at the
+    `implemented` stage; registration is NOT qualification (A9 invariant:
+    a declaration/adapter is not execution evidence)."""
+    import importlib
+
+    registry = next(
+        decision
+        for decision in _inventory()["decisions"]
+        if decision["decision_id"] == "runtime_backend_registry"
+    )
+    backends = {
+        "mlx_backend": "mycelium_router.mlx_runtime",
+        "numpy_backend": "mycelium_router.numpy_runtime",
+        "llama_http_backend": "mycelium_router.llama_runtime",
+        "openrouter_http_backend": "mycelium_router.openrouter_runtime",
+    }
+    for name, module_path in backends.items():
+        assert name in registry["authorities"]
+        module = importlib.import_module(module_path)
+        assert module is not None
+    # The registry declares implementation stage only — never qualified.
+    assert "qualified" not in registry["required_invariants"]

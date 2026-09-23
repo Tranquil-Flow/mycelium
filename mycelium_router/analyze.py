@@ -198,6 +198,22 @@ def summarize(path: str | Path) -> dict[str, Any]:
                 float(hops[i].get("transport_ms", 0.0)),
                 float(hops[i + 1].get("queue_ms", 0.0)),
             ))
+    # Causal chain: when the instrument records causal edges (hop_id +
+    # causal_predecessor), verify every hop's predecessor matches the previous
+    # hop in its request. Tolerates traces that predate the edge fields.
+    chain_ok = True
+    chain_checked = 0
+    for hops in request_to_hops.values():
+        previous_id = None
+        for hop in hops:
+            if "hop_id" in hop and "causal_predecessor" in hop:
+                chain_checked += 1
+                if previous_id is not None and hop.get("causal_predecessor") != previous_id:
+                    chain_ok = False
+                previous_id = hop.get("hop_id")
+    causal_chain_intact = chain_ok and chain_checked > 0
+
+
     corr = None
     if len(pairs) >= 2:
         xs = [p[0] for p in pairs]
@@ -219,6 +235,8 @@ def summarize(path: str | Path) -> dict[str, Any]:
         "bottleneck_ranking": bottlenecks,
         "correlation": {"transport_to_next_queue": corr,
                         "n_pairs": len(pairs)},
+        "causal_chain_intact": causal_chain_intact,
+        "causal_edges_checked": chain_checked,
         "drift": drift,
     }
 
@@ -302,6 +320,18 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"- r = **{corr:+.3f}** across {n_pairs} consecutive-hop pairs. "
             + ("Network backpressure suspected." if abs(corr) > 0.3
                else "No strong backpressure signal."))
+    lines.append("")
+
+    # Causal chain
+    lines.append("## Causal chain")
+    lines.append("")
+    if summary.get("causal_edges_checked", 0) > 0:
+        status = "intact" if summary.get("causal_chain_intact") else "BROKEN"
+        lines.append(
+            f"- {summary['causal_edges_checked']} causal edges verified: **{status}** "
+            "(predecessor links form one unbroken request path)")
+    else:
+        lines.append("- no causal edges recorded in these traces")
     lines.append("")
 
     # Recommendation

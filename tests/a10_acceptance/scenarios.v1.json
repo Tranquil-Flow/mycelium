@@ -11,7 +11,11 @@
   },
   "target_verifier_requirements": {
     "minimum_operations": 100,
-    "qualified_width_classes": ["one", "qualified_default", "qualified_maximum"],
+    "qualified_width_classes": [
+      "one",
+      "qualified_default",
+      "qualified_maximum"
+    ],
     "minimum_prefix_length_buckets": 2,
     "generation_policy": "deterministic_greedy",
     "transaction_modes": [
@@ -113,7 +117,13 @@
         "sequential_loop_and_concurrent_admission_do_not_pass",
         "zero_residual_resources"
       ],
-      "required_workspaces": ["inference", "device_lab", "nodes", "plans", "readiness"]
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "nodes",
+        "plans",
+        "readiness"
+      ]
     },
     {
       "scenario_id": "continuous_late_arrival",
@@ -129,7 +139,12 @@
         "arrival_cancellation_deadline_pressure_and_qos_are_reevaluated",
         "per_request_terminal_attribution_remains_independent"
       ],
-      "required_workspaces": ["inference", "nodes", "plans", "readiness"]
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "plans",
+        "readiness"
+      ]
     },
     {
       "scenario_id": "causal_pipeline_overlap",
@@ -145,7 +160,12 @@
         "every_request_keeps_one_immutable_complete_path",
         "queue_transport_and_ui_overlap_alone_do_not_pass"
       ],
-      "required_workspaces": ["network", "nodes", "plans", "readiness"]
+      "required_workspaces": [
+        "network",
+        "nodes",
+        "plans",
+        "readiness"
+      ]
     },
     {
       "scenario_id": "overlap_trace_rejection",
@@ -161,7 +181,11 @@
         "early_final_loopback_is_rejected",
         "invalid_trace_never_becomes_observed_overlap"
       ],
-      "required_workspaces": ["network", "readiness", "incidents"]
+      "required_workspaces": [
+        "network",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "bounded_queue_qos_aging",
@@ -179,7 +203,13 @@
         "accepted_members_continue",
         "queue_and_reservation_state_returns_to_baseline"
       ],
-      "required_workspaces": ["inference", "nodes", "readiness", "incidents", "settings"]
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
     },
     {
       "scenario_id": "slow_consumer_isolation",
@@ -196,7 +226,13 @@
         "request_owned_resources_return_to_baseline",
         "private_output_does_not_cross_member_boundary"
       ],
-      "required_workspaces": ["inference", "nodes", "readiness", "incidents", "settings"]
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
     },
     {
       "scenario_id": "cancellation_boundary_isolation",
@@ -214,7 +250,12 @@
         "cancelled_member_cleanup_is_exact",
         "deployment_and_unrelated_batches_remain_usable"
       ],
-      "required_workspaces": ["inference", "nodes", "readiness", "incidents"]
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "batch_fail_closed_rollback",
@@ -230,7 +271,12 @@
         "unrelated_batches_queues_paths_and_deployment_remain_usable",
         "packed_buffers_transactions_and_handles_return_to_baseline"
       ],
-      "required_workspaces": ["inference", "nodes", "readiness", "incidents"]
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "cross_member_kv_isolation",
@@ -247,7 +293,12 @@
         "committed_peer_prefixes_remain_unchanged",
         "zero_kv_or_result_contamination"
       ],
-      "required_workspaces": ["device_lab", "nodes", "readiness", "incidents"]
+      "required_workspaces": [
+        "device_lab",
+        "nodes",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "target_verifier_transaction",
@@ -265,7 +316,13 @@
         "candidate_token_ids_remain_on_private_runtime_path",
         "tentative_kv_and_results_never_enter_decode_or_browser_output"
       ],
-      "required_workspaces": ["inference", "device_lab", "nodes", "readiness", "settings"]
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "nodes",
+        "readiness",
+        "settings"
+      ]
     },
     {
       "scenario_id": "target_verifier_rollback_to_prefix",
@@ -281,7 +338,13 @@
         "rollback_is_request_local",
         "reservation_transaction_buffer_and_command_cleanup_is_exact"
       ],
-      "required_workspaces": ["inference", "device_lab", "nodes", "readiness", "incidents"]
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "nodes",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "target_verifier_sampling_rejection",
@@ -296,7 +359,13 @@
         "committed_prefix_and_kv_remain_unchanged",
         "unsupported_capability_is_disabled_with_reason"
       ],
-      "required_workspaces": ["inference", "device_lab", "readiness", "incidents", "settings"]
+      "required_workspaces": [
+        "inference",
+        "device_lab",
+        "readiness",
+        "incidents",
+        "settings"
+      ]
     },
     {
       "scenario_id": "same_route_confidence_benchmark",
@@ -315,7 +384,12 @@
         "reliability_cleanup_starvation_and_queue_bounds_do_not_regress",
         "zero_residual_resources_and_cross_request_contamination"
       ],
-      "required_workspaces": ["inference", "nodes", "plans", "readiness"]
+      "required_workspaces": [
+        "inference",
+        "nodes",
+        "plans",
+        "readiness"
+      ]
     },
     {
       "scenario_id": "invalid_benchmark_pair",
@@ -331,7 +405,11 @@
         "posthoc_threshold_and_exclusion_changes_are_rejected",
         "invalid_pair_cannot_publish_material_gain"
       ],
-      "required_workspaces": ["plans", "readiness", "incidents"]
+      "required_workspaces": [
+        "plans",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "runtime_exit_shutdown_cleanup",
@@ -347,7 +425,11 @@
         "cleanup_completes_within_inherited_a4_budget",
         "no_uncommitted_result_is_forwarded"
       ],
-      "required_workspaces": ["nodes", "readiness", "incidents"]
+      "required_workspaces": [
+        "nodes",
+        "readiness",
+        "incidents"
+      ]
     },
     {
       "scenario_id": "all_workspace_reconstruction_privacy",
@@ -374,5 +456,24 @@
         "settings"
       ]
     }
-  ]
+  ],
+  "instrumentation_profile": {
+    "trace_protocol": "mycelium.pipeline_overlap_trace.v1",
+    "implementing_module": "mycelium_router.instrument",
+    "analysis_module": "mycelium_router.analyze",
+    "requirements": [
+      "monotonic_per_hop_intervals",
+      "queue_compute_transport_decomposition",
+      "causal_edges_between_consecutive_hops",
+      "request_scoped_hop_ordering",
+      "stage_clock_correlation_single_clock",
+      "zero_cost_when_disabled"
+    ],
+    "forbidden": [
+      "invented_timestamps",
+      "wall_time_as_compute_evidence",
+      "overlap_from_queue_or_ui_only",
+      "payload_content_in_trace"
+    ]
+  }
 }

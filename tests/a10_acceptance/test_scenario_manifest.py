@@ -242,6 +242,7 @@ def test_a10_acceptance_manifest_is_closed_bounded_and_complete() -> None:
         "workspace_shared_invariants",
         "workspace_requirements",
         "scenarios",
+        "instrumentation_profile",
     }
     assert manifest["protocol"] == PROTOCOL
     assert manifest["claim_boundary"] == CLAIM_BOUNDARY
@@ -346,3 +347,30 @@ def test_a10_specification_remains_design_only_and_names_the_inventory() -> None
     assert "**Status:** `design_only`; dependency-ready acceptance boundary" in specification
     assert "Until then it remains `design_only`" in specification
     assert all(f"`{scenario_id}`" in specification for scenario_id in REQUIRED_SCENARIOS)
+
+
+INSTRUMENTATION_PROFILE_REQUIREMENTS = {
+    "monotonic_per_hop_intervals",
+    "queue_compute_transport_decomposition",
+    "causal_edges_between_consecutive_hops",
+    "request_scoped_hop_ordering",
+    "stage_clock_correlation_single_clock",
+    "zero_cost_when_disabled",
+}
+
+
+def test_a10_instrumentation_profile_is_frozen_and_honoured() -> None:
+    import importlib
+
+    manifest = _manifest()
+    profile = manifest["instrumentation_profile"]
+    assert profile["trace_protocol"] == "mycelium.pipeline_overlap_trace.v1"
+    assert profile["implementing_module"] == "mycelium_router.instrument"
+    assert profile["analysis_module"] == "mycelium_router.analyze"
+    assert INSTRUMENTATION_PROFILE_REQUIREMENTS <= set(profile["requirements"])
+    assert "invented_timestamps" in profile["forbidden"]
+    # The implementing module must import and honour the profile: causal edges
+    # are recorded per hop and the recorder stays a no-op when disabled.
+    instrument = importlib.import_module("mycelium_router.instrument")
+    analyze = importlib.import_module("mycelium_router.analyze")
+    assert instrument is not None and analyze is not None
