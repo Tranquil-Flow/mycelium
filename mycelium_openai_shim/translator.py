@@ -122,25 +122,27 @@ class StreamingSink:
     request_id: str
     model: str
     detokenizer: Detokenizer | None = None
+    chunk_builder: Any = None
     _finished: bool = False
     _chunks: list[dict] = field(default_factory=list)
+
+    def _build(self, token_id: int, token_index: int, finish_reason: str | None) -> dict:
+        builder = self.chunk_builder or to_openai_chat_chunk
+        return builder(
+            request_id=self.request_id, model=self.model,
+            token_id=int(token_id), token_index=int(token_index),
+            finish_reason=finish_reason, detokenizer=self.detokenizer)
 
     def emit(self, token_index: int, token_id: int) -> None:
         if self._finished:
             return
-        self._chunks.append(to_openai_chat_chunk(
-            request_id=self.request_id, model=self.model,
-            token_id=int(token_id), token_index=int(token_index),
-            finish_reason=None, detokenizer=self.detokenizer))
+        self._chunks.append(self._build(token_id, token_index, None))
 
     def finish(self) -> None:
         if self._finished:
             return
         self._finished = True
-        self._chunks.append(to_openai_chat_chunk(
-            request_id=self.request_id, model=self.model,
-            token_id=0, token_index=len(self._chunks), finish_reason="stop",
-            detokenizer=self.detokenizer))
+        self._chunks.append(self._build(0, len(self._chunks), "stop"))
 
     def drain(self) -> Iterator[dict]:
         yield from self._chunks
