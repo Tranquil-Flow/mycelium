@@ -1,8 +1,9 @@
 # RED-by-design suites: default collection policy and operator opt-in
 
-**Scope.** Five lane paths use the historical `scaffold_red` opt-in policy. A10/A11/A12/A14b
+**Scope.** Six lane paths use the historical `scaffold_red` opt-in policy. A10/A11/A12/A14b
 exercise unimplemented behaviour; A7's in-memory contract core now passes, but its runtime and
-physical gates remain unimplemented. A marker is not a verdict. This
+physical gates remain unimplemented; A9's migration-executor seams are unimplemented while its
+contract and migration *decision* suites are GREEN. A marker is not a verdict. This
 note is the single place that says how they are kept out of ordinary runs and how an operator runs them
 deliberately.
 
@@ -42,26 +43,29 @@ Two operational consequences:
 | `tests/a12_scaffold` | all three modules | 59 |
 | `tests/a14b_acceptance` | both modules | 88 |
 | `tests/a7_acceptance` | `test_kv_successor_contract.py`, `test_kv_successor_boundaries.py` — deterministic core GREEN, not runtime closure | 41 of 51 |
+| `tests/a9_migration_scaffold` | `test_migration_executor_red.py` — the migration executor seams; the A9 contract and migration decision suites in `tests/a9_acceptance` are GREEN | 15 |
 
 `tests/a7_acceptance/test_inventory.py` (10 items) is the already-landed frozen inventory and stays in
 default collection: only the two KV-successor modules are marked. In the 2026-09-21
 closure-train candidate after the terminal-state repair, all A7 tests passed 51,
 and default collection passed the same 10 inventory tests with 41 deselected.
 The five paths collected 324 marked items (334 total); these are measured snapshot counts,
-not a fixed contract. Parent logs: `runs/20260921-closure-train/a7/parent-final-verification/`
+not a fixed contract. The A9 path added 2026-09-23 collected 15 marked items (six paths: 339 marked
+of 349); its 10 boundary items pin the honest `MigrationUnavailable` seams and its 5 remaining items
+are RED until the executor lands. Parent logs: `runs/20260921-closure-train/a7/parent-final-verification/`
 under the external program root. Earlier 40/50 and 323/333 snapshots remain historical,
 before the terminal-state regression was added. No A7 runtime seam is wired.
 
 ## Operator invocation
 
-Run the five suites, and only them:
+Run the six suites, and only them:
 
 ```sh
 cd /Users/evinova-self/Documents/playground/mycelium-core-pilot   # or your worktree of this branch
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /opt/homebrew/bin/python3.14 \
   -m pytest -q -p no:cacheprovider -m scaffold_red \
   tests/a10_scaffold tests/a11_scaffold tests/a12_scaffold \
-  tests/a14b_acceptance tests/a7_acceptance
+  tests/a14b_acceptance tests/a7_acceptance tests/a9_migration_scaffold
 ```
 
 `pytest --markers` also lists `scaffold_red`, so the opt-in is discoverable from the tool itself. A
