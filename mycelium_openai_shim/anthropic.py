@@ -169,15 +169,19 @@ def from_anthropic_request(
     if not isinstance(messages, list) or not messages:
         raise TranslateError("messages: required, non-empty list")
 
-    prompt_parts: list[str] = []
+    system_text: str | None = None
     system = body.get("system")
     if isinstance(system, str) and system:
-        prompt_parts.append(f"<|system|>\n{system}\n")
+        system_text = system
     elif isinstance(system, list):
         # system can also be a list of content blocks
-        for block in system:
-            if isinstance(block, Mapping) and isinstance(block.get("text"), str):
-                prompt_parts.append(f"<|system|>\n{block['text']}\n")
+        system_text = "\n".join(
+            block["text"] for block in system
+            if isinstance(block, Mapping) and isinstance(block.get("text"), str)
+        ) or None
+    prompt_parts: list[str] = []
+    if system_text:
+        prompt_parts.append(f"<|im_start|>system\n{system_text}<|im_end|>\n")
     for m in messages:
         if not isinstance(m, Mapping):
             raise TranslateError("messages: each entry must be an object")
@@ -187,13 +191,10 @@ def from_anthropic_request(
         if not isinstance(text, str):
             raise TranslateError("messages: content must be a string or "
                                  f"a list with a single text block (got {type(content).__name__})")
-        if role == "user":
-            prompt_parts.append(f"<|user|>\n{text}\n")
-        elif role == "assistant":
-            prompt_parts.append(f"<|assistant|>\n{text}\n")
-        else:
+        if role not in ("user", "assistant"):
             raise TranslateError(f"messages: unknown role {role!r}")
-    prompt_parts.append("<|assistant|>\n")
+        prompt_parts.append(f"<|im_start|>{role}\n{text}<|im_end|>\n")
+    prompt_parts.append("<|im_start|>assistant\n")
     prompt_text = "".join(prompt_parts)
 
     model = body.get("model")

@@ -387,13 +387,23 @@ def _make_handler(live_route: Any, tokenizer: Any, detokenizer: Any, model_id: s
 
 def serve(*, live_route: Any, host: str = "127.0.0.1", port: int = 8791,
           tokenizer: Any = None, detokenizer: Any = None,
+          tokenizer_path: str | None = None,
           model_id: str = "mycelium-default", model_name: str | None = None,
           context_length: int = 32768, provider: str = "Mycelium",
           api_token: str = "", ollama_model_id: str | None = None,
           ollama_model_name: str | None = None, ollama_family: str = "mycelium",
           ollama_parameter_size: str = "7B",
           ollama_quantization_level: str = "int8"):
-    """Block until the server is interrupted."""
+    """Block until the server is interrupted.
+
+    tokenizer_path, when given, loads the product's REAL Qwen2 tokenizer
+    (tokenizer.json in that deployment dir) and uses it for every surface;
+    without it the explicitly-labelled test-only char tokenizer is used.
+    """
+    if tokenizer_path is not None:
+        from .qwen_tokenizer import load_qwen_tokenizer
+        qwen = load_qwen_tokenizer(tokenizer_path)
+        tokenizer, detokenizer = qwen.encode, qwen.decode
     handler = _make_handler(
         live_route, tokenizer or default_tokenizer(),
         detokenizer or default_detokenizer(), model_id,
@@ -410,6 +420,7 @@ def serve(*, live_route: Any, host: str = "127.0.0.1", port: int = 8791,
 
 def serve_in_thread(*, live_route: Any, host: str = "127.0.0.1", port: int = 8791,
                     tokenizer: Any = None, detokenizer: Any = None,
+                    tokenizer_path: str | None = None,
                     model_id: str = "mycelium-default",
                     model_name: str | None = None, context_length: int = 32768,
                     provider: str = "Mycelium", api_token: str = "",
@@ -418,7 +429,15 @@ def serve_in_thread(*, live_route: Any, host: str = "127.0.0.1", port: int = 879
                     ollama_family: str = "mycelium",
                     ollama_parameter_size: str = "7B",
                     ollama_quantization_level: str = "int8"):
-    """Start the shim in a daemon thread. Returns (server, thread)."""
+    """Start the shim in a daemon thread. Returns (server, thread).
+
+    tokenizer_path, when given, loads the product's REAL Qwen2 tokenizer;
+    without it the explicitly-labelled test-only char tokenizer is used.
+    """
+    if tokenizer_path is not None:
+        from .qwen_tokenizer import load_qwen_tokenizer
+        qwen = load_qwen_tokenizer(tokenizer_path)
+        tokenizer, detokenizer = qwen.encode, qwen.decode
     handler = _make_handler(
         live_route, tokenizer or default_tokenizer(),
         detokenizer or default_detokenizer(), model_id,

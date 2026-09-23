@@ -67,15 +67,10 @@ def to_mycelium_infer_request(
         content = m.get("content")
         if not isinstance(content, str):
             raise TranslateError("messages: content must be a string")
-        if role == "system":
-            prompt_parts.append(f"<|system|>\n{content}\n")
-        elif role == "user":
-            prompt_parts.append(f"<|user|>\n{content}\n")
-        elif role == "assistant":
-            prompt_parts.append(f"<|assistant|>\n{content}\n")
-        else:
+        if role not in ("system", "user", "assistant"):
             raise TranslateError(f"messages: unknown role {role!r}")
-    prompt_parts.append("<|assistant|>\n")
+        prompt_parts.append(f"<|im_start|>{role}\n{content}<|im_end|>\n")
+    prompt_parts.append("<|im_start|>assistant\n")
     prompt_text = "".join(prompt_parts)
 
     model = openai_body.get("model", model_id)
