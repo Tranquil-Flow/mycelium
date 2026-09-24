@@ -557,3 +557,20 @@ describe('useInferenceSession', () => {
     ]);
   });
 });
+
+
+describe('consumer bootstrap ordering', () => {
+  it('does not race the root cookie bootstrap before that session is ready', async () => {
+    const client = new FakeClient();
+    const load = vi.spyOn(client, 'loadQualification');
+    const { result, rerender } = renderHook(({ ready }) => {
+      const options = { client, now: () => NOW, bootstrapReady: ready };
+      return useInferenceSession(options);
+    }, { initialProps: { ready: false } });
+    expect(load).not.toHaveBeenCalled();
+    expect(result.current.can_submit).toBe(false);
+    rerender({ ready: true });
+    await waitFor(() => expect(result.current.can_submit).toBe(true));
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+});

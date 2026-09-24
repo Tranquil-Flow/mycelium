@@ -18,6 +18,8 @@ import styles from './ConsumerDemoPage.module.css';
 export type ConsumerDemoPageProps = Pick<InferenceWorkspaceProps, 'client' | 'now' | 'externalBlockReason'> & {
   /** Real `/api/v1/observatory/snapshot` reader. Injectable for tests only. */
   readonly routeStatus?: ConsumerRouteStatusPort;
+  /** Serialize child requests after the root has established its cookie session. */
+  readonly bootstrapReady?: boolean;
 };
 const phaseLabels = {
   idle: 'Ready for your question', submitting: 'Submitting prompt', streaming: 'Streaming response',
@@ -31,7 +33,7 @@ function measured(value: number | null, unit: string): string {
   return value === null ? 'Not measured' : `${value.toFixed(1)} ${unit}`;
 }
 
-export function ConsumerDemoPage({ client, now, externalBlockReason = null, routeStatus }: ConsumerDemoPageProps) {
+export function ConsumerDemoPage({ client, now, externalBlockReason = null, routeStatus, bootstrapReady = true }: ConsumerDemoPageProps) {
   // Explicit supported basic stream until native V2 token-ID validators align.
   // Qualification, session ownership and CSRF checks remain unchanged.
   const defaultClient = useMemo(() => new ProductInferenceClient({
@@ -41,7 +43,7 @@ export function ConsumerDemoPage({ client, now, externalBlockReason = null, rout
     () => new TimingInferenceClient(client ?? defaultClient, now),
     [client, defaultClient, now],
   );
-  const session = useInferenceSession({ client: timed, now });
+  const session = useInferenceSession({ client: timed, now, bootstrapReady });
   const evidence = useProductEvidence();
   const [prompt, setPrompt] = useState('');
   const [maxTokens, setMaxTokens] = useState(128);
@@ -94,6 +96,7 @@ export function ConsumerDemoPage({ client, now, externalBlockReason = null, rout
     : 'No route publication available';
 
   useEffect(() => {
+    if (!bootstrapReady) return;
     let active = true;
     const controller = new AbortController();
     setRouteState({ phase: 'loading' });
@@ -112,7 +115,7 @@ export function ConsumerDemoPage({ client, now, externalBlockReason = null, rout
       active = false;
       controller.abort();
     };
-  }, [readRouteStatus, routeAttempt]);
+  }, [readRouteStatus, routeAttempt, bootstrapReady]);
 
   useEffect(() => {
     if (session.phase === 'interrupted') {

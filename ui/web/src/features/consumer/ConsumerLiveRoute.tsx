@@ -17,7 +17,7 @@ function QualifiedConsumer({ connection }: { readonly connection: Connection }) 
   const reason = connection.phase === 'connecting' ? 'Connecting to the same-origin gateway.'
     : connection.phase === 'unavailable' ? 'Gateway unavailable. No fixture or direct-backend fallback.'
     : !productEvidenceRouteReady(evidence.latest) ? 'Inference disabled: live product evidence is not current and qualified.' : null;
-  return <ConsumerDemoPage externalBlockReason={reason} />;
+  return <ConsumerDemoPage externalBlockReason={reason} bootstrapReady={connection.phase === 'ready'} />;
 }
 
 /** Production root: only real same-origin clients. URL/env fixture switches cannot

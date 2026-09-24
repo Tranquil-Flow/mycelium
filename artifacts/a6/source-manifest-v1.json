@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:ed8c45be79c891cea41c14152311867ce93061e3e54a2962765ea7f620d250f8",
+      "sha256": "sha256:2e5a07c7406596d4a43fa5e685077c68a3e0c06f40df3caad9aa9b6b49cbca38",
       "size_bytes": 70321
     },
     {
@@ -1028,13 +1028,13 @@
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.tsx",
-      "sha256": "sha256:5080f80acf99d2a5305788ff9b97f859ec1ecb43911ecd4f123af37ffcb4bb8e",
-      "size_bytes": 17329
+      "sha256": "sha256:511a8e352ac3a3adf4f10ab9cf8c75f7b2683cea583acac005016074261a536d",
+      "size_bytes": 17539
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerLiveRoute.tsx",
-      "sha256": "sha256:86f0f9182665f5a532723fecfdeac2da3c84ebf485a61e9b5f55f294e5dcec7c",
-      "size_bytes": 3685
+      "sha256": "sha256:4f000f5a0dea89b5b4db4bdedb74a02623b8c7c72a58d9615c054ae7e48f46e1",
+      "size_bytes": 3731
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerRoutePanel.tsx",
@@ -1090,6 +1090,16 @@
       "path": "ui/web/src/features/inference/requestClient.ts",
       "sha256": "sha256:c1a1e054708183840d784cca2a27586b317f1df11572592dcdae75990cb91037",
       "size_bytes": 16689
+    },
+    {
+      "path": "ui/web/src/features/inference/useInferenceSession.test.tsx",
+      "sha256": "sha256:505449b4d5bf278035604f37372bcb8a31eb4e82fc6ff58401ad47dd2392b351",
+      "size_bytes": 21766
+    },
+    {
+      "path": "ui/web/src/features/inference/useInferenceSession.ts",
+      "sha256": "sha256:ebae10e4b85206a3c0d74cd47118a2b420270dd18a7a90c743598e8876fce127",
+      "size_bytes": 26208
     },
     {
       "path": "ui/web/src/features/productEvidence/contracts.ts",
@@ -1148,5 +1158,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:0f2a5bc7f1500c508043e49a85ab95a04e86bc12fa698cc05cb9e98f91450d2c"
+  "source_digest": "sha256:0b8d8ffbfefd12784c3d2e2fcf89aa8384b7d5e1618be84a33bc248fe52bb103"
 }

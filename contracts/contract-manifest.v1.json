@@ -1385,8 +1385,8 @@
         },
         {
           "path": "ui/web/src/features/inference/useInferenceSession.ts",
-          "sha256": "fd1d755a67a59487e3474397d7a140895f2f16cd1ca42ed85fc3f57798ee56a3",
-          "size_bytes": 26110
+          "sha256": "ebae10e4b85206a3c0d74cd47118a2b420270dd18a7a90c743598e8876fce127",
+          "size_bytes": 26208
         }
       ],
       "protocol": "mycelium.product_concurrency_liveness_qualification.v1"

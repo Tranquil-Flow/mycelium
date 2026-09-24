@@ -38,6 +38,7 @@ interface UseInferenceSessionOptions {
   readonly client: InferenceClient;
   readonly now?: () => number;
   readonly restored_state?: InferenceSessionState | null;
+  readonly bootstrapReady?: boolean;
 }
 
 type SessionAction =
@@ -417,6 +418,7 @@ export function useInferenceSession({
   client,
   now = Date.now,
   restored_state = null,
+  bootstrapReady = true,
 }: UseInferenceSessionOptions): InferenceSessionController {
   const [state, baseDispatch] = useReducer(
     inferenceSessionReducer,
@@ -464,13 +466,13 @@ export function useInferenceSession({
 
   useEffect(() => {
     mountedRef.current = true;
-    void loadQualification();
+    if (bootstrapReady) void loadQualification();
     return () => {
       mountedRef.current = false;
       loadAbortRef.current?.abort();
       streamAbortRef.current?.abort();
     };
-  }, [loadQualification]);
+  }, [loadQualification, bootstrapReady]);
 
   const runStream = useCallback(
     async (request: InferenceAcceptedResponse, cursor: number | null): Promise<void> => {
