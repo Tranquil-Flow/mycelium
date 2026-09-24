@@ -777,6 +777,11 @@
       "size_bytes": 2633
     },
     {
+      "path": "tests/governance/test_governance_gate_negative_copies.py",
+      "sha256": "sha256:2a805c635373b30e230a8517f7e8ebdf0a63cfccc801a3fa83b9ec223b7cb9d0",
+      "size_bytes": 5320
+    },
+    {
       "path": "tests/l3/conftest.py",
       "sha256": "sha256:ecf94d6ee9b1bbf81fe19bd1dd65f21a52bd6dad319e8afd55fb52f22d793e9c",
       "size_bytes": 719
@@ -1163,5 +1168,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:2732d3f54cb14959bb78d967eab8338c4ebfd30e3fa256408c0e6546f3322d27"
+  "source_digest": "sha256:f3e42ae52294b41e7511fa391c0db7a2f2932e10e04e7280a76ab5528d825b94"
 }
