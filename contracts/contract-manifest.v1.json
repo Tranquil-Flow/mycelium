@@ -115,8 +115,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "c33a9bb518974919221fba04b8d91eeb18ff8f74532c15c38ac64e3bb9c526d8",
-          "size_bytes": 90051
+          "sha256": "a679c1d2b995d7884ffb3c9f79d676178f7b0936906d65e1a635ba8114b681c6",
+          "size_bytes": 93029
         },
         {
           "path": "ui/web/src/features/liveRoute/m16Runtime.ts",
@@ -180,8 +180,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-          "size_bytes": 139882
+          "sha256": "41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+          "size_bytes": 146476
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -220,8 +220,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-          "size_bytes": 139882
+          "sha256": "41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+          "size_bytes": 146476
         },
         {
           "path": "ui/web/src/features/liveRoute/deploymentActivation.ts",
@@ -255,8 +255,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-          "size_bytes": 139882
+          "sha256": "41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+          "size_bytes": 146476
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -290,8 +290,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-          "size_bytes": 139882
+          "sha256": "41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+          "size_bytes": 146476
         },
         {
           "path": "ui/web/src/features/evidence/evidenceProjection.ts",
@@ -430,13 +430,13 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "c33a9bb518974919221fba04b8d91eeb18ff8f74532c15c38ac64e3bb9c526d8",
-          "size_bytes": 90051
+          "sha256": "a679c1d2b995d7884ffb3c9f79d676178f7b0936906d65e1a635ba8114b681c6",
+          "size_bytes": 93029
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-          "size_bytes": 139882
+          "sha256": "41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+          "size_bytes": 146476
         },
         {
           "path": "mycelium_m16_runtime.py",
@@ -570,8 +570,8 @@
         },
         {
           "path": "mycelium_live/supervisor.py",
-          "sha256": "e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-          "size_bytes": 139882
+          "sha256": "41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+          "size_bytes": 146476
         },
         {
           "path": "ui/web/src/features/governance/governanceReadiness.ts",
@@ -650,8 +650,8 @@
         },
         {
           "path": "mycelium_live/router_port.py",
-          "sha256": "c33a9bb518974919221fba04b8d91eeb18ff8f74532c15c38ac64e3bb9c526d8",
-          "size_bytes": 90051
+          "sha256": "a679c1d2b995d7884ffb3c9f79d676178f7b0936906d65e1a635ba8114b681c6",
+          "size_bytes": 93029
         },
         {
           "path": "physical_inference_node.py",
@@ -1385,8 +1385,8 @@
         },
         {
           "path": "ui/web/src/features/inference/useInferenceSession.ts",
-          "sha256": "ebae10e4b85206a3c0d74cd47118a2b420270dd18a7a90c743598e8876fce127",
-          "size_bytes": 26208
+          "sha256": "13b54b139e256050092b28fba2103296a9959c8bf110cd9ebd0054ac2ea5385d",
+          "size_bytes": 28243
         }
       ],
       "protocol": "mycelium.product_concurrency_liveness_qualification.v1"

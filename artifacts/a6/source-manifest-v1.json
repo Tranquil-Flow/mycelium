@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:2e5a07c7406596d4a43fa5e685077c68a3e0c06f40df3caad9aa9b6b49cbca38",
+      "sha256": "sha256:23423a370ce26a1e4685f1884a1a9f5536312392603f92c109f11fb0f7d70cd5",
       "size_bytes": 70321
     },
     {
@@ -178,13 +178,13 @@
     },
     {
       "path": "mycelium_live/router_port.py",
-      "sha256": "sha256:c33a9bb518974919221fba04b8d91eeb18ff8f74532c15c38ac64e3bb9c526d8",
-      "size_bytes": 90051
+      "sha256": "sha256:a679c1d2b995d7884ffb3c9f79d676178f7b0936906d65e1a635ba8114b681c6",
+      "size_bytes": 93029
     },
     {
       "path": "mycelium_live/supervisor.py",
-      "sha256": "sha256:e5c20cf37e0b981938fe55d13e6aa683f6a5b4fa8b054914fb691b5e25b3cbec",
-      "size_bytes": 139882
+      "sha256": "sha256:41b15464a945055ff971872caaaf1a4e15529e16edd0164602fe96e88f29c6d8",
+      "size_bytes": 146476
     },
     {
       "path": "mycelium_m16_runtime.py",
@@ -832,6 +832,11 @@
       "size_bytes": 8557
     },
     {
+      "path": "tests/live/test_qualification_session_renewal.py",
+      "sha256": "sha256:ca28fd1dbf71c064f7f430e4fa450f9f5a65ef780c6e01458feda89adf94d411",
+      "size_bytes": 13501
+    },
+    {
       "path": "tests/live/test_supervisor.py",
       "sha256": "sha256:dc5067d3f784c3f09499b30de9fe7325e2568298c4b20ff43233554644ca43df",
       "size_bytes": 60941
@@ -1093,13 +1098,13 @@
     },
     {
       "path": "ui/web/src/features/inference/useInferenceSession.test.tsx",
-      "sha256": "sha256:505449b4d5bf278035604f37372bcb8a31eb4e82fc6ff58401ad47dd2392b351",
-      "size_bytes": 21766
+      "sha256": "sha256:bd64e0157ef42b62cb9014e028f2402b299dce2a419676b251ce8af6c33353d7",
+      "size_bytes": 26118
     },
     {
       "path": "ui/web/src/features/inference/useInferenceSession.ts",
-      "sha256": "sha256:ebae10e4b85206a3c0d74cd47118a2b420270dd18a7a90c743598e8876fce127",
-      "size_bytes": 26208
+      "sha256": "sha256:13b54b139e256050092b28fba2103296a9959c8bf110cd9ebd0054ac2ea5385d",
+      "size_bytes": 28243
     },
     {
       "path": "ui/web/src/features/productEvidence/contracts.ts",
@@ -1158,5 +1163,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:0b8d8ffbfefd12784c3d2e2fcf89aa8384b7d5e1618be84a33bc248fe52bb103"
+  "source_digest": "sha256:2732d3f54cb14959bb78d967eab8338c4ebfd30e3fa256408c0e6546f3322d27"
 }

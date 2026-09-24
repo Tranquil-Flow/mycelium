@@ -241,6 +241,10 @@ class LiveRouterPort:
         self._recovery_tokenizer_digest = recovery_tokenizer_digest
         self._recovery_a4_atomic_commit = recovery_a4_atomic_commit
         self._recovery_qualification_digest: str | None = None
+        # The public recovery document has one current binding. Retain only
+        # request IDs admitted under that binding in its projection; older
+        # terminal records remain in coordinator history, never relabelled.
+        self._recovery_current_request_ids: set[str] = set()
         # Qualifier-owned source of the *current* deployment qualification,
         # shared with the request gateway's qualification gate. Admission
         # binds the digest on first use; an idle projection (the browser polls
@@ -279,6 +283,44 @@ class LiveRouterPort:
 
         with self._lock:
             return not self._pending
+
+    def run_qualification_refresh_when_idle(
+        self, refresh: Callable[[], Any | None]
+    ) -> None:
+        """Publish a genuine renewed binding in the same admission epoch.
+
+        The callback is the owner's qualified physical challenge. Its result
+        is not accepted as authority until the owner has published it; no
+        pending request may cross this rotation boundary.
+        """
+        with self._admission_dispatch_lock:
+            with self._lock:
+                if self._closed or self._pending:
+                    return
+            renewed = refresh()
+            if renewed is None:
+                return
+            from mycelium_qualification.contracts import RouteQualificationV1
+            from mycelium_request_gateway.contracts import qualification_digest
+
+            if (
+                not isinstance(renewed, RouteQualificationV1)
+                or renewed.route_ready is not True
+                or renewed.deployment_id != self._graph.deployment_id
+                or renewed.deployment_epoch != self._graph.deployment_epoch
+                or renewed.topology_version != self._graph.topology_version
+                or renewed.model_id != self._graph.model_id
+                or renewed.resolved_commit != self._graph.resolved_commit
+                or renewed.manifest_digest != self._graph.manifest_digest
+            ):
+                raise M16AdmissionError("qualification_binding_changed")
+            digest = qualification_digest(renewed)
+            with self._lock:
+                if self._closed or self._pending:
+                    raise M16AdmissionError("qualification_binding_changed")
+                if self._recovery_qualification_digest != digest:
+                    self._recovery_current_request_ids.clear()
+                self._recovery_qualification_digest = digest
 
     def admit(
         self,
@@ -468,6 +510,8 @@ class LiveRouterPort:
                 raise RuntimeError("duplicate_request_id")
             self._pending[request.request_id] = pending
             self._sinks[request.request_id] = client_sink
+            if coordinator is not None:
+                self._recovery_current_request_ids.add(request.request_id)
             self._changed.notify_all()
 
         if coordinator is None:
@@ -1140,26 +1184,28 @@ class LiveRouterPort:
             return False
 
     def _recovery_projection_qualification_digest(self) -> str:
-        """Resolve the exact current qualification binding for the projection.
+        """Resolve the current qualifier binding for the public projection.
 
-        Admission binds the digest on first use, and that binding owns the
-        request path. Before any admission — the browser polls the public
-        projection while the route is idle — the projection must still carry
-        the real current qualifier record, read from the same owned authority
-        the request gateway captures from. No digest is invented, defaulted,
-        or cached: an absent, stale, foreign, or malformed record fails
-        closed instead of publishing evidence the authority never issued.
+        A bound digest may describe an earlier admission epoch. If a source is
+        wired, its non-refreshing authority snapshot must agree with the bound
+        digest; absent, expired, revoked or foreign authority fails closed.
+        Source-less simulated legacy adapters retain their admitted binding.
         """
 
         with self._lock:
             bound = self._recovery_qualification_digest
-        if bound is not None:
-            return bound
         source = self._qualification_source
         if source is None:
+            if bound is not None:
+                return bound  # legacy simulated router without a source
             raise M16AdmissionError("recovery_projection_unavailable")
+        # A physical owner must not run a model challenge on an HTTP status
+        # read. Its snapshot is non-refreshing; the admission path renews.
+        reader = getattr(source, "peek_current", None)
+        if not callable(reader):
+            reader = source.current
         try:
-            record = source.current()
+            record = reader()
         except Exception:
             raise M16AdmissionError("recovery_projection_unavailable") from None
         from mycelium_qualification.contracts import RouteQualificationV1
@@ -1186,6 +1232,8 @@ class LiveRouterPort:
             or any(character not in "0123456789abcdef" for character in digest[7:])
         ):
             raise M16AdmissionError("recovery_projection_binding_invalid")
+        if bound is not None and digest != bound:
+            raise M16AdmissionError("recovery_projection_binding_mismatch")
         return digest
 
     def recovery_public_projection(
@@ -1198,6 +1246,10 @@ class LiveRouterPort:
         if coordinator is None or atomic_commit is None:
             raise M16AdmissionError("recovery_projection_unavailable")
         qualification_digest = self._recovery_projection_qualification_digest()
+        with self._lock:
+            if self._recovery_qualification_digest not in (None, qualification_digest):
+                raise M16AdmissionError("recovery_projection_binding_mismatch")
+            visible_request_ids = frozenset(self._recovery_current_request_ids)
         if qualification_digest is None:
             raise M16AdmissionError("recovery_projection_unavailable")
         if (
@@ -1210,7 +1262,7 @@ class LiveRouterPort:
         requests: list[dict[str, Any]] = []
         for item in status["requests"]:
             request_id = item["request_id"]
-            if request_id not in committed_token_counts:
+            if request_id not in visible_request_ids or request_id not in committed_token_counts:
                 continue
             committed_count = committed_token_counts[request_id]
             if type(committed_count) is not int or committed_count < 0:
@@ -1254,6 +1306,9 @@ class LiveRouterPort:
             },
         }
         runtime["runtime_digest"] = self._digest_document(runtime)
+        with self._lock:
+            if self._recovery_qualification_digest not in (None, qualification_digest):
+                raise M16AdmissionError("recovery_projection_binding_mismatch")
         return runtime
 
     def recovery_failure_reason(self, request_id: str) -> str | None:

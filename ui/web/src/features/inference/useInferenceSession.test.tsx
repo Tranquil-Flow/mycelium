@@ -142,6 +142,94 @@ async function loaded(client: FakeClient) {
 }
 
 describe('useInferenceSession', () => {
+  it('refreshes a stale local snapshot before submitting and accepts genuine same-route renewal once', async () => {
+    const client = new FakeClient();
+    const clock = { value: NOW };
+    const renewed = qualification({
+      issued_at_unix_ms: NOW + 61 * 60_000,
+      binding: {
+        ...qualification().binding,
+        qualification_id: 'renewal-b',
+        qualification_digest: DIGEST_B,
+        path_manifest_digest: DIGEST_B,
+      },
+    });
+    client.qualifications = [qualification(), renewed, renewed];
+    const hook = renderHook(() => useInferenceSession({ client, now: () => clock.value }));
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    clock.value += 61 * 60_000;
+    client.streamBatches.push([event(0, { type: 'accepted' }), event(1, { type: 'completed' })]);
+    await act(async () => {
+      await Promise.all([
+        hook.result.current.start('private synthetic input', 8),
+        hook.result.current.start('private synthetic input', 8),
+      ]);
+    });
+    expect(client.submissions).toHaveLength(1);
+    expect(client.submissions[0].qualification).toEqual(renewed.binding);
+    expect(hook.result.current.qualification_changed).toBe(false);
+  });
+
+  it('keeps a foreign model change behind explicit acknowledgement', async () => {
+    const client = new FakeClient();
+    const clock = { value: NOW };
+    const foreign = qualification({
+      issued_at_unix_ms: NOW + 61 * 60_000,
+      binding: { ...qualification().binding, model_id: 'other-model' },
+    });
+    client.qualifications = [qualification(), foreign, foreign];
+    const hook = renderHook(() => useInferenceSession({ client, now: () => clock.value }));
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    clock.value += 61 * 60_000;
+    await act(() => hook.result.current.start('private synthetic input', 8));
+    expect(client.submissions).toHaveLength(0);
+    expect(hook.result.current.qualification_changed).toBe(true);
+    await act(() => hook.result.current.reload_qualification());
+    expect(hook.result.current.qualification_changed).toBe(true);
+  });
+
+  it('polls only after root bootstrap and replaces the stale local snapshot without clicks', async () => {
+    const client = new FakeClient();
+    const load = vi.spyOn(client, 'loadQualification');
+    const interval = vi.spyOn(window, 'setInterval');
+    const clock = { value: NOW };
+    const refreshed = qualification({
+      issued_at_unix_ms: NOW + 61 * 60_000,
+      binding: { ...qualification().binding, qualification_id: 'renewal-b',
+        qualification_digest: DIGEST_B, path_manifest_digest: DIGEST_B },
+    });
+    client.qualifications = [qualification(), refreshed];
+    const hook = renderHook(({ ready }) => useInferenceSession({ client, now: () => clock.value, bootstrapReady: ready }),
+      { initialProps: { ready: false } });
+    expect(load).not.toHaveBeenCalled();
+    expect(interval.mock.calls.some(([, delay]) => delay === 30_000)).toBe(false);
+    hook.rerender({ ready: true });
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    const poll = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+    expect(poll).toBeTypeOf('function');
+    clock.value += 61 * 60_000;
+    await act(async () => { (poll as () => void)(); });
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(hook.result.current.can_submit).toBe(true);
+    expect(hook.result.current.qualification?.binding).toEqual(refreshed.binding);
+    expect(hook.result.current.qualification_changed).toBe(false);
+    hook.unmount();
+    interval.mockRestore();
+  });
+
+  it('does not treat a failed server renewal as a fresh qualification after 60 minutes', async () => {
+    const client = new FakeClient();
+    client.qualifications = [qualification(), qualification({ issued_at_unix_ms: NOW })];
+    const clock = { value: NOW };
+    const hook = renderHook(() => useInferenceSession({ client, now: () => clock.value }));
+    await waitFor(() => expect(hook.result.current.can_submit).toBe(true));
+    clock.value += 61 * 60_000;
+    await act(() => hook.result.current.reload_qualification());
+    expect(hook.result.current.submit_block_reason).toBe('Qualification is stale');
+    expect(hook.result.current.can_submit).toBe(false);
+    expect(client.submissions).toHaveLength(0);
+  });
+
   it('loads qualification first and reports the exact route_ready=false reason', async () => {
     const client = new FakeClient();
     client.qualifications = [

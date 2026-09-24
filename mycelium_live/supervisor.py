@@ -33,6 +33,7 @@ from mycelium_qualification import (
     issue_live_route_qualification,
     route_qualification_to_dict,
 )
+from mycelium_qualification.contracts import RouteQualificationV1
 from mycelium_request_gateway.asgi import MAX_REQUEST_BODY_BYTES
 from mycelium_request_gateway.contracts import (
     qualification_digest,
@@ -61,7 +62,7 @@ from .activation import DeploymentActivationError, PreparedDeploymentActivation
 from .a6_recovery import LiveA6RecoveryQualifier, tokenizer_artifact_digest
 from .artifact_provisioner import ArtifactAcquisitionStore
 from .codec import prompt_codec_from_deployment
-from .health import RouteHealthSource
+from .health import LIVE_QUALIFICATION_REFRESH_AFTER_MS, RouteHealthSource
 from .model_capacity import (
     ModelCapacityRefresh,
     ModelCapacityRefreshError,
@@ -319,6 +320,7 @@ class LiveStack:
     app: Any
     health: Any
     route: LiveRoute
+    router: LiveRouterPort | None = None
 
 
 COLD_ROUTE_RESTART_ERROR_CODE = "cold_route_restart_in_progress"
@@ -370,6 +372,11 @@ class ColdRouteRestartOwner:
         self._current: LiveRoute | None = None
         self._startup_failed_route: LiveRoute | None = None
         self._qualification: Any | None = None
+        self._qualification_refresh: Callable[[LiveRoute], RouteQualificationV1] | None = None
+        self._qualification_refresh_allowed: Callable[[], bool] = lambda: False
+        self._qualification_clock_ms: Callable[[], int] = lambda: int(time.time() * 1_000)
+        self._qualification_refreshed: Callable[[LiveRoute, RouteQualificationV1], None] = lambda _route, _record: None
+        self._qualification_refresh_runner: Callable[[Callable[[], RouteQualificationV1 | None]], Any] = lambda operation: operation()
         self._generation = 0
         self._restart_attempts = 0
         self._state = "new"
@@ -427,15 +434,124 @@ class ColdRouteRestartOwner:
             self._qualification = None
             self._changed.notify_all()
 
+    def configure_qualification_refresh(
+        self,
+        *,
+        refresh: Callable[[LiveRoute], RouteQualificationV1],
+        refresh_allowed: Callable[[], bool],
+        clock_unix_ms: Callable[[], int] | None = None,
+        on_refresh: Callable[[LiveRoute, RouteQualificationV1], None] | None = None,
+        run_when_idle: Callable[[Callable[[], RouteQualificationV1 | None]], None] | None = None,
+    ) -> None:
+        """Enable genuine idle renewal on this physical route owner."""
+        with self._lock:
+            self._qualification_refresh = refresh
+            self._qualification_refresh_allowed = refresh_allowed
+            if clock_unix_ms is not None:
+                self._qualification_clock_ms = clock_unix_ms
+            if on_refresh is not None:
+                self._qualification_refreshed = on_refresh
+            if run_when_idle is not None:
+                self._qualification_refresh_runner = run_when_idle
+
+    @staticmethod
+    def _same_renewal_identity(old: RouteQualificationV1, new: RouteQualificationV1) -> bool:
+        # path_manifest_digest includes the one-time challenge request_id;
+        # stage_bindings include observation digests. Compare the durable
+        # placement/process identity, not their per-challenge evidence bytes.
+        fields = (
+            "deployment_id", "deployment_epoch", "topology_version", "model_id",
+            "resolved_commit", "manifest_digest", "execution_graph_digest",
+        )
+        stages = (
+            "stage_id", "placement_id", "assignment_id", "node_id",
+            "stage_signature", "load_proof_digest", "endpoint_id", "process_id",
+            "process_host_id", "tensor_scope_digest", "reservation_id",
+        )
+        return (
+            all(getattr(old, name) == getattr(new, name) for name in fields)
+            and len(old.stage_bindings) == len(new.stage_bindings)
+            and all(
+                all(getattr(a, name) == getattr(b, name) for name in stages)
+                for a, b in zip(old.stage_bindings, new.stage_bindings)
+            )
+        )
+
     def current(self) -> Any | None:
+        # Consult the router outside the owner lock; admission itself reads
+        # current() while holding the router's lock.
+        with self._lock:
+            candidate = self._qualification
+            refresh = self._qualification_refresh
+            allowed = self._qualification_refresh_allowed
+            clock = self._qualification_clock_ms
+        now = clock() if refresh is not None and isinstance(candidate, RouteQualificationV1) else None
+        due = (
+            now is not None and candidate is not None
+            and now - candidate.issued_at_unix_ms >= LIVE_QUALIFICATION_REFRESH_AFTER_MS
+        )
+        if due and allowed():
+            def renew_if_current() -> RouteQualificationV1 | None:
+                with self._lock:
+                    route = self._current
+                    qualification = self._qualification
+                    if (
+                        self._dropped or self._state != "ready" or route is None
+                        or qualification is not candidate or refresh is None
+                        or not isinstance(qualification, RouteQualificationV1)
+                        or not self._route_alive(route)
+                    ):
+                        return
+                    try:
+                        renewed = refresh(route)
+                        if (
+                            not isinstance(renewed, RouteQualificationV1)
+                            or renewed.route_ready is not True
+                            or renewed.issued_at_unix_ms <= qualification.issued_at_unix_ms
+                            or renewed.issued_at_unix_ms > clock()
+                            or not self._same_renewal_identity(qualification, renewed)
+                            or not self._route_alive(route)
+                        ):
+                            raise ValueError("qualification_renewal_invalid")
+                        self._qualification_refreshed(route, renewed)
+                        self._qualification = renewed
+                        return renewed
+                    except Exception:
+                        # Retain the true timestamp for retry and expiry.
+                        return None
+
+            # Production runner holds the admission publication lock for the
+            # full challenge. Never acquire that router lock under owner lock.
+            self._qualification_refresh_runner(renew_if_current)
         with self._lock:
             route = self._current
             qualification = self._qualification
             if (
-                self._dropped
-                or self._state != "ready"
-                or route is None
+                self._dropped or self._state != "ready" or route is None
                 or qualification is None
+            ):
+                return None
+            if now is not None and clock() - qualification.issued_at_unix_ms > 60 * 60_000:
+                return None
+        try:
+            return qualification if route.is_alive() else None
+        except BaseException:
+            return None
+
+    def peek_current(self) -> Any | None:
+        """Non-refreshing authority snapshot for HTTP status/projection reads."""
+        with self._lock:
+            route = self._current
+            qualification = self._qualification
+            if (
+                self._dropped or self._state != "ready" or route is None
+                or qualification is None
+            ):
+                return None
+            if (
+                self._qualification_refresh is not None
+                and isinstance(qualification, RouteQualificationV1)
+                and self._qualification_clock_ms() - qualification.issued_at_unix_ms > 60 * 60_000
             ):
                 return None
         try:
@@ -537,7 +653,7 @@ class ColdRouteRestartOwner:
             route_alive = self._route_alive(route)
         else:
             document = {"protocol": "mycelium.live_route_status.v1"}
-        route_ready = bool(state == "ready" and route_alive and qualification is not None)
+        route_ready = bool(state == "ready" and route_alive and self.peek_current() is not None)
         document["route_alive"] = route_alive
         document["route_ready"] = route_ready
         document["route_restarting"] = state == "restarting"
@@ -986,7 +1102,7 @@ def build_live_stack(
             else Path(product_state_root) / "private" / "a6-replay-checkpoints"
         ),
     )
-    return LiveStack(app=app, health=health, route=route)
+    return LiveStack(app=app, health=health, route=route, router=router)
 
 
 def build_registry_stack(
@@ -3182,6 +3298,16 @@ def run_physical_server(
             trusted_proxy_capability=trusted_proxy_capability,
         )
         stack.health.publish(qualification)
+        if stack.router is None:
+            raise RuntimeError("physical_qualification_router_unavailable")
+        route.configure_qualification_refresh(
+            refresh=_qualify_open_route,
+            refresh_allowed=stack.router.is_idle,
+            run_when_idle=stack.router.run_qualification_refresh_when_idle,
+            on_refresh=lambda concrete, record: getattr(
+                concrete, "set_deployment_qualification"
+            )(record, quantization=deployment.quantization),
+        )
         artifact_acquisition_store = ArtifactAcquisitionStore(
             artifact_acquisition_root
             or (Path(seed_state_root) / "artifact-acquisitions")

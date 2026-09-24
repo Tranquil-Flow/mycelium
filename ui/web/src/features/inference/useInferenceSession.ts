@@ -156,6 +156,28 @@ function sameBinding(left: ProductQualification, right: ProductQualification): b
   );
 }
 
+function sameRoute(left: ProductQualification, right: ProductQualification): boolean {
+  const a = left.binding;
+  const b = right.binding;
+  return left.route_ready && right.route_ready
+    && right.issued_at_unix_ms > left.issued_at_unix_ms
+    && a.qualification_id !== b.qualification_id
+    && a.qualification_digest !== b.qualification_digest
+    && left.evidence_class === 'physical_qualification'
+    && right.evidence_class === 'physical_qualification'
+    && left.reason_codes.length === 0 && right.reason_codes.length === 0
+    && a.deployment_id === b.deployment_id
+    && a.deployment_epoch === b.deployment_epoch
+    && a.topology_version === b.topology_version
+    && a.model_id === b.model_id
+    && a.resolved_commit === b.resolved_commit
+    && a.manifest_digest === b.manifest_digest
+    // path_manifest_digest includes the challenge request_id: each genuine
+    // renewal changes it even on the same physical placement path.
+    && a.stage_load_proof_digests.length === b.stage_load_proof_digests.length
+    && a.stage_load_proof_digests.every((digest, index) => digest === b.stage_load_proof_digests[index]);
+}
+
 function terminalHistory(
   state: InferenceSessionState,
   phase: 'completed' | 'cancelled' | 'failed',
@@ -455,7 +477,8 @@ export function useInferenceSession({
       dispatch({
         type: 'qualification_loaded',
         value: current,
-        changed: previous !== null && !sameBinding(previous, current),
+        changed: stateRef.current.qualification_changed ||
+          (previous !== null && !sameBinding(previous, current) && !sameRoute(previous, current)),
       });
     } catch {
       if (!controller.signal.aborted) dispatch({ type: 'qualification_unavailable' });
@@ -473,6 +496,19 @@ export function useInferenceSession({
       streamAbortRef.current?.abort();
     };
   }, [loadQualification, bootstrapReady]);
+
+  // Keep an open tab synchronized with genuine server authority. Never poll
+  // ahead of the root cookie bootstrap or while a request is in flight.
+  useEffect(() => {
+    if (!bootstrapReady) return;
+    const timer = window.setInterval(() => {
+      if (
+        loadAbortRef.current === null &&
+        !['submitting', 'streaming', 'interrupted', 'cancelling'].includes(stateRef.current.phase)
+      ) void loadQualification();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [bootstrapReady, loadQualification]);
 
   const runStream = useCallback(
     async (request: InferenceAcceptedResponse, cursor: number | null): Promise<void> => {
@@ -531,22 +567,21 @@ export function useInferenceSession({
           : before.qualification_changed
             ? QUALIFICATION_CHANGED_REASON
             : inferenceBlockReason(before.qualification, now());
-        if (blocked !== null) {
+        if (blocked !== null && blocked !== 'Qualification is stale') {
           dispatch({ type: 'form_failed', reason: blocked });
           return;
         }
-        let submission;
-        try {
-          submission = buildInferenceSubmission(
-            prompt,
-            maxNewTokens,
-            before.qualification,
-            now(),
-            workloadAttribution,
-          );
-        } catch (error) {
-          dispatch({ type: 'form_failed', reason: formReason(error) });
-          return;
+        // A stale local snapshot is not authority to submit. Fetch current
+        // server authority first, then validate and capture that exact binding.
+        if (blocked !== 'Qualification is stale') {
+          try {
+            buildInferenceSubmission(
+              prompt, maxNewTokens, before.qualification, now(), workloadAttribution,
+            );
+          } catch (error) {
+            dispatch({ type: 'form_failed', reason: formReason(error) });
+            return;
+          }
         }
 
         dispatch({ type: 'clear_form_error' });
@@ -566,10 +601,11 @@ export function useInferenceSession({
           return;
         }
         const acknowledged = before.qualification;
-        if (acknowledged === null || !sameBinding(acknowledged, current)) {
+        if (acknowledged === null || (!sameBinding(acknowledged, current) && !sameRoute(acknowledged, current))) {
           dispatch({ type: 'qualification_loaded', value: current, changed: true });
           return;
         }
+        let submission: InferenceSubmission;
         try {
           submission = buildInferenceSubmission(
             prompt,
