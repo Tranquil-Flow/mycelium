@@ -144,6 +144,11 @@ def native_probe() -> Path:
     built = resources.build_policy_probe(PROBE_PATH)
     assert built == PROBE_PATH.resolve()
     assert built.is_file() and not built.is_symlink()
+    # The first exec of a freshly linked binary pays macOS's one-time launch
+    # assessment (measured 5-8x the steady-state cost; >2.5 s under a loaded
+    # xdist run). Absorb it here so the smoke test below still holds the probe
+    # to the production PROBE_TIMEOUT_SECONDS on a steady-state exec.
+    subprocess.run([str(built)], check=True, capture_output=True, timeout=30)
     return built
 
 
