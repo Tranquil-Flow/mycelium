@@ -32,7 +32,11 @@ function measured(value: number | null, unit: string): string {
 }
 
 export function ConsumerDemoPage({ client, now, externalBlockReason = null, routeStatus }: ConsumerDemoPageProps) {
-  const defaultClient = useMemo(() => new ProductInferenceClient(), []);
+  // Explicit supported basic stream until native V2 token-ID validators align.
+  // Qualification, session ownership and CSRF checks remain unchanged.
+  const defaultClient = useMemo(() => new ProductInferenceClient({
+    submissionProtocol: 'mycelium.request_gateway.v1',
+  }), []);
   const timed = useMemo(
     () => new TimingInferenceClient(client ?? defaultClient, now),
     [client, defaultClient, now],
@@ -136,7 +140,7 @@ export function ConsumerDemoPage({ client, now, externalBlockReason = null, rout
   return <div className={styles.page}>
     <a className={styles.skip} href="#consumer-prompt">Skip to prompt</a>
     <header className={styles.nav}>
-      <a className={styles.brand} href="#consumer-top" aria-label="Mycelium home"><span aria-hidden="true">✳</span> mycelium<span className={styles.tag}>research preview</span></a>
+      <a className={styles.brand} href="#consumer-top" aria-label="Mycelium home"><span aria-hidden="true">✳</span> mycelium<span className={styles.tag}>experimental · basic V1 stream</span></a>
       <nav aria-label="Consumer navigation"><a href="#consumer-try">Try it</a><a href="#consumer-how">How it works</a><a href="/operator">Operator ↗</a></nav>
     </header>
     <main id="consumer-top" className={styles.main}>

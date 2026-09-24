@@ -1028,8 +1028,8 @@
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerDemoPage.tsx",
-      "sha256": "sha256:e6d097f739eda8800a213806d36ed44bb2fb7627d5faf25a18470b2889a3e214",
-      "size_bytes": 17102
+      "sha256": "sha256:5080f80acf99d2a5305788ff9b97f859ec1ecb43911ecd4f123af37ffcb4bb8e",
+      "size_bytes": 17329
     },
     {
       "path": "ui/web/src/features/consumer/ConsumerLiveRoute.tsx",
@@ -1080,6 +1080,16 @@
       "path": "ui/web/src/features/consumer/useElapsedSeconds.ts",
       "sha256": "sha256:30f7c500703f83e558d5b96e610fb7c82967f78d969b6dbe75b00583aec07d0b",
       "size_bytes": 992
+    },
+    {
+      "path": "ui/web/src/features/inference/requestClient.compat.test.ts",
+      "sha256": "sha256:c9baf4b0031b17ac18322816c6a8e77d3860d4bc9f9e416e10005e7b995856fb",
+      "size_bytes": 4008
+    },
+    {
+      "path": "ui/web/src/features/inference/requestClient.ts",
+      "sha256": "sha256:c1a1e054708183840d784cca2a27586b317f1df11572592dcdae75990cb91037",
+      "size_bytes": 16689
     },
     {
       "path": "ui/web/src/features/productEvidence/contracts.ts",
@@ -1138,5 +1148,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:a90068a4e8aff708d3c4a073621c6ea58d59b1ba6054b451adb7789fe71cf5a9"
+  "source_digest": "sha256:0f2a5bc7f1500c508043e49a85ab95a04e86bc12fa698cc05cb9e98f91450d2c"
 }

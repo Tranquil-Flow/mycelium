@@ -58,6 +58,8 @@ export class InferenceClientError extends Error {
 export interface ProductInferenceClientOptions {
   readonly fetch?: InferenceFetch;
   readonly now?: () => number;
+  /** Explicit wire version, never a retry/fallback. V2 remains the default. */
+  readonly submissionProtocol?: 'mycelium.request_gateway.v1' | 'mycelium.request_gateway.v2';
 }
 
 function clientError(
@@ -207,12 +209,18 @@ function decodeFrame(frame: SseFrame, requestId: string): InferenceEvent {
 export class ProductInferenceClient implements InferenceClient {
   private readonly fetchImplementation: InferenceFetch;
   private readonly now: () => number;
+  private readonly submissionProtocol: 'mycelium.request_gateway.v1' | 'mycelium.request_gateway.v2';
   private bootstrap: ProductBootstrap | null = null;
   private bootstrapPromise: Promise<ProductBootstrap> | null = null;
 
   constructor(options: ProductInferenceClientOptions = {}) {
     this.fetchImplementation = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.now = options.now ?? Date.now;
+    this.submissionProtocol = options.submissionProtocol ?? 'mycelium.request_gateway.v2';
+    if (this.submissionProtocol !== 'mycelium.request_gateway.v1' &&
+        this.submissionProtocol !== 'mycelium.request_gateway.v2') {
+      throw clientError('unsupported_submission_protocol', false);
+    }
   }
 
   private async loadBootstrap(signal?: AbortSignal): Promise<ProductBootstrap> {
@@ -312,7 +320,14 @@ export class ProductInferenceClient implements InferenceClient {
         cache: 'no-store',
         redirect: 'error',
         headers: await this.mutationHeaders(signal),
-        body: JSON.stringify(submission),
+        body: JSON.stringify(this.submissionProtocol === 'mycelium.request_gateway.v1'
+          ? {
+              protocol: this.submissionProtocol,
+              prompt: submission.prompt,
+              max_new_tokens: submission.max_new_tokens,
+              qualification: submission.qualification,
+            }
+          : submission),
       },
       signal,
     );
