@@ -20,6 +20,17 @@ def test_work_http_exact_consent_rejections_and_native_start(tmp_path):
         app._policy_observer=lambda:dict(SAFE)
         limits=asdict(options['limits'])
         body={'limits':limits,'stage_acknowledged':True}
+        # Arrange the staged bytes through the same product path the HTTP
+        # preview uses, before any timed request. This test's contract is the
+        # exact consent/native-start semantics over authenticated HTTP -- not
+        # host performance: the per-request staging child
+        # (`python -B -m mycelium_a13_macos.managed_staging prepare`, 60 s
+        # subprocess budget) was measured at ~93% of the first preview
+        # request's wall cost and is the recorded L2 batch-13 tail timeout.
+        # The request under test still re-verifies the staged bytes, marker
+        # and offer binding (TargetStaging.prepare verify path).
+        from mycelium_a13_macos.work_acceptance import preview_work
+        preview_work(actor,offer,stage_acknowledged=True,**options)
         assert request(app,'/api/work/preview','POST',body)[0]==401
         headers=login(app)
         code,_,raw=request(app,'/api/work/preview','POST',body,headers)

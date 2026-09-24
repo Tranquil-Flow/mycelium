@@ -36,7 +36,14 @@ def owned(tmp_path):
     finally:a.close()
 
 def enroll(a,h):
-    assert request(a,'/api/create','POST',{'consent':CONSENT},h)[0]==200
+    # These acquisition tests exercise the model-download and lifecycle HTTP
+    # surfaces. Create the prerequisite real authority membership through the
+    # same product action body but outside test_app.request's 3 s client read
+    # bound: first-time TLS material generation is intentionally expensive and
+    # was the recorded L2 batch-13 tail timeout, but it is not the contract under
+    # test here.
+    status=a.action('/api/create',{'consent':CONSENT})
+    assert status['membership_state']=='current'
 
 def start(a,h,body=None):
     return request(a,'/api/model/download','POST',body or {'consent':GRANT},h)

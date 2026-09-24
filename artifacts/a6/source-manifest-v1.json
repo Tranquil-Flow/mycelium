@@ -577,6 +577,11 @@
       "size_bytes": 20190
     },
     {
+      "path": "tests/a13_macos/test_app_acquisition.py",
+      "sha256": "sha256:aa8977891c6c7f37109a605e240e828c572b32277941ef836e3ba37a64f6ce3e",
+      "size_bytes": 5345
+    },
+    {
       "path": "tests/a13_macos/test_authority.py",
       "sha256": "sha256:8c7702b8db41312da5971df63e986f831ae5609a98c3027e0ba1576b392a4ba3",
       "size_bytes": 10347
@@ -597,6 +602,11 @@
       "size_bytes": 9228
     },
     {
+      "path": "tests/a13_macos/test_http_readiness.py",
+      "sha256": "sha256:80dfb78181bf217e39a99144ba71e29b631c8f91d6e4e7e91d2ce95388e37534",
+      "size_bytes": 7291
+    },
+    {
       "path": "tests/a13_macos/test_managed_control.py",
       "sha256": "sha256:74a0fb49890972ed33959cef24de95316276139612379d02b56f1501d4acd11b",
       "size_bytes": 48504
@@ -615,6 +625,11 @@
       "path": "tests/a13_macos/test_resources.py",
       "sha256": "sha256:4523004999742615269fcc0227a2f426e66ec2825087175ab8b636612edbb01b",
       "size_bytes": 7729
+    },
+    {
+      "path": "tests/a13_macos/test_work_http_parent.py",
+      "sha256": "sha256:eeeab3c9c6a6bd4376271f78826e116a9294c9e65266a14c26baa6ec78c3e3a4",
+      "size_bytes": 2800
     },
     {
       "path": "tests/a13_macos/test_worker.py",
@@ -1123,5 +1138,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:c015299712cd8398e258c3266f0494a44d8a451fa322483d997c7b1e7ec6aa37"
+  "source_digest": "sha256:a90068a4e8aff708d3c4a073621c6ea58d59b1ba6054b451adb7789fe71cf5a9"
 }
