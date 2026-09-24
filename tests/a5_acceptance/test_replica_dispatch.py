@@ -19,6 +19,7 @@ What they prove:
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ from mycelium_qualification.replica_track import (
 from mycelium_qualification.replica_track_backend import (
     BoundTrack,
     ReplicaTrackDispatcher,
+    ReplicaTrackSessionBackend,
 )
 from mycelium_request_gateway.backend import (
     RouterSessionBackend,
@@ -931,3 +933,131 @@ def test_loss_of_any_track_placement_makes_whole_track_unselectable():
         replica_loss_placement_ids={"p1"},
     )
     assert [track.track_id for track in selectable] == ["track-B"]
+
+
+# ---------------------------------------------------------------------------
+# Recovery projection forwarding: the composed backend must keep the A4
+# recovery source visible to the request gateway (browser publication seam)
+# ---------------------------------------------------------------------------
+
+
+def _recovery_document(
+    *,
+    deployment_id: str = "deployment-test",
+    deployment_epoch: int = 1,
+) -> dict[str, Any]:
+    """A minimal document in the exact public recovery runtime schema."""
+
+    from mycelium_a6_recovery import _digest as recovery_runtime_digest
+
+    document: dict[str, Any] = {
+        "protocol": "mycelium.full_context_recovery_runtime.v1",
+        "binding": {
+            "deployment_id": deployment_id,
+            "deployment_epoch": deployment_epoch,
+            "qualification_digest": _digest("qualification"),
+            "a4_atomic_commit": "b" * 40,
+        },
+        "requests": [],
+        "breaker": {
+            "state": "closed",
+            "failure_observations_unix_ms": [],
+            "open_until_unix_ms": 0,
+        },
+    }
+    document["runtime_digest"] = recovery_runtime_digest(document)
+    return document
+
+
+class _RecoveryRouter(_FakeRouter):
+    """A router stub that supplies (or withholds) the A4 recovery source."""
+
+    def __init__(
+        self,
+        graph: _FakeExecutionGraph,
+        *,
+        document: dict[str, Any] | None,
+    ) -> None:
+        super().__init__(graph)
+        self._recovery_document = document
+        self.recovery_calls: list[dict[str, int]] = []
+
+    def recovery_public_projection(
+        self, committed_token_counts: dict[str, int]
+    ) -> dict[str, Any]:
+        self.recovery_calls.append(dict(committed_token_counts))
+        if self._recovery_document is None:
+            raise RuntimeError("recovery_runtime_unavailable")
+        return json.loads(json.dumps(self._recovery_document))
+
+
+def test_session_backend_forwards_the_a4_recovery_projection() -> None:
+    """The wrapper must expose A4's recovery source, not hide it.
+
+    Production composes the A5 replica wrapper as the request-gateway backend
+    whenever the route offers replica qualifications. The browser's product
+    publication reads the recovery runtime projection from that backend; a
+    wrapper that drops the method degrades every snapshot with
+    ``recovery_source_failed`` even though the A4/router path provides it.
+    """
+
+    document = _recovery_document()
+    router = _RecoveryRouter(_graph_with("p0", "p1"), document=document)
+    backend, _now, _calls = _build_session_backend(router=router, quals=())
+    projection = backend.recovery_public_projection({"request-001": 3})
+    assert projection["protocol"] == "mycelium.full_context_recovery_runtime.v1"
+    assert (
+        projection["binding"]["qualification_digest"]
+        == document["binding"]["qualification_digest"]
+    )
+    assert router.recovery_calls == [{"request-001": 3}]
+
+
+def test_session_backend_fails_closed_when_the_a4_recovery_source_raises() -> None:
+    """No fabricated projection: the exact A4 failure code is surfaced."""
+
+    router = _RecoveryRouter(_graph_with("p0", "p1"), document=None)
+    backend, _now, _calls = _build_session_backend(router=router, quals=())
+    with pytest.raises(AdmissionError) as failure:
+        backend.recovery_public_projection({})
+    assert failure.value.code == "recovery_projection_unavailable"
+
+
+def test_session_backend_fails_closed_without_any_a4_recovery_source() -> None:
+    """A composed backend with no recovery source must fail closed, not invent."""
+
+    router = _FakeRouter(_graph_with("p0", "p1"))
+    dispatcher = _build_dispatcher(router=router, quals=())
+    backend = ReplicaTrackSessionBackend(
+        dispatcher=dispatcher,
+        now_unix_ms=lambda: 10_000,
+        plain_backend=object(),
+    )
+    with pytest.raises(AdmissionError) as failure:
+        backend.recovery_public_projection({})
+    assert failure.value.code == "recovery_projection_unavailable"
+
+
+def test_composed_request_gateway_keeps_recovery_projection_through_the_wrapper() -> None:
+    """L1 production composition: the composed app answers the projector.
+
+    ``create_request_gateway_application`` swaps the A5 wrapper in when the
+    route offers replica qualifications. The composed application must still
+    serve ``recovery_public_projection`` with the A4-owned document — the
+    exact source the product projector reads (round-7 browser regression).
+    """
+
+    from mycelium_request_gateway import create_request_gateway_application
+
+    router = _RecoveryRouter(_graph_with("p0", "p1"), document=_recovery_document())
+    application = create_request_gateway_application(
+        qualification_source=_qualification_source_returns_none(),
+        router=router,
+        codec=_FakeCodec(),
+        bearer_token="bounded-test-token",
+        replica_qualifications_factory=lambda: (),
+        replica_loss_placement_ids_factory=frozenset,
+    )
+    projection = application.recovery_public_projection()
+    assert projection["protocol"] == "mycelium.full_context_recovery_runtime.v1"
+    assert projection["binding"]["deployment_id"] == "deployment-test"

@@ -557,6 +557,28 @@ class ReplicaTrackSessionBackend:
             new_generation=new_generation,
         )
 
+    def recovery_public_projection(
+        self, committed_token_counts: Mapping[str, int]
+    ) -> Mapping[str, object]:
+        """Forward the A4/router recovery runtime projection unchanged.
+
+        A5 owns no recovery authority: it selects a replica track, while the
+        recovery runtime projection remains A4/router-owned and identical on
+        both the incumbent and the replica paths. The composed backend must
+        therefore expose it, or every product publication degrades with
+        ``recovery_source_failed`` even though the source exists. When the A4
+        path exposes no recovery source the wrapper fails closed with A4's
+        exact error code — it never fabricates a projection.
+        """
+
+        source = getattr(self._plain_backend, "recovery_public_projection", None)
+        if not callable(source):
+            raise AdmissionError("recovery_projection_unavailable")
+        projection = source(dict(committed_token_counts))
+        if not isinstance(projection, Mapping):
+            raise AdmissionError("recovery_projection_invalid")
+        return projection
+
 
 __all__ = [
     "BoundTrack",

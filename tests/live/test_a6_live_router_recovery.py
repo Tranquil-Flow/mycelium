@@ -7,8 +7,11 @@ physical/browser gate.
 from __future__ import annotations
 
 from dataclasses import replace
+import inspect
 import threading
 import time
+
+import pytest
 
 from mycelium_a6_m16 import M16RecoveryAuthority
 from mycelium_a6_recovery import (
@@ -19,8 +22,14 @@ from mycelium_a6_recovery import (
 from mycelium_live.a6_recovery import LiveA6RecoveryQualifier
 from mycelium_live.router_port import LiveRouterPort
 from mycelium_live.route import InferenceCancelled
+from mycelium_m16_runtime import M16AdmissionError
 from mycelium_request_gateway.backend import RouterSessionBackend
-from mycelium_request_gateway.contracts import InferenceSubmission, qualification_binding
+from mycelium_request_gateway.contracts import (
+    AdmissionError,
+    InferenceSubmission,
+    qualification_binding,
+    qualification_digest,
+)
 from mycelium_request_gateway.service import RequestGatewayService
 from tests.live.test_a6_m16_recovery import (
     _coordinator,
@@ -218,6 +227,26 @@ class MissingCleanupReceiptAfterCutoverRoute(FailingThenRecoveringRoute):
         }
 
 
+def _port_authority_kwargs(qualification_source):
+    """Wire the idle recovery-projection authority when the port supports it.
+
+    Before the M1 repair LiveRouterPort had no source of the *current*
+    qualification for an idle projection (the digest was only bound by
+    ``admit``). Passing the source only when the constructor accepts it lets
+    the RED run reproduce the real production failure
+    (``recovery_projection_unavailable``) instead of a TypeError; once the
+    seam exists it is always supplied.
+    """
+
+    if "qualification_source" in inspect.signature(LiveRouterPort.__init__).parameters:
+        return {"qualification_source": qualification_source}
+    return {}
+
+
+def _unused_successor_qualifier(*_args):
+    raise AssertionError("successor qualifier must not run for idle projection")
+
+
 def _runtime(
     tmp_path,
     route,
@@ -227,8 +256,12 @@ def _runtime(
     qualification_expiry_ms=1_900_000,
     qualification_calls=None,
     production_qualifier=False,
+    qualification=None,
+    port_qualification_source=None,
 ):
-    gateway_qualification = _synthetic_qualification()
+    gateway_qualification = (
+        _synthetic_qualification() if qualification is None else qualification
+    )
     graph = replace(
         _graph() if base_graph is None else base_graph,
         deployment_id=gateway_qualification.deployment_id,
@@ -307,6 +340,7 @@ def _runtime(
         recovery_tokenizer_digest=TOKENIZER_DIGEST,
         recovery_a4_atomic_commit="a" * 40,
         recovery_clock_ms=recovery_clock_ms,
+        **_port_authority_kwargs(port_qualification_source),
     )
     service = RequestGatewayService(
         qualification_source=MutableQualificationSource(gateway_qualification),
@@ -752,3 +786,240 @@ def test_gateway_public_recovery_projection_uses_gateway_committed_count(tmp_pat
         assert "committed_prefix_tokens" not in serialized
     finally:
         service.close()
+
+
+# ---------------------------------------------------------------------------
+# Idle recovery projection: the browser polls the publication source before
+# the first admission, so the binding must come from owned authority, never
+# from an invented digest (M1 UI recovery-projection repair).
+# ---------------------------------------------------------------------------
+
+
+def test_idle_projection_binds_the_current_qualification_before_any_admission(tmp_path) -> None:
+    """Idle pre-first-request projection must carry the real binding.
+
+    LiveRouterPort only bound the qualification digest on ``admit`` (base
+    behavior), so the browser's pre-request poll failed with
+    ``recovery_projection_unavailable`` and the publication stayed degraded,
+    deadlocking the first request. The projection must read the current
+    qualifier record from owned authority while the route is idle.
+    """
+
+    route = FailingThenRecoveringRoute()
+    qualification = _synthetic_qualification()
+    _coordinator_value, router, service, _gateway_qualification = _runtime(
+        tmp_path,
+        route,
+        qualification=qualification,
+        port_qualification_source=MutableQualificationSource(qualification),
+    )
+    try:
+        projection = service.recovery_public_projection()
+        assert projection["protocol"] == "mycelium.full_context_recovery_runtime.v1"
+        assert (
+            projection["binding"]["qualification_digest"]
+            == qualification_digest(qualification)
+        )
+        assert projection["binding"]["deployment_id"] == qualification.deployment_id
+        assert (
+            projection["binding"]["deployment_epoch"]
+            == qualification.deployment_epoch
+        )
+        assert projection["requests"] == []
+        # The projection reads owned authority; it never mints or caches one.
+        assert router.recovery_public_projection(
+            {}
+        )["binding"]["qualification_digest"] == qualification_digest(qualification)
+        assert router._recovery_qualification_digest is None
+    finally:
+        service.close()
+        router.close()
+
+
+def test_idle_projection_without_a_qualification_source_stays_closed(tmp_path) -> None:
+    """No owned authority wired: the projection fails closed, never defaulted."""
+
+    route = FailingThenRecoveringRoute()
+    _coordinator_value, router, service, _gateway_qualification = _runtime(
+        tmp_path,
+        route,
+    )
+    try:
+        with pytest.raises(AdmissionError) as failure:
+            service.recovery_public_projection()
+        assert failure.value.code == "recovery_projection_unavailable"
+    finally:
+        service.close()
+        router.close()
+
+
+def test_idle_projection_rejects_a_record_for_another_deployment(tmp_path) -> None:
+    """Mismatched authority fails closed instead of binding a foreign record."""
+
+    qualification = _synthetic_qualification()
+    graph = replace(_graph(), deployment_id="deployment-foreign-projection")
+    coordinator = _coordinator(graph)
+    router = LiveRouterPort(
+        route=FailingThenRecoveringRoute(),
+        execution_graph=graph,
+        runtime_coordinator=coordinator,
+        recovery_authority=M16RecoveryAuthority(coordinator),
+        recovery_qualification_source=_unused_successor_qualifier,
+        recovery_tokenizer_digest=TOKENIZER_DIGEST,
+        recovery_a4_atomic_commit="a" * 40,
+        recovery_clock_ms=lambda: 1_200,
+        **_port_authority_kwargs(
+            MutableQualificationSource(qualification)
+        ),
+    )
+    try:
+        with pytest.raises(M16AdmissionError) as failure:
+            router.recovery_public_projection({})
+        assert failure.value.code == "recovery_projection_binding_mismatch"
+    finally:
+        router.close()
+
+
+def test_idle_replica_wrapper_gateway_projection_serves_the_real_binding(tmp_path) -> None:
+    """Round-7 composition shape: replica wrapper over an idle live route.
+
+    The product stack composes the A5 replica wrapper whenever the route
+    offers replica qualifications, and the browser polls before the first
+    request. Both seams must hold so the gateway answers with the A4/router
+    recovery document bound to the current qualification.
+    """
+
+    from mycelium_qualification.replica_track_backend import (
+        ReplicaTrackDispatcher,
+        ReplicaTrackSessionBackend,
+    )
+
+    qualification = _synthetic_qualification()
+    source = MutableQualificationSource(qualification)
+    _coordinator_value, router, service, _gateway_qualification = _runtime(
+        tmp_path,
+        FailingThenRecoveringRoute(),
+        qualification=qualification,
+        port_qualification_source=source,
+    )
+    service.close()
+    wrapper = ReplicaTrackSessionBackend(
+        dispatcher=ReplicaTrackDispatcher(
+            router=router,
+            codec=TokenCodec(),
+            clock=lambda: 100.0,
+            qualification_source=None,
+            replica_qualifications_factory=lambda: (),
+            replica_loss_placement_ids_factory=frozenset,
+        ),
+        now_unix_ms=lambda: 1_800_000_000_000,
+        plain_backend=RouterSessionBackend(
+            router=router,
+            codec=TokenCodec(),
+            clock=lambda: 100.0,
+        ),
+    )
+    wrapped_service = RequestGatewayService(
+        qualification_source=source,
+        backend=wrapper,
+        request_id_source=lambda: "idle-wrapper-001",
+        max_buffered_events=16,
+        replay_checkpoint_root=tmp_path / "checkpoints",
+    )
+    try:
+        projection = wrapped_service.recovery_public_projection()
+        assert projection["protocol"] == "mycelium.full_context_recovery_runtime.v1"
+        assert (
+            projection["binding"]["qualification_digest"]
+            == qualification_digest(qualification)
+        )
+        assert projection["requests"] == []
+    finally:
+        wrapped_service.close()
+        router.close()
+
+
+def test_idle_gateway_projection_keeps_recovery_source_current_for_the_product(
+    tmp_path,
+) -> None:
+    """Round-7 browser chain: the real product consumer must see it current.
+
+    The product application catches any recovery-source exception and records
+    ``recovery_source_failed``, which degrades the publication. This drives
+    the exact production chain — idle LiveRouterPort -> A5 replica wrapper ->
+    request gateway -> ProductEvidenceApplication — and asserts the recovery
+    source is ``current`` before any request is submitted.
+    """
+
+    import asyncio
+    import json
+
+    from mycelium_product_spine.app import ProductEvidenceApplication
+    from mycelium_product_spine.projector import ProductProjector
+    from mycelium_request_gateway import create_request_gateway_application
+
+    qualification = _synthetic_qualification()
+    source = MutableQualificationSource(qualification)
+    _coordinator_value, router, service, _gateway_qualification = _runtime(
+        tmp_path,
+        FailingThenRecoveringRoute(),
+        qualification=qualification,
+        port_qualification_source=source,
+    )
+    service.close()
+    gateway = create_request_gateway_application(
+        qualification_source=source,
+        router=router,
+        codec=TokenCodec(),
+        bearer_token="bounded-test-token",
+        replica_qualifications_factory=lambda: (),
+        replica_loss_placement_ids_factory=frozenset,
+        replay_checkpoint_root=tmp_path / "consumer-checkpoints",
+    )
+    product = ProductEvidenceApplication(
+        projector=ProductProjector(pseudonym_salt=b"c" * 32),
+        membership_source=lambda: [],
+        route_source=lambda: None,
+        qualification_source=lambda: None,
+        recovery_source=gateway.recovery_public_projection,
+        clock_unix_ms=lambda: 1_500_000,
+    )
+
+    async def request_snapshot() -> list[dict]:
+        messages: list[dict] = []
+
+        async def receive() -> dict:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message: dict) -> None:
+            messages.append(message)
+
+        await product(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/v1/product/snapshot",
+                "headers": [],
+            },
+            receive,
+            send,
+        )
+        return messages
+
+    try:
+        messages = asyncio.run(request_snapshot())
+        snapshot = json.loads(messages[-1]["body"])
+        recovery_states = [
+            state
+            for state in snapshot["source_states"]
+            if state["source_id"] == "recovery-source"
+        ]
+        assert recovery_states and recovery_states[0]["status"] == "current"
+        recovery = [
+            entity for entity in snapshot["entities"] if entity["kind"] == "recovery"
+        ]
+        assert len(recovery) == 1
+        assert recovery[0]["freshness"]["status"] == "current"
+        assert recovery[0]["attributes"]["request_count"] == 0
+    finally:
+        router.close()

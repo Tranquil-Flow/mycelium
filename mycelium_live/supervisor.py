@@ -920,6 +920,19 @@ def build_live_stack(
     budget = _m16_performance_budget(deployment_dir)
     if budget is not None:
         coordinator.attach_performance_budget(budget)
+    # The qualifier-owned current-record source is created first: the router
+    # port's idle recovery projection (polled by the browser before the first
+    # admission) must read the same authority the request gateway captures
+    # from, so the two never disagree about the current qualification.
+    health = (
+        route
+        if getattr(route, "acts_as_qualification_source", False) is True
+        else RouteHealthSource(
+            route=route,
+            refresh=lambda: _qualify_open_route(route),
+            refresh_allowed=lambda: router.is_idle(),
+        )
+    )
     router = LiveRouterPort(
         route=route,
         execution_graph=execution_graph,
@@ -932,19 +945,12 @@ def build_live_stack(
         recovery_qualification_source=recovery_qualification_source,
         recovery_tokenizer_digest=recovery_tokenizer_digest,
         recovery_a4_atomic_commit=recovery_a4_atomic_commit,
+        qualification_source=health,
     )
     configure_runtime_source = getattr(route, "set_m16_runtime_source", None)
     if callable(configure_runtime_source):
         configure_runtime_source(router.runtime_status)
-    health = (
-        route
-        if getattr(route, "acts_as_qualification_source", False) is True
-        else RouteHealthSource(
-            route=route,
-            refresh=lambda: _qualify_open_route(route),
-            refresh_allowed=router.is_idle,
-        )
-    )
+
     def product_app_factory(recovery_source: Callable[[], Mapping[str, Any]]) -> Any | None:
         return _optional_product_application(
             route,

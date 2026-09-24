@@ -211,6 +211,7 @@ class LiveRouterPort:
         recovery_tokenizer_digest: str | None = None,
         recovery_a4_atomic_commit: str | None = None,
         recovery_clock_ms: Callable[[], int] | None = None,
+        qualification_source: Any | None = None,
     ) -> None:
         recovery_parts = (
             recovery_authority,
@@ -240,6 +241,12 @@ class LiveRouterPort:
         self._recovery_tokenizer_digest = recovery_tokenizer_digest
         self._recovery_a4_atomic_commit = recovery_a4_atomic_commit
         self._recovery_qualification_digest: str | None = None
+        # Qualifier-owned source of the *current* deployment qualification,
+        # shared with the request gateway's qualification gate. Admission
+        # binds the digest on first use; an idle projection (the browser polls
+        # before the first request) reads this source instead of failing or
+        # inventing a digest.
+        self._qualification_source = qualification_source
         self._recovery_clock_ms = recovery_clock_ms or (
             lambda: int(time.time() * 1_000)
         )
@@ -1132,6 +1139,55 @@ class LiveRouterPort:
                     self._changed.notify_all()
             return False
 
+    def _recovery_projection_qualification_digest(self) -> str:
+        """Resolve the exact current qualification binding for the projection.
+
+        Admission binds the digest on first use, and that binding owns the
+        request path. Before any admission — the browser polls the public
+        projection while the route is idle — the projection must still carry
+        the real current qualifier record, read from the same owned authority
+        the request gateway captures from. No digest is invented, defaulted,
+        or cached: an absent, stale, foreign, or malformed record fails
+        closed instead of publishing evidence the authority never issued.
+        """
+
+        with self._lock:
+            bound = self._recovery_qualification_digest
+        if bound is not None:
+            return bound
+        source = self._qualification_source
+        if source is None:
+            raise M16AdmissionError("recovery_projection_unavailable")
+        try:
+            record = source.current()
+        except Exception:
+            raise M16AdmissionError("recovery_projection_unavailable") from None
+        from mycelium_qualification.contracts import RouteQualificationV1
+
+        if record is None or not isinstance(record, RouteQualificationV1):
+            raise M16AdmissionError("recovery_projection_unavailable")
+        if record.route_ready is not True:
+            raise M16AdmissionError("recovery_projection_unavailable")
+        if (
+            record.deployment_id != self._graph.deployment_id
+            or record.deployment_epoch != self._graph.deployment_epoch
+        ):
+            raise M16AdmissionError("recovery_projection_binding_mismatch")
+        from mycelium_request_gateway.contracts import qualification_digest
+
+        try:
+            digest = qualification_digest(record)
+        except Exception:
+            raise M16AdmissionError("recovery_projection_binding_invalid") from None
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 71
+            or not digest.startswith("sha256:")
+            or any(character not in "0123456789abcdef" for character in digest[7:])
+        ):
+            raise M16AdmissionError("recovery_projection_binding_invalid")
+        return digest
+
     def recovery_public_projection(
         self, committed_token_counts: Mapping[str, int]
     ) -> dict[str, Any]:
@@ -1139,8 +1195,10 @@ class LiveRouterPort:
 
         coordinator = self._coordinator
         atomic_commit = self._recovery_a4_atomic_commit
-        qualification_digest = self._recovery_qualification_digest
-        if coordinator is None or atomic_commit is None or qualification_digest is None:
+        if coordinator is None or atomic_commit is None:
+            raise M16AdmissionError("recovery_projection_unavailable")
+        qualification_digest = self._recovery_projection_qualification_digest()
+        if qualification_digest is None:
             raise M16AdmissionError("recovery_projection_unavailable")
         if (
             not isinstance(atomic_commit, str)

@@ -92,6 +92,13 @@ def test_live_stack_wires_qualifier_owned_a6_authority(monkeypatch, tmp_path: Pa
     assert authority.coordinator is coordinator
     assert captured_router["recovery_qualification_source"] is qualifier
     assert captured_router["recovery_tokenizer_digest"] == "sha256:" + "a" * 64
+    # The idle recovery projection and the request gateway must share one
+    # qualifier-owned current-record source: the browser polls the projection
+    # before the first admission, so the port cannot depend on admit alone.
+    assert (
+        captured_router.get("qualification_source")
+        is captured_stack["qualification_source"]
+    )
     factory = captured_stack["product_app_factory"]
     assert callable(factory)
     recovery_source = RouterProbe().recovery_public_projection
