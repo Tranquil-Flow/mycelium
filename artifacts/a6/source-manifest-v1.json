@@ -48,7 +48,7 @@
     },
     {
       "path": "contracts/contract-manifest.v1.json",
-      "sha256": "sha256:07aa7e8626df8e98a1f1b4aee05d53affbf375dfa74b5c56145d8a4d4d1df4c5",
+      "sha256": "sha256:189c360c7c95756ddd8fcb9de24c25a10335d6c3716514fb1e97722b71e98bfe",
       "size_bytes": 70321
     },
     {
@@ -1028,13 +1028,13 @@
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
-      "sha256": "sha256:be9bc57a4a4683781be36f0681c6adcead5b8526c1b7a26733fb8046efdaf254",
-      "size_bytes": 21978
+      "sha256": "sha256:170a29d951a640df076a1fe266dc78695ff61bfe74a628046a23873c89dd4a80",
+      "size_bytes": 22463
     },
     {
       "path": "ui/web/scripts/a6-product-browser-e2e.test.mjs",
-      "sha256": "sha256:b5f868e01f5373afd3ebfe08f37a2b37daa23322946040211e2b0ab3291e0e74",
-      "size_bytes": 14337
+      "sha256": "sha256:88739cbce253c233dc8b5ef44c2e26f7ed0908f3c7b2123a4ffa1ff0d95cc8b9",
+      "size_bytes": 16731
     },
     {
       "path": "ui/web/src/App.consumer.test.tsx",
@@ -1213,5 +1213,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:5372548520f70b0c046f7ac9e8745e8ff65b4b1ae67920b8fa79b01745c884bf"
+  "source_digest": "sha256:159dbc10521479359be3947b84066a57a28f2cf5ac62cbaaccd07e4167d607ea"
 }

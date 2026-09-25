@@ -76,6 +76,49 @@ test('fixture mode is explicitly local preparation and never live evidence', () 
   assert.match(report.claim_boundary, /not live browser evidence/i);
 });
 
+test('live CLI refuses absent, invalid, repeated or ambiguous engine before any contact', () => {
+  // Valid local grant and configuration make this a real CLI selection boundary,
+  // yet none of these probes may import Playwright or touch either endpoint.
+  const env = {
+    MYCELIUM_A6_FLEET_GRANT: 'FLEET GRANTED TO A6',
+    MYCELIUM_A6_PRODUCT_ORIGIN: 'http://127.0.0.1:9',
+    MYCELIUM_A6_BROWSER_EVIDENCE: '/tmp/forbidden-a6-browser-evidence.json',
+  };
+  for (const args of [[], ['--engine='], ['--engine=all'],
+    ['--engine=Chromium'], ['--engine=chromium', '--engine=firefox'],
+    ['--engine=webkit', '--engine=webkit'], ['--engine=chromium', '--unknown']]) {
+    const result = run(args, env);
+    assert.equal(result.status, 1, `${args}: ${result.stderr}`);
+    assert.match(result.stderr, /browser_engine_selection_required/);
+    assert.doesNotMatch(result.stderr, /FLEET GRANTED|browserType|ECONNREFUSED|Cannot find package/);
+  }
+});
+
+test('single-engine receipt binds only the selected engine and is explicitly non-aggregate', () => {
+  for (const engine of ['chromium', 'firefox', 'webkit']) {
+    const positive = { scenario: 'positive', source_failure_observed: true };
+    const negative = { scenario: 'negative', source_failure_observed: true };
+    const report = faultHarness.singleEngineReceipt(engine, positive, negative);
+    assert.equal(report.engine, engine);
+    assert.deepEqual(report.engines, [{ engine, positive, negative }]);
+    assert.equal(report.aggregation_pending, true);
+    assert.equal(report.qualification_claim, false);
+    assert.equal(report.promotion_authorized, false);
+    assert.equal(report.second_session_private_content_visible, false);
+    assert.doesNotMatch(JSON.stringify(report), /FLEET GRANTED|A6-BROWSER-PRIVATE/);
+  }
+});
+
+test('live source launches and checks only the selected engine, not a three-engine case replay', () => {
+  const source = readFileSync(scriptPath, 'utf8');
+  assert.doesNotMatch(source, /for\s*\(const name of ENGINES\)/);
+  assert.match(source, /playwright\[engine\]\.launch/);
+  assert.doesNotMatch(source, /playwright\.chromium\.launch/);
+  assert.match(source, /privacyBrowser\.newContext/);
+  assert.match(source, /runScenario\(page, 'positive', faultControl\.positive, usedCases/);
+  assert.match(source, /runScenario\(page, 'negative', faultControl\.negative, usedCases/);
+});
+
 test('live mode fails closed before contacting a serve without the exact fleet grant', () => {
   const result = run([], {
     MYCELIUM_A6_PRODUCT_ORIGIN: 'http://127.0.0.1:9',
@@ -136,7 +179,7 @@ test('granted CLI refuses incomplete or remote control before browser launch or 
     { MYCELIUM_A6_POSITIVE_FAULT_URL: 'http://evil.test/fault' },
     { MYCELIUM_A6_POSITIVE_FAULT_URL: 'http://127.0.0.1:8787/fault' },
   ]) {
-    const result = run([], { ...env, ...change });
+    const result = run(['--engine=chromium'], { ...env, ...change });
     assert.equal(result.status, 1);
     assert.match(result.stderr, /fault_case_id_invalid|local_fault_url_invalid/);
     assert.doesNotMatch(result.stderr, /FLEET GRANTED|browserType|ECONNREFUSED/);

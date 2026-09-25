@@ -432,37 +432,55 @@ async function runScenario(page, scenario, faultControl, usedCases, maximumNewTo
   };
 }
 
-async function runLive({ origin, outputPath, faultControl, maximumNewTokens }) {
+export function singleEngineReceipt(engine, positive, negative) {
+  if (!ENGINES.includes(engine)) fail('browser_engine_selection_required');
+  return {
+    protocol: 'mycelium.a6_product_browser_observation.v1',
+    mode: 'live',
+    live_evidence: true,
+    fixture_or_unit_evidence: false,
+    qualification_claim: false,
+    promotion_authorized: false,
+    aggregation_pending: true,
+    claim_boundary: 'One engine and one receiver lifetime only; three-engine and physical qualification pending.',
+    fleet_grant_verified: true,
+    passed: true,
+    engine,
+    engines: [{ engine, positive, negative }],
+    workspaces: [...WORKSPACES],
+    required_scenarios: [...REQUIRED_SCENARIOS],
+    source_failure_transition_observed: true,
+    stale_source_after_cutover: false,
+    duplicate_terminal: false,
+    second_session_private_content_visible: false,
+    console_error_count: 0,
+    page_error_count: 0,
+    cross_origin_request_count: 0,
+  };
+}
+
+async function runLive({ engine, origin, outputPath, faultControl, maximumNewTokens }) {
   const playwright = await import('@playwright/test');
   const failures = [];
-  const browsers = [];
-  const engineResults = [];
-  const canaries = [];
   const usedCases = new Set();
+  const browser = await playwright[engine].launch({ headless: true });
   try {
-    for (const name of ENGINES) {
-      const browser = await playwright[name].launch({ headless: true });
-      browsers.push(browser);
-      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-      const page = await context.newPage();
-      observePage(page, name, origin, failures);
-      await page.goto(`${origin}/#inference`, { waitUntil: 'domcontentloaded' });
-      const positive = await runScenario(page, 'positive', faultControl.positive, usedCases, maximumNewTokens);
-      const negative = await runScenario(page, 'negative', faultControl.negative, usedCases, maximumNewTokens);
-      canaries.push(...positive.private_canaries, ...negative.private_canaries);
-      delete positive.private_canaries;
-      delete negative.private_canaries;
-      engineResults.push({ engine: name, positive, negative });
-      await context.close();
-      await browser.close();
-      browsers.pop();
-    }
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    observePage(page, engine, origin, failures);
+    await page.goto(`${origin}/#inference`, { waitUntil: 'domcontentloaded' });
+    const positive = await runScenario(page, 'positive', faultControl.positive, usedCases, maximumNewTokens);
+    const negative = await runScenario(page, 'negative', faultControl.negative, usedCases, maximumNewTokens);
+    const canaries = [...positive.private_canaries, ...negative.private_canaries];
+    delete positive.private_canaries;
+    delete negative.private_canaries;
+    await context.close();
 
-    const privacyBrowser = await playwright.chromium.launch({ headless: true });
-    browsers.push(privacyBrowser);
+    // A separate storage context of the same selected engine, never a second case use.
+    const privacyBrowser = browser;
     const cleanContext = await privacyBrowser.newContext({ viewport: { width: 1280, height: 900 } });
     const cleanPage = await cleanContext.newPage();
-    observePage(cleanPage, 'chromium-clean-session', origin, failures);
+    observePage(cleanPage, `${engine}-clean-session`, origin, failures);
     await cleanPage.goto(`${origin}/#inference`, { waitUntil: 'domcontentloaded' });
     const cleanBody = await cleanPage.locator('body').innerText();
     for (const canary of canaries) {
@@ -471,50 +489,36 @@ async function runLive({ origin, outputPath, faultControl, maximumNewTokens }) {
     assertPrivacyClean(cleanBody);
     await cleanContext.close();
 
-    if (failures.length > 0) fail(`browser_failures:${failures.join('|')}`);
-    const report = {
-      protocol: 'mycelium.a6_product_browser_observation.v1',
-      mode: 'live',
-      live_evidence: true,
-      fixture_or_unit_evidence: false,
-      qualification_claim: false,
-      promotion_authorized: false,
-      fleet_grant_verified: true,
-      passed: true,
-      engines: engineResults,
-      workspaces: [...WORKSPACES],
-      required_scenarios: [...REQUIRED_SCENARIOS],
-      source_failure_transition_observed: true,
-      stale_source_after_cutover: false,
-      duplicate_terminal: false,
-      second_session_private_content_visible: false,
-      console_error_count: 0,
-      page_error_count: 0,
-      cross_origin_request_count: 0,
-    };
+    // Console/page errors can contain private prompt/output; never echo their payload.
+    if (failures.length > 0) fail('browser_failures_observed');
+    const report = singleEngineReceipt(engine, positive, negative);
     await atomicPrivateWrite(outputPath, jsonLine(report));
     process.stdout.write(jsonLine(report));
   } finally {
-    await Promise.all(browsers.map((browser) => browser.close().catch(() => undefined)));
+    await browser.close().catch(() => undefined);
   }
 }
 
 async function main() {
-  const args = new Set(process.argv.slice(2));
-  if (args.has('--plan')) {
+  const args = process.argv.slice(2);
+  if (args.length === 1 && args[0] === '--plan') {
     process.stdout.write(jsonLine(harnessPlan('plan')));
     return;
   }
-  if (args.has('--fixture')) {
+  if (args.length === 1 && args[0] === '--fixture') {
     process.stdout.write(jsonLine(harnessPlan('fixture')));
     return;
   }
 
-  // This authorization check is deliberately first. No origin parsing, fetch,
-  // server probe, Playwright import, or browser launch occurs without the exact grant.
+  // Authorization stays first; selection must precede origin, fault or browser contact.
   if (process.env.MYCELIUM_A6_FLEET_GRANT !== EXACT_FLEET_GRANT) {
     fail('explicit_fleet_grant_required');
   }
+  if (args.length !== 1 || !args[0].startsWith('--engine=')) {
+    fail('browser_engine_selection_required');
+  }
+  const engine = args[0].slice('--engine='.length);
+  if (!ENGINES.includes(engine)) fail('browser_engine_selection_required');
   const origin = exactLoopbackOrigin(process.env.MYCELIUM_A6_PRODUCT_ORIGIN);
   const outputPath = process.env.MYCELIUM_A6_BROWSER_EVIDENCE;
   if (!outputPath || !path.isAbsolute(outputPath)) fail('browser_evidence_path_required');
@@ -530,12 +534,18 @@ async function main() {
     positiveCaseId: process.env.MYCELIUM_A6_POSITIVE_CASE_ID,
     negativeCaseId: process.env.MYCELIUM_A6_NEGATIVE_CASE_ID,
   });
-  await runLive({
-    origin,
-    outputPath: path.resolve(outputPath),
-    faultControl,
-    maximumNewTokens,
-  });
+  try {
+    await runLive({
+      engine,
+      origin,
+      outputPath: path.resolve(outputPath),
+      faultControl,
+      maximumNewTokens,
+    });
+  } catch {
+    // Browser/transport exception messages may include private typed content.
+    fail('a6_browser_live_failed');
+  }
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
