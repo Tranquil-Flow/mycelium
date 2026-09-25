@@ -11,7 +11,7 @@ assert(out, 'A14_EVIDENCE required');
 await mkdir(out,{recursive:true});
 const env={...process.env,PYTHONDONTWRITEBYTECODE:'1'};
 for(const key of ['PYTHONPATH','PYTHONHOME','VIRTUAL_ENV']) delete env[key];
-const server=spawn('/opt/homebrew/bin/python3.14',['scripts/serve_a14_conformance.py'],{cwd:path.resolve('../..'),env,stdio:['ignore','pipe','pipe']});
+const server=spawn('/opt/homebrew/bin/python3.14',['tests/a14_acceptance/serve_browser.py'],{cwd:path.resolve('../..'),env,stdio:['ignore','pipe','pipe']});
 let serverErrors='';server.stderr.on('data',b=>serverErrors+=b.toString());
 let browser;
 const checks=[], failures=[], requests=[];
@@ -45,11 +45,22 @@ try {
  const snapshot=await page.evaluate(async()=>{const r=await fetch('/api/v1/product/snapshot');return r.json();});
  assert.equal(snapshot.publication.source_mode,'fixture');assert.equal(snapshot.route_explorer.source_mode,'fixture');
  assert.equal(snapshot.route_explorer.segments.length,3);
+ assert.deepEqual(snapshot.route_explorer.segments.map(s=>[s.path_status,s.transport,s.provenance,s.connection_generation]),[
+  ['selected','unknown','fixture',null],['observed','direct','fixture',1],['observed','relay','fixture',2]]);
+ assert.deepEqual(snapshot.route_explorer.segments.map(s=>s.history),[false,true,false]);
+ assert(snapshot.route_explorer.segments[0].metrics.rtt_ms===null && snapshot.route_explorer.segments[0].source!==null);
+ assert(snapshot.route_explorer.segments.slice(1).every(s=>s.source===null && s.binding.request===null && s.binding.track===null));
+ const tableRows=table.locator('tbody tr');
+ assert.equal(await tableRows.count(),3);
+ for (const [index, className] of ['unknown','direct','relay'].entries()) {
+  await expect(tableRows.nth(index)).toContainText(className);
+  await expect(tableRows.nth(index)).toContainText('fixture');
+ }
  assert(snapshot.readiness.every(r=>r.dimension!=='qualification'||r.state!=='ready'));
  await writeFile(out+'/production-snapshot.json',JSON.stringify(snapshot,null,2));
  assert.equal(snapshot.route_explorer.nodes.length,expectedPeers);
  if(expectedPeers>64) {
-  const tray=page.getByRole('region',{name:'Unknown-region peers',exact:true});
+  const tray=page.getByRole('region',{name:'Peer regions and unknown-region peers',exact:true});
   assert.equal(await tray.locator('li').count(),64);
   await page.getByRole('button',{name:'Next peers',exact:true}).click();
   await expect(tray).toContainText('Peer page 2');assert.equal(await tray.locator('li').count(),64);
@@ -59,10 +70,15 @@ try {
  const button=page.getByRole('button',{name:'Inspect segment 1',exact:true});
  await button.focus();await page.keyboard.press('Enter');
  await expect(button).toBeFocused();await expect(button).toHaveAttribute('aria-pressed','true');
+ const selectedDetail=page.getByRole('region',{name:'Selected route detail',exact:true});
+ await expect(selectedDetail).toContainText(snapshot.route_explorer.segments[0].authority_digest);
+ await expect(selectedDetail).toContainText('request');
+ await expect(selectedDetail).toContainText('unavailable · unknown');
  await expect(page.getByRole('button',{name:/^Select segment 1:/})).toHaveAttribute('aria-pressed','true');
  await page.getByLabel('Transport',{exact:true}).selectOption('relay');assert.equal((await equivalent()).length,1);
+ await expect(selectedDetail).toContainText(snapshot.route_explorer.segments[0].authority_digest);
  await page.getByLabel('Path status',{exact:true}).selectOption('selected');assert.equal((await equivalent()).length,0);
- await expect(page.getByRole('region',{name:'Unknown-region peers',exact:true})).toContainText(`All ${expectedPeers} public peers`);
+ await expect(page.getByRole('region',{name:'Peer regions and unknown-region peers',exact:true})).toContainText(`All ${expectedPeers} public peers`);
  await page.getByRole('button',{name:'Clear filters',exact:true}).click();assert.deepEqual(await equivalent(),initial);
  checks.push('keyboard_focus_selection_independent_filters_unknown_tray');
  await page.getByRole('button',{name:'Pause route view',exact:true}).click();await expect(explorer).toContainText('Paused historical view');
@@ -127,6 +143,12 @@ try {
  const body=await other.locator('body').innerText();
  for(const canary of ['RAW-ENDPOINT-CANARY','192.0.2.23','node-a','node-b','latitude','longitude']) assert(!body.includes(canary));
  assert(requests.every(r=>r.same_origin&&r.method==='GET'));assert.deepEqual(failures,[]);
+ const after=await other.evaluate(async()=>{const r=await fetch('/api/v1/product/snapshot');return r.json();});
+ assert.deepEqual(after.route_explorer.segments,snapshot.route_explorer.segments);
+ assert(after.route_explorer.generation>=snapshot.route_explorer.generation);
+ assert(after.readiness.every(r=>r.dimension!=='qualification'||r.state!=='ready'));
+ assert.equal(after.route_explorer.source_mode,'fixture');
+ assert.equal(new URL(other.url()).pathname,'/operator');
  checks.push('second_session_initial_retry_privacy_read_only_no_third_party_requests');
  await second.close();await context.close();
  await writeFile(out+'/browser-report.json',JSON.stringify({protocol:'mycelium.a14_local_browser_conformance.v1',physical_devices:0,qualification_claim:false,source_mode:'fixture',browser_version:browser.version(),checks,failures,requests,viewport_checks:widths},null,2));

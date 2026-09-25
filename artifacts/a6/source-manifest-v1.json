@@ -697,9 +697,19 @@
       "size_bytes": 39946
     },
     {
+      "path": "tests/a14_acceptance/accept.py",
+      "sha256": "sha256:d507e250eeb49b13e12f57d85e15e9996513c67d818dd8d5ac6a247f0ca81c52",
+      "size_bytes": 5741
+    },
+    {
+      "path": "tests/a14_acceptance/serve_browser.py",
+      "sha256": "sha256:c1eb727a6ccc83c5da01bfde84160505421954fc6ed3e82febe5ed4fd82d2005",
+      "size_bytes": 1924
+    },
+    {
       "path": "tests/a14_acceptance/test_route_projection_boundaries.py",
-      "sha256": "sha256:33c606b35f767282fc1b480021e269c72eab9a1f105d7c990ea57b95c5ddd9f7",
-      "size_bytes": 4682
+      "sha256": "sha256:999187bbdb75af99a8dc046cc6e3a2db0414317e6cb2390c161ddd03c69182d1",
+      "size_bytes": 6349
     },
     {
       "path": "tests/a15_intake/__init__.py",
@@ -1062,6 +1072,11 @@
       "size_bytes": 2227
     },
     {
+      "path": "ui/web/scripts/a14-local-browser.mjs",
+      "sha256": "sha256:b9f058d013e7ee837a7ccdf6142f1abe760d04d4f2593a36a2d6c7ecab52ac11",
+      "size_bytes": 12912
+    },
+    {
       "path": "ui/web/scripts/a6-product-browser-e2e.mjs",
       "sha256": "sha256:170a29d951a640df076a1fe266dc78695ff61bfe74a628046a23873c89dd4a80",
       "size_bytes": 22463
@@ -1212,6 +1227,16 @@
       "size_bytes": 792
     },
     {
+      "path": "ui/web/src/features/routeExplorer/RouteExplorer.test.tsx",
+      "sha256": "sha256:f715d245b1a4bf44aa7edb1920783a09251036f39b3a281084d8c38d65ff8f05",
+      "size_bytes": 5238
+    },
+    {
+      "path": "ui/web/src/features/routeExplorer/RouteExplorer.tsx",
+      "sha256": "sha256:67382c6139cbed5be8b51a8590c7d11abc4c81811bc95967be9e475737e108f3",
+      "size_bytes": 12068
+    },
+    {
       "path": "ui/web/src/features/routeExplorer/contracts.ts",
       "sha256": "sha256:31db22f213400ab79545439236947642da0dfd404a315ac6141d7e6b77d7dbbb",
       "size_bytes": 11591
@@ -1248,5 +1273,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:2edf3124d46ac684cc5029a82b7c18e828c80bfb2a3966e271994ac1664c500c"
+  "source_digest": "sha256:5f255d2b8bdd6671d3b98df3b05fd8f67fa47f02d5447d0af0cf7bcfcbb26e96"
 }

@@ -6,6 +6,7 @@ from mycelium_product_spine.contracts import validate_product_snapshot
 from mycelium_product_spine.route_explorer import digest, project_route_explorer, validate_route_explorer
 ROOT=Path(__file__).resolve().parents[2]
 fixture=runpy.run_path(str(ROOT/'tests/a14_acceptance/conformance.py'))['conformance_snapshot']
+inputs=runpy.run_path(str(ROOT/'tests/a14_acceptance/conformance.py'))['inputs']
 
 
 def test_public_authorities_keep_namespaces_status_and_transition_facts_separate():
@@ -82,6 +83,36 @@ def test_aging_source_freshness_does_not_rewrite_immutable_observation_identity(
     aged=project_route_explorer(s)
     assert [v['id'] for v in aged['segments']]==[v['id'] for v in old['segments']]
     assert aged['segments'][1]['freshness']=='stale'
+
+
+def test_unbound_a8_observation_cannot_inherit_selected_route_transport():
+    """Production projector consumes A8 unknown without borrowing a selected edge's class."""
+    from mycelium_product_spine.projector import ProductProjector
+    members, route, internet = inputs()
+    missing = internet['activation_history'][-1]
+    missing['path_class'] = 'unknown'
+    missing['path_source'] = 'unknown'
+    missing['metrics'] = {k: False if k == 'measured_zero' else None for k in missing['metrics']}
+    internet['activation_observation'] = missing
+    s = ProductProjector(pseudonym_salt=b'c' * 32).project(
+        members=members, route_status=route, qualification=None,
+        internet_native=internet, now_unix_ms=1000000, source_mode='fixture')
+    p = s['route_explorer']
+    assert [v['transport'] for v in p['segments']] == ['unknown', 'direct', 'unknown']
+    assert [v['path_status'] for v in p['segments']] == ['selected', 'observed', 'unknown']
+    assert p['segments'][-1]['connection_generation'] == 2
+    assert p['segments'][-1]['source'] is None
+    assert all(v is None for k, v in p['segments'][-1]['metrics'].items() if k != 'measured_zero')
+    assert validate_product_snapshot(s) == s
+
+
+def test_forged_unbound_direct_rejected_by_real_a8_validator():
+    from mycelium_internet.contracts import InternetContractError, validate_activation_observation
+    _, _, internet = inputs()
+    forged = internet['activation_history'][-1]
+    forged['path_source'] = 'unknown'
+    with pytest.raises(InternetContractError):
+        validate_activation_observation(forged)
 
 
 @pytest.mark.parametrize('field',['source','destination'])

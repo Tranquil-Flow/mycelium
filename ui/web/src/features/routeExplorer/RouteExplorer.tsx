@@ -38,6 +38,10 @@ export function RouteExplorerView({projection, connected, now}: {readonly projec
   const safePeerPage = Math.min(peerPage, Math.max(0, Math.ceil(projection.nodes.length / 64) - 1));
   const nodes = useMemo(() => new Map(projection.nodes.map(n => [n.id, n])), [projection.nodes]);
   const peerName = (id: string | null) => id === null ? 'Unknown source' : `${nodes.get(id)?.kind === 'member' ? 'Member' : 'Endpoint'} ${id.slice(7, 19)}`;
+  const regionLabel = (id: string | null) => {
+    const node = id === null ? undefined : nodes.get(id);
+    return node ? `${text(node.region_source)} · ${text(node.region)}` : 'unavailable · unknown';
+  };
   const records = projection.segments;
   const filtered = records.filter(s => Object.entries(filters).every(([k, v]) => !v || (k === 'freshness' ? effectiveFreshness(s, now, connected) : k === 'history' ? (s.history ? 'historical' : 'latest') : s[k as keyof RouteSegment]) === v));
   const safePage = Math.min(page, Math.max(0, Math.ceil(filtered.length / PAGE) - 1));
@@ -68,7 +72,7 @@ export function RouteExplorerView({projection, connected, now}: {readonly projec
           <td>{s.transport}</td><td>Path {text(s.binding.path_generation)} · connection {text(s.connection_generation)} · {s.provenance}</td>
           <td>{effectiveFreshness(s,now,connected)} · {s.history ? 'historical' : 'latest retained'}<br />Issued {text(s.issued_at)} · expires {text(s.expires_at)} (Unix ms)</td>
           <td><details><summary>RTT {text(s.metrics.rtt_ms)} ms · all metrics</summary><dl>{Object.entries(s.metrics).map(([k,v]) => <div key={k}><dt>{text(k)}</dt><dd>{text(v)}</dd></div>)}</dl></details></td>
-          <td><details><summary>Complete bindings and provenance</summary><dl>{Object.entries(s.binding).map(([k,v]) => <div key={k}><dt>{text(k)}</dt><dd>{text(v)}</dd></div>)}<dt>Authority digest</dt><dd>{s.authority_digest}</dd><dt>Segment identity</dt><dd>{s.id}</dd><dt>Region source</dt><dd>unavailable · unknown</dd></dl></details></td>
+          <td><details><summary>Complete bindings and provenance</summary><dl>{Object.entries(s.binding).map(([k,v]) => <div key={k}><dt>{text(k)}</dt><dd>{text(v)}</dd></div>)}<dt>Authority digest</dt><dd>{s.authority_digest}</dd><dt>Segment identity</dt><dd>{s.id}</dd><dt>Source region</dt><dd>{regionLabel(s.source)}</dd><dt>Destination region</dt><dd>{regionLabel(s.destination)}</dd></dl></details></td>
         </tr>; })}</tbody>
       </table>
     </div>
@@ -76,9 +80,14 @@ export function RouteExplorerView({projection, connected, now}: {readonly projec
     <section aria-label="Logical route graph"><h3>Logical route graph</h3><p>Static directed segments; same filter, page and selection as the table. No spatial or geographic inference.</p>
       <ol className="route-graph">{visible.map(s => <li key={s.id} data-graph-segment={s.id}><button aria-label={`Select segment ${records.indexOf(s)+1}: ${summary(s)}`} aria-pressed={selected === s.id} onClick={() => select(s)}><span className="route-vertex">{peerName(s.source)}</span><span className="route-arrow" aria-hidden="true"> → </span><span className="route-vertex">{peerName(s.destination)}</span><small>{text(s.path_status)} · {s.transport} · {text(s.phase)} · {effectiveFreshness(s,now,connected)} · {s.history ? 'historical' : 'latest retained'}<br />Path {text(s.binding.path_generation)} · connection {text(s.connection_generation)} · {s.provenance}</small></button></li>)}</ol>
     </section>
-    <section aria-label="Selected route detail"><h3>Selected route detail</h3>{detail ? <><p>{summary(detail)}</p><p>Source authority {detail.authority_digest}</p><p>Segment identity {detail.id}</p></> : <p>No retained segment selected. Selection only changes this view.</p>}</section>
-    <section aria-label="Unknown-region peers"><h3>Unknown-region peers</h3><p>All {projection.nodes.length} public peers remain inspectable, regardless of route filters. Endpoint and member namespaces are intentionally separate.</p>
-      <ul className="route-peers">{projection.nodes.slice(safePeerPage*64,(safePeerPage+1)*64).map(n => <li key={n.id}><details><summary>{peerName(n.id)} · unknown</summary><p>{n.id}</p><p>Region source unavailable. No region authority supplied.</p></details></li>)}</ul>
+    <section aria-label="Selected route detail"><h3>Selected route detail</h3>{detail ? <><p>{summary(detail)}</p>
+      <p>{text(detail.edge_kind)} · {text(detail.role)} · {detail.history ? 'historical' : 'latest retained'} · Issued {text(detail.issued_at)} · expires {text(detail.expires_at)} (Unix ms)</p>
+      <dl>{Object.entries(detail.metrics).map(([k,v]) => <div key={k}><dt>{text(k)}</dt><dd>{text(v)}</dd></div>)}
+        {Object.entries(detail.binding).map(([k,v]) => <div key={k}><dt>{text(k)}</dt><dd>{text(v)}</dd></div>)}
+        <dt>Source region</dt><dd>{regionLabel(detail.source)}</dd><dt>Destination region</dt><dd>{regionLabel(detail.destination)}</dd><dt>Source authority</dt><dd>{detail.authority_digest}</dd><dt>Segment identity</dt><dd>{detail.id}</dd></dl>
+    </> : <p>No retained segment selected. Selection only changes this view.</p>}</section>
+    <section aria-label="Peer regions and unknown-region peers"><h3>Peer regions and unknown-region peers</h3><p>All {projection.nodes.length} public peers remain inspectable, including unknown-region peers, regardless of route filters. Endpoint and member namespaces are intentionally separate. A declared region does not verify physical location; a reviewed relay region locates only its relay.</p>
+      <ul className="route-peers">{projection.nodes.slice(safePeerPage*64,(safePeerPage+1)*64).map(n => <li key={n.id}><details><summary>{peerName(n.id)} · {text(n.region)}</summary><p>{n.id}</p><p>Region source {text(n.region_source)} · {text(n.region)}. No location inferred from transport or network identity.</p></details></li>)}</ul>
       <div className="route-controls"><button disabled={safePeerPage===0} onClick={() => setPeerPage(safePeerPage-1)}>Previous peers</button><span>Peer page {safePeerPage+1}</span><button disabled={(safePeerPage+1)*64>=projection.nodes.length} onClick={() => setPeerPage(safePeerPage+1)}>Next peers</button></div>
     </section>
     <details><summary>Projection provenance and retention</summary><p>Source {projection.source_digest}</p><p>Projection {projection.digest}</p><p>Up to 4096 peers and segments; upstream activation history retains up to 64 observations. Retention is bounded, not a complete lifetime traffic log. Digests bind public bytes; they are not signatures or qualifications. No raw workload export.</p></details>
