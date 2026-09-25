@@ -716,6 +716,136 @@ def test_rejected_node_observation_preserves_remote_error_code(tmp_path: Path) -
     assert caught.value.remote_code == "prefill_completion_timeout"
 
 
+@pytest.mark.parametrize(
+    ("field", "bad_value", "category"),
+    [
+        ("protocol", "private-protocol-marker", "protocol"),
+        ("event", "private-event-marker", "event"),
+        ("monotonic_ns", -1, "monotonic_ns"),
+        ("run_id", "private-run-marker", "run_id"),
+        ("deployment_id", "private-deployment-marker", "deployment_id"),
+        ("node_id", "private-node-marker", "node_id"),
+        ("host_id", "private-host-marker", "host_id"),
+        ("process_id", -1, "process_id"),
+        ("endpoint_id", "private-endpoint-marker", "endpoint_id"),
+        ("route_ready", True, "route_ready"),
+        ("peer_generation", False, "peer_generation"),
+        ("state", None, "state"),
+        ("details", "private-detail-marker", "details"),
+    ],
+)
+def test_configured_observation_mismatch_is_named_without_values(
+    tmp_path: Path, field: str, bad_value: Any, category: str, capsys
+) -> None:
+    from mycelium_live.supervisor import _emit_serve_diagnostic
+
+    controller, _ = _controller(tmp_path, count=2)
+    peer = controller.peers[0]
+    session = FakeNodeSession(
+        argv=("test-only",), node_id=peer.node_id, run_id="run-1",
+        deployment_id="deployment-demo", timeout_seconds=1.0,
+    )
+    signed = session.send(command_id="configure-1", command="configure", payload={})
+    def verify() -> dict[str, Any]:
+        return controller._verified_observation(
+            signed, event="configured", peer=peer, process_id=session.process_id,
+            run_id=session.run_id, deployment_id=session.deployment_id,
+            endpoint_id=session.endpoint_id,
+        )
+
+    assert verify()["event"] == "configured"
+    signed["result"]["observation"][field] = bad_value
+    signed["result"]["signature"] = session.signer.sign(signed["result"]["observation"])
+    with pytest.raises(ControllerError) as caught:
+        verify()
+    assert caught.value.code == str(caught.value) == "node_observation_invalid"
+    assert caught.value.diagnostic == f"observation_mismatch:{category}"
+    _emit_serve_diagnostic(caught.value, stage="route_open")
+    emitted = capsys.readouterr().out
+    assert json.loads(emitted)["cause_chain"][0]["node_stderr_tail"] == caught.value.diagnostic
+    assert "private-" not in emitted and session.endpoint_id not in emitted
+
+
+@pytest.mark.parametrize(
+    ("mutation", "category"),
+    [
+        ("envelope", "envelope_fields"),
+        ("observation_fields", "observation_fields"),
+        ("observation_shape", "observation_shape"),
+        ("signature_shape", "signature_shape"),
+        ("verification_key_shape", "verification_key_shape"),
+        ("verification_key_mismatch", "verification_key_mismatch"),
+        ("signer_endpoint_id", "signer_endpoint_id"),
+    ],
+)
+def test_configured_observation_shape_and_signer_diagnostics(
+    tmp_path: Path, mutation: str, category: str
+) -> None:
+    controller, _ = _controller(tmp_path, count=2)
+    peer = controller.peers[0]
+    session = FakeNodeSession(argv=("test-only",), node_id=peer.node_id,
+                              run_id="run-1", deployment_id="deployment-demo",
+                              timeout_seconds=1.0)
+    signed = session.send(command_id="configure-1", command="configure", payload={})
+    result = signed["result"]
+    trusted_key = dict(result["verification_key"])
+    if mutation == "envelope":
+        result["private-extra-key"] = "private-value"
+    elif mutation == "observation_fields":
+        result["observation"]["private-extra-key"] = "private-value"
+    elif mutation == "observation_shape":
+        result["observation"] = "private-value"
+    elif mutation == "signature_shape":
+        result["signature"] = "private-value"
+    elif mutation == "verification_key_shape":
+        result["verification_key"] = "private-value"
+    elif mutation == "verification_key_mismatch":
+        trusted_key = {"private-key-marker": "private-value"}
+    elif mutation == "signer_endpoint_id":
+        result["signature"]["signer_endpoint_id"] = "private-value"
+    with pytest.raises(ControllerError) as caught:
+        controller._verified_observation(
+            signed, event="configured", peer=peer, process_id=session.process_id,
+            run_id=session.run_id, deployment_id=session.deployment_id,
+            endpoint_id=session.endpoint_id, expected_verification_key=trusted_key,
+        )
+    assert caught.value.code == str(caught.value) == "node_observation_invalid"
+    assert caught.value.diagnostic == f"observation_mismatch:{category}"
+    assert "private-" not in caught.value.diagnostic
+
+
+def test_observation_diagnostic_does_not_accept_missing_fields_or_bad_signature(
+    tmp_path: Path,
+) -> None:
+    controller, _ = _controller(tmp_path, count=2)
+    peer = controller.peers[0]
+    session = FakeNodeSession(argv=("test-only",), node_id=peer.node_id,
+                              run_id="run-1", deployment_id="deployment-demo",
+                              timeout_seconds=1.0)
+    signed = session.send(command_id="configure-1", command="configure", payload={})
+
+    def verify() -> dict[str, Any]:
+        return controller._verified_observation(
+            signed, event="configured", peer=peer, process_id=session.process_id,
+            run_id=session.run_id, deployment_id=session.deployment_id,
+            endpoint_id=session.endpoint_id,
+        )
+
+    assert verify()["event"] == "configured"
+    signed["result"]["observation"].pop("details")
+    with pytest.raises(ControllerError) as caught:
+        verify()
+    assert caught.value.code == "node_observation_invalid"
+    assert caught.value.diagnostic == "observation_mismatch:observation_fields,details"
+
+    signed = session.send(command_id="configure-2", command="configure", payload={})
+    signed["result"]["observation"]["details"] = {"private": "changed-after-signing"}
+    with pytest.raises(ControllerError) as caught:
+        verify()
+    assert caught.value.code == str(caught.value) == "node_observation_signature_invalid"
+    assert caught.value.diagnostic is None
+
+
 def test_failed_physical_run_attaches_rejecting_node_stderr_tail(tmp_path: Path) -> None:
     peers = _peers(2, tmp_path)
     source_root, transfers = _transfers(tmp_path)

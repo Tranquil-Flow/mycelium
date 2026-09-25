@@ -462,6 +462,11 @@
       "size_bytes": 31161
     },
     {
+      "path": "physical_inference_qualification.py",
+      "sha256": "sha256:fc3c561d559995cd716f4165c7697e3e581793eec7dddf6108700e365d190310",
+      "size_bytes": 129943
+    },
+    {
       "path": "pytest.ini",
       "sha256": "sha256:580708389b10849a015bd43b9229cfe5afb5b63d6d5c2526f0cb91c9aac04e6d",
       "size_bytes": 2354
@@ -1032,6 +1037,11 @@
       "size_bytes": 22549
     },
     {
+      "path": "tests/physical_qualification/test_controller.py",
+      "sha256": "sha256:a528e2187e7fa77547f54f0446b734de5f485b212adf4c800f92f2b80d4ef63c",
+      "size_bytes": 100037
+    },
+    {
       "path": "tests/product_spine/test_a14b_atomic_regions.py",
       "sha256": "sha256:3ff53344f80da6f57c8c421da113b298692b2472ffc8e16935a0f685ea4f3533",
       "size_bytes": 9535
@@ -1388,5 +1398,5 @@
     }
   ],
   "protocol": "mycelium.a6_source_manifest.v1",
-  "source_digest": "sha256:46e4f86c286c5b237a5b0ad038af41e252a28a061678ae85a6fa3f1828cfe28f"
+  "source_digest": "sha256:93d36de137341b516e3e607d503e4d10a7d2ac099974b3ce0e1e5dbde2ffd51b"
 }

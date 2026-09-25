@@ -351,6 +351,68 @@ def _hello_failures(
     return failed
 
 
+def _observation_diagnostic(
+    observation: Any,
+    signature: Any,
+    verification_key: Any,
+    *,
+    observation_fields: set[str],
+    event: str,
+    peer: PeerIdentity,
+    process_id: int,
+    run_id: str,
+    deployment_id: str,
+    endpoint_id: str,
+    expected_verification_key: Mapping[str, Any] | None,
+) -> str:
+    """Fixed predicate labels only: no response values, dynamic keys or identities.
+
+    Called solely after the existing rejection predicate. It does not decide
+    admission, and each label mirrors one check of that predicate.
+    """
+    failures: list[str] = []
+    if not isinstance(observation, Mapping):
+        failures.append("observation_shape")
+    else:
+        if set(observation) != observation_fields:
+            failures.append("observation_fields")
+        for name, expected in (
+            ("protocol", _NODE_OBSERVATION_PROTOCOL),
+            ("event", event),
+            ("run_id", run_id),
+            ("deployment_id", deployment_id),
+            ("node_id", peer.node_id),
+            ("host_id", peer.host_id),
+            ("process_id", process_id),
+            ("endpoint_id", endpoint_id),
+        ):
+            if observation.get(name) != expected:
+                failures.append(name)
+        monotonic_ns = observation.get("monotonic_ns")
+        if (not isinstance(monotonic_ns, int) or isinstance(monotonic_ns, bool)
+                or monotonic_ns < 0):
+            failures.append("monotonic_ns")
+        if observation.get("route_ready") is not False:
+            failures.append("route_ready")
+        generation = observation.get("peer_generation")
+        if not isinstance(generation, int) or isinstance(generation, bool):
+            failures.append("peer_generation")
+        if not isinstance(observation.get("state"), str):
+            failures.append("state")
+        if not isinstance(observation.get("details"), Mapping):
+            failures.append("details")
+    if not isinstance(signature, Mapping):
+        failures.append("signature_shape")
+    elif signature.get("signer_endpoint_id") != endpoint_id:
+        failures.append("signer_endpoint_id")
+    if not isinstance(verification_key, Mapping):
+        failures.append("verification_key_shape")
+    elif (expected_verification_key is not None
+          and dict(verification_key) != dict(expected_verification_key)):
+        failures.append("verification_key_mismatch")
+    return "observation_mismatch:" + ",".join(failures)
+
+
 def _segment(value: Any, code: str) -> str:
     if not isinstance(value, str) or _SEGMENT_RE.fullmatch(value) is None:
         _reject(code)
@@ -1779,7 +1841,7 @@ class QualificationController:
             raise ControllerError("node_command_rejected", remote_code=remote_code)
         signed = response["result"]
         if set(signed) != {"observation", "signature", "verification_key"}:
-            _reject("node_observation_invalid")
+            _reject("node_observation_invalid", diagnostic="observation_mismatch:envelope_fields")
         observation = signed.get("observation")
         signature = signed.get("signature")
         verification_key = signed.get("verification_key")
@@ -1825,7 +1887,16 @@ class QualificationController:
             )
             or signature.get("signer_endpoint_id") != endpoint_id
         ):
-            _reject("node_observation_invalid")
+            _reject(
+                "node_observation_invalid",
+                diagnostic=_observation_diagnostic(
+                    observation, signature, verification_key,
+                    observation_fields=observation_fields, event=event, peer=peer,
+                    process_id=process_id, run_id=run_id,
+                    deployment_id=deployment_id, endpoint_id=endpoint_id,
+                    expected_verification_key=expected_verification_key,
+                ),
+            )
         try:
             verifier = build_ed25519_verifier([verification_key])
             valid = verifier(canonical_json_bytes(dict(observation)), dict(signature))
